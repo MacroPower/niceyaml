@@ -1459,7 +1459,7 @@ func TestPrinter_PrintReport_SharedReport(t *testing.T) {
 func treeLabels(nodes []niceyaml.ErrorTree) []string {
 	labels := make([]string, len(nodes))
 	for i, node := range nodes {
-		labels[i] = node.Label
+		labels[i] = node.Label()
 	}
 
 	return labels
@@ -1514,6 +1514,121 @@ func TestPrinter_PrintError_Warnings(t *testing.T) {
 			t.Parallel()
 
 			assert.Equal(t, tc.want, tc.p.PrintError(err))
+		})
+	}
+}
+
+func TestPrinter_PrintError_WarningLabel(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
+	nested := niceyaml.NewSourceFromString("a: 1\nb:\n  c: 2\n",
+		niceyaml.WithName("deploy/environments/production/cfg.yaml"))
+	labeled := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("warning:x.yaml"))
+
+	warnAt := func(msg string, keys ...string) error {
+		return niceyaml.NewWarning(msg, niceyaml.AtPath(paths.Current().Child(keys...)))
+	}
+
+	p := testPrinterWithStyles(style.Set(kind.TextWarn, bracketStyle("<", ">")))
+
+	tcs := map[string]struct {
+		err   error
+		width int
+		// The rows of the tree, without the excerpts after it.
+		want string
+	}{
+		"label keeps its style when the location wraps": {
+			err:   yamltest.Bind(t, nested, warnAt("old c", "b", "c")),
+			width: 40,
+			want: stringtest.JoinLF(
+				"deploy/environments/production/",
+				"cfg.yaml:3:6: <warning:> $.b.c: old c",
+			),
+		},
+		"heading over warnings keeps the text of the caller plain": {
+			err: fmt.Errorf("lint warning: found:\n%w", errors.Join(
+				yamltest.Bind(t, source, warnAt("old a", "a")),
+				yamltest.Bind(t, source, warnAt("old b", "b")),
+			)),
+			width: 80,
+			want: stringtest.JoinLF(
+				"lint warning: found:",
+				"├── f.yaml:1:4: <warning:> $.a: old a",
+				"└── f.yaml:2:4: <warning:> $.b: old b",
+			),
+		},
+		"name that holds the label stays plain": {
+			err:   yamltest.Bind(t, labeled, warnAt("old", "a")),
+			width: 80,
+			want:  "warning:x.yaml:1:4: <warning:> $.a: old",
+		},
+		"unbound warning with a path starts with its label": {
+			err:   warnAt("old", "a"),
+			width: 80,
+			want:  "<warning:> @.a: old",
+		},
+		"unbound warning without a path starts with its label": {
+			err:   niceyaml.NewWarning("dep"),
+			width: 80,
+			want:  "<warning:> dep",
+		},
+		"warning detail renders its label": {
+			err: yamltest.Bind(t, source, niceyaml.NewError("outer",
+				niceyaml.AtPath(paths.Current().Child("b")),
+				niceyaml.WithDetails(warnAt("see a", "a")),
+			)),
+			width: 80,
+			want: stringtest.JoinLF(
+				"f.yaml:2:4: $.b: outer",
+				"└── 1:4: <warning:> $.a: see a",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := p.With(printer.WithWrapWidth(tc.width)).PrintError(tc.err)
+			tree, _, _ := strings.Cut(got, "\n\n")
+			assert.Equal(t, tc.want, tree)
+		})
+	}
+}
+
+func TestPrinter_PrintReport_RowParts(t *testing.T) {
+	t.Parallel()
+
+	p := testPrinterWithStyles(style.Set(kind.TextWarn, bracketStyle("<", ">")))
+
+	// A program can build the row of a report by hand, with any of its
+	// parts left empty.
+	tcs := map[string]struct {
+		row  niceyaml.ErrorRow
+		want string
+	}{
+		"each part draws its control characters as pictures": {
+			row: niceyaml.ErrorRow{
+				Location: "a\x1b[31m.yaml:1:1",
+				Severity: "warn\x1b[31m\x07ing",
+				Path:     "$.\x1b[2Ja",
+				Text:     "t\x1b[31mext",
+			},
+			want: "a␛[31m.yaml:1:1: <warn␛[31m␇ing:> $.␛[2Ja: t␛[31mext",
+		},
+		"label ends a row without path or text": {
+			row:  niceyaml.ErrorRow{Location: "f.yaml:1:1", Severity: "warning"},
+			want: "f.yaml:1:1: <warning:>",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			rep := niceyaml.ErrorReport{Tree: niceyaml.ErrorTree{Row: tc.row}}
+			assert.Equal(t, tc.want, p.PrintReport(rep))
 		})
 	}
 }

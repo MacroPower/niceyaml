@@ -1957,6 +1957,9 @@ type boundTexts struct {
 	// is empty for a binding that does not have text of its own, such as the
 	// binding of a join.
 	head string
+	// The parts of head, which the node of the binding in an [ErrorTree]
+	// holds as its row.
+	row ErrorRow
 	// The message [SourceError.Error] returns.
 	msg string
 	// The first lines of the list, [ErrorListLimit] at most.
@@ -2552,18 +2555,18 @@ func (e *SourceError) keepsMessage() bool {
 }
 
 // place returns what stands in front of the message of a binding that does
-// not write a position, as "cafe.yaml: document 3:". It leaves out either
-// part when e does not have it.
+// not write a position, without the colon after it, as "cafe.yaml:
+// document 3". It leaves out either part when e does not have it.
 func (e *SourceError) place() string {
 	name, doc := e.label(), e.documentLabel()
 
 	switch {
 	case doc == "":
-		return suffixed(name)
+		return name
 	case name == "":
-		return suffixed(doc)
+		return doc
 	default:
-		return name + ": " + doc + ":"
+		return name + ": " + doc
 	}
 }
 
@@ -3397,11 +3400,18 @@ func (e *SourceError) Error() string {
 	return e.texts().msg
 }
 
-// headline returns the line of e itself, without the errors below it: the
-// text [NewErrorTree] gives the node of e. It is empty for a binding that
-// does not have text of its own.
+// headline returns the line of e itself, without the errors below it, as
+// the label of the node that [NewErrorTree] gives e. It is empty for a
+// binding that does not have text of its own.
 func (e *SourceError) headline() string {
 	return e.texts().head
+}
+
+// headRow returns the line of e itself in parts, the row that
+// [NewErrorTree] gives the node of e. It is zero for a binding that does
+// not have text of its own.
+func (e *SourceError) headRow() ErrorRow {
+	return e.texts().row
 }
 
 // texts returns the texts of e, which it builds the first time a caller
@@ -3498,16 +3508,17 @@ func (e *SourceError) buildTexts() boundTexts {
 		}
 
 		if t.wraps {
-			t.own, t.head = t.rows.lineAs(t.wrapped, e.isWarning())
+			t.setRow(t.rows.lineAs(t.wrapped, e.isWarning()))
+
 			t.msg = t.head
 
 			return t
 		}
 
 		pathed := e.pather(e.warns())
-		t.own = pathed(t.own)
-		t.head = e.prefixed(t.own)
-		t.msg = e.prefixed(pathed(full))
+		t.setRow(e.located(pathed(t.own)))
+
+		t.msg = e.located(pathed(full)).String()
 
 		return t
 	}
@@ -3519,11 +3530,13 @@ func (e *SourceError) buildTexts() boundTexts {
 	// location and names it.
 	switch {
 	case t.wraps:
-		t.own, t.head = t.rows.lineAs(t.wrapped, e.isWarning())
+		t.setRow(t.rows.lineAs(t.wrapped, e.isWarning()))
+
 		lines = append(lines, t.head)
 
 	case t.own != "":
-		t.own, t.head = e.line(t.own)
+		t.setRow(e.line(t.own))
+
 		lines = append(lines, t.head)
 	}
 
@@ -3538,6 +3551,16 @@ func (e *SourceError) buildTexts() boundTexts {
 	return t
 }
 
+// setRow sets the line of the binding to row: row in parts, its text, and
+// its text without the location.
+func (t *boundTexts) setRow(row ErrorRow) {
+	t.row = row
+	t.head = row.String()
+
+	row.Location = ""
+	t.own = row.String()
+}
+
 // line returns msg as the line of e above the problems it lists, with the
 // "warning:" label when [SourceError.warns] reports it. Each problem below
 // shows its own line, so msg holds the line of the lead of e only when a
@@ -3545,15 +3568,17 @@ func (e *SourceError) buildTexts() boundTexts {
 // not hold its line, the line names the place of e, as the line of each
 // problem names its own. Otherwise the line reads as [SourceError.lineAs]
 // writes it.
-func (e *SourceError) line(msg string) (string, string) {
-	own := e.pather(e.warns())(msg)
+func (e *SourceError) line(msg string) ErrorRow {
+	row := e.pather(e.warns())(msg)
 
 	lead := e.passedLead()
 	if lead != nil && !holdsLine(msg, lead) {
-		return own, prefix(e.place(), own)
+		row.Location = e.place()
+
+		return row
 	}
 
-	return own, e.prefixed(own)
+	return e.located(row)
 }
 
 // holdsLine reports whether text holds the line of x. A binding that does
@@ -3565,38 +3590,45 @@ func holdsLine(text string, x *SourceError) bool {
 }
 
 // lineAs returns msg as the line of e, with the "warning:" label when warns
-// is true. The first text is msg behind the path and the label that
-// [SourceError.pather] puts in front, and the second is that text behind
-// the position or the place of e as well. A binding that writes its line
-// as the binding it adopted writes one passes its own severity, because
-// the line holds its own message.
-func (e *SourceError) lineAs(msg string, warns bool) (string, string) {
-	own := e.pather(warns)(msg)
-
-	return own, e.prefixed(own)
+// is true. The line holds msg behind the path and the label that
+// [SourceError.pather] puts in front, and the position or the place of e
+// in front of those. A binding that writes its line as the binding it
+// adopted writes one passes its own severity, because the line holds its
+// own message.
+func (e *SourceError) lineAs(msg string, warns bool) ErrorRow {
+	return e.located(e.pather(warns)(msg))
 }
 
-// pather returns a function that puts the path that [SourceError.ownPath]
-// returns in front of a message, if it returns one, and the "warning:"
-// label in front of that when warns is true. The label sits between the
-// position and the path, where compilers put it, so editors and problem
-// matchers read it. The path takes a walk of the chain, so pather finds it
-// one time for every message.
-func (e *SourceError) pather(warns bool) func(string) string {
+// pather returns a function that makes a row of a message, with the path
+// that [SourceError.ownPath] returns, if it returns one, and the "warning:"
+// label when warns is true. The row does not have a location. The label
+// sits between the position and the path, where compilers put it, so
+// editors and problem matchers read it. The path takes a walk of the
+// chain, so pather finds it one time for every message.
+func (e *SourceError) pather(warns bool) func(string) ErrorRow {
 	path, hasPath := e.ownPath()
 
-	return func(msg string) string {
-		if hasPath {
-			msg = withPath(path, msg)
-		}
+	var row ErrorRow
 
-		if warns {
-			msg = prefix("warning:", msg)
-		}
+	if hasPath {
+		row.Path = path.String()
+	}
 
-		return msg
+	if warns {
+		row.Severity = warningSeverity
+	}
+
+	return func(msg string) ErrorRow {
+		out := row
+		out.Text = msg
+
+		return out
 	}
 }
+
+// warningSeverity is the severity that the row of a warning shows, as
+// [ErrorRow.Severity] holds it.
+const warningSeverity = "warning"
 
 // inner returns the binding that e adopted, or nil for a binding that did
 // not adopt one.
@@ -3684,9 +3716,7 @@ func (e *SourceError) unnamedLine(outer *SourceError, msg string) string {
 // [SourceError.text] of e as msg. The row of that binding shows the
 // severity, so the line leaves the label out.
 func (e *SourceError) unlabeledLine(msg string) string {
-	_, row := e.lineRows().lineAs(msg, false)
-
-	return row
+	return e.lineRows().lineAs(msg, false).String()
 }
 
 // lineRows returns the binding whose position and path stand in front of
@@ -3772,20 +3802,21 @@ func withPath(p paths.Path, msg string) string {
 	return prefix(p.String()+":", msg)
 }
 
-// prefixed returns msg behind the position, or the place, of e, by the
-// rules [SourceError.Error] documents. The caller puts the path in front of
-// msg first, so the path stands between the position and the text.
-func (e *SourceError) prefixed(msg string) string {
+// located returns row with the position, or the place, of e as its
+// location, by the rules [SourceError.Error] documents.
+func (e *SourceError) located(row ErrorRow) ErrorRow {
 	switch {
 	case e.locErr == nil && !e.adopted:
-		return prefix(formatPosition(e.label(), e.loc.pos), msg)
+		row.Location = formatPosition(e.label(), e.loc.pos)
 
 	case e.keepsMessage():
-		return msg
+		row.Location = ""
 
 	default:
-		return prefix(e.place(), msg)
+		row.Location = e.place()
 	}
+
+	return row
 }
 
 // list returns the lines [SourceError.Error] lists below the line of e,
@@ -3873,14 +3904,14 @@ func (e *SourceError) ordered(shown int) []*SourceError {
 	return out
 }
 
-// formatPosition returns pos as "name:line:col:", the format editors and
-// build tools read, or "line:col:" when name is empty.
+// formatPosition returns pos as "name:line:col", the format editors and
+// build tools read, or "line:col" when name is empty.
 func formatPosition(name string, pos position.Position) string {
 	if name == "" {
-		return editorPosition(pos) + ":"
+		return editorPosition(pos)
 	}
 
-	return name + ":" + editorPosition(pos) + ":"
+	return name + ":" + editorPosition(pos)
 }
 
 // editorPosition returns pos as "line:col" counted from 1, as editors and
@@ -4355,11 +4386,12 @@ func FormatError(err error, opts ...ExcerptOption) string {
 func renderErrorTree(t ErrorTree) string {
 	var sb strings.Builder
 
-	if t.Label != "" {
-		sb.WriteString(escape.Message(t.Label))
+	label := t.Label()
+	if label != "" {
+		sb.WriteString(escape.Message(label))
 	}
 
-	writeErrorBranches(&sb, t.Children, "", t.Label != "")
+	writeErrorBranches(&sb, t.Children, "", label != "")
 
 	return sb.String()
 }
@@ -4396,7 +4428,7 @@ func writeErrorBranches(sb *strings.Builder, children []ErrorTree, indent string
 			connector, below = "`-- ", "    "
 		}
 
-		for j, row := range strings.Split(escape.Message(child.Label), "\n") {
+		for j, row := range strings.Split(escape.Message(child.Label()), "\n") {
 			if broken {
 				sb.WriteByte('\n')
 			}

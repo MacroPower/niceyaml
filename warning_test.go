@@ -541,7 +541,7 @@ func TestAsErrors(t *testing.T) {
 
 			for problem := range niceyaml.Problems(got) {
 				assert.False(t, problem.Warning)
-				assert.NotContains(t, problem.Label, "warning:")
+				assert.NotContains(t, problem.Label(), "warning:")
 			}
 
 			// The rows and the carets alike read as errors.
@@ -576,7 +576,7 @@ func TestAsErrors(t *testing.T) {
 			messages = append(messages, problem.Message())
 
 			assert.False(t, problem.Warning)
-			assert.NotContains(t, problem.Label, "warning:")
+			assert.NotContains(t, problem.Label(), "warning:")
 		}
 
 		assert.Equal(t, []string{`deprecated field "legacyPricing"`, "open network"}, messages)
@@ -2813,7 +2813,7 @@ func TestNode_Warn(t *testing.T) {
 
 		problem := yamltest.OnlyProblem(t, got)
 		assert.True(t, problem.Warning)
-		assert.Equal(t, "menu.yaml:1:1: warning: $.items: check: odd", problem.Label)
+		assert.Equal(t, "menu.yaml:1:1: warning: $.items: check: odd", problem.Label())
 		assert.Equal(t, "odd", problem.Message())
 		assert.Equal(t, "check", problem.Context())
 	})

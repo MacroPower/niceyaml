@@ -49,7 +49,7 @@ func treeRows(err error) []string {
 	var walk func(t niceyaml.ErrorTree, depth int)
 
 	walk = func(t niceyaml.ErrorTree, depth int) {
-		rows = append(rows, strings.Repeat("  ", depth)+t.Label)
+		rows = append(rows, strings.Repeat("  ", depth)+t.Label())
 
 		for _, child := range t.Children {
 			walk(child, depth+1)

@@ -9392,7 +9392,7 @@ func rejectionRows(err error) string {
 	var rows []string
 
 	for node := range niceyaml.NewErrorTree(err).Problems() {
-		rows = append(rows, node.Label)
+		rows = append(rows, node.Label())
 	}
 
 	return strings.Join(rows, "\n")
@@ -11537,7 +11537,7 @@ func decodeRows(doc *niceyaml.Node, err error) []string {
 
 		rows = append(rows, fmt.Sprintf(
 			"%s | %s | %s | %s %t | %s %s %t | bound=%t decode=%t invalid=%t",
-			node.Bound.Source().Name(), node.Label, node.Message(), path, pathed, pos, rng, located,
+			node.Bound.Source().Name(), node.Label(), node.Message(), path, pathed, pos, rng, located,
 			bound == doc, errors.Is(node.Err, niceyaml.ErrDecode), node.IsInvalid(),
 		))
 	}
@@ -11567,7 +11567,7 @@ func requireInvalid(t *testing.T, err error, count int) {
 	found := 0
 
 	for problem := range niceyaml.NewErrorTree(err).Problems() {
-		require.True(t, problem.IsInvalid(), problem.Label)
+		require.True(t, problem.IsInvalid(), problem.Label())
 
 		found++
 	}
