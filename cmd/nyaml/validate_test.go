@@ -11,7 +11,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -24,6 +26,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/escape"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema"
+	"go.jacobcolvin.com/niceyaml/schema/schemastore"
 )
 
 // nameSchema is the schema the validateFile tests apply to every document
@@ -311,7 +314,7 @@ func TestBuildRegistryRefs(t *testing.T) {
 	t.Run("--schema fails before any file", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := buildRegistry(t.Context(), schemaPath)
+		_, err := buildRegistry(t.Context(), schemaPath, schema.Unrestricted, nil)
 		require.ErrorIs(t, err, schema.ErrLoad)
 		require.ErrorIs(t, err, fs.ErrNotExist)
 		assert.True(t, strings.HasPrefix(err.Error(), "--schema: "), err.Error())
@@ -321,7 +324,7 @@ func TestBuildRegistryRefs(t *testing.T) {
 	t.Run("a directive fails only the document that reaches the ref", func(t *testing.T) {
 		t.Parallel()
 
-		reg, err := buildRegistry(t.Context(), "")
+		reg, err := buildRegistry(t.Context(), "", schema.Unrestricted, nil)
 		require.NoError(t, err)
 
 		require.NoError(t, validateFile(t.Context(), filepath.Join(dir, "skips.yaml"), reg))
@@ -358,7 +361,7 @@ func TestBuildRegistrySchemaDotDotAfterSymlink(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			reg, err := buildRegistry(t.Context(), tc.ref)
+			reg, err := buildRegistry(t.Context(), tc.ref, schema.Unrestricted, nil)
 			require.NoError(t, err)
 
 			require.NoError(t, validateFile(t.Context(), yamlPath, reg))
@@ -402,7 +405,7 @@ func TestBuildRegistrySchemaColonDotDotAfterSymlink(t *testing.T) {
 	for name, tc := range tcs {
 		//nolint:paralleltest // See above.
 		t.Run(name, func(t *testing.T) {
-			reg, err := buildRegistry(t.Context(), tc.ref)
+			reg, err := buildRegistry(t.Context(), tc.ref, schema.Unrestricted, nil)
 			require.NoError(t, err)
 
 			require.NoError(t, validateFile(t.Context(), yamlPath, reg))
@@ -603,13 +606,284 @@ func TestValidateCmdHelp(t *testing.T) {
 	// learns that a run without --schema can still download one. It also
 	// names each exit status, so a script tells an invalid document from a
 	// run that could not check one, and names what each stream carries.
+	// It names each flag that confines what a run reads and fetches.
 	long := validateCmd().Long
 	for _, want := range []string{
 		"--schema", "$schema=", "$schema=none", "SchemaStore", "$ref", "--strict",
+		"--schemastore=false", "--offline", "--schema-root",
 		"Stdout", "Stderr", "Exits 1", "Exits 2",
 	} {
 		assert.Contains(t, long, want)
 	}
+}
+
+// schemaServer serves the schemas of the schema policy tests and records
+// the path of each request it answers.
+type schemaServer struct {
+	*httptest.Server
+
+	mu    sync.Mutex
+	paths []string
+}
+
+// newSchemaServer starts a [schemaServer]. It serves a SchemaStore catalog
+// at /catalog.json whose entry for plain.yaml names /value.json, a schema
+// that requires a "value" key. It serves [nameSchema] at /s.json.
+func newSchemaServer(t *testing.T) *schemaServer {
+	t.Helper()
+
+	s := &schemaServer{}
+	s.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+
+		s.paths = append(s.paths, r.URL.Path)
+
+		s.mu.Unlock()
+
+		var body string
+
+		switch r.URL.Path {
+		case "/catalog.json":
+			body = `{"schemas": [{"name": "plain", "fileMatch": ["plain.yaml"], "url": "` +
+				s.URL + `/value.json"}]}`
+
+		case "/value.json":
+			body = `{"required": ["value"]}`
+
+		case "/s.json":
+			body = string(nameSchema)
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+
+			return
+		}
+
+		_, err := io.WriteString(w, body)
+		assert.NoError(t, err)
+	}))
+	t.Cleanup(s.Close)
+
+	return s
+}
+
+// requested returns the paths that the server answered, each once, in
+// sorted order.
+func (s *schemaServer) requested() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	paths := slices.Clone(s.paths)
+	slices.Sort(paths)
+
+	return slices.Compact(paths)
+}
+
+func TestValidateCmdSchemaPolicy(t *testing.T) {
+	t.Parallel()
+
+	// Each file holds a document that passes against the schema its
+	// directive names. The catalog names a schema for plain.yaml that
+	// it fails. The test directory holds root, which holds every file to
+	// validate and s.json, and other, which holds a second s.json.
+	tcs := map[string]struct {
+		err error
+		// Flags before the files. The value "ROOT" stands for the path of
+		// the root directory.
+		args []string
+		// The result lines for local.yaml, plain.yaml, remote.yaml, and
+		// outside.yaml, in that order.
+		want []string
+		// The paths that the run requests from the server, sorted.
+		requested []string
+		// The status the run exits with.
+		exit int
+	}{
+		"defaults": {
+			want:      []string{"valid", "invalid", "valid", "valid"},
+			requested: []string{"/catalog.json", "/s.json", "/value.json"},
+			exit:      exitInvalid,
+		},
+		"without SchemaStore": {
+			args:      []string{"--schemastore=false"},
+			want:      []string{"valid", "valid", "valid", "valid"},
+			requested: []string{"/s.json"},
+		},
+		"offline": {
+			args: []string{"--offline"},
+			want: []string{"valid", "valid", "failed", "valid"},
+			err:  schema.ErrURLNotAllowed,
+			exit: exitFailure,
+		},
+		"offline with SchemaStore": {
+			args: []string{"--offline", "--schemastore=true"},
+			want: []string{"valid", "valid", "failed", "valid"},
+			err:  schema.ErrURLNotAllowed,
+			exit: exitFailure,
+		},
+		"schema root": {
+			args:      []string{"--schema-root", "ROOT"},
+			want:      []string{"valid", "invalid", "valid", "failed"},
+			err:       schema.ErrFileNotAllowed,
+			requested: []string{"/catalog.json", "/s.json", "/value.json"},
+			exit:      exitFailure,
+		},
+		"offline schema root": {
+			args: []string{"--offline", "--schema-root", "ROOT"},
+			want: []string{"valid", "valid", "failed", "failed"},
+			err:  schema.ErrFileNotAllowed,
+			exit: exitFailure,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := newSchemaServer(t)
+
+			dir := t.TempDir()
+			root := filepath.Join(dir, "root")
+
+			yamltest.WriteFiles(t, dir, map[string]string{
+				"other/s.json":      string(nameSchema),
+				"root/s.json":       string(nameSchema),
+				"root/local.yaml":   yamltest.SchemaDirective("./s.json", "name: a\n"),
+				"root/plain.yaml":   "name: a\n",
+				"root/remote.yaml":  yamltest.SchemaDirective(srv.URL+"/s.json", "name: a\n"),
+				"root/outside.yaml": yamltest.SchemaDirective("../other/s.json", "name: a\n"),
+			})
+
+			var args []string
+
+			for _, arg := range tc.args {
+				arg = strings.ReplaceAll(arg, "ROOT", root)
+				args = append(args, arg)
+			}
+
+			files := []string{"local.yaml", "plain.yaml", "remote.yaml", "outside.yaml"}
+
+			var want strings.Builder
+
+			for i, file := range files {
+				args = append(args, filepath.Join(root, file))
+				want.WriteString(filepath.Join(root, file) + ": " + tc.want[i] + "\n")
+			}
+
+			out := &bytes.Buffer{}
+
+			cmd := validateCmd(schemastore.WithCatalogURL(srv.URL + "/catalog.json"))
+			cmd.SilenceErrors = true
+			cmd.SilenceUsage = true
+			cmd.SetOut(out)
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs(args)
+
+			err := cmd.Execute()
+			assert.Equal(t, tc.exit, exitCode(err), "%v", err)
+			assert.Equal(t, want.String(), out.String())
+			assert.Equal(t, tc.requested, srv.requested())
+
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+			}
+		})
+	}
+}
+
+func TestValidateCmdSchemaPolicyFlag(t *testing.T) {
+	t.Parallel()
+
+	// A --schema that the policy flags do not allow fails the command
+	// once, before it reads any file or requests anything.
+	tcs := map[string]struct {
+		err error
+		// Flags before the file. The value "ROOT" stands for the path of
+		// the root directory, and "URL" for the URL of the server.
+		args []string
+		// The prefix of the error message.
+		prefix string
+	}{
+		"offline URL": {
+			args:   []string{"--offline", "--schema", "URL/s.json"},
+			err:    schema.ErrURLNotAllowed,
+			prefix: "--schema: ",
+		},
+		"file outside the root": {
+			args:   []string{"--schema-root", "ROOT", "--schema", "ROOT/../other/s.json"},
+			err:    schema.ErrFileNotAllowed,
+			prefix: "--schema: ",
+		},
+		"missing root": {
+			args:   []string{"--schema-root", "ROOT/missing"},
+			err:    fs.ErrNotExist,
+			prefix: "--schema-root: ",
+		},
+		// An empty value, such as from an unset shell variable, fails
+		// rather than lift the confinement.
+		"empty root": {
+			args:   []string{"--schema-root", "", "--schema", "ROOT/../other/s.json"},
+			err:    errEmptyPath,
+			prefix: "--schema-root: empty path",
+		},
+		"empty root with equals": {
+			args:   []string{"--schema-root=", "--schema", "ROOT/../other/s.json"},
+			err:    errEmptyPath,
+			prefix: "--schema-root: empty path",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := newSchemaServer(t)
+
+			dir := t.TempDir()
+			root := filepath.Join(dir, "root")
+
+			yamltest.WriteFiles(t, dir, map[string]string{
+				"other/s.json":    string(nameSchema),
+				"root/s.json":     string(nameSchema),
+				"root/local.yaml": "name: a\n",
+			})
+
+			var args []string
+
+			for _, arg := range tc.args {
+				arg = strings.ReplaceAll(arg, "ROOT", root)
+				arg = strings.ReplaceAll(arg, "URL", srv.URL)
+				args = append(args, arg)
+			}
+
+			out, errOut := &bytes.Buffer{}, &bytes.Buffer{}
+
+			err := quietValidateCmd(out, errOut, append(args, filepath.Join(root, "local.yaml"))...).Execute()
+			require.ErrorIs(t, err, tc.err)
+			assert.True(t, strings.HasPrefix(err.Error(), tc.prefix), err.Error())
+			assert.Equal(t, exitFailure, exitCode(err))
+			assert.Empty(t, out.String())
+			assert.Empty(t, errOut.String())
+			assert.Empty(t, srv.requested())
+		})
+	}
+
+	t.Run("schema inside the root", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+
+		schemaPath := yamltest.WriteFile(t, dir, "s.json", string(nameSchema))
+		path := yamltest.WriteFile(t, dir, "local.yaml", "name: a\n")
+
+		out := &bytes.Buffer{}
+
+		args := []string{"--offline", "--schema-root", dir, "--schema", schemaPath, path}
+
+		err := quietValidateCmd(out, io.Discard, args...).Execute()
+		require.NoError(t, err)
+		assert.Equal(t, path+": valid\n", out.String())
+	})
 }
 
 func TestValidateCmdCanceled(t *testing.T) {
@@ -863,7 +1137,7 @@ func TestValidateCmdDetaches(t *testing.T) {
 	err := quietValidateCmd(io.Discard, io.Discard, append([]string{"--schema", schemaPath}, paths...)...).Execute()
 	require.Error(t, err)
 
-	reg, regErr := buildRegistry(t.Context(), schemaPath)
+	reg, regErr := buildRegistry(t.Context(), schemaPath, schema.Unrestricted, nil)
 	require.NoError(t, regErr)
 
 	// The errors that validateFile returns hold their sources. The
