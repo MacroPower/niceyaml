@@ -289,7 +289,7 @@ func TestExitCode(t *testing.T) {
 				cancel()
 			}
 
-			assert.Equal(t, tc.want, exitCode(quietValidateCmd(io.Discard, args...).ExecuteContext(ctx)))
+			assert.Equal(t, tc.want, exitCode(quietValidateCmd(io.Discard, io.Discard, args...).ExecuteContext(ctx)))
 		})
 	}
 }
