@@ -1,7 +1,10 @@
 package schema_test
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -114,6 +117,120 @@ func TestRef_Name(t *testing.T) {
 			t.Parallel()
 
 			assert.Equal(t, tc.want, tc.ref.Name())
+		})
+	}
+}
+
+func TestRef_String(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		ref  schema.Ref
+		want string
+	}{
+		"URL with a password": {
+			ref:  schema.URL("https://user:secret@example.com/s.json#/$defs/a"),
+			want: "https://user:xxxxx@example.com/s.json#/$defs/a",
+		},
+		"URL with no password": {
+			ref:  schema.URL("https://example.com/s.json"),
+			want: "https://example.com/s.json",
+		},
+		"file in a file system": {
+			ref:  schema.FileFS(yamltest.MapFS(nil), "schemas/s.json"),
+			want: "schemas/s.json",
+		},
+		"loadable": {
+			ref:  loading("config.json", nil, nil),
+			want: "config.json",
+		},
+		"zero Ref": {
+			ref:  schema.Ref{},
+			want: "",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.ref.String())
+			assert.Equal(t, tc.ref.Name(), tc.ref.String())
+			assert.Equal(t, "using "+tc.want, fmt.Sprintf("using %v", tc.ref))
+			assert.Equal(t, "using "+tc.want, fmt.Sprintf("using %s", tc.ref))
+			assert.Equal(t, "using "+tc.want, fmt.Sprintf("using %v", &tc.ref))
+		})
+	}
+}
+
+func TestRef_LogValue(t *testing.T) {
+	t.Parallel()
+
+	// Without the time of a record, the output is the same on every
+	// run.
+	dropTime := func(_ []string, a slog.Attr) slog.Attr {
+		if a.Key == slog.TimeKey {
+			return slog.Attr{}
+		}
+
+		return a
+	}
+
+	tcs := map[string]struct {
+		ref      schema.Ref
+		want     string
+		wantText string
+		wantJSON string
+	}{
+		"URL with a password": {
+			ref:      schema.URL("https://user:secret@example.com/s.json"),
+			want:     "https://user:xxxxx@example.com/s.json",
+			wantText: "level=INFO msg=resolved schema=https://user:xxxxx@example.com/s.json\n",
+			wantJSON: `{"level":"INFO","msg":"resolved","schema":"https://user:xxxxx@example.com/s.json"}`,
+		},
+		"file in a file system": {
+			ref:      schema.FileFS(yamltest.MapFS(nil), "schemas/s.json"),
+			want:     "schemas/s.json",
+			wantText: "level=INFO msg=resolved schema=schemas/s.json\n",
+			wantJSON: `{"level":"INFO","msg":"resolved","schema":"schemas/s.json"}`,
+		},
+		"loadable": {
+			ref:      loading("config.json", nil, nil),
+			want:     "config.json",
+			wantText: "level=INFO msg=resolved schema=config.json\n",
+			wantJSON: `{"level":"INFO","msg":"resolved","schema":"config.json"}`,
+		},
+		"zero Ref": {
+			ref:      schema.Ref{},
+			want:     "",
+			wantText: "level=INFO msg=resolved schema=\"\"\n",
+			wantJSON: `{"level":"INFO","msg":"resolved","schema":""}`,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			// The assertions read the kind and the string, because
+			// assert.Equal on two slog.Value structs compares only the
+			// length and the first byte of the strings.
+			got := tc.ref.LogValue()
+			assert.Equal(t, slog.KindString, got.Kind())
+			assert.Equal(t, tc.want, got.String())
+			assert.Equal(t, tc.ref.Name(), got.String())
+
+			opts := &slog.HandlerOptions{ReplaceAttr: dropTime}
+
+			var text bytes.Buffer
+
+			slog.New(slog.NewTextHandler(&text, opts)).Info("resolved", slog.Any("schema", tc.ref))
+			assert.Equal(t, tc.wantText, text.String())
+
+			var js bytes.Buffer
+
+			slog.New(slog.NewJSONHandler(&js, opts)).Info("resolved", slog.Any("schema", tc.ref))
+			assert.JSONEq(t, tc.wantJSON, js.String())
 		})
 	}
 }
