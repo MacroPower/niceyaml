@@ -11,7 +11,6 @@ package hook
 
 import (
 	"context"
-	"reflect"
 
 	"github.com/goccy/go-yaml/ast"
 
@@ -49,11 +48,6 @@ var (
 	// a wrapper whose message is the message of the error it wraps adds a
 	// type to the chain and does not change anything that a renderer shows.
 	Rewrap func(err error, wrap func(error) error) error
-
-	// Defaults returns the defaults of t under opts, a
-	// []niceyaml.DecodeOption, as niceyaml.Defaults returns them. A panic
-	// in a function of niceyaml.WithDefaults reaches the caller.
-	Defaults func(t reflect.Type, opts any) reflect.Value
 
 	// Layers returns the layers that niceyaml.NewSourceFromLayers merged
 	// into src, a *niceyaml.Source, as the *niceyaml.Node of the document

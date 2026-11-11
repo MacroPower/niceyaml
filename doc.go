@@ -991,7 +991,9 @@
 // # Defaults
 //
 // [Node.Decode] starts from the value that [Defaults] returns, and
-// [Node.DecodeInto] starts from the value that the caller passes. A decode
+// [Node.DecodeInto] starts from the value that the caller passes. A caller
+// fills that value with Defaults, or with [DefaultsInto] for a type that it
+// holds as a [reflect.Type]. A decode
 // also creates values: each element of a slice or an array, each value of a
 // map, and the target of each pointer that the document fills. Each starts
 // from the defaults of its type, which [WithDefaults] sets:

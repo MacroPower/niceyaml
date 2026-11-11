@@ -41,12 +41,14 @@ var (
 	// describes.
 	ErrMultipleDocuments = errors.New("multiple documents in source")
 
-	// ErrDecodeTarget indicates that the value given to [Node.DecodeInto] or
-	// [Node.DecodeIfPresent] is nil, a nil pointer, or not a pointer, so the
-	// decode cannot write into it. The call returns the error bound to the
-	// source as a [SourceError] with no location. It is a mistake of the
-	// caller, so the error comes inside [Unchecked]. [IsInvalid] does not
-	// report it, even from a check that returns it as it is.
+	// ErrDecodeTarget indicates that the value given to [Node.DecodeInto],
+	// [Node.DecodeIfPresent], or [DefaultsInto] is nil, a nil pointer, or
+	// not a pointer. The call then cannot write into it. Node.DecodeInto and
+	// Node.DecodeIfPresent return the error bound to the source as a
+	// [SourceError] with no location. DefaultsInto reads no source, so it
+	// returns the error unbound. It is a mistake of the caller, so the
+	// error comes inside [Unchecked]. [IsInvalid] does not report it, even
+	// from a check that returns it as it is.
 	ErrDecodeTarget = errors.New("decode target is not a non-nil pointer")
 
 	// ErrSelfValidateTarget indicates that the value given to
