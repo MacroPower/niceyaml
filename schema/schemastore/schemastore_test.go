@@ -370,9 +370,6 @@ func TestStore_FindMatchRepeatedPath(t *testing.T) {
 	// A registry looks up a file's path once per document, so each lookup
 	// must give what a first lookup of its path gives, whatever lookups
 	// came before it.
-	wd, err := os.Getwd()
-	require.NoError(t, err)
-
 	tcs := map[string]struct {
 		paths []string
 		want  []string // Name of the matching entry, or "" for no match.
@@ -389,9 +386,9 @@ func TestStore_FindMatchRepeatedPath(t *testing.T) {
 			paths: []string{"/x/other.json", "/x/other.json", "/x/myapp.yaml"},
 			want:  []string{"", "", "Specific"},
 		},
-		"relative and absolute spellings of one path": {
+		"two spellings of one path": {
 			// Each error names the path as its caller spelled it.
-			paths: []string{"other.json", filepath.Join(wd, "other.json"), "other.json"},
+			paths: []string{"other.json", "./other.json", "other.json"},
 			want:  []string{"", "", ""},
 		},
 	}
@@ -1792,39 +1789,54 @@ func TestStore_Resolve(t *testing.T) {
 		require.ErrorContains(t, err, "random.yaml")
 	})
 
-	t.Run("matches a relative path against the working directory", func(t *testing.T) {
+	t.Run("matches a relative path as written", func(t *testing.T) {
 		t.Parallel()
 
-		// A pattern that names a directory matches a file read from inside
-		// it, as yaml-language-server matches the absolute document path.
 		// Go runs a test with the package directory as its working
-		// directory, so the pattern names that directory.
+		// directory, so the pattern names that directory. A relative path
+		// that leaves the directory out does not match it, whatever the
+		// working directory is.
 		cwd, err := os.Getwd()
 		require.NoError(t, err)
 
+		dir := filepath.Base(cwd)
 		catalog := schemastore.Catalog{
 			Schemas: []schemastore.CatalogEntry{
 				{
 					Name:      "Local Workflow",
 					URL:       "https://example.com/local.json",
-					FileMatch: []string{filepath.Base(cwd) + "/*.yml"},
+					FileMatch: []string{dir + "/*.yml"},
 				},
 			},
 		}
 
 		store := newCatalogStore(t, catalog)
 
-		requireRef(t, store, "ci.yml", "https://example.com/local.json")
+		for _, path := range []string{"ci.yml", "./ci.yml"} {
+			_, err = store.FindMatch(t.Context(), path)
+			require.ErrorIs(t, err, schemastore.ErrNoCatalogMatch, path)
+			// The error names the path as the caller wrote it.
+			require.ErrorContains(t, err, fmt.Sprintf("%q", path))
+			assert.NotContains(t, err.Error(), cwd)
+		}
 
-		entry, err := store.FindMatch(t.Context(), "./ci.yml")
+		// A path from a file system that carries its directories matches.
+		src, err := niceyaml.NewSourceFromFS(fstest.MapFS{
+			dir + "/ci.yml": &fstest.MapFile{Data: []byte("key: value\n")},
+		}, dir+"/ci.yml")
 		require.NoError(t, err)
-		assert.Equal(t, "Local Workflow", entry.Name)
 
-		// The error names the path as the caller wrote it.
-		_, err = store.FindMatch(t.Context(), "ci.yaml")
+		ref, err := store.Resolve(t.Context(), src.Documents()[0])
+		require.NoError(t, err)
+		assert.Equal(t, "https://example.com/local.json", ref.Key())
+
+		src, err = niceyaml.NewSourceFromFS(fstest.MapFS{
+			"ci.yml": &fstest.MapFile{Data: []byte("key: value\n")},
+		}, "ci.yml")
+		require.NoError(t, err)
+
+		_, err = store.Resolve(t.Context(), src.Documents()[0])
 		require.ErrorIs(t, err, schemastore.ErrNoCatalogMatch)
-		require.ErrorContains(t, err, `"ci.yaml"`)
-		assert.NotContains(t, err.Error(), cwd)
 	})
 
 	t.Run("loads matching schema", func(t *testing.T) {
