@@ -4259,6 +4259,71 @@ func TestDoc_Apply_Failed(t *testing.T) {
 	}
 }
 
+func TestDoc_Apply_ContextEnded(t *testing.T) {
+	t.Parallel()
+
+	const before = "items:\n  - cost: 1\n  - cost: 2\n  - cost: 3\n"
+
+	tcs := map[string]struct {
+		// The number of calls after which the context ends. Zero ends it
+		// before the Apply.
+		endAfter int
+		// The number of calls of the Func that the Apply runs.
+		calls int
+	}{
+		"ended before the apply": {
+			endAfter: 0,
+			calls:    0,
+		},
+		"ended by the first call": {
+			endAfter: 1,
+			calls:    1,
+		},
+		"ended by the second call": {
+			endAfter: 2,
+			calls:    2,
+		},
+		"ended by the last call": {
+			// The check after the calls returns the error.
+			endAfter: 3,
+			calls:    3,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d := newDoc(t, before)
+
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+
+			if tc.endAfter == 0 {
+				cancel()
+			}
+
+			calls := 0
+
+			err := d.Apply(ctx, paths.MustParse("$.items[*].cost"), func(_ context.Context, n *edit.Node) error {
+				calls++
+
+				if calls == tc.endAfter {
+					cancel()
+				}
+
+				return n.SetKey("price")
+			})
+			require.ErrorIs(t, err, context.Canceled)
+			assert.Equal(t, "test.yaml: context canceled", err.Error())
+			assert.Equal(t, tc.calls, calls)
+
+			assert.Equal(t, before, d.Text())
+			assert.False(t, d.Edited())
+		})
+	}
+}
+
 func TestDoc_Apply_FailedCall(t *testing.T) {
 	t.Parallel()
 
