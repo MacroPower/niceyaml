@@ -4,10 +4,12 @@ import (
 	"cmp"
 	"fmt"
 	"iter"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
@@ -1470,29 +1472,20 @@ func TestDiffer_HunksOfHeldLines(t *testing.T) {
 func TestDiffer_HunksFallBackToPositions(t *testing.T) {
 	t.Parallel()
 
-	src := niceyaml.NewSourceFromString("a: 1\n").Lines()
-
 	tcs := map[string]struct {
 		before line.Lines
 		after  line.Lines
-		// Holds the algorithm of the diff, when it is not the default.
-		algo lcs.Algorithm
-		want []string
+		want   []string
 	}{
 		"line with no number": {
 			before: line.Collect(&line.Line{}),
 			after:  line.Collect(),
 			want:   []string{"@@ -1 +0,0 @@"},
 		},
-		"algorithm that repeats a line": {
-			before: src,
-			after:  src,
-			algo: opsAlgorithm{
-				{Kind: lcs.OpEqual, Before: 0, After: 0},
-				{Kind: lcs.OpEqual, Before: 0, After: 0},
-				{Kind: lcs.OpDelete, Before: 0, After: -1},
-			},
-			want: []string{"@@ -3 +2,0 @@"},
+		"second line with no number": {
+			before: line.Collect(&line.Line{}, &line.Line{}),
+			after:  line.Collect(&line.Line{}),
+			want:   []string{"@@ -2 +1,0 @@"},
 		},
 	}
 
@@ -1500,7 +1493,7 @@ func TestDiffer_HunksFallBackToPositions(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := diff.New(diff.WithAlgorithm(tc.algo)).Diff(tc.before, tc.after).Hunks(0)
+			got := diff.Diff(tc.before, tc.after).Hunks(0)
 			assert.Equal(t, tc.want, hunkHeaders(got))
 		})
 	}
@@ -1575,16 +1568,18 @@ func TestDiffer_WithAlgorithm(t *testing.T) {
 
 	before, after := "a: 1\nb: 2\n", "a: 1\nc: 3\n"
 
-	// The fixed ops and the default algorithm pair the lines alike.
-	want := stringtest.JoinLF(
+	// The default algorithm lists the deleted line of the run first.
+	deleteFirst := stringtest.JoinLF(
 		"   1 | a: 1",
 		"   2 - b: 2",
 		"   2 + c: 3",
 	)
-	wantFlags := map[int]line.Flag{1: line.FlagDeleted, 2: line.FlagInserted}
+	deleteFirstFlags := map[int]line.Flag{1: line.FlagDeleted, 2: line.FlagInserted}
 
 	tcs := map[string]struct {
 		algo      lcs.Algorithm
+		want      string
+		wantFlags map[int]line.Flag
 		wantPanic string
 	}{
 		"known kinds render in order": {
@@ -1593,6 +1588,21 @@ func TestDiffer_WithAlgorithm(t *testing.T) {
 				{Kind: lcs.OpDelete, Before: 1, After: -1},
 				{Kind: lcs.OpInsert, Before: -1, After: 1},
 			},
+			want:      deleteFirst,
+			wantFlags: deleteFirstFlags,
+		},
+		"deletes and inserts of a run in any order": {
+			algo: opsAlgorithm{
+				{Kind: lcs.OpEqual, Before: 0, After: 0},
+				{Kind: lcs.OpInsert, Before: -1, After: 1},
+				{Kind: lcs.OpDelete, Before: 1, After: -1},
+			},
+			want: stringtest.JoinLF(
+				"   1 | a: 1",
+				"   2 + c: 3",
+				"   2 - b: 2",
+			),
+			wantFlags: map[int]line.Flag{1: line.FlagInserted, 2: line.FlagDeleted},
 		},
 		"unknown kind panics instead of dropping the line": {
 			algo: opsAlgorithm{
@@ -1601,9 +1611,71 @@ func TestDiffer_WithAlgorithm(t *testing.T) {
 			},
 			wantPanic: "diff: op 1 has unknown lcs.OpKind 3",
 		},
+		// Ops that do not hold every line of each revision once, in order,
+		// would render a wrong diff, so each of them panics.
+		"no ops": {
+			algo:      opsAlgorithm{},
+			wantPanic: "diff: ops name 0 of 2 before lines",
+		},
+		"dropped line": {
+			algo: opsAlgorithm{
+				{Kind: lcs.OpEqual, Before: 0, After: 0},
+				{Kind: lcs.OpDelete, Before: 1, After: -1},
+			},
+			wantPanic: "diff: ops name 1 of 2 after lines",
+		},
+		"repeated line": {
+			algo: opsAlgorithm{
+				{Kind: lcs.OpEqual, Before: 0, After: 0},
+				{Kind: lcs.OpEqual, Before: 0, After: 0},
+				{Kind: lcs.OpDelete, Before: 1, After: -1},
+				{Kind: lcs.OpInsert, Before: -1, After: 1},
+			},
+			wantPanic: "diff: op 1 names before line 0, want 1",
+		},
+		"repeated line after the last line": {
+			algo: opsAlgorithm{
+				{Kind: lcs.OpEqual, Before: 0, After: 0},
+				{Kind: lcs.OpDelete, Before: 1, After: -1},
+				{Kind: lcs.OpInsert, Before: -1, After: 1},
+				{Kind: lcs.OpDelete, Before: 1, After: -1},
+			},
+			wantPanic: "diff: op 3 names before line 1, want no more before lines",
+		},
+		"lines out of order": {
+			algo: opsAlgorithm{
+				{Kind: lcs.OpInsert, Before: -1, After: 1},
+				{Kind: lcs.OpInsert, Before: -1, After: 0},
+				{Kind: lcs.OpDelete, Before: 0, After: -1},
+				{Kind: lcs.OpDelete, Before: 1, After: -1},
+			},
+			wantPanic: "diff: op 0 names after line 1, want 0",
+		},
+		"equal lines out of order": {
+			algo: opsAlgorithm{
+				{Kind: lcs.OpEqual, Before: 0, After: 1},
+				{Kind: lcs.OpEqual, Before: 1, After: 0},
+			},
+			wantPanic: "diff: op 0 names after line 1, want 0",
+		},
+		"index past the last line": {
+			algo: opsAlgorithm{
+				{Kind: lcs.OpEqual, Before: 0, After: 0},
+				{Kind: lcs.OpDelete, Before: 1, After: -1},
+				{Kind: lcs.OpInsert, Before: -1, After: 1},
+				{Kind: lcs.OpInsert, Before: -1, After: 2},
+			},
+			wantPanic: "diff: op 3 names after line 2, want no more after lines",
+		},
+		"negative index": {
+			algo: opsAlgorithm{
+				{Kind: lcs.OpDelete, Before: -1, After: -1},
+			},
+			wantPanic: "diff: op 0 names before line -1, want 0",
+		},
 		// A nil algorithm falls back to the default.
-		"untyped nil":         {algo: nil},
-		"nil *lcs.Hirschberg": {algo: (*lcs.Hirschberg)(nil)},
+		"untyped nil":         {algo: nil, want: deleteFirst, wantFlags: deleteFirstFlags},
+		"nil *lcs.Hirschberg": {algo: (*lcs.Hirschberg)(nil), want: deleteFirst, wantFlags: deleteFirstFlags},
 	}
 
 	for name, tc := range tcs {
@@ -1621,10 +1693,191 @@ func TestDiffer_WithAlgorithm(t *testing.T) {
 			}
 
 			got := yamltest.Diff(before, after, opt).Unified()
-			assert.Equal(t, want, got.String())
-			assert.Equal(t, wantFlags, changedFlags(got))
+			assert.Equal(t, tc.want, got.String())
+			assert.Equal(t, tc.wantFlags, changedFlags(got))
 		})
 	}
+}
+
+// squeezeKey is a line key that ignores the amount of whitespace after the
+// indentation of a line.
+func squeezeKey(l *line.Line) string {
+	text := l.Content()
+	body := strings.TrimLeft(text, " ")
+
+	return text[:len(text)-len(body)] + strings.Join(strings.Fields(body), " ")
+}
+
+// commentKey is a line key that ignores comments. It reads the tokens of
+// the line, so a "#" inside a string stays in the key.
+func commentKey(l *line.Line) string {
+	var sb strings.Builder
+
+	for _, tk := range l.Tokens() {
+		if tk.Type != token.CommentType {
+			sb.WriteString(tk.Origin)
+		}
+	}
+
+	return strings.TrimRight(sb.String(), " \r\n")
+}
+
+// recordingAlgorithm is an [lcs.Algorithm] that records the strings it
+// gets and diffs them through [lcs.Hirschberg].
+type recordingAlgorithm struct {
+	before, after []string
+}
+
+func (a *recordingAlgorithm) Diff(before, after []string) []lcs.Op {
+	a.before, a.after = before, after
+
+	return lcs.NewHirschberg().Diff(before, after)
+}
+
+func TestDiffer_WithLineKey(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		key       func(*line.Line) string
+		before    string
+		after     string
+		want      string
+		wantFlags map[int]line.Flag
+		wantStats diff.Stats
+	}{
+		"nil key compares the content": {
+			before: stringtest.LinesLF("a:   1", "b: 2"),
+			after:  stringtest.LinesLF("a: 1", "b: 2"),
+			want: stringtest.JoinLF(
+				"   1 - a:   1",
+				"   1 + a: 1",
+				"   2 | b: 2",
+			),
+			wantFlags: map[int]line.Flag{0: line.FlagDeleted, 1: line.FlagInserted},
+			wantStats: diff.Stats{Added: 1, Removed: 1},
+		},
+		// The unchanged row shows the after line as its revision wrote it.
+		"equal keys make an unchanged row": {
+			key:    squeezeKey,
+			before: stringtest.LinesLF("a:   1", "b: 2"),
+			after:  stringtest.LinesLF("a: 1", "b:  2"),
+			want: stringtest.JoinLF(
+				"   1 | a: 1",
+				"   2 | b:  2",
+			),
+		},
+		"different keys make a change": {
+			key:    squeezeKey,
+			before: stringtest.LinesLF("a:   1", "  b: 2"),
+			after:  stringtest.LinesLF("a: 1", "b: 2"),
+			want: stringtest.JoinLF(
+				"   1 | a: 1",
+				"   2 -   b: 2",
+				"   2 + b: 2",
+			),
+			wantFlags: map[int]line.Flag{1: line.FlagDeleted, 2: line.FlagInserted},
+			wantStats: diff.Stats{Added: 1, Removed: 1},
+		},
+		"key reads the tokens of a line": {
+			key:    commentKey,
+			before: stringtest.LinesLF("a: 1 # one", `b: "# 2"`, "c: 3"),
+			after:  stringtest.LinesLF("a: 1 # uno", `b: "# 3"`, "c: 3 # tres"),
+			want: stringtest.JoinLF(
+				"   1 | a: 1 # uno",
+				`   2 - b: "# 2"`,
+				`   2 + b: "# 3"`,
+				"   3 | c: 3 # tres",
+			),
+			wantFlags: map[int]line.Flag{1: line.FlagDeleted, 2: line.FlagInserted},
+			wantStats: diff.Stats{Added: 1, Removed: 1},
+		},
+		// A stricter key than the content makes equal content differ.
+		"key that tells equal content apart": {
+			key: func(l *line.Line) string {
+				return strconv.Itoa(l.Number()) + l.Content()
+			},
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			after:  stringtest.LinesLF("b: 2"),
+			want: stringtest.JoinLF(
+				"   1 - a: 1",
+				"   2 - b: 2",
+				"   1 + b: 2",
+			),
+			wantFlags: map[int]line.Flag{0: line.FlagDeleted, 1: line.FlagDeleted, 2: line.FlagInserted},
+			wantStats: diff.Stats{Added: 1, Removed: 2},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			result := yamltest.Diff(tc.before, tc.after, diff.WithLineKey(tc.key))
+
+			got := result.Unified()
+			assert.Equal(t, tc.want, got.String())
+			assert.Equal(t, tc.wantFlags, changedFlags(got))
+			assert.Equal(t, tc.wantStats, result.Stats())
+		})
+	}
+
+	t.Run("each pane shows the line of its revision", func(t *testing.T) {
+		t.Parallel()
+
+		result := yamltest.Diff("a:   1\n", "a: 1\n", diff.WithLineKey(squeezeKey))
+
+		assert.Equal(t, "   1 | a:   1", result.Before().String())
+		assert.Equal(t, "   1 | a: 1", result.After().String())
+		assert.Empty(t, changedFlags(result.Before()))
+		assert.Empty(t, changedFlags(result.After()))
+
+		// The lines map to the one row that shows the pair.
+		for _, side := range []diff.Side{diff.Before, diff.After} {
+			row, ok := result.UnifiedRow(diff.Origin{Side: side, Index: 0})
+			require.True(t, ok)
+			assert.Equal(t, 0, row)
+		}
+	})
+
+	t.Run("algorithm receives the keys", func(t *testing.T) {
+		t.Parallel()
+
+		algo := &recordingAlgorithm{}
+		result := yamltest.Diff(
+			stringtest.LinesLF("a:   1", "b: 2"),
+			stringtest.LinesLF("a: 1", "c:  3"),
+			diff.WithLineKey(squeezeKey),
+			diff.WithAlgorithm(algo),
+		)
+
+		assert.Equal(t, []string{"a: 1", "b: 2"}, algo.before)
+		assert.Equal(t, []string{"a: 1", "c: 3"}, algo.after)
+		assert.Equal(t, diff.Stats{Added: 1, Removed: 1}, result.Stats())
+	})
+
+	t.Run("one Differ diffs many inputs", func(t *testing.T) {
+		t.Parallel()
+
+		differ := diff.New(diff.WithLineKey(commentKey))
+
+		var wg sync.WaitGroup
+
+		for i := range 8 {
+			wg.Go(func() {
+				n := strconv.Itoa(i)
+				before := niceyaml.NewSourceFromString("a: " + n + " # before\nb: 1\n").Lines()
+				after := niceyaml.NewSourceFromString("a: " + n + " # after\nb: 2\n").Lines()
+
+				for range 20 {
+					result := differ.Diff(before, after)
+					assert.Equal(t, diff.Stats{Added: 1, Removed: 1}, result.Stats())
+					assert.Equal(t, "a: "+n+" # after", result.Unified().Line(0).Content())
+				}
+			})
+		}
+
+		wg.Wait()
+	})
 }
 
 func TestDiff_Concurrent(t *testing.T) {
@@ -2396,31 +2649,6 @@ func TestDiffResult_Origins_SharedLines(t *testing.T) {
 	assert.Equal(t, []string{"after"}, unified.Annotations(inserted).Contents())
 }
 
-func TestDiffResult_Origins_RepeatedLine(t *testing.T) {
-	t.Parallel()
-
-	// An algorithm that lists one line more than once maps the line to the
-	// first row that shows it.
-	src := niceyaml.NewSourceFromString("a: 1\n").Lines()
-	result := diff.New(diff.WithAlgorithm(opsAlgorithm{
-		{Kind: lcs.OpEqual, Before: 0, After: 0},
-		{Kind: lcs.OpEqual, Before: 0, After: 0},
-		{Kind: lcs.OpDelete, Before: 0, After: -1},
-	})).Diff(src, src)
-
-	origin, ok := result.UnifiedOrigin(2)
-	require.True(t, ok)
-	assert.Equal(t, diff.Origin{Side: diff.Before, Index: 0}, origin)
-
-	row, ok := result.UnifiedRow(origin)
-	require.True(t, ok)
-	assert.Equal(t, 0, row)
-
-	row, ok = result.PaneRow(origin)
-	require.True(t, ok)
-	assert.Equal(t, 0, row)
-}
-
 // linesAt returns a [line.Sequence] that yields an empty line at each of
 // indices, for a diff whose algorithm ignores the content of its lines.
 func linesAt(indices ...int) line.Sequence {
@@ -2551,32 +2779,6 @@ func TestDiffResult_Changes(t *testing.T) {
 				{Kind: lcs.OpEqual, Before: 1, After: 2},
 			},
 			want: []diff.Change{change(0, 1, 10, 10, 0, 1)},
-		},
-		"algorithm that repeats a line": {
-			before: linesAt(0),
-			after:  linesAt(0),
-			algo: opsAlgorithm{
-				{Kind: lcs.OpEqual, Before: 0, After: 0},
-				{Kind: lcs.OpDelete, Before: 0, After: -1},
-				{Kind: lcs.OpDelete, Before: 0, After: -1},
-			},
-			want: []diff.Change{
-				change(1, 2, 0, 1, 1, 1),
-				change(2, 3, 0, 1, 1, 1),
-			},
-		},
-		"algorithm that lists lines out of order": {
-			before: linesAt(0, 1, 2),
-			after:  linesAt(),
-			algo: opsAlgorithm{
-				{Kind: lcs.OpDelete, Before: 2, After: -1},
-				{Kind: lcs.OpDelete, Before: 0, After: -1},
-				{Kind: lcs.OpDelete, Before: 1, After: -1},
-			},
-			want: []diff.Change{
-				change(0, 1, 2, 3, 0, 0),
-				change(1, 3, 0, 2, 0, 0),
-			},
 		},
 	}
 

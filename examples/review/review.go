@@ -11,7 +11,6 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/diff"
-	"go.jacobcolvin.com/niceyaml/diff/lcs"
 	"go.jacobcolvin.com/niceyaml/escape"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -76,11 +75,12 @@ func main() {
 	fmt.Printf("default:        +%d -%d\n", exact.Added, exact.Removed)
 
 	// A formatter removed the padding from the after revision, so the
-	// default algorithm counts every `item:` line as changed. An algorithm
-	// that ignores the amount of whitespace counts only the edits here. It
-	// also hides a change to the whitespace inside a quoted value. The rest
-	// of the review uses its diff.
-	differ := diff.New(diff.WithAlgorithm(spacing{lcs.NewHirschberg()}))
+	// default diff counts every `item:` line as changed. A diff compares the
+	// keys of two lines, and the default key is the content of the line. A
+	// key that ignores the amount of whitespace counts only the edits here.
+	// It also hides a change to the whitespace inside a quoted value. The
+	// rest of the review uses its diff.
+	differ := diff.New(diff.WithLineKey(spacing))
 	result := differ.Diff(viewBefore, viewAfter)
 	loose := result.Stats()
 	fmt.Printf("ignore spacing: +%d -%d\n", loose.Added, loose.Removed)
@@ -174,32 +174,20 @@ func main() {
 	lipgloss.Println(p.PrintSideBySide(left, right))
 }
 
-// spacing is an [lcs.Algorithm] that ignores changes in the amount of
-// whitespace inside a line and leaves the diff to the algorithm it wraps.
-// Unlike diff -b, it compares the indentation exactly, because the
-// indentation carries meaning in YAML. The ops it returns index the
-// original lines, so the diff shows each line as its revision wrote it.
-type spacing struct {
-	inner lcs.Algorithm
-}
+// spacing is a line key for [diff.WithLineKey] that ignores changes in the
+// amount of whitespace inside a line. The key keeps the indentation of the
+// line. In the text after the indentation, each run of whitespace becomes
+// one space, and the whitespace at the end of the line goes away.
+//
+// Unlike diff -b, a diff with this key compares the indentation exactly,
+// because the indentation carries meaning in YAML. The key decides only
+// which lines are equal, so the diff shows each line as its revision wrote
+// it.
+func spacing(l *line.Line) string {
+	text := l.Content()
+	body := strings.TrimLeft(text, " ")
 
-// Diff squeezes the whitespace of each line and diffs the result with the
-// algorithm that spacing wraps.
-func (s spacing) Diff(before, after []string) []lcs.Op {
-	return s.inner.Diff(squeeze(before), squeeze(after))
-}
-
-// squeeze returns lines that keep their indentation. In the text after
-// the indentation, each run of whitespace becomes one space, and the
-// whitespace at the end of the line goes away.
-func squeeze(lines []string) []string {
-	out := make([]string, len(lines))
-	for i, text := range lines {
-		body := strings.TrimLeft(text, " ")
-		out[i] = text[:len(text)-len(body)] + strings.Join(strings.Fields(body), " ")
-	}
-
-	return out
+	return text[:len(text)-len(body)] + strings.Join(strings.Fields(body), " ")
 }
 
 // inKronor rejects a menu item whose price is not in kr.

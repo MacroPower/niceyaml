@@ -1686,13 +1686,22 @@
 //	lipgloss.Println(p.Print(result.Unified()))
 //	lipgloss.Println(p.Print(result.Hunks(3)))
 //
-// Custom algorithms implement
-// [go.jacobcolvin.com/niceyaml/diff/lcs.Algorithm].
 // [go.jacobcolvin.com/niceyaml/diff.New] creates a reusable
-// [go.jacobcolvin.com/niceyaml/diff.Differ]:
+// [go.jacobcolvin.com/niceyaml/diff.Differ] from options.
+// [go.jacobcolvin.com/niceyaml/diff.WithLineKey] sets the key that the diff
+// compares in place of the content of each line. A key that leaves out
+// padding, comments, or quotes makes the diff ignore them. The diff shows
+// each line as its revision wrote it:
 //
-//	d := diff.New(diff.WithAlgorithm(myAlgo))
+//	d := diff.New(diff.WithLineKey(func(l *line.Line) string {
+//		return strings.TrimRight(l.Content(), " \t")
+//	}))
 //	result := d.Diff(before.Lines(), after.Lines())
+//
+// Custom algorithms implement
+// [go.jacobcolvin.com/niceyaml/diff/lcs.Algorithm], and
+// [go.jacobcolvin.com/niceyaml/diff.WithAlgorithm] sets one. The algorithm
+// aligns the lines by their keys.
 //
 // [Source.Lines] is every line of the file. [Node.View] holds the lines that
 // one document or node covers. A diff reads a view as it reads lines, so a

@@ -108,7 +108,7 @@ The catalog example looks up a [theme][niceyaml/style/theme] by name for a `-the
 
 The diffs example prints a diff in full, as hunks, and as plain text for a log. It then lists each run of changes from `Result.Changes` as the lines it deletes and inserts.
 
-The review example diffs one document of a file, so the gutter keeps the line numbers of the file. It carries the validation errors of each revision onto the diff, prints the hunks around the changes and the errors, and prints the two revisions side by side.
+The review example diffs one document of a file, so the gutter keeps the line numbers of the file. It sets a line key, so the diff ignores the padding that a formatter removed. It carries the validation errors of each revision onto the diff, prints the hunks around the changes and the errors, and prints the two revisions side by side.
 
 ### Finder
 

@@ -14,11 +14,13 @@ import (
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
-// Differ computes line differences with a configurable algorithm.
+// Differ computes line differences. Its line key decides which lines are
+// equal, and its algorithm aligns the lines of the two revisions.
+// [WithLineKey] and [WithAlgorithm] configure them.
 //
-// A Differ is safe for concurrent use when its [lcs.Algorithm] is, and the
-// default [lcs.Hirschberg] is. The [*Result] that [Differ.Diff] returns is
-// safe for concurrent use.
+// A Differ is safe for concurrent use when its [lcs.Algorithm] and its line
+// key are. The default [lcs.Hirschberg] and the default key are. The
+// [*Result] that [Differ.Diff] returns is safe for concurrent use.
 //
 // Create instances with [New].
 type Differ struct {
@@ -29,20 +31,29 @@ type Differ struct {
 //
 // Available options:
 //   - [WithAlgorithm]
+//   - [WithLineKey]
 type Option func(*config)
 
 // config holds the settings an [Option] configures. An option takes it in
 // place of the [Differ] that embeds it, so only [New] can apply one.
 type config struct {
 	algo lcs.Algorithm
+	key  func(*line.Line) string
 }
 
-// WithAlgorithm is an [Option] that sets the diff algorithm. A nil
-// algorithm keeps the default, and so does a nil pointer such as a nil
-// [*lcs.Hirschberg]. A caller that builds an algorithm only on some
+// WithAlgorithm is an [Option] that sets the diff algorithm, which aligns
+// the lines of the two revisions. The algorithm receives the key of each
+// line, as [WithLineKey] sets it. The key thus decides which lines are
+// equal, and the algorithm decides which equal lines to pair.
+//
+// A nil algorithm keeps the default, and so does a nil pointer such as a
+// nil [*lcs.Hirschberg]. A caller that builds an algorithm only on some
 // condition can thus pass it to WithAlgorithm as it is. To share a
 // [Differ] between goroutines, you must give it an algorithm that is safe
 // for concurrent use.
+//
+// [Differ.Diff] panics when the ops of the algorithm break the rule that
+// [lcs.Algorithm] states.
 //
 // The default is [lcs.Hirschberg].
 func WithAlgorithm(algo lcs.Algorithm) Option {
@@ -51,9 +62,44 @@ func WithAlgorithm(algo lcs.Algorithm) Option {
 	}
 }
 
+// WithLineKey is an [Option] that sets the key of a line. A diff treats two
+// lines as equal when their keys are equal. A key that leaves a detail out
+// thus makes the diff ignore that detail. This key ignores comments:
+//
+//	diff.WithLineKey(func(l *line.Line) string {
+//		var sb strings.Builder
+//
+//		for _, tk := range l.Tokens() {
+//			if tk.Type != token.CommentType {
+//				sb.WriteString(tk.Origin)
+//			}
+//		}
+//
+//		return strings.TrimRight(sb.String(), " \r\n")
+//	})
+//
+// The key changes only which lines the diff pairs. Every rendering shows
+// each line as its revision wrote it. [Result.Unified] shows two lines with
+// equal keys as one unchanged row, which holds the line of the after
+// revision. [Result.Before] shows the line of the before revision. A key
+// that gives two different lines the same string hides the change between
+// them.
+//
+// [Differ.Diff] calls key for each line of both revisions. A nil key keeps
+// the default. To share a [Differ] between goroutines, you must give it a
+// key that is safe for concurrent use.
+//
+// The default is [line.Line.Content].
+func WithLineKey(key func(*line.Line) string) Option {
+	return func(c *config) {
+		c.key = key
+	}
+}
+
 // New creates a new [*Differ] with the given options.
 //
-// By default it uses [lcs.Hirschberg].
+// By default it compares lines by [line.Line.Content] and aligns them with
+// [lcs.Hirschberg].
 func New(opts ...Option) *Differ {
 	d := &Differ{}
 	for _, opt := range opts {
@@ -62,6 +108,10 @@ func New(opts ...Option) *Differ {
 
 	if nilness.IsNil(d.algo) {
 		d.algo = lcs.NewHirschberg()
+	}
+
+	if d.key == nil {
+		d.key = (*line.Line).Content
 	}
 
 	return d
@@ -82,9 +132,10 @@ func New(opts ...Option) *Differ {
 // sequence that holds a nil pointer, such as a nil [*line.View], the same
 // way.
 //
-// Diff compares lines by [line.Line.Content], which strips the line ending.
-// Two revisions that differ only in LF versus CRLF endings or in a missing
-// final newline thus diff as equal.
+// Diff compares lines by their keys. The default key is
+// [line.Line.Content], which strips the line ending. Two revisions that
+// differ only in LF versus CRLF endings or in a missing final newline thus
+// diff as equal. [WithLineKey] sets another key.
 //
 // The result shares the lines of its inputs and carries the flags of the
 // diff itself. Those lines never change. Each rendering method returns a
@@ -99,19 +150,20 @@ func New(opts ...Option) *Differ {
 // [Result.UnifiedOrigin] and the other methods that map rows give the
 // deleted row and the inserted row different origins.
 //
-// Diff panics when the [lcs.Algorithm] returns an [lcs.Op] with an
-// [lcs.OpKind] other than [lcs.OpEqual], [lcs.OpDelete], or [lcs.OpInsert],
-// or with an index outside the input it refers to.
+// Diff panics when the ops that the [lcs.Algorithm] returns break the rule
+// that [lcs.Algorithm] states. Such ops hold an [lcs.OpKind] other than
+// [lcs.OpEqual], [lcs.OpDelete], or [lcs.OpInsert], or they drop, repeat,
+// or reorder a line of a revision.
 func (d *Differ) Diff(a, b line.Sequence) *Result {
 	r := &Result{inputs: [2]input{collect(a), collect(b)}}
 	r.ops = d.computeOps(r.inputs[Before].lines, r.inputs[After].lines)
 
-	// Each row of the unified view shows the line of its op, and each line
-	// of an input maps to the first row that shows it.
+	// Each row of the unified view shows the line of its op. The ops hold
+	// each line of an input once, so each line maps to one row.
 	lines := make([]*line.Line, len(r.ops))
 
 	for s := range r.inputs {
-		r.inputs[s].unifiedRows = unmappedRows(r.inputs[s].lines.Len())
+		r.inputs[s].unifiedRows = make([]int, r.inputs[s].lines.Len())
 	}
 
 	for row, op := range r.ops {
@@ -119,7 +171,7 @@ func (d *Differ) Diff(a, b line.Sequence) *Result {
 		lines[row] = r.inputs[shown].lines.Line(op.pos[shown])
 
 		for s, p := range op.pos {
-			if p >= 0 && r.inputs[s].unifiedRows[p] < 0 {
+			if p >= 0 {
 				r.inputs[s].unifiedRows[p] = row
 			}
 		}
@@ -160,51 +212,73 @@ func collect(seq line.Sequence) input {
 	return input{lines: line.Collect(ls...), indices: indices}
 }
 
-// computeOps computes line operations with the configured algorithm. Each
-// op holds the position of its line on each side. A [line.Lines] value
-// never changes, so a position keeps naming the same line.
+// computeOps computes line operations with the configured key and
+// algorithm. Each op holds the position of its line on each side. A
+// [line.Lines] value never changes, so a position keeps naming the same
+// line.
+//
+// The ops must hold every line of each side once, in order, as
+// [lcs.Algorithm] states. Ops that drop, repeat, or reorder a line would
+// render a wrong diff without a trace, so computeOps panics on them.
 func (d *Differ) computeOps(before, after line.Lines) []lineOp {
-	// Precompute content strings once to avoid repeated string building.
-	beforeContent := make([]string, before.Len())
-	for i, l := range before.All() {
-		beforeContent[i] = l.Content()
-	}
-
-	afterContent := make([]string, after.Len())
-	for i, l := range after.All() {
-		afterContent[i] = l.Content()
-	}
-
-	// Compute diff using the configured algorithm.
-	diffOps := d.algo.Diff(beforeContent, afterContent)
-
-	// Convert to lineOp values. Reading the line at each position checks
-	// that the position lies inside its side.
+	diffOps := d.algo.Diff(d.keys(before), d.keys(after))
 	ops := make([]lineOp, 0, len(diffOps))
+
+	var (
+		sides = [2]line.Lines{before, after}
+		next  [2]int // The position that the next op must name on each side, by [Side].
+	)
+
+	// Take returns the position that op i names on side s, which must be
+	// the next position of s, and steps past it.
+	take := func(i int, s Side, pos int) int {
+		switch {
+		case next[s] >= sides[s].Len():
+			panic(fmt.Sprintf("diff: op %d names %s line %d, want no more %s lines", i, s, pos, s))
+		case pos != next[s]:
+			panic(fmt.Sprintf("diff: op %d names %s line %d, want %d", i, s, pos, next[s]))
+		}
+
+		next[s]++
+
+		return pos
+	}
 
 	for i, op := range diffOps {
 		switch op.Kind {
 		case lcs.OpEqual:
-			_, _ = before.Line(op.Before), after.Line(op.After)
-			ops = append(ops, lineOp{kind: lcs.OpEqual, pos: [2]int{op.Before, op.After}})
+			b, a := take(i, Before, op.Before), take(i, After, op.After)
+			ops = append(ops, lineOp{kind: lcs.OpEqual, pos: [2]int{b, a}})
 
 		case lcs.OpDelete:
-			_ = before.Line(op.Before)
-			ops = append(ops, lineOp{kind: lcs.OpDelete, pos: [2]int{op.Before, -1}})
+			ops = append(ops, lineOp{kind: lcs.OpDelete, pos: [2]int{take(i, Before, op.Before), -1}})
 
 		case lcs.OpInsert:
-			_ = after.Line(op.After)
-			ops = append(ops, lineOp{kind: lcs.OpInsert, pos: [2]int{-1, op.After}})
+			ops = append(ops, lineOp{kind: lcs.OpInsert, pos: [2]int{-1, take(i, After, op.After)}})
 
 		default:
-			// Dropping the op would lose a line from every rendering
-			// without a trace, so treat it as a broken Algorithm the same
-			// way an out-of-range index already fails.
 			panic(fmt.Sprintf("diff: op %d has unknown lcs.OpKind %d", i, op.Kind))
 		}
 	}
 
+	for s, lines := range sides {
+		if next[s] != lines.Len() {
+			panic(fmt.Sprintf("diff: ops name %d of %d %s lines", next[s], lines.Len(), Side(s)))
+		}
+	}
+
 	return ops
+}
+
+// keys returns the key of each line of lines, by position. The algorithm
+// compares the keys, so each call of [Differ.Diff] computes each key once.
+func (d *Differ) keys(lines line.Lines) []string {
+	keys := make([]string, lines.Len())
+	for i, l := range lines.All() {
+		keys[i] = d.key(l)
+	}
+
+	return keys
 }
 
 // Side names one of the two revisions a [Result] compares.
@@ -296,9 +370,9 @@ type input struct {
 	// The index each line has in the content of the input sequence, by
 	// position. The indices ascend, as a [line.Sequence] yields them.
 	indices []int
-	// The first row of the unified view that shows each line, by
-	// position, or -1. An unchanged line maps to the row of the after
-	// line the view shows in its place.
+	// The row of the unified view that shows each line, by position. An
+	// unchanged line maps to the row of the after line the view shows in
+	// its place.
 	unifiedRows []int
 }
 
@@ -315,8 +389,8 @@ type panes struct {
 	// its own, so a line pointer names one row of one pane.
 	content [2]line.Lines
 	rows    []alignedRow
-	// The first row of each pane that shows each line of its side, by
-	// [Side] and by position, or -1.
+	// The row of each pane that shows each line of its side, by [Side] and
+	// by position.
 	rowOf [2][]int
 }
 
@@ -339,16 +413,6 @@ func (row alignedRow) flag(s Side) line.Flag {
 	default:
 		return line.FlagInserted
 	}
-}
-
-// unmappedRows returns n rows, each -1.
-func unmappedRows(n int) []int {
-	rows := make([]int, n)
-	for i := range rows {
-		rows[i] = -1
-	}
-
-	return rows
 }
 
 // Unified returns a [line.View] of the complete diff.
@@ -628,11 +692,9 @@ func (r *Result) consecutiveParts() []consecutivePart {
 
 // sideNumber returns the [line.Line.Number] of the line at idx in side
 // when delta shows that an op holds a line of that side. It returns 0
-// when the op does not hold a line of side. It also returns 0 for a
-// position past the end of side, which an [lcs.Algorithm] that repeats a
-// line can produce.
+// when the op does not hold a line of side.
 func sideNumber(side line.Lines, idx, delta int) int {
-	if delta == 0 || idx >= side.Len() {
+	if delta == 0 {
 		return 0
 	}
 
@@ -730,11 +792,6 @@ type Change struct {
 // the same side. The span then sits at that next line instead. On a side
 // that does not hold a line before the run, the span sits at the first
 // line of the side, or at 0 when the side is empty.
-//
-// The spans follow the ops of the [lcs.Algorithm]. An algorithm can list a
-// line twice, or list the lines of a side out of order. The run splits at
-// that op the way it splits at a gap, so each span still names consecutive
-// lines that the rows of its Change show.
 //
 // Each call returns a new slice.
 func (r *Result) Changes() []Change {
@@ -912,7 +969,7 @@ func (r *Result) getPanes() *panes {
 		for s := range r.inputs {
 			in := r.inputs[s]
 			lines := make([]*line.Line, len(rows))
-			rowOf := unmappedRows(in.lines.Len())
+			rowOf := make([]int, in.lines.Len())
 
 			for row, ar := range rows {
 				p := ar.pos[s]
@@ -923,10 +980,7 @@ func (r *Result) getPanes() *panes {
 				}
 
 				lines[row] = in.lines.Line(p)
-
-				if rowOf[p] < 0 {
-					rowOf[p] = row
-				}
+				rowOf[p] = row
 			}
 
 			r.panes.content[s] = line.Collect(lines...)
@@ -1056,8 +1110,7 @@ func (r *Result) PaneOrigin(s Side, row int) (Origin, bool) {
 // names, and true. The unified view shows each unchanged line once, as the
 // line of [After]. A line of [Before] that the diff left unchanged maps to
 // the row of that after line. UnifiedRow reports false when o does not
-// name a line of an input. A line that the [lcs.Algorithm] lists more than
-// once maps to the first row that shows it.
+// name a line of an input.
 //
 // [Result.Hunks] keeps the rows of the unified view and holds a row when a
 // hunk covers it, as [line.View.Contains] reports.
@@ -1069,7 +1122,7 @@ func (r *Result) UnifiedRow(o Origin) (int, bool) {
 	in := r.inputs[o.Side]
 
 	p, ok := in.position(o.Index)
-	if !ok || in.unifiedRows[p] < 0 {
+	if !ok {
 		return 0, false
 	}
 
@@ -1080,9 +1133,7 @@ func (r *Result) UnifiedRow(o Origin) (int, bool) {
 // names, and true. [Result.Before] shows every line of [Before], and
 // [Result.After] shows every line of [After]. The panes align, so the same
 // row of the other pane shows the paired line or an empty placeholder.
-// PaneRow reports false when o does not name a line of an input. A line
-// that the [lcs.Algorithm] lists more than once maps to the first row that
-// shows it.
+// PaneRow reports false when o does not name a line of an input.
 func (r *Result) PaneRow(o Origin) (int, bool) {
 	if o.Side > After {
 		return 0, false
@@ -1095,12 +1146,7 @@ func (r *Result) PaneRow(o Origin) (int, bool) {
 		return 0, false
 	}
 
-	row := r.getPanes().rowOf[o.Side][p]
-	if row < 0 {
-		return 0, false
-	}
-
-	return row, true
+	return r.getPanes().rowOf[o.Side][p], true
 }
 
 // Carry copies the overlays and annotations of the input views onto dst,
@@ -1191,7 +1237,7 @@ func (r *Result) Carry(dst, before, after *line.View) {
 var defaultDiffer = New()
 
 // Diff computes the difference between two revisions using the default
-// algorithm. See [Differ.Diff].
+// line key and algorithm. See [Differ.Diff].
 //
 // Every call goes through one shared [Differ], which is safe for concurrent
 // use, so repeated calls reuse its pooled working buffers.
@@ -1311,8 +1357,7 @@ func writeHunkRange(b *strings.Builder, sign byte, start, count int) {
 // part holds that line.
 //
 // A line that does not have a number, such as the zero value, gives its
-// 1-indexed position in side instead. So does a position past the end of
-// side, which an [lcs.Algorithm] that repeats a line can produce.
+// 1-indexed position in side instead.
 func hunkStart(side line.Lines, part position.Span, idx, count int) int {
 	var (
 		pos    int // The position in side of the line that names the start.
@@ -1332,10 +1377,8 @@ func hunkStart(side line.Lines, part position.Span, idx, count int) int {
 		return 1
 	}
 
-	if pos < side.Len() {
-		if n := side.Line(pos).Number(); n > 0 {
-			return n + offset
-		}
+	if n := side.Line(pos).Number(); n > 0 {
+		return n + offset
 	}
 
 	return idx + 1

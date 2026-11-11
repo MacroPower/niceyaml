@@ -8,8 +8,14 @@ import "strconv"
 type Algorithm interface {
 	// Diff returns operations that transform before into after. Operations
 	// reference indices in the original slices, and the returned slice is the
-	// caller's to keep. Between two [OpEqual] operations, the deletions and
-	// insertions might come in any order.
+	// caller's to keep.
+	//
+	// The operations must hold every element of each slice once, in order.
+	// The Before indices of the [OpEqual] and [OpDelete] operations count
+	// from 0 to len(before)-1. The After indices of the [OpEqual] and
+	// [OpInsert] operations count from 0 to len(after)-1. Between two
+	// [OpEqual] operations, the deletions and insertions might come in any
+	// order. The diff package panics when the operations break this rule.
 	Diff(before, after []string) []Op
 }
 

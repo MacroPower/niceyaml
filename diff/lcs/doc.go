@@ -41,7 +41,12 @@
 // in each input slice, or -1 for the input it does not touch.
 //
 // The package does not depend on the rest of niceyaml, so you can develop
-// and test an [Algorithm] on plain string slices. The diff package maps
-// each [OpKind] to a line flag when it builds rendering views from the
-// operations.
+// and test an [Algorithm] on plain string slices. The diff package passes
+// an Algorithm the key of each line, which is the content of the line
+// unless the caller sets another key. It maps each [OpKind] to a line flag
+// when it builds rendering views from the operations.
+//
+// The operations must hold every element of each input once, in order, as
+// [Algorithm] states. The diff package panics on operations that drop,
+// repeat, or reorder an element.
 package lcs

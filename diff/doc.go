@@ -3,7 +3,7 @@
 //
 // A [Differ] compares two revisions, such as the lines of two niceyaml
 // Source values, with an [lcs.Algorithm]. The default is [lcs.Hirschberg].
-// Create one with [New], or call [Diff] for the default algorithm:
+// Create one with [New], or call [Diff] for the default Differ:
 //
 //	result := diff.Diff(before.Lines(), after.Lines())
 //	p := printer.New()
@@ -89,12 +89,28 @@
 // A diff compares lines by their content without line endings, so a change
 // from LF to CRLF endings or a missing final newline is not a difference.
 //
+// [WithLineKey] changes which lines are equal. The diff compares the key
+// of each line in place of its content. A key that leaves out padding,
+// comments, or quotes thus makes the diff ignore them. This Differ ignores
+// the whitespace at the end of each line:
+//
+//	differ := diff.New(diff.WithLineKey(func(l *line.Line) string {
+//		return strings.TrimRight(l.Content(), " \t")
+//	}))
+//	result := differ.Diff(before.Lines(), after.Lines())
+//
+// The key decides only which lines the diff pairs, and every rendering
+// shows each line as its revision wrote it. An unchanged row of the unified
+// view shows the line of the after revision. [WithAlgorithm] sets the
+// algorithm that aligns the lines, and the algorithm receives the keys.
+//
 // Diff output is a [line.View] rather than a YAML document, because the
 // interleaved lines of two revisions do not parse as one. Each line carries a
 // [line.Flag] that marks it as inserted, deleted, or unchanged. Each hunk
 // header is a [line.Annotation] that [Result.Hunks] places [line.Above] the
 // first line of its hunk.
 //
-// A Differ is safe for concurrent use when its [lcs.Algorithm] is, as
-// [lcs.Hirschberg] is. A Result is safe for concurrent use.
+// A Differ is safe for concurrent use when its [lcs.Algorithm] and its line
+// key are, as [lcs.Hirschberg] and the default key are. A Result is safe
+// for concurrent use.
 package diff
