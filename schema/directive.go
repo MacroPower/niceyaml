@@ -6,12 +6,10 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"weak"
 
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 	"go.jacobcolvin.com/niceyaml/internal/preamble"
 	"go.jacobcolvin.com/niceyaml/position"
 )
@@ -132,29 +130,6 @@ func ParseDocumentDirective(tks token.Tokens) *ParsedDirective {
 // directiveResolver resolves schemas from yaml-language-server directives.
 type directiveResolver struct{}
 
-// A directiveSite is where the directive that named a [Ref] stands. It
-// holds the root of the document with the directive and the position of
-// the comment there. The Ref holds the root through a weak pointer, so a
-// Ref that a program or a cache keeps does not keep the document alive.
-type directiveSite struct {
-	doc weak.Pointer[niceyaml.Node]
-	pos position.Position
-}
-
-// locate returns err located at the directive when the directive stands
-// in doc. A program might keep a Ref from an earlier lookup and check
-// another document with it. The directive does not stand in that
-// document, so locate returns err as it is. It does the same for a nil
-// site. The lookup that calls locate puts the result inside
-// [niceyaml.Unchecked].
-func (s *directiveSite) locate(doc *niceyaml.Node, err error) error {
-	if s == nil || s.doc != weak.Make(doc.Document()) {
-		return err
-	}
-
-	return niceyaml.Locate(err, niceyaml.AtPosition(s.pos))
-}
-
 // Directive creates a new [Resolver] for yaml-language-server schema
 // directives.
 //
@@ -174,9 +149,9 @@ func (s *directiveSite) locate(doc *niceyaml.Node, err error) error {
 // name a schema, such as [ErrNoFilePath]. It also binds there the error
 // of a schema that the directive names and that does not load or
 // compile, as [Registry.Lookup] describes. The [Ref] that Resolve
-// returns keeps that position for its own document only. A lookup of
-// another document with that Ref binds the error of the schema without a
-// position.
+// returns keeps that position for its own document only, as
+// [Ref.NamedAt] describes. A lookup of another document with that Ref
+// binds the error of the schema without a position.
 //
 // The schema lives where the document does. A document that
 // [niceyaml.NewSourceFromFile] opened names a file on disk. A document
@@ -194,7 +169,8 @@ func (s *directiveSite) locate(doc *niceyaml.Node, err error) error {
 // A fragment selects a subschema on a path as it does on a URL, and as it
 // does in yaml-language-server. The directive
 // "$schema=./schema.json#/definitions/Foo" names the Foo definition in
-// schema.json. A '#' that opens the reference is part of the file name.
+// schema.json. A '#' that opens the reference is part of the file name,
+// as RefBeside describes.
 //
 // A directive of "$schema=none", in any letter case, turns validation off
 // for the document, as it does in yaml-language-server. Resolve names a
@@ -279,22 +255,11 @@ func (directiveResolver) Resolve(_ context.Context, doc *niceyaml.Node) (Ref, er
 		return acceptAllSchema.Ref(), nil
 	}
 
-	// Like yaml-language-server, read a '#' after the first character of a
-	// path as the start of a fragment that names a subschema, rather than
-	// as part of the file name. [FileOrURL] splits the fragment off a URL
-	// itself.
-	path, fragment := directive.Schema, ""
-	if !httpfetch.IsHTTPURL(path) && !isFileURL(path) {
-		if i := strings.Index(path, "#"); i > 0 {
-			path, fragment = path[:i], path[i+1:]
-		}
-	}
-
 	// The directive names the schema in the text of the document, so its
 	// comment locates each error of the reference and of the schema.
 	at := niceyaml.AtPosition(directive.Position)
 
-	ref, err := refBeside(doc, path)
+	ref, err := refBeside(doc, directive.Schema)
 	if errors.Is(err, ErrNoBaseDir) && doc.FilePath() == "" {
 		return Ref{}, niceyaml.Unchecked(fmt.Errorf("%w: %w", ErrNoFilePath, err), at)
 	}
@@ -304,11 +269,5 @@ func (directiveResolver) Resolve(_ context.Context, doc *niceyaml.Node) (Ref, er
 		return Ref{}, niceyaml.Unchecked(err, at)
 	}
 
-	if fragment != "" {
-		ref.key += "#" + fragment
-	}
-
-	ref.at = &directiveSite{doc: weak.Make(doc.Document()), pos: directive.Position}
-
-	return ref, nil
+	return ref.NamedAt(doc, at), nil
 }

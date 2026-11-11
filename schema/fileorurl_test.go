@@ -568,6 +568,56 @@ func TestRefBeside(t *testing.T) {
 		assert.JSONEq(t, schemaData, string(data))
 	})
 
+	t.Run("a fragment on a plain path selects a subschema", func(t *testing.T) {
+		t.Parallel()
+
+		const defs = `{"definitions": {"Foo": {"type": "object", "required": ["foo"]}}}`
+
+		yamltest.WriteFile(t, dir, "defs.json", defs)
+
+		defsBundle := yamltest.MapFS(map[string]string{"configs/defs.json": defs})
+		bundled := yamltest.FirstDocument(t, "kind: App\n",
+			niceyaml.WithFilePath("configs/app.yaml"), niceyaml.WithFS(defsBundle))
+
+		tcs := map[string]struct {
+			doc  *niceyaml.Node
+			want string
+		}{
+			"in a file system": {
+				doc:  bundled,
+				want: "file:///configs/defs.json#/definitions/Foo",
+			},
+			"on disk": {
+				doc:  onDisk,
+				want: fileURL(t, filepath.Join(dir, "defs.json")) + "#/definitions/Foo",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				ref, err := schema.RefBeside(tc.doc, "./defs.json#/definitions/Foo")
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, ref.Key())
+
+				byField := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(ref))
+
+				err = byField.Check(t.Context(), tc.doc)
+				require.ErrorContains(t, err, `missing required property "foo"`)
+			})
+		}
+	})
+
+	t.Run("a '#' that opens a plain path is part of the file name", func(t *testing.T) {
+		t.Parallel()
+
+		ref, err := schema.RefBeside(onDisk, "#schema.json")
+		require.NoError(t, err)
+		assert.Equal(t, schema.File(filepath.Join(dir, "#schema.json")).Key(), ref.Key())
+		assert.NotContains(t, ref.Key(), "#")
+	})
+
 	t.Run("an empty reference names no schema", func(t *testing.T) {
 		t.Parallel()
 

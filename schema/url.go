@@ -15,11 +15,12 @@ import (
 //
 // URL is for a URL written in the program, so it panics on an empty
 // schemaURL, as [Loadable] panics on an empty key. A reference read from
-// a directive or a command line might be empty or a file path. Such a
-// reference goes through [FileOrURL], which returns an error instead. URL
-// returns a [Ref], the type that a [Resolver] returns. A resolver that
-// builds the URL from the document thus returns the Ref beside a nil
-// error.
+// a command line might be empty or a file path. Such a reference goes
+// through [FileOrURL], which returns an error instead. A reference that a
+// document holds, such as the one in a directive, goes through
+// [RefBeside]. URL returns a [Ref], the type that a [Resolver] returns. A
+// resolver that builds the URL from the document thus returns the Ref
+// beside a nil error.
 //
 // A registry fetches only HTTP and HTTPS URLs. For a URL with any other
 // scheme, such as a file:// URL, [Registry.Schema] and [Registry.Load]

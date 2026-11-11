@@ -5,6 +5,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,6 +15,8 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
@@ -233,6 +238,294 @@ func TestRef_LogValue(t *testing.T) {
 			assert.JSONEq(t, tc.wantJSON, js.String())
 		})
 	}
+}
+
+func TestRef_WithFragment(t *testing.T) {
+	t.Parallel()
+
+	const defs = `{
+		"definitions": {
+			"Foo": {"type": "object", "required": ["foo"]},
+			"Bar": {"type": "object", "required": ["bar"]}
+		}
+	}`
+
+	bundle := yamltest.MapFS(map[string]string{"schemas/defs.json": defs})
+
+	dir := t.TempDir()
+	onDisk := yamltest.WriteFile(t, dir, "defs.json", defs)
+
+	t.Run("keys", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			ref      schema.Ref
+			fragment string
+			want     string
+			wantName string
+		}{
+			"file on disk": {
+				ref:      schema.File(onDisk),
+				fragment: "/definitions/Foo",
+				want:     schema.File(onDisk).Key() + "#/definitions/Foo",
+			},
+			"file in a file system": {
+				ref:      schema.FileFS(bundle, "schemas/defs.json"),
+				fragment: "/definitions/Foo",
+				want:     "file:///schemas/defs.json#/definitions/Foo",
+				wantName: "schemas/defs.json#/definitions/Foo",
+			},
+			"URL": {
+				ref:      schema.URL("https://example.com/defs.json"),
+				fragment: "/$defs/a",
+				want:     "https://example.com/defs.json#/$defs/a",
+			},
+			"URL with a fragment": {
+				ref:      schema.URL("https://example.com/defs.json#/$defs/a"),
+				fragment: "/$defs/b",
+				want:     "https://example.com/defs.json#/$defs/b",
+			},
+			"file URL with a fragment": {
+				ref:      fileOrURL(t, "", plainFileURL(onDisk)+"#/definitions/Foo"),
+				fragment: "/definitions/Bar",
+				want:     schema.File(onDisk).Key() + "#/definitions/Bar",
+			},
+			"empty fragment names the whole document": {
+				ref:  schema.URL("https://example.com/defs.json#/$defs/a"),
+				want: "https://example.com/defs.json",
+			},
+			"empty fragment on a file in a file system": {
+				ref:      schema.FileFS(bundle, "schemas/defs.json").WithFragment("/definitions/Foo"),
+				want:     "file:///schemas/defs.json",
+				wantName: "schemas/defs.json",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				got := tc.ref.WithFragment(tc.fragment)
+				assert.Equal(t, tc.want, got.Key())
+
+				if tc.wantName != "" {
+					assert.Equal(t, tc.wantName, got.Name())
+				}
+			})
+		}
+	})
+
+	t.Run("a bundle serves each definition", func(t *testing.T) {
+		t.Parallel()
+
+		kindPath := paths.Doc().Child("kind")
+		byKind := schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Node) (schema.Ref, error) {
+			var kind string
+
+			_, err := doc.DecodeIfPresent(ctx, kindPath, &kind)
+			if err != nil {
+				return schema.Ref{}, fmt.Errorf("read kind: %w", err)
+			}
+
+			return schema.FileFS(bundle, "schemas/defs.json").WithFragment("/definitions/" + kind), nil
+		})
+
+		reg := schema.NewRegistry(schema.WithResolvers(byKind))
+
+		require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "kind: Foo\nfoo: 1\n")))
+		require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "kind: Bar\nbar: 1\n")))
+
+		err := reg.Check(t.Context(), yamltest.FirstDocument(t, "kind: Foo\nbar: 1\n"))
+		require.ErrorContains(t, err, `missing required property "foo"`)
+	})
+
+	t.Run("a file on disk serves a definition", func(t *testing.T) {
+		t.Parallel()
+
+		reg := schema.NewRegistry(schema.WithResolvers(schema.File(onDisk).WithFragment("/definitions/Bar")))
+
+		require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "bar: 1\n")))
+
+		err := reg.Check(t.Context(), yamltest.FirstDocument(t, "foo: 1\n"))
+		require.ErrorContains(t, err, `missing required property "bar"`)
+	})
+
+	t.Run("an escaped name selects its definition", func(t *testing.T) {
+		t.Parallel()
+
+		const odd = `{
+			"definitions": {
+				"a/b": {"type": "object", "required": ["slash"]},
+				"a~b": {"type": "object", "required": ["tilde"]},
+				"50%": {"type": "object", "required": ["percent"]},
+				"a b": {"type": "object", "required": ["space"]}
+			}
+		}`
+
+		oddFS := yamltest.MapFS(map[string]string{"odd.json": odd})
+		escape := strings.NewReplacer("~", "~0", "/", "~1")
+
+		tcs := map[string]struct {
+			name string
+			want string
+		}{
+			"slash":   {name: "a/b", want: "slash"},
+			"tilde":   {name: "a~b", want: "tilde"},
+			"percent": {name: "50%", want: "percent"},
+			"space":   {name: "a b", want: "space"},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				fragment := "/definitions/" + url.PathEscape(escape.Replace(tc.name))
+				reg := schema.NewRegistry(schema.WithResolvers(schema.FileFS(oddFS, "odd.json").WithFragment(fragment)))
+
+				require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, tc.want+": 1\n")))
+
+				err := reg.Check(t.Context(), yamltest.FirstDocument(t, "other: 1\n"))
+				require.ErrorContains(t, err, `missing required property "`+tc.want+`"`)
+			})
+		}
+	})
+
+	t.Run("a Ref that a document names keeps the mark", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocumentWithPath(t, "a: 1\n", filepath.Join(dir, "app.yaml"))
+
+		ref, err := schema.RefBeside(doc, "./defs.json")
+		require.NoError(t, err)
+
+		_, err = schema.NewRegistry().Schema(t.Context(), ref.WithFragment("/definitions/Foo"))
+		require.ErrorIs(t, err, schema.ErrAccessNotSet)
+	})
+
+	t.Run("a Ref without a location panics", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			ref schema.Ref
+		}{
+			"zero Ref":   {ref: schema.Ref{}},
+			"loadable":   {ref: loading("config.json", nil, nil)},
+			"embedded":   {ref: schema.Embedded([]byte(defs))},
+			"schema Ref": {ref: schema.MustCompile([]byte(defs)).Ref()},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				assert.PanicsWithValue(t, "schema.Ref.WithFragment: the Ref does not name a file or a URL", func() {
+					tc.ref.WithFragment("/definitions/Foo")
+				})
+			})
+		}
+	})
+}
+
+func TestRef_NamedAt(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	app := filepath.Join(dir, "app.yaml")
+	schemaPath := paths.Doc().Child("$schema")
+
+	// A resolver that reads the reference from a field and marks the Ref
+	// there.
+	field := schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Node) (schema.Ref, error) {
+		var s string
+
+		found, err := doc.DecodeIfPresent(ctx, schemaPath, &s)
+		if err != nil {
+			return schema.Ref{}, fmt.Errorf("read $schema: %w", err)
+		}
+
+		if !found {
+			return schema.Ref{}, schema.ErrNoMatch
+		}
+
+		at := niceyaml.AtPath(schemaPath)
+
+		ref, err := schema.RefBeside(doc, s)
+		if err != nil {
+			return schema.Ref{}, niceyaml.Locate(err, at)
+		}
+
+		return ref.NamedAt(doc, at), nil
+	})
+
+	reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(field))
+
+	t.Run("binds the error of the schema at the field", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("a: 1\n$schema: ./missing.json\n",
+			niceyaml.WithName("app.yaml"), niceyaml.WithFilePath(app))
+
+		_, err := reg.Lookup(t.Context(), source.Documents()[0])
+		require.ErrorIs(t, err, schema.ErrLoad)
+		assert.True(t, strings.HasPrefix(err.Error(), "app.yaml:2:10: "), "got %q", err.Error())
+		assert.False(t, niceyaml.IsInvalid(err))
+
+		at, ok := yamltest.RequireSourceError(t, err).Position()
+		require.True(t, ok)
+		assert.Equal(t, position.New(1, 9), at)
+	})
+
+	t.Run("binds the error of the reference at the field", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("a: 1\n$schema: ./s.json\n", niceyaml.WithName("app.yaml"))
+
+		_, err := reg.Lookup(t.Context(), source.Documents()[0])
+		require.ErrorIs(t, err, schema.ErrNoBaseDir)
+		assert.True(t, strings.HasPrefix(err.Error(), "app.yaml:2:10: "), "got %q", err.Error())
+	})
+
+	t.Run("another document binds without a position", func(t *testing.T) {
+		t.Parallel()
+
+		base := niceyaml.NewSourceFromString("a: 1\n$schema: ./missing.json\n",
+			niceyaml.WithName("base.yaml"), niceyaml.WithFilePath(app))
+
+		ref, err := field.Resolve(t.Context(), base.Documents()[0])
+		require.NoError(t, err)
+
+		reused := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(ref))
+
+		other := niceyaml.NewSourceFromString("a: 1\n$schema: ./missing.json\n", niceyaml.WithName("other.yaml"))
+
+		_, err = reused.Lookup(t.Context(), other.Documents()[0])
+		require.ErrorIs(t, err, schema.ErrLoad)
+		assert.True(t, strings.HasPrefix(err.Error(), "other.yaml: load schema: "), "got %q", err.Error())
+	})
+
+	t.Run("replaces an earlier place", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("a: 1\nb: 2\n",
+			niceyaml.WithName("app.yaml"), niceyaml.WithFilePath(app))
+		doc := source.Documents()[0]
+
+		ref := schema.File(filepath.Join(dir, "missing.json")).
+			NamedAt(doc, niceyaml.AtPath(paths.Doc().Child("a"))).
+			NamedAt(doc, niceyaml.AtPath(paths.Doc().Child("b")))
+
+		_, err := schema.NewRegistry(schema.WithResolvers(ref)).Lookup(t.Context(), doc)
+		require.ErrorIs(t, err, schema.ErrLoad)
+		assert.True(t, strings.HasPrefix(err.Error(), "app.yaml:2:4: "), "got %q", err.Error())
+	})
+
+	t.Run("nil document panics", func(t *testing.T) {
+		t.Parallel()
+
+		assert.PanicsWithValue(t, "schema.Ref.NamedAt: doc is nil", func() {
+			schema.URL("https://example.com/s.json").NamedAt(nil)
+		})
+	})
 }
 
 func TestResolverFunc(t *testing.T) {
