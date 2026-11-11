@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -1297,6 +1298,34 @@ func TestRegistry_Load_Inputs(t *testing.T) {
 			assert.Equal(t, tc.want, listObjects(set))
 		})
 	}
+}
+
+// TestRegistry_Load_DotDotAfterSymlink loads the directory that
+// "link/.." names, with link leading to real/sub. The OS reads real, so
+// the heading of the load names real.
+func TestRegistry_Load_DotDotAfterSymlink(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows drops a .. element as text before it follows a symlink")
+	}
+
+	dir := t.TempDir()
+
+	tree{
+		files: map[string]string{"real/hours.yaml": hoursDoc},
+		dirs:  []string{"real/sub"},
+		links: map[string]string{"link": "real/sub"},
+	}.write(t, dir)
+
+	physical, err := filepath.EvalSymlinks(dir)
+	require.NoError(t, err)
+
+	// The test builds the path as text, because filepath.Join cleans it.
+	_, err = newCafeRegistry(t).Load(t.Context(), input.Path(dir+"/link/.."))
+	require.Error(t, err)
+	assert.True(t, strings.HasPrefix(niceyaml.FormatError(err), filepath.Join(physical, "real")+": "),
+		niceyaml.FormatError(err))
 }
 
 // TestRegistry_Load_LinkProblems loads a directory whose only file that

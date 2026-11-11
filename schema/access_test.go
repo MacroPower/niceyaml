@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -1193,4 +1194,39 @@ func TestAllowRoot_WorkingDirectoryThroughLink(t *testing.T) {
 
 	err = source.ValidateDocuments(t.Context(), reg)
 	require.ErrorContains(t, err, `expected "string", got "integer"`)
+}
+
+// A root opened as "../schemas" in a working directory that the shell
+// names through a link reads the directory that the OS opened, and
+// FileOrURL names the schema there by the same path. The test changes
+// the process's working directory, so it does not run in parallel.
+//
+//nolint:paralleltest // See above.
+func TestAllowRoot_DotDotOutOfSymlinkedWorkDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows drops a .. element as text before it follows a symlink")
+	}
+
+	dir := t.TempDir()
+	yamltest.WriteFiles(t, dir, map[string]string{
+		"real/sub/.keep":      "",
+		"real/schemas/s.json": `{"type": "object"}`,
+	})
+
+	cwd := filepath.Join(dir, "cwdlink")
+	yamltest.SymlinkOrSkip(t, filepath.Join("real", "sub"), cwd)
+
+	t.Chdir(cwd)
+
+	access, err := schema.NewAccess(allowRoot(t, "../schemas"))
+	require.NoError(t, err)
+
+	ref, err := schema.FileOrURL(cwd, "../schemas/s.json")
+	require.NoError(t, err)
+
+	reg := schema.NewRegistry(schema.WithAccess(access))
+
+	data, err := reg.Load(t.Context(), ref)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"type": "object"}`, string(data))
 }

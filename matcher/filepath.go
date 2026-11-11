@@ -56,8 +56,10 @@ type filePathConfig struct {
 //	m, err := matcher.FilePath("configs/*.yaml", matcher.WithBaseDir(projectRoot))
 //
 // A relative dir resolves against the working directory when [FilePath]
-// runs. When a caller passes WithBaseDir more than once, the last one
-// wins.
+// runs. A ".." in dir steps up from the directory that a symbolic link
+// before it leads to, as [niceyaml.NewSourceFromFile] describes for the
+// file path that it sets. When a caller passes WithBaseDir more than
+// once, the last one wins.
 //
 // WithBaseDir panics if dir is empty.
 func WithBaseDir(dir string) FilePathOption {
@@ -113,9 +115,19 @@ type filePathMatcher struct {
 // [niceyaml.NewSourceFromFile] sets an absolute file path. Match tests a
 // relative pattern against the path that leads to that file from the
 // base directory, and never against the absolute path as written. Under
-// the base "/repo", "configs/*.yaml" matches "/repo/configs/app.yaml"
-// however the caller spelled the file. There "**/k8s/*.yaml" matches
+// the base "/repo", "configs/*.yaml" matches "/repo/configs/app.yaml",
+// whether the caller spelled the file "configs/app.yaml" or
+// "configs/sub/../app.yaml". There "**/k8s/*.yaml" matches
 // "/repo/deploy/k8s/app.yaml" and does not match "/other/k8s/app.yaml".
+//
+// When a ".." in the path of the file follows a symbolic link,
+// NewSourceFromFile sets a file path with the links of its prefix
+// resolved, as it describes. A relative pattern matches that path only
+// when the base directory spells the same prefix. So when the base
+// reaches its directory through a link, such a file path leaves the
+// base, even for a file under it. To match such a file, pass
+// [WithBaseDir] a base with its links resolved, or set the file path
+// with [niceyaml.WithFilePath].
 //
 // Wildcards match names and never match a "..", and "**" is one of them.
 // So a relative pattern reaches a file outside the base only through the
@@ -178,7 +190,7 @@ func FilePath(pattern string, opts ...FilePathOption) (Matcher, error) {
 
 	m := &filePathMatcher{pattern: p, raw: pattern}
 
-	m.baseDir, m.baseErr = filepath.Abs(cfg.baseDir)
+	m.baseDir, m.baseErr = filepaths.Abs(cfg.baseDir)
 
 	return m, nil
 }

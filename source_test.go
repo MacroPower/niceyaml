@@ -5003,6 +5003,77 @@ func TestNewSourceFromFile(t *testing.T) {
 	})
 }
 
+func TestNewSourceFromFile_DotDotAfterSymlink(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows drops a .. element as text before it follows a symlink")
+	}
+
+	// With link leading to real/sub, the OS reads link/../doc.yaml as
+	// real/doc.yaml, whose directive names real/schema.json. The
+	// schema.json beside link, which cleaning the path as text names,
+	// accepts any document.
+	dir := t.TempDir()
+	yamltest.WriteFiles(t, dir, map[string]string{
+		"real/doc.yaml":       yamltest.SchemaDirective("./schema.json", "name: 1\n"),
+		"real/schema.json":    `{"properties": {"name": {"type": "string"}}}`,
+		"real/sub/inner.yaml": yamltest.SchemaDirective("./inner.json", "name: a\n"),
+		"real/sub/inner.json": `{"properties": {"name": {"type": "string"}}}`,
+		"schema.json":         `{}`,
+	})
+	yamltest.SymlinkOrSkip(t, filepath.Join("real", "sub"), filepath.Join(dir, "link"))
+
+	physical, err := filepath.EvalSymlinks(dir)
+	require.NoError(t, err)
+
+	tcs := map[string]struct {
+		path         string
+		wantFilePath string
+		invalid      bool
+	}{
+		// The test builds each path as text, because filepath.Join
+		// cleans it.
+		"dot-dot after a symlink": {
+			path:         dir + "/link/../doc.yaml",
+			wantFilePath: filepath.Join(physical, "real", "doc.yaml"),
+			invalid:      true,
+		},
+		"symlinked name without a dot-dot": {
+			path:         dir + "/link/inner.yaml",
+			wantFilePath: filepath.Join(dir, "link", "inner.yaml"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source, err := niceyaml.NewSourceFromFile(tc.path)
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.path, source.Name())
+			assert.Equal(t, tc.wantFilePath, source.FilePath())
+
+			reg := schema.NewRegistry(
+				schema.WithAccess(schema.Unrestricted),
+				schema.WithResolvers(schema.Directive()),
+			)
+
+			err = source.ValidateDocuments(t.Context(), reg)
+			if !tc.invalid {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.Error(t, err)
+			assert.True(t, niceyaml.IsInvalid(err), err.Error())
+			assert.Contains(t, err.Error(), tc.path+`:2:7: $.name: expected "string", got "integer"`)
+		})
+	}
+}
+
 func TestSource_FS(t *testing.T) {
 	t.Parallel()
 

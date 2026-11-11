@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"math"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -25,6 +24,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/decodetree"
 	"go.jacobcolvin.com/niceyaml/internal/decodewalk"
 	"go.jacobcolvin.com/niceyaml/internal/docparse"
+	"go.jacobcolvin.com/niceyaml/internal/filepaths"
 	"go.jacobcolvin.com/niceyaml/internal/limitread"
 	"go.jacobcolvin.com/niceyaml/internal/multierr"
 	"go.jacobcolvin.com/niceyaml/internal/pathindex"
@@ -785,16 +785,22 @@ func WithExcerpts(enabled bool) SourceOption {
 //
 // It names the [Source] by path as given, so [Source.Name] and every
 // message spell the file as the caller did. It sets the file path of the
-// Source to the absolute form of path that [filepath.Abs] builds from the
-// working directory at the time of the read. Schema routing reads that
-// file path, and a schema directive resolves beside it on disk. A later
-// change of working directory thus moves neither the name nor the file
-// path. [WithName] and [WithFilePath] replace them.
+// Source to an absolute form of path, built from the working directory
+// at the time of the read. Schema routing reads that file path, and a
+// schema directive resolves beside it on disk. A later change of working
+// directory thus moves neither the name nor the file path. [WithName]
+// and [WithFilePath] replace them.
 //
-// Abs removes a ".." element together with the element before it, as
-// text. When the element before a ".." element is a symbolic link, the
-// file path then names a directory that the read did not open. In that
-// case, pass WithFilePath with the path that the program resolved itself.
+// The file path names the file that the read opened. A ".." element
+// that follows a symbolic link steps up from the directory that the link
+// leads to, as the OS steps. The file path then holds the target of the
+// link, all of its links resolved, in place of the path up to that link.
+// So "link/../config.yaml" takes the path of the config.yaml beside the
+// target of link. A path whose ".." elements follow no link keeps every
+// element as written, so a symlinked name or working directory stays in
+// the file path. On Windows, which drops each ".." element as text, the
+// file path is the form that [path/filepath.Abs] builds. A program that
+// wants that form everywhere passes it to WithFilePath.
 //
 // NewSourceFromFile returns a nil Source and an error when it cannot read
 // the file. A file past the byte limit gives an error that names the
@@ -802,7 +808,7 @@ func WithExcerpts(enabled bool) SourceOption {
 func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
 	// Abs fails only when the working directory has no name, and the path
 	// as given is then the closest one left.
-	filePath, err := filepath.Abs(path)
+	filePath, err := filepaths.Abs(path)
 	if err != nil {
 		filePath = path
 	}

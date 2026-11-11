@@ -7,8 +7,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"path/filepath"
-	"runtime"
 
 	"github.com/spf13/cobra"
 
@@ -289,24 +287,20 @@ func fileResult(diag io.Writer, name string, err error, warnings *niceyaml.Warni
 // whether the file passes or fails, and returns only its errors. A
 // deprecation that the schema of the file marks is one such warning.
 //
-// The file path of the source is the [physicalAbs] form of yamlPath.
-// SchemaStore patterns that name parent directories, such as
-// "**/.github/workflows/*.yml", then match whatever the working directory
-// is. Schema directives resolve against the directory of the file the read
-// opens. When the read fails, the error from [readSource] already names
-// the file, so validateFile does not add a name of its own.
+// The source takes its file path from [niceyaml.NewSourceFromFile], the
+// absolute path of the file that the read opened. SchemaStore patterns
+// that name parent directories, such as "**/.github/workflows/*.yml",
+// then match whatever the working directory is. Schema directives
+// resolve against the directory of that file. When the read fails, the
+// error from [readSource] already names the file, so validateFile does
+// not add a name of its own.
 func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry, extra ...niceyaml.SourceOption) error {
-	absPath := physicalAbs(yamlPath)
-
-	// Resolvers route on the absolute path, and WithName keeps messages
-	// naming the file as the user typed it. The read uses the typed path,
-	// so a read error names the file that way too. The library draws the
-	// name as escape.Line draws it, and so does every line this command
-	// writes. Every line of a run thus spells the file one way.
-	opts := append([]niceyaml.SourceOption{
-		niceyaml.WithName(yamlPath),
-		niceyaml.WithFilePath(absPath),
-	}, extra...)
+	// WithName keeps messages naming the file as the user typed it. The
+	// read uses the typed path, so a read error names the file that way
+	// too. The library draws the name as escape.Line draws it, and so does
+	// every line this command writes. Every line of a run thus spells the
+	// file one way.
+	opts := append([]niceyaml.SourceOption{niceyaml.WithName(yamlPath)}, extra...)
 
 	source, err := readSource(yamlPath, opts...)
 	if err != nil {
@@ -317,10 +311,8 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry, ex
 }
 
 // readSource reads the file at path into a [*niceyaml.Source] with opts, as
-// [niceyaml.NewSourceFromFile] does. Unlike NewSourceFromFile, it keeps
-// path as given for the file path of the source, unless opts sets another.
-// A read error names path as [escape.Line] draws it, as the library names
-// a source.
+// [niceyaml.NewSourceFromFile] does. A read error names path as
+// [escape.Line] draws it, as the library names a source.
 //
 // A glob match takes its name from the file system. The error handler in
 // main keeps each line break in a message as a row break. A raw newline in
@@ -328,9 +320,6 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry, ex
 // limit of opts fails without a full read, with an error bound to the name
 // of the source.
 func readSource(path string, opts ...niceyaml.SourceOption) (*niceyaml.Source, error) {
-	// The file path goes first, so opts can override it.
-	opts = append([]niceyaml.SourceOption{niceyaml.WithFilePath(path)}, opts...)
-
 	source, err := niceyaml.NewSourceFromFile(path, opts...)
 
 	// The read made this error, so no other caller holds it. The wrapper
@@ -346,95 +335,6 @@ func readSource(path string, opts ...niceyaml.SourceOption) (*niceyaml.Source, e
 	}
 
 	return source, nil
-}
-
-// physicalAbs returns an absolute form of path that names the file the
-// OS opens for it. [filepath.Abs] drops a ".." element together with the
-// element before it, as text. On Unix, the OS instead steps up from the
-// directory a symlink leads to, which might be a different directory. So
-// physicalAbs resolves the symlinks in path up to its last ".." element,
-// including those in the working directory a relative path starts from.
-// It does not resolve the symlinks after that point, so a symlinked name
-// such as ".github" stays visible to patterns.
-//
-// For a path without a ".." element, and for a path whose part up to the
-// last ".." does not resolve, physicalAbs returns the [filepath.Abs] form.
-// It returns that form for every path on Windows too, because Windows
-// drops ".." elements as text before it follows a symlink.
-func physicalAbs(path string) string {
-	lexical, err := filepath.Abs(path)
-	if err != nil {
-		// Abs fails only when the working directory is unreadable.
-		return path
-	}
-
-	if runtime.GOOS == "windows" {
-		return lexical
-	}
-
-	// Build the absolute path as text, since cleaning it would drop the
-	// ".." elements this function resolves.
-	abs := path
-	if !filepath.IsAbs(abs) {
-		wd, err := os.Getwd()
-		if err != nil {
-			return lexical
-		}
-
-		abs = wd + string(filepath.Separator) + path
-	}
-
-	end := lastDotDotEnd(abs)
-	if end < 0 {
-		return lexical
-	}
-
-	resolved, err := filepath.EvalSymlinks(abs[:end])
-	if err != nil {
-		return lexical
-	}
-
-	return filepath.Join(resolved, abs[end:])
-}
-
-// readsAsPath reports whether [schema.FileOrURL] reads ref as a relative
-// path or as a path that starts with a separator. It reports false for a
-// ref that FileOrURL reads as a URL or as a path that opens with a drive
-// letter, such as "C:/". It calls FileOrURL with an empty base directory,
-// and FileOrURL then reports [schema.ErrNoBaseDir] for a relative path.
-// The two functions thus agree on every ref.
-//
-// A relative path whose first element holds a colon, such as
-// "v1:dir/schema.json", reads as a path. So does a file URL that does not
-// name a local path, such as one with a host other than localhost.
-func readsAsPath(ref string) bool {
-	if ref != "" && os.IsPathSeparator(ref[0]) {
-		return true
-	}
-
-	_, err := schema.FileOrURL("", ref)
-
-	return errors.Is(err, schema.ErrNoBaseDir)
-}
-
-// lastDotDotEnd returns the index after the last ".." element of path,
-// or -1 when path does not have one.
-func lastDotDotEnd(path string) int {
-	end, start := -1, 0
-
-	for i := 0; i <= len(path); i++ {
-		if i < len(path) && !os.IsPathSeparator(path[i]) {
-			continue
-		}
-
-		if path[start:i] == ".." {
-			end = i
-		}
-
-		start = i + 1
-	}
-
-	return end
 }
 
 // newAccess returns the [*schema.Access] of the --schema-root and
@@ -470,10 +370,11 @@ func newAccess(root *os.Root, offline bool) (*schema.Access, error) {
 // only resolver, so every document validates against it, and store goes
 // unused. A schema that does not load or compile fails the command with
 // one "--schema:" error. A schema path resolves relative to the current
-// working directory, through [physicalAbs], so it names the file the OS
-// opens for it. A $ref inside the schema resolves relative to the schema's
-// own file or URL. A $ref that names a file or URL that does not load, or
-// that access does not allow, fails the command the same way.
+// working directory, as [schema.FileOrURL] resolves it, so it names the
+// file that the OS opens for it. A $ref inside the schema resolves
+// relative to the schema's own file or URL. A $ref that names a file or
+// URL that does not load, or that access does not allow, fails the
+// command the same way.
 //
 // Otherwise a registry of its own resolves the schema directives under
 // access, as the Untrusted Documents section of the schema package
@@ -499,15 +400,8 @@ func buildRegistry(
 	store schema.Resolver,
 ) (*schema.Registry, error) {
 	if schemaRef != "" {
-		// FileOrURL cleans a path as text, which drops a ".." together
-		// with a symlinked directory before it. Any other ref, such as a
-		// URL or a drive-letter path, goes to FileOrURL as written.
-		if readsAsPath(schemaRef) {
-			schemaRef = physicalAbs(schemaRef)
-		}
-
-		// A relative ref that physicalAbs could not make absolute resolves
-		// relative to the working directory. If cwd fails, use ".".
+		// A relative ref resolves relative to the working directory. If
+		// cwd fails, use ".".
 		cwd, err := os.Getwd()
 		if err != nil {
 			cwd = "."

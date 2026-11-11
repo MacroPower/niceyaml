@@ -88,6 +88,68 @@ func TestFile(t *testing.T) {
 	})
 }
 
+// linkedSchemas returns a temporary directory in which the symlink link
+// leads to real/sub, and the directory with its links resolved. The
+// schemas real/schema.json and real/sub/x.json accept a string, and the
+// schema.json beside link accepts an integer. It skips the test where
+// the OS makes no symlink, and on Windows, which drops a ".." as text.
+func linkedSchemas(t *testing.T) (string, string) {
+	t.Helper()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows drops a .. element as text before it follows a symlink")
+	}
+
+	dir := t.TempDir()
+	yamltest.WriteFiles(t, dir, map[string]string{
+		"real/sub/x.json":  `{"type": "string"}`,
+		"real/schema.json": `{"type": "string"}`,
+		"schema.json":      `{"type": "integer"}`,
+	})
+	yamltest.SymlinkOrSkip(t, filepath.Join("real", "sub"), filepath.Join(dir, "link"))
+
+	physical, err := filepath.EvalSymlinks(dir)
+	require.NoError(t, err)
+
+	return dir, physical
+}
+
+func TestFile_DotDotAfterSymlink(t *testing.T) {
+	t.Parallel()
+
+	dir, physical := linkedSchemas(t)
+
+	// The test builds each path as text, because filepath.Join cleans it.
+	tcs := map[string]struct {
+		path string
+		want string
+	}{
+		"dot-dot after a symlink names the file the OS opens": {
+			path: dir + "/link/../schema.json",
+			want: filepath.Join(physical, "real", "schema.json"),
+		},
+		"dot-dot after a directory drops the pair as text": {
+			path: dir + "/real/sub/../schema.json",
+			want: filepath.Join(dir, "real", "schema.json"),
+		},
+		"symlinked name without a dot-dot keeps its spelling": {
+			path: dir + "/link/x.json",
+			want: filepath.Join(dir, "link", "x.json"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			url, data, err := load(t, schema.File(tc.path))
+			require.NoError(t, err)
+			assert.Equal(t, plainFileURL(tc.want), url)
+			assert.JSONEq(t, `{"type": "string"}`, string(data))
+		})
+	}
+}
+
 func TestFile_ErrorDrawsControlCharacters(t *testing.T) {
 	t.Parallel()
 

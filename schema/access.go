@@ -263,7 +263,9 @@ func NewAccess(opts ...AccessOption) (*Access, error) {
 //
 // The registry names the directory by the name that [os.OpenRoot] took,
 // which [os.Root.Name] returns. [NewAccess] makes a relative name absolute
-// against the working directory at the time it runs. NewAccess returns
+// against the working directory at the time it runs. A ".." in the name
+// steps up from the directory that a symbolic link before it leads to,
+// as it does for OpenRoot, and as [File] describes. NewAccess returns
 // an error when that path does not name the directory that root holds,
 // such as after the program changes its working directory between
 // OpenRoot and NewAccess. When the process does not have a working
