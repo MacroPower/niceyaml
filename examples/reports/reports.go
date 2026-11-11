@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -125,6 +127,23 @@ func main() {
 
 		for _, detail := range problem.Children {
 			fmt.Println(workflowCommand("notice", detail, problem.Message()))
+		}
+	}
+
+	fmt.Println("\nWrite JSON lines:")
+
+	// Each problem encodes as one object with its message, its context,
+	// its file, its path, and its range. The range counts lines and
+	// columns from 0, and a problem whose location did not resolve leaves
+	// it out. The details of a problem sit under "children".
+	enc := json.NewEncoder(os.Stdout)
+
+	for problem := range niceyaml.Problems(all) {
+		err := enc.Encode(problem)
+		if err != nil {
+			lipgloss.Println(p.PrintError(err))
+
+			return
 		}
 	}
 

@@ -1,12 +1,14 @@
 package position_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"testing"
 
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml/position"
 )
@@ -107,6 +109,49 @@ func TestString(t *testing.T) {
 			assert.Equal(t, tc.want, tc.value.String())
 		})
 	}
+}
+
+func TestJSON(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		value any
+		want  string
+	}{
+		"Position": {
+			value: position.New(2, 7),
+			want:  `{"line":2,"col":7}`,
+		},
+		"Range": {
+			value: position.NewRange(position.New(1, 6), position.New(1, 9)),
+			want:  `{"start":{"line":1,"col":6},"end":{"line":1,"col":9}}`,
+		},
+		"Span": {
+			value: position.NewSpan(5, 10),
+			want:  `{"start":5,"end":10}`,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := json.Marshal(tc.value)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, string(got))
+		})
+	}
+
+	t.Run("Range decodes from its encoding", func(t *testing.T) {
+		t.Parallel()
+
+		want := position.NewRange(position.New(1, 6), position.New(1, 9))
+
+		var got position.Range
+
+		require.NoError(t, json.Unmarshal([]byte(`{"start":{"line":1,"col":6},"end":{"line":1,"col":9}}`), &got))
+		assert.Equal(t, want, got)
+	})
 }
 
 func TestNewRange(t *testing.T) {

@@ -21,7 +21,8 @@ import (
 //
 // Create instances with [New].
 type Position struct {
-	Line, Col int
+	Line int `json:"line"`
+	Col  int `json:"col"`
 }
 
 // New creates a new [Position].
@@ -61,7 +62,8 @@ func (p Position) String() string {
 // Range represents a half-open range [Start, End) between two [Position] values.
 // Create instances with [NewRange].
 type Range struct {
-	Start, End Position
+	Start Position `json:"start"`
+	End   Position `json:"end"`
 }
 
 // NewRange creates a new [Range].
@@ -126,7 +128,8 @@ func (r Range) inverted() bool {
 // span of columns or a span of lines.
 // Create instances with [NewSpan].
 type Span struct {
-	Start, End int
+	Start int `json:"start"`
+	End   int `json:"end"`
 }
 
 // NewSpan creates a new [Span].

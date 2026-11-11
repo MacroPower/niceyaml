@@ -494,6 +494,20 @@
 //
 //	log.Print(niceyaml.FormatError(err, niceyaml.WithProblemLimit(50)))
 //
+// The LogValue methods give every error one string, so a log store reads the
+// attribute of an error as text. A program that wants the fields of each
+// problem in a structured log logs the nodes that [Problems] yields under a
+// key of its own. A JSON handler writes each node through
+// [ErrorTree.MarshalJSON]. Unlike the string from LogValue, the slice
+// holds every problem that Problems yields, each with all of its details.
+// A document with thousands of problems thus logs one large record. A
+// program that logs errors from untrusted input caps the slice itself, for
+// example at [ErrorListLimit] problems:
+//
+//	problems := slices.Collect(niceyaml.Problems(err))
+//	problems = problems[:min(len(problems), niceyaml.ErrorListLimit)]
+//	logger.Error("decode", slog.Any("err", err), slog.Any("problems", problems))
+//
 // An excerpt shows lines of the source to whoever reads the log. A program
 // that loads a text with secrets in it, such as the values of its
 // environment, creates that [Source] with [WithExcerpts] set to false. Every
@@ -522,6 +536,22 @@
 // problem alone or heads several. A tool that opens the file, such as an
 // editor, reads [ErrorTree.FilePath] in place of the name. [errors.As] on
 // the Err field of the node finds the typed error of that problem.
+//
+// A report in JSON encodes each node. [ErrorTree.MarshalJSON] writes the
+// message, the context, the name, the file path, and the path as its text.
+// It writes [ErrorTree.Range] counted from 0, as every position in this
+// module counts, and does not write the position. The Label of a node
+// counts from 1, so a problem that the Label shows at 2:7 writes a range
+// that starts at {"line":1,"col":6}. For a position from [AtPosition], the
+// range starts at the content of the token, so a report that needs the
+// exact position reads [ErrorTree.Position]:
+//
+//	enc := json.NewEncoder(w)
+//	for problem := range niceyaml.Problems(err) {
+//		if err := enc.Encode(problem); err != nil {
+//			return err
+//		}
+//	}
 //
 // A terminal gets color from
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError], which takes the

@@ -128,7 +128,7 @@ A [`paths.Path`][niceyaml/paths] such as `$.menu.lunch[0].price` names one node 
 
 An [`Error`][niceyaml.Error] names a path and holds no source. The errors example binds such errors to a `Source`. It then renders them as a styled excerpt, as plain text for a log, as marks on the whole document, and as one row per problem.
 
-The reports example checks several files and keeps each error after [`niceyaml.Detach`][niceyaml.Detach] frees its `Source`. At the end, it reports every problem as an excerpt, as GitHub workflow commands, and as Markdown.
+The reports example checks several files and keeps each error after [`niceyaml.Detach`][niceyaml.Detach] frees its `Source`. At the end, it reports every problem as an excerpt, as GitHub workflow commands, as JSON lines, and as Markdown.
 
 ### Warnings
 
