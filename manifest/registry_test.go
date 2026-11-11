@@ -334,6 +334,13 @@ func TestNewRegistry(t *testing.T) {
 				manifest.Version("v2"),
 			)),
 		},
+		"deprecated kind": {
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
+				manifest.DeprecatedKind("cafe 5.0 removes Hours"),
+				manifest.Version("v1"),
+				manifest.Version("v2"),
+			)),
+		},
 		"loosened only version": {
 			opts: withKinds(manifest.NewKind[Hours]("Hours", manifest.Version("v2", manifest.Loosened()))),
 		},
@@ -343,12 +350,30 @@ func TestNewRegistry(t *testing.T) {
 				manifest.WithKinds(manifest.NewKind[Hours]("Hours", manifest.Version("v2", manifest.Loosened()))),
 			},
 		},
-		"deprecated current version of a required kind": {
+		"deprecated required kind": {
 			opts: withKinds(manifest.NewKind[Cafe]("Cafe",
 				manifest.Required(),
-				manifest.Version("v1", manifest.Deprecated()),
+				manifest.DeprecatedKind(),
+				manifest.Version("v1"),
 			)),
-			err: "kind Cafe: manifest.Deprecated on the current version of a Required kind",
+			err: "kind Cafe: manifest.DeprecatedKind on a Required kind leaves the files no change that clears " +
+				"its warning",
+		},
+		"deprecated current version": {
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
+				manifest.Version("v1", manifest.Deprecated()),
+				manifest.Version("v2", manifest.Deprecated()),
+			)),
+			err: "kind Hours: v2 carries manifest.Deprecated, but it is the current version and no rewrite " +
+				"clears the warning; mark the kind with manifest.DeprecatedKind",
+		},
+		"deprecated only version": {
+			opts: withKinds(manifest.NewKind[Hours]("Hours", manifest.Version("v1", manifest.Deprecated()))),
+			err:  "kind Hours: v1 carries manifest.Deprecated, but it is the current version",
+		},
+		"deprecated only unversioned layout": {
+			opts: withKinds(manifest.NewKind[Hours]("Hours", manifest.Unversioned(manifest.Deprecated()))),
+			err:  "kind Hours: the unversioned layout carries manifest.Deprecated, but it is the current version",
 		},
 		"deprecated removed version": {
 			opts: []manifest.RegistryOption{

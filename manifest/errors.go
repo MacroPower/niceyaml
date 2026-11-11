@@ -156,8 +156,8 @@ var (
 	// [ErrDeprecated].
 	ErrDeprecatedVersion = errors.New("deprecated version")
 
-	// ErrDeprecatedKind indicates the warning about a kind whose current
-	// version [Deprecated] marks. The warning also matches [ErrDeprecated].
+	// ErrDeprecatedKind indicates the warning about a kind that
+	// [DeprecatedKind] marks. The warning also matches [ErrDeprecated].
 	ErrDeprecatedKind = errors.New("deprecated kind")
 
 	// ErrRemoved indicates the warning about a value that a step removed.

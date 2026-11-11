@@ -418,14 +418,14 @@ func TestRegistry_Verify_Deprecations(t *testing.T) {
 			current: `{"deprecated": true}`,
 			want: stringtest.JoinLF(
 				"MenuItem v2: $: the root schema is deprecated",
-				"`-- use manifest.Deprecated instead",
+				"`-- use manifest.DeprecatedKind instead",
 			),
 		},
 		"root behind a $ref": {
 			current: `{"$ref": "#/$defs/item", "$defs": {"item": {"deprecated": true}}}`,
 			want: stringtest.JoinLF(
 				"MenuItem v2: $: the root schema is deprecated",
-				"`-- use manifest.Deprecated instead",
+				"`-- use manifest.DeprecatedKind instead",
 			),
 		},
 		"deprecated where the written version requires it": {

@@ -60,6 +60,7 @@ func NewKind[T any](name string, opts ...KindOption) *Kind {
 //   - [Claim]
 //   - [Required]
 //   - [Singleton]
+//   - [DeprecatedKind]
 //   - [DecodeOptions]
 type KindOption func(*kindConfig)
 
@@ -68,10 +69,13 @@ type kindConfig struct {
 	claims        []matcher.Matcher
 	versions      []*versionConfig
 	decodeOptions []niceyaml.DecodeOption
-	nameField     paths.Path
-	hasNameField  bool
-	required      bool
-	singleton     bool
+	// The details of [DeprecatedKind].
+	details      []string
+	nameField    paths.Path
+	hasNameField bool
+	required     bool
+	singleton    bool
+	deprecated   bool
 }
 
 // Version is a [KindOption] that adds the version named name to the kind,
@@ -171,6 +175,18 @@ func Required() KindOption {
 func Singleton() KindOption {
 	return func(c *kindConfig) {
 		c.singleton = true
+	}
+}
+
+// DeprecatedKind is a [KindOption] that marks the whole kind deprecated. A
+// load warns about each document of the kind, whatever version it
+// declares, with details after the headline that niceyaml writes. The
+// mark belongs to the kind, so it stays when the author adds a version.
+// A rewrite does not clear the warning, so [NewRegistry] rejects the mark
+// on a [Required] kind.
+func DeprecatedKind(details ...string) KindOption {
+	return func(c *kindConfig) {
+		c.deprecated, c.details = true, details
 	}
 }
 
@@ -278,10 +294,12 @@ func Migrate(p paths.Path, fn edit.Func) VersionOption {
 	}
 }
 
-// Deprecated is a [VersionOption] that marks the version deprecated. A load
-// warns about each document that declares it, with details after the
-// headline that niceyaml writes. On the current version, it marks the
-// whole kind deprecated, and every document of the kind warns.
+// Deprecated is a [VersionOption] that marks an older version deprecated.
+// A load warns about each document that declares it, with details after
+// the headline that niceyaml writes. A rewrite moves such a document off
+// the version and clears the warning. [NewRegistry] rejects the mark on
+// the current version, because no rewrite moves a document off it.
+// [DeprecatedKind] marks the whole kind deprecated instead.
 func Deprecated(details ...string) VersionOption {
 	return func(c *versionConfig) {
 		c.deprecated, c.details = true, details
