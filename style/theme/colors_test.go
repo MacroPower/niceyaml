@@ -140,6 +140,21 @@ func TestDerive(t *testing.T) {
 			want:   "#ff0000 bg:#101820",
 		},
 
+		// The error badge paints over the error text style, so it keeps the
+		// attributes of a TextError token and none of a Generic token.
+		"error text token reaches the error badge": {
+			colors: brand,
+			tokens: map[kind.Kind]theme.Token{kind.TextError: "underline"},
+			kind:   kind.GenericError,
+			want:   "underline #101820 bg:#dd3333",
+		},
+		"generic token leaves the error badge": {
+			colors: brand,
+			tokens: map[kind.Kind]theme.Token{kind.Generic: "italic"},
+			kind:   kind.GenericError,
+			want:   "#101820 bg:#dd3333",
+		},
+
 		// Null takes the boolean token unless a token of its own names it.
 		"null takes the boolean token": {
 			colors: brand,
