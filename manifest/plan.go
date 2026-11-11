@@ -30,7 +30,7 @@ import (
 //
 // PlanMigration returns a nil plan and an error only in two cases. One is
 // a ctx that ends. The other is a load of the same input that fails before
-// it reads a file. A pattern that does not parse and an input path that
+// it reads a file. A pattern that Load rejects and an input path that
 // does not exist each fail a load that way.
 func (r *Registry) PlanMigration(ctx context.Context, in Input, opts ...LoadOption) (*Plan, error) {
 	cfg := newLoadConfig(opts)

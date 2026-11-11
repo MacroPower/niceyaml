@@ -185,12 +185,15 @@
 //
 // A directory input reads the files that match "*.yaml" or "*.yml", and
 // skips each entry whose name starts with ".". [WithRecursive],
-// [WithInclude], and [WithExclude] change the selection. A walk reads a
-// file that a symbolic link names only when the link leads inside the
-// input directory to a file that the patterns select. [WithOutsideLinks]
-// also lets a link lead outside. Any other link to a regular file fails
-// with an error that matches [ErrOutsideLink]. A file loads once, however
-// many paths reach it.
+// [WithInclude], and [WithExclude] change the selection. [WithHidden]
+// keeps the entries whose names start with ".", so the patterns select
+// among them too.
+//
+// A walk reads a file that a symbolic link names only when the link leads
+// inside the input directory to a file that the patterns select.
+// [WithOutsideLinks] also lets a link lead outside. Any other link to a
+// regular file fails with an error that matches [ErrOutsideLink]. A file
+// loads once, however many paths reach it.
 //
 // A load reads the inputs in order, the files of a directory sorted by
 // path, and the documents of each file in order. Every report and every

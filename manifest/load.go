@@ -99,7 +99,9 @@ func WithSetChecks(enabled bool) LoadOption {
 //
 // A pattern that does not parse fails Load before it reads a file, with an
 // error that matches
-// [go.jacobcolvin.com/niceyaml/schema/matcher.ErrInvalidPattern]. An input
+// [go.jacobcolvin.com/niceyaml/schema/matcher.ErrInvalidPattern]. Without
+// [WithHidden], an include pattern that names an entry whose name starts
+// with "." fails Load the same way, as [WithInclude] describes. An input
 // path that does not exist also fails Load before it reads a file, with an
 // error that matches [fs.ErrNotExist]. A load whose ctx ends fails with an
 // error that matches ctx.Err().
@@ -122,9 +124,9 @@ func (r *Registry) Load(ctx context.Context, in Input, opts ...LoadOption) (*Set
 // manifests that pass. [Checked.Err] returns the error that Load returns
 // for the same input.
 //
-// Check returns a nil result and an error for a pattern that does not
-// parse, for an input path that does not exist, and for a ctx that ends.
-// Load fails with the same errors.
+// Check returns a nil result and an error for a pattern that Load rejects,
+// for an input path that does not exist, and for a ctx that ends. Load
+// fails with the same errors.
 func (r *Registry) Check(ctx context.Context, in Input, opts ...LoadOption) (*Checked, error) {
 	cfg := newLoadConfig(opts)
 

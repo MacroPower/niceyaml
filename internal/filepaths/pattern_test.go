@@ -564,6 +564,66 @@ func TestPattern_Relative(t *testing.T) {
 	}
 }
 
+func TestPattern_DotElement(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		pattern string
+		want    string
+		ok      bool
+	}{
+		"plain name":                                {pattern: "*.yaml"},
+		"dot inside a name":                         {pattern: "configs/a.b/*.yaml"},
+		"current directory":                         {pattern: "./configs/*.yaml"},
+		"current directory alone":                   {pattern: "."},
+		"parent directory":                          {pattern: "../*.yaml"},
+		"dot in a character class":                  {pattern: "[.]config/*.yaml"},
+		"wildcard before the dot":                   {pattern: "?config/*.yaml"},
+		"dot file":                                  {pattern: ".cafe.yaml", want: ".cafe.yaml", ok: true},
+		"dot directory":                             {pattern: ".github/workflows/*.yaml", want: ".github", ok: true},
+		"dot directory below a name":                {pattern: "services/*/.deploy/*.yaml", want: ".deploy", ok: true},
+		"dot file after a double star":              {pattern: "**/.cafe.yaml", want: ".cafe.yaml", ok: true},
+		"dot before a wildcard":                     {pattern: ".*", want: ".*", ok: true},
+		"escaped dot":                               {pattern: `\.cafe.yaml`, want: ".cafe.yaml", ok: true},
+		"two dots before a name":                    {pattern: "..data/*.yaml", want: "..data", ok: true},
+		"brace alternative":                         {pattern: "{.config,config}/*.yaml", want: ".config", ok: true},
+		"brace after the dot":                       {pattern: ".{config,cache}/*.yaml", want: ".config", ok: true},
+		"rooted pattern":                            {pattern: "/.config/*.yaml", want: ".config", ok: true},
+		"rooted pattern without a dot element":      {pattern: "/config/*.yaml"},
+		"rooted brace alternative":                  {pattern: "{/.config,config}/*.yaml", want: ".config", ok: true},
+		"rooted alternative before a relative one":  {pattern: "{.config,/.cache}/*.yaml", want: ".cache", ok: true},
+		"dot directory that a parent element drops": {pattern: ".config/../*.yaml"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p, err := filepaths.NewPattern(tc.pattern)
+			require.NoError(t, err)
+
+			got, ok := p.DotElement()
+			assert.Equal(t, tc.ok, ok)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestPattern_DotElement_OtherAlternativeMatches(t *testing.T) {
+	t.Parallel()
+
+	p, err := filepaths.NewPattern("{.config,config}/*.yaml")
+	require.NoError(t, err)
+
+	got, ok := p.DotElement()
+	require.True(t, ok)
+	assert.Equal(t, ".config", got)
+
+	// The "config" alternative holds no dot element, and it still matches.
+	assert.True(t, p.Match("config/a.yaml"))
+	assert.True(t, p.Match(".config/a.yaml"))
+}
+
 func TestAnyDepthPatterns_SpecificityClean(t *testing.T) {
 	t.Parallel()
 

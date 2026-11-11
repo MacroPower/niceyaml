@@ -64,7 +64,8 @@ type fsWalk struct {
 }
 
 // list adds the entries of the directory at rel, a slash path below the
-// input directory, and of its subdirectories under [WithRecursive].
+// input directory, and of its subdirectories under [WithRecursive]. It
+// skips each entry whose name starts with "." unless [WithHidden] is set.
 func (w *fsWalk) list(rel string) {
 	dir := path.Join(w.root, rel)
 
@@ -77,7 +78,7 @@ func (w *fsWalk) list(rel string) {
 
 	for _, e := range entries {
 		name := e.Name()
-		if strings.HasPrefix(name, ".") {
+		if !w.p.def.cfg.hidden && strings.HasPrefix(name, ".") {
 			continue
 		}
 

@@ -167,10 +167,11 @@ func Inputs(ins ...Input) Input {
 // the [niceyaml.Source] of each file, for [Path], [FS], [Stdin], and
 // [Reader]. A Stdin or Reader input reads one text, so only
 // [WithSourceOptions] changes what it reads. A pattern of [WithInclude] or
-// [WithExclude] that does not parse still fails the load.
+// [WithExclude] that a directory input rejects still fails the load.
 //
 // Available options:
 //   - [WithRecursive]
+//   - [WithHidden]
 //   - [WithOutsideLinks]
 //   - [WithInclude]
 //   - [WithExclude]
@@ -183,6 +184,7 @@ type inputConfig struct {
 	exclude       []string
 	sourceOptions []niceyaml.SourceOption
 	recursive     bool
+	hidden        bool
 	outsideLinks  bool
 }
 
@@ -206,6 +208,33 @@ func WithRecursive(recursive bool) InputOption {
 	}
 }
 
+// WithHidden is an [InputOption] that sets whether a walk keeps each
+// entry whose name starts with ".". Without it, a walk skips those entries
+// before it reads a pattern. With it, the patterns of [WithInclude] and
+// [WithExclude] select among those files and, under [WithRecursive], among
+// those directories.
+//
+// A walk with WithHidden meets the temporary files that [Plan.Apply]
+// names ".<name>.<hex>", and under [WithRecursive] it enters directories
+// such as ".git". The default patterns do not match the temporary files.
+// An app that passes an include pattern as broad as "*" should exclude
+// those entries with [WithExclude].
+//
+// A symbolic link can lead to a file in a directory whose name starts
+// with ".". A volume that Kubernetes mounts from a ConfigMap keeps its
+// files in a directory named "..<timestamp>". Each file beside that
+// directory is a link into it. An include pattern that names the
+// directory, "..*/*.yaml" for that volume, fails a load without
+// WithHidden, as [WithInclude] describes. A recursive walk with
+// WithHidden also enters the directory and names each file by its path
+// there. An app should exclude the directory from a recursive walk, with
+// "..*/" for that volume.
+func WithHidden(hidden bool) InputOption {
+	return func(c *inputConfig) {
+		c.hidden = hidden
+	}
+}
+
 // WithOutsideLinks is an [InputOption] that sets whether a walk reads a
 // file that a symbolic link leads to outside the input directory. An app
 // should pass it for the directory that it reads by default, such as
@@ -224,6 +253,21 @@ func WithOutsideLinks(follow bool) InputOption {
 // [go.jacobcolvin.com/niceyaml/schema/matcher.FilePath]. A pattern without
 // a "/" matches a name at any depth, and one with a "/" matches the path
 // below the input directory.
+//
+// Without [WithHidden], a walk skips each entry whose name starts with
+// ".", so no pattern selects such an entry or an entry below such a
+// directory. A load then fails for a pattern with an element that starts
+// with a literal ".", such as ".cafe.yaml" or ".github/*.yaml", with an
+// error that matches
+// [go.jacobcolvin.com/niceyaml/schema/matcher.ErrInvalidPattern]. The "."
+// element of a pattern such as "./cafe.yaml" names the directory itself,
+// so it does not fail the load.
+//
+// A walk reads the file that a symbolic link leads to inside the input
+// directory only when a pattern also matches the path of that file. That
+// path can run through a directory whose name starts with ".". A pattern
+// that names the directory, such as ".store/*.yaml", fails the load in the
+// same way, so an input with that pattern must pass [WithHidden].
 func WithInclude(globs ...string) InputOption {
 	return func(c *inputConfig) {
 		c.include = append(c.include, globs...)
@@ -234,6 +278,10 @@ func WithInclude(globs ...string) InputOption {
 // that a pattern matches, such as "*.example.yaml" or "testdata/". A
 // pattern reads as [WithInclude] describes. A pattern that ends with "/"
 // matches only directories.
+//
+// Without [WithHidden], a walk skips each entry whose name starts with
+// "." before it reads a pattern. A pattern that matches only those
+// entries, such as ".git/", changes the selection only under [WithHidden].
 func WithExclude(globs ...string) InputOption {
 	return func(c *inputConfig) {
 		c.exclude = append(c.exclude, globs...)

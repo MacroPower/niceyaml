@@ -174,7 +174,7 @@ func replace(root *os.Root, name string, old, text []byte, app string) error {
 
 	defer func() {
 		if !renamed {
-			_ = root.Remove(tmpName) //nolint:errcheck // A stray file starts with "." and a load skips it.
+			_ = root.Remove(tmpName) //nolint:errcheck // A stray file starts with ".", so most loads skip it.
 		}
 	}()
 

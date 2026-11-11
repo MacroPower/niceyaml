@@ -243,6 +243,40 @@ func (p Pattern) Relative() bool {
 	return len(p.relative) > 0
 }
 
+// DotElement returns the first element of the pattern that starts with a
+// literal "." and is neither "." nor "..", and reports whether the pattern
+// holds one. Such an element matches only names that start with ".".
+//
+// DotElement reads each pattern the braces expand to, as [NewPattern]
+// normalized it. So an escaped "." counts, and "{.config,config}/*.yaml"
+// yields ".config". The pattern that holds the element does not match a
+// path whose names all start with another character. Another pattern that
+// the braces expand to can still match that path, so
+// "{.config,config}/*.yaml" matches "config/a.yaml".
+//
+// DotElement reads the rooted patterns before the relative patterns, and
+// each group in the order of the braces. So "{.config,/.cache}/*.yaml"
+// yields ".cache".
+//
+// [NewPattern] drops each "." element, and a pattern left without another
+// element reads as ".". That element names the directory itself, so it
+// does not count. A ".." element names the parent directory, so it does
+// not count either. A "." inside a character class does not count, so
+// "[.]config" passes.
+func (p Pattern) DotElement() (string, bool) {
+	for _, globs := range [][]string{p.rooted, p.relative} {
+		for _, glob := range globs {
+			for _, elem := range splitElements(glob) {
+				if elem != "." && elem != ".." && strings.HasPrefix(elem, ".") {
+					return elem, true
+				}
+			}
+		}
+	}
+
+	return "", false
+}
+
 // CleanPath returns path cleaned and with forward slashes as separators.
 // The patterns match against paths in that form. Cleaning drops a
 // leading "./", collapses repeated separators, and resolves ".."

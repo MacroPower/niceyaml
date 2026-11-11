@@ -80,12 +80,16 @@ type pattern struct {
 
 // compilePatterns returns the patterns of globs. An include pattern picks
 // only files, so an include pattern that ends with "/" fails. Any pattern
-// with a ".." element fails too.
-func compilePatterns(globs []string, include bool) ([]pattern, error) {
+// with a ".." element fails too. A walk without [WithHidden] skips each
+// entry whose name starts with ".". So an include pattern in which
+// [filepaths.Pattern.DotElement] finds an element fails unless hidden is
+// set. That pattern fails even when it matches the file that a link leads
+// to.
+func compilePatterns(globs []string, include, hidden bool) ([]pattern, error) {
 	patterns := make([]pattern, 0, len(globs))
 
 	for _, g := range globs {
-		p, err := compilePattern(g, include)
+		p, err := compilePattern(g, include, hidden)
 		if err != nil {
 			return nil, fmt.Errorf("pattern %q: %w", g, err)
 		}
@@ -98,7 +102,7 @@ func compilePatterns(globs []string, include bool) ([]pattern, error) {
 
 // compilePattern returns the pattern of glob, which reads as a .gitignore
 // line without negation.
-func compilePattern(glob string, include bool) (pattern, error) {
+func compilePattern(glob string, include, hidden bool) (pattern, error) {
 	dirOnly := strings.HasSuffix(glob, "/")
 	if dirOnly && include {
 		return pattern{}, fmt.Errorf("%w: an include pattern picks files, so it cannot end with /",
@@ -124,6 +128,15 @@ func compilePattern(glob string, include bool) (pattern, error) {
 		return pattern{}, err //nolint:wrapcheck // The caller names the pattern.
 	}
 
+	if include && !hidden {
+		if elem, ok := p.DotElement(); ok {
+			return pattern{}, fmt.Errorf(
+				"%w: a walk skips entries whose names start with \".\", and %q matches only those names",
+				filepaths.ErrInvalidPattern, elem,
+			)
+		}
+	}
+
 	return pattern{glob: p, dirOnly: dirOnly}, nil
 }
 
@@ -147,7 +160,7 @@ type prepared struct {
 }
 
 // prepare checks every input of in before the load reads a file, and
-// returns them in order. It fails for a pattern that does not parse and
+// returns them in order. It fails for a pattern that the walk rejects and
 // for an input path that does not exist.
 func prepare(ctx context.Context, in Input, out []*prepared) ([]*prepared, error) {
 	d := in.in
@@ -184,12 +197,12 @@ func prepare(ctx context.Context, in Input, out []*prepared) ([]*prepared, error
 		p.globs = defaultInclude
 	}
 
-	p.include, err = compilePatterns(p.globs, true)
+	p.include, err = compilePatterns(p.globs, true, d.cfg.hidden)
 	if err != nil {
 		return nil, err
 	}
 
-	p.exclude, err = compilePatterns(d.cfg.exclude, false)
+	p.exclude, err = compilePatterns(d.cfg.exclude, false, d.cfg.hidden)
 	if err != nil {
 		return nil, err
 	}
@@ -567,7 +580,8 @@ type diskWalk struct {
 }
 
 // list adds the entries of the directory at rel, a slash path below the
-// input directory, and of its subdirectories under [WithRecursive].
+// input directory, and of its subdirectories under [WithRecursive]. It
+// skips each entry whose name starts with "." unless [WithHidden] is set.
 func (w *diskWalk) list(rel string) {
 	dir := filepath.Join(w.root, filepath.FromSlash(rel))
 
@@ -580,7 +594,7 @@ func (w *diskWalk) list(rel string) {
 
 	for _, e := range entries {
 		name := e.Name()
-		if strings.HasPrefix(name, ".") {
+		if !w.p.def.cfg.hidden && strings.HasPrefix(name, ".") {
 			continue
 		}
 

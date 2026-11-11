@@ -115,6 +115,201 @@ func TestPath(t *testing.T) {
 			opts: []manifest.InputOption{manifest.WithInclude("*.conf")},
 			want: []string{"config/cafe.conf"},
 		},
+		"hidden entries": {
+			tree: tree{files: map[string]string{
+				"config/cafe.yaml":          cafeDoc,
+				"config/.hidden.yaml":       "",
+				"config/.notes.txt":         "",
+				"config/.git/d.yaml":        "",
+				"config/sub/.deploy/e.yaml": "",
+			}},
+			opts: []manifest.InputOption{
+				manifest.WithRecursive(true),
+				manifest.WithHidden(true),
+				manifest.WithExclude(".git/"),
+			},
+			want: []string{"config/.hidden.yaml", "config/cafe.yaml", "config/sub/.deploy/e.yaml"},
+		},
+		"hidden entries without recursion": {
+			tree: tree{files: map[string]string{
+				"config/cafe.yaml":    cafeDoc,
+				"config/.hidden.yaml": "",
+				"config/.sub/a.yaml":  "",
+			}},
+			opts: []manifest.InputOption{manifest.WithHidden(true)},
+			want: []string{"config/.hidden.yaml", "config/cafe.yaml"},
+		},
+		"hidden entries that include patterns name": {
+			tree: tree{files: map[string]string{
+				"config/cafe.yaml":                 cafeDoc,
+				"config/.cafe.yaml":                "",
+				"config/.github/workflows/ci.yaml": "",
+				"config/.github/dependabot.yaml":   "",
+				"config/.git/workflows/x.yaml":     "",
+			}},
+			opts: []manifest.InputOption{
+				manifest.WithRecursive(true),
+				manifest.WithHidden(true),
+				manifest.WithInclude(".github/workflows/*.yaml", ".cafe.yaml"),
+				manifest.WithExclude(".git/"),
+			},
+			want: []string{"config/.cafe.yaml", "config/.github/workflows/ci.yaml"},
+		},
+		"hidden directory of links excluded": {
+			tree: tree{
+				files: map[string]string{"config/..2026_11_10/cafe.yaml": cafeDoc},
+				links: map[string]string{
+					"config/..data":    "..2026_11_10",
+					"config/cafe.yaml": "..data/cafe.yaml",
+				},
+			},
+			opts: []manifest.InputOption{
+				manifest.WithRecursive(true),
+				manifest.WithHidden(true),
+				manifest.WithExclude("..*/"),
+			},
+			want: []string{"config/cafe.yaml"},
+		},
+		"exclude pattern for a hidden entry without hidden": {
+			tree: tree{files: map[string]string{
+				"config/cafe.yaml":   cafeDoc,
+				"config/.git/d.yaml": "",
+			}},
+			opts: []manifest.InputOption{manifest.WithRecursive(true), manifest.WithExclude(".git/")},
+			want: []string{"config/cafe.yaml"},
+		},
+		"exclude pattern with a hidden brace alternative without hidden": {
+			tree: tree{files: map[string]string{
+				"config/cafe.yaml":   cafeDoc,
+				"config/.git/d.yaml": "",
+				"config/sub/a.yaml":  "",
+			}},
+			opts: []manifest.InputOption{manifest.WithRecursive(true), manifest.WithExclude("{.git,sub}/")},
+			want: []string{"config/cafe.yaml"},
+		},
+		"patterns with a dot element without hidden": {
+			tree: tree{files: map[string]string{
+				"config/cafe.yaml":  cafeDoc,
+				"config/b.yaml":     "",
+				"config/sub/a.yaml": "",
+				"config/sub/c.yaml": "",
+			}},
+			opts: []manifest.InputOption{
+				manifest.WithRecursive(true),
+				manifest.WithInclude("./cafe.yaml", "./b.yaml", "sub/./*.yaml"),
+				manifest.WithExclude("./b.yaml", "sub/./c.yaml"),
+			},
+			want: []string{"config/cafe.yaml", "config/sub/a.yaml"},
+		},
+		"include pattern for a hidden file without hidden": {
+			tree: tree{files: map[string]string{"config/.cafe.yaml": cafeDoc}},
+			opts: []manifest.InputOption{manifest.WithInclude(".cafe.yaml")},
+			err: `pattern ".cafe.yaml": invalid glob pattern: ` +
+				`a walk skips entries whose names start with ".", and ".cafe.yaml" matches only those names`,
+			is: []error{matcher.ErrInvalidPattern},
+		},
+		"include pattern for a hidden directory without hidden": {
+			tree: tree{files: map[string]string{"config/.github/workflows/ci.yaml": cafeDoc}},
+			opts: []manifest.InputOption{
+				manifest.WithRecursive(true),
+				manifest.WithInclude("*.yaml", ".github/workflows/*.yaml"),
+			},
+			err: `pattern ".github/workflows/*.yaml": invalid glob pattern: ` +
+				`a walk skips entries whose names start with ".", and ".github" matches only those names`,
+			is: []error{matcher.ErrInvalidPattern},
+		},
+		"include pattern with a hidden brace alternative without hidden": {
+			tree: tree{files: map[string]string{"config/config/cafe.yaml": cafeDoc}},
+			opts: []manifest.InputOption{
+				manifest.WithRecursive(true),
+				manifest.WithInclude("{.config,config}/*.yaml"),
+			},
+			err: `pattern "{.config,config}/*.yaml": invalid glob pattern: ` +
+				`a walk skips entries whose names start with ".", and ".config" matches only those names`,
+			is: []error{matcher.ErrInvalidPattern},
+		},
+		"link into a hidden directory that an include pattern names without hidden": {
+			tree: tree{
+				files: map[string]string{"config/.store/cafe.yaml": cafeDoc},
+				links: map[string]string{"config/cafe.yaml": ".store/cafe.yaml"},
+			},
+			opts: []manifest.InputOption{manifest.WithInclude("/cafe.yaml", ".store/*.yaml")},
+			err: `pattern ".store/*.yaml": invalid glob pattern: ` +
+				`a walk skips entries whose names start with ".", and ".store" matches only those names`,
+			is: []error{matcher.ErrInvalidPattern},
+		},
+		"link into a hidden directory that an include pattern names": {
+			tree: tree{
+				files: map[string]string{"config/.store/cafe.yaml": cafeDoc},
+				links: map[string]string{"config/cafe.yaml": ".store/cafe.yaml"},
+			},
+			opts: []manifest.InputOption{
+				manifest.WithHidden(true),
+				manifest.WithInclude("/cafe.yaml", ".store/*.yaml"),
+			},
+			want: []string{"config/cafe.yaml"},
+		},
+		"link into a hidden directory that no include pattern names": {
+			tree: tree{
+				files: map[string]string{"config/.store/cafe.yaml": cafeDoc},
+				links: map[string]string{"config/cafe.yaml": ".store/cafe.yaml"},
+			},
+			opts: []manifest.InputOption{manifest.WithHidden(true), manifest.WithInclude("/cafe.yaml")},
+			err:  "config/cafe.yaml: links to .store/cafe.yaml, which does not match /cafe.yaml",
+			is:   []error{manifest.ErrOutsideLink},
+		},
+		"link into a hidden directory under recursion": {
+			tree: tree{
+				files: map[string]string{"config/.store/cafe.yaml": cafeDoc},
+				links: map[string]string{"config/cafe.yaml": ".store/cafe.yaml"},
+			},
+			opts: []manifest.InputOption{
+				manifest.WithRecursive(true),
+				manifest.WithHidden(true),
+				manifest.WithInclude("/cafe.yaml", ".store/*.yaml"),
+			},
+			want: []string{"config/.store/cafe.yaml"},
+		},
+		"link into a hidden directory excluded under recursion": {
+			tree: tree{
+				files: map[string]string{"config/.store/cafe.yaml": cafeDoc},
+				links: map[string]string{"config/cafe.yaml": ".store/cafe.yaml"},
+			},
+			opts: []manifest.InputOption{
+				manifest.WithRecursive(true),
+				manifest.WithHidden(true),
+				manifest.WithInclude("/cafe.yaml", ".store/*.yaml"),
+				manifest.WithExclude(".store/"),
+			},
+			want: []string{"config/cafe.yaml"},
+		},
+		"links into the hidden directory of a volume that an include pattern names without hidden": {
+			tree: tree{
+				files: map[string]string{"config/..2026_11_10/cafe.yaml": cafeDoc},
+				links: map[string]string{
+					"config/..data":    "..2026_11_10",
+					"config/cafe.yaml": "..data/cafe.yaml",
+				},
+			},
+			opts: []manifest.InputOption{manifest.WithInclude("/*.yaml", "..*/*.yaml")},
+			err: `pattern "..*/*.yaml": invalid glob pattern: ` +
+				`a walk skips entries whose names start with ".", and "..*" matches only those names`,
+			is: []error{matcher.ErrInvalidPattern},
+		},
+		"links into the hidden directory of a volume that an include pattern names": {
+			tree: tree{
+				files: map[string]string{"config/..2026_11_10/cafe.yaml": cafeDoc},
+				links: map[string]string{
+					"config/..data":    "..2026_11_10",
+					"config/cafe.yaml": "..data/cafe.yaml",
+				},
+			},
+			opts: []manifest.InputOption{
+				manifest.WithHidden(true),
+				manifest.WithInclude("/*.yaml", "..*/*.yaml"),
+			},
+			want: []string{"config/cafe.yaml"},
+		},
 		"named file loads whatever its name": {
 			tree:  tree{files: map[string]string{"cafe.txt": cafeDoc}},
 			input: "cafe.txt",
@@ -263,10 +458,80 @@ func TestFS(t *testing.T) {
 
 	tcs := map[string]struct {
 		tree tree
+		opts []manifest.InputOption
 		want []string
 		err  string
 		is   []error
 	}{
+		"hidden entries skipped": {
+			tree: tree{files: map[string]string{
+				"config/cafe.yaml":        cafeDoc,
+				"config/.hidden.yaml":     "",
+				"config/.deploy/e.yaml":   "",
+				"config/sub/.hidden.yaml": "",
+			}},
+			opts: []manifest.InputOption{manifest.WithRecursive(true)},
+			want: []string{"config/cafe.yaml"},
+		},
+		"hidden entries": {
+			tree: tree{files: map[string]string{
+				"config/cafe.yaml":        cafeDoc,
+				"config/.hidden.yaml":     "",
+				"config/.deploy/e.yaml":   "",
+				"config/.git/d.yaml":      "",
+				"config/sub/.hidden.yaml": "",
+			}},
+			opts: []manifest.InputOption{
+				manifest.WithRecursive(true),
+				manifest.WithHidden(true),
+				manifest.WithExclude(".git/"),
+			},
+			want: []string{
+				"config/.deploy/e.yaml",
+				"config/.hidden.yaml",
+				"config/cafe.yaml",
+				"config/sub/.hidden.yaml",
+			},
+		},
+		"include pattern for a hidden file without hidden": {
+			tree: tree{files: map[string]string{"config/.cafe.yaml": cafeDoc}},
+			opts: []manifest.InputOption{manifest.WithInclude(".cafe.yaml")},
+			err:  `and ".cafe.yaml" matches only those names`,
+			is:   []error{matcher.ErrInvalidPattern},
+		},
+		"link into a hidden directory that an include pattern names without hidden": {
+			tree: tree{
+				files: map[string]string{"config/.store/cafe.yaml": cafeDoc},
+				links: map[string]string{"config/cafe.yaml": ".store/cafe.yaml"},
+			},
+			opts: []manifest.InputOption{manifest.WithInclude("/cafe.yaml", ".store/*.yaml")},
+			err:  `and ".store" matches only those names`,
+			is:   []error{matcher.ErrInvalidPattern},
+		},
+		"link into a hidden directory that an include pattern names": {
+			tree: tree{
+				files: map[string]string{"config/.store/cafe.yaml": cafeDoc},
+				links: map[string]string{"config/cafe.yaml": ".store/cafe.yaml"},
+			},
+			opts: []manifest.InputOption{
+				manifest.WithHidden(true),
+				manifest.WithInclude("/cafe.yaml", ".store/*.yaml"),
+			},
+			want: []string{"config/cafe.yaml"},
+		},
+		"link into a hidden directory excluded under recursion": {
+			tree: tree{
+				files: map[string]string{"config/.store/cafe.yaml": cafeDoc},
+				links: map[string]string{"config/cafe.yaml": ".store/cafe.yaml"},
+			},
+			opts: []manifest.InputOption{
+				manifest.WithRecursive(true),
+				manifest.WithHidden(true),
+				manifest.WithInclude("/cafe.yaml", ".store/*.yaml"),
+				manifest.WithExclude(".store/"),
+			},
+			want: []string{"config/cafe.yaml"},
+		},
 		"files and a link inside": {
 			tree: tree{
 				files: map[string]string{"config/cafe.yaml": cafeDoc, "config/data/menu.yaml": ""},
@@ -320,7 +585,8 @@ func TestFS(t *testing.T) {
 
 			reg := newCafeRegistry(t)
 
-			set, err := reg.Load(t.Context(), manifest.FS(os.DirFS(dir), "config"), manifest.WithSetChecks(false))
+			set, err := reg.Load(t.Context(), manifest.FS(os.DirFS(dir), "config", tc.opts...),
+				manifest.WithSetChecks(false))
 			if tc.err != "" {
 				require.Error(t, err)
 

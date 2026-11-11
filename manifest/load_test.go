@@ -1477,6 +1477,10 @@ func TestRegistry_Check_Fails(t *testing.T) {
 			in:  configFS(files, manifest.WithExclude("[")),
 			err: matcher.ErrInvalidPattern,
 		},
+		"include pattern for a dot entry without WithHidden": {
+			in:  configFS(files, manifest.WithInclude(".cafe.yaml")),
+			err: matcher.ErrInvalidPattern,
+		},
 		"input path that does not exist": {
 			in:  manifest.Path(filepath.Join(t.TempDir(), "confg")),
 			err: fs.ErrNotExist,
