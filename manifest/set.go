@@ -362,16 +362,25 @@ func (l *loader) missingDetails(entry *kindEntry) []error {
 	reg := l.reg
 	written := entry.written
 
+	vField, kField := fieldName(reg.cfg.versionField), fieldName(reg.cfg.kindField)
+
 	var add error
 
+	// A document of the unversioned layout leaves out the version field.
+	// The hint asks for the kind field too, unless a load picks the kind
+	// without it. In a registry whose messages do not name the version
+	// field, the hint asks for the kind field alone.
 	switch {
-	case written.cfg.unversioned:
+	case written.cfg.unversioned && reg.versioned && reg.adopts(entry):
 		add = fmt.Errorf("add %s document without %s", article(entry.kind.name), reg.typeFieldsText())
+	case written.cfg.unversioned && reg.versioned:
+		add = fmt.Errorf("add a document with %s: %s and without %s", kField, written.kindName, vField)
+	case written.cfg.unversioned:
+		add = fmt.Errorf("add a document with %s: %s", kField, written.kindName)
 	case reg.cfg.versionOnly:
-		add = fmt.Errorf("add a document with %s: %s", fieldName(reg.cfg.versionField), written.cfg.name)
+		add = fmt.Errorf("add a document with %s: %s", vField, written.cfg.name)
 	default:
-		add = fmt.Errorf("add a document with %s: %s and %s: %s", fieldName(reg.cfg.versionField),
-			written.cfg.name, fieldName(reg.cfg.kindField), written.kindName)
+		add = fmt.Errorf("add a document with %s: %s and %s: %s", vField, written.cfg.name, kField, written.kindName)
 	}
 
 	details := []error{add}

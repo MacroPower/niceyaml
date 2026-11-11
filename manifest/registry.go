@@ -37,10 +37,20 @@ type Registry struct {
 	// What the schema of each version says about the type fields, keyed by
 	// the version, as [Registry.schemaFields] returns it. Each entry is a
 	// [schemaFields] value that names the validator it reads.
-	fields  sync.Map
-	kinds   []*kindEntry
+	fields sync.Map
+	kinds  []*kindEntry
+	// The kinds that can take a document without type fields. Each one
+	// does not carry a [Claim], and it reads the unversioned layout or
+	// [WithRemoved] names that layout. A load picks the kind of such a
+	// document only when the list holds one kind. Otherwise the document
+	// fails, as [docState.adopt] describes.
+	plain   []*kindEntry
 	removed []*removal
 	cfg     registryConfig
+	// Whether the messages of a load name the version field. They do
+	// under [WithVersionOnly], when a kind lists a version that [Version]
+	// names, and in a registry without kinds.
+	versioned bool
 }
 
 // kindEntry is a [Kind] as a registry reads it.
@@ -236,7 +246,16 @@ func WithIgnore(m matcher.Matcher) RegistryOption {
 // the app has removed. A document that declares the version thus fails
 // with details rather than with "unknown version". The kind is the name
 // that the documents of the version write. An empty version names the
-// unversioned layout of the kind.
+// unversioned layout of the kind, which a document without a version field
+// declares. The error about that layout sits at the kind field of a
+// document that writes the field.
+//
+// The registry does not need to hold the kind. A document that names a
+// kind that the app has removed, with a version that WithRemoved names for
+// that kind, fails with the details rather than with "unknown kind". When
+// the registry holds kinds and none of them lists a [Version], an empty
+// version retires a kind of a format without versions. The error then
+// reads `removed kind "legacy"`.
 func WithRemoved(version, kind string, details ...string) RegistryOption {
 	return func(c *registryConfig) {
 		c.removed = append(c.removed, &removal{version: version, kind: kind, details: details})
@@ -497,7 +516,7 @@ func (b *registryBuilder) addVersions(entry *kindEntry) {
 
 		case !vc.unversioned && vc.name == "":
 			b.failf("kind %s: manifest.Version needs a name, "+
-				"and manifest.Unversioned reads documents without type fields", k.name)
+				"and manifest.Unversioned reads documents without a version field", k.name)
 		}
 
 		if vc.hasKindName {
@@ -526,15 +545,8 @@ func (b *registryBuilder) addVersions(entry *kindEntry) {
 			b.failf("kind %s: %s has a schema.Ref that names no schema", k.name, label)
 		}
 
-		if vc.hasTypeFields {
-			switch {
-			case vc.unversioned:
-				b.failf("kind %s: the unversioned layout takes no manifest.SchemaTypeFields, "+
-					"because its documents do not hold type fields", k.name)
-
-			case !vc.hasSchema:
-				b.failf("kind %s: %s takes no manifest.SchemaTypeFields without manifest.Schema", k.name, label)
-			}
+		if vc.hasTypeFields && !vc.hasSchema {
+			b.failf("kind %s: %s takes no manifest.SchemaTypeFields without manifest.Schema", k.name, label)
 		}
 
 		if _, ok := entry.byName[vc.name]; ok && !vc.unversioned {
@@ -669,12 +681,14 @@ func (b *registryBuilder) tieUnversionedRemoval(entry *kindEntry, rm *removal) {
 	}
 }
 
-// checkKinds checks the rules that span the versions of a kind, and the
-// kinds that read documents without type fields.
+// checkKinds checks the rules that span the versions of a kind. It also
+// records the kinds that can take a document without type fields, and
+// whether the messages of a load name the version field.
 func (b *registryBuilder) checkKinds() {
-	var plain []string
+	r := b.r
+	r.versioned = r.cfg.versionOnly || len(r.kinds) == 0
 
-	for _, entry := range b.r.kinds {
+	for _, entry := range r.kinds {
 		b.checkWritten(entry)
 		b.checkLoosened(entry)
 		b.checkDeprecations(entry)
@@ -684,13 +698,12 @@ func (b *registryBuilder) checkKinds() {
 			len(entry.versions) > 0 && entry.versions[0].cfg.unversioned
 
 		if reads && len(entry.kind.cfg.claims) == 0 {
-			plain = append(plain, entry.kind.name)
+			r.plain = append(r.plain, entry)
 		}
-	}
 
-	if len(plain) > 1 {
-		b.failf("kinds %s read documents without type fields, which cannot pick between them; give each but one "+
-			"manifest.Claim", joinAnd(plain))
+		if len(entry.byName) > 0 {
+			r.versioned = true
+		}
 	}
 }
 

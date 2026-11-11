@@ -673,7 +673,8 @@ type route struct {
 	// version.
 	counted *kindEntry
 	// The details on the first error of a document that the load reads as
-	// a kind that it does not name.
+	// a kind that it does not name, or as the unversioned layout of the
+	// kind that it names.
 	adoption []error
 	// The text of the kind field, or "" when the document does not have
 	// one.
@@ -737,21 +738,35 @@ func (r *Registry) findRemoval(version, name string) *removal {
 }
 
 // removedProblem returns the problem of a document that declares the
-// version that rm removed.
-func (r *Registry) removedProblem(doc *niceyaml.Node, rm *removal, hint bool) error {
+// version that rm removed. The parameter wroteKind reports whether the
+// document writes the kind field. A removal of an unversioned layout binds
+// the problem at that field, which names the kind of the removal. In a
+// registry whose messages do not name the version field, such a removal
+// retires the kind, so the problem names the kind alone.
+func (r *Registry) removedProblem(doc *niceyaml.Node, rm *removal, wroteKind, hint bool) error {
 	details := detailsOf(rm.details)
 
 	if hint && r.cfg.migrateHint != "" {
 		details = append(details, errors.New(r.cfg.migrateHint))
 	}
 
-	if rm.version == "" {
+	switch {
+	case rm.version != "":
+		return newProblem(ErrRemovedVersion, fmt.Sprintf("removed version %q of %s", rm.version, rm.kind),
+			niceyaml.AtPath(r.cfg.versionField), niceyaml.WithDetails(details...))
+
+	case !wroteKind:
 		return newProblem(ErrRemovedVersion, "removed unversioned layout of "+rm.kind,
 			startOf(doc), niceyaml.WithDetails(details...))
-	}
 
-	return newProblem(ErrRemovedVersion, fmt.Sprintf("removed version %q of %s", rm.version, rm.kind),
-		niceyaml.AtPath(r.cfg.versionField), niceyaml.WithDetails(details...))
+	case !r.versioned:
+		return newProblem(ErrRemovedVersion, fmt.Sprintf("removed kind %q", rm.kind),
+			niceyaml.AtPath(r.cfg.kindField), niceyaml.WithDetails(details...))
+
+	default:
+		return newProblem(ErrRemovedVersion, "removed unversioned layout of "+rm.kind,
+			niceyaml.AtPath(r.cfg.kindField), niceyaml.WithDetails(details...))
+	}
 }
 
 // unknownKind returns the problem of a document whose kind field does not
@@ -849,10 +864,14 @@ func (r *Registry) unknownVersion(entry *kindEntry, version, wrote string) error
 		}
 	}
 
-	details := []error{
-		fmt.Errorf("%s reads %s", r.app(), joinAnd(reads)),
-		r.newerRelease("this version"),
+	// A kind that lists the unversioned layout alone reads its documents
+	// without a version field.
+	supported := fmt.Errorf("%s reads %s", r.app(), joinAnd(reads))
+	if len(reads) == 0 {
+		supported = fmt.Errorf("%s reads %s without %s", r.app(), entry.kind.name, fieldName(r.cfg.versionField))
 	}
+
+	details := []error{supported, r.newerRelease("this version")}
 
 	details = append(details, r.oldName(entry, wrote)...)
 
@@ -922,7 +941,8 @@ func gives(entry *kindEntry, name string) *versionEntry {
 
 // missingTypeFields returns the problem of a document that lacks a type
 // field. The flags version and kind report whether the document holds
-// each field.
+// each field. The problem of a document without type fields names the
+// version field only in a registry whose messages name it.
 func (r *Registry) missingTypeFields(doc *niceyaml.Node, version, kind bool, details []error) error {
 	vName, kName := fieldName(r.cfg.versionField), fieldName(r.cfg.kindField)
 
@@ -931,7 +951,7 @@ func (r *Registry) missingTypeFields(doc *niceyaml.Node, version, kind bool, det
 	switch {
 	case r.cfg.versionOnly || kind:
 		msg = "missing " + vName
-	case version:
+	case version || !r.versioned:
 		msg = "missing " + kName
 	default:
 		msg = "missing " + vName + " and " + kName
@@ -940,12 +960,53 @@ func (r *Registry) missingTypeFields(doc *niceyaml.Node, version, kind bool, det
 	return newProblem(ErrMissingTypeField, msg, startOf(doc), niceyaml.WithDetails(details...))
 }
 
-// typeFieldsText returns the type fields that the registry reads, as a
-// detail names them: "apiVersion and kind", or "version".
-func (r *Registry) typeFieldsText() string {
-	if r.cfg.versionOnly {
-		return fieldName(r.cfg.versionField)
+// plainNames returns the names of the kinds that can take a document
+// without type fields and whose unversioned layout reads documents. Each
+// one lists that layout, and [WithRemoved] does not name it. A document
+// that names one of them in the kind field, without a version field,
+// routes to that layout.
+func (r *Registry) plainNames() []string {
+	var names []string
+
+	for _, e := range r.plain {
+		if first := e.versions[0]; first.cfg.unversioned && first.removal == nil {
+			names = append(names, e.kind.name)
+		}
 	}
 
-	return fieldName(r.cfg.versionField) + " and " + fieldName(r.cfg.kindField)
+	return names
+}
+
+// missingKind returns the problem of a document without type fields in a
+// registry where several kinds can take such a document. Its first detail
+// lists names, the kinds that [Registry.plainNames] returns, and details
+// follow it.
+func (r *Registry) missingKind(doc *niceyaml.Node, names []string, details []error) error {
+	kName := fieldName(r.cfg.kindField)
+
+	details = append([]error{fmt.Errorf("set %s to %s", kName, joinList(names, "or"))}, details...)
+
+	return newProblem(ErrMissingTypeField, "missing "+kName, startOf(doc), niceyaml.WithDetails(details...))
+}
+
+// adopts reports whether a load can read a document without type fields
+// as the kind of entry. It can when the kind carries a [Claim], and when
+// the kind is the one kind that takes such a document without a claim.
+func (r *Registry) adopts(entry *kindEntry) bool {
+	return len(entry.kind.cfg.claims) > 0 || len(r.plain) == 1 && r.plain[0] == entry
+}
+
+// typeFieldsText returns the type fields that the messages of the registry
+// name, as a detail names them. The text is "apiVersion and kind", or
+// "version" under [WithVersionOnly]. It is "kind" when the messages of the
+// registry do not name the version field.
+func (r *Registry) typeFieldsText() string {
+	switch {
+	case r.cfg.versionOnly:
+		return fieldName(r.cfg.versionField)
+	case !r.versioned:
+		return fieldName(r.cfg.kindField)
+	default:
+		return fieldName(r.cfg.versionField) + " and " + fieldName(r.cfg.kindField)
+	}
 }

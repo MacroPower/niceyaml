@@ -308,8 +308,13 @@ func TestNewRegistry(t *testing.T) {
 				manifest.Unversioned(manifest.Schema(schema.Embedded([]byte(`{}`))), manifest.SchemaTypeFields(false)),
 				v1,
 			)),
-			err: "kind Cafe: the unversioned layout takes no manifest.SchemaTypeFields, " +
-				"because its documents do not hold type fields",
+		},
+		"schema type fields on the unversioned layout without a schema": {
+			opts: withKinds(manifest.NewKind[Cafe]("Cafe",
+				manifest.Unversioned(manifest.SchemaTypeFields(true)),
+				v1,
+			)),
+			err: "kind Cafe: the unversioned layout takes no manifest.SchemaTypeFields without manifest.Schema",
 		},
 		"schema type fields beside a schema": {
 			opts: withKinds(manifest.NewKind[Cafe](
@@ -447,11 +452,11 @@ func TestNewRegistry(t *testing.T) {
 			err:  "kind Cafe: manifest.Claim got a nil matcher",
 		},
 		"two unversioned kinds without a claim": {
+			// The kind field picks between them.
 			opts: withKinds(
 				manifest.NewKind[Cafe]("Cafe", manifest.Unversioned(), v1),
 				manifest.NewKind[Hours]("Hours", manifest.Unversioned(), v1),
 			),
-			err: "kinds Cafe and Hours read documents without type fields",
 		},
 		"unversioned removal beside an unversioned kind": {
 			opts: []manifest.RegistryOption{
@@ -461,7 +466,12 @@ func TestNewRegistry(t *testing.T) {
 					manifest.NewKind[Hours]("Hours", v1),
 				),
 			},
-			err: "kinds Cafe and Hours read documents without type fields",
+		},
+		"kinds without a named version": {
+			opts: withKinds(
+				manifest.NewKind[Cafe]("Cafe", manifest.Unversioned()),
+				manifest.NewKind[Hours]("Hours", manifest.Unversioned()),
+			),
 		},
 		"embedded struct without an inline option": {
 			opts: withKinds(manifest.NewKind[badEmbed]("Item", v1)),

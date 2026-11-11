@@ -1138,10 +1138,30 @@ func TestRegistry_Load_Inputs(t *testing.T) {
 	cafePath := yamltest.WriteFile(t, t.TempDir(), "config/cafe.yaml", cafeDoc)
 
 	tcs := map[string]struct {
+		// The options of the registry, in place of [cafeOptions].
+		opts []manifest.RegistryOption
 		in   manifest.Input
 		want []string
 		err  string
 	}{
+		"source without type fields that several unversioned kinds can take": {
+			// A source is not a file of a directory, so the error does not
+			// ask the user to move the file.
+			opts: withKinds(
+				manifest.NewKind[CafeSpec]("Cafe", manifest.Unversioned(), manifest.Version("cafe.jacobcolvin.com/v1")),
+				manifest.NewKind[HoursSpec](
+					"Hours",
+					manifest.Unversioned(),
+					manifest.Version("cafe.jacobcolvin.com/v1"),
+				),
+			),
+			in: manifest.Sources(niceyaml.NewSourceFromString("seats: 12\n", niceyaml.WithName("notes.yaml"))),
+			err: stringtest.LinesLF(
+				"notes.yaml:1:1: missing kind",
+				"`-- set kind to Cafe or Hours",
+				"",
+			),
+		},
 		"sources": {
 			in: manifest.Sources(cafe, hours),
 			want: []string{
@@ -1196,6 +1216,11 @@ func TestRegistry_Load_Inputs(t *testing.T) {
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
+
+			reg := reg
+			if tc.opts != nil {
+				reg = manifest.MustNewRegistry(tc.opts...)
+			}
 
 			set, err := reg.Load(t.Context(), tc.in)
 			if tc.err != "" {
@@ -1644,6 +1669,22 @@ func TestRegistry_Load_Unversioned(t *testing.T) {
 				manifest.Unversioned(),
 				manifest.Version("cafe.jacobcolvin.com/v1"),
 			)...)),
+		}
+	}
+
+	// A registry whose kinds Cafe and Hours both read the unversioned
+	// layout without a claim.
+	twoPlain := func() []manifest.RegistryOption {
+		return []manifest.RegistryOption{
+			manifest.WithAppName("cafe"),
+			manifest.WithKinds(
+				manifest.NewKind[CafeSpec]("Cafe", manifest.Unversioned(), manifest.Version("cafe.jacobcolvin.com/v1")),
+				manifest.NewKind[HoursSpec](
+					"Hours",
+					manifest.Unversioned(),
+					manifest.Version("cafe.jacobcolvin.com/v1"),
+				),
+			),
 		}
 	}
 
@@ -2105,6 +2146,22 @@ func TestRegistry_Load_Unversioned(t *testing.T) {
 			},
 			want: []string{`Cafe "" cafe.jacobcolvin.com/v1 up-to-date=true`},
 		},
+		"error of a claimed document with a version": {
+			// The document declares its version, so the detail names the
+			// kind field alone.
+			opts: opts(manifest.Claim(matcher.Exists(paths.Doc().Child("seats")))),
+			files: map[string]string{
+				"cafe.yaml": stringtest.LinesLF("apiVersion: cafe.jacobcolvin.com/v1", "seats: many"),
+			},
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:2:8: $.seats: expected integer, got string",
+				"`-- the document has no kind, so cafe reads it as a Cafe",
+				"",
+				"   1 | apiVersion: cafe.jacobcolvin.com/v1",
+				"   2 | seats: many",
+				"     |        ^^^^",
+			),
+		},
 		"documents that several claims accept": {
 			opts: withKinds(
 				manifest.NewKind[CafeSpec]("Cafe",
@@ -2129,6 +2186,246 @@ func TestRegistry_Load_Unversioned(t *testing.T) {
 				`Cafe "" unversioned up-to-date=false`,
 				`Hours "" unversioned up-to-date=false`,
 			},
+		},
+		"kind without a version": {
+			opts:  opts(),
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF("kind: Cafe", "seats: 40")},
+			want:  []string{`Cafe "" unversioned up-to-date=false`},
+		},
+		"error of a kind without a version": {
+			// The document might have lost its version field by mistake, so
+			// its first error says how the load read it.
+			opts:  opts(),
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF("kind: Cafe", "seats: many", "chairs: 4")},
+			err: stringtest.JoinLF(
+				"config: 2 errors",
+				"|-- config/cafe.yaml:2:8: $.seats: expected integer, got string",
+				"|   `-- the document has no apiVersion, so cafe reads it as an unversioned Cafe",
+				"`-- config/cafe.yaml:3:1: $.chairs~: unknown field \"chairs\"",
+				"",
+				"config/cafe.yaml",
+				"   1 | kind: Cafe",
+				"   2 | seats: many",
+				"     |        ^^^^ expected integer, got string",
+				"   3 | chairs: 4",
+				"     | ^^^^^^ unknown field \"chairs\"",
+			),
+		},
+		"kind without a version that its kind needs": {
+			opts: withKinds(
+				manifest.NewKind[CafeSpec]("Cafe", manifest.Unversioned(), manifest.Version("cafe.jacobcolvin.com/v1")),
+				manifest.NewKind[HoursSpec]("Hours", manifest.Version("cafe.jacobcolvin.com/v1")),
+			),
+			files: map[string]string{"hours.yaml": stringtest.LinesLF("kind: Hours", `open: "07:00"`)},
+			err: stringtest.JoinLF(
+				"config/hours.yaml:1:1: missing apiVersion",
+				"",
+				"   1 | kind: Hours",
+				"     | ^^^^",
+				"   2 | open: \"07:00\"",
+			),
+			matches: []error{manifest.ErrMissingTypeField},
+		},
+		"old kind name without a version": {
+			opts: []manifest.RegistryOption{
+				manifest.WithAppName("cafe"),
+				manifest.WithKinds(manifest.NewKind[CafeSpec]("Cafe",
+					manifest.Unversioned(),
+					manifest.Version("cafe.jacobcolvin.com/v1beta1", manifest.KindName("Bistro")),
+					manifest.Version("cafe.jacobcolvin.com/v1"),
+				)),
+			},
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF("kind: Bistro", "seats: 40")},
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:1:7: $.kind: the unversioned layout of Cafe has no kind \"Bistro\"",
+				"|-- the unversioned layout of Cafe calls it \"Cafe\"",
+				"`-- set kind to \"Cafe\", or set apiVersion to cafe.jacobcolvin.com/v1beta1, which calls it \"Bistro\"",
+				"",
+				"   1 | kind: Bistro",
+				"     |       ^^^^^^",
+				"   2 | seats: 40",
+			),
+			matches: []error{manifest.ErrKindMismatch},
+		},
+		"old kind name without a version that its kind needs": {
+			// The kind does not list the unversioned layout, so the
+			// document does not declare a layout with another kind name.
+			opts: []manifest.RegistryOption{
+				manifest.WithAppName("cafe"),
+				manifest.WithKinds(manifest.NewKind[CafeSpec]("Cafe",
+					manifest.Version("cafe.jacobcolvin.com/v1beta1", manifest.KindName("Bistro")),
+					manifest.Version("cafe.jacobcolvin.com/v1"),
+				)),
+			},
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF("kind: Bistro", "seats: 40")},
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:1:1: missing apiVersion",
+				"",
+				"   1 | kind: Bistro",
+				"     | ^^^^",
+				"   2 | seats: 40",
+			),
+			matches: []error{manifest.ErrMissingTypeField},
+		},
+		"several unversioned kinds without a claim": {
+			opts: twoPlain(),
+			files: map[string]string{
+				"cafe.yaml":  stringtest.LinesLF("kind: Cafe", "seats: 40"),
+				"hours.yaml": stringtest.LinesLF("kind: Hours", `open: "07:00"`),
+			},
+			want: []string{`Cafe "" unversioned up-to-date=false`, `Hours "" unversioned up-to-date=false`},
+		},
+		"plain document that several unversioned kinds can take": {
+			opts: twoPlain(),
+			files: map[string]string{
+				"cafe.yaml":  stringtest.LinesLF("kind: Cafe", "seats: 40"),
+				"notes.yaml": "seats: 12\n",
+			},
+			err: stringtest.JoinLF(
+				"config/notes.yaml:1:1: missing kind",
+				"|-- set kind to Cafe or Hours",
+				"`-- move the file out of config if it is not one of them",
+				"",
+				"   1 | seats: 12",
+				"     | ^^^^^",
+			),
+			matches: []error{manifest.ErrMissingTypeField},
+		},
+		"plain document beside a removed unversioned layout": {
+			// The load cannot pick between Cafe and the removed layout of
+			// Hours. The hint leaves Hours out, because a document that
+			// names Hours without a version fails as a removed version.
+			opts: []manifest.RegistryOption{
+				manifest.WithRemoved("", "Hours"),
+				manifest.WithKinds(
+					manifest.NewKind[CafeSpec](
+						"Cafe",
+						manifest.Unversioned(),
+						manifest.Version("cafe.jacobcolvin.com/v1"),
+					),
+					manifest.NewKind[HoursSpec]("Hours", manifest.Version("cafe.jacobcolvin.com/v1")),
+				),
+			},
+			files: map[string]string{"notes.yaml": "seats: 12\n"},
+			err: stringtest.JoinLF(
+				"config/notes.yaml:1:1: missing kind",
+				"|-- set kind to Cafe",
+				"`-- move the file out of config if it is not a Cafe",
+				"",
+				"   1 | seats: 12",
+				"     | ^^^^^",
+			),
+			matches: []error{manifest.ErrMissingTypeField},
+		},
+		"plain document beside a removed unversioned layout that its kind lists": {
+			opts: []manifest.RegistryOption{
+				manifest.WithRemoved("", "Hours"),
+				manifest.WithKinds(
+					manifest.NewKind[CafeSpec](
+						"Cafe",
+						manifest.Unversioned(),
+						manifest.Version("cafe.jacobcolvin.com/v1"),
+					),
+					manifest.NewKind[HoursSpec](
+						"Hours",
+						manifest.Unversioned(),
+						manifest.Version("cafe.jacobcolvin.com/v1"),
+					),
+				),
+			},
+			files: map[string]string{"notes.yaml": "seats: 12\n"},
+			err: stringtest.JoinLF(
+				"config/notes.yaml:1:1: missing kind",
+				"|-- set kind to Cafe",
+				"`-- move the file out of config if it is not a Cafe",
+				"",
+				"   1 | seats: 12",
+				"     | ^^^^^",
+			),
+			matches: []error{manifest.ErrMissingTypeField},
+		},
+		"plain document beside removed unversioned layouts alone": {
+			// No kind reads a document without a version field, so the
+			// hint asks for both type fields.
+			opts: []manifest.RegistryOption{
+				manifest.WithRemoved("", "Cafe"),
+				manifest.WithRemoved("", "Hours"),
+				manifest.WithKinds(
+					manifest.NewKind[CafeSpec]("Cafe", manifest.Version("cafe.jacobcolvin.com/v1")),
+					manifest.NewKind[HoursSpec]("Hours", manifest.Version("cafe.jacobcolvin.com/v1")),
+				),
+			},
+			files: map[string]string{"notes.yaml": "seats: 12\n"},
+			err: stringtest.JoinLF(
+				"config/notes.yaml:1:1: missing apiVersion and kind",
+				"`-- add apiVersion and kind, or move the file out of config",
+				"",
+				"   1 | seats: 12",
+				"     | ^^^^^",
+			),
+			matches: []error{manifest.ErrMissingTypeField},
+		},
+		"plain document in a registry without kinds": {
+			opts:  []manifest.RegistryOption{manifest.WithAppName("cafe")},
+			files: map[string]string{"notes.yaml": "seats: 12\n"},
+			err: stringtest.JoinLF(
+				"config/notes.yaml:1:1: missing apiVersion and kind",
+				"`-- add apiVersion and kind, or move the file out of config",
+				"",
+				"   1 | seats: 12",
+				"     | ^^^^^",
+			),
+			matches: []error{manifest.ErrMissingTypeField},
+		},
+		"kind of a removed unversioned layout": {
+			opts: []manifest.RegistryOption{
+				manifest.WithRemoved("", "Cafe", "cafe 7.0 reads only files with apiVersion and kind"),
+				manifest.WithKinds(manifest.NewKind[CafeSpec]("Cafe", manifest.Version("cafe.jacobcolvin.com/v1"))),
+			},
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF("seats: 40", "kind: Cafe")},
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:2:7: $.kind: removed unversioned layout of Cafe",
+				"`-- cafe 7.0 reads only files with apiVersion and kind",
+				"",
+				"   1 | seats: 40",
+				"   2 | kind: Cafe",
+				"     |       ^^^^",
+			),
+			matches: []error{manifest.ErrRemovedVersion},
+		},
+		"kind of a removed unversioned layout that the registry does not hold": {
+			// The removal is of the layout that the document declares, so the
+			// document does not fail as an unknown kind.
+			opts:  append(opts(), manifest.WithRemoved("", "Bistro", "cafe 7.0 removed Bistro, write a Cafe")),
+			files: map[string]string{"bistro.yaml": stringtest.LinesLF("kind: Bistro", "seats: 40")},
+			err: stringtest.JoinLF(
+				"config/bistro.yaml:1:7: $.kind: removed unversioned layout of Bistro",
+				"`-- cafe 7.0 removed Bistro, write a Cafe",
+				"",
+				"   1 | kind: Bistro",
+				"     |       ^^^^^^",
+				"   2 | seats: 40",
+			),
+			matches: []error{manifest.ErrRemovedVersion},
+		},
+		"version of a kind that the registry does not hold, beside its removed unversioned layout": {
+			// The removal does not name the version that the document
+			// declares.
+			opts: append(opts(), manifest.WithRemoved("", "Bistro", "cafe 7.0 removed Bistro, write a Cafe")),
+			files: map[string]string{"bistro.yaml": stringtest.LinesLF(
+				"apiVersion: cafe.jacobcolvin.com/v1", "kind: Bistro", "seats: 40",
+			)},
+			err: stringtest.JoinLF(
+				`config/bistro.yaml:2:7: $.kind: unknown kind "Bistro"`,
+				"|-- cafe reads Cafe",
+				"`-- a newer release of cafe might read this kind",
+				"",
+				"   1 | apiVersion: cafe.jacobcolvin.com/v1",
+				"   2 | kind: Bistro",
+				"     |       ^^^^^^",
+				"   3 | seats: 40",
+			),
+			matches: []error{manifest.ErrUnknownKind},
 		},
 		"removed unversioned layout": {
 			opts: []manifest.RegistryOption{
@@ -2159,6 +2456,405 @@ func TestRegistry_Load_Unversioned(t *testing.T) {
 				"",
 				"   1 | version: 3",
 				"     |          ^",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tc.run(t)
+		})
+	}
+}
+
+// stageSource, stageTransform, and stageSink are the Go types of a format
+// that names each kind in a type field and does not version its kinds.
+// They do not declare the type field.
+type stageSource struct {
+	ID    string `json:"id"`
+	Topic string `json:"topic,omitzero"`
+}
+
+type stageTransform struct {
+	ID   string `json:"id"`
+	Expr string `json:"expr,omitzero"`
+}
+
+type stageSink struct {
+	ID  string `json:"id"`
+	URL string `json:"url,omitzero"`
+}
+
+func TestRegistry_Load_KindOnly(t *testing.T) {
+	t.Parallel()
+
+	typ := paths.Doc().Child("type")
+	// A closed schema that leaves the type field out.
+	sinkSchema := schema.Embedded([]byte(
+		`{"additionalProperties": false, "properties": {"id": {"type": "string"}, "url": {"type": "string"}}}`,
+	))
+
+	// The options of a registry whose kinds list the unversioned layout
+	// alone. The sink takes sink as its options.
+	opts := func(sink ...manifest.KindOption) []manifest.RegistryOption {
+		return []manifest.RegistryOption{
+			manifest.WithAppName("pipectl"),
+			manifest.WithKindField(typ),
+			manifest.WithNameField(paths.Doc().Child("id")),
+			manifest.WithKinds(
+				manifest.NewKind[stageSource]("source", manifest.Unversioned()),
+				manifest.NewKind[stageTransform]("transform", manifest.Unversioned()),
+				manifest.NewKind[stageSink]("sink", append(sink, manifest.Unversioned(manifest.Schema(sinkSchema)))...),
+			),
+		}
+	}
+
+	// The options of a registry that holds the sink alone.
+	sinkOnly := []manifest.RegistryOption{
+		manifest.WithAppName("pipectl"),
+		manifest.WithKindField(typ),
+		manifest.WithKinds(manifest.NewKind[stageSink]("sink", manifest.Unversioned(manifest.Schema(sinkSchema)))),
+	}
+
+	// A schema that reads the type field only inside a branch, and the
+	// options of a registry whose sink takes it with the options layout.
+	branchSchema := manifest.Schema(schema.Embedded([]byte(`{
+  "properties": {"id": {"type": "string"}},
+  "if": {"properties": {"type": {"const": "sink"}}, "required": ["type"]},
+  "then": {"required": ["url"]}
+}`)))
+	branch := func(layout ...manifest.VersionOption) []manifest.RegistryOption {
+		return []manifest.RegistryOption{
+			manifest.WithAppName("pipectl"),
+			manifest.WithKindField(typ),
+			manifest.WithNameField(paths.Doc().Child("id")),
+			manifest.WithKinds(manifest.NewKind[stageSink]("sink",
+				manifest.Unversioned(append([]manifest.VersionOption{branchSchema}, layout...)...))),
+		}
+	}
+
+	source := stringtest.LinesLF("type: source", "id: in", "topic: events")
+
+	// The options of a registry whose sink gained a version, beside a
+	// source that lists the unversioned layout alone.
+	grown := []manifest.RegistryOption{
+		manifest.WithAppName("pipectl"),
+		manifest.WithKindField(typ),
+		manifest.WithVersionField(paths.Doc().Child("v")),
+		manifest.WithNameField(paths.Doc().Child("id")),
+		manifest.WithKinds(
+			manifest.NewKind[stageSource]("source", manifest.Unversioned()),
+			manifest.NewKind[stageSink]("sink",
+				manifest.Unversioned(),
+				manifest.Version("2", manifest.Migrate(paths.Doc().Child("endpoint"),
+					func(_ context.Context, n *edit.Node) error { return n.SetKey("url") })),
+			),
+		),
+	}
+
+	tcs := map[string]loadCase{
+		"schema that reads the kind field inside a branch": {
+			// The load cannot tell whether the check sees the type field
+			// that the document writes.
+			opts:  branch(),
+			files: map[string]string{"pipe.yaml": stringtest.LinesLF("type: sink", "id: out")},
+			err: stringtest.JoinLF(
+				"config/pipe.yaml: pipectl cannot tell whether its schema of the unversioned layout of sink reads $.type",
+				"|-- a branch or a $ref to another document might read it",
+				"`-- declare $.type under properties outside every branch and every such $ref, "+
+					"or pass manifest.SchemaTypeFields",
+			),
+			matches: []error{manifest.ErrSchemaTypeField},
+		},
+		"schema that reads the kind field inside a branch and a document without one": {
+			// The check sees the same lines whether or not the schema reads
+			// the type field.
+			opts:  branch(),
+			files: map[string]string{"sink.yaml": "id: out\n"},
+			want:  []string{`sink "out" unversioned up-to-date=true`},
+		},
+		"branch that sees the kind field": {
+			opts: branch(manifest.SchemaTypeFields(true)),
+			files: map[string]string{
+				"pipe.yaml": stringtest.LinesLF("type: sink", "id: out", "url: https://jacobcolvin.com"),
+			},
+			want: []string{`sink "out" unversioned up-to-date=true`},
+		},
+		"branch that sees the kind field and fails": {
+			opts:  branch(manifest.SchemaTypeFields(true)),
+			files: map[string]string{"pipe.yaml": stringtest.LinesLF("type: sink", "id: out")},
+			err: stringtest.JoinLF(
+				`config/pipe.yaml:1:1: $.url: missing required property "url"`,
+				"",
+				"   1 | type: sink",
+				"     | ^^^^",
+				"   2 | id: out",
+			),
+			notMatches: []error{manifest.ErrSchemaTypeField},
+		},
+		"branch that sees the kind field blank": {
+			// The condition does not hold without the type field.
+			opts:  branch(manifest.SchemaTypeFields(false)),
+			files: map[string]string{"pipe.yaml": stringtest.LinesLF("type: sink", "id: out")},
+			want:  []string{`sink "out" unversioned up-to-date=true`},
+		},
+		"documents of each kind": {
+			opts: opts(),
+			files: map[string]string{"pipe.yaml": stringtest.LinesLF(
+				"type: source", "id: in", "topic: events",
+				"---",
+				"type: transform", "id: t", "expr: a+b",
+				"---",
+				"type: sink", "id: out", "url: https://jacobcolvin.com",
+			)},
+			want: []string{
+				`source "in" unversioned up-to-date=true`,
+				`transform "t" unversioned up-to-date=true`,
+				`sink "out" unversioned up-to-date=true`,
+			},
+		},
+		"schema that requires the kind field": {
+			opts: []manifest.RegistryOption{
+				manifest.WithKindField(typ),
+				manifest.WithKinds(manifest.NewKind[stageSink]("sink", manifest.Unversioned(manifest.Schema(
+					schema.Embedded([]byte(`{"required": ["type"], "properties": {"type": {"const": "sink"}}}`)),
+				)))),
+			},
+			files: map[string]string{
+				"a.yaml": stringtest.LinesLF("type: sink", "id: out"),
+				"b.yaml": "id: plain\n",
+			},
+			err: stringtest.JoinLF(
+				`config/b.yaml:1:1: $.type: missing required property "type"`,
+				"|-- the document has no type, so this program reads it as a sink",
+				"`-- move the file out of config if it is not a sink",
+				"",
+				"   1 | id: plain",
+				"     | ^^",
+			),
+		},
+		"schema error": {
+			// The registry does not list a version, so the error does not
+			// say that the document lacks one.
+			opts: opts(),
+			files: map[string]string{
+				"pipe.yaml": stringtest.LinesLF("type: sink", "id: out", "url: 8080"),
+			},
+			err: stringtest.JoinLF(
+				`config/pipe.yaml:3:6: $.url: expected "string", got "integer"`,
+				"",
+				"   1 | type: sink",
+				"   2 | id: out",
+				"   3 | url: 8080",
+				"     |      ^^^^",
+			),
+		},
+		"misspelled kind": {
+			opts:  opts(),
+			files: map[string]string{"pipe.yaml": stringtest.LinesLF("type: sinkk", "id: out")},
+			err: stringtest.JoinLF(
+				`config/pipe.yaml:1:7: $.type: unknown kind "sinkk"`,
+				"`-- did you mean \"sink\"?",
+				"",
+				"   1 | type: sinkk",
+				"     |       ^^^^^",
+				"   2 | id: out",
+			),
+			matches: []error{manifest.ErrUnknownKind},
+		},
+		"document without a kind": {
+			opts:  opts(),
+			files: map[string]string{"in.yaml": source, "notes.yaml": "id: nokind\n"},
+			err: stringtest.JoinLF(
+				"config/notes.yaml:1:1: missing type",
+				"|-- set type to source, transform, or sink",
+				"`-- move the file out of config if it is not one of them",
+				"",
+				"   1 | id: nokind",
+				"     | ^^",
+			),
+			matches: []error{manifest.ErrMissingTypeField},
+		},
+		"document without a kind beside a document with one": {
+			opts: opts(),
+			files: map[string]string{
+				"pipe.yaml": stringtest.LinesLF("type: source", "id: in", "---", "id: nokind"),
+			},
+			err: stringtest.JoinLF(
+				"config/pipe.yaml:4:1: missing type",
+				"`-- set type to source, transform, or sink",
+				"",
+				"   2 | id: in",
+				"   3 | ---",
+				"   4 | id: nokind",
+				"     | ^^",
+			),
+			matches: []error{manifest.ErrMissingTypeField},
+		},
+		"document without a kind in a registry of one kind": {
+			opts:  sinkOnly,
+			files: map[string]string{"sink.yaml": stringtest.LinesLF("id: out", "url: 8080")},
+			err: stringtest.JoinLF(
+				`config/sink.yaml:2:6: $.url: expected "string", got "integer"`,
+				"|-- the document has no type, so pipectl reads it as a sink",
+				"`-- move the file out of config if it is not a sink",
+				"",
+				"   1 | id: out",
+				"   2 | url: 8080",
+				"     |      ^^^^",
+			),
+		},
+		"document without a kind that no kind takes": {
+			opts: []manifest.RegistryOption{
+				manifest.WithKindField(typ),
+				manifest.WithKinds(manifest.NewKind[stageSink]("sink",
+					manifest.Claim(matcher.Exists(paths.Doc().Child("url"))), manifest.Unversioned())),
+			},
+			files: map[string]string{"notes.yaml": "id: nokind\n"},
+			err: stringtest.JoinLF(
+				"config/notes.yaml:1:1: missing type",
+				"`-- add type, or move the file out of config",
+				"",
+				"   1 | id: nokind",
+				"     | ^^",
+			),
+			matches: []error{manifest.ErrMissingTypeField},
+		},
+		"version field that the kind does not read": {
+			opts: opts(),
+			files: map[string]string{
+				"pipe.yaml": stringtest.LinesLF("apiVersion: v1", "type: sink", "id: out"),
+			},
+			err: stringtest.JoinLF(
+				`config/pipe.yaml:1:13: $.apiVersion: unknown version "v1" for sink`,
+				"|-- pipectl reads sink without apiVersion",
+				"`-- a newer release of pipectl might read this version",
+				"",
+				"   1 | apiVersion: v1",
+				"     |             ^^",
+				"   2 | type: sink",
+				"   3 | id: out",
+			),
+			matches: []error{manifest.ErrUnknownVersion},
+		},
+		"kind that gains a version": {
+			// The files that leave the version out keep loading, and reach
+			// the layout of the version through its step.
+			opts: grown,
+			files: map[string]string{"pipe.yaml": stringtest.LinesLF(
+				"type: source", "id: in",
+				"---",
+				"type: sink", "id: old", "endpoint: https://jacobcolvin.com",
+				"---",
+				"v: 2", "type: sink", "id: new", "url: https://jacobcolvin.com",
+			)},
+			want: []string{
+				`source "in" unversioned up-to-date=true`,
+				`sink "old" unversioned up-to-date=false`,
+				`sink "new" 2 up-to-date=true`,
+			},
+		},
+		"errors beside a kind that gains a version": {
+			// The sink might have lost its version field by mistake. The
+			// source does not have a version to lose.
+			opts: grown,
+			files: map[string]string{"pipe.yaml": stringtest.LinesLF(
+				"type: source", "id: in", "port: 1",
+				"---",
+				"type: sink", "id: old", "port: 2",
+			)},
+			err: stringtest.JoinLF(
+				"config: 2 errors",
+				`|-- config/pipe.yaml:3:1: $.port~: unknown field "port"`,
+				"`-- config/pipe.yaml:7:1: $.port~: unknown field \"port\"",
+				"    `-- the document has no v, so pipectl reads it as an unversioned sink",
+				"",
+				"config/pipe.yaml",
+				"   1 | type: source",
+				"   2 | id: in",
+				"   3 | port: 1",
+				`     | ^^^^ unknown field "port"`,
+				"   4 | ---",
+				"   5 | type: sink",
+				"   6 | id: old",
+				"   7 | port: 2",
+				`     | ^^^^ unknown field "port"`,
+			),
+		},
+		"kind that the format removed": {
+			// The format does not have versions, so the error names the
+			// kind alone, at the field that names it.
+			opts:  append(opts(), manifest.WithRemoved("", "legacy", "pipectl 2 removed legacy, write a source")),
+			files: map[string]string{"pipe.yaml": stringtest.LinesLF("id: old", "type: legacy")},
+			err: stringtest.JoinLF(
+				`config/pipe.yaml:2:7: $.type: removed kind "legacy"`,
+				"`-- pipectl 2 removed legacy, write a source",
+				"",
+				"   1 | id: old",
+				"   2 | type: legacy",
+				"     |       ^^^^^^",
+			),
+			matches: []error{manifest.ErrRemovedVersion},
+		},
+		"kind that the format removed, beside a kind that gains a version": {
+			// The messages of this registry name the version field, so the
+			// error names the layout that the document declares.
+			opts: append(slices.Clone(grown),
+				manifest.WithRemoved("", "legacy", "pipectl 2 removed legacy, write a source")),
+			files: map[string]string{"pipe.yaml": stringtest.LinesLF("id: old", "type: legacy")},
+			err: stringtest.JoinLF(
+				"config/pipe.yaml:2:7: $.type: removed unversioned layout of legacy",
+				"`-- pipectl 2 removed legacy, write a source",
+				"",
+				"   1 | id: old",
+				"   2 | type: legacy",
+				"     |       ^^^^^^",
+			),
+			matches: []error{manifest.ErrRemovedVersion},
+		},
+		"missing required kind that a load picks without the kind field": {
+			// The registry does not list a version, so the hint names the
+			// kind field alone.
+			opts: []manifest.RegistryOption{
+				manifest.WithKindField(typ),
+				manifest.WithKinds(
+					manifest.NewKind[stageSource]("source", manifest.Required(), manifest.Unversioned()),
+					manifest.NewKind[stageSink]("sink",
+						manifest.Claim(matcher.Exists(paths.Doc().Child("url"))), manifest.Unversioned()),
+				),
+			},
+			files: map[string]string{"sink.yaml": stringtest.LinesLF("id: out", "url: https://jacobcolvin.com")},
+			err: stringtest.JoinLF(
+				"config: missing source",
+				"`-- add a document with type: source",
+			),
+		},
+		"missing required kind": {
+			opts:  opts(manifest.Required()),
+			files: map[string]string{"in.yaml": source},
+			err: stringtest.JoinLF(
+				"config: missing sink",
+				"`-- add a document with type: sink",
+			),
+		},
+		"second manifest of a singleton kind": {
+			opts: opts(manifest.Singleton()),
+			files: map[string]string{"pipe.yaml": stringtest.LinesLF(
+				"type: sink", "id: a", "---", "type: sink", "id: b",
+			)},
+			err: stringtest.JoinLF(
+				"config/pipe.yaml:4:7: $.type: more than one sink",
+				"`-- 1:7: $.type: first defined here",
+				"",
+				"   1 | type: sink",
+				"     |       ^^^^ first defined here",
+				"   2 | id: a",
+				"   3 | ---",
+				"   4 | type: sink",
+				"     |       ^^^^",
+				"   5 | id: b",
 			),
 		},
 	}
@@ -2228,6 +2924,53 @@ func TestRegistry_Load_Written(t *testing.T) {
 			err: stringtest.JoinLF(
 				"config: missing Cafe",
 				"`-- add a Cafe document without apiVersion and kind",
+			),
+		},
+		"hint of an unversioned kind beside another one": {
+			// A document without type fields does not pick between the
+			// kinds, so the hint names the kind field.
+			opts: []manifest.RegistryOption{
+				manifest.WithAppName("cafe"),
+				manifest.WithKinds(
+					manifest.NewKind[CafeSpec]("Cafe", manifest.Required(),
+						manifest.Unversioned(manifest.Written()), manifest.Version("cafe.jacobcolvin.com/v1")),
+					manifest.NewKind[HoursSpec]("Hours",
+						manifest.Unversioned(), manifest.Version("cafe.jacobcolvin.com/v1")),
+				),
+			},
+			files: map[string]string{"hours.yaml": stringtest.LinesLF("kind: Hours", `open: "07:00"`)},
+			err: stringtest.JoinLF(
+				"config: missing Cafe",
+				"`-- add a document with kind: Cafe and without apiVersion",
+			),
+		},
+		"hint of a claimed unversioned kind beside another one": {
+			opts: []manifest.RegistryOption{
+				manifest.WithAppName("cafe"),
+				manifest.WithKinds(
+					manifest.NewKind[CafeSpec]("Cafe", manifest.Required(),
+						manifest.Claim(matcher.Exists(paths.Doc().Child("seats"))),
+						manifest.Unversioned(manifest.Written()), manifest.Version("cafe.jacobcolvin.com/v1")),
+					manifest.NewKind[HoursSpec]("Hours",
+						manifest.Unversioned(), manifest.Version("cafe.jacobcolvin.com/v1")),
+				),
+			},
+			files: map[string]string{"hours.yaml": `open: "07:00"` + "\n"},
+			err: stringtest.JoinLF(
+				"config: missing Cafe",
+				"`-- add a Cafe document without apiVersion and kind",
+			),
+		},
+		"hint of an unversioned kind under a version field alone": {
+			// The registry names the version field, so the hint does too.
+			opts: []manifest.RegistryOption{
+				manifest.WithVersionOnly(paths.Doc().Child("version")),
+				manifest.WithKinds(manifest.NewKind[CafeSpec]("Config", manifest.Required(), manifest.Unversioned())),
+			},
+			files: map[string]string{"empty.yaml": ""},
+			err: stringtest.JoinLF(
+				"config: missing Config",
+				"`-- add a Config document without version",
 			),
 		},
 		"older document without written": {
@@ -3151,6 +3894,33 @@ func TestRegistry_Load_Hint(t *testing.T) {
 			want:  stringtest.LinesLF(`$.apiVersion: removed version "v0" of Tab`, hint),
 			hint:  true,
 		},
+		"removed unversioned layout that the kind still lists": {
+			opts: []manifest.RegistryOption{
+				manifest.WithMigrateHint(migrateHint),
+				manifest.WithRemoved("", "Tab"),
+				manifest.WithKinds(manifest.NewKind[Tip]("Tab", manifest.Unversioned(), manifest.Version("v1"))),
+			},
+			files: map[string]string{"tab.yaml": stringtest.LinesLF("kind: Tab", "metadata:", "  name: jar")},
+			err:   manifest.ErrRemovedVersion,
+			want:  stringtest.LinesLF("removed unversioned layout of Tab", hint),
+			hint:  true,
+		},
+		"removed unversioned layout that the kind still lists, under two names of the kind": {
+			opts: []manifest.RegistryOption{
+				manifest.WithMigrateHint(migrateHint),
+				manifest.WithRemoved("", "Tab"),
+				manifest.WithRemoved("", "Bill"),
+				manifest.WithKinds(manifest.NewKind[Tip]("Tab",
+					manifest.Unversioned(),
+					manifest.Version("v0", manifest.KindName("Bill")),
+					manifest.Version("v1"),
+				)),
+			},
+			files: map[string]string{"tab.yaml": stringtest.LinesLF("kind: Tab", "metadata:", "  name: jar")},
+			err:   manifest.ErrRemovedVersion,
+			want:  stringtest.LinesLF("removed unversioned layout of Bill", hint),
+			hint:  true,
+		},
 		"removal by the written version": {
 			opts:  drinkOptions(false),
 			files: map[string]string{"drink.yaml": colorDrinkDoc},
@@ -3573,6 +4343,8 @@ func TestRegistry_Load_SchemaTypeFields(t *testing.T) {
 	bare := stringtest.LinesLF("apiVersion: v2", "kind: Brew")
 	brew := stringtest.LinesLF("apiVersion: v2", "kind: Brew", "metadata:", "  name: bryggkaffe")
 	plain := stringtest.LinesLF("metadata:", "  name: bryggkaffe")
+	// A document that names its kind without a version.
+	kinded := stringtest.LinesLF("kind: Brew", "metadata:", "  name: bryggkaffe")
 
 	// Two documents of the same version in one stream.
 	stream := stringtest.LinesLF(
@@ -3681,14 +4453,16 @@ func TestRegistry_Load_SchemaTypeFields(t *testing.T) {
 		// The schema belongs to v1 instead, a version that every document
 		// of the case leaves behind.
 		older bool
-		// The schema belongs to the unversioned layout instead, which
-		// takes the place of v1.
+		// The schema and the other options belong to the unversioned
+		// layout instead, which takes the place of v1.
 		unversioned bool
 		// The unversioned layout takes the place of v1 without a schema,
 		// and the schema stays on v2.
 		layout bool
-		doc    string
-		err    string
+		// The kind claims each document that holds metadata.
+		claim bool
+		doc   string
+		err   string
 		// The error is the fault of the author of the registry.
 		author bool
 	}{
@@ -3754,9 +4528,60 @@ func TestRegistry_Load_SchemaTypeFields(t *testing.T) {
 			doc:     stream,
 		},
 		"branch on the unversioned layout": {
+			// The document does not write the kind field, so the check sees
+			// the same lines whether or not the schema reads it.
 			schema:      branch,
 			unversioned: true,
 			doc:         plain,
+		},
+		"branch on the unversioned layout of a document with a kind": {
+			schema:      branch,
+			unversioned: true,
+			doc:         kinded,
+			err: stringtest.JoinLF(
+				"brew.yaml: this program cannot tell whether its schema of the unversioned layout of Brew reads $.kind",
+				"|-- the document has no apiVersion, so this program reads it as an unversioned Brew",
+				"|-- "+why,
+				"`-- "+remedy("$.kind"),
+			),
+			author: true,
+		},
+		"branch that sees the type fields on the unversioned layout": {
+			schema:      branch,
+			version:     visible,
+			unversioned: true,
+			doc:         kinded,
+		},
+		"branch that sees the type fields on the unversioned layout and fails": {
+			schema:      branch,
+			version:     visible,
+			unversioned: true,
+			doc:         "kind: Brew\n",
+			err: stringtest.JoinLF(
+				`brew.yaml:1:1: $.metadata: missing required property "metadata"`,
+				"`-- the document has no apiVersion, so this program reads it as an unversioned Brew",
+				"",
+				"   1 | kind: Brew",
+				"     | ^^^^",
+			),
+		},
+		"branch that sees the type fields blank on the unversioned layout": {
+			schema:      branch,
+			version:     blank,
+			unversioned: true,
+			doc:         kinded,
+		},
+		"closed schema behind a $ref on the unversioned layout of a document with a kind": {
+			schema:      closedOutside,
+			unversioned: true,
+			doc:         kinded,
+			err: stringtest.JoinLF(
+				"brew.yaml: this program cannot tell whether its schema of the unversioned layout of Brew reads $.kind",
+				"|-- the document has no apiVersion, so this program reads it as an unversioned Brew",
+				"|-- "+why,
+				"`-- "+remedy("$.kind"),
+			),
+			author: true,
 		},
 		"required outside the branches that read it without the option": {
 			schema: union,
@@ -3860,6 +4685,20 @@ func TestRegistry_Load_SchemaTypeFields(t *testing.T) {
 			err:    unsureKind,
 			author: true,
 		},
+		"branch without the option on a claimed document without a kind": {
+			// Only the unversioned layout passes a document that does not
+			// write the field.
+			schema: branch,
+			claim:  true,
+			doc:    stringtest.LinesLF("apiVersion: v2", "metadata:", "  name: bryggkaffe"),
+			err: stringtest.JoinLF(
+				"brew.yaml: this program cannot tell whether its schema of Brew v2 reads $.kind",
+				"|-- the document has no kind, so this program reads it as a Brew",
+				"|-- "+why,
+				"`-- "+remedy("$.kind"),
+			),
+			author: true,
+		},
 		"unversioned document on the way through the version": {
 			schema: branch,
 			layout: true,
@@ -3894,7 +4733,7 @@ func TestRegistry_Load_SchemaTypeFields(t *testing.T) {
 
 			switch {
 			case tc.unversioned:
-				v1 = manifest.Unversioned(sch)
+				v1, v2 = manifest.Unversioned(append([]manifest.VersionOption{sch}, v2...)...), nil
 
 			case tc.older:
 				v1 = manifest.Version("v1", manifest.KindName("Coffee"), sch)
@@ -3903,9 +4742,14 @@ func TestRegistry_Load_SchemaTypeFields(t *testing.T) {
 				v2 = append([]manifest.VersionOption{sch}, v2...)
 			}
 
+			kind := []manifest.KindOption{v1, manifest.Version("v2", v2...)}
+			if tc.claim {
+				kind = append(kind, manifest.Claim(matcher.Exists(meta)))
+			}
+
 			reg := manifest.MustNewRegistry(
 				manifest.WithNameField(meta.Child("name")),
-				manifest.WithKinds(manifest.NewKind[Brew]("Brew", v1, manifest.Version("v2", v2...))),
+				manifest.WithKinds(manifest.NewKind[Brew]("Brew", kind...)),
 			)
 
 			// The second load reads the type fields of the schema from the

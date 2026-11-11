@@ -65,8 +65,11 @@ import (
 //
 //	MenuItem v1: $.kind: required, but manifest.SchemaTypeFields(false) blanks it
 //
-// Verify skips each version that [Unversioned] adds, because the documents
-// of such a version do not hold type fields.
+// For the layout that [Unversioned] adds, Verify gives these reports
+// about the kind field alone. A document of that layout might write the
+// kind field, and it does not write the version field. When a branch or
+// such a $ref might read the kind field, a load fails only the documents
+// of that layout that write the field.
 //
 // # Deprecations
 //
@@ -164,9 +167,7 @@ func (r *Registry) verifyTypeFields(entry *kindEntry, compiled map[*versionEntry
 	for _, v := range entry.versions {
 		cv := compiled[v]
 
-		// An unversioned document writes no type fields, so its schema
-		// never sees one.
-		if cv == nil || v.cfg.unversioned {
+		if cv == nil {
 			continue
 		}
 
@@ -175,6 +176,12 @@ func (r *Registry) verifyTypeFields(entry *kindEntry, compiled map[*versionEntry
 		doc := newSchemaDoc(cv)
 
 		for _, p := range r.typeFields() {
+			// An unversioned document does not write a version field, so
+			// its schema never sees one.
+			if v.cfg.unversioned && p.Equal(r.cfg.versionField) {
+				continue
+			}
+
 			switch {
 			case slices.ContainsFunc(fields.unsure, p.Equal):
 				errs = append(errs, markedAuthorError(ErrSchemaTypeField,

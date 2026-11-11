@@ -130,8 +130,6 @@ type schemaFields struct {
 // a $ref that the document does not resolve might read it, as
 // [schemaField] describes. Such a field is unsure whether or not the
 // schema also requires it. The check sees every other type field blank.
-// On the unversioned layout, the check sees the unsure fields blank too,
-// because the documents of that layout do not hold type fields.
 //
 // The registry keeps the fields of each version under the version and
 // the validator that it read them from. The schema registry hands a
@@ -168,7 +166,7 @@ func (r *Registry) schemaFields(v *versionEntry, validator *jsonschema.Validator
 		case f.declared:
 			// The check sees the field.
 
-		case f.unsure && !v.cfg.unversioned:
+		case f.unsure:
 			entry.unsure = append(entry.unsure, p)
 
 		default:
@@ -185,7 +183,12 @@ func (r *Registry) schemaFields(v *versionEntry, validator *jsonschema.Validator
 // read the type field at p in a place that the registry does not follow.
 // The author of the registry is at fault for it rather than a document.
 func (r *Registry) unsureTypeField(v *versionEntry, p paths.Path) error {
-	msg := fmt.Sprintf("%s cannot tell whether its schema of %s %s reads %s", r.app(), v.kind.kind.name, v.label(), p)
+	of := v.kind.kind.name + " " + v.label()
+	if v.cfg.unversioned {
+		of = r.label(v)
+	}
+
+	msg := fmt.Sprintf("%s cannot tell whether its schema of %s reads %s", r.app(), of, p)
 
 	return markedAuthorError(ErrSchemaTypeField, msg, unsureWhy, unsureRemedy(p))
 }

@@ -155,8 +155,9 @@ func (d *docState) warn(w error) {
 }
 
 // report adds the problems of the document to the report of the load. The
-// first error of a document that the load reads as a kind that it does
-// not name carries the details of that choice.
+// load reads some documents as a kind that they do not name, or as the
+// unversioned layout of the kind that they name. The first error of such
+// a document carries the details of that choice.
 //
 // A plan sets migrated for a document that it rewrites. The report then
 // leaves out the warnings that the rewrite clears. These are the
@@ -275,12 +276,12 @@ func (d *docState) routeDoc(ctx context.Context) bool {
 		entry := reg.names[name]
 		rt.counted = entry
 
-		if rt.versionTxt.found {
-			if rm := reg.findRemoval(version, name); rm != nil && !listed(entry, rm) {
-				d.fail(reg.removedProblem(doc, rm, false))
+		// The version is "" for a document without a version field, and
+		// that text names the unversioned layout in a removal.
+		if rm := reg.findRemoval(version, name); rm != nil && !listed(entry, rm) {
+			d.fail(reg.removedProblem(doc, rm, true, false))
 
-				return false
-			}
+			return false
 		}
 
 		if entry == nil {
@@ -289,13 +290,18 @@ func (d *docState) routeDoc(ctx context.Context) bool {
 			return false
 		}
 
-		if !rt.versionTxt.found {
-			d.fail(reg.missingTypeFields(doc, false, true, nil))
-
+		if !d.routeVersion(entry, name) {
 			return false
 		}
 
-		return d.routeVersion(entry, name)
+		// A document that names a kind with a named version, and leaves
+		// the version field out, might have lost that field by mistake.
+		if rt.version.cfg.unversioned && len(entry.byName) > 0 {
+			rt.adoption = append(rt.adoption, fmt.Errorf("the document has no %s, so %s reads it as an unversioned %s",
+				fieldName(cfg.versionField), reg.app(), entry.kind.name))
+		}
+
+		return true
 
 	default:
 		return d.adopt(ctx)
@@ -303,14 +309,17 @@ func (d *docState) routeDoc(ctx context.Context) bool {
 }
 
 // listed reports whether rm names a version that the kind of entry still
-// lists, which a plan still migrates.
+// lists, which a plan still migrates. The removal rm names the kind of
+// entry under one of its names. Several removals can name the unversioned
+// layout of a kind, each under another name, so the match is on the
+// version that rm names.
 func listed(entry *kindEntry, rm *removal) bool {
 	if entry == nil {
 		return false
 	}
 
 	for _, v := range entry.versions {
-		if v.removal == rm {
+		if v.removal != nil && v.removal.version == rm.version {
 			return true
 		}
 	}
@@ -318,10 +327,11 @@ func listed(entry *kindEntry, rm *removal) bool {
 	return false
 }
 
-// routeVersion picks the version of entry that the document declares. The
-// parameter wrote holds the kind name that the document writes, or ""
-// when the document does not have a kind field. It reports whether the
-// document routed.
+// routeVersion picks the version of entry that the document declares. A
+// document without a version field declares the unversioned layout of
+// entry. The parameter wrote holds the kind name that the document writes,
+// or "" when the document does not have a kind field. It reports whether
+// the document routed.
 func (d *docState) routeVersion(entry *kindEntry, wrote string) bool {
 	reg := d.l.reg
 	rt := &d.route
@@ -331,8 +341,13 @@ func (d *docState) routeVersion(entry *kindEntry, wrote string) bool {
 		first := entry.versions[0]
 
 		switch {
+		case first.cfg.unversioned && wrote != "" && first.kindName != wrote:
+			d.fail(reg.kindMismatch(first, wrote))
+
+			return false
+
 		case first.cfg.unversioned && first.removal != nil && !d.l.cfg.plan:
-			d.fail(reg.removedProblem(d.doc, first.removal, d.rewritable()))
+			d.fail(reg.removedProblem(d.doc, first.removal, wrote != "", d.rewritable()))
 
 			return false
 
@@ -342,7 +357,7 @@ func (d *docState) routeVersion(entry *kindEntry, wrote string) bool {
 			return true
 
 		case entry.removedUnversioned != nil:
-			d.fail(reg.removedProblem(d.doc, entry.removedUnversioned, false))
+			d.fail(reg.removedProblem(d.doc, entry.removedUnversioned, wrote != "", false))
 
 			return false
 
@@ -363,7 +378,7 @@ func (d *docState) routeVersion(entry *kindEntry, wrote string) bool {
 		}
 
 		if rm := reg.findRemoval(version, name); rm != nil {
-			d.fail(reg.removedProblem(d.doc, rm, false))
+			d.fail(reg.removedProblem(d.doc, rm, wrote != "", false))
 
 			return false
 		}
@@ -382,7 +397,7 @@ func (d *docState) routeVersion(entry *kindEntry, wrote string) bool {
 	rt.version = v
 
 	if v.removal != nil && !d.l.cfg.plan {
-		d.fail(reg.removedProblem(d.doc, v.removal, d.rewritable()))
+		d.fail(reg.removedProblem(d.doc, v.removal, wrote != "", d.rewritable()))
 
 		return false
 	}
@@ -392,19 +407,19 @@ func (d *docState) routeVersion(entry *kindEntry, wrote string) bool {
 
 // adopt picks the kind of a document without a kind field. It picks the
 // first kind whose [Claim] accepts the document. For a document without
-// type fields that no claim accepts, it picks the kind that reads the
-// unversioned layout without a claim. It reports whether the document
-// routed.
+// type fields that no claim accepts, it picks the kind that can take such
+// a document without a claim, when the registry holds one such kind. With
+// several such kinds, the document fails with the problem of a missing
+// kind field, which lists the kinds that [Registry.plainNames] returns.
+// When that list is empty, the document fails with the problem of a
+// document without type fields. It reports whether the document routed.
 func (d *docState) adopt(ctx context.Context) bool {
 	reg := d.l.reg
 	rt := &d.route
 	doc := d.doc
 	hasVersion := rt.versionTxt.found
 
-	var (
-		entry   *kindEntry
-		claimed bool
-	)
+	var entry *kindEntry
 
 	for _, e := range reg.kinds {
 		ok, err := d.claims(ctx, e)
@@ -415,19 +430,34 @@ func (d *docState) adopt(ctx context.Context) bool {
 		}
 
 		if ok {
-			entry, claimed = e, true
+			entry = e
 
 			break
 		}
 	}
 
 	if entry == nil && !hasVersion {
-		for _, e := range reg.kinds {
-			if len(e.kind.cfg.claims) == 0 && (e.versions[0].cfg.unversioned || e.removedUnversioned != nil) {
-				entry = e
+		names := reg.plainNames()
 
-				break
+		switch {
+		case len(reg.plain) == 1:
+			entry = reg.plain[0]
+
+		case len(names) > 0:
+			var details []error
+
+			if d.f.dir != "" && !d.typedFile {
+				other := "one of them"
+				if len(names) == 1 {
+					other = article(names[0])
+				}
+
+				details = append(details, fmt.Errorf("move the file out of %s if it is not %s", d.f.dir, other))
 			}
+
+			d.fail(reg.missingKind(doc, names, details))
+
+			return false
 		}
 	}
 
@@ -453,10 +483,12 @@ func (d *docState) adopt(ctx context.Context) bool {
 	name := entry.kind.name
 	kindField, versionField := fieldName(reg.cfg.kindField), fieldName(reg.cfg.versionField)
 
-	if hasVersion && claimed {
+	switch {
+	case hasVersion || !reg.versioned:
 		rt.adoption = append(rt.adoption, fmt.Errorf("the document has no %s, so %s reads it as %s",
 			kindField, reg.app(), article(name)))
-	} else {
+
+	default:
 		rt.adoption = append(rt.adoption, fmt.Errorf("the document has no %s and no %s, so %s reads it as an "+
 			"unversioned %s", versionField, kindField, reg.app(), name))
 	}
@@ -617,9 +649,11 @@ func detailsOf(texts []string) []error {
 // each type field that [Registry.schemaFields] does not hide, with the
 // names of v, and sees every other type field blank. A schema with a type
 // field that the registry is unsure about fails the document without a
-// check. Each problem of the check takes detail as its last detail, when
-// detail is not nil. Only the schema of the current version reports
-// deprecations.
+// check. On the unversioned layout, such a schema fails only a document
+// that writes the field. The check of every other document sees the same
+// lines whether or not the schema reads the field. Each problem of the
+// check takes detail as its last detail, when detail is not nil. Only the
+// schema of the current version reports deprecations.
 func (d *docState) checkSchema(ctx context.Context, v *versionEntry, detail error) bool {
 	if !v.cfg.hasSchema {
 		return true
@@ -641,11 +675,19 @@ func (d *docState) checkSchema(ctx context.Context, v *versionEntry, detail erro
 
 	fields := reg.schemaFields(v, sch.JSONSchema())
 
+	unsure := false
+
 	for _, p := range fields.unsure {
+		if v.cfg.unversioned && !readField(d.workFrom, p, nil).found {
+			continue
+		}
+
 		d.fail(reg.unsureTypeField(v, p))
+
+		unsure = true
 	}
 
-	if len(fields.unsure) > 0 {
+	if unsure {
 		return false
 	}
 

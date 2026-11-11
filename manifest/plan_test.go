@@ -452,6 +452,34 @@ func TestRegistry_PlanMigration(t *testing.T) {
 			)},
 			summary: "1 file to migrate, nothing written",
 		},
+		"version field of a document that names its kind": {
+			opts: unversioned(),
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF(
+				"# Café Yamüll, the main room.",
+				"kind: Cafe # the only one",
+				"metadata:",
+				"  name: yamull",
+			)},
+			headers: []string{`config/cafe.yaml: Cafe from the unversioned layout of Cafe to cafe.jacobcolvin.com/v1`},
+			afters: []string{stringtest.LinesLF(
+				"# Café Yamüll, the main room.",
+				"apiVersion: cafe.jacobcolvin.com/v1",
+				"kind: Cafe # the only one",
+				"metadata:",
+				"  name: yamull",
+			)},
+			summary: "1 file to migrate, nothing written",
+		},
+		"kinds without versions": {
+			opts: withKinds(
+				manifest.NewKind[Cafe]("Cafe", manifest.Unversioned()),
+				manifest.NewKind[Hours]("Hours", manifest.Unversioned()),
+			),
+			files: map[string]string{
+				"cafe.yaml": stringtest.LinesLF("kind: Cafe", "metadata:", "  name: yamull"),
+			},
+			summary: "1 file up to date, nothing written",
+		},
 		"documents without names": {
 			opts: configOptions(),
 			files: map[string]string{"config.yaml": stringtest.LinesLF(
