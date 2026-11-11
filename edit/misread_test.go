@@ -679,7 +679,7 @@ func TestNew_GoYAMLReading(t *testing.T) {
 					got, err := n.Decode[any](ctx)
 					require.NoError(t, err, p.String())
 					assert.Equal(t, want, got, p.String())
-					assert.True(t, n.Exists(), p.String())
+					assert.True(t, exists(t, n), p.String())
 				}
 
 				return nil

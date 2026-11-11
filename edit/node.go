@@ -20,27 +20,41 @@ import (
 // document. Each edit keeps the path of the node up to date. A node on a
 // value that an edit renamed or moved thus names its new place. After a Set
 // of its place, a node reads the new value. After a Move of its value, it
-// follows the value to the target. Each edit of a node fails after an edit
-// removed its place, either directly or by replacing a value above it. The
-// edit can reach the place through another path than the node, such as the
-// anchor of an alias on the path of the node. The problem binds where a
-// problem at the place of the edit that removed the place bound before that
-// edit. It has the path of that problem, as the Errors section of the
-// package documentation gives it, and its details name calls by the rule of
-// that section. A place that the user wrote thus gives its own path. A
-// place that an earlier call created gives the path of its site. The
-// message of the problem names the place that the call asked for. Decode
-// through such a node fails with that problem. Exists, Kind, Len, and Text
-// answer as they do for a place that does not hold a value. They do so
-// even when a later edit writes that place again. A new node from
-// [Node.At] reads and edits the place.
+// follows the value to the target.
+//
+// A node can lose its place to an earlier edit of the Apply. Each later
+// edit and each Decode and Exists through such a node then returns a
+// problem that matches [ErrDisplaced]. Kind, Len, and Text answer as they
+// do for a place that does not hold a value. They do so even when a later
+// edit writes that place again. A new node from [Node.At] reads and edits
+// the place.
+//
+// A node loses its place when an edit removes the place, either directly or
+// by replacing a value above it. The edit can reach the place through another
+// path than the node, such as the anchor of an alias on the path of the
+// node. The problem binds where a problem at the place of the edit that
+// removed the place bound before that edit. It has the path of that
+// problem, as the Errors section of the package documentation gives it.
+// Its details name calls by the rule of that section. A place that the
+// user wrote thus gives its own path. A place that an earlier call created
+// gives the path of its site. The message of the problem names the place
+// that the call asked for.
+//
+// A node also loses its place when an edit leaves the value of the node in the
+// text but makes the path of the node read another value. A rename of a key
+// that a `<<` merge key brings in does so when the mapping of the merge key
+// holds an entry under the new name. The problem binds where a problem at the
+// value of the node binds, with the path of that problem. When the text no
+// longer holds that value, the problem binds at the value that the path of the
+// node reads. Its message names the path of the node.
 //
 // Through any other node, a read returns what the text holds. A call after
 // which the text differs from the model of the Apply fails with an error
 // that matches [ErrEngine], as the package documentation describes. Each
-// later edit and each Decode of the Apply then returns that error. Exists,
-// Kind, Len, and Text then answer as they do for a place that does not
-// hold a value. The Apply fails with that error whatever the Func returns.
+// later edit, each Decode, and each Exists of the Apply then returns that
+// error. Kind, Len, and Text then answer as they do for a place that does
+// not hold a value. The Apply fails with that error whatever the Func
+// returns.
 //
 // The place of a node holds the value that the model of the Apply holds
 // there, as the package documentation describes. A node whose place did
@@ -51,9 +65,8 @@ import (
 // error too. [Doc.Apply] fails with such an error only when the [Func]
 // returns it or when the error matches [ErrEngine]. A node takes edits
 // until the Apply that gave it returns. After that, each method that edits
-// or decodes returns [ErrEnded]. Exists, Kind, Len, and Text then answer as
-// they do for a place that does not hold a value, and [Node.Err] tells the
-// two apart.
+// or decodes returns [ErrEnded], and so does [Node.Exists]. Kind, Len, and
+// Text then answer as they do for a place that does not hold a value.
 //
 // The methods that run code of the caller take a context. Set and Insert
 // run marshalers, and Decode runs unmarshalers, so each takes one. SetKey,
@@ -959,8 +972,13 @@ func (n *Node) Path() paths.Path {
 // at a merge key that have no own path fails with [ErrUnsupported], as
 // [ConstructMergeForm] names it.
 //
-// Own returns Path through a node that cannot read its place too, where
-// [Node.Err] returns an error.
+// Own returns Path through a node whose path [Node.At] refused. It returns
+// Path through a node that lost its place to an earlier edit, and through
+// a node whose Apply returned. It returns Path too after a call that left
+// the text apart from the model, which [ErrEngine] describes.
+// [Node.Exists] returns the problem of the node in each of those states.
+// At an alias that does not resolve, Exists returns the problem of the
+// alias, but Own returns the path where the text writes the alias.
 func (n *Node) Own() paths.Path {
 	if n.ended || n.err != nil || n.gone || n.d.stuck != nil || n.d.displaced(n) {
 		return n.path
@@ -1060,14 +1078,14 @@ func (n *Node) stepProblem() error {
 // details name the call, as [Doc.callDetails] names the call that runs.
 type pathProblem func(verb string) error
 
-// read returns the place of n for Exists, Kind, Len, and Text, with its value
-// as a [*niceyaml.Node] of the current text. They answer as they do for a
-// place that does not hold a value when read reports false. Read reports
-// false after the Apply of n returned, and for a node whose path failed,
-// whose place an edit took away, or whose path reads another value. It
-// also reports false at a value that no decode reads, such as an alias
-// without an anchor, and after a call of the Apply that left the text apart
-// from the model of the calls.
+// read returns the place of n for Kind, Len, and Text, with its value as a
+// [*niceyaml.Node] of the current text. They answer as they do for a place
+// that does not hold a value when read reports false. Read reports false
+// where [Node.Exists] does not report true: after the Apply of n returned,
+// and for a node whose path failed, whose place an edit took away, or whose
+// path reads another value. It also reports false at a value that no
+// decode reads, such as an alias without an anchor, and after a call of the
+// Apply that left the text apart from the model of the calls.
 func (n *Node) read() (*place, *niceyaml.Node, bool) {
 	if n.ended || n.err != nil || n.gone {
 		return nil, nil, false
@@ -1090,25 +1108,72 @@ func (n *Node) read() (*place, *niceyaml.Node, bool) {
 	return p, v, true
 }
 
-// Exists reports whether the place holds a value. An alias that does not
-// resolve, such as one without an anchor, holds no value that a decode
-// reads, so Exists reports false there. Exists also reports false at a path
-// that a reference document of [niceyaml.WithReferences] decides, such as a
-// path below an alias of that reference document, where [Node.Decode] fails,
-// as [Node.At] describes. A [Func] tells such a place from a place without a
-// value by the error of Decode. Exists reports false through a node that
-// lost its place to an earlier edit, as [Node] describes.
-func (n *Node) Exists() bool {
-	_, _, ok := n.read()
+// Exists reports whether the place holds a value. It returns true and a
+// nil error when the place holds a value. It returns false and a nil error
+// only when the node reads its place and the place holds no value. In
+// every other case, it returns false and the problem that stops
+// [Node.Decode] through the node. The message of that problem names the
+// call as a read, as in "reads $.a", where an edit names its own call.
+// Exists returns such a problem:
+//
+//   - for a path of [Node.At] that the node cannot take, such as a path
+//     that selects more than one value or holds a `~`, which matches
+//     [ErrUsage]
+//   - for a path that a reference document of [niceyaml.WithReferences]
+//     decides, such as a path below an alias of that reference document or
+//     through a name that a `<<` merge key of such an alias brings in,
+//     which matches [paths.ErrReferenceAlias], as [Node.At] describes
+//   - at an alias that does not resolve, such as one without an anchor,
+//     where a decode reads no value
+//   - through a node that lost its place to an earlier edit, which matches
+//     [ErrDisplaced], as [Node] describes
+//   - after a call of the Apply after which the text differed from the
+//     model, which matches [ErrEngine]
+//   - after the Apply that gave the node returned, which is [ErrEnded]
+//
+// A step of a path that the node cannot take can reach a zone of the
+// Apply. An edit then fails with the refusal of that zone, but Exists
+// returns the problem of the path.
+//
+// A [Func] that reads a value thus returns the error of Exists, and it
+// skips the place only when Exists returns false and a nil error:
+//
+//	ok, err := cost.Exists()
+//	if err != nil || !ok {
+//		return err
+//	}
+//
+// [Node.SetKey], [Node.Remove], and [Node.Move] leave a place that holds
+// no value as they find it. They return the problem of a node that cannot
+// take the call. A Func thus calls them without a check of Exists. Exists
+// is a read, so the Apply fails with its error only when the Func returns
+// it, or when the error matches ErrEngine.
+func (n *Node) Exists() (bool, error) {
+	defer n.startRead()()
 
-	return ok
+	p, err := n.place(useRead, "reads")
+	if err != nil {
+		return false, err
+	}
+
+	if !p.exists {
+		return false, nil
+	}
+
+	_, err = n.value(p, "reads")
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
 }
 
-// Kind returns the kind of the value, or [niceyaml.NodeNone] when the
-// place does not hold a value, as [Node.Exists] reports it. A path never
+// Kind returns the kind of the value. It returns [niceyaml.NodeNone]
+// whenever [Node.Exists] does not return true, both for a place that does
+// not hold a value and for a node that Exists returns a problem for. A
+// [Func] that must tell those apart calls Exists first. A path never
 // selects a `<<` merge key, as [Node.At] describes, so Kind returns
-// NodeNone at a path that ends at one. Kind returns NodeNone at a path that
-// a reference document decides too. At an alias that reads a reference
+// NodeNone at a path that ends at one. At an alias that reads a reference
 // document, Kind returns the kind of the value of its anchor.
 func (n *Node) Kind() niceyaml.NodeKind {
 	_, v, ok := n.read()
@@ -1160,28 +1225,6 @@ func (n *Node) Append(ctx context.Context, v any) error {
 	return n.At(paths.Current().Index(n.Len())).Insert(ctx, v)
 }
 
-// Err returns the problem that stops each method that edits or decodes
-// through the node before it reads the place, or nil when the node reads
-// and edits the place. The message names the call as a read, as in "reads
-// $.a", where an edit names its own call. Err returns [ErrEnded] after the
-// Apply that gave the node returned. It returns the problem of a path of
-// [Node.At] that the node cannot take, and the problem of a node that lost
-// its place to an earlier edit, as [Node] describes. A step of a failed
-// path can reach a zone of the Apply. An edit then fails with the refusal
-// of that zone, but Err returns the problem of the path.
-// Err returns the error of a call of the Apply after which the text
-// differed from the model too, which matches [ErrEngine].
-// Exists, Kind, Len, and Text answer as they do for a place that does not
-// hold a value in each of those cases. Err tells such a node from a node
-// on a place that holds no value, because Err returns nil there. The Apply
-// fails with the error of Err only when the Func returns it or when the
-// error matches [ErrEngine].
-func (n *Node) Err() error {
-	_, err := n.place(useRead, "reads")
-
-	return err
-}
-
 // Text returns the string that a decode reads from a scalar, before a tag
 // converts it, so 0x10 gives "0x10". The string has the quotes, the
 // escapes, and the folding of the scalar resolved. For a block scalar, it
@@ -1190,10 +1233,10 @@ func (n *Node) Err() error {
 // returns "" for a mapping, a sequence, and a place that does not hold a
 // value. At an alias, Text reads the anchor as a decode does. It thus
 // returns the text of the scalar that the anchor holds, in the document
-// or in a reference document of [niceyaml.WithReferences]. It returns ""
-// for an alias that does not resolve, and at a path that a reference
-// document decides, as [Node.Exists] describes. After a call of the Apply
-// that left the text apart from the model, Text returns "".
+// or in a reference document of [niceyaml.WithReferences]. Text returns ""
+// whenever [Node.Exists] does not return true, both for a place that does
+// not hold a value and for a node that Exists returns a problem for, as
+// [Node.Kind] describes.
 //
 //nolint:contextcheck // The decode of such a scalar reads no state that a context carries.
 func (n *Node) Text() string {
@@ -1227,14 +1270,18 @@ func (n *Node) Text() string {
 // [WithUnmarshalers] apply ahead of those of the Source. A [Func] should
 // pass the ctx it got, so the warnings of the decode reach the
 // [niceyaml.Warnings] on the context of [Doc.Apply]. Decode fails on a
-// place that does not hold a value, and through a node that lost its place
-// to an earlier edit, as [Node] describes. The root of an empty document
-// holds no value, and Decode there returns the zero value, as
-// [niceyaml.Node.Decode] does for that document. Such an error belongs to the
-// Func, so the Apply fails with it only when the Func returns it. Decode
-// returns the error of a call of the Apply after which the text differed
-// from the model, as [Node] describes. That error matches [ErrEngine], and
-// the Apply fails with it whatever the Func returns.
+// place that does not hold a value, with a problem that matches
+// [paths.ErrNotFound], as the error of [niceyaml.Node.At] does for the same
+// path. [Node.Exists] tells such a place apart from a problem of the node,
+// so a Func checks Exists rather than matching that error. Decode also
+// fails through a node that lost its place to an earlier edit, with a
+// problem that matches [ErrDisplaced], as [Node] describes. The root of an
+// empty document holds no value, and Decode there returns the zero value,
+// as [niceyaml.Node.Decode] does for that document. Such an error belongs
+// to the Func, so the Apply fails with it only when the Func returns it.
+// Decode returns the error of a call of the Apply after which the text
+// differed from the model, as [Node] describes. That error matches
+// [ErrEngine], and the Apply fails with it whatever the Func returns.
 //
 // An error of the decode keeps the path that it names in the current text.
 // The decoder raises such an error for a type mismatch, and so do a schema
@@ -1325,16 +1372,7 @@ func (n *Node) MarshalYAML(ctx context.Context) (any, error) {
 // decode, it does not call fn, and it returns the error that [Node.doc]
 // returns.
 func (n *Node) withValue(fn func(doc *niceyaml.Node) error) error {
-	// A read is a call, so each problem of the read names it, as
-	// [Doc.callDetails] names the call that runs. A read can run inside
-	// another call, as a Decode in the MarshalYAML method of the value of a
-	// Set does, and that call runs again after the read.
-	if !n.ended && n.d.applying {
-		outer := n.d.runningCall()
-		n.d.startCall("reads "+n.path.String(), nil)
-
-		defer n.d.resumeCall(outer)
-	}
+	defer n.startRead()()
 
 	doc, err := n.doc()
 	if err != nil {
@@ -1342,6 +1380,23 @@ func (n *Node) withValue(fn func(doc *niceyaml.Node) error) error {
 	}
 
 	return fn(doc)
+}
+
+// startRead starts the read of the node as a call, and returns the func
+// that ends it.
+func (n *Node) startRead() func() {
+	// A read is a call, so each problem of the read names it, as
+	// [Doc.callDetails] names the call that runs. A read can run inside
+	// another call, as a Decode in the MarshalYAML method of the value of a
+	// Set does, and that call runs again after the read.
+	if n.ended || !n.d.applying {
+		return func() {}
+	}
+
+	outer := n.d.runningCall()
+	n.d.startCall("reads "+n.path.String(), nil)
+
+	return func() { n.d.resumeCall(outer) }
 }
 
 // doc returns the value of the place as a [*niceyaml.Node] of the current
@@ -1358,20 +1413,34 @@ func (n *Node) doc() (*niceyaml.Node, error) {
 		// [niceyaml.Source.Documents] describes.
 		return n.d.node, nil
 	case !p.exists:
-		return nil, n.d.fail(n, "%s cannot decode %s, which holds no value", n.d.subject(), n.path)
+		// The problem matches [paths.ErrNotFound], as the error of
+		// [niceyaml.Node.At] does for the same path.
+		problem := &sentinelError{
+			sentinel: paths.ErrNotFound,
+			err:      fmt.Errorf("%s cannot decode %s, which holds no value", n.d.subject(), n.path),
+		}
+
+		return nil, n.bindOwn(niceyaml.Invalid(problem))
 	}
 
+	return n.value(p, "cannot decode")
+}
+
+// value returns the value of p, the place of n, which holds a value, as
+// [Doc.view] gives it. An alias at the place that does not resolve, such
+// as one without an anchor, stops the read there. Value then returns the
+// problem of that alias, whose message names what the call does as verb
+// says, as in "cannot decode $.a".
+func (n *Node) value(p *place, verb string) (*niceyaml.Node, error) {
 	doc, err := n.d.view(n, p)
 	if err == nil {
 		return doc, nil
 	}
 
-	// An alias at the place that does not resolve, such as one without an
-	// anchor, stops the decode there, and the error of the view names it.
 	if alias, ok := n.d.aliasProblem(err); ok {
 		alias.held = true
 
-		return nil, n.d.readFail(n, fmt.Errorf("%s cannot decode %s, which %w", n.d.subject(), n.path, alias))
+		return nil, n.d.readFail(n, fmt.Errorf("%s %s %s, which %w", n.d.subject(), verb, n.path, alias))
 	}
 
 	return nil, err
@@ -1813,13 +1882,21 @@ func (d *Doc) goneProblem(n *Node, verb string) error {
 
 	rec := n.goneBy
 	if rec == nil {
-		return d.fail(n, "%s", msg)
+		return n.bindOwn(displacedError(msg))
 	}
 
-	err := d.user.Bind(niceyaml.NewError(msg, niceyaml.AtPath(rec.holder()), niceyaml.AtRange(rec.at),
+	err := d.user.Bind(displacedError(msg, niceyaml.AtPath(rec.holder()), niceyaml.AtRange(rec.at),
 		niceyaml.WithDetails(d.callDetails(rec.site())...)))
 
 	return err //nolint:wrapcheck // The binding is the problem of the edit.
+}
+
+// displacedError returns the problem that msg describes, of a call
+// through a node that lost its place, with the location and the details of
+// opts. It matches [ErrDisplaced], and the document is at fault for it, as
+// for each problem that its values decide.
+func displacedError(msg string, opts ...niceyaml.ErrorOption) error {
+	return niceyaml.Invalid(&sentinelError{sentinel: ErrDisplaced, err: errors.New(msg)}, opts...)
 }
 
 // take marks each node of r below the place as gone, and those at the

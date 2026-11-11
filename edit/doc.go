@@ -22,12 +22,7 @@
 //	}
 //
 //	err = d.Apply(ctx, paths.MustParse("$.spec.extras.*"), func(ctx context.Context, n *edit.Node) error {
-//		cost := n.At(paths.Current().Child("cost"))
-//		if !cost.Exists() {
-//			return nil
-//		}
-//
-//		return cost.SetKey("price")
+//		return n.At(paths.Current().Child("cost")).SetKey("price")
 //	})
 //	if err != nil {
 //		return err
@@ -39,6 +34,16 @@
 //	}
 //
 //	fmt.Print(text)
+//
+// SetKey leaves an extra without a cost as it finds it, as Remove and Move
+// leave a place that holds no value. A Func that reads a value first
+// checks [Node.Exists], which tells a place without a value from a node
+// that cannot read its place:
+//
+//	ok, err := n.At(paths.Current().Child("cost")).Exists()
+//	if err != nil || !ok {
+//		return err
+//	}
 //
 // A Node renames a key, sets or creates a value, inserts or appends an
 // item, moves a value to another path, or removes an entry or an item. A
@@ -139,10 +144,10 @@
 // stops the selector, as [go.jacobcolvin.com/niceyaml.Node.Nodes] binds it,
 // under the path of the value that holds the alias.
 //
-// Each edit through such a path fails. [Node.Decode] there returns
-// the error of the path, and [Node.Exists], [Node.Kind], [Node.Len], and
+// Each edit through such a path fails. [Node.Decode] and [Node.Exists]
+// there return the error of the path, and [Node.Kind], [Node.Len], and
 // [Node.Text] answer as at a place that does not hold a value. A Func tells
-// such a place from a place without a value by the error of Decode. It reads
+// such a place from a place without a value by the error of Exists. It reads
 // the value through the alias, or through the mapping that holds the merge
 // key, whose Decode reads the entries that the merge key brings in. The
 // References section of the go.jacobcolvin.com/niceyaml package describes
@@ -186,17 +191,16 @@
 //		return n.At(paths.Doc().Child("server", "port")).Set(ctx, 8080)
 //	})
 //
-// At the root, [Node.Exists] reports false, [Node.Kind] returns
-// [go.jacobcolvin.com/niceyaml.NodeNone], and [Node.Decode] returns the zero
-// value. The root encodes as null in the value of a Set elsewhere. A Set of
-// `$` writes the root. A Set of a path below it writes the mappings and the
-// sequences that its names and its indexes give, with the value inside
-// them. Each such sequence takes the index 0 alone, so a path with another
-// index fails, as in "the edit sets $[1], but the document holds no $". A
-// Set of `$` with a slice writes a root sequence. Remove, SetKey, and Move
-// at the root fail, as they fail at the root of any document. A `$` path
-// of [WithProtected] protects the root, so an Apply of `$` then selects
-// nothing.
+// At the root, [Node.Exists] reports false with a nil error, [Node.Kind]
+// returns [go.jacobcolvin.com/niceyaml.NodeNone], and [Node.Decode] returns the
+// zero value. The root encodes as null in the value of a Set elsewhere. A Set
+// of `$` writes the root. A Set of a path below it writes the mappings and the
+// sequences that its names and its indexes give, with the value inside them.
+// Each such sequence takes the index 0 alone, so a path with another index
+// fails, as in "the edit sets $[1], but the document holds no $". A Set of `$`
+// with a slice writes a root sequence. Remove, SetKey, and Move at the root
+// fail, as they fail at the root of any document. A `$` path of [WithProtected]
+// protects the root, so an Apply of `$` then selects nothing.
 //
 // The first value goes on block lines at the end of the text of the
 // document. Those lines go after its comment lines and before a "..."
@@ -649,13 +653,15 @@
 // passes in the same Apply.
 //
 // [Node.At], [Node.Exists], [Node.Decode], [Node.Text], [Node.Kind], and
-// [Node.Len] are reads. A read that cannot answer returns its problem to
-// the Func, or answers as it does for a place that does not hold a value.
-// The Decode of a place that does not hold a value has a problem. So does
-// a read at a path that selects more than one value or a key. So does a
-// read at a path that a reference document decides, as the Edits section
-// describes. A problem of a read that does not match [ErrEngine] fails the
-// Apply only when the Func returns it, as for the problem of an edit.
+// [Node.Len] are reads. Exists and Decode return the problem of a read that
+// cannot answer to the Func. Text, Kind, and Len answer as they do for a place
+// that does not hold a value. A Func that must tell the two apart calls Exists
+// first. The Decode of a place that does not hold a value has a problem, which
+// matches [go.jacobcolvin.com/niceyaml/paths.ErrNotFound]. A read at a path
+// that selects more than one value or a key has a problem. So does a read at a
+// path that a reference document decides, as the Edits section describes. A
+// problem of a read that does not match [ErrEngine] fails the Apply only when
+// the Func returns it, as for the problem of an edit.
 //
 // The calls of an Apply act in order. Each call edits the text that the
 // calls before it left, through any path, alias, or `<<` merge key, and the
@@ -729,8 +735,8 @@
 // misread of go-yaml. The first difference fails the call that made it with
 // an error that matches [ErrEngine], and the call leaves the text as it
 // found it. Each later call and each [Node.Decode] of the Apply then
-// returns that error. [Node.Text], [Node.Kind], [Node.Len], and
-// [Node.Exists] answer as they do for a place that does not hold a value,
+// returns that error, and so does [Node.Exists]. [Node.Text], [Node.Kind],
+// and [Node.Len] answer as they do for a place that does not hold a value,
 // as [Node] describes.
 //
 // The error of a difference binds where the user's text holds the value
@@ -934,7 +940,7 @@
 // the Doc as it found it, so the Doc does not keep any of the edits of that
 // Apply. A Node works only during the Apply that gave it. After that Apply
 // returns, each method of the node that edits or decodes returns
-// [ErrEnded], and so does [Node.Err].
+// [ErrEnded], and so does [Node.Exists].
 //
 // # Errors
 //
@@ -996,12 +1002,19 @@
 //
 // A node can lose its place to an earlier call, as a node at $.m.a does
 // when a call removes $.m. A call through such a node fails before any
-// other check of the call, also when the text holds that place again. It
-// binds where a problem at the place of that earlier call bound before that
-// call ran, with the path of that problem. Its message names the place that
-// the call asked for, as in "the edit sets $.m.a through a node that lost
-// its place to an earlier edit". A new node from [Node.At] reads and edits
-// that place again.
+// other check of the call, also when the text holds that place again. The
+// problem matches [ErrDisplaced]. It binds where a problem at the place of
+// that earlier call bound before that call ran, with the path of that
+// problem. Its message names the place that the call asked for, as in "the
+// edit sets $.m.a through a node that lost its place to an earlier edit". A
+// new node from [Node.At] reads and edits that place again.
+//
+// A node also loses its place when an earlier call makes its path read
+// another value, as [Node] describes. A call through such a node fails with
+// a problem that matches [ErrDisplaced] too. The problem binds where a
+// problem at the value of the node binds. Its message names the path of the
+// node, as in "the edit cannot read this value, because an earlier edit
+// made $.m.a.d read another value".
 //
 // An item of a flow sequence has no key or "-". So when a move puts a value
 // into such an item, the item keeps the place of the key or the "-" that

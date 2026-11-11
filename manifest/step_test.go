@@ -134,8 +134,10 @@ func TestRegistry_Load_Steps(t *testing.T) {
 			manifest.Version("cafe.jacobcolvin.com/v1",
 				manifest.Migrate(paths.MustParse("$.spec.extras.*"), func(ctx context.Context, n *edit.Node) error {
 					price := n.At(paths.Current().Child("price"))
-					if !price.Exists() {
-						return nil
+
+					ok, err := price.Exists()
+					if err != nil || !ok {
+						return err
 					}
 
 					kr, err := price.Decode[int](ctx)

@@ -4347,7 +4347,7 @@ func TestNode_Insert_Nodes(t *testing.T) {
 		assert.Equal(t, paths.Doc().Child("s").Index(2), second.Path())
 		assert.Equal(t, "b", second.Text())
 		assert.Equal(t, paths.Doc().Child("s").Index(3), past.Path())
-		assert.False(t, past.Exists())
+		assert.False(t, exists(t, past))
 
 		got, err := first.Decode[string](ctx)
 		if err != nil {
@@ -4403,8 +4403,7 @@ func TestNode_Insert_SharedItems(t *testing.T) {
 					tt: paths.Doc().Child("t").Index(2),
 				} {
 					assert.Equal(t, want, n.Path())
-					require.NoError(t, n.Err())
-					assert.True(t, n.Exists())
+					assert.True(t, exists(t, n))
 					assert.Equal(t, "b", n.Text())
 				}
 

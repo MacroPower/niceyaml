@@ -170,11 +170,22 @@ var (
 	ErrNested = errors.New("Apply runs inside another Apply of the Doc")
 
 	// ErrEnded indicates an edit or a decode through a [Node] after the
-	// Apply that gave the node returned. [Node.Err] returns the error then,
-	// and so does each method of the node that edits or decodes. The error
-	// binds nowhere, and [go.jacobcolvin.com/niceyaml.IsInvalid] reports
-	// false for it.
+	// Apply that gave the node returned. [Node.Exists] returns the error
+	// then, and so does each method of the node that edits or decodes. The
+	// error binds nowhere, and [go.jacobcolvin.com/niceyaml.IsInvalid]
+	// reports false for it.
 	ErrEnded = errors.New("the Apply that gave the node has returned")
+
+	// ErrDisplaced indicates a call through a [Node] that lost its place to
+	// an earlier edit of the Apply, as [Node] describes. The edit removed
+	// the place, or it made the path of the node read another value.
+	// [Node.Exists] returns the error then, and so does each method of the
+	// node that edits or decodes. [Doc.Apply] does not call its Func for a
+	// place of its path that an earlier call took this way. A [Func] that
+	// loops over the nodes it kept can thus skip each node whose Exists
+	// returns the error. The error binds as [Node] describes, and
+	// [go.jacobcolvin.com/niceyaml.IsInvalid] reports true for it.
+	ErrDisplaced = errors.New("the node lost its place to an earlier edit")
 
 	// The problem of a call of New with a nil Node or a Node below the root.
 	errDocument = usage("New takes the root of a document")
@@ -196,9 +207,10 @@ var (
 )
 
 // sentinelError is a problem that matches sentinel, an error of the
-// package such as [ErrEngine]. It has the message of err, the error behind
-// it. A report that lists the problems of the error thus reads the problem
-// once, rather than once for the sentinel and once for err.
+// package such as [ErrEngine], or [paths.ErrNotFound]. It has the message
+// of err, the error behind it. A report that lists the problems of the
+// error thus reads the problem once, rather than once for the sentinel and
+// once for err.
 //
 // The error of a call can also have a cause, such as the error of a
 // marshaler. [errors.Is] and [errors.As] find the cause, but Unwrap does
@@ -241,7 +253,7 @@ func (e *sentinelError) Is(target error) bool {
 
 	if e.sentinel == ErrValue {
 		switch target {
-		case ErrEngine, ErrMisread, ErrUnsupported, ErrUsage, ErrProtected, ErrNested, ErrEnded:
+		case ErrEngine, ErrMisread, ErrUnsupported, ErrUsage, ErrProtected, ErrNested, ErrEnded, ErrDisplaced:
 			return false
 		}
 	}

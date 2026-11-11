@@ -1394,13 +1394,13 @@ func (d *Doc) displacedProblem(n *Node, u use) error {
 		// it binds. No path of the current text selects the place.
 		s := d.placeRange(n, p)
 
-		err := d.user.Bind(niceyaml.NewError(msg, niceyaml.AtPath(s.path), niceyaml.AtRange(s.at),
+		err := d.user.Bind(displacedError(msg, niceyaml.AtPath(s.path), niceyaml.AtRange(s.at),
 			niceyaml.WithDetails(d.callDetails(s)...)))
 
 		return err //nolint:wrapcheck // The binding is the problem of the edit.
 	}
 
-	return d.fail(n, "%s", msg)
+	return n.bindOwn(displacedError(msg))
 }
 
 // slotPlace returns the place of the current text that holds the value of
