@@ -18,11 +18,17 @@ import (
 	"go.jacobcolvin.com/niceyaml/schema/schemastore"
 )
 
-func validateCmd() *cobra.Command {
+// The error for a flag that names a directory with an empty value.
+var errEmptyPath = errors.New("empty path")
+
+func validateCmd(storeOpts ...schemastore.Option) *cobra.Command {
 	var (
-		schemaRef string
-		strict    bool
-		limits    *limitFlags
+		schemaRef   string
+		schemaRoot  string
+		schemaStore bool
+		offline     bool
+		strict      bool
+		limits      *limitFlags
 	)
 
 	cmd := &cobra.Command{
@@ -41,12 +47,24 @@ func validateCmd() *cobra.Command {
 			`"# yaml-language-server: $schema=" comment above its content, or else ` +
 			"against the SchemaStore schema that matches its file path. A $schema " +
 			"comment below a document's content has no effect on that document. " +
-			"A document with neither only has to parse. The SchemaStore lookup " +
-			"downloads the catalog from schemastore.org, so while that site is " +
-			"unreachable, every document without such a comment fails. A " +
-			"$schema=none comment in the same place turns validation off for its " +
-			"document and skips the lookup. A $ref in such a schema to a file or " +
-			"URL that does not load fails only the documents that reach it.\n\n" +
+			"A document with neither only has to parse. A $schema=none comment " +
+			"in the same place turns validation off for its document and skips " +
+			"the lookup. A $ref in such a schema to a file or URL that does not " +
+			"load fails only the documents that reach it.\n\n" +
+			"The SchemaStore lookup downloads the catalog from schemastore.org, " +
+			"so while that site is unreachable, every document without a " +
+			"$schema comment fails. With --schemastore=false, the run skips the " +
+			"lookup, and such a document only has to parse.\n\n" +
+			"The --offline and --schema-root flags confine the files and URLs " +
+			"that a run reads a schema from, such as for files from a pull " +
+			"request. They apply to --schema, to each $schema comment, and to " +
+			"each $ref in those schemas, but not to the schemas of the " +
+			"SchemaStore catalog. With --offline, the run skips " +
+			"the SchemaStore lookup and fetches no URL. A schema or $ref that " +
+			"names a URL then fails to load without a request. With " +
+			"--schema-root DIR, a schema file or $ref outside DIR fails to " +
+			"load. Without --offline, a $schema comment can still name any URL, " +
+			"so pair the two flags to keep the run to DIR.\n\n" +
 			"A schema file or URL holds JSON or YAML, whatever its name. A " +
 			"schema that opens with { reads as JSON, and any other reads as " +
 			"YAML. A schema in YAML reads its numbers as a YAML document " +
@@ -77,8 +95,39 @@ func validateCmd() *cobra.Command {
 				return err
 			}
 
+			// The registry reads through the root, so the root stays open
+			// for the whole run. The flag decides whether the run has a
+			// root, not its value. An empty value, such as from an unset
+			// shell variable, then fails the run rather than lift the
+			// confinement.
+			var root *os.Root
+
+			if cmd.Flags().Changed("schema-root") {
+				if schemaRoot == "" {
+					return fmt.Errorf("--schema-root: %w", errEmptyPath)
+				}
+
+				root, err = os.OpenRoot(schemaRoot)
+				if err != nil {
+					return fmt.Errorf("--schema-root: %w", err)
+				}
+
+				defer root.Close() //nolint:errcheck // A directory has nothing to flush.
+			}
+
+			access, err := newAccess(root, offline)
+			if err != nil {
+				return err
+			}
+
+			var store schema.Resolver
+
+			if schemaStore && !offline {
+				store = schemastore.New(storeOpts...)
+			}
+
 			// Build the registry once, so every file shares its schema cache.
-			reg, err := buildRegistry(cmd.Context(), schemaRef)
+			reg, err := buildRegistry(cmd.Context(), schemaRef, access, store)
 			if err != nil {
 				return err
 			}
@@ -157,6 +206,12 @@ func validateCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&schemaRef, "schema", "s", "", "File path or URL of a JSON schema, written in JSON or YAML")
+	cmd.Flags().BoolVar(&schemaStore, "schemastore", true,
+		"Look up the schema of a document without a $schema comment on SchemaStore")
+	cmd.Flags().BoolVar(&offline, "offline", false,
+		"Fetch no URL, so skip SchemaStore and fail each schema that names a URL")
+	cmd.Flags().StringVar(&schemaRoot, "schema-root", "",
+		"Directory that holds every schema file the run reads")
 	cmd.Flags().BoolVar(&strict, "strict", false, "Fail a file on a warning, such as a deprecated field")
 
 	limits = addLimitFlags(cmd)
@@ -377,33 +432,67 @@ func lastDotDotEnd(path string) int {
 	return end
 }
 
+// newAccess returns the [*schema.Access] of the --schema-root and
+// --offline flags. Each schema that the run reads from disk must lie under
+// the directory of root, or anywhere when root is nil. Offline, the Access
+// allows no URL. Otherwise it allows every HTTP and HTTPS URL. Without
+// either flag, the Access allows what [schema.Unrestricted] allows.
+func newAccess(root *os.Root, offline bool) (*schema.Access, error) {
+	fileOpt := schema.AllowAnyFile()
+	if root != nil {
+		fileOpt = schema.AllowRoot(root)
+	}
+
+	opts := []schema.AccessOption{fileOpt}
+	if !offline {
+		opts = append(opts, schema.AllowAnyURL())
+	}
+
+	access, err := schema.NewAccess(opts...)
+	if err != nil {
+		return nil, fmt.Errorf("--schema-root: %w", err)
+	}
+
+	return access, nil
+}
+
 // buildRegistry creates a schema registry from schemaRef, the value of the
-// --schema flag.
+// --schema flag. The registry reads and fetches each schema under access,
+// except the schemas that store names. A nil store leaves SchemaStore out.
 //
 // When schemaRef is not empty, buildRegistry loads and compiles that schema
 // once, before the command reads any file. The compiled schema is then the
-// only resolver, so every document validates against it. A schema that
-// does not load or compile fails the command with one "--schema:" error. A
-// schema path resolves relative to the current working directory, through
-// [physicalAbs], so it names the file the OS opens for it. A $ref inside
-// the schema resolves relative to the schema's own file or URL. A $ref
-// that names a file or URL that does not load fails the command the same
-// way.
+// only resolver, so every document validates against it, and store goes
+// unused. A schema that does not load or compile fails the command with
+// one "--schema:" error. A schema path resolves relative to the current
+// working directory, through [physicalAbs], so it names the file the OS
+// opens for it. A $ref inside the schema resolves relative to the schema's
+// own file or URL. A $ref that names a file or URL that does not load, or
+// that access does not allow, fails the command the same way.
 //
-// Otherwise the registry matches on schema directives first, and the
-// reference of each directive resolves relative to its own YAML file. A
-// document that does not have a schema directive goes to SchemaStore,
-// which discovers a schema by file path. SchemaStore fetches its catalog
-// for the first document that reaches it. When it cannot fetch the catalog
-// for a file, the error of that file reports the failure.
+// Otherwise a registry of its own resolves the schema directives under
+// access, as the Untrusted Documents section of the schema package
+// describes. The reference of each directive resolves relative to its own
+// YAML file. A document that does not have a schema directive goes to
+// store, which discovers a schema by file path. The outer registry holds
+// store, so access does not confine the schemas of the catalog. Such a
+// schema comes from SchemaStore rather than from the files the run checks.
+// The store fetches its catalog for the first document that reaches it.
+// When it cannot fetch the catalog for a file, the error of that file
+// reports the failure.
 //
 // Schema validation is optional here, so a document that the resolvers do
 // not claim passes rather than failing the file. A catalog schema is not
 // the user's to fix. A public schema might name a document that is gone
-// under a branch few documents take. The registry therefore compiles a
+// under a branch few documents take. The registries therefore compile a
 // schema without the documents that its $refs fail to load, and only a
 // document that reaches such a $ref fails.
-func buildRegistry(ctx context.Context, schemaRef string) (*schema.Registry, error) {
+func buildRegistry(
+	ctx context.Context,
+	schemaRef string,
+	access *schema.Access,
+	store schema.Resolver,
+) (*schema.Registry, error) {
 	if schemaRef != "" {
 		// FileOrURL cleans a path as text, which drops a ".." together
 		// with a symlinked directory before it. Any other ref, such as a
@@ -430,7 +519,7 @@ func buildRegistry(ctx context.Context, schemaRef string) (*schema.Registry, err
 		// instead. Compiling through Registry.Schema, rather than Compile
 		// on the loaded bytes, lets a $ref in the schema resolve against
 		// the schema's own file or URL.
-		s, err := schema.NewRegistry().Schema(ctx, ref)
+		s, err := schema.NewRegistry(schema.WithAccess(access)).Schema(ctx, ref)
 		if err != nil {
 			return nil, fmt.Errorf("--schema: %w", err)
 		}
@@ -440,15 +529,24 @@ func buildRegistry(ctx context.Context, schemaRef string) (*schema.Registry, err
 		return schema.NewRegistry(schema.WithResolvers(s)), nil
 	}
 
+	refs := schema.WithCompileOptions(schema.WithRequireRefs(false))
+
+	// The directive registry hands each schema to the outer registry
+	// compiled, so the outer registry does not need an Access of its own.
+	directives := schema.NewRegistry(
+		schema.WithAccess(access),
+		schema.WithResolvers(schema.Directive()), // Resolves schemas relative to each YAML file.
+		refs,
+	)
+
+	resolvers := []schema.Resolver{directives}
+	if store != nil {
+		resolvers = append(resolvers, store) // Automatic discovery by absolute file path.
+	}
+
 	return schema.NewRegistry(
-		// The user picks the files to validate, so a directive can name any
-		// file or URL, as it does in yaml-language-server.
-		schema.WithAccess(schema.Unrestricted),
-		schema.WithResolvers(
-			schema.Directive(), // Resolves schemas relative to each YAML file.
-			schemastore.New(),  // Automatic discovery by absolute file path.
-		),
+		schema.WithResolvers(resolvers...),
 		schema.WithRequireSchema(false),
-		schema.WithCompileOptions(schema.WithRequireRefs(false)),
+		refs,
 	), nil
 }
