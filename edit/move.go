@@ -102,8 +102,12 @@ import (
 //
 // A reference document of [go.jacobcolvin.com/niceyaml.WithReferences] that
 // a merge key reads decides which names the mapping of the merge key reads.
-// A Move of an entry of such a mapping, or into it, fails with a problem
-// that matches [paths.ErrReferenceAlias].
+// A Move of an entry of such a mapping fails with a problem that matches
+// [paths.ErrReferenceAlias]. So does a Move into it, by a name whose entry
+// the merge key brings in. A Move with [First], [Before], or [After] can
+// put the entry before such a merge key. It fails the same way when the
+// merge key brings in a key that a decode reads as the name, or a key that
+// does not decode.
 //
 // The value keeps its text, indented for its new place, with its anchors
 // and its aliases. An empty value does not have text, so its key or its
@@ -327,6 +331,13 @@ func (n *Node) move(target paths.Path, at placement) (modelPlace, error) {
 	where, err := d.movePlace(n, th, named, at)
 	if err != nil {
 		return modelPlace{}, err
+	}
+
+	if ok && len(th.rest) > 0 && th.rest[0].Kind == paths.SelectorChild {
+		err = d.placeRead(th.content, th.rest[0].Name, where)
+		if err != nil {
+			return modelPlace{}, d.readFail(n, fmt.Errorf("%s %s, which %w", d.subject(), named, err))
+		}
 	}
 
 	// The entry leaves its mapping before the new entry goes in, so the new

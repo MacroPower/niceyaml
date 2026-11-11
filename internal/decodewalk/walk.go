@@ -300,10 +300,6 @@ type walker struct {
 	// [walker.pastAliasLimit] finds it, or nil before it asks.
 	pastLimit *bool
 	rules     Rules
-	// Whether a lookup of [walker.mergedEntry] reads each merge source, as
-	// a path does, rather than skip each source that a decode of a struct
-	// drops.
-	paths bool
 	// Whether the walk goes below a node once for each value that reads
 	// it, as [WalkUses] describes, rather than once for each type.
 	uses bool
@@ -718,9 +714,10 @@ type entryRead struct {
 // Without merges, the entry is the last entry of mapping itself with that
 // name.
 //
-// The resolver cannot read the sources of a `<<` merge key that reads a
-// reference document. For such a lookup, the walk reads the merge keys
-// itself, as [walker.mergedEntry] describes, so the entry might lie in a
+// The resolver does not return an entry of a reference document. When a
+// path through name selects one, or the resolver cannot read a reference
+// document that a `<<` merge key reads, the walk reads the merge keys
+// itself, as [walker.mergedEntry] describes. The entry might then lie in a
 // reference document. When the walk cannot read a source either, the
 // result holds the last entry of mapping itself with that name, and it
 // reports that the lookup is not known. A merge key after that entry might
@@ -772,8 +769,7 @@ func (w *walker) ownEntry(mapping *ast.MappingNode, name string) *ast.MappingVal
 // wins. It reads an alias of a reference document through [Rules.Anchor].
 // The decoder drops each source with a key that it does not read as a
 // string, as [walker.readsAsStruct] tells, so the lookup skips such a source
-// and the sources it merges. A walker that reads every source as a path
-// does skips none. One lookup reads each mapping once.
+// and the sources it merges. One lookup reads each mapping once.
 //
 // The lookup stops at the first source that it cannot read. A key that it
 // has not found by then is not known. It reads only the merge keys that
@@ -831,7 +827,7 @@ func (l *nameLookup) entries(
 	l.seen[node] = true
 
 	keys := l.w.keysOf(node, entries, anchor, via != nil, top)
-	if !top && !l.w.paths && !keys.strings {
+	if !top && !keys.strings {
 		return entryRead{}, false
 	}
 
@@ -1131,60 +1127,6 @@ func (k *Keys) held(key keysOfKey, index func() *sourceKeys) *sourceKeys {
 	return keys
 }
 
-// PathEntries finds the entries that paths select in the mappings of one
-// document, as [PathEntries.Entry] describes. The keys of the merge
-// sources that its lookups read stay in [Rules.Keys] and
-// [Rules.AnchorKeys]. So the lookups of many paths that merge one source
-// read its entries once. A PathEntries is safe for concurrent use.
-//
-// Create instances with [NewPathEntries].
-type PathEntries struct {
-	rules Rules
-}
-
-// NewPathEntries creates new [PathEntries] that read the document of the
-// resolver of r, and the anchors of reference documents through
-// [Rules.Anchor].
-func NewPathEntries(r Rules) *PathEntries {
-	return &PathEntries{rules: r}
-}
-
-// Entry returns the entry that a path through the key name selects in
-// mapping, a mapping of the document. The resolver of the path cannot read
-// a `<<` merge key that reads a reference document. Entry reads such a
-// merge key as the resolver reads the merge keys of the document. It
-// reads an alias of a reference document through [Rules.Anchor]. It reads
-// every merge source, as a path does, even one that a decode of a struct
-// drops. The entry is nil when no entry has the key. The alias is the
-// alias of the document through which a `<<` merge key brings in the entry
-// from a reference document, or nil when the document holds the entry.
-// The name `<<` selects the last merge key of mapping when no entry has a
-// real key of that text, as the resolver reads it. Entry reports false
-// when the lookup cannot read a merge source, such as one past
-// [Rules.PastAliasLimit].
-func (p *PathEntries) Entry(mapping *ast.MappingNode, name string) (*ast.MappingValueNode, *ast.AliasNode, bool) {
-	// The walker reads every merge source as a path does.
-	w := lookupWalker(p.rules)
-	w.paths = true
-
-	read := w.mergedEntry(mapping, name)
-	if !read.known || read.entry != nil {
-		return read.entry, read.alias, read.known
-	}
-
-	merges := w.keysOf(mapping, mapping.Values, nil, false, true).merges
-	if len(merges) == 0 {
-		return nil, nil, true
-	}
-
-	last := mapping.Values[merges[len(merges)-1]]
-	if key, ok := w.rules.Resolver.KeyName(last.Key); ok && key == name {
-		return last, nil, true
-	}
-
-	return nil, nil, true
-}
-
 // ReferenceKey returns the alias of the document through which a `<<`
 // merge key brings in the entry of mapping, a mapping of the document,
 // whose key has the token tk. The entry lies in a reference document, and
@@ -1263,7 +1205,7 @@ func (l *mergeLookup) entries(node ast.Node, via *ast.AliasNode, from astnode.Pa
 
 	l.seen[node] = true
 
-	if !top && !l.w.paths && !l.w.readsAsStrings(entries, via != nil) {
+	if !top && !l.w.readsAsStrings(entries, via != nil) {
 		return false
 	}
 

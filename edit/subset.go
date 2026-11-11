@@ -4455,8 +4455,9 @@ func (d *Doc) mergeReader(alias ast.Node) (*ast.MappingValueNode, bool) {
 // source override the earlier one, but the merge spec keeps the earlier
 // one. That misread binds at the merge key. The sources are the mappings of
 // the document that the merge key brings in, as [Doc.formOf] gives them.
-// The engine does not read what an alias of a reference document brings
-// in, so a key of a reference document counts for neither kind.
+// A key of a reference document counts for neither kind. A path through
+// an own entry whose key such a key replaces fails instead, as
+// [Doc.referenceRead] tells.
 func (d *Doc) precedenceMisreads() []misreadFound {
 	var out []misreadFound
 
@@ -5039,9 +5040,11 @@ func (d *Doc) referenceNames() map[ast.Node]*ast.MappingValueNode {
 // merge key. An earlier step of the path comes before a later one. It
 // reports false when the call makes no such change. A Set of a name that
 // such a mapping does not write, and a Move into such a mapping, look the
-// name up through the merge key on their own paths. Those paths fail with
-// the problem of the alias first, as [Node.At] tells, so only a change of
-// an own entry that the call finds reaches this rule.
+// name up through the merge key on their own paths. Such a path fails with
+// the problem of the alias first when the reference document decides it,
+// as [Node.At] tells. Otherwise the call adds a name that the reference
+// document does not hold. Only a change of an own entry that the call finds
+// thus reaches this rule.
 func (d *Doc) referenceChange(c reachCall, w *callWalk) (keyChange, *ast.MappingValueNode, bool) {
 	decided := d.referenceNames()
 	if len(decided) == 0 || !w.p.exists {
@@ -5066,9 +5069,9 @@ func (d *Doc) referenceChange(c reachCall, w *callWalk) (keyChange, *ast.Mapping
 // referenceProblem returns the problem of the call c, whose walk is w, that
 // removes, renames, or moves the own entry at its place, in a mapping whose
 // names e, a << merge key of an alias of a reference document, decides, as
-// [Doc.referenceChange] finds it. The engine does not read which names the
-// reference document holds, so it cannot tell whether the mapping then
-// reads another value under the name. The problem matches
+// [Doc.referenceChange] finds it. The engine does not check which names
+// the reference document holds for such a call, so the call fails whatever
+// the reference document holds. The problem matches
 // [go.jacobcolvin.com/niceyaml/paths.ErrReferenceAlias] and
 // [go.jacobcolvin.com/niceyaml/paths.ErrAlias], as the problem of a path
 // through such a merge key does. It binds at the entry of the call, with a

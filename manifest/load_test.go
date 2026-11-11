@@ -611,9 +611,7 @@ func TestRegistry_Load(t *testing.T) {
 		},
 		"type fields before a merge key that reads a reference document": {
 			// The decoder reads the kind of the reference document, so the
-			// load must not route the document as Hours. It cannot read
-			// the reference document, so it fails whatever that document
-			// holds.
+			// load must not route the document as Hours.
 			opts: []manifest.RegistryOption{
 				manifest.WithDecodeOptions(niceyaml.WithUnknownFields(niceyaml.UnknownFieldsIgnore)),
 			},
@@ -633,7 +631,7 @@ func TestRegistry_Load(t *testing.T) {
 				)),
 			},
 			err: stringtest.JoinLF(
-				"config/hours.yaml:3:1: $.apiVersion: apiVersion might come from a merge key that reads a reference document",
+				"config/hours.yaml:3:1: $.kind: kind might come from a merge key that reads a reference document",
 				"`-- put the merge key before apiVersion",
 				"",
 				"   1 | apiVersion: cafe.jacobcolvin.com/v1",
@@ -644,6 +642,28 @@ func TestRegistry_Load(t *testing.T) {
 				"   5 |   name: weekday",
 			),
 			matches: []error{manifest.ErrFieldAlias},
+		},
+		"type fields before a merge key of a reference document without them": {
+			// The decoder reads the type fields of the document itself.
+			files: map[string]string{
+				"cafe.yaml": cafeDoc,
+				"hours.yaml": stringtest.LinesLF(
+					"apiVersion: cafe.jacobcolvin.com/v1",
+					"kind: Hours",
+					"<<: *b",
+					"metadata:",
+					"  name: weekday",
+				),
+			},
+			in: []input.Option{
+				input.WithSourceOptions(niceyaml.WithReferences(
+					niceyaml.NewSourceFromString("base: &b {spec: {open: 8}}\n"),
+				)),
+			},
+			want: []string{
+				`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`,
+				`Hours "weekday" cafe.jacobcolvin.com/v1 up-to-date=true`,
+			},
 		},
 		"kind before apiVersion and a merge key that reads a reference document": {
 			// The detail names the first type field before the merge key,
@@ -663,7 +683,7 @@ func TestRegistry_Load(t *testing.T) {
 			},
 			in: []input.Option{
 				input.WithSourceOptions(niceyaml.WithReferences(
-					niceyaml.NewSourceFromString("base: &b {spec: {open: 8}}\n"),
+					niceyaml.NewSourceFromString("base: &b {apiVersion: other/v1, spec: {open: 8}}\n"),
 				)),
 			},
 			err: stringtest.JoinLF(
@@ -698,7 +718,7 @@ func TestRegistry_Load(t *testing.T) {
 			},
 			in: []input.Option{
 				input.WithSourceOptions(niceyaml.WithReferences(
-					niceyaml.NewSourceFromString("base: &b {spec: {open: 8}}\n"),
+					niceyaml.NewSourceFromString("base: &b {metadata: {name: other}, spec: {open: 8}}\n"),
 				)),
 			},
 			err: stringtest.JoinLF(
@@ -732,7 +752,7 @@ func TestRegistry_Load(t *testing.T) {
 			},
 			in: []input.Option{
 				input.WithSourceOptions(niceyaml.WithReferences(
-					niceyaml.NewSourceFromString("base: &b {spec: {open: 8}}\n"),
+					niceyaml.NewSourceFromString("base: &b {apiVersion: other/v1, spec: {open: 8}}\n"),
 				)),
 			},
 			err: stringtest.JoinLF(
@@ -763,7 +783,7 @@ func TestRegistry_Load(t *testing.T) {
 			},
 			in: []input.Option{
 				input.WithSourceOptions(niceyaml.WithReferences(
-					niceyaml.NewSourceFromString("base: &b {a: '1'}\n"),
+					niceyaml.NewSourceFromString("base: &b {metadata: {name: other}}\n"),
 				)),
 			},
 			err: stringtest.JoinLF(
@@ -796,7 +816,7 @@ func TestRegistry_Load(t *testing.T) {
 			},
 			in: []input.Option{
 				input.WithSourceOptions(niceyaml.WithReferences(
-					niceyaml.NewSourceFromString("base: &b {a: '1'}\n"),
+					niceyaml.NewSourceFromString("base: &b {apiVersion: other/v1}\n"),
 				)),
 			},
 			err: stringtest.JoinLF(
@@ -841,7 +861,7 @@ func TestRegistry_Load(t *testing.T) {
 			},
 			in: []input.Option{
 				input.WithSourceOptions(niceyaml.WithReferences(
-					niceyaml.NewSourceFromString("base: &b {labels: {floor: one}}\n"),
+					niceyaml.NewSourceFromString("base: &b {name: other, labels: {floor: one}}\n"),
 				)),
 			},
 			err: stringtest.JoinLF(
@@ -854,6 +874,23 @@ func TestRegistry_Load(t *testing.T) {
 				"     |   ^^",
 			),
 			matches: []error{manifest.ErrFieldAlias},
+		},
+		"name before a merge key of a reference document without it": {
+			files: map[string]string{
+				"cafe.yaml": stringtest.LinesLF(
+					"apiVersion: cafe.jacobcolvin.com/v1",
+					"kind: Cafe",
+					"metadata:",
+					"  name: yamull",
+					"  <<: *b",
+				),
+			},
+			in: []input.Option{
+				input.WithSourceOptions(niceyaml.WithReferences(
+					niceyaml.NewSourceFromString("base: &b {labels: {floor: one}}\n"),
+				)),
+			},
+			want: []string{`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`},
 		},
 		"name after a merge key that reads a reference document": {
 			files: map[string]string{
@@ -1754,6 +1791,22 @@ func sixteenOptions() []manifest.RegistryOption {
 	}
 }
 
+// fanOut returns the text of a reference document whose anchor a0 holds
+// the mapping {q: 1}. Each anchor aN up to a<levels> merges the anchor
+// before it four times.
+func fanOut(levels int) string {
+	var b strings.Builder
+
+	b.WriteString("a0: &a0 {q: 1}\n")
+
+	for n := 1; n <= levels; n++ {
+		prev := fmt.Sprintf("*a%d", n-1)
+		fmt.Fprintf(&b, "a%d: &a%d {<<: [%s, %s, %s, %s]}\n", n, n, prev, prev, prev, prev)
+	}
+
+	return b.String()
+}
+
 func TestRegistry_Load_Unversioned(t *testing.T) {
 	t.Parallel()
 
@@ -1863,6 +1916,185 @@ func TestRegistry_Load_Unversioned(t *testing.T) {
 				"   5 | seats: 9",
 			),
 			matches: []error{manifest.ErrFieldAlias},
+		},
+		"version before a merge key whose reference document holds it under another key text": {
+			// The decode reads the 0x10 of the reference document as the key
+			// 16, so it reads that entry in place of the version.
+			opts: sixteenOptions(),
+			in: []input.Option{
+				input.WithSourceOptions(niceyaml.WithReferences(
+					niceyaml.NewSourceFromString("base: &b {0x10: cafe.jacobcolvin.com/v9}\n"),
+				)),
+			},
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF(
+				"16: cafe.jacobcolvin.com/v1", "kind: Cafe", "<<: *b", "seats: 9",
+			)},
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:3:1: $.16: 16 might come from a merge key that reads a reference document",
+				"`-- put the merge key before 16",
+				"",
+				"   1 | 16: cafe.jacobcolvin.com/v1",
+				"   2 | kind: Cafe",
+				"   3 | <<: *b",
+				"     | ^^",
+				"   4 | seats: 9",
+			),
+			matches: []error{manifest.ErrFieldAlias},
+		},
+		"version before a merge key whose reference document merges it under another key text": {
+			opts: sixteenOptions(),
+			in: []input.Option{
+				input.WithSourceOptions(niceyaml.WithReferences(
+					niceyaml.NewSourceFromString("inner: &c {0o20: cafe.jacobcolvin.com/v9}\nbase: &b {<<: *c}\n"),
+				)),
+			},
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF(
+				"16: cafe.jacobcolvin.com/v1", "kind: Cafe", "<<: *b", "seats: 9",
+			)},
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:3:1: $.16: 16 might come from a merge key that reads a reference document",
+				"`-- put the merge key before 16",
+				"",
+				"   1 | 16: cafe.jacobcolvin.com/v1",
+				"   2 | kind: Cafe",
+				"   3 | <<: *b",
+				"     | ^^",
+				"   4 | seats: 9",
+			),
+			matches: []error{manifest.ErrFieldAlias},
+		},
+		"version before a merge key whose reference document holds a key that does not decode": {
+			// A decode cannot read the key !!bool x, so it might read it as 16.
+			opts: sixteenOptions(),
+			in: []input.Option{
+				input.WithSourceOptions(niceyaml.WithReferences(
+					niceyaml.NewSourceFromString("base: &b {? !!bool x : other}\n"),
+				)),
+			},
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF(
+				"16: cafe.jacobcolvin.com/v1", "kind: Cafe", "<<: *b", "seats: 9",
+			)},
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:3:1: $.16: 16 might come from a merge key that reads a reference document",
+				"`-- put the merge key before 16",
+				"",
+				"   1 | 16: cafe.jacobcolvin.com/v1",
+				"   2 | kind: Cafe",
+				"   3 | <<: *b",
+				"     | ^^",
+				"   4 | seats: 9",
+			),
+			matches: []error{manifest.ErrFieldAlias},
+		},
+		"version before a merge key whose reference document holds other keys": {
+			opts: sixteenOptions(),
+			in: []input.Option{
+				input.WithSourceOptions(niceyaml.WithReferences(
+					niceyaml.NewSourceFromString("base: &b {0x11: other}\n"),
+				)),
+			},
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF(
+				"16: cafe.jacobcolvin.com/v1", "kind: Cafe", "<<: *b", "seats: 9",
+			)},
+			want: []string{`Cafe "" cafe.jacobcolvin.com/v1 up-to-date=true`},
+		},
+		"no version and a merge key whose reference document holds it under another key text": {
+			// The decode reads the 0x10 of the reference document as the
+			// version, so the load must not route the document as
+			// unversioned.
+			opts: sixteenOptions(),
+			in: []input.Option{
+				input.WithSourceOptions(niceyaml.WithReferences(
+					niceyaml.NewSourceFromString("base: &b {0x10: cafe.jacobcolvin.com/v9}\n"),
+				)),
+			},
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF("kind: Cafe", "seats: 9", "<<: *b")},
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:3:1: $.16: 16 might come from a merge key that reads a reference document",
+				"`-- write the 16 in the document itself, after the merge key",
+				"",
+				"   1 | kind: Cafe",
+				"   2 | seats: 9",
+				"   3 | <<: *b",
+				"     | ^^",
+			),
+			matches: []error{manifest.ErrFieldAlias},
+		},
+		"no type fields and a merge key whose reference document holds the version under another key text": {
+			opts: sixteenOptions(),
+			in: []input.Option{
+				input.WithSourceOptions(niceyaml.WithReferences(
+					niceyaml.NewSourceFromString("base: &b {0x10: cafe.jacobcolvin.com/v1}\n"),
+				)),
+			},
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF("seats: 9", "<<: *b")},
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:2:1: $.16: 16 might come from a merge key that reads a reference document",
+				"`-- write the 16 in the document itself, after the merge key",
+				"",
+				"   1 | seats: 9",
+				"   2 | <<: *b",
+				"     | ^^",
+			),
+			matches: []error{manifest.ErrFieldAlias},
+		},
+		"no version and a merge key whose reference document holds a key that does not decode": {
+			// A decode cannot read the key !!bool x, so it might read it as 16.
+			opts: sixteenOptions(),
+			in: []input.Option{
+				input.WithSourceOptions(niceyaml.WithReferences(
+					niceyaml.NewSourceFromString("base: &b {? !!bool x : other}\n"),
+				)),
+			},
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF("kind: Cafe", "seats: 9", "<<: *b")},
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:3:1: $.16: 16 might come from a merge key that reads a reference document",
+				"`-- write the 16 in the document itself, after the merge key",
+				"",
+				"   1 | kind: Cafe",
+				"   2 | seats: 9",
+				"   3 | <<: *b",
+				"     | ^^",
+			),
+			matches: []error{manifest.ErrFieldAlias},
+		},
+		"version after a merge key whose reference document holds it under another key text": {
+			// The entry 16 of the document comes after the merge key, so the
+			// decode reads it in place of the 0x10 of the reference document.
+			opts: sixteenOptions(),
+			in: []input.Option{
+				input.WithSourceOptions(niceyaml.WithReferences(
+					niceyaml.NewSourceFromString("base: &b {0x10: cafe.jacobcolvin.com/v9}\n"),
+				)),
+			},
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF(
+				"kind: Cafe", "seats: 9", "<<: *b", "16: cafe.jacobcolvin.com/v1",
+			)},
+			want: []string{`Cafe "" cafe.jacobcolvin.com/v1 up-to-date=true`},
+		},
+		"version before a merge key whose reference document fans out": {
+			// Each anchor of the reference document merges the one before it
+			// four times. The search for the version reads each mapping
+			// once, so the load does not take time that grows with the count
+			// of paths through the anchors.
+			opts: sixteenOptions(),
+			in: []input.Option{
+				input.WithSourceOptions(niceyaml.WithReferences(
+					niceyaml.NewSourceFromString(fanOut(16)),
+				)),
+			},
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF(
+				"16: cafe.jacobcolvin.com/v1", "kind: Cafe", "<<: *a16",
+			)},
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:3:5: aliases expand the document past the alias limit",
+				"",
+				"   1 | 16: cafe.jacobcolvin.com/v1",
+				"   2 | kind: Cafe",
+				"   3 | <<: *a16",
+				"     |     ^",
+			),
+			matches: []error{niceyaml.ErrExcessiveAliasing},
 		},
 		"version that a merge key brings in through an alias key that reads its anchor at its own place": {
 			// The alias key *n reads the anchor before it, 0x10, also where
@@ -2075,7 +2307,7 @@ func TestRegistry_Load_Unversioned(t *testing.T) {
 			)},
 			in: []input.Option{
 				input.WithSourceOptions(niceyaml.WithReferences(
-					niceyaml.NewSourceFromString("base: &b {seats: 5}\n"),
+					niceyaml.NewSourceFromString("base: &b {apiVersion: other/v1, seats: 5}\n"),
 				)),
 			},
 			err: stringtest.JoinLF(
@@ -2088,6 +2320,20 @@ func TestRegistry_Load_Unversioned(t *testing.T) {
 				"     | ^^",
 			),
 			matches: []error{manifest.ErrFieldAlias},
+		},
+		"versioned document with a merge key of a reference document without the type fields": {
+			opts: opts(),
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF(
+				"apiVersion: cafe.jacobcolvin.com/v1",
+				"kind: Cafe",
+				"<<: *b",
+			)},
+			in: []input.Option{
+				input.WithSourceOptions(niceyaml.WithReferences(
+					niceyaml.NewSourceFromString("base: &b {seats: 5}\n"),
+				)),
+			},
+			want: []string{`Cafe "" cafe.jacobcolvin.com/v1 up-to-date=true`},
 		},
 		"versioned document after a merge key that reads a reference document": {
 			opts: opts(),
@@ -2103,96 +2349,31 @@ func TestRegistry_Load_Unversioned(t *testing.T) {
 			},
 			want: []string{`Cafe "" cafe.jacobcolvin.com/v1 up-to-date=true`},
 		},
-		// The lookup of each type field goes through the merge key, whose
-		// alias reads a reference document, so the migration fails.
+		// The mapping of the reference document does not hold the type
+		// fields, so the migration writes them beside the merge key.
 		"plain document with a merge key that reads a reference document": {
 			opts:  opts(),
 			files: map[string]string{"cafe.yaml": "<<: *b\n"},
 			in:    baseReference,
-			err: stringtest.JoinLF(
-				"config/cafe.yaml:1:5: $: cafe.jacobcolvin.com/v1 sets $.kind, "+
-					"which goes through <<: *b at 1:1, a merge key that reads a reference document, so that document decides which names $ reads",
-				"|-- the document has no apiVersion and no kind, so cafe reads it as an unversioned Cafe",
-				"|-- move the file out of config if it is not a Cafe",
-				"`-- cafe.jacobcolvin.com/v1 sets $.kind",
-				"",
-				"   1 | <<: *b",
-				"     |     ^^",
-			),
-			matches: []error{manifest.ErrFieldAlias, paths.ErrReferenceAlias},
-		},
-		"plain document with an entry before a merge key that reads a reference document": {
-			// The reference document does not hold hours, so the text holds
-			// no precedence misread.
-			opts:  opts(),
-			files: map[string]string{"cafe.yaml": stringtest.LinesLF("hours: 1", "<<: *b")},
-			in:    baseReference,
-			err: stringtest.JoinLF(
-				"config/cafe.yaml:2:5: $: cafe.jacobcolvin.com/v1 sets $.kind, "+
-					"which goes through <<: *b at 2:1, a merge key that reads a reference document, so that document decides which names $ reads",
-				"|-- the document has no apiVersion and no kind, so cafe reads it as an unversioned Cafe",
-				"|-- move the file out of config if it is not a Cafe",
-				"`-- cafe.jacobcolvin.com/v1 sets $.kind",
-				"",
-				"   1 | hours: 1",
-				"   2 | <<: *b",
-				"     |     ^^",
-			),
-			matches: []error{manifest.ErrFieldAlias, paths.ErrReferenceAlias},
+			want:  []string{`Cafe "" unversioned up-to-date=false`},
 		},
 		"plain document with an entry before a merge key that reads the same key in a reference document": {
-			// The edit package reads the document alone for the misreads that
-			// New refuses, and the reference document decides which names the
-			// mapping reads, so the type field fails as a path through the
-			// alias does.
 			opts:  opts(),
 			files: map[string]string{"cafe.yaml": stringtest.LinesLF("seats: 1", "<<: *b")},
 			in:    baseReference,
-			err: stringtest.JoinLF(
-				"config/cafe.yaml:2:5: $: cafe.jacobcolvin.com/v1 sets $.kind, "+
-					"which goes through <<: *b at 2:1, a merge key that reads a reference document, so that document decides which names $ reads",
-				"|-- the document has no apiVersion and no kind, so cafe reads it as an unversioned Cafe",
-				"|-- move the file out of config if it is not a Cafe",
-				"`-- cafe.jacobcolvin.com/v1 sets $.kind",
-				"",
-				"   1 | seats: 1",
-				"   2 | <<: *b",
-				"     |     ^^",
-			),
-			matches: []error{manifest.ErrFieldAlias, paths.ErrReferenceAlias},
+			want:  []string{`Cafe "" unversioned up-to-date=false`},
 		},
 		"plain document with an entry after a merge key that reads a reference document": {
 			opts:  opts(),
 			files: map[string]string{"cafe.yaml": stringtest.LinesLF("<<: *b", "seats: 1")},
 			in:    baseReference,
-			err: stringtest.JoinLF(
-				"config/cafe.yaml:1:5: $: cafe.jacobcolvin.com/v1 sets $.kind, "+
-					"which goes through <<: *b at 1:1, a merge key that reads a reference document, so that document decides which names $ reads",
-				"|-- the document has no apiVersion and no kind, so cafe reads it as an unversioned Cafe",
-				"|-- move the file out of config if it is not a Cafe",
-				"`-- cafe.jacobcolvin.com/v1 sets $.kind",
-				"",
-				"   1 | <<: *b",
-				"     |     ^^",
-				"   2 | seats: 1",
-			),
-			matches: []error{manifest.ErrFieldAlias, paths.ErrReferenceAlias},
+			want:  []string{`Cafe "" unversioned up-to-date=false`},
 		},
 		"plain flow document with a trailing comma after a merge key that reads a reference document": {
 			opts:  opts(),
-			files: map[string]string{"cafe.yaml": "{hours: 1, <<: *b,}\n"},
+			files: map[string]string{"cafe.yaml": "{seats: 1, <<: *b,}\n"},
 			in:    baseReference,
-			err: stringtest.JoinLF(
-				"config/cafe.yaml:1:16: $: cafe.jacobcolvin.com/v1 sets $.kind, "+
-					"which goes through <<: *b at 1:12, a merge key that reads a reference document, so that document decides which names $ reads",
-				"|-- the document has no apiVersion and no kind, so cafe reads it as an unversioned Cafe",
-				"|-- move the file out of config if it is not a Cafe",
-				"`-- cafe.jacobcolvin.com/v1 sets $.kind",
-				"",
-				"   1 | {hours: 1, <<: *b,}",
-				"     |                ^^",
-			),
-			matches: []error{manifest.ErrFieldAlias, paths.ErrReferenceAlias},
+			want:  []string{`Cafe "" unversioned up-to-date=false`},
 		},
 		"plain document whose merge key reads a reference document, with a nested kind field": {
 			opts:  nested,
@@ -2202,18 +2383,11 @@ func TestRegistry_Load_Unversioned(t *testing.T) {
 					niceyaml.NewSourceFromString("base: &b {spec: {seats: 5}}\n"),
 				)),
 			},
-			err: stringtest.JoinLF(
-				"config/cafe.yaml:1:5: $: cafe.jacobcolvin.com/v1 sets $.metadata.kind, "+
-					"which goes through <<: *b at 1:1, a merge key that reads a reference document, so that document decides which names $ reads",
-				"|-- the document has no apiVersion and no kind, so cafe reads it as an unversioned Cafe",
-				"|-- move the file out of config if it is not a Cafe",
-				"`-- cafe.jacobcolvin.com/v1 sets $.metadata.kind",
-				"",
-				"   1 | <<: *b",
-				"     |     ^^",
-			),
-			matches: []error{manifest.ErrFieldAlias, paths.ErrReferenceAlias},
+			want: []string{`Cafe "" unversioned up-to-date=false`},
 		},
+		// The mapping of the reference document holds metadata, so the
+		// lookup of the kind field goes through the merge key, and the
+		// migration fails.
 		"plain document whose merge key brings in the mapping of a nested kind field": {
 			opts:  nested,
 			files: map[string]string{"cafe.yaml": "<<: *b\n"},

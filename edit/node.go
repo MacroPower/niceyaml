@@ -575,12 +575,12 @@ func (d *Doc) ownPath(path paths.Path, p *place) (paths.Path, bool) {
 // written returns the place at own, a path that [Doc.pathTo] gives, as the
 // text writes it. [Doc.resolve] gives that place unless a reference
 // document of [niceyaml.WithReferences] decides a name of own. A `<<` merge
-// key that reads such a document lets it decide which names the mapping of
-// the merge key reads. Resolve thus fails at a name that the mapping does
-// not write after every such merge key. The mapping still writes an entry
-// of that name, so written reads the last such entry there, and it reports
-// true. It returns the error of resolve when the mapping does not write
-// the name.
+// key that reads such a document decides a name whose entry it brings in
+// from that document, as a decode reads the keys there. It decides every
+// name of its mapping when the engine cannot read that document. Resolve
+// fails at such a name. The mapping can still write an entry of that name,
+// so written reads the last such entry there, and it reports true. It
+// returns the error of resolve when the mapping does not write the name.
 func (d *Doc) written(own paths.Path) (*place, bool, error) {
 	var (
 		sels = slices.Collect(own.Selectors())
@@ -930,12 +930,11 @@ func (n *Node) Path() paths.Path {
 // equals Path, though each alias of the anchor reads an edit there. Own
 // does not list those aliases.
 //
-// A reference document of [niceyaml.WithReferences] can decide a name of
-// the own path. The mapping of a `<<` merge key that reads the document
-// does not write that name after every such merge key, as [Node.At]
-// describes. Own still returns the path of the names and the indexes that
-// the text writes, and an edit through the node changes the text there.
-// At fails at that own path with a problem that matches
+// A reference document of [niceyaml.WithReferences] can decide a name of the
+// own path. A `<<` merge key that reads the document then brings in that
+// name, as [Node.At] describes. Own still returns the path of the names and
+// the indexes that the text writes, and an edit through the node changes the
+// text there. At fails at that own path with a problem that matches
 // [paths.ErrReferenceAlias], and so does a Move to a target below it.
 //
 // Some places have no own path, and Own returns Path for them. An entry
@@ -955,8 +954,10 @@ func (n *Node) Path() paths.Path {
 // below that entry.
 //
 // A merge key can also write a mapping in a sequence that holds an alias of
-// a reference document. A place in or below that mapping has no own path,
-// when the path reaches it through an alias. An edit at each of the places
+// a reference document. An entry of the written mapping has no own path
+// when the path reaches it through an alias and the reference document
+// decides its name, as [Node.At] describes. Each place below such an entry
+// has no own path either. An edit at each of the places
 // at a merge key that have no own path fails with [ErrUnsupported], as
 // [ConstructMergeForm] names it.
 //
@@ -1423,10 +1424,9 @@ func (d *Doc) view(n *Node, p *place) (*niceyaml.Node, error) {
 // path that enters an alias of a reference document of
 // [niceyaml.WithReferences] fails the same way, with a problem that matches
 // [paths.ErrReferenceAlias], as [niceyaml.Node.At] fails there. A `<<`
-// merge key of such an alias decides the names of its mapping. So a path
-// through a name that the mapping writes before the merge key fails too. So
-// does a path through a name that it does not write after every such merge
-// key, as the package documentation describes.
+// merge key of such an alias brings in the names of the mapping of its
+// anchor. So a path through a name whose entry such a merge key brings in
+// fails too, as the package documentation describes.
 //
 // A path through an alias or a `<<` merge key reaches the anchored value.
 // Two nodes with different paths can thus edit the same text. [Doc.Apply]

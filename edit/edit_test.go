@@ -3714,6 +3714,7 @@ func TestDoc_Apply(t *testing.T) {
 			"deep: &deep {<<: *kaffe, size: L}",
 			"first: &twice {n: 1}",
 			"second: &twice {n: 2}",
+			"env: &env {environment: {B: 1}}",
 			"---",
 			"later: &later {n: 3}",
 		), niceyaml.WithName("ref.yaml"))
@@ -3866,35 +3867,46 @@ func TestDoc_Apply(t *testing.T) {
 				want: stringtest.LinesLF("extra:", "  <<: *deep", "  cost: 3"),
 			},
 			"reads an own key before a merge key of the alias": {
-				// The merge key can bring in the key of the own entry, which then
-				// wins over it, so the reference document decides what the path
-				// selects.
-				before: stringtest.LinesLF("extra:", "  size: S", "  <<: *kaffe"),
+				// The merge key brings in the key of the own entry, which then
+				// wins over it, so the path selects an entry of the reference
+				// document.
+				before: stringtest.LinesLF("extra:", "  price: 9", "  <<: *kaffe"),
 				path:   paths.Doc(),
 				fn: both(
-					at(paths.MustParse("$.extra.size"), refusedRead),
-					at(paths.MustParse("$.extra.size"), reads(exists, false)),
-					at(paths.MustParse("$.extra.size"), reads(text, "")),
+					at(paths.MustParse("$.extra.price"), refusedRead),
+					at(paths.MustParse("$.extra.price"), reads(exists, false)),
+					at(paths.MustParse("$.extra.price"), reads(text, "")),
 					at(paths.MustParse("$.extra"), decodes(map[string]any{
-						"item": "Kaffe", "price": uint64(35), "size": "S",
+						"item": "Kaffe", "price": uint64(35),
 					})),
 				),
-				want: stringtest.LinesLF("extra:", "  size: S", "  <<: *kaffe"),
+				want: stringtest.LinesLF("extra:", "  price: 9", "  <<: *kaffe"),
 			},
 			"set of an own key before a merge key of the alias": {
-				before: stringtest.LinesLF("extra:", "  size: S", "  <<: *kaffe"),
+				before: stringtest.LinesLF("extra:", "  price: 9", "  <<: *kaffe"),
 				path:   paths.Doc(),
-				fn:     at(paths.MustParse("$.extra.size"), set("M")),
-				err: "test.yaml:3:7: $.extra: cafe.jacobcolvin.com/v1 sets $.extra.size, " +
+				fn:     at(paths.MustParse("$.extra.price"), set(10)),
+				err: "test.yaml:3:7: $.extra: cafe.jacobcolvin.com/v1 sets $.extra.price, " +
 					"which goes through <<: *kaffe at 3:3, a merge key that reads the reference document ref.yaml, so that document decides which names $.extra reads",
 			},
 			"Apply at an own key before a merge key of the alias": {
-				before: stringtest.LinesLF("extra:", "  size: S", "  <<: *kaffe"),
-				path:   paths.MustParse("$.extra.size"),
-				fn:     set("M"),
-				err: "test.yaml:3:7: $.extra: cafe.jacobcolvin.com/v1 reads $.extra.size, " +
+				before: stringtest.LinesLF("extra:", "  price: 9", "  <<: *kaffe"),
+				path:   paths.MustParse("$.extra.price"),
+				fn:     set(10),
+				err: "test.yaml:3:7: $.extra: cafe.jacobcolvin.com/v1 reads $.extra.price, " +
 					"which goes through <<: *kaffe at 3:3, a merge key that reads the reference document ref.yaml, so that document decides which names $.extra reads",
 				calls: []string{},
+			},
+			"set of an own key before a merge key of the alias that lacks it": {
+				// The merge key does not bring in size, so the path selects the
+				// own entry.
+				before: stringtest.LinesLF("extra:", "  size: S", "  <<: *kaffe"),
+				path:   paths.Doc(),
+				fn: both(
+					at(paths.MustParse("$.extra.size"), reads(text, "S")),
+					at(paths.MustParse("$.extra.size"), set("M")),
+				),
+				want: stringtest.LinesLF("extra:", "  size: M", "  <<: *kaffe"),
 			},
 			"Apply at a name that a merge key of the alias brings in": {
 				// A control: an edit there fails, as an edit through the alias
@@ -3907,9 +3919,9 @@ func TestDoc_Apply(t *testing.T) {
 					"decides which names $.extra reads",
 			},
 			"Apply of a descent below an own key before a merge key of the alias": {
-				// The merge key can bring in own, so the descent fails at the
-				// alias, as a path through own does.
-				before: stringtest.LinesLF("m:", "  own: {x: 1}", "  <<: *kaffe"),
+				// The merge key brings in price, so the descent fails at the
+				// alias, as a path through price does.
+				before: stringtest.LinesLF("m:", "  price: {x: 1}", "  <<: *kaffe"),
 				path:   paths.MustParse("$..x"),
 				fn:     set(5),
 				err: "test.yaml:3:7: $.m: cafe.jacobcolvin.com/v1 reads $..x, which goes through <<: *kaffe at 3:3, " +
@@ -3918,7 +3930,7 @@ func TestDoc_Apply(t *testing.T) {
 				calls: []string{},
 			},
 			"Apply of every node with an own key before a merge key of the alias": {
-				before: stringtest.LinesLF("m:", "  own: {x: 1}", "  <<: *kaffe"),
+				before: stringtest.LinesLF("m:", "  price: {x: 1}", "  <<: *kaffe"),
 				path:   paths.MustParse("$..*"),
 				fn:     reads(exists, true),
 				err: "test.yaml:3:7: $.m: cafe.jacobcolvin.com/v1 reads $..*, which goes through <<: *kaffe at 3:3, " +
@@ -3931,14 +3943,14 @@ func TestDoc_Apply(t *testing.T) {
 					"services:",
 					"  web:",
 					"    environment: {A: 1}",
-					"    <<: *kaffe",
+					"    <<: *env",
 					"  db:",
 					"    environment: {A: 2}",
 				),
 				path: paths.MustParse("$..environment"),
 				fn:   at(paths.Current().Child("A"), set(3)),
 				err: "test.yaml:4:9: $.services.web: cafe.jacobcolvin.com/v1 reads $..environment, " +
-					"which goes through <<: *kaffe at 4:5, a merge key that reads the reference document ref.yaml, so that document decides which names $.services.web reads",
+					"which goes through <<: *env at 4:5, a merge key that reads the reference document ref.yaml, so that document decides which names $.services.web reads",
 				calls: []string{},
 			},
 			"Apply of a descent below an own key after a merge key of the alias": {
@@ -3954,20 +3966,20 @@ func TestDoc_Apply(t *testing.T) {
 				// The merge key of the root comes before c, so only the merge
 				// key of c decides an entry that the descent selects, and the
 				// problem binds there, as niceyaml's Node.Nodes binds it.
-				before: stringtest.LinesLF("<<: *codes", "c:", "  x: 1", "  <<: *kaffe"),
-				path:   paths.MustParse("$..x"),
+				before: stringtest.LinesLF("<<: *codes", "c:", "  item: 1", "  <<: *kaffe"),
+				path:   paths.MustParse("$..item"),
 				fn:     set(5),
-				err: "test.yaml:4:7: $.c: cafe.jacobcolvin.com/v1 reads $..x, which goes through <<: *kaffe at 4:3, " +
+				err: "test.yaml:4:7: $.c: cafe.jacobcolvin.com/v1 reads $..item, which goes through <<: *kaffe at 4:3, " +
 					"a merge key that reads the reference document ref.yaml, so that document decides which names " +
 					"$.c reads",
 				calls: []string{},
 			},
 			"Apply of each item, where the merge key of a later item decides": {
-				before: "s: [{<<: *codes, a: 1}, {<<: *kaffe}]\n",
-				path:   paths.MustParse("$.s[*].a"),
+				before: "s: [{<<: *codes, item: 1}, {<<: *kaffe}]\n",
+				path:   paths.MustParse("$.s[*].item"),
 				fn:     set(5),
-				err: "test.yaml:1:30: $.s[1]: cafe.jacobcolvin.com/v1 reads $.s[*].a, which goes through <<: *kaffe " +
-					"at 1:26, a merge key that reads the reference document ref.yaml, so that document decides " +
+				err: "test.yaml:1:33: $.s[1]: cafe.jacobcolvin.com/v1 reads $.s[*].item, which goes through <<: *kaffe " +
+					"at 1:29, a merge key that reads the reference document ref.yaml, so that document decides " +
 					"which names $.s[1] reads",
 				calls: []string{},
 			},
@@ -3983,11 +3995,11 @@ func TestDoc_Apply(t *testing.T) {
 			},
 			"Apply at a name of a mapping whose merge sequence holds the alias second": {
 				// The lookup reads the merge key of h through *h, but the alias
-				// of the reference document that it stops at is *kaffe.
+				// of the reference document that brings in item is *kaffe.
 				before: stringtest.LinesLF("h: &h", "  <<: *codes", "m:", "  <<: [*h, *kaffe]", "  x: 1"),
-				path:   paths.MustParse("$.m.y"),
+				path:   paths.MustParse("$.m.item"),
 				fn:     set(5),
-				err: "test.yaml:4:12: $.m: cafe.jacobcolvin.com/v1 reads $.m.y, which goes through <<: [*h, *kaffe] " +
+				err: "test.yaml:4:12: $.m: cafe.jacobcolvin.com/v1 reads $.m.item, which goes through <<: [*h, *kaffe] " +
 					"at 4:3, a merge key that reads the reference document ref.yaml, so that document decides " +
 					"which names $.m reads",
 				calls: []string{},
@@ -4182,8 +4194,8 @@ func TestDoc_Apply(t *testing.T) {
 					"reads a reference document, which decides which names $.spec reads",
 			},
 			"rename of a key that the merge key does not bring in": {
-				// The engine does not read which names the reference document
-				// holds.
+				// The engine does not check which names the reference
+				// document holds for a rename.
 				before: block,
 				ref:    "base: &b {other: 4}\n",
 				fn:     rename("price"),
@@ -4198,11 +4210,11 @@ func TestDoc_Apply(t *testing.T) {
 					"reads a reference document, which decides which names $.spec reads",
 			},
 			"move into the mapping of the merge key": {
-				// A control: the mapping does not write z after the merge key, so
-				// the path of the target fails as a path through the alias does.
+				// A control: the merge key brings in z, so the path of the target
+				// fails as a path through the alias does.
 				before: block + "z: 1\n",
 				path:   "$.z",
-				ref:    "base: &b {other: 4}\n",
+				ref:    "base: &b {other: 4, z: 2}\n",
 				fn:     move("$.spec.z"),
 				err: `test.yaml:2:7: $.spec: cafe.jacobcolvin.com/v1 moves "z" to $.spec.z, which goes through ` +
 					`<<: *b at 2:3, a merge key that reads a reference document, so that document decides which ` +
@@ -9112,21 +9124,22 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 			applies: []edit.Func{both(move("$.m[0]", "$.l[2]"), fail("$.l[2].zz"))},
 			err:     "test.yaml:4:5: $.l[2].zz: bad",
 		},
-		// The edit does not read the names that a reference document brings
-		// in, so an error at a name that a merge key of the document decides
-		// binds at its alias, as a read there does (fix20 F5).
+		// An error at a name that a merge key of a reference document brings
+		// in binds at its alias, as a read there does (fix20 F5). An error at
+		// a name that neither the document nor the reference document holds
+		// binds at the mapping, as a read there does.
 		"F5: caller error at a name beside a merge key of a reference document that lacks it": {
 			before:  stringtest.LinesLF("o: 0", "m:", "  <<: *r", "  b: 1"),
 			ref:     "r: &r {x: 2}\n",
 			applies: []edit.Func{fail("$.m.zz")},
-			err:     "test.yaml:3:7: $.m.zz: bad",
+			err:     "test.yaml:2:1: $.m.zz: bad",
 		},
 		"F5: error that Doc.Node binds at a name that a merge key of a reference document lacks": {
 			before:  stringtest.LinesLF("o: 0", "m:", "  <<: *r", "  b: 1"),
 			ref:     "r: &r {x: 2}\n",
 			applies: []edit.Func{func(context.Context, *edit.Node) error { return nil }},
 			bind:    "$.m.zz",
-			bound:   "test.yaml:3:7: $.m.zz: bad",
+			bound:   "test.yaml:2:1: $.m.zz: bad",
 		},
 		"F5 control: caller error at a name that a merge key of a reference document brings in": {
 			before:  stringtest.LinesLF("o: 0", "m:", "  <<: *r", "  b: 1"),
@@ -11396,20 +11409,20 @@ func TestWithProtected(t *testing.T) {
 		protected []paths.Path
 	}{
 		"set of a mapping whose merge key of a reference document decides the protected path": {
-			// The reference document decides $.m.a, so the mapping holds the
-			// protected value, whatever the reference document holds.
+			// The reference document holds a, so it decides $.m.a, and the
+			// mapping holds the protected value.
 			before:    stringtest.LinesLF("m:", "  a: 1", "  <<: *r"),
-			ref:       "r: &r {b: 2}\n",
+			ref:       "r: &r {a: 2}\n",
 			protected: []paths.Path{paths.MustParse("$.m.a")},
 			path:      paths.MustParse("$.m"),
 			fn:        func(ctx context.Context, n *edit.Node) error { return n.Set(ctx, 5) },
 			err:       "cafe.jacobcolvin.com/v1 sets $.m, which holds a protected value",
 		},
 		"set of a mapping value whose merge key of a reference document decides the protected path": {
-			// The protected own entry is in the text, so the Set does not
-			// create it.
+			// The reference document holds a, so it decides $.m.a, and the
+			// Set replaces the mapping that holds the protected value.
 			before:    stringtest.LinesLF("m:", "  a: 1", "  <<: *r"),
-			ref:       "r: &r {b: 2}\n",
+			ref:       "r: &r {a: 2}\n",
 			protected: []paths.Path{paths.MustParse("$.m.a")},
 			path:      paths.MustParse("$.m"),
 			fn: func(ctx context.Context, n *edit.Node) error {
@@ -11419,7 +11432,7 @@ func TestWithProtected(t *testing.T) {
 		},
 		"removal of a mapping whose merge key of a reference document decides the protected path": {
 			before:    stringtest.LinesLF("m:", "  a: 1", "  <<: *r", "k: 1"),
-			ref:       "r: &r {b: 2}\n",
+			ref:       "r: &r {a: 2}\n",
 			protected: []paths.Path{paths.MustParse("$.m.a")},
 			path:      paths.MustParse("$.m"),
 			fn:        func(_ context.Context, n *edit.Node) error { return n.Remove() },
@@ -11427,7 +11440,7 @@ func TestWithProtected(t *testing.T) {
 		},
 		"move of a mapping whose merge key of a reference document decides the protected path": {
 			before:    stringtest.LinesLF("m:", "  a: 1", "  <<: *r", "k: 1"),
-			ref:       "r: &r {b: 2}\n",
+			ref:       "r: &r {a: 2}\n",
 			protected: []paths.Path{paths.MustParse("$.m.a")},
 			path:      paths.MustParse("$.m"),
 			fn:        func(_ context.Context, n *edit.Node) error { return n.Move(paths.MustParse("$.n")) },
@@ -11435,7 +11448,7 @@ func TestWithProtected(t *testing.T) {
 		},
 		"set of the value above a mapping whose merge key of a reference document decides the protected path": {
 			before:    stringtest.LinesLF("spec:", "  template:", "    kind: Pod", "    <<: *r"),
-			ref:       "r: &r {b: 2}\n",
+			ref:       "r: &r {kind: X}\n",
 			protected: []paths.Path{paths.MustParse("$.spec.template.kind")},
 			path:      paths.MustParse("$.spec"),
 			fn: func(ctx context.Context, n *edit.Node) error {
@@ -11451,9 +11464,9 @@ func TestWithProtected(t *testing.T) {
 			fn:        func(ctx context.Context, n *edit.Node) error { return n.Set(ctx, 5) },
 			err:       "cafe.jacobcolvin.com/v1 sets $.m, which holds a protected value",
 		},
-		"set of an own entry after the merge key of a mapping with a protected path that a reference decides": {
-			// A control: the edit inside the mapping keeps the merge key that
-			// reads the protected value.
+		"set of an own entry after the merge key of a mapping with a protected own entry beside a reference merge": {
+			// A control: the reference document lacks a, so $.m.a selects the
+			// own entry, and an edit of another entry keeps it.
 			before:    stringtest.LinesLF("m:", "  a: 1", "  <<: *r", "  b: 3"),
 			ref:       "r: &r {c: 2}\n",
 			protected: []paths.Path{paths.MustParse("$.m.a")},
@@ -11461,7 +11474,7 @@ func TestWithProtected(t *testing.T) {
 			fn:        func(ctx context.Context, n *edit.Node) error { return n.Set(ctx, 4) },
 			want:      stringtest.LinesLF("m:", "  a: 1", "  <<: *r", "  b: 4"),
 		},
-		"rename of a mapping with a protected path that a reference decides": {
+		"rename of a mapping with a protected own entry beside a reference merge": {
 			// A control: a rename of a value that holds a protected value
 			// passes.
 			before:    stringtest.LinesLF("m:", "  a: 1", "  <<: *r"),
@@ -11814,11 +11827,11 @@ func TestWithProtected(t *testing.T) {
 			want: "- w\n- z\n",
 		},
 		"set below an item that a protected path reaches through an alias, where a reference document decides the path of its sequence": {
-			// The reference document decides $.x.k, so the guard keeps the
-			// protected path, and a path through the other alias reaches
-			// the protected item.
+			// The reference document holds k, so it decides $.x.k. The guard
+			// keeps the protected path, and a path through the other alias
+			// reaches the protected item.
 			before:    stringtest.LinesLF("x:", "  k: &m", "    - 1", "    - {z: 2}", "  <<: *r", "c: *m", "e: *m"),
-			ref:       "r: &r {b: 2}\n",
+			ref:       "r: &r {k: 2}\n",
 			protected: []paths.Path{paths.MustParse("$.c[1]")},
 			path:      paths.MustParse("$.e[1].z"),
 			fn:        func(ctx context.Context, n *edit.Node) error { return n.Set(ctx, 5) },

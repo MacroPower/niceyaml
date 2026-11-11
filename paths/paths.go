@@ -50,11 +50,12 @@ var (
 	// reference document defines wraps [ErrReferenceAlias] instead.
 	ErrAnchorMissing = errors.New("alias has no anchor before it")
 
-	// ErrReferenceAlias indicates an alias on the path whose anchor a
-	// reference document defines, as [WithReferenceAnchors] names those
-	// anchors. A path selects such an alias but does not enter it, because
-	// the Resolver does not hold the reference documents. Every error that
-	// wraps ErrReferenceAlias also wraps [ErrAlias].
+	// ErrReferenceAlias indicates that the value at the path lies in a
+	// reference document, as [WithReferenceAnchors] names the anchors of
+	// those documents. A path selects an alias that reads such an anchor
+	// but does not enter it. A path through a key that a `<<` merge key
+	// brings in from such an anchor stops at the alias of the merge key.
+	// Every error that wraps ErrReferenceAlias also wraps [ErrAlias].
 	ErrReferenceAlias = errors.New("alias reads a reference document")
 
 	// ErrWildcard indicates a request for a single node or token from a path

@@ -509,16 +509,22 @@ func TestRegistry_PlanMigration(t *testing.T) {
 			)},
 			summary: "1 file to migrate, nothing written",
 		},
-		// The lookup of a type field goes through a merge key whose alias
-		// reads a reference document, so the plan blocks the file.
+		// The mapping of the reference document does not hold the type
+		// fields, so the plan writes them beside the merge key.
 		"plain document with a merge key that reads a reference document": {
 			opts:    unversioned(),
 			in:      baseReference,
 			files:   map[string]string{"cafe.yaml": stringtest.LinesLF("# Cafe", "<<: *b # base", "", "metadata: {}")},
-			blocked: []string{"config/cafe.yaml"},
-			summary: "1 file not migrated, nothing written",
-			err: "config/cafe.yaml:2:5: $: cafe.jacobcolvin.com/v1 sets $.kind, " +
-				"which goes through <<: *b at 2:1, a merge key that reads a reference document, so that document decides which names $ reads",
+			headers: []string{`config/cafe.yaml: Cafe from the unversioned layout of Cafe to cafe.jacobcolvin.com/v1`},
+			afters: []string{stringtest.LinesLF(
+				"# Cafe",
+				"apiVersion: cafe.jacobcolvin.com/v1",
+				"kind: Cafe",
+				"<<: *b # base",
+				"",
+				"metadata: {}",
+			)},
+			summary: "1 file to migrate, nothing written",
 		},
 		"plain flow document with a merge key that reads a reference document": {
 			opts: unversioned(),
@@ -528,18 +534,58 @@ func TestRegistry_PlanMigration(t *testing.T) {
 				"b.yaml": "{metadata: {}, <<: *b}\n",
 				"c.yaml": "{metadata: {}, <<: *b,}\n",
 			},
-			blocked: []string{"config/a.yaml", "config/b.yaml", "config/c.yaml"},
-			summary: "3 files not migrated, nothing written",
-			err:     "config: 3 errors",
+			headers: []string{
+				`config/a.yaml: Cafe from the unversioned layout of Cafe to cafe.jacobcolvin.com/v1`,
+				`config/b.yaml: Cafe from the unversioned layout of Cafe to cafe.jacobcolvin.com/v1`,
+				`config/c.yaml: Cafe from the unversioned layout of Cafe to cafe.jacobcolvin.com/v1`,
+			},
+			afters: []string{
+				"{apiVersion: cafe.jacobcolvin.com/v1, kind: Cafe, <<: *b, metadata: {}}\n",
+				"{apiVersion: cafe.jacobcolvin.com/v1, kind: Cafe, metadata: {}, <<: *b}\n",
+				"{apiVersion: cafe.jacobcolvin.com/v1, kind: Cafe, metadata: {}, <<: *b,}\n",
+			},
+			summary: "3 files to migrate, nothing written",
 		},
 		"plain document with a merge key that reads a reference document, with a nested kind field": {
 			opts:    unversioned(manifest.WithKindField(meta.Child("kind"))),
 			in:      baseReference,
 			files:   map[string]string{"cafe.yaml": "<<: *b\n"},
+			headers: []string{`config/cafe.yaml: Cafe from the unversioned layout of Cafe to cafe.jacobcolvin.com/v1`},
+			afters: []string{
+				stringtest.LinesLF("apiVersion: cafe.jacobcolvin.com/v1", "<<: *b", "metadata:", "  kind: Cafe"),
+			},
+			summary: "1 file to migrate, nothing written",
+		},
+		// The mapping of the reference document holds metadata, so the
+		// lookup of the kind field goes through the merge key, and the plan
+		// blocks the file.
+		"plain document whose merge key brings in the mapping of a nested kind field": {
+			opts: unversioned(manifest.WithKindField(meta.Child("kind"))),
+			in: []input.Option{
+				input.WithSourceOptions(niceyaml.WithReferences(
+					niceyaml.NewSourceFromString("base: &b {metadata: {name: yamull}}\n"),
+				)),
+			},
+			files:   map[string]string{"cafe.yaml": "<<: *b\n"},
 			blocked: []string{"config/cafe.yaml"},
 			summary: "1 file not migrated, nothing written",
 			err: "config/cafe.yaml:1:5: $: cafe.jacobcolvin.com/v1 sets $.metadata.kind, " +
 				"which goes through <<: *b at 1:1, a merge key that reads a reference document, so that document decides which names $ reads",
+		},
+		// The decode reads the 0x10 of the reference document as the version
+		// field 16. A write of 16 before the merge key does not replace that
+		// entry, so the document fails to route and the plan leaves it as it
+		// is.
+		"plain document whose merge key brings in the version under another key text": {
+			opts: sixteenOptions(),
+			in: []input.Option{
+				input.WithSourceOptions(niceyaml.WithReferences(
+					niceyaml.NewSourceFromString("base: &b {0x10: cafe.jacobcolvin.com/v9}\n"),
+				)),
+			},
+			files:   map[string]string{"cafe.yaml": stringtest.LinesLF("kind: Cafe", "seats: 9", "<<: *b")},
+			summary: "1 document not migrated, 1 file up to date, nothing written",
+			err:     "config/cafe.yaml:3:1: $.16: 16 might come from a merge key that reads a reference document",
 		},
 		"version field with an anchor that an alias reads": {
 			// The field keeps its anchor, so the alias reads the new version.

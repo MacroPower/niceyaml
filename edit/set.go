@@ -192,11 +192,14 @@ type payload struct {
 // writes its exported fields, unless the marshalers turn on
 // [go.jacobcolvin.com/niceyaml/encoder.JSONMarshalers].
 //
-// A reference document of [go.jacobcolvin.com/niceyaml.WithReferences]
-// that a `<<` merge key reads decides which names the mapping of the merge
-// key reads. A Set of a name that such a mapping does not write after the
-// merge key fails with a problem that matches [paths.ErrReferenceAlias], as
-// [Node.At] describes.
+// A `<<` merge key that reads a reference document of
+// [go.jacobcolvin.com/niceyaml.WithReferences] brings in the names of the
+// mapping of its anchor. A Set of a name whose entry such a merge key
+// brings in fails with a problem that matches [paths.ErrReferenceAlias], as
+// [Node.At] describes. A Set with [First], [Before], or [After] can put a
+// new entry before such a merge key. It fails the same way when the merge
+// key brings in a key that a decode reads as the name, such as 0x10 for 16,
+// or a key that does not decode.
 //
 // A Go string keeps the quotes of the scalar that it replaces, in block
 // and in flow style, even when it holds a line break. A single-quoted
@@ -2221,6 +2224,11 @@ func (d *Doc) createValue(
 		where, err = d.placeEntry(h, named, holder, holderPath, content, at)
 		if err != nil {
 			return nil, modelPlace{}, err
+		}
+
+		err = d.placeRead(content, next.Name, where)
+		if err != nil {
+			return nil, modelPlace{}, d.readFail(h, fmt.Errorf("%s sets %s, which %w", d.subject(), h.path, err))
 		}
 	}
 

@@ -1386,8 +1386,8 @@ func (n *Node) DataLocator() *DataLocator {
 //
 // A name can lead behind an alias that the document cannot follow, such
 // as an alias to an anchor of a document from [WithReferences]. So can a
-// name in a mapping whose `<<` merge key holds such an alias, where that
-// document decides which entry a path through the name selects, as the
+// name in a mapping whose `<<` merge key holds such an alias, where the
+// merge key brings in the entry of the name from that document, as the
 // paths package describes. Such a name keeps its form too, and so does
 // each name below it. The option does not set a position, so the error
 // binds where that path binds. A name such as 3.10 there binds where a path

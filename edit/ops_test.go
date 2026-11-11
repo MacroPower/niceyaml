@@ -200,8 +200,8 @@ func TestNode_SetKey(t *testing.T) {
 			want:   "s: &s {c: 1}\nm: {<<: *s, c: 2}\n",
 		},
 		"rename to the key of the document anchor that an alias key of a reference document does not read": {
-			// The engine does not read which names the reference document
-			// holds, so this rename fails too.
+			// The engine does not check which names the reference document
+			// holds for a rename, so this rename fails too.
 			before: "x: &x d\nm: {<<: *r, q: 2}\n",
 			ref:    "r: &r {*x : 1}\nx: &x k\n",
 			path:   paths.MustParse("$.m.q"),

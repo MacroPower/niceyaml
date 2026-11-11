@@ -1055,7 +1055,8 @@ func (r *resolver) reference(name string) (ast.Node, bool) {
 // alias of the document reads its anchor. Each alias of a reference
 // document reads the anchor of its name that the reference documents
 // define. It reports false for an alias that reads no anchor, or that
-// leads back to an alias of a reference document before it.
+// leads back to an alias of a reference document before it. It returns an
+// untyped nil with true for content that is nil.
 func (r *resolver) referenceContent(node ast.Node) (ast.Node, bool) {
 	read := make(map[string]bool)
 
@@ -1091,7 +1092,7 @@ func (r *resolver) referenceContent(node ast.Node) (ast.Node, bool) {
 		}
 	}
 
-	return nil, false
+	return nil, true
 }
 
 // resolveError returns err, the error of a resolve of p, after the path.
@@ -1280,8 +1281,19 @@ func (r *resolver) excessive(count int) bool {
 // searches them. Those lookups thus share one buffer rather than each
 // allocating one for every merge key it reads.
 type lookupReads struct {
-	sources []*ast.MappingNode
+	sources []lookupSource
 	count   int
+}
+
+// lookupSource is one mapping that a `<<` merge key brings in, as the key
+// lookups of [lookupReads] read it. The via field is nil for a mapping of
+// the document. For a mapping of a reference document, it holds the error
+// of the alias of the document through which the merge reads that
+// mapping. That error wraps [ErrReferenceAlias]. Every merge source below
+// such a mapping holds that error too.
+type lookupSource struct {
+	mapping *ast.MappingNode
+	via     *AliasError
 }
 
 // These constants limit the nodes under `<<` merge keys that the key
@@ -1375,7 +1387,7 @@ func (r *resolver) apply(seg segment, m match, reads *lookupReads) ([]match, err
 			return nil, nil
 		}
 
-		entry, i, ok, err := r.lookup(mapping, seg.name, nil, reads)
+		entry, i, ok, err := r.lookup(mapping, seg.name, nil, reads, nil)
 		if err != nil || !ok {
 			return nil, err
 		}
@@ -1470,7 +1482,7 @@ func (r *resolver) entries(mapping *ast.MappingNode, m match, reads *lookupReads
 			// names this merge key brings in.
 			seen := map[*ast.MappingNode]bool{mapping: true}
 
-			names, err = r.mergedNames(names, entry.Value, seen, reads)
+			names, err = r.mergedNames(names, entry.Value, seen, reads, nil)
 			if err != nil {
 				return nil, err
 			}
@@ -1481,7 +1493,7 @@ func (r *resolver) entries(mapping *ast.MappingNode, m match, reads *lookupReads
 		for _, name := range names {
 			pe, ok := placed[name]
 			if !ok {
-				e, place, has, err := r.lookup(mapping, name, nil, reads)
+				e, place, has, err := r.lookup(mapping, name, nil, reads, nil)
 				if err != nil {
 					return nil, err
 				}
@@ -1538,8 +1550,14 @@ type placedEntry struct {
 // merge might bring in any key, so mergedNames returns an error wrapping
 // [ErrAlias]. MergedNames leaves the sources stack of reads at the length
 // it found it, unless it returns an error.
+//
+// MergedNames reads the mappings of reference documents too, as
+// [resolver.lookup] reads them. The via argument is the error of the alias
+// through which the merge key reads a reference document, or nil for a
+// merge key of the document. When it cannot read such a mapping, the merge
+// might bring in any key, so mergedNames returns the error of that alias.
 func (r *resolver) mergedNames(
-	names []string, value ast.Node, seen map[*ast.MappingNode]bool, reads *lookupReads,
+	names []string, value ast.Node, seen map[*ast.MappingNode]bool, reads *lookupReads, via *AliasError,
 ) ([]string, error) {
 	if r.excessiveMerging(reads.count) {
 		return nil, ErrExcessiveMerging
@@ -1547,7 +1565,7 @@ func (r *resolver) mergedNames(
 
 	top := len(reads.sources)
 
-	sources, read, err := r.mergeSources(reads.sources, value)
+	sources, read, err := r.mergeSources(reads.sources, value, via, true)
 
 	reads.sources = sources
 	reads.count += read
@@ -1565,17 +1583,17 @@ func (r *resolver) mergedNames(
 	// source from the stack of reads rather than from sources.
 	for i := top; i < len(sources); i++ {
 		src := reads.sources[i]
-		if seen[src] {
+		if seen[src.mapping] {
 			continue
 		}
 
-		seen[src] = true
+		seen[src.mapping] = true
 
-		for _, entry := range src.Values {
+		for _, entry := range src.mapping.Values {
 			switch {
 			case entry == nil:
 			case astnode.IsMergeKey(entry.Key):
-				names, err = r.mergedNames(names, entry.Value, seen, reads)
+				names, err = r.mergedNames(names, entry.Value, seen, reads, src.via)
 				if err != nil {
 					return nil, err
 				}
@@ -1618,12 +1636,24 @@ func (r *resolver) mergedNames(
 // them. Lookup leaves the sources stack of reads at the length it found
 // it.
 //
+// A merge key can read a mapping of a reference document through an
+// alias, as [WithReferenceAnchors] gives those mappings. Lookup reads the
+// keys of that mapping and the merge keys inside it, with the same seen
+// set and count of reads. When the entry that wins lies in a reference
+// document, lookup returns the error of the alias of the document that
+// reads it, which wraps [ErrReferenceAlias]. It returns that error too
+// when it cannot read a mapping of a reference document, such as one that
+// merges an alias whose anchor no reference document defines. Otherwise,
+// the entry of the document wins, or no entry has the key. The via
+// argument holds that error when mapping itself lies in a reference
+// document, and it is nil for a mapping of the document.
+//
 // The int result is the index in mapping of the entry that lookup found.
 // For an entry that a merge source holds, it is the index of the `<<`
 // entry that brings that entry in. The bool result reports whether lookup
 // found an entry.
 func (r *resolver) lookup(
-	mapping *ast.MappingNode, name string, seen map[*ast.MappingNode]bool, reads *lookupReads,
+	mapping *ast.MappingNode, name string, seen map[*ast.MappingNode]bool, reads *lookupReads, via *AliasError,
 ) (*ast.MappingValueNode, int, bool, error) {
 	keys := r.mappingKeys(mapping)
 
@@ -1656,7 +1686,7 @@ func (r *resolver) lookup(
 
 		top := len(reads.sources)
 
-		found, ok, err := r.lookupMerge(mapping.Values[i].Value, name, seen, reads)
+		found, ok, err := r.lookupMerge(mapping.Values[i].Value, name, seen, reads, via)
 
 		reads.sources = reads.sources[:top]
 
@@ -1682,9 +1712,11 @@ func (r *resolver) lookup(
 // there for [resolver.lookup] to pop. A later source wins over an earlier
 // one, so lookupMerge searches them from the last one back. It adds to the
 // count of reads and returns [ErrExcessiveMerging] as lookup describes.
-// The bool result reports whether lookupMerge found an entry.
+// It reads the sources of a reference document and returns the error of
+// the alias that reads one, as lookup describes. The via argument is that
+// of lookup. The bool result reports whether lookupMerge found an entry.
 func (r *resolver) lookupMerge(
-	value ast.Node, name string, seen map[*ast.MappingNode]bool, reads *lookupReads,
+	value ast.Node, name string, seen map[*ast.MappingNode]bool, reads *lookupReads, via *AliasError,
 ) (*ast.MappingValueNode, bool, error) {
 	// A caller that goes on after the error would otherwise read the
 	// whole value again on each lookup past the limit.
@@ -1694,7 +1726,7 @@ func (r *resolver) lookupMerge(
 
 	top := len(reads.sources)
 
-	sources, read, err := r.mergeSources(reads.sources, value)
+	sources, read, err := r.mergeSources(reads.sources, value, via, true)
 
 	reads.sources = sources
 	reads.count += read
@@ -1712,17 +1744,23 @@ func (r *resolver) lookupMerge(
 	// reads rather than from sources.
 	for i := len(sources) - 1; i >= top; i-- {
 		src := reads.sources[i]
-		if seen[src] {
+		if seen[src.mapping] {
 			continue
 		}
 
-		found, _, ok, err := r.lookup(src, name, seen, reads)
+		found, _, ok, err := r.lookup(src.mapping, name, seen, reads, src.via)
 		if err != nil {
 			return nil, false, err
 		}
 
-		// A merge key in a source is not a key the merge brings in.
-		if ok && !astnode.IsMergeKey(found.Key) {
+		// A merge key in a source is not a key the merge brings in. An
+		// entry of a reference document lies outside the document, so
+		// the lookup stops at the alias that reads it.
+		switch {
+		case !ok || astnode.IsMergeKey(found.Key):
+		case src.via != nil:
+			return nil, false, src.via
+		default:
 			return found, true, nil
 		}
 	}
@@ -1739,8 +1777,8 @@ func (r *resolver) lookupMerge(
 // overridden also reports true. Its lookup adds to the count of reads as
 // [resolver.lookup] describes. Overridden returns the [ErrExcessiveMerging]
 // that lookup returns. It also returns the error of lookup at an alias that
-// reads a reference document. The reference document then decides which
-// entry a path through name selects.
+// reads a reference document. A path through name then selects an entry of
+// that document, or lookup cannot read the document.
 func (r *resolver) overridden(
 	mapping *ast.MappingNode, keys *mappingKeys, name string, i int, reads *lookupReads,
 ) (bool, error) {
@@ -1751,7 +1789,7 @@ func (r *resolver) overridden(
 
 	// Lookup gives the index of the merge key for an entry that a merge
 	// source holds, so overridden compares the entries.
-	found, _, ok, err := r.lookup(mapping, name, nil, reads)
+	found, _, ok, err := r.lookup(mapping, name, nil, reads, nil)
 	if errors.Is(err, ErrExcessiveMerging) || errors.Is(err, ErrReferenceAlias) {
 		return false, err
 	}
@@ -1766,13 +1804,21 @@ func (r *resolver) overridden(
 // mapping, or each mapping element when it is a sequence. MergeSources
 // skips a nil node, including a typed nil.
 //
+// With references set, mergeSources reads an alias that reads a reference
+// document, as [resolver.mergeRead] reads it. Each mapping of a reference
+// document holds the error of the alias of the document that reads it.
+// The via argument holds that error when value lies in a reference
+// document. Without references, such an alias does not resolve.
+//
 // The int result counts the nodes that mergeSources reads. It counts one
 // for the value, and one more for each element when the value is a
 // sequence, whether or not that element is a mapping. When the value or
 // an element is an alias that does not resolve, the count ends with that
 // node. The buffer then holds the sources before that node.
-func (r *resolver) mergeSources(buf []*ast.MappingNode, value ast.Node) ([]*ast.MappingNode, int, error) {
-	content, err := r.unwrap(value)
+func (r *resolver) mergeSources(
+	buf []lookupSource, value ast.Node, via *AliasError, references bool,
+) ([]lookupSource, int, error) {
+	content, via, err := r.mergeRead(value, via, references)
 	if err != nil {
 		return buf, 1, err
 	}
@@ -1783,7 +1829,7 @@ func (r *resolver) mergeSources(buf []*ast.MappingNode, value ast.Node) ([]*ast.
 
 	switch n := content.(type) {
 	case *ast.MappingNode:
-		return append(buf, n), 1, nil
+		return append(buf, lookupSource{mapping: n, via: via}), 1, nil
 	case *ast.SequenceNode:
 		// Making room for the whole sequence costs its length, even when
 		// an early element does not resolve and stops the count there. The
@@ -1792,13 +1838,13 @@ func (r *resolver) mergeSources(buf []*ast.MappingNode, value ast.Node) ([]*ast.
 		buf = slices.Grow(buf, len(n.Values))
 
 		for i, v := range n.Values {
-			elem, err := r.unwrap(v)
+			elem, elemVia, err := r.mergeRead(v, via, references)
 			if err != nil {
 				return buf, i + 2, err
 			}
 
 			if m, ok := elem.(*ast.MappingNode); ok && m != nil {
-				buf = append(buf, m)
+				buf = append(buf, lookupSource{mapping: m, via: elemVia})
 			}
 		}
 
@@ -1807,6 +1853,41 @@ func (r *resolver) mergeSources(buf []*ast.MappingNode, value ast.Node) ([]*ast.
 	default:
 		return buf, 1, nil
 	}
+}
+
+// mergeRead returns the content of node, the value of a `<<` merge key or
+// an element of a sequence there, under every anchor, alias, and tag, as
+// [resolver.unwrap] returns it. The via argument and result are those of
+// [lookupSource]. The via argument is nil for a node of the document.
+//
+// With references set, mergeRead reads through an alias of the document
+// that reads a reference document, as [resolver.referenceContent] reads
+// it. The via result is then the error of that alias. A node of a
+// reference document reads that way too. When mergeRead cannot read the
+// content of such a node, it returns via as the error. Without
+// references, it returns the error of the alias that reads a reference
+// document, as unwrap does.
+func (r *resolver) mergeRead(node ast.Node, via *AliasError, references bool) (ast.Node, *AliasError, error) {
+	if via == nil {
+		content, err := r.unwrap(node)
+		if !references || !errors.Is(err, ErrReferenceAlias) {
+			return content, nil, err
+		}
+
+		alias, ok := errors.AsType[*AliasError](err)
+		if !ok || alias.Alias == nil {
+			return nil, nil, err
+		}
+
+		node, via = alias.Alias, alias
+	}
+
+	content, ok := r.referenceContent(node)
+	if !ok {
+		return nil, via, via
+	}
+
+	return content, via, nil
 }
 
 // recurse applies seg, a `..name` or `..*` selector, to each of matches in
@@ -1923,9 +2004,9 @@ func covers(a, b []int) bool {
 // across the walks of every match.
 //
 // The undecided field holds the error of an alias that reads a reference
-// document while the walk descends into the value of a `<<` merge key whose
-// entry that document decides, as [recursiveWalk.descend] describes, or
-// nil.
+// document while the walk descends into the value of a `<<` merge key that
+// a path through `<<` might not select, as [recursiveWalk.descend]
+// describes, or nil.
 type recursiveWalk struct {
 	resolver  *resolver
 	starts    map[ast.Node][]int
@@ -1983,16 +2064,16 @@ type recursiveWalk struct {
 // lookups of the walk read past the limit that [resolver.excessiveMerging]
 // applies.
 //
-// A lookup that meets an alias of a reference document cannot tell whether
-// the merge key brings in the key, so the reference document decides which
-// entry a path through the key selects. Descend then returns the error of
-// that alias, which wraps [ErrReferenceAlias], as a path through the key
-// does. For the last merge key, the reference document decides only
-// whether a path through `<<` selects the merge key. The walk fails at that
-// merge key when it lists it, and at the first entry or listed element that
-// it would visit in the value of the merge key. It does not fail at the
-// value of the merge key otherwise, because an alias there brings in
-// nothing that the walk visits.
+// A lookup can find that a merge key brings in the key from a reference
+// document, or it can fail to read such a document, as [resolver.lookup]
+// describes. Descend then returns the error of the alias that reads the
+// document, which wraps [ErrReferenceAlias], as a path through the key
+// does. For the last merge key, that error means only that a path through
+// `<<` does not select the merge key. The walk fails at that merge key
+// when it lists it, and at the first entry or listed element that it would
+// visit in the value of the merge key. It does not fail at the value of
+// the merge key otherwise, because an alias there brings in nothing that
+// the walk visits.
 func (w *recursiveWalk) descend(node ast.Node, sources bool) error {
 	if astnode.IsNil(node) {
 		return nil
