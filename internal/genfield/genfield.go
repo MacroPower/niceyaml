@@ -16,9 +16,7 @@
 //
 // Where the two disagree, a schema that gen writes for a type rejects
 // documents that the decoder reads, or passes documents whose values the
-// decoder leaves zero. [Inline] reports the fields where they disagree on
-// whether a field is inline. [Check] reports those and the fields where
-// they disagree on the name.
+// decoder leaves zero. [Check] reports the fields where they disagree.
 package genfield
 
 import (
@@ -33,33 +31,22 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
 )
 
-// Inline returns a message for each field where gen and the decoder
-// disagree on whether the field is inline. It reads the fields of each
-// struct that a decode into t reads field by field. Each message names
-// the struct and the field, as in "Spec.Common: ...", and says how gen
-// and the decoder read the field.
-func Inline(t reflect.Type) []string {
-	return check(t, false)
-}
-
-// Check is [Inline] with the rules for names too. It also returns a
-// message for each field where the property name that gen gives differs
-// from the key that the decoder reads. Each field that only one of the
-// two reads gets a message too. It skips each type that supplies its own
-// schema through a JSONSchema method, because gen does not read the
-// fields of such a type.
+// Check returns a message for each field where gen and the decoder
+// disagree. Gen and the decoder disagree on a field when one of them
+// reads it inline and the other nests it, when the property name that
+// gen gives differs from the key that the decoder reads, or when only one
+// of the two reads the field. Check reads the fields of each struct that
+// a decode into t reads field by field. It skips each type that supplies
+// its own schema through a JSONSchema method, because gen does not read
+// the fields of such a type. Each message names the struct and the
+// field, as in "Spec.Common: ...", and says how gen and the decoder read
+// the field.
 func Check(t reflect.Type) []string {
-	return check(t, true)
-}
-
-// check returns the messages of [Check] when names is true, and those of
-// [Inline] otherwise.
-func check(t reflect.Type, names bool) []string {
 	var out []string
 
 	yamlfield.Reaches(t, func(t reflect.Type) (bool, bool) {
 		if unmarshaler.DecodesItself(t) ||
-			names && unmarshaler.Declares(t, reflect.TypeFor[jsonschema.JSONSchemaProvider]()) {
+			unmarshaler.Declares(t, reflect.TypeFor[jsonschema.JSONSchemaProvider]()) {
 			return false, true
 		}
 
@@ -68,7 +55,7 @@ func check(t reflect.Type, names bool) []string {
 		}
 
 		for f := range t.Fields() {
-			if problem := fieldProblem(f, names); problem != "" {
+			if problem := fieldProblem(f); problem != "" {
 				out = append(out, typeName(t)+"."+f.Name+": "+problem)
 			}
 		}
@@ -80,22 +67,18 @@ func check(t reflect.Type, names bool) []string {
 }
 
 // fieldProblem returns how gen and the decoder disagree on f, or ""
-// when they agree. It checks the names only when names is true.
-func fieldProblem(f reflect.StructField, names bool) string {
+// when they agree.
+func fieldProblem(f reflect.StructField) string {
 	name, inline, skip := yamlfield.Name(f)
-
-	switch {
-	case skip && names:
+	if skip {
 		return skipProblem(f)
-	case skip:
-		return ""
 	}
 
 	if problem := inlineProblem(f, inline); problem != "" {
 		return problem
 	}
 
-	if !names || inline {
+	if inline {
 		return ""
 	}
 

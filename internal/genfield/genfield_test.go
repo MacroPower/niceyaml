@@ -38,16 +38,23 @@ const (
 	portWant = `mixed.Port: field needs json:"port", because gen names it "Port" and the decode reads "port"`
 )
 
-func TestInline(t *testing.T) {
+func TestCheck(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
 		typ  reflect.Type
 		want []string
 	}{
-		"rules for inline fields alone": {
+		"rules for inline fields and names": {
 			typ:  reflect.TypeFor[mixed](),
-			want: []string{embedWant},
+			want: []string{embedWant, portWant},
+		},
+		"fields that agree": {
+			typ: reflect.TypeFor[struct {
+				inner `yaml:",inline"`
+
+				Port int `json:"port"`
+			}](),
 		},
 		"embed option": {
 			typ: reflect.TypeFor[struct {
@@ -68,40 +75,6 @@ func TestInline(t *testing.T) {
 			}](),
 			want: []string{`struct { Extra genfield_test.inner "yaml:\",inline\"" }.Extra: ` +
 				`named field has an inline option, which the decode reads inline and gen nests`},
-		},
-		"type that supplies its own schema": {
-			typ: reflect.TypeFor[provided](),
-			want: []string{`provided.inner: embedded struct needs yaml:",inline", because gen reads it inline ` +
-				`and the decode nests it`},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, genfield.Inline(tc.typ))
-		})
-	}
-}
-
-func TestCheck(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		typ  reflect.Type
-		want []string
-	}{
-		"rules for inline fields and names": {
-			typ:  reflect.TypeFor[mixed](),
-			want: []string{embedWant, portWant},
-		},
-		"fields that agree": {
-			typ: reflect.TypeFor[struct {
-				inner `yaml:",inline"`
-
-				Port int `json:"port"`
-			}](),
 		},
 		"type that supplies its own schema": {
 			typ: reflect.TypeFor[provided](),

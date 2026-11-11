@@ -71,23 +71,23 @@ type Common struct {
 	Note string `json:"note,omitzero"`
 }
 
-// badEmbed embeds a struct without an inline option.
-type badEmbed struct {
+// plainEmbed embeds a struct without an inline option, so documents nest
+// its fields under common.
+type plainEmbed struct {
 	Common
 
 	Price int `json:"price"`
 }
 
-// badInline gives a named field an inline option.
-type badInline struct {
+// namedInline gives a named field an inline option.
+type namedInline struct {
 	Extra Common `yaml:",inline"`
 }
 
-// goodEmbed embeds a struct with an inline option.
-type goodEmbed struct {
-	Common `yaml:",inline"`
-
-	Price int `json:"price"`
+// looseItem holds each key that no other field reads in an inline map.
+type looseItem struct {
+	Extra map[string]any `yaml:",inline"`
+	Price int            `json:"price"`
 }
 
 // migrateHint is the migrate hint of the test registries.
@@ -475,19 +475,6 @@ func TestNewRegistry(t *testing.T) {
 				manifest.NewKind[Hours]("Hours", manifest.Unversioned()),
 			),
 		},
-		"embedded struct without an inline option": {
-			opts: withKinds(manifest.NewKind[badEmbed]("Item", v1)),
-			err: `kind Item: badEmbed.Common: embedded struct needs yaml:",inline", ` +
-				"because gen reads it inline and the decode nests it",
-		},
-		"named field with an inline option": {
-			opts: withKinds(manifest.NewKind[badInline]("Item", v1)),
-			err: "kind Item: badInline.Extra: named field has an inline option, " +
-				"which the decode reads inline and gen nests",
-		},
-		"embedded struct with an inline option": {
-			opts: withKinds(manifest.NewKind[goodEmbed]("Item", v1)),
-		},
 	}
 
 	for name, tc := range tcs {
@@ -507,6 +494,86 @@ func TestNewRegistry(t *testing.T) {
 			assert.Contains(t, err.Error(), tc.err)
 		})
 	}
+}
+
+func TestNewRegistry_Layouts(t *testing.T) {
+	t.Parallel()
+
+	v1 := manifest.Version("v1")
+
+	tcs := map[string]struct {
+		// The value of the one manifest of the load, which get returns.
+		want any
+		get  func(set *manifest.Set) (any, bool)
+		// The text of the manifest.
+		input string
+		opts  []manifest.RegistryOption
+	}{
+		"embedded struct without an inline option": {
+			opts:  withKinds(manifest.NewKind[plainEmbed]("Item", manifest.Singleton(), v1)),
+			input: "apiVersion: v1\nkind: Item\ncommon:\n  note: hot\nprice: 3\n",
+			get:   oneValue[plainEmbed],
+			want:  plainEmbed{Common: Common{Note: "hot"}, Price: 3},
+		},
+		"named field with an inline option": {
+			opts:  withKinds(manifest.NewKind[namedInline]("Item", manifest.Singleton(), v1)),
+			input: "apiVersion: v1\nkind: Item\nnote: hot\n",
+			get:   oneValue[namedInline],
+			want:  namedInline{Extra: Common{Note: "hot"}},
+		},
+		// The go-yaml decoder panics on an inline map when it rejects
+		// unknown fields, so these registries warn about unknown fields
+		// or ignore them. The search for unknown fields reads each key of
+		// the map as known. Under UnknownFieldsWarn, the decode cuts the
+		// type fields out of its view, so the map leaves out apiVersion
+		// and kind. Under UnknownFieldsIgnore, the decode cuts nothing,
+		// so the map holds them.
+		"inline map, unknown fields warn": {
+			opts: append(
+				withKinds(manifest.NewKind[looseItem]("Item", manifest.Singleton(), v1)),
+				manifest.WithDecodeOptions(niceyaml.WithUnknownFields(niceyaml.UnknownFieldsWarn)),
+			),
+			input: "apiVersion: v1\nkind: Item\nprice: 3\nsize: large\n",
+			get:   oneValue[looseItem],
+			want:  looseItem{Price: 3, Extra: map[string]any{"price": uint64(3), "size": "large"}},
+		},
+		"inline map, unknown fields ignore": {
+			opts: append(
+				withKinds(manifest.NewKind[looseItem]("Item", manifest.Singleton(), v1)),
+				manifest.WithDecodeOptions(niceyaml.WithUnknownFields(niceyaml.UnknownFieldsIgnore)),
+			),
+			input: "apiVersion: v1\nkind: Item\nprice: 3\nsize: large\n",
+			get:   oneValue[looseItem],
+			want: looseItem{Price: 3, Extra: map[string]any{
+				"apiVersion": "v1", "kind": "Item", "price": uint64(3), "size": "large",
+			}},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			reg, err := manifest.NewRegistry(tc.opts...)
+			require.NoError(t, err)
+
+			set, err := reg.Load(t.Context(), configFS(map[string]string{"item.yaml": tc.input}))
+			require.NoError(t, err)
+			require.NoError(t, set.Warnings())
+
+			got, ok := tc.get(set)
+			require.True(t, ok)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// oneValue returns the value of the one manifest of set whose kind has
+// the Go type T.
+func oneValue[T any](set *manifest.Set) (any, bool) {
+	obj, ok := set.One[T]()
+
+	return obj.Value, ok
 }
 
 func TestNewRegistry_Advice(t *testing.T) {
