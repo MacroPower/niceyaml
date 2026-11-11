@@ -3,8 +3,10 @@ package decodewalk
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"reflect"
 	"slices"
+	"strings"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -13,19 +15,34 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/datapath"
 	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
+	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-// UnknownFields returns the rejection of each unknown field of a decode
-// of node into a value of type t, for a decoder that rejects unknown
-// fields, in the order of the source. The decoder stops at the first
-// unknown field it finds. It does not find the fields of one mapping in a
-// fixed order, so one decode names one field, and not always the same
-// one. A decode that rejects a value does not name an unknown field.
+// UnknownField is an unknown field of a decode, as [UnknownFields] finds
+// it.
+type UnknownField struct {
+	// Err is the rejection of the key of the field.
+	Err *yaml.UnknownFieldError
+	// Path is the `@` path of the key, from the value the walk starts at,
+	// through the use that read it.
+	Path paths.Path
+}
+
+// UnknownFields returns each unknown field of a decode of node into a
+// value of type t, for a decoder that rejects unknown fields, in the order
+// of the source. A key that several uses of an anchor read comes once for
+// each use, with the path of that use, as [WalkUses] reaches it. The
+// uses of one key come in the order the walk reaches them. The decoder
+// stops at the first unknown field it finds. It does not find the fields
+// of one mapping in a fixed order, so one decode names one field, and not
+// always the same one. A decode that rejects a value does not name an
+// unknown field.
 //
-// The search walks t as [Walk] does and reads each mapping a struct
-// decodes from. A key of such a mapping is a candidate when the struct
-// does not have a field of that name. The search reads the field names as
-// [yamlfield.Name] gives them, including the fields of inline structs.
+// The search walks t as [WalkUses] does, once for each use of a value,
+// and reads each mapping a struct decodes from. A key of such a mapping is
+// a candidate when the struct does not have a field of that name. The
+// search reads the field names as [yamlfield.Name] gives them, including
+// the fields of inline structs.
 //
 // The candidates are the entries that the decoder reads. A later entry of
 // a key replaces an earlier one, and a `<<` merge key brings in the entries
@@ -61,16 +78,20 @@ import (
 // decodes the whole struct once. When the decoder accepts it, the search
 // does not read anything at or below the struct, because the decoder does
 // not reject a key there. The search decodes the content of an anchor
-// once for all the aliases that reach it. The unmarshaler of a struct
-// without an unknown field thus runs once more rather than once more for
-// each of its keys or aliases.
+// once for all the aliases that reach it, and it confirms a candidate
+// once for all the uses that read it the same way. The unmarshaler of a
+// struct without an unknown field thus runs once more rather than once
+// more for each of its keys or aliases.
 //
 // The search does not read below any other type that decodes itself,
 // below a struct that decodes itself held inline, or below the members of
 // an inline map.
-func UnknownFields(ctx context.Context, r Rules, t reflect.Type, node ast.Node) []*yaml.UnknownFieldError {
-	found := map[int]*yaml.UnknownFieldError{}
+func UnknownFields(ctx context.Context, r Rules, t reflect.Type, node ast.Node) []UnknownField {
+	var fields []UnknownField
+
+	held := map[fieldUse]bool{}
 	verdicts := map[seenKey]bool{}
+	confirmed := map[confirmKey]*yaml.UnknownFieldError{}
 
 	w := newWalker(ctx, r, func(v *Value) Action {
 		decodesItself := r.Unmarshalers.ReportsOwnError(v.Type)
@@ -104,44 +125,84 @@ func UnknownFields(ctx context.Context, r Rules, t reflect.Type, node ast.Node) 
 				continue
 			}
 
-			rejected := w.confirm(v, entry)
-			if rejected != nil {
-				offset := rejected.Token.Position.Offset
-				if _, held := found[offset]; !held {
-					found[offset] = rejected
-				}
+			rejected := w.confirmOnce(v, entry, confirmed)
+			if rejected == nil {
+				continue
+			}
+
+			path := v.Path().Child(name).Key()
+
+			use := fieldUse{offset: rejected.Token.Position.Offset, path: path.String()}
+			if !held[use] {
+				held[use] = true
+
+				fields = append(fields, UnknownField{Err: rejected, Path: path})
 			}
 		}
 	}
 
+	w.uses = true
 	w.root(t, node, astnode.Parent{})
 
-	fields := make([]*yaml.UnknownFieldError, 0, len(found))
-	for _, field := range found {
-		fields = append(fields, field)
-	}
-
-	slices.SortFunc(fields, func(a, b *yaml.UnknownFieldError) int {
-		return cmp.Compare(a.Token.Position.Offset, b.Token.Position.Offset)
+	slices.SortStableFunc(fields, func(a, b UnknownField) int {
+		return cmp.Compare(a.Err.Token.Position.Offset, b.Err.Token.Position.Offset)
 	})
 
 	return fields
 }
 
-// confirm returns the rejection of the key of entry, an entry of the
-// mapping v reads, as an unknown field of the struct v, or nil for any
-// other outcome. It decodes a mapping of entry alone into a new value of
-// the type of v. Under a struct that decodes itself, it decodes the
-// outermost such struct from nodes that hold only the entries and
-// elements that lead down to entry. The unmarshaler then reads entry
-// where the document holds it.
-func (w *walker) confirm(v *Value, entry *ast.MappingValueNode) *yaml.UnknownFieldError {
-	view := w.view(entry)
-	if view == nil || view.Key == nil {
+// fieldUse names an unknown field that [UnknownFields] found, by the
+// offset of its key and the path of the use that read it.
+//
+//nolint:unused // The fields tell the keys of the set apart.
+type fieldUse struct {
+	path   string
+	offset int
+}
+
+// confirmOnce returns what [walker.confirm] returns for entry under v. The
+// map done holds the answer for each decode that confirm has run, so the
+// uses of an anchor that read entry the same way share one decode.
+func (w *walker) confirmOnce(
+	v *Value, entry *ast.MappingValueNode, done map[confirmKey]*yaml.UnknownFieldError,
+) *yaml.UnknownFieldError {
+	node, t, key, ok := w.confirmation(v, entry)
+	if !ok {
 		return nil
 	}
 
+	if rejected, held := done[key]; held {
+		return rejected
+	}
+
+	rejected := w.confirm(node, t, entry)
+	done[key] = rejected
+
+	return rejected
+}
+
+// confirmation returns the node and the type that [walker.confirm] decodes
+// to confirm entry, an entry of the mapping v reads, as an unknown field
+// of the struct v. The node is a mapping of entry alone, and the type is
+// the type of v. Under a struct that decodes itself, the node holds the
+// outermost such struct, with only the entries and elements that lead down
+// to entry, and the type is the type of that struct. The unmarshaler then
+// reads entry where the document holds it. The key names the nodes the
+// decode reads and the type, so two uses that read entry the same way
+// share a key. It
+// reports false when the decode does not hold an entry in the place of
+// entry or of one that leads to it.
+func (w *walker) confirmation(v *Value, entry *ast.MappingValueNode) (ast.Node, reflect.Type, confirmKey, bool) {
+	view := w.view(entry)
+	if view == nil || view.Key == nil {
+		return nil, nil, confirmKey{}, false
+	}
+
 	var node ast.Node = ast.Mapping(view.Start, false, view)
+
+	var key strings.Builder
+
+	fmt.Fprintf(&key, "%p", entry)
 
 	owner := ownerOf(w.rules, v)
 
@@ -155,13 +216,17 @@ func (w *walker) confirm(v *Value, entry *ast.MappingValueNode) *yaml.UnknownFie
 				seq.Values = append(seq.Values, node)
 				node = seq
 
+				fmt.Fprintf(&key, " %p[%d]", at.From.Sequence, at.From.Index)
+
 			case Field, Member:
 				outer := w.view(at.Entry)
 				if outer == nil {
-					return nil
+					return nil, nil, confirmKey{}, false
 				}
 
 				node = ast.Mapping(outer.Start, false, ast.MappingValue(outer.Start, outer.Key, node))
+
+				fmt.Fprintf(&key, " %p", at.Entry)
 
 			case Root, Inline, Key:
 				// The value reads the node of the one that holds it.
@@ -170,6 +235,24 @@ func (w *walker) confirm(v *Value, entry *ast.MappingValueNode) *yaml.UnknownFie
 
 		t = owner.Type
 	}
+
+	return node, t, confirmKey{chain: key.String(), typ: t}, true
+}
+
+// confirmKey names a decode that [walker.confirm] runs, by the nodes it
+// reads and the type it decodes into.
+//
+//nolint:unused // The fields tell the keys of the set apart.
+type confirmKey struct {
+	typ   reflect.Type
+	chain string
+}
+
+// confirm returns the rejection of the key of entry as an unknown field,
+// when the decode of node into a new value of type t rejects it so, or nil
+// for any other outcome. [walker.confirmation] builds node and t.
+func (w *walker) confirm(node ast.Node, t reflect.Type, entry *ast.MappingValueNode) *yaml.UnknownFieldError {
+	view := w.view(entry)
 
 	err := w.rules.Decode(node, reflect.New(t).Interface())
 

@@ -259,6 +259,25 @@ func Walk(
 	newWalker(ctx, r, visit).root(t, node, from)
 }
 
+// WalkUses walks node as [Walk] does, except that it goes below a struct,
+// a map, or a sequence once for each value that reads it. It thus reads a
+// node that several aliases reach once for each alias, and each [Value]
+// below it has the path of the use that reached it. It does not go below a
+// value that a value holding it already reads as the same type, so it
+// stops at a node that holds itself. The [paths.Resolver] of the rules
+// reads an alias inside its own anchor as null, so a document does not
+// make such a node.
+//
+// The walk costs what the aliases of the document expand to, as the
+// decoder does when it decodes them.
+func WalkUses(
+	ctx context.Context, r Rules, t reflect.Type, node ast.Node, from astnode.Parent, visit func(*Value) Action,
+) {
+	w := newWalker(ctx, r, visit)
+	w.uses = true
+	w.root(t, node, from)
+}
+
 // walker holds the state of one walk.
 type walker struct {
 	ctx context.Context
@@ -285,6 +304,9 @@ type walker struct {
 	// a path does, rather than skip each source that a decode of a struct
 	// drops.
 	paths bool
+	// Whether the walk goes below a node once for each value that reads
+	// it, as [WalkUses] describes, rather than once for each type.
+	uses bool
 }
 
 // seenKey names a node the walk has gone below, by the type it read the
@@ -406,13 +428,8 @@ func (w *walker) reads(v *Value) Reads {
 func (w *walker) below(v *Value) bool {
 	content := datapath.Deref(w.rules.Resolver, v.Node)
 
-	if v.Kind != Inline && v.Reads != Whole && v.Reads != Nothing {
-		key := seenKey{typ: v.Type, node: content}
-		if w.seen[key] {
-			return true
-		}
-
-		w.seen[key] = true
+	if v.Kind != Inline && v.Reads != Whole && v.Reads != Nothing && !w.enter(v, content) {
+		return true
 	}
 
 	switch v.Reads {
@@ -443,6 +460,35 @@ func (w *walker) below(v *Value) bool {
 
 	case Whole, Nothing, Reference:
 		// The walk reads nothing below the value.
+	}
+
+	return true
+}
+
+// enter reports whether the walk goes below v, a struct, a map, or a
+// sequence whose node has the content content. A walk goes below a node
+// once for each type it reads the node as. A walk of [WalkUses] goes below
+// it for each use instead, unless a value that holds v reads the node as
+// the same type, so that v lies inside a node that holds itself. The
+// resolver refuses an alias that leads back into its own anchor, so no
+// document reaches that check. It keeps the walk finite without relying
+// on the resolver.
+func (w *walker) enter(v *Value, content ast.Node) bool {
+	if !w.uses {
+		key := seenKey{typ: v.Type, node: content}
+		if w.seen[key] {
+			return false
+		}
+
+		w.seen[key] = true
+
+		return true
+	}
+
+	for at := v.Parent; at != nil; at = at.Parent {
+		if at.Kind != Inline && at.Type == v.Type && datapath.Deref(w.rules.Resolver, at.Node) == content {
+			return false
+		}
 	}
 
 	return true

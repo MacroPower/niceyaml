@@ -3232,10 +3232,10 @@ func (e *SourceError) Message() string {
 // the result starts at `$`. An error written as `@.price` and bound through
 // the Node at `$.items[1]` reports `$.items[1].price`.
 //
-// A rejection of the go-yaml decoder reports the path where the document
-// writes the value. That path might lie outside the scope of the Node, as
-// the Decoding and Scoped Nodes sections of the package documentation
-// describe. An error that binds at a range or a position beside its path
+// The Decoding section of the package documentation lists the rejections of
+// the go-yaml decoder that report the path where the document writes the
+// value. That path might lie outside the scope of the Node, as the Scoped
+// Nodes section describes. An error that binds at a range or a position beside its path
 // reports that path, resolved or not. A binding that wraps another reports
 // the path of the one it wraps, and a nil SourceError does not have a path.
 func (e *SourceError) Path() (paths.Path, bool) {

@@ -326,6 +326,11 @@ func (m *UnknownFieldsMode) UnmarshalText(text []byte) error {
 // section of the package documentation describes, and [errors.As] finds
 // the [yaml.UnknownFieldError] of each.
 //
+// A key inside an anchor that several aliases or `<<` merge keys read is an
+// unknown field once for each use. Each error or warning for that key has
+// the path of its use, at the position of the key in the anchor. Under both
+// modes, a key that three aliases read thus gives three errors or warnings.
+//
 // Under [UnknownFieldsWarn], the decoder fills the value as it does under
 // UnknownFieldsIgnore. The decode then hands the same fields to the
 // [Warnings] collector of ctx, whether the decoder accepts the document or
@@ -807,9 +812,7 @@ func (n *Node) warnUnknownFields(ctx context.Context, t reflect.Type, cfg decode
 	}
 
 	problems := slices.Collect(maps.Values(c.found))
-	slices.SortFunc(problems, func(a, b decodeProblem) int {
-		return cmp.Or(cmp.Compare(a.at.Line, b.at.Line), cmp.Compare(a.at.Col, b.at.Col))
-	})
+	sortProblems(problems)
 
 	for _, problem := range problems {
 		n.Warn(ctx, problem.err)
@@ -1832,8 +1835,11 @@ func (n *Node) DecodeIfPresent(ctx context.Context, path paths.Path, v any, opts
 }
 
 // decodeProblems returns err, the one rejection of a failed decode, in a
-// summary with the other problems a [problemCollector] finds. It returns
-// the rejection alone when the rejection lacks a position or ctx ends.
+// summary with the other problems a [problemCollector] finds. The problems
+// that the collector finds again for the rejection, one for each use of
+// the value, stand in its place with the paths of those uses. It returns
+// the rejection alone when the rejection lacks a position or ctx ends, and
+// the one problem alone when the collector finds no other.
 func (n *Node) decodeProblems(
 	ctx context.Context,
 	err error,
@@ -1855,26 +1861,82 @@ func (n *Node) decodeProblems(
 	c := newProblemCollector(ctx, n, cfg)
 	c.collect(reflect.TypeOf(v).Elem(), node)
 
-	delete(c.found, at)
-
-	if len(c.found) == 0 || ctx.Err() != nil {
+	if ctx.Err() != nil {
 		return rejectionErr
 	}
 
-	problems := make([]decodeProblem, 0, len(c.found)+1)
-	problems = append(problems, decodeProblem{
-		err:          rejectionErr,
-		at:           at,
-		unknownField: n.rejectsUnknownField(err),
-	})
+	// The collector finds the rejection again at its position, once for
+	// each use of the value that fails the same way, with the path of that
+	// use. Those problems stand for the rejection. A problem at that
+	// position with another path is a use that the decoder did not reach,
+	// or a use that reads the value as another Go type. It keeps the error
+	// of its own leaf decode.
+	// A rejection without a token of the document, such as a duration that
+	// does not parse, names the path of its use instead, so the problem
+	// with that path is the rejection itself. When the rejection names no
+	// path, the collector cannot tell its use from the others, and the
+	// rejection stands for every problem at its position.
+	yamlErr, tokened := err.(yaml.Error) //nolint:errorlint // A wrapped error is the unmarshaler's own.
+	tokened = tokened && n.holdsToken(yamlErr.GetToken())
+
+	usePath, pathed := "", false
+	if !tokened {
+		usePath, pathed = n.rejectionPath(rejectionErr)
+	}
+
+	var again, problems []decodeProblem
+
+	for key, problem := range c.found {
+		switch {
+		case problem.at != at:
+			continue
+		case tokened && problem.rejected != nil && sameReading(yamlErr, problem.rejected):
+			again = append(again, problem)
+
+		case (tokened || pathed) && problem.path != "" && problem.path != usePath:
+			continue
+		}
+
+		delete(c.found, key)
+	}
+
+	// Each problem that stands for the rejection keeps the location of its
+	// use. Its cause is the error that the decode returned, so [errors.As]
+	// finds that error and not the error of the leaf decode. That error
+	// names the struct field of the one use the decoder read. When several
+	// uses stand for it, each takes a copy that names no struct field, so
+	// no row names the field of another use.
+	for i, problem := range again {
+		rejected := yamlErr
+		if len(again) > 1 {
+			rejected = withoutStructField(yamlErr)
+		}
+
+		problem.err = Invalid(n.rejectionCause(rejected), problem.loc...)
+		problem.rejected = rejected
+		again[i] = problem
+	}
+
+	if len(again) == 0 {
+		again = append(again, decodeProblem{
+			err:          rejectionErr,
+			at:           at,
+			order:        -1,
+			unknownField: n.rejectsUnknownField(err),
+		})
+	}
+
+	problems = append(problems, again...)
 
 	for _, problem := range c.found {
 		problems = append(problems, problem)
 	}
 
-	slices.SortFunc(problems, func(a, b decodeProblem) int {
-		return cmp.Or(cmp.Compare(a.at.Line, b.at.Line), cmp.Compare(a.at.Col, b.at.Col))
-	})
+	if len(problems) == 1 {
+		return problems[0].err
+	}
+
+	sortProblems(problems)
 
 	errs := make([]error, 0, len(problems))
 	unknownFields := true
@@ -1890,6 +1952,20 @@ func (n *Node) decodeProblems(
 	}
 
 	return NewSummary(msg, errs...)
+}
+
+// rejectionPath returns the `$` path that rejectionErr, a decoder
+// rejection without a token of the document, reports, spelled as the paths
+// of a [problemCollector] are. It reports false when the rejection names no
+// one path.
+func (n *Node) rejectionPath(rejectionErr error) (string, bool) {
+	found := anchorOf(placeable(rejectionErr))
+	_, own := found.err.(*Error) //nolint:errorlint // The anchor itself, found by the walk.
+	if !own || !found.hasPath || found.ambiguous {
+		return "", false
+	}
+
+	return n.base.Join(found.path).String(), true
 }
 
 // rejectsUnknownField reports whether err, the rejection of a decode,
@@ -1981,37 +2057,117 @@ func (n *Node) decodeRejection(err error) error {
 // anchor as the document does, and binds where [Node.rejectionLocation]
 // puts the token.
 func (n *Node) tokenRejection(err yaml.Error) error {
-	msg, label := n.doc.rejectionText(err)
-	rejected := markDecode(yamlMessage(err, msg), label)
+	return Invalid(n.rejectionCause(err), n.rejectionLocation(err.GetToken())...)
+}
 
-	return Invalid(rejected, n.rejectionLocation(err.GetToken())...)
+// rejectionCause returns err, a rejection at a source token, as the cause
+// of the [*Error] that [Node.tokenRejection] returns.
+func (n *Node) rejectionCause(err yaml.Error) error {
+	msg, label := n.doc.rejectionText(err)
+
+	return markDecode(yamlMessage(err, msg), label)
+}
+
+// useRejection returns err, a rejection at a source token, as a problem
+// of a value that the decode read at path, a `$` path through the aliases
+// and `<<` merge keys that read it. The problem carries path when path
+// binds at the node of the token, as a [Validator] error at path binds
+// there. A value inside an anchor that an alias brings in thus reports the
+// path through the alias, at the position of the value. The argument alias
+// is the token that a path to the value points at when the document holds
+// an alias for the value itself, or nil. A path that binds at that alias
+// also names the use, and the problem carries it at the position of the
+// node of the token. Where path binds elsewhere, as when a later entry of
+// the same key takes it, the problem binds as [Node.tokenRejection] binds
+// it.
+func (n *Node) useRejection(err yaml.Error, path paths.Path, alias *token.Token) decodeProblem {
+	tk := err.GetToken()
+	owner := n.doc.pathIndex().OwnerToken(tk)
+	problem := decodeProblem{rejected: err, at: position.NewFromToken(tk)}
+
+	switch {
+	case n.bindsAt(path, owner):
+		problem.loc = []ErrorOption{AtPath(path)}
+		problem.path = path.String()
+
+	case alias != nil && owner != nil && n.bindsAt(path, alias):
+		problem.loc = []ErrorOption{AtPath(path), atToken(owner)}
+		problem.path = path.String()
+
+	default:
+		problem.loc = n.rejectionLocation(tk)
+	}
+
+	problem.err = Invalid(n.rejectionCause(err), problem.loc...)
+
+	return problem
 }
 
 // decodeProblem is one problem of a decode, before the Node binds it.
 type decodeProblem struct {
-	// The problem, located as [Node.decodeRejection] locates a rejection.
+	// The problem, located as [Node.decodeRejection] locates a rejection,
+	// or at the path of the use that read the value.
 	err error
+	// The rejection of the decoder at a source token that err reports, or
+	// nil for any other problem.
+	rejected yaml.Error
+	// The path of the use that err reports, or empty when err reports the
+	// path that the token alone gives.
+	path string
+	// The options that locate err when rejected is set. A rejection that
+	// the collector finds again takes them, so the problem reports the
+	// error that the decode returned at the location of this use.
+	loc []ErrorOption
 	// The position that marks the problem among the others, which is the
 	// position of the value the problem is about.
 	at position.Position
+	// The order in which the collector found the problem, which orders the
+	// problems at one position.
+	order int
 	// Whether the problem is the rejection of an unknown field.
 	unknownField bool
 }
 
+// sortProblems sorts problems in the order of the source. The problems at
+// one position come in the order the collector found them.
+func sortProblems(problems []decodeProblem) {
+	slices.SortFunc(problems, func(a, b decodeProblem) int {
+		return cmp.Or(cmp.Compare(a.at.Line, b.at.Line), cmp.Compare(a.at.Col, b.at.Col), cmp.Compare(a.order, b.order))
+	})
+}
+
+// problemKey names a problem of a decode by its position and the path of
+// the use it reports. A value that several uses read and reject thus
+// gives one problem for each use.
+//
+//nolint:unused // The fields tell the keys of the map apart.
+type problemKey struct {
+	path string
+	at   position.Position
+}
+
 // problemCollector finds the problems of a decode beside the one rejection
-// the go-yaml decoder returned. It decodes each leaf of the walk alone,
+// the go-yaml decoder returned. It walks each use of a value that aliases
+// or `<<` merge keys read, as [decodewalk.WalkUses] does, so it finds a
+// problem once for each use. It decodes each leaf of the walk alone,
 // never inside the mapping or sequence that holds it. A leaf thus costs
-// the pass the same however deep it lies. The pass confirms the rejection
-// of a field or an element by decoding it again, as the one entry of a
-// mapping or the one element of a sequence.
+// the pass the same however deep it lies, and the uses of one node share
+// its decodes. The pass confirms the rejection of a field or an element
+// by decoding it again, as the one entry of a mapping or the one element
+// of a sequence.
 //
 // Create instances with [newProblemCollector].
 type problemCollector struct {
 	ctx     context.Context
 	node    *Node
 	decoder *yaml.Decoder
-	// The problems found, by the position that marks each.
-	found map[position.Position]decodeProblem
+	// The problems found, by the position that marks each and the path of
+	// the use it reports.
+	found map[problemKey]decodeProblem
+	// The error of the decode of each leaf, by its type and node.
+	leaves map[leafKey]error
+	// The answer of [problemCollector.confirmed] for each leaf it read.
+	confirms map[confirmKey]bool
 	// What the walk knows of the decode, which decodes with decoder.
 	rules decodewalk.Rules
 	// The settings of the decode.
@@ -2026,12 +2182,14 @@ func newProblemCollector(ctx context.Context, n *Node, cfg decodeConfig) *proble
 	dec := n.newDecoder(cfg)
 
 	return &problemCollector{
-		ctx:     ctx,
-		node:    n,
-		decoder: dec,
-		found:   map[position.Position]decodeProblem{},
-		rules:   n.walkRules(ctx, dec, cfg.unmarshalers),
-		cfg:     cfg,
+		ctx:      ctx,
+		node:     n,
+		decoder:  dec,
+		found:    map[problemKey]decodeProblem{},
+		leaves:   map[leafKey]error{},
+		confirms: map[confirmKey]bool{},
+		rules:    n.walkRules(ctx, dec, cfg.unmarshalers),
+		cfg:      cfg,
 	}
 }
 
@@ -2091,7 +2249,7 @@ func (c *problemCollector) collect(t reflect.Type, node ast.Node) {
 	c.register(node)
 
 	from := datapath.ParentAt(c.rules.Resolver, c.node.base)
-	decodewalk.Walk(c.ctx, c.rules, t, node, from, c.visit)
+	decodewalk.WalkUses(c.ctx, c.rules, t, node, from, c.visit)
 
 	if c.cfg.unknownFields == UnknownFieldsReject {
 		c.collectUnknown(t, node)
@@ -2108,15 +2266,14 @@ func (c *problemCollector) collectUnknown(t reflect.Type, node ast.Node) {
 	for _, field := range decodewalk.UnknownFields(c.ctx, c.rules, t, node) {
 		// The search reads node, which holds the known keys that the view
 		// of the decode leaves out.
-		if _, ok := known[position.NewFromToken(field.Token)]; ok {
+		if _, ok := known[position.NewFromToken(field.Err.Token)]; ok {
 			continue
 		}
 
-		c.add(decodeProblem{
-			err:          c.node.tokenRejection(field),
-			at:           position.NewFromToken(field.Token),
-			unknownField: true,
-		})
+		problem := c.node.useRejection(field.Err, c.node.base.Join(field.Path), nil)
+		problem.unknownField = true
+
+		c.add(problem)
 	}
 }
 
@@ -2135,10 +2292,12 @@ func (c *problemCollector) register(node ast.Node) {
 }
 
 // add keeps problem, unless the collector holds one at the same position
-// already.
+// for the same path already.
 func (c *problemCollector) add(problem decodeProblem) {
-	if _, held := c.found[problem.at]; !held {
-		c.found[problem.at] = problem
+	key := problemKey{at: problem.at, path: problem.path}
+	if _, held := c.found[key]; !held {
+		problem.order = len(c.found)
+		c.found[key] = problem
 	}
 }
 
@@ -2494,11 +2653,33 @@ func (c *problemCollector) visit(v *decodewalk.Value) decodewalk.Action {
 	}
 }
 
+// leafKey names the decode of a leaf, by the type of the leaf and the
+// node the decoder reads it from.
+//
+//nolint:unused // The fields tell the keys of the map apart.
+type leafKey struct {
+	typ  reflect.Type
+	node ast.Node
+}
+
+// confirmKey names what [problemCollector.confirmed] reads of a leaf.
+//
+//nolint:unused // The fields tell the keys of the map apart.
+type confirmKey struct {
+	typ   reflect.Type
+	owner reflect.Type
+	held  ast.Node
+	entry *ast.MappingValueNode
+	kind  decodewalk.Kind
+}
+
 // leaf decodes the node of v alone and adds the rejection as a problem.
-// A rejection without a token goes at the path of v, and only when that
-// path selects v rather than a later entry with the same key.
+// A rejection at a token goes at the path of v when that path binds at the
+// token, as [Node.useRejection] describes. A rejection without a token
+// goes at the path of v, and only when that path selects v rather than a
+// later entry with the same key.
 func (c *problemCollector) leaf(v *decodewalk.Value) {
-	err := c.rules.Decode(c.rules.View(v.Node), reflect.New(v.Type).Interface())
+	err := c.decodeLeaf(v)
 	if err == nil {
 		return
 	}
@@ -2506,7 +2687,7 @@ func (c *problemCollector) leaf(v *decodewalk.Value) {
 	if rejected, ok := builtRejection(err); ok {
 		tk := rejected.GetToken()
 		if c.node.holdsToken(tk) && c.confirmed(err, v) {
-			c.add(decodeProblem{err: c.node.tokenRejection(rejected), at: position.NewFromToken(tk)})
+			c.add(c.node.useRejection(rejected, c.node.base.Join(v.Path()), heldAlias(v)))
 		}
 
 		return
@@ -2542,7 +2723,33 @@ func (c *problemCollector) leaf(v *decodewalk.Value) {
 		return
 	}
 
-	c.add(decodeProblem{err: Rebase(cause, path), at: loc.pos})
+	c.add(decodeProblem{err: Rebase(cause, path), path: c.node.base.Join(path).String(), at: loc.pos})
+}
+
+// heldAlias returns the token that a path to v points at when the
+// document holds an alias for v, or nil when it holds the value itself.
+func heldAlias(v *decodewalk.Value) *token.Token {
+	if _, ok := astnode.Content(v.Held).(*ast.AliasNode); !ok {
+		return nil
+	}
+
+	return astnode.PathToken(v.Held, v.From)
+}
+
+// decodeLeaf decodes the node of v, a leaf, alone into a new value of its
+// type, and returns the error. The uses of one node share the decode.
+func (c *problemCollector) decodeLeaf(v *decodewalk.Value) error {
+	view := c.rules.View(v.Node)
+
+	key := leafKey{typ: v.Type, node: view}
+	if err, held := c.leaves[key]; held {
+		return err
+	}
+
+	err := c.rules.Decode(view, reflect.New(v.Type).Interface())
+	c.leaves[key] = err
+
+	return err //nolint:wrapcheck // The caller reads the error of the decoder as it is.
 }
 
 // builtRejection returns err as a rejection the decoder builds without
@@ -2564,7 +2771,22 @@ func builtRejection(err error) (yaml.Error, bool) {
 // confirmed reports whether the value that holds v, a leaf, also rejects
 // it as err when it holds v alone. That decode applies what the walk cannot
 // see, such as a registered unmarshaler or the value held for an anchor.
+// The uses of one node that the same value holds share the answer, since
+// err is the error of [problemCollector.decodeLeaf] for v.
 func (c *problemCollector) confirmed(err error, v *decodewalk.Value) bool {
+	key := confirmKey{typ: v.Type, owner: v.Struct, held: v.Held, entry: v.Entry, kind: v.Kind}
+	if ok, held := c.confirms[key]; held {
+		return ok
+	}
+
+	ok := c.confirm(err, v)
+	c.confirms[key] = ok
+
+	return ok
+}
+
+// confirm reports what [problemCollector.confirmed] reports for v.
+func (c *problemCollector) confirm(err error, v *decodewalk.Value) bool {
 	var (
 		node   ast.Node
 		target reflect.Value
@@ -2611,6 +2833,38 @@ func sameRejection(err, again error) bool {
 	}
 
 	return reflect.TypeOf(want) == reflect.TypeOf(got) && want.GetToken() == got.GetToken()
+}
+
+// sameReading reports whether again, the rejection of a leaf decode,
+// rejects the token of err, the rejection of the decode, the way err
+// does. The two match when [sameRejection] matches them and their
+// messages agree, so a use that reads the token as another Go type does
+// not match. The messages leave out the struct field of a
+// [*yaml.TypeError], which names the field the decode read and differs
+// between the uses of one value.
+func sameReading(err, again yaml.Error) bool {
+	return sameRejection(err, again) && readingMessage(err) == readingMessage(again)
+}
+
+// readingMessage returns the message of err without the struct field
+// that a [*yaml.TypeError] names.
+func readingMessage(err yaml.Error) string {
+	return withoutStructField(err).GetMessage()
+}
+
+// withoutStructField returns a copy of err without the struct field
+// when err is a [*yaml.TypeError]. It returns any other error as it is,
+// because no other rejection names a struct field.
+func withoutStructField(err yaml.Error) yaml.Error {
+	typed, ok := err.(*yaml.TypeError) //nolint:errorlint // The decoder returns it unwrapped.
+	if !ok {
+		return err
+	}
+
+	bare := *typed
+	bare.StructFieldName = nil
+
+	return &bare
 }
 
 // sameRead reports whether again, the error of a second decode of a

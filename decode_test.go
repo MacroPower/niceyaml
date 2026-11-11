@@ -1915,6 +1915,23 @@ func TestWithUnknownFields(t *testing.T) {
 				source: []niceyaml.SourceOption{yamltest.References("kaffe: &kaffe {item: Kaffe, prise: 35}\n")},
 				opts:   []niceyaml.DecodeOption{warn},
 			},
+			"a key inside an anchor that several aliases read": {
+				// Each alias is a use of the key, with a warning of its own
+				// at the place the anchor defines it.
+				input: stringtest.LinesLF(
+					"name: Fika",
+					"x-kaffe: &k {item: Kaffe, prise: 35}",
+					"fika: [*k, *k, *k, *k]",
+				),
+				opts: []niceyaml.DecodeOption{warn, niceyaml.WithAllowedFieldPrefixes("x-")},
+				warnings: stringtest.JoinLF(
+					"menu.yaml: 4 warnings",
+					`menu.yaml:2:27: warning: $.fika[0].prise~: unknown field "prise"`,
+					`menu.yaml:2:27: warning: $.fika[1].prise~: unknown field "prise"`,
+					`menu.yaml:2:27: warning: $.fika[2].prise~: unknown field "prise"`,
+					`menu.yaml:2:27: warning: $.fika[3].prise~: unknown field "prise"`,
+				),
+			},
 			"a scoped node at an alias that reads a reference document": {
 				input:  stringtest.LinesLF("name: Fika", "fika: [*kaffe]"),
 				source: []niceyaml.SourceOption{yamltest.References("kaffe: &kaffe {item: Kaffe, prise: 35}\n")},
@@ -8997,8 +9014,8 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 				`9:5: $.l[0].w~: unknown field "w"`,
 			),
 		},
-		// Two elements merge one mapping, and its key reports once, at
-		// the place the anchor defines it.
+		// Two elements merge one mapping, and its key reports once for
+		// each element, at the place the anchor defines it.
 		"merge source read twice": {
 			decode: decodeAs[struct {
 				Defs    any           `yaml:"defs"`
@@ -9014,8 +9031,26 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 				"    yyy: 2",
 			),
 			want: stringtest.JoinLF(
-				`2:3: $.defs.zzz~: unknown field "zzz"`,
+				`2:3: $.servers[0].zzz~: unknown field "zzz"`,
+				`2:3: $.servers[1].zzz~: unknown field "zzz"`,
 				`7:5: $.servers[1].yyy~: unknown field "yyy"`,
+			),
+		},
+		// The program allows the prefix, so the key reports under each
+		// use, never under the anchor.
+		"value under an allowed prefix that two uses read": {
+			decode: decodeAs[struct {
+				Hours strictInner `yaml:"hours"`
+				Late  strictInner `yaml:"late"`
+			}](strict, niceyaml.WithAllowedFieldPrefixes("x-")),
+			input: stringtest.LinesLF(
+				"x-defaults: &b {zzz: 1}",
+				"hours: *b",
+				"late: {<<: *b}",
+			),
+			want: stringtest.JoinLF(
+				`1:17: $.hours.zzz~: unknown field "zzz"`,
+				`1:17: $.late.zzz~: unknown field "zzz"`,
 			),
 		},
 		"value an alias reads twice": {
@@ -9031,7 +9066,9 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 			),
 			want: stringtest.JoinLF(
 				`2:3: $.a.zzz~: unknown field "zzz"`,
+				`2:3: $.b.zzz~: unknown field "zzz"`,
 				`3:3: $.a.yyy~: unknown field "yyy"`,
+				`3:3: $.b.yyy~: unknown field "yyy"`,
 			),
 		},
 		// The decoder allows the prefix, so the keys under it stay out
@@ -11311,8 +11348,61 @@ func TestDocument_Decode_Problems(t *testing.T) {
 				"4:4: $.b: expected boolean, got integer",
 			),
 		},
-		// The decoder names a value by the place its anchor defines it,
-		// so a value several aliases read is one problem.
+		// The anchor defines a string that a field of its own reads. The
+		// alias and the merge key read it as an integer, and each names
+		// the path of its use.
+		"value inside an anchor that an alias and a merge key read": {
+			decode: decodeAs[struct {
+				Defaults struct {
+					Open string `yaml:"open"`
+				} `yaml:"defaults"`
+				Hours problemHours `yaml:"hours"`
+				Late  problemHours `yaml:"late"`
+			}](),
+			input: stringtest.LinesLF(
+				"defaults: &b {open: nine}",
+				"hours: *b",
+				"late: {<<: *b}",
+			),
+			want: stringtest.JoinLF(
+				"2 problems",
+				"1:21: $.hours.open: expected integer, got string",
+				"1:21: $.late.open: expected integer, got string",
+			),
+		},
+		// The read at the anchor itself is a use too.
+		"value inside an anchor that the anchor and two aliases read": {
+			decode: decodeAs[struct {
+				Defaults problemHours `yaml:"defaults"`
+				Hours    problemHours `yaml:"hours"`
+				Late     problemHours `yaml:"late"`
+			}](),
+			input: stringtest.LinesLF(
+				"defaults: &b {open: nine}",
+				"hours: *b",
+				"late: *b",
+			),
+			want: stringtest.JoinLF(
+				"3 problems",
+				"1:21: $.defaults.open: expected integer, got string",
+				"1:21: $.hours.open: expected integer, got string",
+				"1:21: $.late.open: expected integer, got string",
+			),
+		},
+		// The decode of the Node at the alias reports the path inside its
+		// scope.
+		"scoped decode of an alias": {
+			decode: decodeAs[problemHours](),
+			input: stringtest.LinesLF(
+				"defaults: &b {open: nine}",
+				"hours: *b",
+			),
+			scope: paths.MustParse("$.hours"),
+			want:  "1:21: $.hours.open: expected integer, got string",
+		},
+		// Each alias that reads a value is a use of its own, so a value
+		// that several aliases read is a problem for each, at the place
+		// the anchor defines it.
 		"value several aliases read": {
 			decode: decodeAs[struct {
 				A int `yaml:"a"`
@@ -11327,8 +11417,10 @@ func TestDocument_Decode_Problems(t *testing.T) {
 				"d: bad",
 			),
 			want: stringtest.JoinLF(
-				"2 problems",
+				"4 problems",
 				"1:7: $.a: expected integer, got string",
+				"1:7: $.b: expected integer, got string",
+				"1:7: $.c: expected integer, got string",
 				"4:4: $.d: expected integer, got string",
 			),
 		},
@@ -11354,8 +11446,166 @@ func TestDocument_Decode_Problems(t *testing.T) {
 				"4:4: $.d: expected integer, got string",
 			),
 		},
-		// Two servers read the timeout of one anchor through a merge
-		// key, which is one value and one problem.
+		// The decoder rejects the first use with an error that has no
+		// token. The second use fails at the same text, and it reports a
+		// problem of its own.
+		"duration inside an anchor that two aliases read": {
+			decode: decodeAs[struct {
+				D any `yaml:"d"`
+				A struct {
+					Timeout time.Duration `yaml:"timeout"`
+				} `yaml:"a"`
+				B struct {
+					Timeout time.Duration `yaml:"timeout"`
+				} `yaml:"b"`
+			}](),
+			input: stringtest.LinesLF(
+				"d: &d {timeout: soon}",
+				"a: *d",
+				"b: *d",
+			),
+			want: stringtest.JoinLF(
+				"2 problems",
+				`1:17: $.a.timeout: time: invalid duration "soon"`,
+				`1:17: $.b.timeout: time: invalid duration "soon"`,
+			),
+		},
+		// An UnmarshalText method returns an error with no token, as a
+		// duration parse does.
+		"text that two aliases hand to an UnmarshalText method": {
+			decode: decodeAs[struct {
+				D any `yaml:"d"`
+				A struct {
+					Open methodLevel `yaml:"open"`
+				} `yaml:"a"`
+				B struct {
+					Open methodLevel `yaml:"open"`
+				} `yaml:"b"`
+			}](),
+			input: stringtest.LinesLF(
+				"d: &d {open: soon}",
+				"a: *d",
+				"b: *d",
+			),
+			want: stringtest.JoinLF(
+				"2 problems",
+				"1:14: $.a.open: the decoder called the method",
+				"1:14: $.b.open: the decoder called the method",
+			),
+		},
+		// The decoder rejects the first use as a duration, with no token.
+		// The second use reads the value as an integer, which fails the
+		// other way.
+		"duration and integer inside an anchor that two aliases read": {
+			decode: decodeAs[struct {
+				D any `yaml:"d"`
+				B struct {
+					Open time.Duration `yaml:"open"`
+				} `yaml:"b"`
+				A problemHours `yaml:"a"`
+			}](),
+			input: stringtest.LinesLF(
+				"d: &d {open: soon}",
+				"b: *d",
+				"a: *d",
+			),
+			want: stringtest.JoinLF(
+				"2 problems",
+				`1:14: $.b.open: time: invalid duration "soon"`,
+				"1:14: $.a.open: expected integer, got string",
+			),
+		},
+		// Two uses reject one value in different ways, and each reports
+		// its own rejection.
+		"value inside an anchor that two aliases reject differently": {
+			decode: decodeAs[struct {
+				D any `yaml:"d"`
+				A struct {
+					Open int8 `yaml:"open"`
+				} `yaml:"a"`
+				B struct {
+					Open bool `yaml:"open"`
+				} `yaml:"b"`
+			}](),
+			input: stringtest.LinesLF(
+				"d: &d {open: 300}",
+				"a: *d",
+				"b: *d",
+			),
+			want: stringtest.JoinLF(
+				"2 problems",
+				"1:14: $.a.open: expected integer from -128 to 127, got 300",
+				"1:14: $.b.open: expected boolean, got integer",
+			),
+		},
+		// The two uses reject one value with the same error type but read
+		// it as different Go types, and each reports its own rejection.
+		"value inside an anchor that two aliases read as integer and boolean": {
+			decode: decodeAs[struct {
+				D any `yaml:"d"`
+				A struct {
+					Open int `yaml:"open"`
+				} `yaml:"a"`
+				B struct {
+					Open bool `yaml:"open"`
+				} `yaml:"b"`
+			}](),
+			input: stringtest.LinesLF(
+				"d: &d {open: abc}",
+				"a: *d",
+				"b: *d",
+			),
+			want: stringtest.JoinLF(
+				"2 problems",
+				"1:14: $.a.open: expected integer, got string",
+				"1:14: $.b.open: expected boolean, got string",
+			),
+		},
+		"value inside an anchor that two aliases read as integer and float": {
+			decode: decodeAs[struct {
+				D any `yaml:"d"`
+				A struct {
+					Open int `yaml:"open"`
+				} `yaml:"a"`
+				B struct {
+					Open float64 `yaml:"open"`
+				} `yaml:"b"`
+			}](),
+			input: stringtest.LinesLF(
+				"d: &d {open: abc}",
+				"a: *d",
+				"b: *d",
+			),
+			want: stringtest.JoinLF(
+				"2 problems",
+				"1:14: $.a.open: expected integer, got string",
+				"1:14: $.b.open: expected float, got string",
+			),
+		},
+		"value inside an anchor that two aliases read as int8 and uint8": {
+			decode: decodeAs[struct {
+				D any `yaml:"d"`
+				A struct {
+					Open int8 `yaml:"open"`
+				} `yaml:"a"`
+				B struct {
+					Open uint8 `yaml:"open"`
+				} `yaml:"b"`
+			}](),
+			input: stringtest.LinesLF(
+				"d: &d {open: 300}",
+				"a: *d",
+				"b: *d",
+			),
+			want: stringtest.JoinLF(
+				"2 problems",
+				"1:14: $.a.open: expected integer from -128 to 127, got 300",
+				"1:14: $.b.open: expected integer from 0 to 255, got 300",
+			),
+		},
+		// Two servers read the port and the timeout of one anchor, one
+		// through an alias and one through a merge key. Each server is a
+		// use of its own, with a problem for each value.
 		"values a merge key brings in": {
 			decode: decodeAs[problemConfig](),
 			input: stringtest.LinesLF(
@@ -11367,9 +11617,11 @@ func TestDocument_Decode_Problems(t *testing.T) {
 				"replicas: z",
 			),
 			want: stringtest.JoinLF(
-				"6 problems",
-				"1:17: $.base.port: expected integer, got string",
+				"8 problems",
+				"1:17: $.servers[0].port: expected integer, got string",
+				"1:17: $.servers[1].port: expected integer, got string",
 				`1:32: $.servers[0].timeout: time: invalid duration "soon"`,
+				`1:32: $.servers[1].timeout: time: invalid duration "soon"`,
 				"4:14: $.servers[1].name: expected string, got sequence",
 				"5:18: $.labels.k: expected integer, got string",
 				"5:25: $.labels.j: expected integer, got string",
@@ -11463,7 +11715,9 @@ func TestDocument_Decode_Problems(t *testing.T) {
 				"2:11: $.replicas: expected integer, got string",
 			),
 		},
-		// The paths read from the root of the document.
+		// The paths read from the root of the document, and a value that
+		// a merge key brings in from outside the scope reports the path
+		// inside it.
 		"scoped decode": {
 			decode: decodeAs[problemServer](),
 			input: stringtest.LinesLF(
@@ -11475,7 +11729,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 			scope: paths.MustParse("$.servers[1]"),
 			want: stringtest.JoinLF(
 				"3 problems",
-				"1:17: $.base.port: expected integer, got string",
+				"1:17: $.servers[1].port: expected integer, got string",
 				"4:14: $.servers[1].name: expected string, got sequence",
 				`4:34: $.servers[1].timeout: time: invalid duration "soon"`,
 			),
@@ -11821,8 +12075,8 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 				`1:21: $.tiers[2]: unknown tier "top"`,
 			),
 		},
-		// The document writes the tier once, so both servers that merge
-		// it report one problem.
+		// The document writes the tier once, and each server that merges
+		// it is a use with a problem of its own at that place.
 		"text value a merge key brings in": {
 			decode: decodeAs[struct {
 				Servers []problemTiered `yaml:"servers"`
@@ -11835,8 +12089,9 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 			),
 			is: errUnknownTier,
 			want: stringtest.JoinLF(
-				"2 problems",
+				"3 problems",
 				`1:17: $.servers[0].tier: unknown tier "mid"`,
+				`1:17: $.servers[1].tier: unknown tier "mid"`,
 				"4:29: $.servers[1].port: expected integer, got string",
 			),
 		},
@@ -12031,8 +12286,9 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 				"replicas: x",
 			),
 			want: stringtest.JoinLF(
-				"3 problems",
-				"1:17: $.base.port: expected integer, got string",
+				"4 problems",
+				"1:17: $.servers[0].port: expected integer, got string",
+				"1:17: $.servers[1].port: expected integer, got string",
 				"4:14: $.servers[1].name: expected string, got sequence",
 				"5:11: $.replicas: expected integer, got string",
 			),
@@ -12285,7 +12541,7 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 			scope: paths.MustParse("$.servers[1]"),
 			want: stringtest.JoinLF(
 				"2 problems",
-				"1:17: $.base.port: expected integer, got string",
+				"1:17: $.servers[1].port: expected integer, got string",
 				"4:14: $.servers[1].name: expected string, got sequence",
 			),
 		},
@@ -13710,6 +13966,12 @@ func (*summarizedTierWarnings) UnmarshalYAML([]byte) error {
 	)
 }
 
+// problemHours holds an integer that a document can define in an anchor
+// of another type.
+type problemHours struct {
+	Open int `yaml:"open"`
+}
+
 // rejectionServer is an element of [rejectionConfig].
 type rejectionServer struct {
 	Host  string `yaml:"host"`
@@ -13832,25 +14094,6 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 			input: "top: !!str abc\n",
 			want:  "1:12: $.top: expected integer, got string",
 		},
-		"value an alias reads": {
-			input: stringtest.LinesLF(
-				"defs:",
-				"  p: &p abc",
-				"servers:",
-				"  - port: *p",
-			),
-			want: "2:9: $.defs.p: expected integer, got string",
-		},
-		"value a merge key brings in": {
-			input: stringtest.LinesLF(
-				"defs: &d",
-				"  port: abc",
-				"servers:",
-				"  - <<: *d",
-				"    host: h",
-			),
-			want: "2:9: $.defs.port: expected integer, got string",
-		},
 		"map key": {
 			input: stringtest.LinesLF("counts:", "  x: 1"),
 			want:  "2:3: $.counts.x~: expected integer, got string",
@@ -13934,16 +14177,6 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 			opts:  []niceyaml.DecodeOption{niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject)},
 			want:  `2:5: $.servers[0].zzz~: unknown field "zzz"`,
 		},
-		"unknown field a merge key brings in": {
-			input: stringtest.LinesLF(
-				"labels: &d",
-				"  zzz: 1",
-				"one:",
-				"  <<: *d",
-			),
-			opts: []niceyaml.DecodeOption{niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject)},
-			want: `2:3: $.labels.zzz~: unknown field "zzz"`,
-		},
 		"alias with no anchor": {
 			input: "top: *nope\n",
 			want:  `1:6: $.top: could not find alias "nope"`,
@@ -14004,6 +14237,102 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 
 			_, ok = under.CutPrefix(path)
 			assert.True(t, ok, "position %s lies at %s", pos, under)
+		})
+	}
+}
+
+func TestDocument_Decode_Rejection_Aliases(t *testing.T) {
+	t.Parallel()
+
+	// A rejection of a value that an alias or a `<<` merge key brings in
+	// names the path of that use, at the position of the text of the
+	// anchor, as a schema error does.
+	tcs := map[string]struct {
+		input string
+		want  string
+		// The path of the place that the anchor defines the value at.
+		anchor string
+		opts   []niceyaml.DecodeOption
+	}{
+		"value an alias reads": {
+			input: stringtest.LinesLF(
+				"defs:",
+				"  p: &p abc",
+				"servers:",
+				"  - port: *p",
+			),
+			want:   "2:9: $.servers[0].port: expected integer, got string",
+			anchor: "$.defs.p",
+		},
+		"value inside a mapping an alias reads": {
+			input: stringtest.LinesLF(
+				"defs: &d {port: abc}",
+				"one: *d",
+			),
+			want:   "1:17: $.one.port: expected integer, got string",
+			anchor: "$.defs.port",
+		},
+		"value a merge key brings in": {
+			input: stringtest.LinesLF(
+				"defs: &d",
+				"  port: abc",
+				"servers:",
+				"  - <<: *d",
+				"    host: h",
+			),
+			want:   "2:9: $.servers[0].port: expected integer, got string",
+			anchor: "$.defs.port",
+		},
+		"unknown field a merge key brings in": {
+			input: stringtest.LinesLF(
+				"labels: &d",
+				"  zzz: 1",
+				"one:",
+				"  <<: *d",
+			),
+			opts:   []niceyaml.DecodeOption{niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject)},
+			want:   `2:3: $.one.zzz~: unknown field "zzz"`,
+			anchor: "$.labels.zzz~",
+		},
+		"unknown field under an allowed prefix": {
+			input: stringtest.LinesLF(
+				"x-defs: &d {zzz: 1}",
+				"one: *d",
+			),
+			opts: []niceyaml.DecodeOption{
+				niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject),
+				niceyaml.WithAllowedFieldPrefixes("x-"),
+			},
+			want:   `1:13: $.one.zzz~: unknown field "zzz"`,
+			anchor: "$.x-defs.zzz~",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dd := yamltest.FirstDocument(t, tc.input)
+
+			var v rejectionConfig
+
+			err := dd.DecodeInto(t.Context(), &v, tc.opts...)
+			require.EqualError(t, err, tc.want)
+			require.ErrorIs(t, err, niceyaml.ErrDecode)
+
+			srcErr := yamltest.RequireSourceError(t, err)
+			require.NoError(t, srcErr.Unresolved())
+
+			path := requireNamedPath(t, srcErr, tc.want)
+
+			// The path resolves through the use to the value.
+			_, err = dd.At(path)
+			require.NoError(t, err)
+
+			// The position lies where the anchor defines the value.
+			under, ok := dd.PathAt(yamltest.PositionOf(t, srcErr))
+			require.True(t, ok)
+			assert.Equal(t, tc.anchor, under.String())
 		})
 	}
 }
@@ -14175,6 +14504,98 @@ func TestDocument_Decode_Rejection_GoYAMLError(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, reflect.TypeFor[int](), got.DstType)
 		assert.Equal(t, reflect.TypeFor[string](), got.SrcType)
+		assert.NotNil(t, got.StructFieldName)
+	})
+
+	// A rejection through an alias reports the path of the use, and its
+	// cause is still the error the decoder returned.
+	t.Run("type mismatch through an alias", func(t *testing.T) {
+		t.Parallel()
+
+		var v rejectionConfig
+
+		err := yamltest.FirstDocument(t, "name: &b abc\ntop: *b\n").DecodeInto(t.Context(), &v)
+		require.EqualError(t, err, "1:10: $.top: expected integer, got string")
+
+		got, ok := errors.AsType[*yaml.TypeError](err)
+		require.True(t, ok)
+		assert.Equal(t, reflect.TypeFor[int](), got.DstType)
+		assert.Equal(t, reflect.TypeFor[string](), got.SrcType)
+		assert.NotNil(t, got.StructFieldName)
+	})
+
+	// Two uses read one value as different Go types. The problem of each
+	// use wraps an error with the Go type of that use.
+	t.Run("type mismatch through two aliases", func(t *testing.T) {
+		t.Parallel()
+
+		var v struct {
+			D any `yaml:"d"`
+			A struct {
+				Open int `yaml:"open"`
+			} `yaml:"a"`
+			B struct {
+				Open bool `yaml:"open"`
+			} `yaml:"b"`
+		}
+
+		err := yamltest.FirstDocument(t, "d: &d {open: abc}\na: *d\nb: *d\n").DecodeInto(t.Context(), &v)
+		require.Error(t, err)
+
+		want := map[string]reflect.Type{
+			"$.a.open": reflect.TypeFor[int](),
+			"$.b.open": reflect.TypeFor[bool](),
+		}
+		got := map[string]reflect.Type{}
+
+		for problem := range niceyaml.NewErrorTree(err).Problems() {
+			path, ok := problem.Path()
+			require.True(t, ok)
+
+			typeErr, ok := errors.AsType[*yaml.TypeError](problem.Err)
+			require.True(t, ok, path.String())
+
+			got[path.String()] = typeErr.DstType
+		}
+
+		assert.Equal(t, want, got)
+	})
+
+	// Two uses in two struct types read one value the same way. The
+	// decoder names the struct field of only one of them. So the problem
+	// of each use wraps a copy of its error that names no struct field.
+	t.Run("same type mismatch through two aliases", func(t *testing.T) {
+		t.Parallel()
+
+		var v struct {
+			D any `yaml:"d"`
+			A struct {
+				Open int `yaml:"open"`
+			} `yaml:"a"`
+			B struct {
+				Open int `yaml:"open"`
+			} `yaml:"b"`
+		}
+
+		err := yamltest.FirstDocument(t, "d: &d {open: abc}\na: *d\nb: *d\n").DecodeInto(t.Context(), &v)
+		require.Error(t, err)
+
+		var got []string
+
+		for problem := range niceyaml.NewErrorTree(err).Problems() {
+			path, ok := problem.Path()
+			require.True(t, ok)
+
+			typeErr, ok := errors.AsType[*yaml.TypeError](problem.Err)
+			require.True(t, ok, path.String())
+			assert.Equal(t, reflect.TypeFor[int](), typeErr.DstType, path.String())
+			assert.Equal(t, reflect.TypeFor[string](), typeErr.SrcType, path.String())
+			assert.Nil(t, typeErr.StructFieldName, path.String())
+
+			got = append(got, path.String())
+		}
+
+		assert.ElementsMatch(t, []string{"$.a.open", "$.b.open"}, got)
 	})
 
 	t.Run("overflow", func(t *testing.T) {
@@ -14463,11 +14884,12 @@ func TestDocument_Decode_Rejection_Scoped(t *testing.T) {
 			scope: "$.servers[0]",
 			want:  "s.yaml:5:11: $.servers[0].port: expected integer, got string",
 		},
-		// The merge key brings the value in from outside the scope,
-		// and the path names the place where the anchor defines it.
+		// The merge key brings the value in from outside the scope. The
+		// path names the use inside the scope, and the position the place
+		// where the anchor defines the value.
 		"value a merge key brings in from outside the scope": {
 			scope: "$.servers[1]",
-			want:  "s.yaml:2:9: $.defs.port: expected integer, got string",
+			want:  "s.yaml:2:9: $.servers[1].port: expected integer, got string",
 		},
 	}
 
@@ -14496,6 +14918,36 @@ func TestDocument_Decode_Rejection_Scoped(t *testing.T) {
 			assert.Equal(t, ranges[0].Start, yamltest.PositionOf(t, srcErr))
 		})
 	}
+
+	// The decoder rejects the anchor that the merge key names as a whole,
+	// and the decode cannot tie the rejection to the use. The error keeps
+	// the path where the document writes the value, outside the scope.
+	t.Run("rejection the decode cannot tie to a use", func(t *testing.T) {
+		t.Parallel()
+
+		type aliased struct {
+			*StrictBase `yaml:",inline,alias"`
+
+			B int `yaml:"b"`
+		}
+
+		doc := yamltest.FirstDocumentWithPath(t, stringtest.LinesLF(
+			"defs: &d",
+			"  a: 1",
+			"v:",
+			"  <<: *d",
+			"  b: 1",
+		), "s.yaml")
+
+		scoped := yamltest.At(t, doc, paths.MustParse("$.v"))
+
+		_, err := scoped.Decode[aliased](t.Context())
+		require.EqualError(t, err, "s.yaml:1:1: $.defs: expected mapping, got value of another type")
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+
+		srcErr := yamltest.RequireSourceError(t, err)
+		assert.Same(t, scoped, yamltest.BoundNode(t, srcErr))
+	})
 }
 
 func TestDocument_Decode_Rejection_Unselected(t *testing.T) {
@@ -14630,14 +15082,15 @@ func TestDocument_Decode_Rejection_MergeSources(t *testing.T) {
 			want:   "2:32: $.x.r.port: expected integer, got string",
 		},
 		// A merge key that reads an anchor of the document brings in the
-		// entries where the anchor defines them.
+		// entries where the anchor defines them, and the path goes through
+		// the merge.
 		"anchor of the document": {
 			decode: decodeAs[struct {
 				Base any           `yaml:"base"`
 				X    problemServer `yaml:"x"`
 			}](),
 			input: stringtest.LinesLF("base: &b {port: bad}", "x:", "  <<: *b"),
-			want:  "1:17: $.base.port: expected integer, got string",
+			want:  "1:17: $.x.port: expected integer, got string",
 		},
 		// A later entry of the key takes the path through the merge, so the
 		// path goes through the merge key.
