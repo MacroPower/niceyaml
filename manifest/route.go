@@ -790,11 +790,18 @@ func (r *Registry) versionLabel(name string) string {
 
 // label returns v as a message of a load names it outside quotes.
 func (r *Registry) label(v *versionEntry) string {
-	if v.cfg.unversioned {
-		return "the unversioned layout of " + v.kind.kind.name
+	return r.layoutLabel(v.kind.kind.name, v.cfg.name)
+}
+
+// layoutLabel returns the version named version of the kind named kind as
+// a message of a load names it outside quotes. An empty version names the
+// unversioned layout of the kind, because every other version has a name.
+func (r *Registry) layoutLabel(kind, version string) string {
+	if version == "" {
+		return "the unversioned layout of " + kind
 	}
 
-	return r.versionLabel(v.cfg.name)
+	return r.versionLabel(version)
 }
 
 // app returns the name that [WithAppName] gives the app, or "this program"
