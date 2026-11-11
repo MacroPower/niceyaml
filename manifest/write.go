@@ -86,7 +86,7 @@ func WriteAtomic(ctx context.Context, f *PlanFile) error {
 		return systemProblem(err)
 	}
 
-	return writeFile(dir, name, []byte(f.f.src.Text()), f.after, app)
+	return writeFile(dir, name, []byte(f.f.src.Text()), []byte(f.after), app)
 }
 
 // target is where a file came from, and where [WriteAtomic] writes it.

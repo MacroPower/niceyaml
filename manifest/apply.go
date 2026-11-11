@@ -135,8 +135,11 @@ type failure struct {
 }
 
 // Files returns the files that Apply wrote, in load order.
+//
+// Every call returns the same files in a new slice, so a caller that
+// reorders or filters the slice does not change the result.
 func (r *Result) Files() []*PlanFile {
-	return r.files
+	return slices.Clone(r.files)
 }
 
 // Summary returns a line for each document that Apply migrated and for
@@ -247,7 +250,7 @@ func (r *Result) check(ctx context.Context) {
 
 		switch {
 		case written[i]:
-			nf := &file{src: f.src.WithText(string(f.plan.after)), dir: f.dir, target: f.target, name: f.name}
+			nf := &file{src: f.src.WithText(f.plan.after), dir: f.dir, target: f.target, name: f.name}
 			l.files[i] = nf
 			l.checkFile(ctx, i, nf)
 

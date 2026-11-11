@@ -136,7 +136,7 @@ func TestPlan_Apply_Link(t *testing.T) {
 			assert.NotZero(t, info.Mode()&os.ModeSymlink)
 			assert.Equal(
 				t,
-				string(plan.Files()[0].After()),
+				plan.Files()[0].After(),
 				yamltest.ReadFile(t, filepath.Join(dir, filepath.FromSlash(tc.target))),
 			)
 		})
@@ -230,7 +230,7 @@ func TestPlan_Apply_RelativeLink(t *testing.T) {
 
 			assert.Equal(
 				t,
-				string(plan.Files()[0].After()),
+				plan.Files()[0].After(),
 				yamltest.ReadFile(t, filepath.Join(dir, "config", "shared", "hours.yaml")),
 			)
 		})
@@ -272,7 +272,7 @@ func TestPlan_Apply_SymlinkedWorkDir(t *testing.T) {
 
 	assert.Equal(
 		t,
-		string(plan.Files()[0].After()),
+		plan.Files()[0].After(),
 		yamltest.ReadFile(t, filepath.Join(dir, "real", "d", "hours.yaml")),
 	)
 }
@@ -311,7 +311,7 @@ func TestWriteAtomic(t *testing.T) {
 	assert.Equal(t, hoursDoc, yamltest.ReadFile(t, path))
 
 	require.NoError(t, manifest.WriteAtomic(t.Context(), f))
-	assert.Equal(t, string(f.After()), yamltest.ReadFile(t, path))
+	assert.Equal(t, f.After(), yamltest.ReadFile(t, path))
 
 	// The file now holds the new text, so a second write finds it changed.
 	require.ErrorIs(t, manifest.WriteAtomic(t.Context(), f), manifest.ErrChanged)
