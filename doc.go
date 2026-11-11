@@ -506,6 +506,13 @@
 // a collector of its own, because Report returns every warning that the
 // collector holds.
 //
+// Of the lines of its file, a detached error keeps only the lines that its
+// excerpts show. The memory that those lines take thus grows with the number
+// of problems and with the context lines around each. It does not grow with
+// the length of the file, with one exception. One line of a scalar that spans
+// several lines carries the value of the whole scalar, and the copy of that
+// line keeps that value.
+//
 // The program detaches the whole error of a file once, after
 // [Warnings.Report] adds the warnings of the collector. When the bindings of
 // one source go through separate calls of Detach, they render as bindings of

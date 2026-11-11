@@ -2,6 +2,7 @@ package segment_test
 
 import (
 	"math"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -1017,6 +1018,115 @@ func TestSplit_UnlinkedStream(t *testing.T) {
 			yamltest.RequireTokensEqual(t, lineParts(want), lineParts(got))
 		})
 	}
+}
+
+// TestSplit_RetainedSize checks that the lines of a short stream hold
+// memory in proportion to their parts. It cuts a stream one line at a
+// time, and then in one call, and compares the heap that the two results
+// hold. The test reads the heap of the whole process, so it does not run
+// in parallel.
+//
+//nolint:paralleltest // See above.
+func TestSplit_RetainedSize(t *testing.T) {
+	const lines = 1000
+
+	whole := tokens.Tokenize(strings.Repeat("a: 1\n", lines))
+
+	each := make([]token.Tokens, 0, lines)
+	for range lines {
+		each = append(each, tokens.Tokenize("a: 1\n"))
+	}
+
+	together := retainedBytes(func() any {
+		return segment.Split(whole)
+	})
+	apart := retainedBytes(func() any {
+		kept := make([][]segment.Line, 0, lines)
+		for _, tks := range each {
+			kept = append(kept, segment.Split(tks))
+		}
+
+		return kept
+	})
+
+	require.Positive(t, together)
+	assert.Less(t, apart, 2*together)
+
+	runtime.KeepAlive(whole)
+	runtime.KeepAlive(each)
+}
+
+// TestSplit_Allocations checks that Split takes the part tokens and the
+// segments of a long stream from chunks. Split sizes each chunk from the
+// parts that it counts before it cuts them. A count that is too low makes
+// one allocation for each part past the count. The test counts the
+// allocations of the whole process, so it does not run in parallel.
+//
+//nolint:paralleltest // See above.
+func TestSplit_Allocations(t *testing.T) {
+	const repeats = 1000
+
+	tcs := map[string]struct {
+		input string
+		// The largest number of parts that join the line finished before
+		// them. Each such part grows the segments of that line, which
+		// takes one allocation.
+		joined int
+	}{
+		"LF lines":   {input: strings.Repeat("key: value # c\n", repeats)},
+		"CRLF lines": {input: strings.Repeat("key: value\r\n", repeats)},
+		"CRLF lines with comments": {
+			input:  strings.Repeat("key: value # c\r\n", repeats),
+			joined: repeats,
+		},
+		"bare CR lines":            {input: strings.Repeat("key: value\r", repeats)},
+		"blank lines between keys": {input: strings.Repeat("key: value\n\n\n", repeats)},
+		"tags before nested values": {
+			input:  strings.Repeat("a: !!str\n  b\n", repeats),
+			joined: repeats,
+		},
+		"literal scalar of many lines":  {input: "text: |\n" + strings.Repeat("  line\n", repeats)},
+		"literal scalar of blank lines": {input: "text: |\n" + strings.Repeat("\n", repeats) + "  line\n"},
+		"plain scalar of many lines":    {input: "text: a\n" + strings.Repeat("  b\n", repeats)},
+		"quoted scalar of many lines":   {input: "text: \"a\n" + strings.Repeat("  b\n", repeats) + "  c\"\n"},
+		"flow sequence on one line":     {input: "[" + strings.Repeat("a, ", repeats) + "a]\n"},
+	}
+
+	for name, tc := range tcs {
+		//nolint:paralleltest // See above.
+		t.Run(name, func(t *testing.T) {
+			tks := tokens.Tokenize(tc.input)
+
+			parts := len(lineParts(segment.Split(tks)))
+			require.GreaterOrEqual(t, parts, repeats)
+
+			allocs := testing.AllocsPerRun(10, func() {
+				segment.Split(tks)
+			})
+
+			assert.Less(t, allocs, float64(parts)/10+float64(tc.joined), "allocations for %d parts", parts)
+		})
+	}
+}
+
+// retainedBytes returns the number of bytes of heap that the value build
+// returns keeps alive. It reads the heap of the whole process, so a test
+// that calls it does not run in parallel.
+func retainedBytes(build func() any) float64 {
+	var before, after runtime.MemStats
+
+	runtime.GC()
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+
+	kept := build()
+
+	runtime.GC()
+	runtime.GC()
+	runtime.ReadMemStats(&after)
+	runtime.KeepAlive(kept)
+
+	return float64(after.HeapAlloc) - float64(before.HeapAlloc)
 }
 
 // unlinked returns clones of tks with no Prev or Next links, as a

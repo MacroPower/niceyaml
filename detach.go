@@ -4,6 +4,7 @@ import (
 	"errors"
 	"reflect"
 	"slices"
+	"strings"
 	"weak"
 
 	"github.com/goccy/go-yaml/token"
@@ -49,6 +50,13 @@ import (
 // that the excerpt of the whole error only counts, so it shows those lines
 // too. Detach does not keep any line of a source with excerpts off, as
 // [WithExcerpts] sets them.
+//
+// The copy holds those lines and no other line of the source. The memory
+// that those lines take thus grows with the number of problems and with
+// the context lines around each. It does not grow with the length of the
+// file, with one exception. One line of a scalar that spans several lines
+// carries the value of the whole scalar, and the copy of that line keeps
+// that value.
 //
 // Detach keeps the context lines, the width, and the number of marks on
 // one line that opts set too, as [ExcerptOption] describes. Every renderer
@@ -589,6 +597,11 @@ type lineCopier struct {
 // types of the neighbors its token has in the source. [line.Line.Kind]
 // reads those types, so the copy renders as ln does. A line the clones do
 // not rebuild becomes one token of plain text with the text of ln.
+//
+// Each clone holds a copy of the Origin of its part, so the copy of ln
+// does not keep the text of any other line. A clone keeps the Value of its
+// part. On one line of a scalar that spans several lines, that Value is
+// the value of the whole scalar.
 func (c *lineCopier) copy(ln *line.Line) *line.Line {
 	parts := ln.Tokens()
 	sources := ln.SourceTokens()
@@ -598,6 +611,11 @@ func (c *lineCopier) copy(ln *line.Line) *line.Line {
 	for n, part := range parts {
 		clone := part.Clone()
 		clone.Prev, clone.Next = nil, nil
+
+		// The Origin of a part shares its memory with the Origin of its
+		// source token. That Origin holds every line of a scalar that
+		// spans several lines.
+		clone.Origin = strings.Clone(clone.Origin)
 
 		// Each part of a line comes from its own source token, so when the
 		// counts match, part n pairs with source token n.

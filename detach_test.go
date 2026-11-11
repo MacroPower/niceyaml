@@ -928,3 +928,124 @@ func TestDetach_AsErrors(t *testing.T) {
 	assert.Equal(t, niceyaml.FormatError(want), niceyaml.FormatError(got))
 	assert.Equal(t, detachedRows(want), detachedRows(got))
 }
+
+// TestDetach_RetainedSize checks that the detached errors of short files
+// hold less memory than the errors hold with their sources. The test reads
+// the heap of the whole process, so it does not run in parallel.
+//
+//nolint:paralleltest // See above.
+func TestDetach_RetainedSize(t *testing.T) {
+	tcs := map[string]struct {
+		lines    int
+		problems int
+	}{
+		"one problem in a short file":      {lines: 11, problems: 1},
+		"several problems in a short file": {lines: 43, problems: 3},
+	}
+
+	for name, tc := range tcs {
+		//nolint:paralleltest // See above.
+		t.Run(name, func(t *testing.T) {
+			var input strings.Builder
+
+			for i := range tc.lines {
+				fmt.Fprintf(&input, "key%d: value\n", i)
+			}
+
+			// The errors of 100 files, each with its problems spread evenly
+			// through the file.
+			check := func(keep func(error) error) func() any {
+				return func() any {
+					kept := make([]error, 0, 100)
+
+					for range cap(kept) {
+						source := niceyaml.NewSourceFromString(input.String(), niceyaml.WithName("check.yaml"))
+						step := tc.lines / tc.problems
+
+						problems := make([]error, 0, tc.problems)
+						for i := range tc.problems {
+							problems = append(problems, yamltest.ErrorAt("bad", fmt.Sprintf("key%d", i*step+step/2)))
+						}
+
+						kept = append(kept, keep(source.Bind(errors.Join(problems...))))
+					}
+
+					return kept
+				}
+			}
+
+			bound := retainedBytes(check(func(err error) error { return err }))
+			detached := retainedBytes(check(func(err error) error { return niceyaml.Detach(err) }))
+
+			require.Positive(t, detached)
+			assert.Less(t, detached, bound)
+		})
+	}
+}
+
+// TestDetach_RetainedScalarLines checks that the copy of a line of a scalar
+// that spans many lines does not keep the text of the whole scalar. Each
+// excerpt shows lines of the scalar other than the line that carries its
+// value. The test reads the heap of the whole process, so it does not run
+// in parallel.
+//
+//nolint:paralleltest // See above.
+func TestDetach_RetainedScalarLines(t *testing.T) {
+	text := strings.Repeat("  0123456789 0123456789 0123456\n", 3000)
+
+	tcs := map[string]string{
+		"first line of a literal scalar": stringtest.JoinLF("a: 1", "key: x", "data: |", text),
+		"first line of a folded scalar":  stringtest.JoinLF("a: 1", "key: x", "data: >", text),
+		"last lines of a plain scalar":   stringtest.JoinLF("data: a", text+"key: x", ""),
+		"last lines of a quoted scalar":  stringtest.JoinLF(`data: "a`, text+`  b"`, "key: x", ""),
+	}
+
+	for name, input := range tcs {
+		//nolint:paralleltest // See above.
+		t.Run(name, func(t *testing.T) {
+			var shown string
+
+			detached := retainedBytes(func() any {
+				kept := make([]error, 0, 5)
+
+				for range cap(kept) {
+					source := niceyaml.NewSourceFromString(input)
+					kept = append(kept, niceyaml.Detach(source.Bind(yamltest.ErrorAt("bad", "key"))))
+				}
+
+				shown = niceyaml.FormatError(kept[0])
+
+				return kept
+			})
+
+			require.Contains(t, shown, "0123456789")
+			require.Positive(t, detached)
+
+			// Each error holds a few kilobytes. An error that keeps the
+			// text of the scalar holds more than the file.
+			assert.Less(t, detached, float64(len(input)))
+
+			runtime.KeepAlive(input)
+		})
+	}
+}
+
+// retainedBytes returns the number of bytes of heap that the value build
+// returns keeps alive. It reads the heap of the whole process, so a test
+// that calls it does not run in parallel.
+func retainedBytes(build func() any) float64 {
+	var before, after runtime.MemStats
+
+	runtime.GC()
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+
+	kept := build()
+
+	runtime.GC()
+	runtime.GC()
+	runtime.ReadMemStats(&after)
+	runtime.KeepAlive(kept)
+
+	return float64(after.HeapAlloc) - float64(before.HeapAlloc)
+}

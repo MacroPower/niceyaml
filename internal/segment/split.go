@@ -76,8 +76,19 @@ func Split(tks token.Tokens) []Line {
 	lines := 1
 
 	for _, tk := range tks {
-		if tk != nil {
-			lines += lineend.CountBreaks(tk.Origin)
+		if tk == nil {
+			continue
+		}
+
+		breaks := lineend.CountBreaks(tk.Origin)
+		lines += breaks
+
+		// A part ends at each line break of an Origin, and one more part
+		// holds the text after the last break. An empty Origin makes one
+		// part.
+		b.partsLeft += breaks
+		if lineEnding(tk.Origin) == "" {
+			b.partsLeft++
 		}
 	}
 
@@ -162,6 +173,7 @@ type builder struct {
 	tokens []partToken // The part tokens not yet handed out, as [builder.newPart] takes them.
 	segs   Segments    // The segments not yet handed out, as [builder.keep] takes them.
 
+	partsLeft   int        // Number of parts that [builder.newPart] has yet to make, as [Split] counts them.
 	currentLine int        // Number of the line in progress.
 	prevType    token.Type // Type of the last token added other than a comment.
 
@@ -523,15 +535,23 @@ func (b *builder) processPart(ctx *partContext) {
 // newPart creates the token for one part of tk, with origin as its Origin
 // and pos as its Position. The caller picks its type and value. The part
 // copies the rest of its fields from tk, so every part of a token carries
-// the same CharacterType, Indicator, and Error. The parts take their
-// tokens and positions from chunks of [partChunk].
+// the same CharacterType, Indicator, and Error.
+//
+// The parts take their tokens and positions from chunks of at most
+// [partChunk] part tokens. A chunk does not hold more part tokens than
+// the parts that the builder has yet to make. The chunks of a stream thus
+// hold one part token per part, however few parts the stream has.
 func (b *builder) newPart(tk *token.Token, typ token.Type, origin, value string, pos token.Position) *token.Token {
 	if len(b.tokens) == 0 {
-		b.tokens = make([]partToken, partChunk)
+		// Split counts every part, so partsLeft is at least 1 here. The
+		// lower bound keeps a count that is too low from making an empty
+		// chunk.
+		b.tokens = make([]partToken, min(partChunk, max(b.partsLeft, 1)))
 	}
 
 	pt := &b.tokens[0]
 	b.tokens = b.tokens[1:]
+	b.partsLeft--
 
 	pt.pos = pos
 	pt.tk = token.Token{
@@ -548,16 +568,23 @@ func (b *builder) newPart(tk *token.Token, typ token.Type, origin, value string,
 }
 
 // keep returns a copy of segs, the segments of a line that the builder
-// finished, or nil for a line without segments. The copies come from
-// chunks of [segChunk] segments, and the builder reuses segs for the next
-// line.
+// finished, or nil for a line without segments. The builder reuses segs
+// for the next line.
+//
+// The copies come from chunks of at most [segChunk] segments, and a line
+// of more segments takes a chunk of its own. A chunk does not hold more
+// segments than segs and one segment for each part that the builder has
+// yet to make. That sum is an upper bound of the segments that the stream
+// has yet to keep. A part that joins the line finished last does not pass
+// through keep, so a chunk can hold a segment that the stream never
+// keeps.
 func (b *builder) keep(segs Segments) Segments {
 	if len(segs) == 0 {
 		return nil
 	}
 
 	if len(segs) > len(b.segs) {
-		b.segs = make(Segments, max(segChunk, len(segs)))
+		b.segs = make(Segments, max(len(segs), min(segChunk, len(segs)+b.partsLeft)))
 	}
 
 	kept := b.segs[:len(segs):len(segs)]
@@ -568,7 +595,8 @@ func (b *builder) keep(segs Segments) Segments {
 	return kept
 }
 
-// segChunk is the number of segments of one allocation of [builder.keep].
+// segChunk is the largest number of segments that one allocation of
+// [builder.keep] holds for more than one line.
 const segChunk = 256
 
 // partToken holds the token of a part with its position, so the two take
@@ -578,7 +606,7 @@ type partToken struct {
 	pos token.Position
 }
 
-// partChunk is the number of part tokens of one allocation of
+// partChunk is the largest number of part tokens of one allocation of
 // [builder.newPart]. A chunk of 60 takes 8,160 bytes, which fits the
 // allocator's size class of 8,192 bytes.
 const partChunk = 60
