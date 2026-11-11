@@ -37,6 +37,10 @@ type guarded struct {
 // as [Directive], implements [Resolver] directly and does not need a
 // guard.
 //
+// When r is a [*Registry], or a guard around one, a release such as
+// [Registry.Purge] on the registry that holds the guard reaches r too,
+// as [Registry.Resolve] describes.
+//
 // # Reasons
 //
 // A matcher that describes the documents that it accepts, through
@@ -90,4 +94,12 @@ func (g *guarded) Resolve(ctx context.Context, doc *niceyaml.Node) (Ref, error) 
 
 	//nolint:wrapcheck // The guarded resolver's errors pass through unchanged.
 	return g.resolver.Resolve(ctx, doc)
+}
+
+// release implements releaser, so a release of the registry that holds
+// the guard reaches a registry that the guard holds.
+func (g *guarded) release(rel func(*Registry), seen map[*Registry]struct{}) {
+	if n, ok := g.resolver.(releaser); ok {
+		n.release(rel, seen)
+	}
 }

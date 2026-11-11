@@ -131,7 +131,8 @@ const defaultRetryAfter = 1 * time.Minute
 // A Registry is a [Resolver] too. So a registry that an [Access]
 // confines can load the schemas that documents pick and serve them to a
 // registry that holds the program's own schemas, as [Registry.Resolve]
-// describes.
+// describes. A release of the outer registry, such as Invalidate,
+// reaches the confined registry too.
 //
 // Only the cache of a Registry changes after construction, so a Registry
 // is safe for concurrent use. Create instances with [NewRegistry].
@@ -503,6 +504,23 @@ func (r *Registry) Lookup(ctx context.Context, n *niceyaml.Node) (*Schema, error
 //	))
 //
 // A schema that both registries name compiles once in each of them.
+//
+// # Releases
+//
+// The registry that asked does not keep the schemas that this registry
+// names. So [Registry.Invalidate], [Registry.Forget], and
+// [Registry.Purge] act on their own registry and then on each registry
+// among its resolvers, at any depth. They
+// reach a registry that [When] guards too. A program that holds only reg
+// thus releases the schemas that untrusted keeps:
+//
+//	reg.Invalidate(schema.File(path)) // drops the schema in untrusted too
+//
+// A registry that several registries hold as a resolver loses its
+// schemas when the program releases any of them. A release does not
+// reach a registry that a [Resolver] of the program calls, such as a
+// [ResolverFunc] that asks a registry for a Ref. The program releases
+// such a registry itself.
 //
 // # Errors
 //
@@ -1131,6 +1149,10 @@ func (r *Registry) Load(ctx context.Context, ref Ref) ([]byte, error) {
 //
 //	reg.Invalidate(schema.File(path))
 //
+// Invalidate acts on every registry among the resolvers of the
+// registry too, as [Registry.Resolve] describes. So one call reaches
+// the schemas that a nested registry compiled for this one.
+//
 // Invalidate matches schemas by the document that they reached, not by
 // the Ref that a request named. Two schemas whose $refs name one
 // defs.json share the document. Invalidate for defs.json drops both
@@ -1206,7 +1228,7 @@ func (r *Registry) Invalidate(refs ...Ref) {
 		return
 	}
 
-	r.cache.invalidate(ids)
+	r.releaseAll(func(reg *Registry) { reg.cache.invalidate(ids) })
 }
 
 // Forget drops every schema, remembered failure, and $ref document that
@@ -1225,8 +1247,11 @@ func (r *Registry) Invalidate(refs ...Ref) {
 //	return source.ValidateDocuments(ctx, reg)
 //
 // The next request for a schema in fsys loads it again. Forget acts on
-// the file system of a Ref from [FileFS], or of a document in a file
-// system, as [RefBeside] describes. The registry knows every file that
+// every registry among the resolvers of the registry too, as
+// [Registry.Resolve] describes. So a program calls it on the registry
+// that it validates with. Forget acts on the file system of a Ref from
+// [FileFS], or of a document in a file system, as [RefBeside]
+// describes. The registry knows every file that
 // it reads through a root of [AllowRoot] as a file on disk, so Forget
 // leaves those schemas in place. For a nil fsys, or a file system that
 // the registry does not keep anything from, Forget does not change the
@@ -1250,15 +1275,17 @@ func (r *Registry) Forget(fsys fs.FS) {
 		return
 	}
 
-	r.cache.forget(id)
+	r.releaseAll(func(reg *Registry) { reg.cache.forget(id) })
 }
 
 // Purge drops every schema, remembered failure, and $ref document that
-// the registry keeps. The registry then stops holding every file system.
-// The next request for any schema loads and compiles it again. Every
-// holder of the registry, such as a [niceyaml.WithValidator] option, sees
-// the emptied cache. So a program calls Purge instead of building a new
-// registry and giving it to every holder again.
+// the registry keeps. It empties every registry among the resolvers of
+// the registry too, as [Registry.Resolve] describes. The registry then
+// stops holding every file system. The next request for any schema loads
+// and compiles it again. Every holder of the registry, such as a
+// [niceyaml.WithValidator] option, sees the emptied cache. So a program
+// calls Purge instead of building a new registry and giving it to every
+// holder again.
 //
 // Purge acts only on the cache, as [Registry.Invalidate] does. A
 // [*Schema] that the registry returned before Purge stays unchanged. The
@@ -1266,7 +1293,41 @@ func (r *Registry) Forget(fsys fs.FS) {
 // Purge starts. A validation with a Schema from before Purge might load
 // a $ref document again, and the registry then keeps it.
 func (r *Registry) Purge() {
-	r.cache.purge()
+	r.releaseAll(func(reg *Registry) { reg.cache.purge() })
+}
+
+// releaser is a [Resolver] that a release reaches: a [*Registry], or the
+// guard that [When] returns. Its release method calls rel for each
+// registry that the resolver holds and that seen does not hold yet. It
+// adds each of those registries to seen.
+type releaser interface {
+	release(rel func(*Registry), seen map[*Registry]struct{})
+}
+
+// releaseAll calls rel once for r and once for each registry among its
+// resolvers, at any depth.
+func (r *Registry) releaseAll(rel func(*Registry)) {
+	r.release(rel, make(map[*Registry]struct{}))
+}
+
+// release implements releaser. A registry fixes its resolvers when
+// [NewRegistry] builds it, so the walk never comes back to a registry
+// that it started from. The seen set keeps a registry that several
+// paths reach to one call of rel.
+func (r *Registry) release(rel func(*Registry), seen map[*Registry]struct{}) {
+	if _, ok := seen[r]; ok {
+		return
+	}
+
+	seen[r] = struct{}{}
+
+	rel(r)
+
+	for _, res := range r.resolvers {
+		if n, ok := res.(releaser); ok {
+			n.release(rel, seen)
+		}
+	}
 }
 
 // checkNamed returns [ErrAccessNotSet] for a ref that a document named,
