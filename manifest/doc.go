@@ -266,10 +266,11 @@
 // A null, such as "~", leaves the field out. A rewrite writes a type field
 // in quotes where go-yaml's decoder reads the plain text as another
 // string, so `version: "1.10"` replaces `version: 1.9`. A migration writes
-// a type field that the document lacks, with the mappings above it. When a
-// value on the path of the field holds a scalar, null, or a sequence, no
-// mapping can hold the field. The migration of the document then fails at
-// that value, as in "v2 sets $.meta.version, but meta holds a scalar".
+// a type field that the document lacks, with the mappings above it. A null
+// on the path of the field becomes such a mapping. When a value on the path
+// holds a scalar or a sequence, no mapping can hold the field. The
+// migration of the document then fails at that value, as in "v2 sets
+// $.meta.version, but meta holds a scalar".
 // [WithVersionField] and [WithKindField] move the type fields, and
 // [WithVersionOnly] gives a registry of one kind a version field alone.
 // [WithIgnore] skips the documents of other tools.

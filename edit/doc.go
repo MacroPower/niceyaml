@@ -154,12 +154,13 @@
 // At the root, [Node.Exists] reports false, [Node.Kind] returns
 // [go.jacobcolvin.com/niceyaml.NodeNone], and [Node.Decode] returns the zero
 // value. The root encodes as null in the value of a Set elsewhere. A Set of
-// `$` writes the root. A Set of a path of names writes the mappings that
-// its names give, with the value inside them. A path with an index fails,
-// as in "the edit sets $[0], but the document holds no $". A Set of `$`
-// with a slice writes a root sequence. Remove, SetKey, and Move at the root
-// fail, as they fail at the root of any document. A `$` path of
-// [WithProtected] protects the root, so an Apply of `$` then selects
+// `$` writes the root. A Set of a path below it writes the mappings and the
+// sequences that its names and its indexes give, with the value inside
+// them. Each such sequence takes the index 0 alone, so a path with another
+// index fails, as in "the edit sets $[1], but the document holds no $". A
+// Set of `$` with a slice writes a root sequence. Remove, SetKey, and Move
+// at the root fail, as they fail at the root of any document. A `$` path
+// of [WithProtected] protects the root, so an Apply of `$` then selects
 // nothing.
 //
 // The first value goes on block lines at the end of the text of the
@@ -586,11 +587,15 @@
 //     value comes from the node that go-yaml's encoder makes, and a Set
 //     whose text go-yaml reads as a value of another kind fails, as
 //     [Node.Set] describes. When the place does not hold a value, the Set
-//     creates the values of its path below the nearest value that exists,
-//     where its placement option puts the entry. In an empty document, the
-//     Set replaces the root with the value inside the mappings of its path.
+//     creates the values of its path below the nearest value that holds
+//     content, where its placement option puts the entry. A null there
+//     first becomes the empty collection that the next selector of the
+//     path selects into, at its anchor when the path reads it through an
+//     alias. In an empty document, the Set replaces the root with the value
+//     inside the collections of its path.
 //   - [Node.Insert] puts the value before the item at its place, or after
-//     the last item of the sequence when the place lies past it.
+//     the last item of the sequence when the place lies past it. Where the
+//     text lacks the place, the Insert creates it as a Set does.
 //   - [Node.SetKey] gives the entry the key that the call names, as a
 //     decode reads that string. When a decode reads the key as the new key
 //     and a path by the new key selects the entry already, the SetKey

@@ -298,11 +298,13 @@ func TestRegistry_PlanMigration(t *testing.T) {
 			err:     "config/cafe.yaml:1:7: $.meta: v1 sets $.meta.version, but meta holds a scalar",
 		},
 		"version field below null": {
+			// A null holds no content, so the version field goes in a mapping
+			// there.
 			opts:    metaVersion,
 			files:   map[string]string{"cafe.yaml": stringtest.LinesLF("meta:", "x: 1")},
-			blocked: []string{"config/cafe.yaml"},
-			summary: "1 file not migrated, nothing written",
-			err:     "config/cafe.yaml:1:6: $.meta: v1 sets $.meta.version, but meta holds null",
+			headers: []string{`config/cafe.yaml: Cafe from the unversioned layout of Cafe to v2`},
+			afters:  []string{stringtest.LinesLF("kind: Cafe", "meta:", "  version: v2", "x: 1")},
+			summary: "1 file to migrate, nothing written",
 		},
 		"version field below a sequence": {
 			opts:    metaVersion,

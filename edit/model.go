@@ -352,6 +352,11 @@ type modelCall struct {
 	// For a place that does not hold a value, the value of the model that
 	// holds the place. The selectors of rest lead from it to the place.
 	holder *value
+	// For a place below a null, the edge of the model that holds the null,
+	// in place of holder. The call fills the null with the empty collection
+	// that the first selector of rest selects into, as [Doc.fillNull]
+	// writes it.
+	null *edge
 	// The record of the last edit before the call.
 	before *editRecord
 	rest   []paths.Selector
@@ -372,7 +377,7 @@ type modelCall struct {
 	// or the value that holds the place when the place does not hold a value.
 	mapped bool
 	// Whether the place lies below the root of an empty document, where a
-	// Set writes the root with the mappings above its value, as
+	// Set writes the root with the collections above its value, as
 	// [Doc.setFirst] writes them.
 	bare bool
 }
@@ -422,44 +427,82 @@ func (x *model) placeOf(p *place) modelCall {
 	return c
 }
 
-// nested returns v below the mappings that the names of sels give, the
-// first name outermost.
-func nested(sels []paths.Selector, v *value) *value {
-	for _, sel := range slices.Backward(sels) {
-		v = &value{kind: vMapping, edges: []*edge{{key: sel.Name, name: sel.Name, val: v}}}
+// label gives e, an edge that sel selects, the key and the name of an
+// entry for a name, or those of an item for an index. The key that an edit
+// writes for a name reads as the name.
+func label(e *edge, sel paths.Selector) {
+	if sel.Kind == paths.SelectorIndex {
+		e.key, e.name, e.merge = "", "", false
+
+		return
 	}
 
-	return v
+	e.key, e.name, e.merge = sel.Name, sel.Name, false
+}
+
+// collectionOf returns the kind of the collection that sel selects into: a
+// mapping for a name and a sequence for an index.
+func collectionOf(sel paths.Selector) vkind {
+	if sel.Kind == paths.SelectorIndex {
+		return vSequence
+	}
+
+	return vMapping
 }
 
 // attach puts e under h, a value of the model, at sel, after the entries
-// or the items of h, for the call numbered call. Each name of rest gives a
-// mapping on the way, and e takes the last name of rest, or sel when rest
-// is empty. The key that an edit writes for a name reads as the name. It
-// returns the edge that h takes, or nil when h cannot hold sel.
+// or the items of h, for the call numbered call. Each selector of rest
+// gives a collection on the way: a mapping for a name and a sequence for
+// an index. The edge e takes the last selector of rest, or sel when rest
+// is empty. It returns the edge that h takes, or nil when h cannot hold
+// sel.
 func attach(h *value, sel paths.Selector, rest []paths.Selector, e *edge, call int) *edge {
+	if collectionOf(sel) != h.kind {
+		return nil
+	}
+
 	top := e
 	e.changed = call
 
-	if len(rest) > 0 {
-		last := rest[len(rest)-1]
-		e.key, e.name, e.merge = last.Name, last.Name, false
-		top = &edge{val: nested(rest[:len(rest)-1], &value{kind: vMapping, edges: []*edge{e}})}
+	sels := append([]paths.Selector{sel}, rest...)
+
+	for i := len(sels) - 1; i > 0; i-- {
+		label(top, sels[i])
+
+		top = &edge{val: &value{kind: collectionOf(sels[i]), edges: []*edge{top}}}
+	}
+
+	if top != e {
 		top.changed = call
 	}
 
-	switch {
-	case sel.Kind == paths.SelectorIndex && h.kind == vSequence && len(rest) == 0:
-		top.key, top.name = "", ""
-	case sel.Kind == paths.SelectorChild && h.kind == vMapping:
-		top.key, top.name, top.merge = sel.Name, sel.Name, false
-	default:
-		return nil
-	}
+	label(top, sel)
 
 	h.edges = append(h.edges, top)
 
 	return top
+}
+
+// fill gives the null at the place of c the empty collection that the
+// first selector of rest selects into, as [Doc.fillNull] writes it, for a
+// place below a null. Each edge that reads the null, through an alias too,
+// reads the collection, which then holds the place. Fill does nothing for
+// another place.
+func (c *modelCall) fill() {
+	if c.null == nil || len(c.rest) == 0 {
+		return
+	}
+
+	old := c.null.val
+	empty := &edge{val: &value{kind: collectionOf(c.rest[0])}}
+
+	if c.x.top.val == old {
+		c.x.top.val, c.x.top.tag = empty.val, ""
+	}
+
+	c.x.share(old, empty)
+
+	c.holder, c.null = empty.val, nil
 }
 
 // detach takes e out of the model value owner, for the call numbered call.
@@ -503,21 +546,24 @@ func (c *modelCall) set(e *edge, where modelPlace) bool {
 		return true
 
 	case c.bare:
-		// The value of e holds the mappings above the place, and it takes the
-		// place of the root.
+		// The value of e holds the collections above the place, and it takes
+		// the place of the root.
 		c.x.top.val, c.x.top.tag = e.val, e.tag
 		c.x.wroteIn(e.val)
 
 		return true
+	}
 
-	case c.holder == nil || len(c.rest) == 0:
+	c.fill()
+
+	if c.holder == nil || len(c.rest) == 0 {
 		return false
 	}
 
 	c.x.wroteIn(e.val)
 
-	// The value takes its tag at its own place, below the mappings that the
-	// call creates on the way.
+	// The value takes its tag at its own place, below the collections that
+	// the call creates on the way.
 	top := attach(c.holder, c.rest[0], c.rest[1:], &edge{val: e.val, tag: e.tag}, c.call())
 
 	c.x.place(c.holder, top, where)
@@ -832,11 +878,11 @@ func (c *modelCall) move(to *modelCall, where modelPlace) bool {
 		return c.reorder(where)
 	case to.edge != nil:
 		return c.moveBefore(to)
-	case to.holder == nil || len(to.rest) == 0:
-		return false
 	}
 
-	if !detach(c.owner, c.edge, c.call()) {
+	to.fill()
+
+	if to.holder == nil || len(to.rest) == 0 || !detach(c.owner, c.edge, c.call()) {
 		return false
 	}
 
@@ -881,8 +927,10 @@ func (c *modelCall) moveBefore(to *modelCall) bool {
 
 // insertItem puts the value of e into the sequence at the place of c, as
 // [Node.Insert] does: before the item at the place, or as the last item
-// when the place lies past the last item. It reports false when the model
-// cannot take the call.
+// when the place lies past the last item. Where the text lacks the place,
+// the Insert creates it as a Set does, so the model sets the place, as
+// [modelCall.set] describes. It reports false when the model cannot take
+// the call.
 func (c *modelCall) insertItem(e *edge) bool {
 	switch {
 	case !c.mapped || e == nil || e.val == nil:
@@ -903,14 +951,9 @@ func (c *modelCall) insertItem(e *edge) bool {
 		c.owner.edges = slices.Insert(slices.Clone(c.owner.edges), i, item)
 
 		return c.x.created(c.owner, item)
-
-	case c.holder == nil || c.holder.kind != vSequence || len(c.rest) != 1:
-		return false
 	}
 
-	c.x.wroteIn(e.val)
-
-	return c.x.created(c.holder, attach(c.holder, c.rest[0], nil, &edge{val: e.val, tag: e.tag}, c.call()))
+	return c.set(e, modelPlace{})
 }
 
 // syncModel returns the model of the Apply running, in step with the
@@ -1036,9 +1079,36 @@ func (d *Doc) modelOf(path paths.Path, find func() (*place, error)) *modelCall {
 		return &modelCall{x: x, path: path}
 	}
 
-	c := x.placeOf(p)
+	c := d.placeCall(x, p)
 
 	return &c
+}
+
+// placeCall returns the place p of the current text as a call of x reads
+// it, as [model.placeOf] gives it. For a place below a value that reads
+// null, the call holds the edge of that value, which the call fills, as
+// [modelCall.fill] describes.
+func (d *Doc) placeCall(x *model, p *place) modelCall {
+	c := x.placeOf(p)
+
+	if p.exists || p.bare || c.holder != nil {
+		return c
+	}
+
+	holder, err := d.resolveFrom(p, prefixOf(p.path, p.found))
+	if err != nil {
+		return c
+	}
+
+	if _, ok := d.nullPlace(holder, p.container); !ok {
+		return c
+	}
+
+	if hc := x.placeOf(holder); hc.mapped && hc.edge != nil {
+		c.null, c.rest, c.mapped = hc.edge, slices.Collect(p.path.Selectors())[p.found:], true
+	}
+
+	return c
 }
 
 // modelEnd ends c, a call of an edit that returned err, in the model.

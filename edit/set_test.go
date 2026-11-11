@@ -1920,10 +1920,170 @@ func TestNode_Set(t *testing.T) {
 			err:    "test.yaml:2:4: $.m: cafe.jacobcolvin.com/v1 sets $.m.a.b, but m holds a scalar",
 		},
 		"below a null": {
+			// A null holds no content, so the Set creates a mapping there.
 			before: "spec:\n",
 			path:   spec.Child("currency"),
 			value:  "SEK",
-			err:    "cafe.jacobcolvin.com/v1 sets $.spec.currency, but spec holds null",
+			want:   stringtest.LinesLF("spec:", "  currency: SEK"),
+		},
+		"below a null whose entries are comment lines": {
+			// The comment lines stay below the new entry, as a Set of an empty
+			// mapping and then of the entry leave them.
+			before: stringtest.LinesLF("securityContext:", "  # runAsUser: 1000", "name: web"),
+			path:   paths.MustParse("$.securityContext.runAsNonRoot"),
+			value:  true,
+			want: stringtest.LinesLF(
+				"securityContext:", "  runAsNonRoot: true", "  # runAsUser: 1000", "name: web",
+			),
+		},
+		"below a null with a comment after it": {
+			before: stringtest.LinesLF("spec: ~ # todo", "  # size: M", "x: 1"),
+			path:   spec.Child("price", "amount"),
+			value:  65,
+			want:   stringtest.LinesLF("spec: # todo", "  price:", "    amount: 65", "  # size: M", "x: 1"),
+		},
+		"below a null under the null tag": {
+			before: stringtest.LinesLF("spec: !!null ~", "x: 1"),
+			path:   spec.Child("currency"),
+			value:  "SEK",
+			want:   stringtest.LinesLF("spec:", "  currency: SEK", "x: 1"),
+		},
+		"below a scalar under the string tag that reads like null": {
+			// A decode reads "", not null, so the scalar holds content.
+			before: "spec: !!str ~\n",
+			path:   spec.Child("currency"),
+			value:  "SEK",
+			err:    "test.yaml:1:13: $.spec: cafe.jacobcolvin.com/v1 sets $.spec.currency, but spec holds a scalar",
+		},
+		"below an empty value of a flow mapping": {
+			before: "{a: , b: 1}\n",
+			path:   paths.MustParse("$.a.c"),
+			value:  1,
+			want:   "{a: {c: 1}, b: 1}\n",
+		},
+		"below an empty item": {
+			before: stringtest.LinesLF("- ", "- 1"),
+			path:   paths.MustParse("$[0].c"),
+			value:  1,
+			want:   stringtest.LinesLF("- c: 1", "- 1"),
+		},
+		"below a null root": {
+			before: "~\n",
+			path:   paths.MustParse("$.a"),
+			value:  1,
+			want:   "a: 1\n",
+		},
+		"below an alias of a null": {
+			// The mapping goes at the anchor, so each alias reads it.
+			before: stringtest.LinesLF("a: &x ~", "b: *x"),
+			path:   paths.MustParse("$.b.c"),
+			value:  1,
+			want:   stringtest.LinesLF("a: &x", "  c: 1", "b: *x"),
+		},
+		"below an anchored null item": {
+			// An anchor on the line of a collection in an item keeps the
+			// collection in flow style, as for a Set of an empty mapping there
+			// and then of the entry.
+			before: stringtest.LinesLF("- &x ~", "- *x"),
+			path:   paths.MustParse("$[1].c"),
+			value:  1,
+			want:   stringtest.LinesLF("- &x {c: 1}", "- *x"),
+		},
+		"item of a null": {
+			before: stringtest.LinesLF("tags:   # todo", "  # - a", "x: 1"),
+			path:   paths.Doc().Child("tags").Index(0),
+			value:  "b",
+			want:   stringtest.LinesLF("tags:   # todo", "  - b", "  # - a", "x: 1"),
+		},
+		"item past the first of a null": {
+			before: "tags:\n",
+			path:   paths.Doc().Child("tags").Index(1),
+			value:  "b",
+			err:    "test.yaml:1:6: $.tags: cafe.jacobcolvin.com/v1 sets $.tags[1], but tags holds null",
+		},
+		"item of a null with a placement": {
+			before: "tags:\n",
+			path:   paths.Doc().Child("tags").Index(0),
+			value:  "b",
+			opts:   []edit.SetOption{edit.First()},
+			err:    "cafe.jacobcolvin.com/v1 sets $.tags[0] first, but $.tags[0] is an item",
+		},
+		"below a null in a flow mapping with a comment inside it": {
+			// The call reaches the flow mapping before it fills the null, so
+			// the zone of the mapping refuses it.
+			before: stringtest.LinesLF("a: {", "  b: ~, # c", "  d: 1", "}"),
+			path:   paths.MustParse("$.a.b.k"),
+			value:  1,
+			err:    "test.yaml:1:4: $.a: cafe.jacobcolvin.com/v1 sets $.a.b.k, which reaches a flow collection with a comment inside it, and cafe does not edit inside such a collection",
+		},
+		"item of a null in a flow mapping with a comment inside it": {
+			before: stringtest.LinesLF("a: {", "  b: ~, # c", "  d: 1", "}"),
+			path:   paths.MustParse("$.a.b[0]"),
+			value:  1,
+			err:    "test.yaml:1:4: $.a: cafe.jacobcolvin.com/v1 sets $.a.b[0], which reaches a flow collection with a comment inside it, and cafe does not edit inside such a collection",
+		},
+		"below a null item of a flow sequence with a comment inside it": {
+			before: stringtest.LinesLF("a: [", "  ~, # c", "  1", "]"),
+			path:   paths.MustParse("$.a[0].k"),
+			value:  1,
+			err:    "test.yaml:1:4: $.a: cafe.jacobcolvin.com/v1 sets $.a[0].k, which reaches a flow collection with a comment inside it, and cafe does not edit inside such a collection",
+		},
+		"item of a null item of a flow sequence with a comment inside it": {
+			before: stringtest.LinesLF("a: [", "  ~, # c", "  1", "]"),
+			path:   paths.MustParse("$.a[0][0]"),
+			value:  1,
+			err:    "test.yaml:1:4: $.a: cafe.jacobcolvin.com/v1 sets $.a[0][0], which reaches a flow collection with a comment inside it, and cafe does not edit inside such a collection",
+		},
+		"below a null in a pair without braces": {
+			before: "- [a: ~]\n",
+			path:   paths.MustParse("$[0][0].a.k"),
+			value:  1,
+			err:    "test.yaml:1:4: $[0][0].a: cafe.jacobcolvin.com/v1 sets $[0][0].a.k, which reaches a pair without braces in a flow sequence, and cafe does not edit inside such a pair",
+		},
+		"below a null in an entry with an explicit key": {
+			before: stringtest.LinesLF("? a", ": ~", "b: 1"),
+			path:   paths.MustParse("$.a.c"),
+			value:  1,
+			err:    "test.yaml:1:1: $.a: cafe.jacobcolvin.com/v1 sets $.a.c, which reaches an entry with an explicit key, and cafe does not edit such an entry other than by removing it",
+		},
+		"item of a null in an entry with an explicit key": {
+			before: stringtest.LinesLF("? a", ": ~", "b: 1"),
+			path:   paths.MustParse("$.a[0]"),
+			value:  1,
+			err:    "test.yaml:1:1: $.a: cafe.jacobcolvin.com/v1 sets $.a[0], which reaches an entry with an explicit key, and cafe does not edit such an entry other than by removing it",
+		},
+		"below an explicit key without a value": {
+			// A fill of the null writes text that reads as another key, so the
+			// zone of the entry refuses the call before the fill.
+			before: stringtest.LinesLF("? a", "b: 1"),
+			path:   paths.MustParse("$.a.c"),
+			value:  1,
+			err:    "test.yaml:1:1: $.a: cafe.jacobcolvin.com/v1 sets $.a.c, which reaches an entry with an explicit key, and cafe does not edit such an entry other than by removing it",
+		},
+		"item of an explicit key without a value": {
+			before: stringtest.LinesLF("? a", "b: 1"),
+			path:   paths.MustParse("$.a[0]"),
+			value:  1,
+			err:    "test.yaml:1:1: $.a: cafe.jacobcolvin.com/v1 sets $.a[0], which reaches an entry with an explicit key, and cafe does not edit such an entry other than by removing it",
+		},
+		"below an explicit key without a value in a nested mapping": {
+			before: stringtest.LinesLF("x:", "  ? a", "  b: 1"),
+			path:   paths.MustParse("$.x.a.c"),
+			value:  1,
+			err:    "test.yaml:2:3: $.x.a: cafe.jacobcolvin.com/v1 sets $.x.a.c, which reaches an entry with an explicit key, and cafe does not edit such an entry other than by removing it",
+		},
+		"item of an explicit key without a value in an item": {
+			before: stringtest.LinesLF("- ? a", "- 1"),
+			path:   paths.MustParse("$[0].a[0]"),
+			value:  1,
+			err:    "test.yaml:1:3: $[0].a: cafe.jacobcolvin.com/v1 sets $[0].a[0], which reaches an entry with an explicit key, and cafe does not edit such an entry other than by removing it",
+		},
+		"entry below a null before a key": {
+			before: "spec:\n",
+			path:   spec.Child("currency"),
+			value:  "SEK",
+			opts:   []edit.SetOption{edit.Before("price")},
+			err:    `cafe.jacobcolvin.com/v1 sets $.spec.currency before "price", but the document holds no $.spec.price`,
 		},
 		"item far past the last": {
 			before: "tags: [a]\n",
@@ -1947,14 +2107,52 @@ func TestNode_Set(t *testing.T) {
 			before: "tags: [a]\n",
 			path:   paths.Doc().Child("sizes").Index(0),
 			value:  "s",
-			err:    "test.yaml:1:1: $: cafe.jacobcolvin.com/v1 sets $.sizes[0], but the document holds no $.sizes",
+			want:   stringtest.LinesLF("tags: [a]", "sizes:", "  - s"),
+		},
+		"item past the first of a sequence that the document lacks": {
+			before: "tags: [a]\n",
+			path:   paths.Doc().Child("sizes").Index(1),
+			value:  "s",
+			err:    "test.yaml:1:1: $: cafe.jacobcolvin.com/v1 sets $.sizes[1], but the document holds no $.sizes",
 		},
 		"key of an item of a sequence that a mapping lacks": {
 			before: "spec: {tags: [a]}\n",
 			path:   paths.MustParse("$.spec.sizes[0].name"),
 			value:  "s",
-			err: "test.yaml:1:1: $.spec: cafe.jacobcolvin.com/v1 sets $.spec.sizes[0].name, " +
-				"but the document holds no $.spec.sizes",
+			want:   "spec: {tags: [a], sizes: [{name: s}]}\n",
+		},
+		"key of the item past the last": {
+			before: stringtest.LinesLF("list:", "  - name: a"),
+			path:   paths.MustParse("$.list[1].name"),
+			value:  "b",
+			want:   stringtest.LinesLF("list:", "  - name: a", "  - name: b"),
+		},
+		"sequences below a missing key": {
+			before: "a: 1\n",
+			path:   paths.MustParse("$.b[0].c[0].d"),
+			value:  1,
+			want:   stringtest.LinesLF("a: 1", "b:", "  - c:", "      - d: 1"),
+		},
+		"item past the first of a sequence below a missing key": {
+			before: "a: 1\n",
+			path:   paths.MustParse("$.b[0].c[1]"),
+			value:  1,
+			err:    "test.yaml:1:1: $: cafe.jacobcolvin.com/v1 sets $.b[0].c[1], but the document holds no $.b[0].c",
+		},
+		"flow below a sequence that the document lacks": {
+			// The collections above the value take block style.
+			before: "a: 1\n",
+			path:   paths.MustParse("$.b[0].c"),
+			value:  map[string]any{"x": 1},
+			opts:   []edit.SetOption{edit.Flow()},
+			want:   stringtest.LinesLF("a: 1", "b:", "  - c: {x: 1}"),
+		},
+		"flow item of a sequence that the document lacks": {
+			before: "a: 1\n",
+			path:   paths.MustParse("$.b[0]"),
+			value:  map[string]any{"x": 1},
+			opts:   []edit.SetOption{edit.Flow()},
+			want:   stringtest.LinesLF("a: 1", "b:", "  - {x: 1}"),
 		},
 		"item of a sequence below a scalar": {
 			before: "spec: 1\n",
@@ -2831,13 +3029,40 @@ func TestNode_Set_Empty(t *testing.T) {
 			before: "# c\n",
 			path:   paths.Doc().Index(0),
 			value:  1,
-			err:    "test.yaml: $: cafe.jacobcolvin.com/v1 sets $[0], but the document holds no $",
+			want:   "# c\n- 1\n",
 		},
 		"item below a name": {
 			before: "# c\n",
 			path:   paths.Doc().Child("a").Index(0),
 			value:  1,
-			err:    "test.yaml: $: cafe.jacobcolvin.com/v1 sets $.a[0], but the document holds no $",
+			want:   "# c\na:\n  - 1\n",
+		},
+		"flow entry of an item below a name": {
+			before: "# c\n",
+			path:   paths.MustParse("$.a[0].b"),
+			value:  map[string]any{"x": 1},
+			opts:   []edit.SetOption{edit.Flow()},
+			want:   "# c\na:\n  - b: {x: 1}\n",
+		},
+		"item past the first of a root sequence": {
+			before: "# c\n",
+			path:   paths.Doc().Index(1),
+			value:  1,
+			err:    "test.yaml: $: cafe.jacobcolvin.com/v1 sets $[1], but the document holds no $",
+		},
+		"item past the first below a name": {
+			before: "# c\n",
+			path:   paths.Doc().Child("a").Index(1),
+			value:  1,
+			err:    "test.yaml: $: cafe.jacobcolvin.com/v1 sets $.a[1], but the document holds no $.a",
+		},
+		"first item of a root sequence": {
+			// A placement puts an entry, so it does not apply to an item.
+			before: "# c\n",
+			path:   paths.Doc().Index(0),
+			value:  1,
+			opts:   []edit.SetOption{edit.First()},
+			err:    "test.yaml: $: cafe.jacobcolvin.com/v1 sets $[0] first, but $[0] is an item",
 		},
 		"tag alone": {
 			before: "!!str",
@@ -2923,22 +3148,30 @@ func TestNode_Set_Empty(t *testing.T) {
 func TestNode_Insert_Empty(t *testing.T) {
 	t.Parallel()
 
-	// An empty document holds no sequence, so an Insert fails at the root.
+	// An empty document holds no sequence, so an Insert at the index 0
+	// creates one, as a Set there does.
 	tcs := map[string]struct {
 		call func(ctx context.Context, n *edit.Node) error
+		want string
 		err  string
 	}{
 		"insert": {
 			call: func(ctx context.Context, n *edit.Node) error {
 				return n.At(paths.Doc().Index(0)).Insert(ctx, 1)
 			},
-			err: "cafe.jacobcolvin.com/v1 inserts $[0], but the document holds no $",
+			want: "# c\n- 1\n",
 		},
 		"insert below a name": {
 			call: func(ctx context.Context, n *edit.Node) error {
 				return n.At(paths.Doc().Child("a").Index(0)).Insert(ctx, 1)
 			},
-			err: "cafe.jacobcolvin.com/v1 inserts $.a[0], but the document holds no $",
+			want: "# c\na:\n  - 1\n",
+		},
+		"insert past the first item": {
+			call: func(ctx context.Context, n *edit.Node) error {
+				return n.At(paths.Doc().Index(1)).Insert(ctx, 1)
+			},
+			err: "cafe.jacobcolvin.com/v1 inserts $[1], but the document holds no $",
 		},
 	}
 
@@ -2952,10 +3185,18 @@ func TestNode_Insert_Empty(t *testing.T) {
 			err = d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, n *edit.Node) error {
 				return tc.call(ctx, n)
 			}, label)
-			require.Error(t, err)
-			assert.True(t, niceyaml.IsInvalid(err))
-			assert.Contains(t, err.Error(), tc.err)
-			assert.Equal(t, "# c\n", d.Text())
+
+			if tc.err != "" {
+				require.Error(t, err)
+				assert.True(t, niceyaml.IsInvalid(err))
+				assert.Contains(t, err.Error(), tc.err)
+				assert.Equal(t, "# c\n", d.Text())
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, d.Text())
 		})
 	}
 }
@@ -3839,6 +4080,8 @@ func TestNode_Insert(t *testing.T) {
 		path   paths.Path
 		want   string
 		err    string
+		// Whether the error matches edit.ErrProtected.
+		protected bool
 	}{
 		"first item of a block sequence": {
 			before: stringtest.LinesLF("s:", "  - a", "  - b"),
@@ -3976,7 +4219,49 @@ func TestNode_Insert(t *testing.T) {
 			before: "a: 1\n",
 			path:   paths.Doc().Child("s").Index(0),
 			value:  "z",
-			err:    "test.yaml:1:1: $: cafe.jacobcolvin.com/v1 inserts $.s[0], but the document holds no $.s",
+			want:   stringtest.LinesLF("a: 1", "s:", "  - z"),
+		},
+		"item past the first of a sequence that the document lacks": {
+			before: "a: 1\n",
+			path:   paths.Doc().Child("s").Index(1),
+			value:  "z",
+			err:    "test.yaml:1:1: $: cafe.jacobcolvin.com/v1 inserts $.s[1], but the document holds no $.s",
+		},
+		"item of null": {
+			before: stringtest.LinesLF("s:", "a: 1"),
+			path:   paths.Doc().Child("s").Index(0),
+			value:  "z",
+			want:   stringtest.LinesLF("s:", "  - z", "a: 1"),
+		},
+		"item of a null in a flow mapping with a comment inside it": {
+			before: stringtest.LinesLF("a: {", "  b: ~, # c", "  d: 1", "}"),
+			path:   paths.MustParse("$.a.b[0]"),
+			value:  1,
+			err:    "test.yaml:1:4: $.a: cafe.jacobcolvin.com/v1 inserts $.a.b[0], which reaches a flow collection with a comment inside it, and cafe does not edit inside such a collection",
+		},
+		"item of a null in a pair without braces": {
+			before: "- [a: ~]\n",
+			path:   paths.MustParse("$[0][0].a[0]"),
+			value:  1,
+			err:    "test.yaml:1:4: $[0][0].a: cafe.jacobcolvin.com/v1 inserts $[0][0].a[0], which reaches a pair without braces in a flow sequence, and cafe does not edit inside such a pair",
+		},
+		"item of a null in an entry with an explicit key": {
+			before: stringtest.LinesLF("? a", ": ~", "b: 1"),
+			path:   paths.MustParse("$.a[0]"),
+			value:  1,
+			err:    "test.yaml:1:1: $.a: cafe.jacobcolvin.com/v1 inserts $.a[0], which reaches an entry with an explicit key, and cafe does not edit such an entry other than by removing it",
+		},
+		"item of an explicit key without a value": {
+			before: stringtest.LinesLF("? a", "b: 1"),
+			path:   paths.MustParse("$.a[0]"),
+			value:  1,
+			err:    "test.yaml:1:1: $.a: cafe.jacobcolvin.com/v1 inserts $.a[0], which reaches an entry with an explicit key, and cafe does not edit such an entry other than by removing it",
+		},
+		"item of a sequence in the item past the last": {
+			before: "s: [a]\n",
+			path:   paths.MustParse("$.s[1][0]"),
+			value:  "z",
+			want:   "s: [a, [z]]\n",
 		},
 		"item of a protected sequence": {
 			before: stringtest.LinesLF("kind:", "  - a"),
@@ -3990,6 +4275,27 @@ func TestNode_Insert(t *testing.T) {
 			value:  "z",
 			err: "test.yaml:2:7: $.kind.s[0]: cafe.jacobcolvin.com/v1 inserts $.kind.s[0], but s lies inside a " +
 				"protected value",
+		},
+		"item of a sequence that the document lacks inside an anchored mapping that a protected value reads": {
+			before:    stringtest.LinesLF("x: &a {}", "kind: *a"),
+			path:      paths.MustParse("$.x.y[0]"),
+			value:     1,
+			err:       "test.yaml:1:1: $.x: cafe.jacobcolvin.com/v1 inserts $.x.y[0], which lies inside a protected value",
+			protected: true,
+		},
+		"item of an anchored null that a protected value reads": {
+			before:    stringtest.LinesLF("a: &x ~", "kind: *x"),
+			path:      paths.MustParse("$.a[0]"),
+			value:     1,
+			err:       "test.yaml:1:7: $.a: cafe.jacobcolvin.com/v1 inserts $.a[0], which lies inside a protected value",
+			protected: true,
+		},
+		"item of a sequence in an anchored null item that a protected value reads": {
+			before:    stringtest.LinesLF("a:", "  - &x ~", "kind: *x"),
+			path:      paths.MustParse("$.a[0][0]"),
+			value:     1,
+			err:       "test.yaml:2:8: $.a[0]: cafe.jacobcolvin.com/v1 inserts $.a[0][0], which lies inside a protected value",
+			protected: true,
 		},
 		"string with a control character": {
 			before: "s: [a]\n",
@@ -4010,6 +4316,11 @@ func TestNode_Insert(t *testing.T) {
 			})
 
 			requireEdit(t, d, err, tc.err, tc.want)
+
+			if tc.protected {
+				require.ErrorIs(t, err, edit.ErrProtected)
+				assert.Equal(t, tc.before, d.Text())
+			}
 		})
 	}
 }
