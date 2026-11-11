@@ -514,6 +514,86 @@ func TestLoadError_Fields(t *testing.T) {
 	assert.Equal(t, "ref https://user:xxxxx@example.com/s.json", fmt.Sprintf("ref %v", err.Ref))
 }
 
+func TestLoadError_Detach(t *testing.T) {
+	t.Parallel()
+
+	ref := schema.URL("https://example.com/s.json")
+
+	// The error of a loader of the program, bound in a YAML file that the
+	// loader parsed.
+	bound := func(t *testing.T) error {
+		t.Helper()
+
+		doc := yamltest.FirstDocument(t, "type: 5\n", niceyaml.WithName("s.yaml"))
+
+		return doc.Bind(yamltest.ErrorAt("type must be text", "type"))
+	}
+
+	tcs := map[string]struct {
+		err func(t *testing.T) error
+	}{
+		"binding below a LoadError": {
+			err: func(t *testing.T) error {
+				t.Helper()
+
+				return &schema.LoadError{Ref: ref, Phase: schema.ErrLoad, Err: bound(t)}
+			},
+		},
+		"binding below a FetchError": {
+			err: func(t *testing.T) error {
+				t.Helper()
+
+				return &schema.FetchError{URL: ref.Name(), StatusCode: http.StatusOK, Err: bound(t)}
+			},
+		},
+		"FetchError below a LoadError": {
+			err: func(t *testing.T) error {
+				t.Helper()
+
+				return &schema.LoadError{Ref: ref, Phase: schema.ErrLoad, Err: &schema.FetchError{
+					URL:        ref.Name(),
+					StatusCode: http.StatusOK,
+					Err:        bound(t),
+				}}
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tc.err(t)
+			got := niceyaml.Detach(err)
+
+			assert.NotSame(t, err, got)
+			require.EqualError(t, got, err.Error())
+			assert.Equal(t, niceyaml.FormatError(err), niceyaml.FormatError(got))
+
+			bindings := slices.Collect(niceyaml.Bindings(got))
+			require.NotEmpty(t, bindings)
+
+			for _, b := range bindings {
+				assert.Nil(t, b.Source(), b.Error())
+			}
+
+			if live, ok := errors.AsType[*schema.LoadError](err); ok {
+				found, ok := errors.AsType[*schema.LoadError](got)
+				require.True(t, ok)
+				assert.Equal(t, live.Ref.Key(), found.Ref.Key())
+				require.ErrorIs(t, got, schema.ErrLoad)
+			}
+
+			if live, ok := errors.AsType[*schema.FetchError](err); ok {
+				found, ok := errors.AsType[*schema.FetchError](got)
+				require.True(t, ok)
+				assert.Equal(t, live.URL, found.URL)
+				assert.Equal(t, live.StatusCode, found.StatusCode)
+			}
+		})
+	}
+}
+
 func TestFetchError(t *testing.T) {
 	t.Parallel()
 

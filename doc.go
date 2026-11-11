@@ -602,6 +602,11 @@
 // source binds the result, as Locate describes. A collector keeps the Source
 // of each warning it holds alive until the program drops the collector.
 //
+// Detach rebuilds an error type of the program around detached bindings
+// when the type has a DetachErrors method, as Detach describes. An error
+// type without the method comes back as it is, and keeps the Source of each
+// binding that it wraps.
+//
 // The marks of an error decorate a [line.View], so this package does not
 // depend on the printer. [Annotate] marks every binding of an error on a view
 // that holds lines of its source, such as the whole source, one document of

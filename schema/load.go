@@ -119,6 +119,15 @@ func (e *LoadError) Unwrap() error {
 	return e.Err
 }
 
+// DetachErrors returns a copy of e with Err detached by detach. The copy
+// keeps the other fields of e. [niceyaml.Detach] calls it.
+func (e *LoadError) DetachErrors(detach func(error) error) error {
+	c := *e
+	c.Err = detach(e.Err)
+
+	return &c
+}
+
 // FetchError is the error of one schema document whose read or fetch
 // failed. The document is a file that the registry reads, a URL that it
 // fetches, or the catalog that a
@@ -185,6 +194,15 @@ func (e *FetchError) Error() string {
 // Unwrap returns Err.
 func (e *FetchError) Unwrap() error {
 	return e.Err
+}
+
+// DetachErrors returns a copy of e with Err detached by detach. The copy
+// keeps the other fields of e. [niceyaml.Detach] calls it.
+func (e *FetchError) DetachErrors(detach func(error) error) error {
+	c := *e
+	c.Err = detach(e.Err)
+
+	return &c
 }
 
 // readError returns the [*FetchError] of the file at name, whose read

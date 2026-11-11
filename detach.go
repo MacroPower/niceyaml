@@ -81,13 +81,29 @@ import (
 //
 // Detach rebuilds the errors that this package builds around bindings,
 // the joins of [errors.Join], and the wrappers of [fmt.Errorf], each with
-// the message it had. Any other error that wraps a binding keeps the
-// Source of that binding, as a
-// [go.jacobcolvin.com/niceyaml/manifest.LoadError] does. Detach keeps
-// such an error as it is, so [errors.Is] and [errors.As] find it in the
-// result as they find it in err. Each go-yaml error in the chain holds a
-// token of the parse, as the one behind [ErrSyntax] does. That token
-// links to the other tokens of the parse and keeps them alive.
+// the message it had. It also rebuilds each [PanicError] whose Value is
+// an error. An error of another type rebuilds itself when it
+// has a DetachErrors method, as a
+// [go.jacobcolvin.com/niceyaml/manifest.LoadError] does:
+//
+//	func (e *FileError) DetachErrors(detach func(error) error) error {
+//		return &FileError{Path: e.Path, Err: detach(e.Err)}
+//	}
+//
+// Detach calls the method with a function that detaches an error as part
+// of the same call. The bindings below the error thus share the copies of
+// their sources with the rest of err. The method passes each error that
+// it wraps to that function, and returns a copy of itself around the
+// results. A method that calls Detach itself starts a separate call, and
+// its bindings render as sources of their own. Detach keeps the error as
+// it is when the function did not change any error that the method passed
+// to it.
+//
+// Any other error that wraps a binding keeps the Source of that binding.
+// Detach keeps such an error as it is, so [errors.Is] and [errors.As] find
+// it in the result as they find it in err. Each go-yaml error in the chain
+// holds a token of the parse, as the one behind [ErrSyntax] does. That
+// token links to the other tokens of the parse and keeps them alive.
 //
 // Detach returns err itself when it does not detach any binding of err,
 // such as when err does not hold a binding, or holds only detached ones.
@@ -143,6 +159,12 @@ func (d *detacher) walk(err error) (error, bool) {
 	// compare panics.
 	keyed := reflect.TypeOf(err).Kind() == reflect.Pointer
 	if keyed {
+		// A nil pointer holds nothing to detach, and its methods might not
+		// take a nil receiver.
+		if reflect.ValueOf(err).IsNil() {
+			return err, false
+		}
+
 		if done, ok := d.rebuilt[err]; ok {
 			return done, true
 		}
@@ -176,11 +198,47 @@ func (d *detacher) rebuild(err error) (error, bool) {
 		c.err = inner
 
 		return &c, true
+
+	case *PanicError:
+		value, wraps := x.Value.(error)
+		if !wraps {
+			return err, false
+		}
+
+		inner, changed := d.walk(value)
+		if !changed {
+			return err, false
+		}
+
+		c := *x
+		c.Value = inner
+
+		return &c, true
 	}
 
 	joined, several := err.(interface{ Unwrap() []error }) //nolint:errorlint // The error itself, not a chain search.
+	self, rebuilds := err.(interface {
+		DetachErrors(detach func(error) error) error
+	}) //nolint:errorlint // The error itself, not a chain search.
 
 	switch {
+	case rebuilds:
+		// The error rebuilds itself around what the walk makes of each error
+		// it wraps, so those share the kept sources of this call.
+		var changed bool
+
+		out := self.DetachErrors(func(inner error) error {
+			walked, ok := d.walk(inner)
+			changed = changed || ok
+
+			return walked
+		})
+		if !changed {
+			return err, false
+		}
+
+		return out, true //nolint:wrapcheck // The error rebuilds itself and keeps its type.
+
 	case multierr.IsBuilt(err):
 		// The copy of a stand-in holds what the walk makes of the error it
 		// stands in for. It keeps that error of the program only when the

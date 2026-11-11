@@ -1394,6 +1394,20 @@ func (e *decodePanicError) Unwrap() error {
 	return e.err
 }
 
+// DetachErrors returns a copy of e with the error of the decode detached by
+// detach. When the decoder panicked with an error, the copy holds that
+// error detached too. [niceyaml.Detach] calls it.
+func (e *decodePanicError) DetachErrors(detach func(error) error) error {
+	c := *e
+	c.err = detach(e.err)
+
+	if v, ok := e.value.(error); ok {
+		c.value = detach(v)
+	}
+
+	return &c
+}
+
 // boundAt returns the options that bind a problem at the path and the
 // range of err, a bound error of a decode, or none.
 func boundAt(err error) []niceyaml.ErrorOption {

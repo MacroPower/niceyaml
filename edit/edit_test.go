@@ -9,10 +9,12 @@ import (
 	"io/fs"
 	"net"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+	"weak"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -4908,6 +4910,117 @@ func TestDoc_Apply_MarshalerErrorAs(t *testing.T) {
 		assert.NotSame(t, inner, got)
 		assert.False(t, niceyaml.IsInvalid(err))
 	})
+}
+
+// detachedSet returns a slice that holds a weak pointer to the Source of a
+// new Doc, and the detached error of a Set on the Doc. The marshaler of
+// the Set fails with the error of a decode that binds in the Source.
+// Nothing else holds the Source or the Doc.
+func detachedSet(t *testing.T) ([]weak.Pointer[niceyaml.Source], error) {
+	t.Helper()
+
+	// The helper newSourceDoc keeps the Doc, and so its Source, until the
+	// test ends for the Changes checks. The callers check that the Source
+	// goes away before then, so build the Doc without that helper.
+	doc := yamltest.FirstDocument(t, "a: x\n", niceyaml.WithName("test.yaml"))
+	src := doc.Source()
+
+	d, err := edit.New(doc, edit.WithApp("cafe"), edit.WithProtected(typeFields...))
+	require.NoError(t, err)
+
+	err = d.Apply(t.Context(), paths.Doc().Child("a"), func(ctx context.Context, n *edit.Node) error {
+		_, err := n.Decode[int](ctx)
+		require.Error(t, err)
+
+		return n.Set(ctx, errorMarshaler{err: err})
+	}, label)
+	require.Error(t, err)
+
+	weaks := []weak.Pointer[niceyaml.Source]{weak.Make(src)}
+
+	return weaks, niceyaml.Detach(err) //nolint:wrapcheck // The test reads the error that Detach returns.
+}
+
+// detachedPanic returns weak pointers to the Sources of a new Doc and of
+// another document, and the detached error of a Set on the Doc. A type
+// rule of the Doc panics with an error that binds in the other document,
+// so go-yaml's decoder panics when the check of the Set decodes the text.
+// Nothing else holds the Sources or the Doc.
+func detachedPanic(t *testing.T) ([]weak.Pointer[niceyaml.Source], error) {
+	t.Helper()
+
+	other := yamltest.FirstDocument(t, "x: 1\n", niceyaml.WithName("other.yaml"))
+	doc := yamltest.FirstDocument(t, "a: 1\n", niceyaml.WithName("test.yaml"))
+	weaks := []weak.Pointer[niceyaml.Source]{weak.Make(doc.Source()), weak.Make(other.Source())}
+
+	panics := niceyaml.CustomUnmarshaler(func(_ context.Context, _ *any, _ func(any) error) error {
+		panic(other.Bind(yamltest.ErrorAt("bad x", "x")))
+	})
+
+	d, err := edit.New(doc, edit.WithUnmarshalers(panics))
+	require.NoError(t, err)
+
+	err = d.Apply(t.Context(), paths.Doc().Child("a"), func(ctx context.Context, n *edit.Node) error {
+		return n.Set(ctx, 2)
+	}, label)
+	require.ErrorIs(t, err, edit.ErrEngine)
+
+	return weaks, niceyaml.Detach(err) //nolint:wrapcheck // The test reads the error that Detach returns.
+}
+
+func TestDoc_Apply_Detach(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		detached func(t *testing.T) ([]weak.Pointer[niceyaml.Source], error)
+		want     string
+	}{
+		// The cause of the error of the Set holds the error of the decode,
+		// which binds in the Source of the Doc.
+		"marshaler that fails with the error of a decode": {
+			detached: detachedSet,
+			want:     "cannot write the value of $.a",
+		},
+		// The error behind the sentinel of the problem holds the panic of
+		// the decoder, whose value binds in the other document.
+		"decoder that panics with a binding": {
+			detached: detachedPanic,
+			want:     "go-yaml's decoder panicked: other.yaml:1:4: $.x: bad x",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			weaks, detached := tc.detached(t)
+			require.Error(t, detached)
+			assert.Contains(t, detached.Error(), tc.want)
+
+			var bound int
+
+			for node := range niceyaml.NewErrorTree(detached).All() {
+				if node.Bound != nil {
+					bound++
+
+					assert.Nil(t, node.Source(), node.Message())
+				}
+			}
+
+			assert.Positive(t, bound)
+
+			// Detach reaches each binding, so each Source goes away.
+			for _, w := range weaks {
+				assert.Eventually(t, func() bool {
+					runtime.GC()
+
+					return w.Value() == nil
+				}, 5*time.Second, 10*time.Millisecond)
+			}
+
+			runtime.KeepAlive(detached)
+		})
+	}
 }
 
 func TestDoc_Apply_Nested(t *testing.T) {
