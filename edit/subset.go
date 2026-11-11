@@ -61,17 +61,69 @@ type instance struct {
 	// Whether the instance lies in a value or a key that the program passed
 	// to the call, rather than in the text of the document.
 	inValue bool
+	// Whether the instance is an anchor on an empty value under which
+	// go-yaml's parse nests the lines after it, as
+	// [Doc.misnestedEmpties] finds it.
+	nests bool
 }
 
-// newRefusal returns the problem of the first construct of the user's text
-// that [New] refuses, in the order of the text, or nil.
+// refused is a place of the user's text that [New] refuses, as
+// [Doc.newRefusal] gathers them.
+type refused struct {
+	// The problem of the place, bound in the user's text.
+	problem func() error
+	// The site where the problem binds.
+	at site
+	// The construct of the place, or zero for a byte order mark or a
+	// misread, so that these come before the constructs at one site.
+	construct Construct
+	// Whether go-yaml's parse nests the lines after the place inside it,
+	// as for an instance whose nests field is true.
+	nests bool
+}
+
+// newRefusal returns the problem of each place of the user's text that
+// [New] refuses, or nil. The places come in the order of the text. At one
+// site, a byte order mark comes first, then the misreads in the order of
+// [Doc.misreads], then the constructs in the order of their constants. The
+// sort is stable, so it keeps the order of the gathering for the places of
+// one site and one construct. The list stops at the first anchor on an
+// empty value under which go-yaml's parse nests the lines after it, as
+// [Doc.misnestedEmpties] finds it, inclusive. The paths of the places
+// after such an anchor name values of another tree. An anchor on an empty
+// value that go-yaml's parse shows as empty does not stop the list. One
+// problem comes alone, and several come under a summary from
+// [niceyaml.NewSummary] that counts them.
 func (d *Doc) newRefusal() error {
-	found := d.find(false)
-	if len(found) == 0 {
-		return nil
+	found := d.markRefusals()
+	found = append(found, d.misreadRefusals()...)
+
+	instances := d.find(false)
+	for i := range instances {
+		in := &instances[i]
+		found = append(found, refused{
+			at: in.at, construct: in.construct, nests: in.nests,
+			problem: func() error { return d.refusal(in, "") },
+		})
 	}
 
-	return d.refusal(firstInText(found), "")
+	slices.SortStableFunc(found, func(a, b refused) int {
+		return cmp.Or(siteOrder(a.at, b.at), cmp.Compare(a.construct, b.construct))
+	})
+
+	if i := slices.IndexFunc(found, func(r refused) bool { return r.nests }); i >= 0 {
+		found = found[:i+1]
+	}
+
+	problems := make([]error, 0, len(found))
+	for _, r := range found {
+		problems = append(problems, r.problem())
+	}
+
+	msg := fmt.Sprintf("%s does not edit this document, for %d reasons", d.appName(), len(problems))
+	summary := niceyaml.NewSummary(msg, problems...)
+
+	return d.user.Bind(summary) //nolint:wrapcheck // The binding is the problem of the document.
 }
 
 // firstInText returns the first of found, instances of constructs, by their
@@ -957,7 +1009,9 @@ func (d *Doc) misnestedEmpties() []instance {
 		d.anchorsAbove(m.props, func(anchor *ast.AnchorNode) {
 			if !seen[anchor] {
 				seen[anchor] = true
-				found = append(found, d.anchoredEmpty(anchor))
+				in := d.anchoredEmpty(anchor)
+				in.nests = true
+				found = append(found, in)
 			}
 		})
 	}
@@ -2839,38 +2893,43 @@ func (d *Doc) secondMark() (int, bool) {
 	return 0, false
 }
 
-// markRefusal returns the problem of the user's text when it holds a byte
-// order mark that the Source does not read as YAML does, or nil. YAML
+// markRefusals returns each byte order mark of the user's text that the
+// Source does not read as YAML does, as a place that [New] refuses. YAML
 // allows a mark only in the prefix of a document. The tokenizer of the
-// Source drops a mark at the start of a line after the "---" of a
-// document, as [Doc.insideMarks] finds it. Go-yaml reads such a mark as
-// text. YAML allows a mark right after another one in the prefix. The
-// tokenizer drops only the first and reads the second as text, as
-// [Doc.secondMark] finds it. The engine drops that second mark. The problem
-// binds at the first such mark, and [niceyaml.IsInvalid] reports it.
-func (d *Doc) markRefusal() error {
-	at, msg := -1, ""
+// Source drops a mark at the start of a line after the "---" of a document,
+// as [Doc.insideMarks] finds it. Go-yaml reads such a mark as text. YAML
+// allows a mark right after another one in the prefix. The tokenizer drops
+// only the first and reads the second as text, as [Doc.secondMark] finds
+// it. The engine drops that second mark. A mark inside the document with a
+// second mark right after it gives one place, of the mark inside the
+// document. The problem of a mark binds at the mark, and
+// [niceyaml.IsInvalid] reports it.
+func (d *Doc) markRefusals() []refused {
+	inside := d.insideMarks()
+	found := make([]refused, 0, len(inside)+1)
 
-	if inside := d.insideMarks(); len(inside) > 0 {
-		at, msg = inside[0], "inside the document, where YAML does not allow it"
+	refuse := func(at int, msg string) {
+		s := d.offsetSite(at, 1)
+
+		found = append(found, refused{at: s, problem: func() error {
+			//nolint:wrapcheck // The binding is the problem of the document.
+			return d.user.Bind(niceyaml.Invalid(
+				fmt.Errorf("%w at %s %s", errMarkPlace, d.userAt(at), msg),
+				niceyaml.AtRange(s.at), niceyaml.AtPath(s.path),
+				niceyaml.WithDetails(errors.New(markFix)),
+			))
+		}})
 	}
 
-	if second, ok := d.secondMark(); ok && (at < 0 || second < at) {
-		at, msg = second, "after another one, which the tokenizer of the Source reads as text"
+	for _, at := range inside {
+		refuse(at, "inside the document, where YAML does not allow it")
 	}
 
-	if at < 0 {
-		return nil
+	if second, ok := d.secondMark(); ok && !slices.Contains(inside, second) {
+		refuse(second, "after another one, which the tokenizer of the Source reads as text")
 	}
 
-	s := d.offsetSite(at, 1)
-
-	//nolint:wrapcheck // The binding is the problem of the document.
-	return d.user.Bind(niceyaml.Invalid(
-		fmt.Errorf("%w at %s %s", errMarkPlace, d.userAt(at), msg),
-		niceyaml.AtRange(s.at), niceyaml.AtPath(s.path),
-		niceyaml.WithDetails(errors.New(markFix)),
-	))
+	return found
 }
 
 // constructZones returns the zones of the constructs of the current text

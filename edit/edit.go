@@ -48,11 +48,16 @@ var (
 	// ErrMisread indicates a document of valid YAML that go-yaml's decoder
 	// reads otherwise than YAML does, in one of the ways that the Supported
 	// YAML section of the package documentation lists. Only [New] fails with
-	// an error that matches ErrMisread. The error names go-yaml and what it
-	// reads, and its detail says what the user can write so that go-yaml
+	// an error that matches ErrMisread. The problem names go-yaml and what
+	// it reads, and its detail says what the user can write so that go-yaml
 	// reads the text as YAML does. A text that go-yaml's parser refuses
 	// fails New with the error of the parse, as the Source gives it. That
 	// error does not match ErrMisread.
+	//
+	// The error of New holds a problem for each instance that New refuses,
+	// so one error can match both ErrMisread and [ErrUnsupported]. A program
+	// reads the kind of each problem from the Err field of each row that
+	// [go.jacobcolvin.com/niceyaml.Problems] yields.
 	//
 	// The user can fix the text, so [go.jacobcolvin.com/niceyaml.IsInvalid]
 	// reports true for the error. It reports true for a document that holds
@@ -657,11 +662,14 @@ type Removal struct {
 // the root itself, so New takes that Node. So does a
 // [niceyaml.Node.NodeAt] that finds the root. New reads the document as
 // go-yaml reads it. It refuses some documents that go-yaml's decoder
-// reads otherwise than YAML does, with an error that matches
+// reads otherwise than YAML does, with a problem that matches
 // [ErrMisread]. The Supported YAML section of the package
-// documentation lists them. It then refuses a document that holds YAML
+// documentation lists them. It also refuses a document that holds YAML
 // outside the subset that the engine edits, as that section lists it, with
-// an error that matches [ErrUnsupported].
+// a problem that matches [ErrUnsupported]. The error of New holds a
+// problem for each instance that it refuses. The problems stop at the
+// first anchor on an empty value under which go-yaml's parser nests the
+// lines after it, as that section describes.
 //
 // New takes an empty document, which [niceyaml.Node.IsEmpty] reports, such
 // as an empty text or a text of comments alone. Its root holds no value, so
@@ -713,11 +721,9 @@ func New(doc *niceyaml.Node, opts ...Option) (*Doc, error) {
 		return nil, err
 	}
 
-	for _, refuse := range []func() error{d.markRefusal, d.misreadRefusal, d.newRefusal} {
-		err = refuse()
-		if err != nil {
-			return nil, err
-		}
+	err = d.newRefusal()
+	if err != nil {
+		return nil, err
 	}
 
 	d.readUserScalars()

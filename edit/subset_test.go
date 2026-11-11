@@ -24,11 +24,13 @@ func TestNew_Unsupported(t *testing.T) {
 		refs []string
 		// The options of New.
 		opts []edit.Option
-		// The lines of the error of New before its excerpt, or "" for a
-		// document that New takes.
+		// The lines of the first problem of the error of New before its
+		// excerpt, or "" for a document that New takes.
 		err string
 		// The paths of the other sites of the construct.
 		related []string
+		// The number of problems of the error of New, or 0 for one.
+		problems int
 		// The document of the text that New takes.
 		doc       int
 		construct edit.Construct
@@ -130,6 +132,7 @@ func TestNew_Unsupported(t *testing.T) {
 			),
 		},
 		"tag on an alias key": {
+			problems:  2,
 			before:    stringtest.LinesLF("k: &k a", "!t *k : v"),
 			construct: edit.ConstructAliasProperties,
 			err: stringtest.JoinLF(
@@ -523,7 +526,9 @@ func TestNew_Unsupported(t *testing.T) {
 				"twice",
 		},
 		"alias inside its anchor before the anchor name is defined again": {
-			// Control: the alias comes before the second anchor of its name.
+			// The alias comes before the second anchor of its name, so its
+			// problem comes first.
+			problems:  2,
 			before:    stringtest.LinesLF("a: &x [*x]", "b: &x 1"),
 			construct: edit.ConstructRecursiveAlias,
 			related:   []string{"$.a[0]"},
@@ -712,6 +717,7 @@ func TestNew_Unsupported(t *testing.T) {
 			),
 		},
 		"alias key of a reference document before a block scalar": {
+			problems:  2,
 			before:    stringtest.LinesLF("&k0 !t *q0 : *rk"),
 			refs:      []string{"&rk name: 1\n", "t0: &q0 'q'\n"},
 			construct: edit.ConstructAliasProperties,
@@ -730,6 +736,7 @@ func TestNew_Unsupported(t *testing.T) {
 			),
 		},
 		"anchored mapping with an alias key of a reference document under a local tag, before an anchor of its name": {
+			problems:  3,
 			before:    stringtest.LinesLF("a: &k0 {!t *r0 : v}", "c: &r0 q", "b: *k0"),
 			refs:      []string{"s: &r0 1\n"},
 			construct: edit.ConstructAliasProperties,
@@ -755,6 +762,7 @@ func TestNew_Unsupported(t *testing.T) {
 			),
 		},
 		"entry below an alias of an anchor on a str-tagged alias inside its own anchor": {
+			problems:  2,
 			before:    stringtest.LinesLF("a: &x !!str *x", "b: *x"),
 			construct: edit.ConstructAliasProperties,
 			err: stringtest.JoinLF(
@@ -763,6 +771,7 @@ func TestNew_Unsupported(t *testing.T) {
 			),
 		},
 		"entry below an alias of an anchor on a tagged alias inside its own anchor": {
+			problems:  2,
 			before:    stringtest.LinesLF("a: {k: &x !t *x}", "b: *x"),
 			construct: edit.ConstructAliasProperties,
 			err: stringtest.JoinLF(
@@ -771,6 +780,7 @@ func TestNew_Unsupported(t *testing.T) {
 			),
 		},
 		"key that a merge key brings in through a tagged alias key of an anchor beside it": {
+			problems:  2,
 			before:    stringtest.LinesLF("<<: {k: &a 1, !t *a : x}", "1: y"),
 			construct: edit.ConstructAliasProperties,
 			err: stringtest.JoinLF(
@@ -779,6 +789,7 @@ func TestNew_Unsupported(t *testing.T) {
 			),
 		},
 		"move that leaves an alias key of a reference first, before a quoted key": {
+			problems:  2,
 			before:    stringtest.LinesLF("n: {k: 16}", "!!str *r0 : &k0 True"),
 			refs:      []string{"t0: &r0 True\n"},
 			construct: edit.ConstructAliasProperties,
@@ -788,6 +799,7 @@ func TestNew_Unsupported(t *testing.T) {
 			),
 		},
 		"tagged alias key of a reference document whose value a set replaced": {
+			problems:  2,
 			before:    stringtest.LinesLF("&k0 !!str *r2 : {<<: *rm0}"),
 			refs:      []string{"s2: &r2 a b\nm0: &rm0 {c: 0x10, false: ~, m: x}\n"},
 			dup:       true,
@@ -806,6 +818,7 @@ func TestNew_Unsupported(t *testing.T) {
 			),
 		},
 		"walk of k: <<: &g !!str *g": {
+			problems:  2,
 			before:    stringtest.LinesLF("k:", "  <<: &g !!str *g"),
 			construct: edit.ConstructAliasProperties,
 			err: stringtest.JoinLF(
@@ -814,6 +827,7 @@ func TestNew_Unsupported(t *testing.T) {
 			),
 		},
 		"walk of k: {<<: &g !!str *g}": {
+			problems:  2,
 			before:    stringtest.LinesLF("k: {<<: &g !!str *g}"),
 			construct: edit.ConstructAliasProperties,
 			err: stringtest.JoinLF(
@@ -945,6 +959,9 @@ func TestNew_Unsupported(t *testing.T) {
 		"item after an anchored empty item, from sweep seed 27327 case 2971": {
 			// The local tag on the first key stands for the !!str of the sweep
 			// case, which go-yaml's decoder reads otherwise on a plain key.
+			// Go-yaml reads &x0 as empty and nests no line in it, so the
+			// problems go on after it.
+			problems:  5,
 			before:    "!t false:\r- &x0\r-\r      +1: 'p\r\r        q'\r      b: {.inf: x}\r      <<: {}\r<<: {!t 16: 2, !!null null: 1}\rr2: *x0 # f\r",
 			dup:       true,
 			construct: edit.ConstructKeyProperties,
@@ -954,6 +971,7 @@ func TestNew_Unsupported(t *testing.T) {
 			),
 		},
 		"move that leaves an alias key of a reference first, before a moved quoted key": {
+			problems:  2,
 			before:    stringtest.LinesLF("&k0 !t m:", "  - name: x", "    a:", "    b: 1", "*rk : 16"),
 			refs:      []string{"&rk !!bool true: 1\n"},
 			construct: edit.ConstructKeyProperties,
@@ -1030,6 +1048,7 @@ func TestNew_Unsupported(t *testing.T) {
 			),
 		},
 		"value that holds two keys that a decode reads as one, at a flow root whose first key has an anchor": {
+			problems:  2,
 			before:    stringtest.LinesLF("{&k z: 1, *k : 2}"),
 			construct: edit.ConstructKeyProperties,
 			err: stringtest.JoinLF(
@@ -1065,7 +1084,9 @@ func TestNew_Unsupported(t *testing.T) {
 		"removal that leaves an anchor without a value before a comment line, in text of lone carriage returns": {
 			// The local tag on the key of the flow mapping stands for the !!str
 			// of the sweep case, which go-yaml's decoder reads otherwise on a
-			// plain key.
+			// plain key. Go-yaml reads &x0 as empty and nests no line in it,
+			// so the problems go on after it.
+			problems:  4,
 			before:    "r0: &x0 # al\r  # d\rr1: &x1 # al\r  c:\r   k: !t *x0\r\r   <<: {!t true: x}\r  <<: {} # f\r  p: *x0 # al\r",
 			construct: edit.ConstructAnchoredEmpty,
 			err: stringtest.JoinLF(
@@ -1154,7 +1175,15 @@ func TestNew_Unsupported(t *testing.T) {
 			assert.False(t, unsupported.InValue)
 			assert.Equal(t, append([]string{}, tc.related...), related)
 			assert.True(t, niceyaml.IsInvalid(err))
-			assert.Contains(t, niceyaml.FormatError(err), tc.err)
+
+			var rows []niceyaml.ErrorTree
+
+			for p := range niceyaml.Problems(err) {
+				rows = append(rows, p)
+			}
+
+			require.Len(t, rows, max(tc.problems, 1))
+			assert.Contains(t, niceyaml.FormatError(rows[0].Err), tc.err)
 		})
 	}
 }

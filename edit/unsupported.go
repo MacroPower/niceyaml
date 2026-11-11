@@ -13,8 +13,12 @@ import (
 // ErrUnsupported indicates a document or a call that reaches YAML that the
 // engine does not edit, as the Supported YAML section of the package
 // documentation lists it. A detail says what the user can write instead.
-// An error that matches ErrUnsupported is an [*UnsupportedError], and it
-// never matches [ErrEngine].
+// An error that matches ErrUnsupported holds an [*UnsupportedError], and it
+// never matches [ErrEngine]. The error of [New] holds a problem for each
+// instance that New refuses, so it can match [ErrMisread] too, and
+// [errors.As] finds the first UnsupportedError in the text. A program reads
+// the kind of each problem from the Err field of each row that
+// [niceyaml.Problems] yields.
 var ErrUnsupported = errors.New("the engine does not edit this YAML")
 
 // Construct names a YAML construct that the engine does not edit, as the

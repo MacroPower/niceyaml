@@ -200,6 +200,256 @@ func TestNew(t *testing.T) {
 	}
 }
 
+func TestNew_Refusals(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		text string
+		// The heading of the error of New, or "" for an error of one
+		// problem.
+		summary string
+		// The rows of the problems of the error of New, each as its line, its
+		// column, and its message.
+		want []string
+		// The construct of the first [*edit.UnsupportedError] of the error,
+		// or zero for an error that holds none.
+		construct edit.Construct
+		// Whether a problem matches edit.ErrMisread.
+		misread bool
+	}{
+		"one anchor defined twice": {
+			text:      stringtest.LinesLF("a: &x 1", "b: &x 2", "e: 1"),
+			want:      []string{"2:4 this program does not edit a document that defines the anchor &x twice"},
+			construct: edit.ConstructReusedAnchor,
+		},
+		"two anchors defined twice": {
+			text:    stringtest.LinesLF("a: &x 1", "b: &x 2", "c: &y 1", "d: &y 2", "e: 1"),
+			summary: "this program does not edit this document, for 2 reasons",
+			want: []string{
+				"2:4 this program does not edit a document that defines the anchor &x twice",
+				"4:4 this program does not edit a document that defines the anchor &y twice",
+			},
+			construct: edit.ConstructReusedAnchor,
+		},
+		"misread before a construct": {
+			text:    stringtest.LinesLF("s: &s {a: 1}", "m: {a: 2, <<: *s}", "b: !t *s"),
+			summary: "this program does not edit this document, for 2 reasons",
+			want: []string{
+				"2:5 go-yaml's decoder reads $.m.a from the merge key at 2:11, but the merge spec keeps the own " +
+					"entry written before it",
+				"3:4 this program does not edit a document with a tag or an anchor on an alias, such as !t *s",
+			},
+			construct: edit.ConstructAliasProperties,
+			misread:   true,
+		},
+		"construct before a misread": {
+			text:    stringtest.LinesLF("b: !t *s", "s: &s {a: 1}", "m: {a: 2, <<: *s}"),
+			summary: "this program does not edit this document, for 2 reasons",
+			want: []string{
+				"1:4 this program does not edit a document with a tag or an anchor on an alias, such as !t *s",
+				"3:5 go-yaml's decoder reads $.m.a from the merge key at 3:11, but the merge spec keeps the own " +
+					"entry written before it",
+			},
+			construct: edit.ConstructAliasProperties,
+			misread:   true,
+		},
+		"two constructs at one token": {
+			// At one site, the constructs come in the order of their
+			// constants.
+			text:    stringtest.LinesLF("k: &k a", "!t *k : v"),
+			summary: "this program does not edit this document, for 2 reasons",
+			want: []string{
+				"2:1 this program does not edit a document with a tag or an anchor on an alias, such as !t *k",
+				"2:1 this program does not edit a document with a tag or an anchor on a mapping key, such as !t",
+			},
+			construct: edit.ConstructAliasProperties,
+		},
+		"mark and a construct at one site": {
+			text:    stringtest.LinesLF("---", "\ufeff&x a: 1"),
+			summary: "this program does not edit this document, for 2 reasons",
+			want: []string{
+				"2:1 a byte order mark at 2:1 inside the document, where YAML does not allow it",
+				"2:1 this program does not edit a document with a tag or an anchor on a mapping key, such as &x",
+			},
+			construct: edit.ConstructKeyProperties,
+		},
+		"misread and a construct at one site": {
+			text:    stringtest.LinesLF("s: &s {a: 1}", "m: {!t a: 2, <<: *s}"),
+			summary: "this program does not edit this document, for 2 reasons",
+			want: []string{
+				"2:5 go-yaml's decoder reads $.m.a from the merge key at 2:14, but the merge spec keeps the own " +
+					"entry written before it",
+				"2:5 this program does not edit a document with a tag or an anchor on a mapping key, such as !t",
+			},
+			construct: edit.ConstructKeyProperties,
+			misread:   true,
+		},
+		"mark, misread, and construct at one site": {
+			text:    stringtest.LinesLF("---", "\ufeff!t a: 2", "<<: {a: 1}"),
+			summary: "this program does not edit this document, for 3 reasons",
+			want: []string{
+				"2:1 a byte order mark at 2:1 inside the document, where YAML does not allow it",
+				"2:1 go-yaml's decoder reads $.a from the merge key at 3:1, but the merge spec keeps the own " +
+					"entry written before it",
+				"2:1 this program does not edit a document with a tag or an anchor on a mapping key, such as !t",
+			},
+			construct: edit.ConstructKeyProperties,
+			misread:   true,
+		},
+		"misread and a tag that converts a collection": {
+			// YAML refuses the text, so New leaves out the misread at 2:5.
+			text: stringtest.LinesLF("s: &s {a: 1}", "m: {a: 2, <<: *s}", "a: !!str &x {b: 1}"),
+			want: []string{
+				"3:4 this program does not edit a document with a tag that converts a collection, such as !!str",
+			},
+			construct: edit.ConstructConvertingTag,
+		},
+		"two marks inside the document": {
+			text:    stringtest.LinesLF("---", "\ufeff", "\ufeff", "b: 1"),
+			summary: "this program does not edit this document, for 2 reasons",
+			want: []string{
+				"2:1 a byte order mark at 2:1 inside the document, where YAML does not allow it",
+				"3:1 a byte order mark at 3:1 inside the document, where YAML does not allow it",
+			},
+		},
+		"second mark and a construct": {
+			// The tokenizer drops the first mark and reads the second one as
+			// text of the key.
+			text:    stringtest.LinesLF("\ufeff\ufeffa: &x 1", "b: &x 2"),
+			summary: "this program does not edit this document, for 2 reasons",
+			want: []string{
+				"1:1 a byte order mark at 1:1 after another one, which the tokenizer of the Source reads as text",
+				"2:4 this program does not edit a document that defines the anchor &x twice",
+			},
+			construct: edit.ConstructReusedAnchor,
+		},
+		"three marks side by side before the document": {
+			// The marks after the first share one place in the text that the
+			// Source reads.
+			text: "\ufeff\ufeff\ufeffa: 1\n",
+			want: []string{
+				"1:1 a byte order mark at 1:1 after another one, which the tokenizer of the Source reads as text",
+			},
+		},
+		"second mark after a mark inside the document": {
+			// Both marks stand at one place, which gives one problem.
+			text: stringtest.LinesLF("---", "\ufeff\ufeffa: 1"),
+			want: []string{
+				"2:1 a byte order mark at 2:1 inside the document, where YAML does not allow it",
+			},
+		},
+		"marks in the prefix of the document and a construct": {
+			// The tokenizer drops each mark in the prefix, so New takes them.
+			text:      stringtest.LinesLF("", "\ufeff", "\ufeff# x", "a: &x 1", "b: &x 2"),
+			want:      []string{"5:4 this program does not edit a document that defines the anchor &x twice"},
+			construct: edit.ConstructReusedAnchor,
+		},
+		"construct after an anchored empty item": {
+			// Go-yaml nests r1 inside the empty item, so the list stops at
+			// its anchor.
+			text: stringtest.LinesLF("r0:", "- &x0", "r1: !t *x0"),
+			want: []string{
+				"2:3 this program does not edit a document with an anchor on an empty value, such as &x0",
+			},
+			construct: edit.ConstructAnchoredEmpty,
+		},
+		"construct before an anchored empty item": {
+			text:    stringtest.LinesLF("a: &y 1", "b: &y 2", "r0:", "- &x0", "r1: !t *x0"),
+			summary: "this program does not edit this document, for 2 reasons",
+			want: []string{
+				"2:4 this program does not edit a document that defines the anchor &y twice",
+				"4:3 this program does not edit a document with an anchor on an empty value, such as &x0",
+			},
+			construct: edit.ConstructReusedAnchor,
+		},
+		"construct after an anchored empty value": {
+			// Go-yaml leaves b and c beside a, so the list goes on after &x.
+			text:    stringtest.LinesLF("a: &x", "b: &y 1", "c: &y 2"),
+			summary: "this program does not edit this document, for 2 reasons",
+			want: []string{
+				"1:4 this program does not edit a document with an anchor on an empty value, such as &x",
+				"3:4 this program does not edit a document that defines the anchor &y twice",
+			},
+			construct: edit.ConstructAnchoredEmpty,
+		},
+		"anchored empty item before one that nests": {
+			// Go-yaml shows &x0 as empty and nests r1 inside the item of
+			// &x1, so the list stops at &x1.
+			text:    stringtest.LinesLF("r0:", "- &x0", "- &x1", "r1: !t *x0"),
+			summary: "this program does not edit this document, for 2 reasons",
+			want: []string{
+				"2:3 this program does not edit a document with an anchor on an empty value, such as &x0",
+				"3:3 this program does not edit a document with an anchor on an empty value, such as &x1",
+			},
+			construct: edit.ConstructAnchoredEmpty,
+		},
+		"misread and a tag of another kind": {
+			// Only a tag that converts a collection leaves out the misreads.
+			text:    stringtest.LinesLF("s: &s {a: 1}", "m: {a: 2, <<: *s}", "b: !!set {q: null}"),
+			summary: "this program does not edit this document, for 2 reasons",
+			want: []string{
+				"2:5 go-yaml's decoder reads $.m.a from the merge key at 2:11, but the merge spec keeps the own " +
+					"entry written before it",
+				"3:4 this program does not edit a document with the tag !!set",
+			},
+			construct: edit.ConstructTagKind,
+			misread:   true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			src := niceyaml.NewSourceFromString(tc.text, niceyaml.WithName("f.yaml"))
+
+			_, err := edit.New(src.Documents()[0])
+			require.Error(t, err)
+			assert.True(t, niceyaml.IsInvalid(err))
+			require.NotErrorIs(t, err, edit.ErrEngine)
+			assert.Equal(t, tc.misread, errors.Is(err, edit.ErrMisread))
+
+			var unsupported *edit.UnsupportedError
+
+			if tc.construct == 0 {
+				require.NotErrorAs(t, err, &unsupported)
+			} else {
+				require.ErrorAs(t, err, &unsupported)
+				assert.Equal(t, tc.construct, unsupported.Construct)
+			}
+
+			var (
+				got  []string
+				errs []error
+			)
+
+			for p := range niceyaml.Problems(err) {
+				pos, ok := p.Position()
+				require.True(t, ok)
+
+				got = append(got, fmt.Sprintf("%d:%d %s", pos.Line+1, pos.Col+1, p.Message()))
+				errs = append(errs, p.Err)
+
+				assert.True(t, p.IsInvalid())
+				// A row matches one sentinel at most. The row of a byte order
+				// mark matches neither.
+				assert.False(t, errors.Is(p.Err, edit.ErrMisread) && errors.Is(p.Err, edit.ErrUnsupported))
+			}
+
+			assert.Equal(t, tc.want, got)
+
+			// One problem comes alone, without a heading.
+			if tc.summary == "" {
+				assert.Equal(t, []error{err}, errs)
+
+				return
+			}
+
+			assert.Equal(t, tc.summary, niceyaml.NewErrorTree(err).Message())
+		})
+	}
+}
+
 func TestNew_RootPath(t *testing.T) {
 	t.Parallel()
 
