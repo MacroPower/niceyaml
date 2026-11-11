@@ -895,7 +895,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			"map field under a slice go-yaml leaves as it was": {
 				input: "wrapped: 1\n",
 				start: parent{Bags: []bag{{positives: positives{"a": -1}}}},
-				err:   "$.bags[0].positives.a: negative",
+				err:   "1:1: $.bags[0].positives.a: negative",
 			},
 			"field of a struct in an interface": {
 				input: "wrapped: 1\n",
@@ -910,7 +910,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			"field that decodes a struct in an array in an interface": {
 				input: "wrapped: 1\n",
 				start: parent{Any: [1]wrapped{{innerPositive: -1}}},
-				err:   "$.any[0]: negative",
+				err:   "1:1: $.any[0]: negative",
 			},
 			"valid fields": {
 				input: "wrapped: 1\nby_name: {a: 1}\n",
@@ -1101,7 +1101,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			},
 			"a port at the far end of a list fails": {
 				target: &withMesh{Mesh: meshChain(40, &bad)},
-				err: "$.mesh" + strings.Repeat(".next[0]", 40) +
+				err: "1:1: $.mesh" + strings.Repeat(".next[0]", 40) +
 					".port: port out of range",
 			},
 			"no port is set in a map": {
@@ -2437,12 +2437,12 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 					"z":    map[string]any{"b": map[string]any{"c": 2}},
 				}},
 				input: "name: x\n",
-				err:   "$.extra.list[1].s.n: negative -1",
+				err:   "1:1: $.extra.list[1].s.n: negative -1",
 			},
 			"validator key in a map of any the caller filled": {
 				target: &withAnyKeys{Extra: map[any]any{"a": 1, port(70000): 2}},
 				input:  "name: x\n",
-				err:    "$.extra.70000~: port out of range",
+				err:    "1:1: $.extra.70000~: port out of range",
 			},
 			"validator beside a map of any that holds itself": {
 				target: &withExtra{Extra: loop},
@@ -2568,14 +2568,10 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		// SelfValidate binds each error at the same value under the same
 		// options. Without them, it reads each type as one that decodes
-		// field by field, so the errors have no value to bind at.
+		// field by field, so each error binds at the nearest value the
+		// document holds, which is that same value.
 		require.EqualError(t, dd.SelfValidate(t.Context(), &got, opts), want)
-
-		err = dd.SelfValidate(t.Context(), &got)
-		require.EqualError(t, err, stringtest.JoinLF(
-			"$.custom.inner.close: closes before it opens",
-			"$.json.inner.close: closes before it opens",
-		))
+		require.EqualError(t, dd.SelfValidate(t.Context(), &got), want)
 	})
 
 	t.Run("a struct that gets UnmarshalJSON from an embedded field validates the field", func(t *testing.T) {
@@ -2607,8 +2603,8 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		// Nothing shows which types yaml.RegisterCustomUnmarshaler gave a
 		// function, so the walk reads the type as one that decodes field
 		// by field. It reads the hours below the value as it does below
-		// any type, at a path the document does not hold, and the error
-		// has no value that decodes itself to bind at.
+		// any type, at a path the document does not hold, so the error
+		// binds at the nearest value the document holds.
 		yaml.RegisterCustomUnmarshaler(func(r *registeredHours, _ []byte) error {
 			r.Inner = hours{Open: "17:00", Close: "09:00"}
 
@@ -2620,7 +2616,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		_, err := dd.Decode[struct {
 			Registered registeredHours `yaml:"registered"`
 		}](t.Context())
-		require.EqualError(t, err, "$.registered.inner.close: closes before it opens")
+		require.EqualError(t, err, "1:13: $.registered.inner.close: closes before it opens")
 	})
 
 	t.Run("an ast.Node value validates itself alone", func(t *testing.T) {
@@ -3048,12 +3044,12 @@ func TestNode_SelfValidate(t *testing.T) {
 			},
 			err: "app.yaml:1:1: $.backup.password: password is required",
 		},
-		"an appended element binds with no position": {
+		"an appended element binds at the key of its sequence": {
 			layer: func(cfg *layeredConfig) {
 				cfg.DB.Password = "s3cret"
 				cfg.Items = append(cfg.Items, upstream{URL: "ftp://z"})
 			},
-			err: `app.yaml: $.items[2].url: url "ftp://z" is not http`,
+			err: `app.yaml:6:1: $.items[2].url: url "ftp://z" is not http`,
 		},
 		"a prepended element marks the element the document holds there": {
 			layer: func(cfg *layeredConfig) {
@@ -3835,14 +3831,14 @@ func TestSelfValidateValue_Place(t *testing.T) {
 			value: request{Items: []upstream{{URL: "http://x"}, {URL: "ftp://y"}}},
 			want:  `app.yaml:4:12: $.request.items[1].url: url "ftp://y" is not http`,
 		},
-		"an element the document lacks places with no position": {
+		"an element the document lacks places at the key of its sequence": {
 			input: stringtest.LinesLF(
 				"request:",
 				"  items:",
 				"    - url: http://x",
 			),
 			value: request{Items: []upstream{{URL: "http://x"}, {URL: "ftp://y"}}},
-			want:  `app.yaml: $.request.items[1].url: url "ftp://y" is not http`,
+			want:  `app.yaml:2:3: $.request.items[1].url: url "ftp://y" is not http`,
 		},
 		"a key the document spells as the Go value places at its line": {
 			input: stringtest.LinesLF(
@@ -4276,15 +4272,17 @@ func TestNode_Decode_SelfDecoding(t *testing.T) {
 			err:     "app.yaml:1:8: $.peers.addrs[1].port: port must be at least 1",
 			nearest: map[string]string{"$.peers.addrs[1].port": "$.peers"},
 		},
-		"an element the method adds binds at its struct": {
+		// The document holds the sequence, so the nearest node it holds
+		// wins over the struct that decodes itself.
+		"an element the method adds binds at the key of its sequence": {
 			target: func() any { return new(withFleet) },
 			input: stringtest.LinesLF(
 				"fleet:",
 				"  servers:",
 				"    - host: a",
 			),
-			err:     "app.yaml:1:1: $.fleet.servers[1].port: port out of range",
-			nearest: map[string]string{"$.fleet.servers[1].port": "$.fleet"},
+			err:     "app.yaml:2:3: $.fleet.servers[1].port: port out of range",
+			nearest: map[string]string{"$.fleet.servers[1].port": "$.fleet.servers"},
 		},
 		"an element the method moves reports at the element of its index": {
 			target: func() any { return new(withReversed) },
@@ -5551,8 +5549,8 @@ func TestDataLocator(t *testing.T) {
 		key  bool
 		want string
 		// The path of the node the error binds at, for names the document
-		// holds no value for: the mapping that lacks a member, or an alias
-		// the document cannot follow.
+		// holds no value for: the nearest node the document holds, or an
+		// alias the document cannot follow.
 		wantNear string
 	}{
 		"key the decoder respells": {
@@ -5676,41 +5674,49 @@ func TestDataLocator(t *testing.T) {
 			wantNear: "$.m",
 		},
 
-		// A name that is no index of its sequence, or lies below a scalar.
+		// A name that is no index of its sequence binds at the sequence,
+		// and a name below a scalar binds at the scalar.
 		"index past the end": {
-			input: shapesDoc,
-			names: []string{"seq", "9"},
-			want:  "f.yaml: $.seq[9]: x",
+			input:    shapesDoc,
+			names:    []string{"seq", "9"},
+			want:     "f.yaml:1:1: $.seq[9]: x",
+			wantNear: "$.seq",
 		},
 		"names below an index past the end": {
-			input: shapesDoc,
-			names: []string{"seq", "9", "x"},
-			want:  "f.yaml: $.seq[9].x: x",
+			input:    shapesDoc,
+			names:    []string{"seq", "9", "x"},
+			want:     "f.yaml:1:1: $.seq[9].x: x",
+			wantNear: "$.seq",
 		},
 		"index with a leading zero": {
-			input: shapesDoc,
-			names: []string{"seq", "01"},
-			want:  "f.yaml: $.seq.01: x",
+			input:    shapesDoc,
+			names:    []string{"seq", "01"},
+			want:     "f.yaml:1:1: $.seq.01: x",
+			wantNear: "$.seq",
 		},
 		"index with a sign": {
-			input: shapesDoc,
-			names: []string{"seq", "+1"},
-			want:  "f.yaml: $.seq.+1: x",
+			input:    shapesDoc,
+			names:    []string{"seq", "+1"},
+			want:     "f.yaml:1:1: $.seq.+1: x",
+			wantNear: "$.seq",
 		},
 		"index too large for an int": {
-			input: shapesDoc,
-			names: []string{"seq", "99999999999999999999"},
-			want:  "f.yaml: $.seq.99999999999999999999: x",
+			input:    shapesDoc,
+			names:    []string{"seq", "99999999999999999999"},
+			want:     "f.yaml:1:1: $.seq.99999999999999999999: x",
+			wantNear: "$.seq",
 		},
 		"member name in a sequence": {
-			input: shapesDoc,
-			names: []string{"seq", "name"},
-			want:  "f.yaml: $.seq.name: x",
+			input:    shapesDoc,
+			names:    []string{"seq", "name"},
+			want:     "f.yaml:1:1: $.seq.name: x",
+			wantNear: "$.seq",
 		},
 		"name below a scalar": {
-			input: shapesDoc,
-			names: []string{"scalar", "x"},
-			want:  "f.yaml: $.scalar.x: x",
+			input:    shapesDoc,
+			names:    []string{"scalar", "x"},
+			want:     "f.yaml:11:9: $.scalar.x: x",
+			wantNear: "$.scalar",
 		},
 		"index past the end below a member no path selects": {
 			input: stringtest.LinesLF("user:", "  <<: {0x10: [a]}", `  "0x10": 1`),
@@ -5768,9 +5774,10 @@ func TestDataLocator(t *testing.T) {
 			wantNear: "$",
 		},
 		"name below a scalar root": {
-			input: "scalar\n",
-			names: []string{"a", "0"},
-			want:  "f.yaml: $.a.0: x",
+			input:    "scalar\n",
+			names:    []string{"a", "0"},
+			want:     "f.yaml:1:1: $.a.0: x",
+			wantNear: "$",
 		},
 		"empty document": {
 			input: "",
@@ -5856,10 +5863,11 @@ func TestDataLocator(t *testing.T) {
 			want:  "f.yaml:1:1: $.python.'3.10': x",
 		},
 		"AtKey: index past the end": {
-			key:   true,
-			input: shapesDoc,
-			names: []string{"seq", "9"},
-			want:  "f.yaml: $.seq[9]: x",
+			key:      true,
+			input:    shapesDoc,
+			names:    []string{"seq", "9"},
+			want:     "f.yaml:1:1: $.seq[9]: x",
+			wantNear: "$.seq",
 		},
 		"AtKey: member below an alias to a reference document": {
 			key:      true,

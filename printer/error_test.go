@@ -284,17 +284,17 @@ func TestPrinter_PrintError(t *testing.T) {
 				yamltest.Bind(
 					t,
 					source,
-					niceyaml.NewError("gone", niceyaml.AtPath(paths.Current().Child("x").Index(0))),
+					niceyaml.NewError("gone", niceyaml.AtPath(paths.Current().Child("x").IndexAll())),
 				),
 				bound,
 			),
 			want: stringtest.JoinLF(
-				"├── $.x[0]: gone",
+				"├── $.x[*]: gone",
 				"└── 2:4: $.b: bad",
 				"",
 				labeled,
 				"",
-				"no excerpt: resolve $.x[0]: not found",
+				"no excerpt: resolve $.x[*]: wildcard path matches any number of nodes",
 			),
 		},
 		// No path resolves in a document with no content, so the tree
@@ -437,7 +437,7 @@ func TestPrinter_PrintError_ControlCharacters(t *testing.T) {
 	// key of the document and writes a control character in it as an
 	// escape, in the reason as in the tree.
 	source := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("f.yaml"))
-	bound := source.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("mi\x1b[31mss").Index(0))))
+	bound := source.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("mi\x1b[31mss").IndexAll())))
 
 	got = p.PrintError(bound)
 	assert.NotContains(t, got, "\x1b")
@@ -447,24 +447,24 @@ func TestPrinter_PrintError_ControlCharacters(t *testing.T) {
 	// A tab in the key is an escape in the reason as it is in the tree, so
 	// neither lays out a tab.
 	named := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("cfg.yaml"))
-	bound = named.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("ab\tc").Index(0))))
+	bound = named.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("ab\tc").IndexAll())))
 
 	got = p.PrintError(bound)
 	assert.NotContains(t, got, "\u2409")
 	assert.Equal(t, stringtest.JoinLF(
-		`cfg.yaml: $.'ab\tc'[0]: bad`,
+		`cfg.yaml: $.'ab\tc'[*]: bad`,
 		"",
-		`no excerpt: resolve $.'ab\tc'[0]: not found`,
+		`no excerpt: resolve $.'ab\tc'[*]: wildcard path matches any number of nodes`,
 	), got)
 
 	// A line feed in the key is an escape too, so the key starts no row of
 	// its own.
-	bound = named.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("x\ny\tz").Index(0))))
+	bound = named.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("x\ny\tz").IndexAll())))
 
 	assert.Equal(t, stringtest.JoinLF(
-		`cfg.yaml: $.'x\ny\tz'[0]: bad`,
+		`cfg.yaml: $.'x\ny\tz'[*]: bad`,
 		"",
-		`no excerpt: resolve $.'x\ny\tz'[0]: not found`,
+		`no excerpt: resolve $.'x\ny\tz'[*]: wildcard path matches any number of nodes`,
 	), p.PrintError(bound))
 }
 
@@ -1069,11 +1069,11 @@ func TestPrinter_PrintError_ExcerptsOff(t *testing.T) {
 		},
 		// The reason names the path and no text of the source.
 		"a location that does not resolve keeps its reason": {
-			err: yamltest.Bind(t, secrets, niceyaml.NewError("not a list", niceyaml.AtPath(port.Index(3)))),
+			err: yamltest.Bind(t, secrets, niceyaml.NewError("not a list", niceyaml.AtPath(port.IndexAll()))),
 			want: stringtest.JoinLF(
-				"secrets.yaml: $.port[3]: not a list",
+				"secrets.yaml: $.port[*]: not a list",
 				"",
-				"no excerpt: resolve $.port[3]: not found",
+				"no excerpt: resolve $.port[*]: wildcard path matches any number of nodes",
 			),
 		},
 		"a binding in another source keeps its excerpt": {

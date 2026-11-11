@@ -584,13 +584,13 @@ func TestErrorTree_New(t *testing.T) {
 		},
 		"children without a position follow the positioned ones": {
 			err: yamltest.Bind(t, source, niceyaml.NewSummary("3 problems",
-				niceyaml.NewError("bad x", niceyaml.AtPath(paths.Current().Child("x").Index(0))),
+				niceyaml.NewError("bad x", niceyaml.AtPath(paths.Current().Child("x").IndexAll())),
 				niceyaml.NewError("no path"),
 				badA(),
 			)),
 			want: textNode("f.yaml: 3 problems",
 				textNode("1:4: $.a: bad a"),
-				textNode("$.x[0]: bad x"),
+				textNode("$.x[*]: bad x"),
 				textNode("no path"),
 			),
 		},
@@ -1380,11 +1380,11 @@ func TestErrorTree_Bound(t *testing.T) {
 
 				// The row of the binding shows the path of the Error
 				// already, so the node reads as the binding.
-				far := paths.Doc().Child("a").Child("far")
+				far := paths.Doc().Child("a").ChildAll()
 				bound := bind(t, niceyaml.NewError("far", niceyaml.AtPath(far)))
 				err := niceyaml.Invalid(bound, niceyaml.AtPath(far))
 
-				return tree{err: err, want: []node{{text: "f.yaml: $.a.far: far", err: err, bound: bound}}}
+				return tree{err: err, want: []node{{text: "f.yaml: $.a.*: far", err: err, bound: bound}}}
 			},
 		},
 		"located Errors with the path of a binding whose path did not resolve": {
@@ -1393,11 +1393,11 @@ func TestErrorTree_Bound(t *testing.T) {
 
 				// A helper and its caller both locate the binding at its
 				// path, so the node reads as the binding.
-				far := paths.Doc().Child("a").Child("far")
+				far := paths.Doc().Child("a").ChildAll()
 				bound := bind(t, niceyaml.NewError("far", niceyaml.AtPath(far)))
 				err := niceyaml.Locate(niceyaml.Locate(bound, niceyaml.AtPath(far)), niceyaml.AtPath(far))
 
-				return tree{err: err, want: []node{{text: "f.yaml: $.a.far: far", err: err, bound: bound}}}
+				return tree{err: err, want: []node{{text: "f.yaml: $.a.*: far", err: err, bound: bound}}}
 			},
 		},
 		"located Error around a wrapper of a located Error with the path of a binding": {
@@ -1406,14 +1406,14 @@ func TestErrorTree_Bound(t *testing.T) {
 
 				// The text of the wrapper follows the path of the binding, as
 				// it does after the bind.
-				far := paths.Doc().Child("a").Child("far")
+				far := paths.Doc().Child("a").ChildAll()
 				bound := bind(t, niceyaml.NewError("far", niceyaml.AtPath(far)))
 				err := niceyaml.Locate(
 					fmt.Errorf("check: %w", niceyaml.Locate(bound, niceyaml.AtPath(far))),
 					niceyaml.AtPath(far),
 				)
 
-				return tree{err: err, want: []node{{text: "f.yaml: $.a.far: check: far", err: err, bound: bound}}}
+				return tree{err: err, want: []node{{text: "f.yaml: $.a.*: check: far", err: err, bound: bound}}}
 			},
 		},
 		"located Error with the path of a binding above one at its parent": {
@@ -1423,28 +1423,28 @@ func TestErrorTree_Bound(t *testing.T) {
 				// A bind takes the location of the outer Error, so the
 				// location of the inner one does not show before the bind
 				// either.
-				far := paths.Doc().Child("a").Child("far")
+				far := paths.Doc().Child("a").ChildAll()
 				bound := bind(t, niceyaml.NewError("far", niceyaml.AtPath(far)))
 				err := niceyaml.Locate(
 					niceyaml.Locate(bound, niceyaml.AtPath(paths.Doc().Child("a"))),
 					niceyaml.AtPath(far),
 				)
 
-				return tree{err: err, want: []node{{text: "f.yaml: $.a.far: far", err: err, bound: bound}}}
+				return tree{err: err, want: []node{{text: "f.yaml: $.a.*: far", err: err, bound: bound}}}
 			},
 		},
 		"located Error with the path of a binding above one at a position": {
 			build: func(t *testing.T) tree {
 				t.Helper()
 
-				far := paths.Doc().Child("a").Child("far")
+				far := paths.Doc().Child("a").ChildAll()
 				bound := bind(t, niceyaml.NewError("far", niceyaml.AtPath(far)))
 				err := niceyaml.Locate(
 					niceyaml.Locate(bound, niceyaml.AtPosition(position.New(1, 0))),
 					niceyaml.AtPath(far),
 				)
 
-				return tree{err: err, want: []node{{text: "f.yaml: $.a.far: far", err: err, bound: bound}}}
+				return tree{err: err, want: []node{{text: "f.yaml: $.a.*: far", err: err, bound: bound}}}
 			},
 		},
 		"unbound summary that heads a binding": {
@@ -2712,8 +2712,8 @@ func TestErrorTree_MessageContextAndPath(t *testing.T) {
 	pathA := paths.Current().Child("a")
 	pathB := paths.Current().Child("b")
 
-	// The value of a is a number, so this path does not resolve.
-	farPath := paths.Doc().Child("a").Child("far")
+	// A wildcard path does not resolve to one node.
+	farPath := paths.Doc().Child("a").ChildAll()
 
 	badA, badB := badKeyError("a"), badKeyError("b")
 	withDetail := func() *niceyaml.Error {
@@ -3041,7 +3041,7 @@ func TestErrorTree_MessageContextAndPath(t *testing.T) {
 				niceyaml.AtPath(farPath),
 			)),
 			want:     "far",
-			wantPath: "$.a.far",
+			wantPath: "$.a.*",
 		},
 		"Error with a path of its own around a value binding": {
 			node:     niceyaml.NewErrorTree(niceyaml.Invalid(niceyaml.BindValue(badA()), niceyaml.AtPath(pathB))),
@@ -3921,7 +3921,7 @@ func TestErrorTree_Accessors(t *testing.T) {
 	docs := yamltest.Documents(t, source, 2)
 
 	badB := niceyaml.NewError("bad b", niceyaml.AtPath(paths.Doc().Child("b")))
-	gone := niceyaml.NewError("gone", niceyaml.AtPath(paths.Doc().Child("x").Index(0)))
+	gone := niceyaml.NewError("gone", niceyaml.AtPath(paths.Doc().Child("x").IndexAll()))
 
 	t.Run("a bound node reads its binding", func(t *testing.T) {
 		t.Parallel()
@@ -4351,7 +4351,7 @@ func TestNewErrorReport(t *testing.T) {
 	badE := yamltest.Bind(t, secret, yamltest.ErrorAt("bad e", "e"))
 	farA := yamltest.Bind(t, first, niceyaml.NewError("far a", outside))
 	farC := yamltest.Bind(t, second, niceyaml.NewError("far c", outside))
-	gone := yamltest.Bind(t, second, niceyaml.NewError("gone", niceyaml.AtPath(paths.Current().Child("x").Index(0))))
+	gone := yamltest.Bind(t, second, niceyaml.NewError("gone", niceyaml.AtPath(paths.Current().Child("x").IndexAll())))
 
 	// The excerpt of each source among several, below its name.
 	namedA := stringtest.JoinLF(
@@ -4422,7 +4422,7 @@ func TestNewErrorReport(t *testing.T) {
 		"a source with a path that selects nothing still names the other": {
 			err:            errors.Join(badA, gone),
 			want:           []string{namedA},
-			wantUnresolved: []string{"second.yaml: $.x[0]: gone"},
+			wantUnresolved: []string{"second.yaml: $.x[*]: gone"},
 		},
 		"a source with no name is not named": {
 			err: errors.Join(badA, badD),
@@ -4460,7 +4460,7 @@ func TestNewErrorReport(t *testing.T) {
 		},
 		"a path that selects nothing is unresolved": {
 			err:            gone,
-			wantUnresolved: []string{"second.yaml: $.x[0]: gone"},
+			wantUnresolved: []string{"second.yaml: $.x[*]: gone"},
 		},
 		"a path into a document with no content has nothing to explain": {
 			err: yamltest.Bind(t, empty, yamltest.ErrorAt("bad a", "a")),

@@ -313,30 +313,39 @@ func (r *Resolver) Token(p Path) (*token.Token, error) {
 	return p.tokenOf(m)
 }
 
-// Nearest returns the path of the mapping that lacks a key p names, and
-// reports whether the document holds such a mapping. It resolves p from
-// the root of the document, whether p starts at `$` or `@`, and the path
-// it returns starts at `$`.
+// Nearest returns the path of the nearest node the document holds on the
+// way to p, and reports whether p misses a node below that node. It
+// resolves p from the root of the document, whether p starts at `$` or
+// `@`, and the path it returns starts at `$`.
 //
-// When the document leaves out a key that p names, p does not select
-// anything. The longest prefix of p that resolves is then where that key
-// belongs. Nearest returns that prefix when every selector of p after it
-// is a `.name` selector and the prefix resolves to a mapping or to a null.
-// Such a null stands in the place of a mapping. An error about a value
-// the document leaves out, such as a required field, points there:
+// When the document does not hold a node that p names, p does not select
+// anything. Nearest then returns the longest prefix of p that resolves,
+// whatever selector after it misses. That prefix can hold a mapping that
+// lacks a key, a sequence too short for an index, or a scalar, which does
+// not hold names. An error about a value the document does not hold,
+// such as a required field, points there:
 //
 //	// In a document that holds server and no tls under it.
 //	near, ok := r.Nearest(paths.Doc().Child("server", "tls", "cert"))
 //	// $.server, true
 //
-// It reports false for a path that resolves, because such a path does
-// not miss a key. It also reports false when p fails to select a node for
-// another reason. An index past the end of a sequence is one such reason,
-// and a name looked up in a scalar or a sequence is another. So is a `~`
-// selector after a sequence element or the root, which do not have a key.
-// A `.*`, `[*]`, or `..` selector anywhere in p gives false, and so does a
-// `~` selector at or after the missing key. An alias that does not resolve
-// also gives false, and so does a document without content.
+// A caller that inserts the missing value at the prefix must check the
+// kind of the node there. Only a mapping or a null takes a key, and only
+// a sequence takes an index.
+//
+// A prefix that ends in a `~` selector after a sequence element or the
+// root does not resolve, because neither has a key. Nearest goes on to
+// the shorter prefix before that `~`. That `~` does not read the element
+// or the root, so the prefix before it can be an alias that does not
+// resolve. Nearest returns such a prefix, and [Resolver.Token] gives the
+// token of its alias.
+//
+// It reports false for a path that [Resolver.Token] resolves. Such a path
+// includes one that ends in a `~` after an element or the root, because
+// an error at that path binds at the element or the root itself. A `.*`,
+// `[*]`, or `..` selector anywhere in p gives false. A path that enters
+// an alias that does not resolve also gives false, and so does a
+// document without content.
 func (r *Resolver) Nearest(p Path) (Path, bool) {
 	if p.wildcard() || r.doc == nil || !astnode.HasContent(r.doc.Body) {
 		return Path{}, false
@@ -350,25 +359,13 @@ func (r *Resolver) Nearest(p Path) (Path, bool) {
 			continue
 		}
 
-		// A `~` that does not find a key selects nothing, so the path
-		// misses more than a key.
-		if err != nil || k == len(p.segments) || m.keyless {
+		if err != nil || k == len(p.segments) {
 			return Path{}, false
 		}
 
-		for _, seg := range p.segments[k:] {
-			if seg.kind != segmentChild {
-				return Path{}, false
-			}
-		}
-
-		content, err := r.resolver.unwrap(m.node)
-		if err != nil || astnode.IsNil(content) {
-			return Path{}, false
-		}
-
-		if _, ok := content.(*ast.MappingNode); !ok && content.Type() != ast.NullType {
-			return Path{}, false
+		// A `~` that does not find a key does not select a node.
+		if m.keyless {
+			continue
 		}
 
 		return Doc().extend(p.segments[:k]...), true

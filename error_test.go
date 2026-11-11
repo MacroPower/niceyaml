@@ -197,8 +197,12 @@ func TestError(t *testing.T) {
 		},
 		"path that does not resolve names the reason": {
 			input: threeKeys,
-			err:   niceyaml.NewError("not found", niceyaml.AtPath(paths.Current().Child("nonexistent").Key())),
-			want:  stringtest.JoinLF("$.nonexistent~: not found", "", "no excerpt: resolve $.nonexistent~: not found"),
+			err:   niceyaml.NewError("not found", niceyaml.AtPath(paths.Current().Child("nonexistent").ChildAll())),
+			want: stringtest.JoinLF(
+				"$.nonexistent.*: not found",
+				"",
+				"no excerpt: resolve $.nonexistent.*: wildcard path matches any number of nodes",
+			),
 		},
 		"path without source": {
 			err:  niceyaml.NewError("missing source", niceyaml.AtPath(paths.Current().Child("key").Key())),
@@ -362,13 +366,20 @@ func TestError(t *testing.T) {
 			),
 		},
 		"root level array - selector after the key that an element lacks": {
-			// Only a path that ends in the `~` falls back to the element.
+			// The element does not have a key, so the path binds at the
+			// element, the nearest node the document holds.
 			input: stringtest.Input(`
 				- first
 				- k: v
 			`),
-			err:  niceyaml.NewError("below a key", niceyaml.AtPath(paths.Current().Index(1).Key().Child("k"))),
-			want: stringtest.JoinLF("$[1]~.k: below a key", "", "no excerpt: resolve $[1]~.k: not found"),
+			err: niceyaml.NewError("below a key", niceyaml.AtPath(paths.Current().Index(1).Key().Child("k"))),
+			want: stringtest.JoinLF(
+				"2:1: $[1]~.k: below a key",
+				"",
+				"<punctuationSequenceEntry>-</punctuationSequenceEntry><text> </text><literalString>first</literalString>",
+				"<genericError>-</genericError><text> </text><nameTag>k</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>v</literalString>",
+				"<textError>^</textError>",
+			),
 		},
 		"document root - no entry selected": {
 			// A key target on the root falls back to the mapping's first key.
@@ -557,10 +568,10 @@ func TestSourceError_Error_Name(t *testing.T) {
 			want: "config: bad value",
 		},
 		"name stands alone in front of a path that does not resolve": {
-			err:        niceyaml.NewError("bad value", niceyaml.AtPath(paths.Current().Child("missing").Index(0))),
+			err:        niceyaml.NewError("bad value", niceyaml.AtPath(paths.Current().Child("missing").IndexAll())),
 			name:       "config",
-			want:       "config: $.missing[0]: bad value",
-			wantDetail: "no excerpt: resolve $.missing[0]: not found",
+			want:       "config: $.missing[*]: bad value",
+			wantDetail: "no excerpt: resolve $.missing[*]: wildcard path matches any number of nodes",
 		},
 		"name stands alone in front of an empty message": {
 			err:  niceyaml.NewError(""),
@@ -722,8 +733,8 @@ func TestSourceError_Error_Document(t *testing.T) {
 			message: "bad",
 		},
 		"a path that does not resolve names its document": {
-			err:     docs[2].Bind(niceyaml.NewError("required", niceyaml.AtPath(itemsPath.Index(7)))),
-			want:    "m.yaml: document 3: $.items[7]: required",
+			err:     docs[2].Bind(niceyaml.NewError("required", niceyaml.AtPath(itemsPath.IndexAll()))),
+			want:    "m.yaml: document 3: $.items[*]: required",
 			message: "required",
 		},
 		"a position says which document, so no document goes beside it": {
@@ -974,13 +985,13 @@ func TestSourceError_Error_MultiError(t *testing.T) {
 		},
 		"a branch whose path does not resolve": {
 			err: listError{
-				niceyaml.NewError("bad x", niceyaml.AtPath(paths.Current().Child("x").Index(0))),
+				niceyaml.NewError("bad x", niceyaml.AtPath(paths.Current().Child("x").IndexAll())),
 				yamltest.ErrorAt("bad a", "a"),
 			},
 			want: stringtest.JoinLF(
 				"f.yaml: bad x; bad a",
 				"f.yaml:1:4: $.a: bad a",
-				"f.yaml: $.x[0]: bad x",
+				"f.yaml: $.x[*]: bad x",
 			),
 		},
 		"a list with located and unlocated branches": {
@@ -1949,7 +1960,8 @@ func TestError_MultiError(t *testing.T) {
 	namePath := paths.Current().Child("name")
 	otherPath := paths.Current().Child("other")
 	keyPath := paths.Current().Child("key")
-	missingPath := paths.Current().Child("nonexistent")
+	// A wildcard path does not resolve to one node.
+	unresolvedPath := paths.Current().Child("nonexistent").ChildAll()
 
 	tcs := map[string]struct {
 		source string
@@ -2038,13 +2050,13 @@ func TestError_MultiError(t *testing.T) {
 		"nested error that does not resolve stays in the message": {
 			source: "key: value",
 			err: niceyaml.NewError("main error", niceyaml.AtPath(keyPath.Key()), niceyaml.WithDetails(
-				niceyaml.NewError("nested error", niceyaml.AtPath(missingPath.Key())),
+				niceyaml.NewError("nested error", niceyaml.AtPath(unresolvedPath)),
 			)),
 			// The nested error has no line to annotate, so the message is the
 			// only place it appears.
-			wantPrefix: stringtest.LinesLF("1:1: $.key~: main error", "└── $.nonexistent~: nested error", ""),
+			wantPrefix: stringtest.LinesLF("1:1: $.key~: main error", "└── $.nonexistent.*: nested error", ""),
 			want:       []string{"<genericError>key</genericError>"},
-			wantNot:    []string{"^ nested error", "\n\n$.nonexistent~"},
+			wantNot:    []string{"^ nested error", "\n\n$.nonexistent.*"},
 		},
 		"nested error without path or token stays in the message": {
 			source: "key: value",
@@ -2099,18 +2111,18 @@ func TestError_MultiError(t *testing.T) {
 			err: niceyaml.NewSummary(
 				"validation failed",
 				yamltest.ErrorAt("resolvable error", "value"),
-				niceyaml.NewError("unresolvable error", niceyaml.AtPath(missingPath.Key())),
+				niceyaml.NewError("unresolvable error", niceyaml.AtPath(unresolvedPath)),
 			),
 			// Both nested errors are part of the message, and only the one that
 			// resolves annotates the excerpt.
 			wantPrefix: stringtest.LinesLF(
 				"validation failed",
 				"├── 2:8: $.value: resolvable error",
-				"└── $.nonexistent~: unresolvable error",
+				"└── $.nonexistent.*: unresolvable error",
 				"",
 			),
 			want:    []string{"^ resolvable error"},
-			wantNot: []string{"^ unresolvable error", "\n\n$.nonexistent~"},
+			wantNot: []string{"^ unresolvable error", "\n\n$.nonexistent.*"},
 		},
 	}
 
@@ -2348,8 +2360,8 @@ func TestSourceError_UnresolvedNestedInTree(t *testing.T) {
 	source := niceyaml.NewSourceFromString("a: 1\n")
 	err := yamltest.Bind(t, source, niceyaml.NewSummary(
 		"2 schema violations",
-		niceyaml.NewError("bad x", niceyaml.AtPath(paths.Current().Child("x").Index(0))),
-		niceyaml.NewError("bad y", niceyaml.AtPath(paths.Current().Child("y").Index(0))),
+		niceyaml.NewError("bad x", niceyaml.AtPath(paths.Current().Child("x").IndexAll())),
+		niceyaml.NewError("bad y", niceyaml.AtPath(paths.Current().Child("y").IndexAll())),
 	))
 
 	// The message and the %+v verb list each nested error behind its
@@ -2357,18 +2369,18 @@ func TestSourceError_UnresolvedNestedInTree(t *testing.T) {
 	// beyond the connectors of the tree.
 	assert.Equal(t, stringtest.JoinLF(
 		"2 schema violations",
-		"$.x[0]: bad x",
-		"$.y[0]: bad y",
+		"$.x[*]: bad x",
+		"$.y[*]: bad y",
 	), err.Error())
 	assert.Equal(t, stringtest.JoinLF(
 		"2 schema violations",
-		"|-- $.x[0]: bad x",
-		"`-- $.y[0]: bad y",
+		"|-- $.x[*]: bad x",
+		"`-- $.y[*]: bad y",
 	), report(err))
 	assert.Equal(t, stringtest.JoinLF(
 		"2 schema violations",
-		"├── $.x[0]: bad x",
-		"└── $.y[0]: bad y",
+		"├── $.x[*]: bad x",
+		"└── $.y[*]: bad y",
 	), render(err))
 
 	// The summary carries no location of its own, so it has no reason to
@@ -2383,7 +2395,7 @@ func TestSourceError_UnresolvedNestedInTree(t *testing.T) {
 	require.Len(t, children, 2)
 
 	for _, child := range children {
-		require.ErrorIs(t, child.Bound.Unresolved(), paths.ErrNotFound)
+		require.ErrorIs(t, child.Bound.Unresolved(), paths.ErrWildcard)
 	}
 }
 
@@ -2506,8 +2518,12 @@ func TestSourceError_Format_Plain(t *testing.T) {
 		},
 		"names why no excerpt resolves": {
 			input: "a: 1\n",
-			err:   niceyaml.NewError("bad value", niceyaml.AtPath(paths.Current().Child("b").Index(0))),
-			want:  stringtest.JoinLF("$.b[0]: bad value", "", "no excerpt: resolve $.b[0]: not found"),
+			err:   niceyaml.NewError("bad value", niceyaml.AtPath(paths.Current().Child("b").IndexAll())),
+			want: stringtest.JoinLF(
+				"$.b[*]: bad value",
+				"",
+				"no excerpt: resolve $.b[*]: wildcard path matches any number of nodes",
+			),
 		},
 		// The value holds a tab, which the excerpt draws as its one-cell
 		// picture, so the carets keep one cell per column.
@@ -2659,7 +2675,7 @@ func TestSourceError_Format_Plain(t *testing.T) {
 		src := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("f"))
 		err := yamltest.Bind(t, src, niceyaml.NewError(
 			"m\x1b[31mX",
-			niceyaml.AtPath(paths.Current().Child("k\x1b[31mY").Index(0)),
+			niceyaml.AtPath(paths.Current().Child("k\x1b[31mY").IndexAll()),
 		))
 
 		got := niceyaml.FormatError(err, niceyaml.WithContextLines(0))
@@ -3928,7 +3944,7 @@ func TestSourceError_NestedPositionsBehindWrappers(t *testing.T) {
 	source := errorTreeSource()
 	inner := niceyaml.NewSummary("2 problems",
 		yamltest.ErrorAt("bad a", "a"),
-		niceyaml.NewError("bad b", niceyaml.AtPath(paths.Current().Child("missing").Index(0))),
+		niceyaml.NewError("bad b", niceyaml.AtPath(paths.Current().Child("missing").IndexAll())),
 	)
 
 	tcs := map[string]struct {
@@ -3943,12 +3959,12 @@ func TestSourceError_NestedPositionsBehindWrappers(t *testing.T) {
 			want: stringtest.JoinLF(
 				"f.yaml: 2 problems",
 				"|-- 1:4: $.a: bad a",
-				"`-- $.missing[0]: bad b",
+				"`-- $.missing[*]: bad b",
 			),
 			wantMsg: stringtest.JoinLF(
 				"f.yaml: 2 problems",
 				"f.yaml:1:4: $.a: bad a",
-				"f.yaml: $.missing[0]: bad b",
+				"f.yaml: $.missing[*]: bad b",
 			),
 		},
 		"context in front keeps the nested lines at the end": {
@@ -3956,12 +3972,12 @@ func TestSourceError_NestedPositionsBehindWrappers(t *testing.T) {
 			want: stringtest.JoinLF(
 				"f.yaml: document 0: 2 problems",
 				"|-- 1:4: $.a: bad a",
-				"`-- $.missing[0]: bad b",
+				"`-- $.missing[*]: bad b",
 			),
 			wantMsg: stringtest.JoinLF(
 				"f.yaml: document 0: 2 problems",
 				"f.yaml:1:4: $.a: bad a",
-				"f.yaml: $.missing[0]: bad b",
+				"f.yaml: $.missing[*]: bad b",
 			),
 		},
 		"details inside details": {
@@ -3982,12 +3998,12 @@ func TestSourceError_NestedPositionsBehindWrappers(t *testing.T) {
 			want: stringtest.JoinLF(
 				"f.yaml: rewritten",
 				"|-- 1:4: $.a: bad a",
-				"`-- $.missing[0]: bad b",
+				"`-- $.missing[*]: bad b",
 			),
 			wantMsg: stringtest.JoinLF(
 				"f.yaml: rewritten",
 				"f.yaml:1:4: $.a: bad a",
-				"f.yaml: $.missing[0]: bad b",
+				"f.yaml: $.missing[*]: bad b",
 			),
 		},
 	}
@@ -4619,9 +4635,13 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 			wantRender: "bad",
 		},
 		"path that does not resolve": {
-			err:        niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("missing").Index(0))),
-			is:         paths.ErrNotFound,
-			wantRender: stringtest.JoinLF("$.missing[0]: bad", "", "no excerpt: resolve $.missing[0]: not found"),
+			err: niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("missing").IndexAll())),
+			is:  paths.ErrWildcard,
+			wantRender: stringtest.JoinLF(
+				"$.missing[*]: bad",
+				"",
+				"no excerpt: resolve $.missing[*]: wildcard path matches any number of nodes",
+			),
 		},
 		"range past the last line": {
 			err: niceyaml.NewError("bad",
@@ -4656,29 +4676,29 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 		},
 		"nested range before the first line": {
 			err: niceyaml.NewError("bad",
-				niceyaml.AtPath(paths.Current().Child("missing").Index(0)),
+				niceyaml.AtPath(paths.Current().Child("missing").IndexAll()),
 				niceyaml.WithDetails(
 					niceyaml.NewError("first",
 						niceyaml.AtRange(yamltest.LineRange(-1, 0, 2)),
 					),
 				),
 			),
-			is: paths.ErrNotFound,
+			is: paths.ErrWildcard,
 			wantRender: stringtest.JoinLF(
-				"$.missing[0]: bad",
+				"$.missing[*]: bad",
 				"└── first",
 				"",
-				"no excerpt: resolve $.missing[0]: not found",
+				"no excerpt: resolve $.missing[*]: wildcard path matches any number of nodes",
 			),
 		},
 		"every nested error unresolved": {
 			err: niceyaml.NewSummary("bad",
-				niceyaml.NewError("first", niceyaml.AtPath(paths.Current().Child("missing").Index(0))),
+				niceyaml.NewError("first", niceyaml.AtPath(paths.Current().Child("missing").IndexAll())),
 				niceyaml.NewError("second", niceyaml.AtPosition(position.New(9, 0))),
 			),
 			wantRender: stringtest.JoinLF(
 				"bad",
-				"├── $.missing[0]: first",
+				"├── $.missing[*]: first",
 				"└── second",
 			),
 		},
@@ -4708,7 +4728,7 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 		t.Parallel()
 
 		bound := requireBound(t, source, niceyaml.NewSummary("bad",
-			niceyaml.NewError("first", niceyaml.AtPath(paths.Current().Child("missing").Index(0))),
+			niceyaml.NewError("first", niceyaml.AtPath(paths.Current().Child("missing").IndexAll())),
 			yamltest.ErrorAt("second", "value"),
 		))
 
@@ -4723,11 +4743,11 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 		t.Parallel()
 
 		bound := requireBound(t, source, niceyaml.NewError("bad",
-			niceyaml.AtPath(paths.Current().Child("missing").Index(0)),
+			niceyaml.AtPath(paths.Current().Child("missing").IndexAll()),
 			niceyaml.WithDetails(yamltest.ErrorAt("first", "name")),
 		))
 
-		requireUnresolved(t, bound, paths.ErrNotFound)
+		requireUnresolved(t, bound, paths.ErrWildcard)
 
 		requireExcerpt(t, bound, niceyaml.WithContextLines(0))
 
@@ -4735,7 +4755,7 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 		// its message in the tree without a position or a reason.
 		assert.Equal(t,
 			stringtest.JoinLF(
-				"$.missing[0]: bad",
+				"$.missing[*]: bad",
 				"`-- 1:7: $.name: first",
 				"",
 				"   1 | name: test",
@@ -5576,8 +5596,8 @@ func TestSourceError_Annotate(t *testing.T) {
 				err: niceyaml.NewError("bad"),
 			},
 			"path that does not resolve": {
-				err: niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("missing").Index(0))),
-				is:  paths.ErrNotFound,
+				err: niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("missing").IndexAll())),
+				is:  paths.ErrWildcard,
 			},
 			"range past the last line": {
 				err: niceyaml.NewError("bad",
@@ -5927,7 +5947,7 @@ func TestAnnotate(t *testing.T) {
 			},
 			"binding whose path selects nothing": {
 				err: yamltest.Bind(t, source, niceyaml.NewError("bad",
-					niceyaml.AtPath(paths.Current().Child("missing").Index(0)),
+					niceyaml.AtPath(paths.Current().Child("missing").IndexAll()),
 				)),
 				view: source.View(),
 			},
@@ -6305,12 +6325,12 @@ func TestSourceError_TreeBranches(t *testing.T) {
 	t.Run("a join branch that does not resolve is listed without a position", func(t *testing.T) {
 		t.Parallel()
 
-		missing := niceyaml.NewError("bad x", niceyaml.AtPath(paths.Current().Child("x").Index(0)))
+		missing := niceyaml.NewError("bad x", niceyaml.AtPath(paths.Current().Child("x").IndexAll()))
 		err := yamltest.Bind(t, source, errors.Join(badA, missing))
 
 		tree, excerpt := renderParts(err)
-		assert.Equal(t, stringtest.JoinLF("├── 1:4: $.a: bad a", "└── $.x[0]: bad x"), tree)
-		assert.NotContains(t, excerpt, "$.x[0]: bad x")
+		assert.Equal(t, stringtest.JoinLF("├── 1:4: $.a: bad a", "└── $.x[*]: bad x"), tree)
+		assert.NotContains(t, excerpt, "$.x[*]: bad x")
 	})
 
 	t.Run("a bound error inside the tree keeps its own binding", func(t *testing.T) {
@@ -7050,11 +7070,15 @@ func TestFormatError_ExcerptsOff(t *testing.T) {
 		// The reason names the path, which the tree names already, and no
 		// text of the source.
 		"a location that does not resolve keeps its reason": {
-			err: yamltest.Bind(t, secrets, niceyaml.NewError("not a list", niceyaml.AtPath(db.Child("port").Index(3)))),
+			err: yamltest.Bind(
+				t,
+				secrets,
+				niceyaml.NewError("not a list", niceyaml.AtPath(db.Child("port").IndexAll())),
+			),
 			want: stringtest.JoinLF(
-				"secrets.yaml: $.db.port[3]: not a list",
+				"secrets.yaml: $.db.port[*]: not a list",
 				"",
-				"no excerpt: resolve $.db.port[3]: not found",
+				"no excerpt: resolve $.db.port[*]: wildcard path matches any number of nodes",
 			),
 		},
 		"a binding in another source keeps its excerpt": {
@@ -7593,7 +7617,7 @@ func TestSourceError_Errors(t *testing.T) {
 
 	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
 	badA := yamltest.ErrorAt("bad a", "a")
-	badX := niceyaml.NewError("bad x", niceyaml.AtPath(paths.Current().Child("x").Index(0)))
+	badX := niceyaml.NewError("bad x", niceyaml.AtPath(paths.Current().Child("x").IndexAll()))
 	deep := yamltest.ErrorAt("deep", "b")
 	mid := niceyaml.NewError("mid", niceyaml.WithDetails(deep))
 
@@ -7615,7 +7639,7 @@ func TestSourceError_Errors(t *testing.T) {
 
 	// One that did not resolve reports why, and one that carries no
 	// location reports that.
-	requireUnresolved(t, children[1].Bound, paths.ErrNotFound)
+	requireUnresolved(t, children[1].Bound, paths.ErrWildcard)
 	requireUnresolved(t, children[2].Bound, nil)
 
 	// The detail of a problem the summary heads binds below that problem,
@@ -9465,12 +9489,12 @@ func TestFormatError(t *testing.T) {
 		},
 		"names why a binding of a join marks nothing after the excerpts": {
 			err: errors.Join(
-				docs[0].Bind(niceyaml.NewError("gone", niceyaml.AtPath(paths.Current().Child("x").Index(0)))),
+				docs[0].Bind(niceyaml.NewError("gone", niceyaml.AtPath(paths.Current().Child("x").IndexAll()))),
 				docs[1].Bind(yamltest.ErrorAt("bad b", "b")),
 				docs[1].Bind(errors.New("plain")),
 			),
 			want: stringtest.JoinLF(
-				"|-- f.yaml: document 1: $.x[0]: gone",
+				"|-- f.yaml: document 1: $.x[*]: gone",
 				"|-- f.yaml:3:4: $.b: bad b",
 				"`-- f.yaml: document 2: plain",
 				"",
@@ -9479,7 +9503,7 @@ func TestFormatError(t *testing.T) {
 				"   3 | b: 2",
 				"     |    ^ bad b",
 				"",
-				"no excerpt: resolve $.x[0]: not found",
+				"no excerpt: resolve $.x[*]: wildcard path matches any number of nodes",
 			),
 		},
 		// Each tab becomes four spaces, wherever it falls in its row.
@@ -9501,12 +9525,12 @@ func TestFormatError(t *testing.T) {
 		"a tab in the key of a path that does not resolve": {
 			err: yamltest.Bind(t,
 				niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("cfg.yaml")),
-				niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("ab\tc").Index(0))),
+				niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("ab\tc").IndexAll())),
 			),
 			want: stringtest.JoinLF(
-				`cfg.yaml: $.'ab\tc'[0]: bad`,
+				`cfg.yaml: $.'ab\tc'[*]: bad`,
 				"",
-				`no excerpt: resolve $.'ab\tc'[0]: not found`,
+				`no excerpt: resolve $.'ab\tc'[*]: wildcard path matches any number of nodes`,
 			),
 		},
 		// A line feed in the key is an escape too, so the key starts
@@ -9514,12 +9538,12 @@ func TestFormatError(t *testing.T) {
 		"a line feed and a tab in a key": {
 			err: yamltest.Bind(t,
 				niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("cfg.yaml")),
-				niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("x\ny\tz").Index(0))),
+				niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("x\ny\tz").IndexAll())),
 			),
 			want: stringtest.JoinLF(
-				`cfg.yaml: $.'x\ny\tz'[0]: bad`,
+				`cfg.yaml: $.'x\ny\tz'[*]: bad`,
 				"",
-				`no excerpt: resolve $.'x\ny\tz'[0]: not found`,
+				`no excerpt: resolve $.'x\ny\tz'[*]: wildcard path matches any number of nodes`,
 			),
 		},
 		// The excerpt spells the message beside the caret as the tree
@@ -10251,19 +10275,39 @@ func TestSourceError_Nearest(t *testing.T) {
 			rng:  yamltest.LineRange(3, 2, 3),
 		},
 		"name in a scalar": {
-			err:    yamltest.ErrorAt("bad", "note", "text"),
-			want:   "cfg.yaml: $.note.text: bad",
-			reason: paths.ErrNotFound,
+			err:  yamltest.ErrorAt("bad", "note", "text"),
+			want: "cfg.yaml:6:7: $.note.text: bad",
+			near: "$.note",
+			rng:  yamltest.LineRange(5, 6, 11),
 		},
 		"index past the end": {
-			err:    niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("servers").Index(5).Child("name"))),
-			want:   "cfg.yaml: $.servers[5].name: bad",
-			reason: paths.ErrNotFound,
+			err:  niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("servers").Index(5).Child("name"))),
+			want: "cfg.yaml:1:1: $.servers[5].name: bad",
+			near: "$.servers",
+			rng:  yamltest.LineRange(0, 0, 7),
+		},
+		"index in a mapping": {
+			err:  niceyaml.NewError("bad", niceyaml.AtPath(second.Index(0))),
+			want: "cfg.yaml:4:3: $.servers[1][0]: bad",
+			near: "$.servers[1]",
+			rng:  yamltest.LineRange(3, 2, 3),
+		},
+		"index below a null": {
+			err:  niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("tls").Index(0))),
+			want: "cfg.yaml:5:1: $.tls[0]: bad",
+			near: "$.tls",
+			rng:  yamltest.LineRange(4, 0, 3),
 		},
 		"key selector on the missing key": {
-			err:    niceyaml.NewError("bad", niceyaml.AtPath(name.Key())),
-			want:   "cfg.yaml: $.servers[1].name~: bad",
-			reason: paths.ErrNotFound,
+			err:  niceyaml.NewError("bad", niceyaml.AtPath(name.Key())),
+			want: "cfg.yaml:4:3: $.servers[1].name~: bad",
+			near: "$.servers[1]",
+			rng:  yamltest.LineRange(3, 2, 3),
+		},
+		"wildcard": {
+			err:    niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("servers").IndexAll())),
+			want:   "cfg.yaml: $.servers[*]: bad",
+			reason: paths.ErrWildcard,
 		},
 		"no location": {
 			err:  errors.New("bad"),
@@ -10693,10 +10737,10 @@ func TestError_Format_ListLimit(t *testing.T) {
 			problems = append(problems, yamltest.Bind(t, source, err))
 		}
 
-		missing := niceyaml.NewError("bad port", niceyaml.AtPath(paths.Current().Child("port").Index(0)))
+		missing := niceyaml.NewError("bad port", niceyaml.AtPath(paths.Current().Child("port").IndexAll()))
 		err := niceyaml.NewSummary("summary", append(problems, yamltest.Bind(t, source, missing))...)
 
-		const reason = "no excerpt: resolve $.port[0]: not found"
+		const reason = "no excerpt: resolve $.port[*]: wildcard path matches any number of nodes"
 
 		assert.Contains(t, niceyaml.FormatError(err, niceyaml.WithContextLines(0)), reason)
 
@@ -11920,19 +11964,25 @@ func TestLocate(t *testing.T) {
 		// that file, and the binding of the result adopted the warning.
 		adoptedKey := included.Bind(niceyaml.Locate(oldKey, niceyaml.AtPath(paths.Doc())))
 
-		// The license holds a string, so this path does not resolve.
-		ownerPath := paths.Doc().Child("license").Child("owner")
+		// A wildcard path does not resolve to one node, so this path does
+		// not resolve.
+		ownerPath := paths.Doc().Child("license").ChildAll()
 
-		// The close key holds a number, so this path does not resolve
-		// below the hours either.
+		// This path does not resolve below the hours either.
 		hours := yamltest.At(t, doc, paths.Doc().Child("hours"))
-		deepPath := closePath.Child("deep")
+		deepPath := closePath.ChildAll()
 
 		// The line of each value names its document in a file of several.
 		multiSource := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\nc: 3\n", niceyaml.WithName("m.yaml"))
 		multi := yamltest.AllDocuments(t, multiSource, 2)
 
-		bDeepPath := paths.Current().Child("b").Child("deep")
+		bDeepPath := paths.Current().Child("b").ChildAll()
+
+		// No path resolves in the second document of this file, and a
+		// path of the first binds at its root.
+		bareSecond := yamltest.AllDocuments(t,
+			niceyaml.NewSourceFromString("a: 1\n---\n# none\n", niceyaml.WithName("m.yaml")), 2)
+		bPath := paths.Current().Child("b")
 
 		secondLine := stringtest.JoinLF(
 			"   2 | ---",
@@ -11993,8 +12043,8 @@ func TestLocate(t *testing.T) {
 					doc.Bind(niceyaml.NewError("no owner", niceyaml.AtPath(ownerPath))),
 					niceyaml.AtPath(licensePath),
 				)),
-				want:    "cfg.yaml:4:10: $.license: $.license.owner: no owner",
-				message: "$.license.owner: no owner",
+				want:    "cfg.yaml:4:10: $.license: $.license.*: no owner",
+				message: "$.license.*: no owner",
 			},
 			"whose path did not resolve and matches the options names it once": {
 				// The row shows the path of the options, which is the path of
@@ -12003,18 +12053,18 @@ func TestLocate(t *testing.T) {
 					doc.Bind(niceyaml.NewError("no owner", niceyaml.AtPath(ownerPath))),
 					niceyaml.AtPath(ownerPath),
 				)),
-				want:    "cfg.yaml: $.license.owner: no owner",
+				want:    "cfg.yaml: $.license.*: no owner",
 				message: "no owner",
-				excerpt: "no excerpt: resolve $.license.owner: not found",
+				excerpt: "no excerpt: resolve $.license.*: wildcard path matches any number of nodes",
 			},
 			"of a scoped node whose path matches the options names it once": {
 				err: hours.Bind(niceyaml.Locate(
 					hours.Bind(niceyaml.NewError("required", niceyaml.AtPath(deepPath))),
 					niceyaml.AtPath(deepPath),
 				)),
-				want:    "cfg.yaml: $.hours.close.deep: required",
+				want:    "cfg.yaml: $.hours.close.*: required",
 				message: "required",
-				excerpt: "no excerpt: resolve $.hours.close.deep: not found",
+				excerpt: "no excerpt: resolve $.hours.close.*: wildcard path matches any number of nodes",
 			},
 			"in the document of the result leaves out the document": {
 				// The line of the options lies in the second document, so it
@@ -12029,11 +12079,11 @@ func TestLocate(t *testing.T) {
 			},
 			"whose path did not resolve in the document of the result keeps that path": {
 				err: multi[1].Bind(niceyaml.Locate(
-					multi[1].Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b").Child("deep")))),
+					multi[1].Bind(niceyaml.NewError("bad", niceyaml.AtPath(bDeepPath))),
 					niceyaml.AtPath(paths.Current().Child("c")),
 				)),
-				want:    "m.yaml:4:4: $.c: $.b.deep: bad",
-				message: "$.b.deep: bad",
+				want:    "m.yaml:4:4: $.c: $.b.*: bad",
+				message: "$.b.*: bad",
 				excerpt: secondLine,
 			},
 			"in another document names that document": {
@@ -12055,17 +12105,17 @@ func TestLocate(t *testing.T) {
 			"whose path matches the options in another document keeps that path": {
 				// The line names the document of the binding, so the path
 				// behind that document is not the one the row shows.
-				err: multi[0].Bind(niceyaml.Locate(
-					multi[1].Bind(niceyaml.NewError("bad", niceyaml.AtPath(bDeepPath))),
-					niceyaml.AtPath(bDeepPath),
+				err: bareSecond[0].Bind(niceyaml.Locate(
+					bareSecond[1].Bind(niceyaml.NewError("bad", niceyaml.AtPath(bPath))),
+					niceyaml.AtPath(bPath),
 				)),
-				want:    "m.yaml:1:1: $.b.deep: document 2: $.b.deep: bad",
-				message: "document 2: $.b.deep: bad",
+				want:    "m.yaml:1:1: $.b: document 2: $.b: bad",
+				message: "document 2: $.b: bad",
 				excerpt: stringtest.JoinLF(
 					"   1 | a: 1",
 					"     | ^",
 					"   2 | ---",
-					"   3 | b: 2",
+					"   3 | # none",
 				),
 			},
 			"bound by the source whose path matches the options names it once": {
@@ -12105,18 +12155,18 @@ func TestLocate(t *testing.T) {
 					niceyaml.Detach(doc.Bind(niceyaml.NewError("no owner", niceyaml.AtPath(ownerPath)))),
 					niceyaml.AtPath(ownerPath),
 				)),
-				want:    "cfg.yaml: $.license.owner: no owner",
+				want:    "cfg.yaml: $.license.*: no owner",
 				message: "no owner",
-				excerpt: "no excerpt: resolve $.license.owner: not found",
+				excerpt: "no excerpt: resolve $.license.*: wildcard path matches any number of nodes",
 			},
 			"detached in the document of the result, whose path matches the options names it once": {
 				err: multi[1].Bind(niceyaml.Locate(
 					niceyaml.Detach(multi[1].Bind(niceyaml.NewError("bad", niceyaml.AtPath(bDeepPath)))),
 					niceyaml.AtPath(bDeepPath),
 				)),
-				want:    "m.yaml: document 2: $.b.deep: bad",
+				want:    "m.yaml: document 2: $.b.*: bad",
 				message: "bad",
-				excerpt: "no excerpt: resolve $.b.deep: not found",
+				excerpt: "no excerpt: resolve $.b.*: wildcard path matches any number of nodes",
 			},
 			"detached, whose location resolved keeps it": {
 				// The result binds in cfg.yaml again, so the excerpt shows
@@ -12135,9 +12185,9 @@ func TestLocate(t *testing.T) {
 					doc.Bind(niceyaml.NewError("no owner", niceyaml.AtPath(ownerPath))),
 					niceyaml.AtPath(ownerPath),
 				),
-				want:    "cfg.yaml: $.license.owner: no owner",
+				want:    "cfg.yaml: $.license.*: no owner",
 				message: "no owner",
-				excerpt: "no excerpt: resolve $.license.owner: not found",
+				excerpt: "no excerpt: resolve $.license.*: wildcard path matches any number of nodes",
 			},
 			"before the bind, nested results whose path matches the options name it once": {
 				// A helper and its caller both locate the binding at its path,
@@ -12149,9 +12199,9 @@ func TestLocate(t *testing.T) {
 					),
 					niceyaml.AtPath(ownerPath),
 				),
-				want:    "cfg.yaml: $.license.owner: no owner",
+				want:    "cfg.yaml: $.license.*: no owner",
 				message: "no owner",
-				excerpt: "no excerpt: resolve $.license.owner: not found",
+				excerpt: "no excerpt: resolve $.license.*: wildcard path matches any number of nodes",
 			},
 			"before the bind, a result at the path of the binding around one at its parent names it once": {
 				// A bind takes the location of the outer result alone, so the
@@ -12163,9 +12213,9 @@ func TestLocate(t *testing.T) {
 					),
 					niceyaml.AtPath(ownerPath),
 				),
-				want:    "cfg.yaml: $.license.owner: no owner",
+				want:    "cfg.yaml: $.license.*: no owner",
 				message: "no owner",
-				excerpt: "no excerpt: resolve $.license.owner: not found",
+				excerpt: "no excerpt: resolve $.license.*: wildcard path matches any number of nodes",
 			},
 			"before the bind, a result at the path of the binding around one at a position names it once": {
 				err: niceyaml.Locate(
@@ -12175,9 +12225,9 @@ func TestLocate(t *testing.T) {
 					),
 					niceyaml.AtPath(ownerPath),
 				),
-				want:    "cfg.yaml: $.license.owner: no owner",
+				want:    "cfg.yaml: $.license.*: no owner",
 				message: "no owner",
-				excerpt: "no excerpt: resolve $.license.owner: not found",
+				excerpt: "no excerpt: resolve $.license.*: wildcard path matches any number of nodes",
 			},
 			"of a warning whose path did not resolve labels the row once": {
 				// The row of the result carries the warning label, so the
@@ -12186,8 +12236,8 @@ func TestLocate(t *testing.T) {
 					doc.Bind(niceyaml.NewWarning("old owner", niceyaml.AtPath(ownerPath))),
 					niceyaml.AtPath(licensePath),
 				)),
-				want:    "cfg.yaml:4:10: warning: $.license: $.license.owner: old owner",
-				message: "$.license.owner: old owner",
+				want:    "cfg.yaml:4:10: warning: $.license: $.license.*: old owner",
+				message: "$.license.*: old owner",
 			},
 			"of a warning of another source labels the row once": {
 				// The row of the result carries the warning label, so the

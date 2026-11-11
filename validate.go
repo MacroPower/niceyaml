@@ -397,9 +397,10 @@ func (w *selfWalker) walkValue(v reflect.Value, at place, shadowed map[string]bo
 }
 
 // enter records the value at at, which decodes itself, as where an error
-// below it binds when the document lacks the error's path. A slice, array,
-// or map seals the record, because tags do not say where its elements
-// sit.
+// below it binds when the path of the error does not bind at any node of
+// the document. A slice, array, or map seals the record, because tags do
+// not say where its elements sit. Every error below such a value binds at
+// it.
 func (w *selfWalker) enter(kind reflect.Kind, at place) {
 	if w.sealed {
 		return
@@ -418,9 +419,10 @@ func (w *selfWalker) enter(kind reflect.Kind, at place) {
 }
 
 // fallback returns where an error of the value the walk is at binds when
-// the document does not hold the path of the error. The result lists the
-// paths of the values that the walk is inside of and that decode
-// themselves, the nearest first.
+// the path of the error does not bind at any node of the document, such
+// as a wildcard path. The nearest node that the document holds along that
+// path wins over it. The result lists the paths of the values that the
+// walk is inside of and that decode themselves, the nearest first.
 func (w *selfWalker) fallback() fallback {
 	if len(w.within) == 0 {
 		return fallback{}
@@ -1417,8 +1419,8 @@ func (n *Node) DataLocator() *DataLocator {
 // Names that lead past the data keep the form the caller wrote from there
 // on. The error binds where that path binds, as [SourceError.Nearest]
 // describes. A member that a mapping lacks binds at the key of the
-// mapping. An index past the end of a sequence, or a name below a scalar,
-// binds without a position.
+// mapping, and an index past the end of a sequence binds at the key of the
+// sequence. A name below a scalar binds at the scalar.
 //
 // A name can lead behind an alias that the document cannot follow, such
 // as an alias to an anchor of a document from [WithReferences]. So can a
