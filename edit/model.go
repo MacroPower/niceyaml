@@ -371,6 +371,10 @@ type modelCall struct {
 	// Whether the model maps the place. It then holds the edge at the place,
 	// or the value that holds the place when the place does not hold a value.
 	mapped bool
+	// Whether the place lies below the root of an empty document, where a
+	// Set writes the root with the mappings above its value, as
+	// [Doc.setFirst] writes them.
+	bare bool
 }
 
 // placeOf returns the place p of the current text as a call of the model
@@ -381,6 +385,9 @@ func (x *model) placeOf(p *place) modelCall {
 	switch {
 	case p.root:
 		c.edge, c.mapped = x.top, true
+
+	case p.bare:
+		c.bare, c.mapped = true, true
 
 	case p.exists && p.entry != nil:
 		te := x.text.entries[p.entry]
@@ -491,6 +498,14 @@ func (c *modelCall) set(e *edge, where modelPlace) bool {
 			c.x.share(old, e)
 		}
 
+		c.x.wroteIn(e.val)
+
+		return true
+
+	case c.bare:
+		// The value of e holds the mappings above the place, and it takes the
+		// place of the root.
+		c.x.top.val, c.x.top.tag = e.val, e.tag
 		c.x.wroteIn(e.val)
 
 		return true

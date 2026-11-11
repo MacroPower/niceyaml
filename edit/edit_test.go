@@ -141,9 +141,6 @@ func TestNew(t *testing.T) {
 		doc  *niceyaml.Node
 		opts []edit.Option
 		err  string
-		// Whether niceyaml.IsInvalid reports the error, because the text of
-		// the document is at fault.
-		invalid bool
 		// Whether the error matches edit.ErrUsage, because the program is at
 		// fault.
 		usage bool
@@ -152,40 +149,14 @@ func TestNew(t *testing.T) {
 		scoped bool
 	}{
 		"nil document": {
-			err:   "New takes the root of a document that holds a value, not nil",
+			err:   "New takes the root of a document, not nil",
 			usage: true,
 		},
 		"node below the root": {
 			doc:    below,
-			err:    "New takes the root of a document that holds a value, not the node at $.a",
+			err:    "New takes the root of a document, not the node at $.a",
 			usage:  true,
 			scoped: true,
-		},
-		"empty document": {
-			doc:     niceyaml.NewSourceFromString("# only a comment\n").AllDocuments()[0],
-			err:     "New takes the root of a document that holds a value, not an empty document",
-			invalid: true,
-		},
-		"document of a tag alone": {
-			// Go-yaml's parser reads no value from the document.
-			doc:     niceyaml.NewSourceFromString("!!str").AllDocuments()[0],
-			err:     "New takes the root of a document that holds a value, not an empty document",
-			invalid: true,
-		},
-		"control: document of a tag after a header": {
-			// A control: the tag ends the text, so go-yaml's parser reads no
-			// value from the document.
-			doc:     niceyaml.NewSourceFromString("--- !t").AllDocuments()[0],
-			err:     "New takes the root of a document that holds a value, not an empty document",
-			invalid: true,
-		},
-		"control: document of a tag that a tab ends": {
-			// A control for the doc of New (fix25 G25-3). Go-yaml's lexer reads
-			// the tab into the tag, so the tag ends the text. Go-yaml's parser
-			// then reads no value from the document.
-			doc:     niceyaml.NewSourceFromString("!t\t").AllDocuments()[0],
-			err:     "New takes the root of a document that holds a value, not an empty document",
-			invalid: true,
 		},
 		"protected path that selects more than one value": {
 			doc:   doc,
@@ -208,7 +179,7 @@ func TestNew(t *testing.T) {
 			_, err := edit.New(tc.doc, tc.opts...)
 			require.Error(t, err)
 			assert.Equal(t, tc.err, err.Error())
-			assert.Equal(t, tc.invalid, niceyaml.IsInvalid(err))
+			assert.False(t, niceyaml.IsInvalid(err))
 			assert.Equal(t, tc.usage, errors.Is(err, edit.ErrUsage))
 			assert.Equal(t, tc.scoped, errors.Is(err, niceyaml.ErrScopedNode))
 			require.NotErrorIs(t, err, edit.ErrEngine)
@@ -289,6 +260,128 @@ func TestNew_TagAlone(t *testing.T) {
 			assert.Equal(t, tc.text, d.Text())
 		})
 	}
+}
+
+func TestNew_Empty(t *testing.T) {
+	t.Parallel()
+
+	// New takes a document without a value, and a Doc without edits keeps
+	// its text.
+	tcs := map[string]struct {
+		text string
+	}{
+		"empty text":               {text: ""},
+		"comment alone":            {text: "# only a comment\n"},
+		"comment without newline":  {text: "# c"},
+		"header alone":             {text: "---\n"},
+		"directive and end marker": {text: "%YAML 1.2\n---\n...\n"},
+		"comments with CRLF":       {text: "# a\r\n# b\r\n"},
+		"tag alone":                {text: "!!str"},
+		"tag after a header":       {text: "--- !t"},
+		"tag that a tab ends":      {text: "!t\t"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			src := niceyaml.NewSourceFromString(tc.text)
+			doc := src.AllDocuments()[0]
+			require.True(t, doc.IsEmpty())
+
+			d, err := edit.New(doc)
+			require.NoError(t, err)
+
+			err = d.Apply(t.Context(), paths.Doc(), func(context.Context, *edit.Node) error { return nil })
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.text, d.Text())
+			assert.False(t, d.Edited())
+			assert.True(t, d.Node().IsEmpty())
+
+			text, err := edit.FileText(src, d)
+			require.NoError(t, err)
+			assert.Equal(t, tc.text, text)
+		})
+	}
+}
+
+func TestDoc_Apply_Empty(t *testing.T) {
+	t.Parallel()
+
+	// The root of an empty document is the one place without a value that a
+	// path selects.
+	tcs := map[string]struct {
+		path      paths.Path
+		protected []paths.Path
+		calls     int
+	}{
+		"root":           {path: paths.Doc(), calls: 1},
+		"protected root": {path: paths.Doc(), protected: []paths.Path{paths.Doc()}},
+		"protected name": {path: paths.Doc(), protected: []paths.Path{paths.Doc().Child("a")}, calls: 1},
+		"name":           {path: paths.Doc().Child("a")},
+		"index":          {path: paths.Doc().Index(0)},
+		"wildcard":       {path: paths.Doc().ChildAll()},
+		"recursive":      {path: paths.MustParse("$..*")},
+		"recursive name": {path: paths.MustParse("$..a")},
+		"item wildcard":  {path: paths.MustParse("$[*]")},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d, err := edit.New(yamltest.FirstDocument(t, "# c\n"), edit.WithProtected(tc.protected...))
+			require.NoError(t, err)
+
+			calls := 0
+			err = d.Apply(t.Context(), tc.path, func(context.Context, *edit.Node) error {
+				calls++
+
+				return nil
+			})
+			require.NoError(t, err)
+			assert.Equal(t, tc.calls, calls)
+		})
+	}
+
+	t.Run("reads at the root", func(t *testing.T) {
+		t.Parallel()
+
+		d, err := edit.New(yamltest.FirstDocument(t, "# c\n"))
+		require.NoError(t, err)
+
+		err = d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, n *edit.Node) error {
+			assert.False(t, n.Exists())
+			assert.Equal(t, niceyaml.NodeNone, n.Kind())
+			assert.Zero(t, n.Len())
+			assert.Empty(t, n.Text())
+			require.NoError(t, n.Err())
+
+			got, err := n.Decode[map[string]int](ctx)
+			require.NoError(t, err)
+			assert.Nil(t, got)
+
+			v, err := n.MarshalYAML(ctx)
+			require.NoError(t, err)
+			assert.Nil(t, v)
+
+			// A place below the root holds no value, and its Decode fails as
+			// at any such place.
+			_, err = n.At(paths.Doc().Child("a")).Decode[any](ctx)
+			require.ErrorContains(t, err, "cannot decode $.a, which holds no value")
+
+			// After the first write, the root holds the value.
+			require.NoError(t, n.At(paths.Doc().Child("a")).Set(ctx, 1))
+			assert.True(t, n.Exists())
+			assert.Equal(t, niceyaml.NodeMapping, n.Kind())
+
+			return nil
+		})
+		require.NoError(t, err)
+		assert.Equal(t, "# c\na: 1\n", d.Text())
+		assert.True(t, d.Edited())
+	})
 }
 
 func TestNew_Unparsed(t *testing.T) {

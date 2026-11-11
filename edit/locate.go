@@ -90,6 +90,14 @@ func endsLine(text string) bool {
 	return strings.HasSuffix(text, "\n") || strings.HasSuffix(text, "\r")
 }
 
+// userBare reports whether the user's text lacks a final newline, so that
+// the text ends without one after an edit of its last lines. An empty text
+// counts as one with a final newline, because the first value of an empty
+// document goes on lines that end with a line break.
+func (d *Doc) userBare() bool {
+	return d.orig != "" && !endsLine(d.orig)
+}
+
 // isBreak reports whether the byte at off of text ends a line: a "\n", or
 // a "\r" that no "\n" follows.
 func isBreak(text string, off int) bool {

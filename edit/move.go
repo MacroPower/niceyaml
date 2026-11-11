@@ -43,7 +43,8 @@ import (
 // then reads the entry of the merge key, as the Supported YAML section of
 // the package documentation describes.
 //
-// A place that does not hold a value stays as it is. The comments include
+// A place that does not hold a value stays as it is, but a Move of the root
+// fails, also at the root of an empty document. The comments include
 // the comment lines that [Node.Remove] takes with the entry or the item,
 // such as those that the user indented past its key or its "-". Move
 // deletes blank lines next to the old lines of the value as Remove does.
@@ -158,8 +159,9 @@ func (n *Node) move(target paths.Path, at placement) (modelPlace, error) {
 	}
 
 	// The text lacks the place, so the move does nothing, unless a step of
-	// the path reaches a zone of the Apply.
-	if !p.exists {
+	// the path reaches a zone of the Apply. The root of an empty document
+	// holds no value either, but the move of a root fails.
+	if !p.exists && !p.root {
 		return modelPlace{}, n.stepProblem()
 	}
 

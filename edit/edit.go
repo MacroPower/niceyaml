@@ -96,11 +96,7 @@ var (
 	ErrEnded = errors.New("the Apply that gave the node has returned")
 
 	// The problem of a call of New with a nil Node or a Node below the root.
-	errDocument = usage("New takes the root of a document that holds a value")
-	// The problem of a call of New with a document that does not hold a
-	// value, which is the fault of the document. It reads as errDocument,
-	// but it does not match ErrUsage.
-	errEmptyDocument = errors.New(errDocument.Error())
+	errDocument = usage("New takes the root of a document")
 	// The problem of a document that holds a byte order mark inside it.
 	errMarkInside = errors.New("a byte order mark")
 	// The problem of a call of New with a protected path that is not a `$`
@@ -507,17 +503,10 @@ type Removal struct {
 // [niceyaml.Source.Documents] returns. It returns the error of a document
 // that does not parse, or of a reference document of
 // [niceyaml.WithReferences] that does not parse, because a decode of the
-// document then fails. It also returns an error for a nil doc, a Node
-// below the root, and a document that does not hold a value, such as an
-// empty text. Go-yaml's lexer reads a tab after a tag as a part of the
-// tag. Go-yaml's parser reads no value from a tag at the end of the text,
-// as in "!t" or "!t\t" without a line break. So New refuses that document
-// too. The parser reads an empty value under a tag that a line break or a
-// space follows. So New takes "!t\n" with that value as its root.
-// [niceyaml.IsInvalid] reports the error of a document that does not hold
-// a value. The error of a nil doc or a Node below the root matches
-// [ErrUsage] instead. So does the error of a path of [WithProtected] that
-// is not a `$` path of names and indexes, which fails New too. The error
+// document then fails. It also returns an error for a nil doc and for a
+// Node below the root. Such an error matches [ErrUsage]. So does the error
+// of a path of [WithProtected] that is not a `$` path of names and indexes,
+// which fails New too. The error
 // of a Node below the root also matches [niceyaml.ErrScopedNode]. A path
 // that selects the root, as [paths.Doc] does in [niceyaml.Node.At], gives
 // the root itself, so New takes that Node. So does a
@@ -528,6 +517,16 @@ type Removal struct {
 // documentation lists them. It then refuses a document that holds YAML
 // outside the subset that the engine edits, as that section lists it, with
 // an error that matches [ErrUnsupported].
+//
+// New takes an empty document, which [niceyaml.Node.IsEmpty] reports, such
+// as an empty text or a text of comments alone. Its root holds no value, so
+// a [Func] writes the first value with [Node.Set], as the Empty Documents
+// section of the package documentation describes. Go-yaml's parser reads no
+// value from a tag at the end of the text, as in "!t" or "!t\t" without a
+// line break. Go-yaml's lexer reads a tab after a tag as a part of the tag.
+// So such a document is empty too. The parser reads an
+// empty value under a tag that a line break or a space follows. So New
+// takes "!t\n" with that value as its root.
 func New(doc *niceyaml.Node, opts ...Option) (*Doc, error) {
 	switch {
 	case doc == nil:
@@ -567,13 +566,6 @@ func New(doc *niceyaml.Node, opts ...Option) (*Doc, error) {
 	d, err := readDoc(doc, cfg)
 	if err != nil {
 		return nil, err
-	}
-
-	// The text of the user is at fault for a document without a value, as
-	// for an empty upload, unlike a program that passes a nil doc.
-	if doc.IsEmpty() {
-		//nolint:wrapcheck // The binding is the problem of the document.
-		return nil, doc.Bind(niceyaml.Invalid(fmt.Errorf("%w, not an empty document", errEmptyDocument)))
 	}
 
 	for _, refuse := range []func() error{d.markRefusal, d.misreadRefusal, d.newRefusal} {
@@ -656,6 +648,10 @@ func readDoc(doc *niceyaml.Node, cfg config) (*Doc, error) {
 	return d, nil
 }
 
+// headerMarker is the marker of a document header, which starts a
+// document.
+const headerMarker = "---"
+
 // lineStart returns off, the offset in text of column 0 of a line as
 // [niceyaml.Source.Offset] gives it, or the offset of the byte order mark
 // before it. The tokenizer drops such a mark, which lies before column 0 of
@@ -705,12 +701,12 @@ func headerEnd(src *niceyaml.Source, line int) int {
 		return len(text)
 	}
 
-	at := strings.Index(text[off:], "---")
+	at := strings.Index(text[off:], headerMarker)
 	if at < 0 {
 		return len(text)
 	}
 
-	return off + at + len("---")
+	return off + at + len(headerMarker)
 }
 
 // Apply runs fn once on each place that path selects, in document order,
@@ -747,7 +743,11 @@ func headerEnd(src *niceyaml.Source, line int) int {
 //
 // Apply calls fn only on places that hold a value. A recursive selector
 // thus selects nothing below a tag that converts a collection, such as
-// !!str, because the decode reads that collection as a scalar.
+// !!str, because the decode reads that collection as a scalar. The root of
+// an empty document is the one place without a value that a path selects.
+// The path `$` selects it, so fn writes the first value there, and every
+// other path selects nothing. A `$` path of [WithProtected] protects the
+// root, so `$` then selects nothing too.
 //
 // Each call sees the edits of the calls before it. A read after the write of
 // an earlier call thus reads the written value, through an alias too. Apply

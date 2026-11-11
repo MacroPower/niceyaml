@@ -1304,3 +1304,152 @@ func TestDoc_Apply_EngineProblem(t *testing.T) {
 		})
 	}
 }
+
+func TestNode_Remove_Empty(t *testing.T) {
+	t.Parallel()
+
+	// A Remove at the root of an empty document fails as at any root, and a
+	// Remove below it leaves the text as it is.
+	tcs := map[string]struct {
+		path paths.Path
+		err  string
+	}{
+		"root": {
+			path: paths.Doc(),
+			err:  "cafe.jacobcolvin.com/v1 removes the root of the document",
+		},
+		"place below the root": {
+			path: paths.Doc().Child("a", "b"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d := newDoc(t, "# c\n")
+
+			err := d.Apply(t.Context(), paths.Doc(), func(_ context.Context, n *edit.Node) error {
+				return n.At(tc.path).Remove()
+			}, label)
+
+			requireEdit(t, d, err, tc.err, "# c\n")
+		})
+	}
+}
+
+func TestNode_SetKey_Empty(t *testing.T) {
+	t.Parallel()
+
+	// A SetKey at the root of an empty document fails as at any root, and a
+	// SetKey below it leaves the text as it is.
+	tcs := map[string]struct {
+		path paths.Path
+		err  string
+	}{
+		"root": {
+			path: paths.Doc(),
+			err:  "cafe.jacobcolvin.com/v1 renames the root of the document, which has no key",
+		},
+		"place below the root": {
+			path: paths.Doc().Child("a"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d := newDoc(t, "# c\n")
+
+			err := d.Apply(t.Context(), paths.Doc(), func(_ context.Context, n *edit.Node) error {
+				return n.At(tc.path).SetKey("x")
+			}, label)
+
+			requireEdit(t, d, err, tc.err, "# c\n")
+		})
+	}
+}
+
+func TestNode_Remove_AfterFirstWrite(t *testing.T) {
+	t.Parallel()
+
+	// The first write gives an empty text a final newline, so a removal of
+	// the last lines after it keeps that line break, as in any text that
+	// ends with one.
+	set := func(path paths.Path, v any, opts ...edit.SetOption) edit.Func {
+		return func(ctx context.Context, n *edit.Node) error {
+			return n.At(path).Set(ctx, v, opts...)
+		}
+	}
+	remove := func(path paths.Path) edit.Func {
+		return func(_ context.Context, n *edit.Node) error {
+			return n.At(path).Remove()
+		}
+	}
+
+	tcs := map[string]struct {
+		text  string
+		calls [][]edit.Func
+		want  string
+	}{
+		"empty text": {
+			calls: [][]edit.Func{
+				{set(paths.Doc().Child("a"), 1)},
+				{set(paths.Doc().Child("b"), 2)},
+				{remove(paths.Doc().Child("b"))},
+			},
+			want: "a: 1\n",
+		},
+		"empty text in one call": {
+			calls: [][]edit.Func{{
+				set(paths.Doc().Child("a"), 1),
+				set(paths.Doc().Child("b"), 2, edit.Before("a")),
+				remove(paths.Doc().Child("a")),
+			}},
+			want: "b: 2\n",
+		},
+		"comment": {
+			text: "# c\n",
+			calls: [][]edit.Func{
+				{set(paths.Doc().Child("a"), 1)},
+				{set(paths.Doc().Child("b"), 2)},
+				{remove(paths.Doc().Child("b"))},
+			},
+			want: "# c\na: 1\n",
+		},
+		"comment without a final newline": {
+			text: "# c",
+			calls: [][]edit.Func{
+				{set(paths.Doc().Child("a"), 1)},
+				{set(paths.Doc().Child("b"), 2)},
+				{remove(paths.Doc().Child("b"))},
+			},
+			want: "# c\na: 1",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d := newDoc(t, tc.text)
+
+			for _, fns := range tc.calls {
+				err := d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, n *edit.Node) error {
+					for _, fn := range fns {
+						err := fn(ctx, n)
+						if err != nil {
+							return err
+						}
+					}
+
+					return nil
+				}, label)
+				require.NoError(t, err)
+			}
+
+			assert.Equal(t, tc.want, d.Text())
+		})
+	}
+}

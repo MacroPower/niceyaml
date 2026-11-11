@@ -2817,6 +2817,12 @@ func TestNode_Append(t *testing.T) {
 			value:  "b",
 			err:    "cafe.jacobcolvin.com/v1 inserts $.s[0], but the document holds no $.s",
 		},
+		"root of an empty document": {
+			before: "# c\n",
+			path:   paths.Doc(),
+			value:  "b",
+			err:    "cafe.jacobcolvin.com/v1 inserts $[0], but the document holds no $",
+		},
 		"node whose place an earlier remove took away": {
 			// A node on the same path reads the new sequence, but the held
 			// node does not append to it.
