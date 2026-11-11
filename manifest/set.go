@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"iter"
 	"reflect"
+	"slices"
 
 	"go.jacobcolvin.com/niceyaml"
 )
@@ -160,11 +161,11 @@ func (l *loader) newSet() *Set {
 // the set does not hold one. The kind carries [Singleton], so the set
 // holds one at most.
 //
-// One panics when T is not the Go type of a kind of the registry, or when
-// the kind does not carry [Singleton]. The first test that runs the call
-// thus fails.
+// One panics when T is not the Go type of exactly one kind of the
+// registry, or when the kind does not carry [Singleton]. The first test
+// that runs the call thus fails.
 func (s *Set) One[T any]() (Object[T], bool) {
-	entry := s.reg.kindOf(reflect.TypeFor[T]())
+	entry := s.reg.kindOf("One", reflect.TypeFor[T]())
 	if !entry.kind.cfg.singleton {
 		panic(fmt.Sprintf("manifest: One needs a kind with manifest.Singleton, and %s has none", entry.kind.name))
 	}
@@ -178,16 +179,18 @@ func (s *Set) One[T any]() (Object[T], bool) {
 	return Object[T]{}, false
 }
 
-// All yields the manifests of the kind whose Go type is T, in load order.
+// All yields the manifests of every kind whose Go type is T, in load
+// order. When several kinds share T, the sequence mixes their manifests,
+// and [Object.Kind] tells them apart.
 //
 // All panics when T is not the Go type of a kind of the registry. It
 // panics at the call, before a loop ranges over the sequence.
 func (s *Set) All[T any]() iter.Seq[Object[T]] {
-	entry := s.reg.kindOf(reflect.TypeFor[T]())
+	entries := s.reg.kindsOf(reflect.TypeFor[T]())
 
 	return func(yield func(Object[T]) bool) {
 		for _, o := range s.objects {
-			if o.entry == entry && !yield(typed[T](o.obj)) {
+			if slices.Contains(entries, o.entry) && !yield(typed[T](o.obj)) {
 				return
 			}
 		}
@@ -197,10 +200,10 @@ func (s *Set) All[T any]() iter.Seq[Object[T]] {
 // Get returns the manifest of the kind whose Go type is T with the given
 // name, and false when the set does not hold one.
 //
-// Get panics when T is not the Go type of a kind of the registry, or when
-// the kind has no [NameField].
+// Get panics when T is not the Go type of exactly one kind of the
+// registry, or when the kind has no [NameField].
 func (s *Set) Get[T any](name string) (Object[T], bool) {
-	entry := s.reg.kindOf(reflect.TypeFor[T]())
+	entry := s.reg.kindOf("Get", reflect.TypeFor[T]())
 	if !entry.kind.cfg.hasNameField {
 		panic(fmt.Sprintf("manifest: Get needs a kind with manifest.NameField, and %s has none", entry.kind.name))
 	}

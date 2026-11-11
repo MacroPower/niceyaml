@@ -33,6 +33,9 @@ type Kind struct {
 // into a value of type T. The name is the name of the current version, the
 // one that messages give the kind, as in "missing Cafe".
 //
+// Several kinds of a registry can share T. [Set.All] then yields the
+// manifests of each of them, and [Set.One] and [Set.Get] panic on T.
+//
 // [NewRegistry] checks the kind, so a kind that contradicts itself, such as
 // one that lists a version twice, fails there.
 func NewKind[T any](name string, opts ...KindOption) *Kind {

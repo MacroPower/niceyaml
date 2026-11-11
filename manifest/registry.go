@@ -44,8 +44,8 @@ type Registry struct {
 	// The kind of each name that a document can write in its kind field.
 	// The names are the registered names and the old names from KindName.
 	names map[string]*kindEntry
-	// The kind of each Go type.
-	types map[reflect.Type]*kindEntry
+	// The kinds of each Go type, in the order of registration.
+	types map[reflect.Type][]*kindEntry
 	// What the schema of each version says about the type fields, keyed by
 	// the version, as [Registry.schemaFields] returns it. Each entry is a
 	// [schemaFields] value that names the validator it reads.
@@ -344,7 +344,7 @@ func NewRegistry(opts ...RegistryOption) (*Registry, error) {
 	r := &Registry{
 		schemas: schemas,
 		names:   make(map[string]*kindEntry),
-		types:   make(map[reflect.Type]*kindEntry),
+		types:   make(map[reflect.Type][]*kindEntry),
 		removed: cfg.removed,
 		cfg:     cfg,
 	}
@@ -522,11 +522,7 @@ func (b *registryBuilder) addKind(k *Kind) {
 		r.names[k.name] = entry
 	}
 
-	if other, ok := r.types[k.typ]; ok {
-		b.failf("kinds %s and %s share the Go type %s", other.kind.name, k.name, k.typ)
-	} else {
-		r.types[k.typ] = entry
-	}
+	r.types[k.typ] = append(r.types[k.typ], entry)
 
 	if r.cfg.versionOnly && len(k.cfg.claims) > 0 {
 		b.failf("kind %s: manifest.WithVersionOnly names the only type field, so it takes no manifest.Claim", k.name)
@@ -998,13 +994,31 @@ func joinList(items []string, conj string) string {
 	}
 }
 
-// kindOf returns the kind of Go type t, or panics with a message for the
+// kindsOf returns the kinds of Go type t, or panics with a message for the
 // author of the call, as the typed accessors of a [Set] do.
-func (r *Registry) kindOf(t reflect.Type) *kindEntry {
-	entry, ok := r.types[t]
-	if !ok {
+func (r *Registry) kindsOf(t reflect.Type) []*kindEntry {
+	entries := r.types[t]
+	if len(entries) == 0 {
 		panic(fmt.Sprintf("manifest: %s is not the Go type of a kind", t))
 	}
 
-	return entry
+	return entries
+}
+
+// kindOf returns the one kind of Go type t for the accessor method, or
+// panics with a message for the author of the call when t is not the Go
+// type of a kind or is the Go type of several.
+func (r *Registry) kindOf(method string, t reflect.Type) *kindEntry {
+	entries := r.kindsOf(t)
+	if len(entries) > 1 {
+		names := make([]string, len(entries))
+		for i, e := range entries {
+			names[i] = e.kind.name
+		}
+
+		panic(fmt.Sprintf("manifest: %s needs the Go type of one kind, and %s is the type of %s",
+			method, t, joinAnd(names)))
+	}
+
+	return entries[0]
 }
