@@ -654,7 +654,12 @@
 // upload whose directive named a schema beside it, until the program
 // passes the upload to [Registry.Forget]:
 //
-//	defer untrusted.Forget(upload)
+//	defer reg.Forget(upload)
+//
+// A release of reg, such as Forget or [Registry.Invalidate], reaches
+// untrusted too, as [Registry.Resolve] describes. So a program that
+// watches the schema files of its tenants passes each file that changes
+// to reg.Invalidate.
 //
 // [WithLoadLimit] bounds the bytes of each schema document the confined
 // registry reads, [DefaultLoadLimit] by default. A directive that names a

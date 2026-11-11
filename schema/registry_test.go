@@ -4034,6 +4034,123 @@ func TestRegistry_Purge(t *testing.T) {
 	})
 }
 
+func TestRegistry_ReleaseNested(t *testing.T) {
+	t.Parallel()
+
+	nestings := map[string]struct {
+		// Builds the registry the program validates with around the
+		// registry that loads the schema a directive names.
+		nest func(inner *schema.Registry) *schema.Registry
+		// Text the error of the check holds after the release, or "" for
+		// a check that passes because the release did not reach inner.
+		want string
+	}{
+		"registry": {
+			nest: func(inner *schema.Registry) *schema.Registry {
+				return schema.NewRegistry(schema.WithResolvers(inner))
+			},
+			want: notInteger,
+		},
+		"registry behind When": {
+			nest: func(inner *schema.Registry) *schema.Registry {
+				return schema.NewRegistry(schema.WithResolvers(
+					schema.When(matcher.Content(kindPath, "App"), inner),
+				))
+			},
+			want: notInteger,
+		},
+		"registry behind When behind When": {
+			nest: func(inner *schema.Registry) *schema.Registry {
+				return schema.NewRegistry(schema.WithResolvers(
+					schema.When(
+						matcher.Content(kindPath, "App"),
+						schema.When(matcher.Content(kindPath, "App"), inner),
+					),
+				))
+			},
+			want: notInteger,
+		},
+		"registry behind a registry": {
+			nest: func(inner *schema.Registry) *schema.Registry {
+				mid := schema.NewRegistry(schema.WithResolvers(inner))
+
+				return schema.NewRegistry(schema.WithResolvers(mid))
+			},
+			want: notInteger,
+		},
+		"registry that two resolvers hold": {
+			nest: func(inner *schema.Registry) *schema.Registry {
+				return schema.NewRegistry(schema.WithResolvers(
+					schema.When(matcher.Content(kindPath, "Other"), inner),
+					inner,
+				))
+			},
+			want: notInteger,
+		},
+		// A release does not reach a registry that a resolver of the
+		// program calls.
+		"registry behind a ResolverFunc": {
+			nest: func(inner *schema.Registry) *schema.Registry {
+				return schema.NewRegistry(schema.WithResolvers(schema.ResolverFunc(inner.Resolve)))
+			},
+		},
+	}
+
+	releases := map[string]func(reg *schema.Registry, fsys fs.FS){
+		"Invalidate": func(reg *schema.Registry, fsys fs.FS) {
+			reg.Invalidate(schema.FileFS(fsys, "schemas/s.json"))
+		},
+		"Forget": func(reg *schema.Registry, fsys fs.FS) { reg.Forget(fsys) },
+		"Purge":  func(reg *schema.Registry, _ fs.FS) { reg.Purge() },
+	}
+
+	for nestName, nc := range nestings {
+		for releaseName, release := range releases {
+			t.Run(nestName+"/"+releaseName, func(t *testing.T) {
+				t.Parallel()
+
+				fsys := yamltest.MapFS(map[string]string{
+					"configs/app.yaml": yamltest.SchemaDirective("../schemas/s.json", "kind: App\na: x\n"),
+					"schemas/s.json":   stringA,
+				})
+
+				inner := schema.NewRegistry(
+					schema.WithAccess(schema.Unrestricted),
+					schema.WithResolvers(schema.Directive()),
+				)
+				reg := nc.nest(inner)
+
+				check := func() error {
+					source, err := niceyaml.NewSourceFromFS(fsys, "configs/app.yaml")
+					require.NoError(t, err)
+
+					//nolint:wrapcheck // The test inspects the error itself.
+					return source.ValidateDocuments(t.Context(), reg)
+				}
+
+				require.NoError(t, check())
+
+				fsys["schemas/s.json"] = &fstest.MapFile{Data: []byte(integerA)}
+
+				// The registry serves the schema it compiled before the
+				// change.
+				require.NoError(t, check())
+
+				release(reg, fsys)
+
+				err := check()
+				if nc.want == "" {
+					require.NoError(t, err)
+
+					return
+				}
+
+				require.ErrorContains(t, err, nc.want)
+			})
+		}
+	}
+}
+
 func TestRegistry_ReleaseDuringLoad(t *testing.T) {
 	t.Parallel()
 
