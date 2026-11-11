@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"strings"
 	"testing"
 
@@ -44,7 +45,7 @@ func TestLimitFlags(t *testing.T) {
 			path := yamltest.WriteFile(t, t.TempDir(), "deep.yaml", deep)
 			out := &bytes.Buffer{}
 
-			err := quietValidateCmd(out, append(tc.args, path)...).Execute()
+			err := quietValidateCmd(out, io.Discard, append(tc.args, path)...).Execute()
 			if tc.err == nil {
 				require.NoError(t, err)
 				assert.Contains(t, out.String(), "deep.yaml: valid")

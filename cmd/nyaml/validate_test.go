@@ -34,6 +34,14 @@ var nameSchema = []byte(`{
 	"required": ["name"]
 }`)
 
+// oldSchema is [nameSchema] with a deprecated "old" key, so a document
+// that sets "old" passes with a warning.
+const oldSchema = `{
+	"type": "object",
+	"properties": {"name": {"type": "string"}, "old": {"deprecated": true}},
+	"required": ["name"]
+}`
+
 // nameRegistry returns a registry that applies [nameSchema] to every
 // document.
 func nameRegistry() *schema.Registry {
@@ -66,13 +74,14 @@ func writeOrSkip(t *testing.T, dir, name, content string) {
 }
 
 // quietValidateCmd returns nyaml validate set to run with args, to write
-// its output to out, and to print no error itself.
-func quietValidateCmd(out io.Writer, args ...string) *cobra.Command {
+// its stdout to out and its stderr to errOut, and to print no error
+// itself.
+func quietValidateCmd(out, errOut io.Writer, args ...string) *cobra.Command {
 	cmd := validateCmd()
 	cmd.SilenceErrors = true
 	cmd.SilenceUsage = true
 	cmd.SetOut(out)
-	cmd.SetErr(out)
+	cmd.SetErr(errOut)
 	cmd.SetArgs(args)
 
 	return cmd
@@ -564,9 +573,9 @@ func TestValidateCmdSchemaError(t *testing.T) {
 				yamltest.WriteFile(t, dir, "two.yaml", stringtest.LinesLF("a: 1", "---", "b: 2")),
 			}
 
-			out := &bytes.Buffer{}
+			out, errOut := &bytes.Buffer{}, &bytes.Buffer{}
 
-			err := quietValidateCmd(out, append([]string{"--schema", ref}, yamlPaths...)...).Execute()
+			err := quietValidateCmd(out, errOut, append([]string{"--schema", ref}, yamlPaths...)...).Execute()
 			require.ErrorIs(t, err, tc.err)
 
 			msg := err.Error()
@@ -578,6 +587,7 @@ func TestValidateCmdSchemaError(t *testing.T) {
 			}
 
 			assert.Empty(t, out.String())
+			assert.Empty(t, errOut.String())
 
 			if tc.url {
 				assert.Equal(t, int32(1), fetches.Load())
@@ -592,9 +602,12 @@ func TestValidateCmdHelp(t *testing.T) {
 	// The help names every source of a document's schema, so a reader
 	// learns that a run without --schema can still download one. It also
 	// names each exit status, so a script tells an invalid document from a
-	// run that could not check one.
+	// run that could not check one, and names what each stream carries.
 	long := validateCmd().Long
-	for _, want := range []string{"--schema", "$schema=", "$schema=none", "SchemaStore", "$ref", "Exits 1", "Exits 2"} {
+	for _, want := range []string{
+		"--schema", "$schema=", "$schema=none", "SchemaStore", "$ref", "--strict",
+		"Stdout", "Stderr", "Exits 1", "Exits 2",
+	} {
 		assert.Contains(t, long, want)
 	}
 }
@@ -641,12 +654,13 @@ func TestValidateCmdCanceled(t *testing.T) {
 				args = append(args, yamltest.WriteFile(t, dir, name, body))
 			}
 
-			out := &bytes.Buffer{}
+			out, errOut := &bytes.Buffer{}, &bytes.Buffer{}
 
-			err := quietValidateCmd(out, args...).ExecuteContext(ctx)
+			err := quietValidateCmd(out, errOut, args...).ExecuteContext(ctx)
 			require.ErrorIs(t, err, context.Canceled)
 			assert.Equal(t, 1, strings.Count(err.Error(), context.Canceled.Error()), err.Error())
 			assert.Empty(t, out.String())
+			assert.Empty(t, errOut.String())
 		})
 	}
 }
@@ -654,27 +668,60 @@ func TestValidateCmdCanceled(t *testing.T) {
 func TestValidateCmdOutput(t *testing.T) {
 	t.Parallel()
 
-	// The per-file line goes to the writer the caller set on the command,
-	// so embedding the command and redirecting its output captures it.
+	// The result lines go to the stdout writer the caller set on the
+	// command, so embedding the command and redirecting its output
+	// captures them. Stdout carries one result line for each file, in the
+	// order of the arguments, and nothing else.
 	tcs := map[string]struct {
-		// Names of the valid files to write to the test directory.
-		files []string
-		// Arguments after the schema flag, relative to the test directory.
+		// Contents of the files to write to the test directory, by name.
+		files map[string]string
+		// Arguments after the schema flag. Each argument that does not
+		// start with "-" is relative to the test directory.
 		args []string
-		// Names that the "valid" lines report in order, relative to the
-		// test directory.
+		// The result lines, each with a name relative to the test
+		// directory.
 		want []string
+		// The status the run exits with.
+		exit int
 	}{
 		"explicit names": {
-			files: []string{"a.yaml", "b.yaml"},
+			files: map[string]string{"a.yaml": "name: a\n", "b.yaml": "name: b\n"},
 			args:  []string{"a.yaml", "b.yaml"},
-			want:  []string{"a.yaml", "b.yaml"},
+			want:  []string{"a.yaml: valid", "b.yaml: valid"},
 		},
 		"control characters in a matched name": {
-			files: []string{"\x1b]52;c;eA==\a.yaml"},
+			files: map[string]string{"\x1b]52;c;eA==\a.yaml": "name: a\n"},
 			args:  []string{"*.yaml"},
 			// The Control Pictures for ESC and BEL stand in for them.
-			want: []string{"␛]52;c;eA==␇.yaml"},
+			want: []string{"␛]52;c;eA==␇.yaml: valid"},
+		},
+		"every result": {
+			files: map[string]string{
+				"good.yaml":  "name: a\n",
+				"bad.yaml":   "value: 1\n",
+				"dep.yaml":   stringtest.LinesLF("name: a", "old: 1"),
+				"deps.yaml":  stringtest.LinesLF("name: a", "old: 1", "---", "name: b", "old: 2"),
+				"other.yaml": "name: [\n",
+			},
+			args: []string{"good.yaml", "bad.yaml", "missing.yaml", "dep.yaml", "deps.yaml", "other.yaml"},
+			want: []string{
+				"good.yaml: valid",
+				"bad.yaml: invalid",
+				"missing.yaml: failed",
+				"dep.yaml: valid, 1 warning",
+				"deps.yaml: valid, 2 warnings",
+				"other.yaml: invalid",
+			},
+			exit: exitFailure,
+		},
+		"strict fails a file on its warnings": {
+			files: map[string]string{
+				"good.yaml": "name: a\n",
+				"dep.yaml":  stringtest.LinesLF("name: a", "old: 1"),
+			},
+			args: []string{"--strict", "good.yaml", "dep.yaml"},
+			want: []string{"good.yaml: valid", "dep.yaml: invalid"},
+			exit: exitInvalid,
 		},
 	}
 
@@ -684,26 +731,32 @@ func TestValidateCmdOutput(t *testing.T) {
 
 			dir := t.TempDir()
 
-			schemaPath := yamltest.WriteFile(t, dir, "schema.json", `{"type": "object"}`)
+			schemaPath := yamltest.WriteFile(t, dir, "schema.json", oldSchema)
 
-			for _, file := range tc.files {
-				writeOrSkip(t, dir, file, "name: a\n")
+			for file, content := range tc.files {
+				writeOrSkip(t, dir, file, content)
 			}
 
 			args := []string{"--schema", schemaPath}
+
 			for _, arg := range tc.args {
-				args = append(args, filepath.Join(dir, arg))
+				if !strings.HasPrefix(arg, "-") {
+					arg = filepath.Join(dir, arg)
+				}
+
+				args = append(args, arg)
 			}
 
 			var want strings.Builder
 
 			for _, w := range tc.want {
-				want.WriteString(filepath.Join(dir, w) + ": valid\n")
+				want.WriteString(filepath.Join(dir, w) + "\n")
 			}
 
 			out := &bytes.Buffer{}
 
-			require.NoError(t, quietValidateCmd(out, args...).Execute())
+			err := quietValidateCmd(out, io.Discard, args...).Execute()
+			assert.Equal(t, tc.exit, exitCode(err), "%v", err)
 			assert.Equal(t, want.String(), out.String())
 			assert.NotContains(t, out.String(), "\x1b")
 		})
@@ -725,12 +778,31 @@ func TestValidateCmdErrorNames(t *testing.T) {
 		// Contents of the file. With none, the file is a dangling
 		// symlink, as a glob can match, so its read fails.
 		content string
-		// Makes every write of a result line fail.
-		failWrite bool
+		// The result that the result line reports, or none when every
+		// write to stdout fails.
+		result string
+		// The status the run exits with.
+		exit int
+		// Makes every write to stdout fail.
+		failOut bool
+		// Makes every write to stderr fail.
+		failErrOut bool
 	}{
-		"invalid document":        {content: "value: 1\n"},
-		"unreadable file":         {err: fs.ErrNotExist},
-		"result line not written": {content: "name: a\n", failWrite: true, err: io.ErrClosedPipe},
+		"invalid document": {content: "value: 1\n", result: "invalid", exit: exitInvalid},
+		"unreadable file":  {err: fs.ErrNotExist, result: "failed", exit: exitFailure},
+		"result line not written": {
+			content: "name: a\n",
+			failOut: true,
+			err:     io.ErrClosedPipe,
+			exit:    exitFailure,
+		},
+		"warnings not written": {
+			content:    stringtest.LinesLF("name: a", "old: 1"),
+			failErrOut: true,
+			result:     "valid, 1 warning",
+			err:        io.ErrClosedPipe,
+			exit:       exitFailure,
+		},
 	}
 
 	for name, tc := range tcs {
@@ -739,7 +811,7 @@ func TestValidateCmdErrorNames(t *testing.T) {
 
 			dir := t.TempDir()
 
-			schemaPath := yamltest.WriteFile(t, dir, "schema.json", string(nameSchema))
+			schemaPath := yamltest.WriteFile(t, dir, "schema.json", oldSchema)
 
 			path := filepath.Join(dir, file)
 
@@ -749,19 +821,30 @@ func TestValidateCmdErrorNames(t *testing.T) {
 				writeOrSkip(t, dir, file, tc.content)
 			}
 
-			out := io.Writer(&bytes.Buffer{})
-			if tc.failWrite {
+			buf := &bytes.Buffer{}
+
+			out, errOut := io.Writer(buf), io.Discard
+			if tc.failOut {
 				out = closedWriter{}
 			}
 
-			err := quietValidateCmd(out, "--schema", schemaPath, filepath.Join(dir, "evil*")).Execute()
+			if tc.failErrOut {
+				errOut = closedWriter{}
+			}
+
+			err := quietValidateCmd(out, errOut, "--schema", schemaPath, filepath.Join(dir, "evil*")).Execute()
 			require.Error(t, err)
+			assert.Equal(t, tc.exit, exitCode(err), err.Error())
 
 			if tc.err != nil {
 				require.ErrorIs(t, err, tc.err)
 			}
 
 			assert.Equal(t, 1, strings.Count(err.Error(), escape.Line(path)), err.Error())
+
+			if tc.result != "" {
+				assert.Equal(t, escape.Line(path)+": "+tc.result+"\n", buf.String())
+			}
 		})
 	}
 }
@@ -777,7 +860,7 @@ func TestValidateCmdDetaches(t *testing.T) {
 		yamltest.WriteFile(t, dir, "second.yaml", "name: [\n"),
 	}
 
-	err := quietValidateCmd(io.Discard, append([]string{"--schema", schemaPath}, paths...)...).Execute()
+	err := quietValidateCmd(io.Discard, io.Discard, append([]string{"--schema", schemaPath}, paths...)...).Execute()
 	require.Error(t, err)
 
 	reg, regErr := buildRegistry(t.Context(), schemaPath)
@@ -820,16 +903,22 @@ func (closedWriter) Write([]byte) (int, error) {
 func TestValidateCmdDeprecations(t *testing.T) {
 	t.Parallel()
 
+	// A file reports its result on stdout and its warnings on stderr,
+	// whether it passes or fails.
 	tcs := map[string]struct {
 		input string
-		// The output of the run, and the error it fails with, or none for a
-		// run that passes.
-		want string
-		err  string
+		// Flags before the file argument.
+		args []string
+		// The stdout and the stderr of the run, and the error it fails
+		// with, or none for a run that passes.
+		out    string
+		errOut string
+		err    string
 	}{
-		"a file that passes prints its warnings before its result line": {
+		"a file that passes prints its warnings on stderr": {
 			input: stringtest.LinesLF(`version: "3.8"`, "services: {}"),
-			want: stringtest.LinesLF(
+			out:   "compose.yaml: valid, 1 warning\n",
+			errOut: stringtest.LinesLF(
 				`compose.yaml:1:1: warning: $.version~: deprecated field "version"`,
 				"`-- Compose ignores version.",
 				"",
@@ -837,14 +926,30 @@ func TestValidateCmdDeprecations(t *testing.T) {
 				"     | ^^^^^^^",
 				"   2 | services: {}",
 				"",
-				"compose.yaml: valid",
 			),
 		},
 		"a file that fails reports its warnings among its errors": {
 			input: stringtest.LinesLF(`version: "3.8"`, "services: 1"),
+			out:   "compose.yaml: invalid\n",
 			err: stringtest.JoinLF(
 				"compose.yaml: 1 error, 1 warning",
 				`compose.yaml:1:1: warning: $.version~: deprecated field "version"`,
+				`compose.yaml:2:11: $.services: expected "object", got "integer"`,
+			),
+		},
+		"strict reports the warnings of a file as errors": {
+			input: stringtest.LinesLF(`version: "3.8"`, "services: {}"),
+			args:  []string{"--strict"},
+			out:   "compose.yaml: invalid\n",
+			err:   `compose.yaml:1:1: $.version~: deprecated field "version"`,
+		},
+		"strict counts the warnings of a file that fails as errors": {
+			input: stringtest.LinesLF(`version: "3.8"`, "services: 1"),
+			args:  []string{"--strict"},
+			out:   "compose.yaml: invalid\n",
+			err: stringtest.JoinLF(
+				"compose.yaml: 2 errors",
+				`compose.yaml:1:1: $.version~: deprecated field "version"`,
 				`compose.yaml:2:11: $.services: expected "object", got "integer"`,
 			),
 		},
@@ -861,19 +966,23 @@ func TestValidateCmdDeprecations(t *testing.T) {
 
 			path := yamltest.WriteFile(t, dir, "compose.yaml", tc.input)
 
-			out := &bytes.Buffer{}
+			out, errOut := &bytes.Buffer{}, &bytes.Buffer{}
 
-			err := quietValidateCmd(out, "--schema", filepath.Join(dir, "compose.schema.json"), path).Execute()
+			args := append([]string{"--schema", filepath.Join(dir, "compose.schema.json")}, tc.args...)
+
+			err := quietValidateCmd(out, errOut, append(args, path)...).Execute()
+			assert.Equal(t, tc.out, strings.ReplaceAll(out.String(), path, "compose.yaml"))
+			assert.Equal(t, tc.errOut, strings.ReplaceAll(errOut.String(), path, "compose.yaml"))
+
 			if tc.err != "" {
 				require.Error(t, err)
 				assert.Equal(t, tc.err, strings.ReplaceAll(err.Error(), path, "compose.yaml"))
-				assert.Empty(t, out.String())
+				assert.Equal(t, exitInvalid, exitCode(err))
 
 				return
 			}
 
 			require.NoError(t, err)
-			assert.Equal(t, tc.want, strings.ReplaceAll(out.String(), path, "compose.yaml"))
 		})
 	}
 }

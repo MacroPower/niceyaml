@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -20,6 +21,7 @@ import (
 func validateCmd() *cobra.Command {
 	var (
 		schemaRef string
+		strict    bool
 		limits    *limitFlags
 	)
 
@@ -50,6 +52,17 @@ func validateCmd() *cobra.Command {
 			"YAML. A schema in YAML reads its numbers as a YAML document " +
 			"does, so 1e3 is text and 010 is 8.\n\n" +
 			"Supports glob patterns like *.yaml.\n\n" +
+			"Stdout carries one result line for each file, written when the file " +
+			"finishes: \"valid\", \"valid, N warnings\", \"invalid\" when the " +
+			"documents are at fault, or \"failed\" for any other error, such as " +
+			"a file that does not read. Stderr carries every " +
+			"diagnostic. The warnings of a file that passes print there before " +
+			"its result line, and the errors of every file that fails print " +
+			"there together, with their warnings, after the last file. A " +
+			"canceled run writes no result line for the file it stopped in or " +
+			"for the files after it.\n\n" +
+			"With --strict, a warning fails its file as an error does, so a " +
+			"file with a deprecated field reads as invalid.\n\n" +
 			"Exits 0 when every document is valid. Exits 1 when the documents " +
 			"themselves are at fault for every error, such as a syntax error or " +
 			"a schema violation. Exits 2 when any error is not a fault of a " +
@@ -82,19 +95,29 @@ func validateCmd() *cobra.Command {
 					break
 				}
 
-				// The warnings of a file that passes print before its result
-				// line, and the run still passes. A file that fails reports
-				// its warnings among its errors.
+				// The warnings of a file that passes print on stderr before
+				// its result line, and the run still passes. A file that
+				// fails reports its warnings among its errors.
 				warnings := niceyaml.NewWarnings()
 
 				// The run holds the error of each file until the run ends.
 				// A binding keeps its whole source alive, so the run
 				// detaches each error, after the report adds the warnings.
 				// The error handler in main renders the error with the
-				// default excerpt options, which Detach keeps.
+				// default excerpt options, which Detach keeps. In strict
+				// mode, the report of a file that passes with warnings
+				// fails it too.
 				err := validateFile(warnings.Context(cmd.Context()), yamlPath, reg, limits.options()...)
+				if err != nil || strict {
+					err = warnings.Report(err)
+				}
+
+				if strict {
+					err = niceyaml.AsErrors(err)
+				}
+
 				if err != nil {
-					err = niceyaml.Detach(warnings.Report(err))
+					err = niceyaml.Detach(err)
 				}
 
 				// A run canceled during the file stops there. The error of
@@ -114,27 +137,18 @@ func validateCmd() *cobra.Command {
 					break
 				}
 
-				if err != nil {
-					errs = append(errs, err)
-
-					continue
-				}
-
 				// A glob match takes its name from the file system, so
 				// draw it as the library draws the name of a source.
 				name := escape.Line(yamlPath)
 
-				warned := warnings.Err()
-				if warned != nil {
-					_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s\n\n", niceyaml.FormatError(warned))
-					if err != nil {
-						errs = append(errs, fmt.Errorf("write the warnings of %s: %w", name, err))
-					}
+				result, err := fileResult(cmd.ErrOrStderr(), name, err, warnings)
+				if err != nil {
+					errs = append(errs, err)
 				}
 
-				_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s: valid\n", name)
-				if err != nil {
-					errs = append(errs, fmt.Errorf("write the result of %s: %w", name, err))
+				_, writeErr := fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", name, result)
+				if writeErr != nil {
+					errs = append(errs, fmt.Errorf("write the result of %s: %w", name, writeErr))
 				}
 			}
 
@@ -143,10 +157,55 @@ func validateCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&schemaRef, "schema", "s", "", "File path or URL of a JSON schema, written in JSON or YAML")
+	cmd.Flags().BoolVar(&strict, "strict", false, "Fail a file on a warning, such as a deprecated field")
 
 	limits = addLimitFlags(cmd)
 
 	return cmd
+}
+
+// fileResult returns the result that the result line of a file reports,
+// and the error that the file adds to the run. The err argument is the
+// error of the file, with its warnings already reported, and warnings
+// holds the warnings of the file.
+//
+// For a file that fails, fileResult returns "invalid" when
+// [niceyaml.IsInvalid] reports err, and "failed" otherwise. It returns err
+// as the error of the run, which reports the warnings among the errors.
+//
+// For a file that passes, fileResult writes the warnings to diag and
+// returns "valid", with a count of the warnings when the file has any. A
+// write to diag that fails returns an error that names the file as name.
+func fileResult(diag io.Writer, name string, err error, warnings *niceyaml.Warnings) (string, error) {
+	if err != nil {
+		if niceyaml.IsInvalid(err) {
+			return "invalid", err
+		}
+
+		return "failed", err
+	}
+
+	warned := warnings.Err()
+	if warned == nil {
+		return "valid", nil
+	}
+
+	count := 0
+	for range niceyaml.Problems(warned) {
+		count++
+	}
+
+	result := fmt.Sprintf("valid, %d warnings", count)
+	if count == 1 {
+		result = "valid, 1 warning"
+	}
+
+	_, err = fmt.Fprintf(diag, "%s\n\n", niceyaml.FormatError(warned))
+	if err != nil {
+		return result, fmt.Errorf("write the warnings of %s: %w", name, err)
+	}
+
+	return result, nil
 }
 
 // validateFile validates every document of the file at yamlPath against the
