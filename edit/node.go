@@ -30,7 +30,7 @@ import (
 // that section. A place that the user wrote thus gives its own path. A
 // place that an earlier call created gives the path of its site. The
 // message of the problem names the place that the call asked for. Decode
-// through such a node fails with that problem, and Exists, Kind, and Text
+// through such a node fails with that problem. Exists, Kind, Len, and Text
 // answer as they do for a place that does not hold a value. They do so
 // even when a later edit writes that place again. A new node from
 // [Node.At] reads and edits the place.
@@ -38,9 +38,9 @@ import (
 // Through any other node, a read returns what the text holds. A call after
 // which the text differs from the model of the Apply fails with an error
 // that matches [ErrEngine], as the package documentation describes. Each
-// later edit and each Decode of the Apply then returns that error, and
-// Exists, Kind, and Text answer as they do for a place that does not hold
-// a value. The Apply fails with that error whatever the Func returns.
+// later edit and each Decode of the Apply then returns that error. Exists,
+// Kind, Len, and Text then answer as they do for a place that does not
+// hold a value. The Apply fails with that error whatever the Func returns.
 //
 // The place of a node holds the value that the model of the Apply holds
 // there, as the package documentation describes. A node whose place did
@@ -52,8 +52,9 @@ import (
 // Func, and the Apply fails with that error only when the Func returns it or
 // when the error matches [ErrEngine]. A node takes edits until the Apply
 // that gave it returns. After that, each method that edits or decodes
-// returns [ErrEnded]. Exists, Kind, and Text then answer as they do for a
-// place that does not hold a value, and [Node.Err] tells the two apart.
+// returns [ErrEnded]. Exists, Kind, Len, and Text then answer as they do
+// for a place that does not hold a value, and [Node.Err] tells the two
+// apart.
 //
 // The methods that run code of the caller take a context. Set and Insert
 // run marshalers, and Decode runs unmarshalers, so each takes one. SetKey,
@@ -1053,7 +1054,7 @@ func (n *Node) stepProblem() error {
 // details name the call, as [Doc.callDetails] names the call that runs.
 type pathProblem func(verb string) error
 
-// read returns the place of n for Exists, Kind, and Text, with its value
+// read returns the place of n for Exists, Kind, Len, and Text, with its value
 // as a [*niceyaml.Node] of the current text. They answer as they do for a
 // place that does not hold a value when read reports false. Read reports
 // false after the Apply of n returned, and for a node whose path failed,
@@ -1112,6 +1113,45 @@ func (n *Node) Kind() niceyaml.NodeKind {
 	return v.Kind()
 }
 
+// Len returns the number of items of the sequence at the place, as a
+// decode reads it, through an alias too. At an alias that reads a
+// reference document of [niceyaml.WithReferences], Len counts the items of
+// the value of its anchor, as [Node.Kind] reads it. Len returns 0 when the
+// place holds another kind of value, and when Kind returns
+// [niceyaml.NodeNone]. The path of the node with the index Len names the
+// place past the last item. [Node.Set], [Node.Insert], and [Node.Move]
+// append an item there, as [Node.Append] does.
+func (n *Node) Len() int {
+	p, _, ok := n.read()
+	if !ok {
+		return 0
+	}
+
+	seq, ok := hook.Content(n.d.node, p.value).(*ast.SequenceNode)
+	if !ok {
+		return 0
+	}
+
+	return len(seq.Values)
+}
+
+// Append appends v as the last item of the sequence at the place, as
+// [Node.Insert] at the index [Node.Len] does. It fails where that Insert
+// fails, such as at a place that holds a mapping, a scalar, or no value.
+// Like each other edit, it fails through a node that lost its place to an
+// earlier edit, as [Node] describes.
+func (n *Node) Append(ctx context.Context, v any) error {
+	// A node that lost its place reports a Len of 0. A node that At makes
+	// from it reads the place again, so the node takes its place as an edit
+	// first.
+	_, err := n.place(useEdit, "appends to")
+	if err != nil {
+		return err
+	}
+
+	return n.At(paths.Current().Index(n.Len())).Insert(ctx, v)
+}
+
 // Err returns the problem that stops each method that edits or decodes
 // through the node before it reads the place, or nil when the node reads
 // and edits the place. The message names the call as a read, as in "reads
@@ -1123,10 +1163,10 @@ func (n *Node) Kind() niceyaml.NodeKind {
 // of that zone, but Err returns the problem of the path.
 // Err returns the error of a call of the Apply after which the text
 // differed from the model too, which matches [ErrEngine].
-// Exists, Kind, and Text answer as they do for a place that does not hold
-// a value in each of those cases, so Err tells such a node from a node on
-// a place that holds no value, where Err returns nil. Err is a read, so
-// the Apply fails with its error only when the Func returns it.
+// Exists, Kind, Len, and Text answer as they do for a place that does not
+// hold a value in each of those cases. Err tells such a node from a node
+// on a place that holds no value, because Err returns nil there. Err is a
+// read, so the Apply fails with its error only when the Func returns it.
 func (n *Node) Err() error {
 	// A problem of the place that a read finds belongs to the Func, so the
 	// Apply keeps the problem that it recorded before the read.

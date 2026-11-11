@@ -802,14 +802,22 @@ func (x *model) repeat(ws []wrote) (repeated, bool) {
 // move takes the value at the place of c to the place of to, as
 // [Node.Move] does. The edge of the value stays the same. The entry that
 // the move creates at the target goes where the place gives, as
-// [model.place] puts it.
+// [model.place] puts it. A target that holds an item takes the value
+// before that item, and a target at the place of c moves the entry in its
+// mapping.
 func (c *modelCall) move(to *modelCall, where modelPlace) bool {
 	switch {
 	case !c.mapped:
 		return false
 	case c.edge == nil:
 		return true
-	case c.owner == nil || to == nil || !to.mapped || to.holder == nil || len(to.rest) == 0:
+	case c.owner == nil || to == nil || !to.mapped:
+		return false
+	case to.edge == c.edge:
+		return c.reorder(where)
+	case to.edge != nil:
+		return c.moveBefore(to)
+	case to.holder == nil || len(to.rest) == 0:
 		return false
 	}
 
@@ -822,6 +830,38 @@ func (c *modelCall) move(to *modelCall, where modelPlace) bool {
 	c.x.place(to.holder, top, where)
 
 	return c.x.created(to.holder, top)
+}
+
+// reorder puts the entry at the place of c where the place gives in its
+// own mapping, as a Move to the path of the entry does. The keys of the
+// mapping stay.
+func (c *modelCall) reorder(where modelPlace) bool {
+	if c.owner.kind != vMapping || !detach(c.owner, c.edge, c.call()) {
+		return false
+	}
+
+	c.owner.edges = append(c.owner.edges, c.edge)
+	c.x.place(c.owner, c.edge, where)
+
+	return true
+}
+
+// moveBefore takes the value at the place of c to the sequence that holds
+// the item at the place of to, before that item.
+func (c *modelCall) moveBefore(to *modelCall) bool {
+	if to.owner == nil || to.owner.kind != vSequence || !detach(c.owner, c.edge, c.call()) {
+		return false
+	}
+
+	i := slices.Index(to.owner.edges, to.edge)
+	if i < 0 {
+		return false
+	}
+
+	c.edge.key, c.edge.name, c.edge.merge = "", "", false
+	to.owner.edges = slices.Insert(slices.Clone(to.owner.edges), i, c.edge)
+
+	return c.x.created(to.owner, c.edge)
 }
 
 // insertItem puts the value of e into the sequence at the place of c, as

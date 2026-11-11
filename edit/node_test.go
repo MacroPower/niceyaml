@@ -2642,3 +2642,228 @@ func ExampleNode_Own() {
 	//   test: {<<: *defaults}
 	//   lint: {timeout: 5000}
 }
+
+func TestNode_Len(t *testing.T) {
+	t.Parallel()
+
+	ref := niceyaml.NewSourceFromString("r: &r [x, y, z]\n", niceyaml.WithName("ref.yaml"))
+
+	tcs := map[string]struct {
+		before string
+		path   paths.Path
+		want   int
+	}{
+		"block sequence": {
+			before: stringtest.LinesLF("s:", "  - a", "  - b", "  - c"),
+			path:   paths.Doc().Child("s"),
+			want:   3,
+		},
+		"flow sequence": {
+			before: "s: [a, b]\n",
+			path:   paths.Doc().Child("s"),
+			want:   2,
+		},
+		"empty flow sequence": {
+			before: "s: []\n",
+			path:   paths.Doc().Child("s"),
+		},
+		"alias of a sequence": {
+			before: stringtest.LinesLF("s: &s [a, b]", "t: *s"),
+			path:   paths.Doc().Child("t"),
+			want:   2,
+		},
+		"alias of a sequence of a reference document": {
+			before: "a: *r\n",
+			path:   paths.Doc().Child("a"),
+			want:   3,
+		},
+		"sequence under a tag": {
+			before: "s: !!seq [a]\n",
+			path:   paths.Doc().Child("s"),
+			want:   1,
+		},
+		"mapping": {
+			before: "m: {a: 1, b: 2}\n",
+			path:   paths.Doc().Child("m"),
+		},
+		"scalar": {
+			before: "a: 1\n",
+			path:   paths.Doc().Child("a"),
+		},
+		"null": {
+			before: "s:\n",
+			path:   paths.Doc().Child("s"),
+		},
+		"place without a value": {
+			before: "a: 1\n",
+			path:   paths.Doc().Child("s"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d := newDoc(t, tc.before, niceyaml.WithReferences(ref))
+
+			err := applyAt(t, d, tc.path, func(_ context.Context, n *edit.Node) error {
+				assert.Equal(t, tc.want, n.Len())
+
+				return nil
+			})
+			require.NoError(t, err)
+		})
+	}
+
+	t.Run("after an edit", func(t *testing.T) {
+		t.Parallel()
+
+		d := newDoc(t, "s: [a]\n")
+
+		err := applyAt(t, d, paths.Doc().Child("s"), func(ctx context.Context, n *edit.Node) error {
+			err := n.Append(ctx, "b")
+			if err != nil {
+				return err
+			}
+
+			assert.Equal(t, 2, n.Len())
+
+			return nil
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("after its Apply", func(t *testing.T) {
+		t.Parallel()
+
+		d := newDoc(t, "s: [a, b]\n")
+
+		var kept *edit.Node
+
+		err := applyAt(t, d, paths.Doc().Child("s"), func(_ context.Context, n *edit.Node) error {
+			kept = n
+			assert.Equal(t, 2, n.Len())
+
+			return nil
+		})
+		require.NoError(t, err)
+
+		assert.Zero(t, kept.Len())
+		require.ErrorIs(t, kept.Err(), edit.ErrEnded)
+	})
+}
+
+func TestNode_Append(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		value any
+		// The edit runs after the Func takes the node at path and before the
+		// Append through that node.
+		edit   edit.Func
+		before string
+		path   paths.Path
+		want   string
+		err    string
+	}{
+		"block sequence": {
+			before: stringtest.LinesLF("args:", "  - --quiet # first", "  - --color"),
+			path:   paths.Doc().Child("args"),
+			value:  "--verbose",
+			want:   stringtest.LinesLF("args:", "  - --quiet # first", "  - --color", "  - --verbose"),
+		},
+		"flow sequence": {
+			before: "args: [a, b]\n",
+			path:   paths.Doc().Child("args"),
+			value:  "c",
+			want:   "args: [a, b, c]\n",
+		},
+		"empty flow sequence": {
+			before: "args: []\n",
+			path:   paths.Doc().Child("args"),
+			value:  "a",
+			want:   "args: [a]\n",
+		},
+		"mapping value": {
+			before: stringtest.LinesLF("steps:", "  - run: a"),
+			path:   paths.Doc().Child("steps"),
+			value:  map[string]any{"run": "b"},
+			want:   stringtest.LinesLF("steps:", "  - run: a", "  - run: b"),
+		},
+		"alias of a sequence": {
+			before: stringtest.LinesLF("s: &s [a]", "t: *s"),
+			path:   paths.Doc().Child("t"),
+			value:  "b",
+			want:   stringtest.LinesLF("s: &s [a, b]", "t: *s"),
+		},
+		"mapping": {
+			before: "m: {a: 1}\n",
+			path:   paths.Doc().Child("m"),
+			value:  "b",
+			err:    "cafe.jacobcolvin.com/v1 inserts $.m[0], but m holds a mapping",
+		},
+		"place without a value": {
+			before: "a: 1\n",
+			path:   paths.Doc().Child("s"),
+			value:  "b",
+			err:    "cafe.jacobcolvin.com/v1 inserts $.s[0], but the document holds no $.s",
+		},
+		"node whose place an earlier remove took away": {
+			// A node on the same path reads the new sequence, but the held
+			// node does not append to it.
+			before: "s: [a]\n",
+			path:   paths.Doc().Child("s"),
+			edit: func(ctx context.Context, root *edit.Node) error {
+				err := root.At(paths.Doc().Child("s")).Remove()
+				if err != nil {
+					return err
+				}
+
+				return root.At(paths.Doc().Child("s")).Set(ctx, []string{"b", "c"})
+			},
+			value: "x",
+			err:   "test.yaml:1:1: $.s: cafe.jacobcolvin.com/v1 appends to $.s through a node that lost its place to an earlier edit",
+		},
+		"node on a key that an earlier rename gives another entry": {
+			before: stringtest.LinesLF("a: [1]", "b: [2, 3]"),
+			path:   paths.Doc().Child("a"),
+			edit: func(ctx context.Context, root *edit.Node) error {
+				err := root.At(paths.Doc().Child("a")).Remove()
+				if err != nil {
+					return err
+				}
+
+				return root.At(paths.Doc().Child("b")).SetKey("a")
+			},
+			value: "x",
+			err:   "test.yaml:1:1: $.a: cafe.jacobcolvin.com/v1 appends to $.a through a node that lost its place to an earlier edit",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d := newDoc(t, tc.before)
+
+			err := d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, root *edit.Node) error {
+				n := root.At(tc.path)
+
+				if tc.edit != nil {
+					err := tc.edit(ctx, root)
+					if err != nil {
+						return err
+					}
+				}
+
+				return n.Append(ctx, tc.value)
+			}, label)
+
+			requireEdit(t, d, err, tc.err, tc.want)
+
+			if tc.err != "" {
+				assert.Equal(t, tc.before, d.Text())
+			}
+		})
+	}
+}

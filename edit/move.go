@@ -6,6 +6,7 @@ import (
 	"math"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/goccy/go-yaml/ast"
 
@@ -17,11 +18,31 @@ import (
 
 // Move moves the value and its comments to target, a `$` path, which it
 // creates as [Node.Set] does. A target at the index past the last item of a
-// sequence thus appends an item. The entry that the move creates goes
-// after the last entry of its mapping, unless an option of opts places it,
-// as the same option places the entry that a Set creates. A [Before] or an
-// [After] that names the key of the entry that moves fails the move. A
-// place that does not hold a value stays as it is. The comments include
+// sequence thus appends an item, and [Node.Len] gives that index. A target
+// at an index that holds an item puts the value before that item, as
+// [Node.Insert] puts a new item. The index names the item in the text that
+// the call found. So on the items [a, b, c], a Move of the item at 0 to
+// the index 2 gives [b, a, c], where the value lands at index 1. A Move of
+// an item to the index after its own keeps the order of the items. It
+// still deletes the blank lines next to the item, as each Move does.
+//
+// The entry that the move creates goes after the last entry of its
+// mapping, unless an option of opts places it, as the same option places
+// the entry that a Set creates. A target at the path of the entry that
+// moves, with [First], [Before], or [After], puts the entry at that place
+// in its own mapping. The key keeps its text, so a key such as 1 or 3.9
+// still reads as a number. A [Before] or an [After] that names the key of
+// the entry that moves fails the move. So does an option at a target in a
+// sequence, because the option places an entry.
+//
+// A move to the path of its own entry keeps the keys of the mapping. So a
+// `<<` merge key that brings in the key of the entry does not refuse the
+// move while the entry stays after the merge key. A move that puts the
+// entry before such a merge key fails with [ErrEngine]. Go-yaml's decoder
+// then reads the entry of the merge key, as the Supported YAML section of
+// the package documentation describes.
+//
+// A place that does not hold a value stays as it is. The comments include
 // the comment lines that [Node.Remove] takes with the entry or the item,
 // such as those that the user indented past its key or its "-". Move
 // deletes blank lines next to the old lines of the value as Remove does.
@@ -30,10 +51,15 @@ import (
 // same text at target. It passes where that pair passes, except where it
 // refuses the move itself. It fails when target cannot take the value:
 //
-//   - Target holds a value or lies inside the value, through an alias too.
+//   - Target is a key that holds a value. Move does not replace a value.
+//   - Target lies inside the value, through an alias too. The path of the
+//     value itself lies inside it, unless a placement option comes with
+//     the path of an entry, and so does the index of an item.
 //   - The deepest value on target that the document holds cannot take the
 //     rest of target, such as a scalar, or a sequence where target names a
 //     key.
+//   - Target is the path of an entry that a `<<` merge key brings in, with
+//     a placement option.
 //
 // Move fails with [ErrUnsupported] where it reaches a construct outside the
 // YAML that the package documentation supports, as each call does. It also
@@ -159,8 +185,19 @@ func (n *Node) move(target paths.Path, at placement) (modelPlace, error) {
 		return modelPlace{}, d.fail(n, "%s moves %s, which %s", d.subject(), name, why)
 	}
 
-	if _, inside := target.CutPrefix(n.path); inside {
+	// A move to the path of its own entry with a placement reorders the
+	// entry in its mapping.
+	reorder := target.Equal(n.path) && p.entry != nil && at.kind != placeLast
+
+	if _, inside := target.CutPrefix(n.path); inside && !reorder {
 		return modelPlace{}, d.fail(n, "%s moves %s to %s, which lies inside it", d.subject(), name, target)
+	}
+
+	if reorder && p.merged {
+		parent, _ := n.path.Parent()
+
+		return modelPlace{}, d.fail(n, "%s moves %s to %s %s, but a `<<` merge key brings %s into %s",
+			d.subject(), name, target, at.words(), n.Key(), d.describe(parent))
 	}
 
 	// A step of the path to target before its problem can reach a zone of
@@ -189,8 +226,12 @@ func (n *Node) move(target paths.Path, at placement) (modelPlace, error) {
 	// holds a value. The zones that the Move reaches come first.
 	reach := reachCall{kind: callMove, path: n.path, hidden: n.hidden, target: target, named: named}
 
+	// A target that holds an item takes the value before that item, as an
+	// Insert there does.
+	occupied := tp.exists && !reorder && tp.seq != nil && lastIndex(target)
+
 	tw, walkErr := d.walkCall(target, nil)
-	if walkErr == nil && tp.exists {
+	if walkErr == nil && tp.exists && !occupied && !reorder {
 		if k, key, ok := d.mergedTarget(tw); ok {
 			err = d.reachProblem(reach)
 			if err != nil {
@@ -202,6 +243,7 @@ func (n *Node) move(target paths.Path, at placement) (modelPlace, error) {
 	}
 
 	switch {
+	case occupied || reorder:
 	case tp.exists && p.entry != nil:
 		// The problem is about the key that the move writes, so it binds at
 		// the key of the entry.
@@ -225,7 +267,17 @@ func (n *Node) move(target paths.Path, at placement) (modelPlace, error) {
 		return modelPlace{}, err //nolint:wrapcheck // The binding is the problem of the edit.
 	}
 
-	th, why, ok := d.targetHolder(target, tp)
+	var (
+		th moveHolder
+		ok bool
+	)
+
+	if occupied || reorder {
+		th, ok = d.parentHolder(target)
+	} else {
+		th, why, ok = d.targetHolder(target, tp)
+	}
+
 	if ok && why != "" {
 		refused := d.stepProblem(targetStep)
 		if refused != nil {
@@ -236,8 +288,11 @@ func (n *Node) move(target paths.Path, at placement) (modelPlace, error) {
 	switch {
 	case ok && why != "":
 		return modelPlace{}, d.fail(n, "%s moves %s to %s, but %s", d.subject(), name, target, why)
-	case ok && (th.content == astnode.Content(p.value) || d.liesIn(th.content, p.value)):
-		// The path to target reads the value through an alias.
+	case ok && !reorder && (th.content == astnode.Content(p.value) || d.liesIn(th.content, p.value)),
+		occupied && astnode.Content(tp.value) == astnode.Content(p.value):
+		// The path to target reads the value through an alias. An index of
+		// target can also name the item that moves through an alias of its
+		// sequence.
 		return modelPlace{}, d.fail(n, "%s moves %s to %s, which lies inside it", d.subject(), name, target)
 	}
 
@@ -246,7 +301,8 @@ func (n *Node) move(target paths.Path, at placement) (modelPlace, error) {
 		return modelPlace{}, err
 	}
 
-	if p.entry != nil {
+	// A reorder keeps the keys of the mapping.
+	if p.entry != nil && !reorder {
 		err = d.ownKeysProblem(p.entry, p.container, "", false, named)
 		if err != nil {
 			return modelPlace{}, err
@@ -255,6 +311,12 @@ func (n *Node) move(target paths.Path, at placement) (modelPlace, error) {
 
 	if ok && d.inFlow(th.content) && d.userBlock(p.value) {
 		return modelPlace{}, d.flowMoveProblem(p.value, named)
+	}
+
+	// A placement puts an entry, so it does not apply to an item.
+	if _, isSeq := th.content.(*ast.SequenceNode); ok && isSeq && at.kind != placeLast {
+		return modelPlace{}, d.fail(n, "%s %s %s, but %s holds a sequence",
+			d.subject(), named, at.words(), d.describe(th.path))
 	}
 
 	// The placement names a key of the mapping that holds target, as the
@@ -290,12 +352,18 @@ func (n *Node) move(target paths.Path, at placement) (modelPlace, error) {
 		items = d.reached(d.itemsOf(from, p))
 	}
 
+	var targets *reached
+
+	if occupied {
+		targets = d.reached(d.itemsOf(target, tp))
+	}
+
 	// The text of the value goes to target with its bytes, and the Move
 	// writes no copy. Each alias must then read the anchor that it read.
 	saved, callErr := d.save(), d.callErr
 	bound := d.aliasBindings()
 
-	moved, index, err := d.moveValue(n, p, target, named, where)
+	moved, index, err := d.moveValue(n, p, target, named, where, occupied, reorder)
 
 	moves := -1
 	if err == nil {
@@ -326,6 +394,18 @@ func (n *Node) move(target paths.Path, at placement) (modelPlace, error) {
 		items.shift(index+1, -1)
 	}
 
+	// The items from the place of the value on take the index after theirs,
+	// as for an Insert.
+	if targets != nil {
+		for m := range moving.nodes {
+			delete(targets.nodes, m)
+		}
+
+		if last, ok := moved.Last(); ok {
+			targets.shift(last.Index, 1)
+		}
+	}
+
 	// The value takes the place of target, which a path selects, so a node
 	// on the value or below it reads no entry that a later entry of its
 	// key hides above target.
@@ -352,19 +432,26 @@ func (d *Doc) movePlace(n *Node, th moveHolder, named string, at placement) (mod
 	return d.placeEntry(n, named, th.place, th.path, th.content, at)
 }
 
-// moveValue moves the text of the value of p, the place of n, to target, a
-// place that does not hold a value, as [Node.Move] describes, and puts the
-// entry that it creates at the place that where gives. Named says what the
-// Move does, as in "moves $.a to $.b". MoveValue returns target as the text
-// after the move spells it, and the index of the item of p in its
-// sequence.
-func (d *Doc) moveValue(n *Node, p *place, target paths.Path, named string, where modelPlace) (paths.Path, int, error) {
+// moveValue moves the text of the value of p, the place of n, to target,
+// as [Node.Move] describes, and puts the entry that it creates at the place
+// that where gives. Target does not hold a value, unless occupied tells
+// that it holds an item, which the value goes before, or reorder tells
+// that it is the place of n. Named says what the Move does, as in "moves
+// $.a to $.b". MoveValue returns target as the text after the move spells
+// it, and the index of the item of p in its sequence.
+func (d *Doc) moveValue(
+	n *Node, p *place, target paths.Path, named string, where modelPlace, occupied, reorder bool,
+) (paths.Path, int, error) {
 	pl := d.extract(p)
 	saved := d.save()
 
+	if reorder {
+		pl.key = d.entryKeyText(p)
+	}
+
 	// The value that holds target before the removal. The text that the
 	// removal edits gives that place.
-	holder, held := d.targetHolderID(target)
+	holder, held := d.targetHolderID(target, occupied)
 
 	// The target names a place of the document before the removal.
 	moved := target
@@ -378,8 +465,19 @@ func (d *Doc) moveValue(n *Node, p *place, target paths.Path, named string, wher
 		return target, 0, err
 	}
 
-	if after, ok := d.targetHolderID(moved); held && ok && after.same(holder) {
-		err = d.insertAt(n, moved, pl, named, where)
+	// The entry goes back into the mapping that it left. A `<<` merge key
+	// of the mapping can bring in an entry of its key while it is away.
+	if reorder {
+		err = d.insertAt(n, target, pl, named, where, true)
+		if err != nil {
+			return target, 0, err
+		}
+
+		return target, p.index, nil
+	}
+
+	if after, ok := d.targetHolderID(moved, occupied); held && ok && after.same(holder) {
+		err = d.insertAt(n, moved, pl, named, where, occupied)
 		if err != nil {
 			return target, 0, err
 		}
@@ -393,7 +491,7 @@ func (d *Doc) moveValue(n *Node, p *place, target paths.Path, named string, wher
 	// leaves its place.
 	d.restore(saved)
 
-	err = d.insertAt(n, target, pl, named, where)
+	err = d.insertAt(n, target, pl, named, where, occupied)
 	if err != nil {
 		return target, 0, err
 	}
@@ -447,13 +545,19 @@ func (h holderID) same(o holderID) bool {
 }
 
 // targetHolderID returns the [holderID] of the place at target, a place
-// that the current text does not hold. It reports false when the text
-// holds a value at target, or when no key or "-" holds the value that
-// holds target.
-func (d *Doc) targetHolderID(target paths.Path) (holderID, bool) {
+// that the current text does not hold, or an item when occupied is true.
+// It reports false when the text holds another value at target, or when
+// no key or "-" holds the value that holds target.
+func (d *Doc) targetHolderID(target paths.Path, occupied bool) (holderID, bool) {
 	p, err := d.resolve(target)
-	if err != nil || p.exists {
+	if err != nil || p.exists && (!occupied || p.seq == nil) {
 		return holderID{}, false
+	}
+
+	// The sequence of an item holds it as it holds the place past its last
+	// item.
+	if p.exists {
+		p.found--
 	}
 
 	if p.container == astnode.Content(d.node.AST()) {
@@ -1008,24 +1112,82 @@ func (d *Doc) targetHolder(target paths.Path, tp *place) (moveHolder, string, bo
 	return h, d.createProblem(holder, h.path, h.content, h.rest), true
 }
 
+// parentHolder returns the value that holds target, a path of a name or
+// an index, as the value of the parent of target. It reports false when
+// that value does not resolve.
+func (d *Doc) parentHolder(target paths.Path) (moveHolder, bool) {
+	sels := slices.Collect(target.Selectors())
+	h := moveHolder{path: appendSelectors(paths.Doc(), sels[:len(sels)-1]), rest: sels[len(sels)-1:]}
+
+	holder, err := d.resolve(h.path)
+	if err != nil || !holder.exists {
+		return h, false
+	}
+
+	content, _, err := d.readValue(holder.value)
+	if err != nil {
+		return h, false
+	}
+
+	h.place, h.content = holder, content
+
+	return h, true
+}
+
+// entryKeyText returns the text of the key of the entry of p as the current
+// text spells it. It returns "" for a key whose text spans more than one
+// line, such as a block scalar after a "?".
+func (d *Doc) entryKeyText(p *place) string {
+	s, ok := d.nodeSpan(p.entry.Key)
+	if !ok || s.end <= s.start {
+		return ""
+	}
+
+	text := d.cur[s.start:s.end]
+	if strings.ContainsAny(text, "\r\n") {
+		return ""
+	}
+
+	return text
+}
+
+// lastIndex reports whether the last selector of path is an index.
+func lastIndex(path paths.Path) bool {
+	last, ok := path.Last()
+
+	return ok && last.Kind == paths.SelectorIndex
+}
+
 // insertAt inserts pl at target, a place that does not hold a value, and
-// creates the mappings above it that the document lacks. The entry that it
-// creates goes at the place that where gives. Named says what the Move
-// does, for the note of the text that it creates. The caller checks with
-// [Doc.targetHolder] that target can take a value before it changes the
-// text.
-func (d *Doc) insertAt(h *Node, target paths.Path, pl payload, named string, where modelPlace) error {
+// creates the mappings above it that the document lacks. With occupied
+// set, target can hold a value: an item, which pl goes before, or the key
+// of an entry, which a `<<` merge key brings into the mapping that pl goes
+// back into. The entry that it creates goes at the place that where gives.
+// Named says what the Move does, for the note of the text that it creates.
+// The caller checks with [Doc.targetHolder] that target can take a value
+// before it changes the text.
+func (d *Doc) insertAt(h *Node, target paths.Path, pl payload, named string, where modelPlace, occupied bool) error {
 	tp, err := d.resolve(target)
 	if err != nil {
 		return d.bug(h, fmt.Errorf("%s %w", target, err))
 	}
 
 	// The checks of the move found no value at target.
-	if tp.exists {
+	if tp.exists && !occupied {
 		return d.bug(h, fmt.Errorf("%s holds a value", target))
 	}
 
-	th, why, ok := d.targetHolder(target, tp)
+	var (
+		th  moveHolder
+		why string
+		ok  bool
+	)
+
+	if tp.exists {
+		th, ok = d.parentHolder(target)
+	} else {
+		th, why, ok = d.targetHolder(target, tp)
+	}
 
 	switch {
 	case !ok:
@@ -1037,7 +1199,12 @@ func (d *Doc) insertAt(h *Node, target paths.Path, pl payload, named string, whe
 	if seq, ok := th.content.(*ast.SequenceNode); ok {
 		origin := d.addNote(d.createdNote(th.place, named))
 
-		return d.insertPayloadItem(h, th.path, th.place, seq, len(seq.Values), pl, origin)
+		index := len(seq.Values)
+		if tp.exists {
+			index = th.rest[0].Index
+		}
+
+		return d.insertPayloadItem(h, th.path, th.place, seq, index, pl, origin)
 	}
 
 	// The text after the removal of the value holds the entry that the new
@@ -1063,8 +1230,14 @@ func (d *Doc) insertAt(h *Node, target paths.Path, pl payload, named string, whe
 
 	// The key that holds the value stands for the key or the "-" that held
 	// it. Where an edit wrote that key or "-", the key names that edit as
-	// its writer, and binds where the text that the move creates binds.
-	switch last := len(keys) - 1; {
+	// its writer, and binds where the text that the move creates binds. An
+	// entry that goes back into its own mapping keeps the text of its key.
+	last := len(keys) - 1
+	if pl.key != "" {
+		keys[last] = newRun(pl.key, origin)
+	}
+
+	switch {
 	case pl.holder != nil:
 		keys[last] = newRun(keys[last].text, *pl.holder)
 	case pl.writer != nil:

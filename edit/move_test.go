@@ -1292,6 +1292,10 @@ func TestNode_Move_Placement(t *testing.T) {
 		// Whether the Func removes the value through the node before the
 		// Move.
 		removed bool
+		// Whether the error matches [edit.ErrEngine].
+		engine bool
+		// Whether the document decodes to the same data after the Move.
+		same bool
 	}{
 		"first": {
 			before: stringtest.LinesLF("a: 1", "m:", "  x: 1", "  y: 2"),
@@ -1391,7 +1395,139 @@ func TestNode_Move_Placement(t *testing.T) {
 			path:   paths.Doc().Child("a"),
 			target: paths.Doc().Child("s").Index(1),
 			opts:   []edit.SetOption{edit.First()},
-			want:   "s: [x, 1]\n",
+			err: "test.yaml:1:4: $.a: cafe.jacobcolvin.com/v1 moves $.a to $.s[1] first, but s holds " +
+				"a sequence",
+		},
+		"placement of an item that exists": {
+			before: stringtest.LinesLF("a: 1", "s: [x]"),
+			path:   paths.Doc().Child("a"),
+			target: paths.Doc().Child("s").Index(0),
+			opts:   []edit.SetOption{edit.After("x")},
+			err:    `cafe.jacobcolvin.com/v1 moves $.a to $.s[0] after "x", but s holds a sequence`,
+		},
+		"own path first": {
+			before: stringtest.LinesLF("a: 1", "b: 2", "# about c", "c: 3 # C"),
+			path:   paths.Doc().Child("c"),
+			target: paths.Doc().Child("c"),
+			opts:   []edit.SetOption{edit.First()},
+			want:   stringtest.LinesLF("# about c", "c: 3 # C", "a: 1", "b: 2"),
+		},
+		"own path after a key": {
+			before: stringtest.LinesLF("a: 1", "b: 2", "c:", "  x: 1"),
+			path:   paths.Doc().Child("c"),
+			target: paths.Doc().Child("c"),
+			opts:   []edit.SetOption{edit.After("a")},
+			want:   stringtest.LinesLF("a: 1", "c:", "  x: 1", "b: 2"),
+		},
+		"own path before a key": {
+			before: stringtest.LinesLF("m:", "  a: 1", "  b: 2", "  c: 3"),
+			path:   paths.Doc().Child("m").Child("a"),
+			target: paths.Doc().Child("m").Child("a"),
+			opts:   []edit.SetOption{edit.Before("c")},
+			want:   stringtest.LinesLF("m:", "  b: 2", "  a: 1", "  c: 3"),
+		},
+		"own path in a flow mapping": {
+			before: "m: {a: 1, b: 2, c: 3}\n",
+			path:   paths.Doc().Child("m").Child("c"),
+			target: paths.Doc().Child("m").Child("c"),
+			opts:   []edit.SetOption{edit.First()},
+			want:   "m: {c: 3, a: 1, b: 2}\n",
+		},
+		"own path of an int key": {
+			before: stringtest.LinesLF("1: one", "2: two"),
+			path:   paths.Doc().Child("1"),
+			target: paths.Doc().Child("1"),
+			opts:   []edit.SetOption{edit.After("2")},
+			want:   stringtest.LinesLF("2: two", "1: one"),
+			same:   true,
+		},
+		"own path of a float key": {
+			before: stringtest.LinesLF("3.10: cp310", "3.9: cp39"),
+			path:   paths.Doc().Child("3.9"),
+			target: paths.Doc().Child("3.9"),
+			opts:   []edit.SetOption{edit.First()},
+			want:   stringtest.LinesLF("3.9: cp39", "3.10: cp310"),
+			same:   true,
+		},
+		"own path of a bool key": {
+			before: stringtest.LinesLF("a: 1", "true: 2"),
+			path:   paths.Doc().Child("true"),
+			target: paths.Doc().Child("true"),
+			opts:   []edit.SetOption{edit.Before("a")},
+			want:   stringtest.LinesLF("true: 2", "a: 1"),
+			same:   true,
+		},
+		"own path of a single-quoted key": {
+			before: stringtest.LinesLF("'a': 1", "b: 2"),
+			path:   paths.Doc().Child("a"),
+			target: paths.Doc().Child("a"),
+			opts:   []edit.SetOption{edit.After("b")},
+			want:   stringtest.LinesLF("b: 2", "'a': 1"),
+			same:   true,
+		},
+		"own path of a key that YAML 1.1 reads as a bool": {
+			before: stringtest.LinesLF("y: 1", "on: 2", "z: 3"),
+			path:   paths.Doc().Child("on"),
+			target: paths.Doc().Child("on"),
+			opts:   []edit.SetOption{edit.After("z")},
+			want:   stringtest.LinesLF("y: 1", "z: 3", "on: 2"),
+			same:   true,
+		},
+		"own path of a key in a flow mapping": {
+			before: "{1: one, 'b': two}\n",
+			path:   paths.Doc().Child("1"),
+			target: paths.Doc().Child("1"),
+			opts:   []edit.SetOption{edit.After("b")},
+			want:   "{'b': two, 1: one}\n",
+			same:   true,
+		},
+		"own path through an alias": {
+			before: stringtest.LinesLF("s: &s", "  a: 1", "  b: 2", "t: *s"),
+			path:   paths.Doc().Child("t").Child("b"),
+			target: paths.Doc().Child("t").Child("b"),
+			opts:   []edit.SetOption{edit.First()},
+			want:   stringtest.LinesLF("s: &s", "  b: 2", "  a: 1", "t: *s"),
+		},
+		"own path of a key that a merge key also brings in": {
+			// The own c stays after the merge key, so the merge key does not
+			// refuse the Move.
+			before: stringtest.LinesLF("s: &s {c: 9}", "m:", "  <<: *s", "  a: 1", "  c: 3"),
+			path:   paths.Doc().Child("m").Child("c"),
+			target: paths.Doc().Child("m").Child("c"),
+			opts:   []edit.SetOption{edit.Before("a")},
+			want:   stringtest.LinesLF("s: &s {c: 9}", "m:", "  <<: *s", "  c: 3", "  a: 1"),
+		},
+		"own path before a merge key that also brings in the key": {
+			// Go-yaml's decoder reads the c of the merge key when the own c
+			// comes before it.
+			before: stringtest.LinesLF("base: &b {c: 0}", "m:", "  <<: *b", "  a: 1", "  # about c", "  c: 3 # C"),
+			path:   paths.Doc().Child("m").Child("c"),
+			target: paths.Doc().Child("m").Child("c"),
+			opts:   []edit.SetOption{edit.First()},
+			err: "test.yaml:6:3: $.m.c: go-yaml's decoder reads $.m.c from the merge key at 3:3 in the " +
+				"edited text, but the merge spec keeps the own entry written before it",
+			engine: true,
+		},
+		"own path of an entry that a merge key brings in": {
+			before: stringtest.LinesLF("s: &s {c: 9}", "m:", "  <<: *s", "  a: 1"),
+			path:   paths.Doc().Child("m").Child("c"),
+			target: paths.Doc().Child("m").Child("c"),
+			opts:   []edit.SetOption{edit.First()},
+			err: "cafe.jacobcolvin.com/v1 moves \"c\" to $.m.c first, but a `<<` merge key brings c " +
+				"into m",
+		},
+		"own path before its own key": {
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("b"),
+			target: paths.Doc().Child("b"),
+			opts:   []edit.SetOption{edit.Before("b")},
+			err:    `cafe.jacobcolvin.com/v1 moves $.b to $.b before "b", which is the entry that moves`,
+		},
+		"own path without a placement": {
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("b"),
+			target: paths.Doc().Child("b"),
+			err:    `cafe.jacobcolvin.com/v1 moves "b" to $.b, which lies inside it`,
 		},
 	}
 
@@ -1401,7 +1537,10 @@ func TestNode_Move_Placement(t *testing.T) {
 
 			d := newDoc(t, tc.before)
 
-			err := applyAt(t, d, tc.path, func(_ context.Context, n *edit.Node) error {
+			data, err := d.Node().Decode[map[any]any](t.Context())
+			require.NoError(t, err)
+
+			err = applyAt(t, d, tc.path, func(_ context.Context, n *edit.Node) error {
 				if tc.removed {
 					err := n.Remove()
 					if err != nil {
@@ -1411,11 +1550,183 @@ func TestNode_Move_Placement(t *testing.T) {
 
 				return n.Move(tc.target, tc.opts...)
 			})
+			switch {
+			case tc.engine:
+				require.ErrorIs(t, err, edit.ErrEngine)
+			case tc.err != "":
+				require.NotErrorIs(t, err, edit.ErrEngine)
+			}
+
+			requireEdit(t, d, err, tc.err, tc.want)
+
+			if tc.same {
+				got, err := d.Node().Decode[map[any]any](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, data, got)
+			}
+		})
+	}
+}
+
+func TestNode_Move_Index(t *testing.T) {
+	t.Parallel()
+
+	steps := paths.Doc().Child("steps")
+
+	tcs := map[string]struct {
+		before string
+		path   paths.Path
+		target paths.Path
+		want   string
+		err    string
+		// The paths of the nodes on the items of steps after the Move, by
+		// their index before it.
+		nodes []paths.Path
+	}{
+		"last item to the first index": {
+			before: stringtest.LinesLF("steps:", "  # about a", "  - a # A", "  - b", "  # about c", "  - c # C"),
+			path:   steps.Index(2),
+			target: steps.Index(0),
+			want: stringtest.LinesLF("steps:", "  # about c", "  - c # C", "  # about a", "  - a # A",
+				"  - b"),
+			nodes: []paths.Path{steps.Index(1), steps.Index(2), steps.Index(0)},
+		},
+		"first item to the last index": {
+			// The value goes before the item that holds the index as the call
+			// found the text, so it lands at the index before it.
+			before: stringtest.LinesLF("steps:", "  - a", "  - b", "  - c"),
+			path:   steps.Index(0),
+			target: steps.Index(2),
+			want:   stringtest.LinesLF("steps:", "  - b", "  - a", "  - c"),
+			nodes:  []paths.Path{steps.Index(1), steps.Index(0), steps.Index(2)},
+		},
+		"item to the index after it": {
+			before: stringtest.LinesLF("steps:", "  - a", "  - b", "  - c"),
+			path:   steps.Index(0),
+			target: steps.Index(1),
+			want:   stringtest.LinesLF("steps:", "  - a", "  - b", "  - c"),
+			nodes:  []paths.Path{steps.Index(0), steps.Index(1), steps.Index(2)},
+		},
+		"item to the index after it between blank lines": {
+			// The order stays, but the blank line after the item goes, as for
+			// each Move.
+			before: stringtest.LinesLF("steps:", "  - a", "", "  - b # B", "", "  - c"),
+			path:   steps.Index(1),
+			target: steps.Index(2),
+			want:   stringtest.LinesLF("steps:", "  - a", "", "  - b # B", "  - c"),
+			nodes:  []paths.Path{steps.Index(0), steps.Index(1), steps.Index(2)},
+		},
+		"item to the index past the last item": {
+			before: stringtest.LinesLF("steps:", "  - a", "  - b", "  - c"),
+			path:   steps.Index(0),
+			target: steps.Index(3),
+			want:   stringtest.LinesLF("steps:", "  - b", "  - c", "  - a"),
+			nodes:  []paths.Path{steps.Index(2), steps.Index(0), steps.Index(1)},
+		},
+		"item to its own index": {
+			before: stringtest.LinesLF("steps:", "  - a", "  - b", "  - c"),
+			path:   steps.Index(1),
+			target: steps.Index(1),
+			err:    "cafe.jacobcolvin.com/v1 moves $.steps[1] to $.steps[1], which lies inside it",
+		},
+		"item of a flow sequence to the first index": {
+			before: "steps: [a, b, c]\n",
+			path:   steps.Index(2),
+			target: steps.Index(0),
+			want:   "steps: [c, a, b]\n",
+			nodes:  []paths.Path{steps.Index(1), steps.Index(2), steps.Index(0)},
+		},
+		"entry to an index of a block sequence": {
+			before: stringtest.LinesLF("x: 1", "steps:", "  - a", "  - b", "  - c"),
+			path:   paths.Doc().Child("x"),
+			target: steps.Index(1),
+			want:   stringtest.LinesLF("steps:", "  - a", "  - 1", "  - b", "  - c"),
+			nodes:  []paths.Path{steps.Index(0), steps.Index(2), steps.Index(3)},
+		},
+		"entry to an index of a flow sequence": {
+			before: stringtest.LinesLF("x: 1", "steps: [a, b, c]"),
+			path:   paths.Doc().Child("x"),
+			target: steps.Index(0),
+			want:   "steps: [1, a, b, c]\n",
+			nodes:  []paths.Path{steps.Index(1), steps.Index(2), steps.Index(3)},
+		},
+		"item to an index of another sequence": {
+			before: stringtest.LinesLF("other: [x, y]", "steps: [a, b, c]"),
+			path:   paths.Doc().Child("other").Index(1),
+			target: steps.Index(1),
+			want:   stringtest.LinesLF("other: [x]", "steps: [a, y, b, c]"),
+			nodes:  []paths.Path{steps.Index(0), steps.Index(2), steps.Index(3)},
+		},
+		"item to an index through an alias of its sequence": {
+			before: stringtest.LinesLF("steps: &s [a, b, c]", "t: *s"),
+			path:   steps.Index(2),
+			target: paths.Doc().Child("t").Index(0),
+			want:   stringtest.LinesLF("steps: &s [c, a, b]", "t: *s"),
+			nodes:  []paths.Path{steps.Index(1), steps.Index(2), paths.Doc().Child("t").Index(0)},
+		},
+		"item to its own index through an alias of its sequence": {
+			before: stringtest.LinesLF("steps: &s [a, b, c]", "t: *s"),
+			path:   steps.Index(1),
+			target: paths.Doc().Child("t").Index(1),
+			err:    "cafe.jacobcolvin.com/v1 moves $.steps[1] to $.t[1], which lies inside it",
+		},
+		"item through an alias to its own index": {
+			before: stringtest.LinesLF("steps: &s [a, b, c]", "t: *s"),
+			path:   paths.Doc().Child("t").Index(1),
+			target: steps.Index(1),
+			err:    "cafe.jacobcolvin.com/v1 moves $.t[1] to $.steps[1], which lies inside it",
+		},
+		"item of a block sequence to its own index through an alias": {
+			before: stringtest.LinesLF("steps: &s", "  - a", "  - b", "t: *s"),
+			path:   steps.Index(0),
+			target: paths.Doc().Child("t").Index(0),
+			err:    "cafe.jacobcolvin.com/v1 moves $.steps[0] to $.t[0], which lies inside it",
+		},
+		"item to the index after it through an alias of its sequence": {
+			before: stringtest.LinesLF("steps: &s [a, b, c]", "t: *s"),
+			path:   steps.Index(0),
+			target: paths.Doc().Child("t").Index(1),
+			want:   stringtest.LinesLF("steps: &s [a, b, c]", "t: *s"),
+			nodes:  []paths.Path{paths.Doc().Child("t").Index(0), steps.Index(1), steps.Index(2)},
+		},
+		"item to an index below a scalar": {
+			before: stringtest.LinesLF("steps: [a, b]", "x: 1"),
+			path:   steps.Index(0),
+			target: paths.Doc().Child("x").Index(0),
+			err:    "cafe.jacobcolvin.com/v1 moves $.steps[0] to $.x[0], but x holds a scalar",
+		},
+		"entry to a key that exists": {
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("a"),
+			target: paths.Doc().Child("b"),
+			err:    `cafe.jacobcolvin.com/v1 moves "a" to $.b, which already exists`,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d := newDoc(t, tc.before)
+
+			var nodes []*edit.Node
+
+			err := d.Apply(t.Context(), paths.Doc(), func(_ context.Context, root *edit.Node) error {
+				for i := range 3 {
+					nodes = append(nodes, root.At(steps.Index(i)))
+				}
+
+				return root.At(tc.path).Move(tc.target)
+			}, label)
 			if tc.err != "" {
 				require.NotErrorIs(t, err, edit.ErrEngine)
 			}
 
 			requireEdit(t, d, err, tc.err, tc.want)
+
+			for i, want := range tc.nodes {
+				assert.Equal(t, want, nodes[i].Path(), "node of $.steps[%d]", i)
+			}
 		})
 	}
 }
