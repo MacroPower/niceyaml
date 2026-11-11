@@ -1205,6 +1205,18 @@ func (e *Error) Format(f fmt.State, verb rune) {
 // the Error logs as its own message, which does not hold a path. A program
 // that wants the path of any error thus logs the string FormatError
 // returns.
+//
+// The value stays one string for every error, so a log store reads the
+// attribute of an error as text. A program that wants the fields of each
+// problem logs the nodes that [Problems] yields under a key of its own. A
+// JSON handler writes each node through [ErrorTree.MarshalJSON]. Unlike
+// the string, the slice holds every problem with all of its details. A
+// program that logs errors from untrusted input thus caps the slice
+// itself, for example at ErrorListLimit problems:
+//
+//	problems := slices.Collect(niceyaml.Problems(err))
+//	problems = problems[:min(len(problems), niceyaml.ErrorListLimit)]
+//	logger.Error("decode", slog.Any("err", err), slog.Any("problems", problems))
 func (e *Error) LogValue() slog.Value {
 	return logValue(e)
 }
@@ -4253,6 +4265,10 @@ func (e *SourceError) Format(f fmt.State, verb rune) {
 // shows at most [ErrorListLimit] problems and a last row that counts the
 // rest. A wrapper such as [fmt.Errorf] around a SourceError logs as its own
 // message, which holds the list [SourceError.Error] returns.
+//
+// The value stays one string, and a program that wants the fields of each
+// problem logs the nodes that [Problems] yields, as [Error.LogValue]
+// describes.
 func (e *SourceError) LogValue() slog.Value {
 	return logValue(e)
 }

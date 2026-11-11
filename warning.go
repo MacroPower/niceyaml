@@ -653,6 +653,9 @@ func (w *Warnings) Context(ctx context.Context) context.Context {
 //		pos, _ := warning.Position()
 //		emit(warning.Name(), pos, warning.Message())
 //	}
+//
+// A report in JSON encodes each tree, as [ErrorTree.MarshalJSON]
+// describes.
 func (w *Warnings) All() iter.Seq[ErrorTree] {
 	return func(yield func(ErrorTree) bool) {
 		rows := w.sorted()

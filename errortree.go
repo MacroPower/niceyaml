@@ -1,6 +1,8 @@
 package niceyaml
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"iter"
@@ -33,7 +35,10 @@ import (
 // node, and [ErrorTree.Name], [ErrorTree.FilePath], and
 // [ErrorTree.Position] from its binding. [Problems] yields the nodes that
 // such a report lists, one per problem, and [ErrorTree.All] yields every
-// node of the tree.
+// node of the tree. [ErrorTree.MarshalJSON] encodes a node as a JSON object
+// of the message, the context, the name, the file path, and the text of the
+// path. The object holds [ErrorTree.Range] in place of the position. A
+// report in JSON writes each node as it is.
 //
 // Each node with Detail set explains its parent, and a renderer that
 // draws details apart from problems reads that field.
@@ -58,6 +63,8 @@ type ErrorTree struct {
 	//   - Each child bound to the same source drops the name and reads
 	//     "line:col: $.path: msg".
 	//   - Each child in another document names that document.
+	//
+	// The line and column in a Label count from 1, as an editor does.
 	//
 	// Label is empty for a node that stands for several errors and does
 	// not add a message of its own, such as one built from [errors.Join].
@@ -260,7 +267,8 @@ func (t ErrorTree) Problems() iter.Seq[ErrorTree] {
 //		emit(problem.Name(), pos, path, problem.Context(), problem.Message())
 //	}
 //
-// Problems does not yield a node for a nil err.
+// A report in JSON encodes each node instead, as [ErrorTree.MarshalJSON]
+// describes. Problems does not yield a node for a nil err.
 func Problems(err error) iter.Seq[ErrorTree] {
 	return NewErrorTree(err).Problems()
 }
@@ -1055,6 +1063,95 @@ func (t ErrorTree) Range() (position.Range, bool) {
 // bound to a source, and for a binding that does not hold a document.
 func (t ErrorTree) DocumentIndex() (int, bool) {
 	return t.Bound.DocumentIndex()
+}
+
+// errorTreeJSON holds the fields that [ErrorTree.MarshalJSON] writes for
+// one node.
+type errorTreeJSON struct {
+	Message  string          `json:"message"`
+	Context  string          `json:"context,omitempty"`
+	Name     string          `json:"name,omitempty"`
+	FilePath string          `json:"filePath,omitempty"`
+	Path     string          `json:"path,omitempty"`
+	Range    *position.Range `json:"range,omitempty"`
+	Children []ErrorTree     `json:"children,omitempty"`
+	Warning  bool            `json:"warning,omitempty"`
+	Detail   bool            `json:"detail,omitempty"`
+}
+
+// MarshalJSON implements [json.Marshaler]. It writes the node as an object
+// whose fields come from the accessors of the node, so the object agrees
+// with them:
+//
+//   - "message" holds [ErrorTree.Message].
+//   - "context" holds [ErrorTree.Context] and is left out when empty.
+//   - "name" and "filePath" hold [ErrorTree.Name] and
+//     [ErrorTree.FilePath] and are each left out when empty, as for a
+//     node that is not bound to a source or a source without a file
+//     path.
+//   - "path" holds the text of [ErrorTree.Path] and is left out when the
+//     node does not name a path.
+//   - "range" holds [ErrorTree.Range] and is left out when the location of
+//     the node did not resolve.
+//   - "children" holds the Children, each written the same way, and is
+//     left out when the node does not have any.
+//   - "warning" and "detail" hold the Warning and Detail fields and are
+//     left out when false.
+//
+// A heading and a problem write the same fields. The range counts lines
+// and columns from 0 and is half-open, like every [position.Range]. The
+// Label counts them from 1, as an editor does, so a problem that the Label
+// shows at 2:7 writes a range that starts at {"line":1,"col":6}. The
+// object leaves out the Label and [ErrorTree.Position]. For a position from
+// [AtPosition], the range starts where the content of the token starts. It
+// can begin before the position that Position returns and the Label shows,
+// so a report that needs that exact position reads Position.
+//
+// A program that writes each problem of an error as a line of JSON encodes
+// the nodes that [Problems] yields:
+//
+//	enc := json.NewEncoder(w)
+//	for problem := range niceyaml.Problems(err) {
+//		if err := enc.Encode(problem); err != nil {
+//			return err
+//		}
+//	}
+//
+// A [log/slog] handler for JSON writes a slice of nodes through
+// MarshalJSON, as [Error.LogValue] describes.
+func (t ErrorTree) MarshalJSON() ([]byte, error) {
+	out := errorTreeJSON{
+		Message:  t.Message(),
+		Context:  t.Context(),
+		Warning:  t.Warning,
+		Detail:   t.Detail,
+		Name:     t.Name(),
+		FilePath: t.FilePath(),
+		Children: t.Children,
+	}
+
+	if path, ok := t.Path(); ok {
+		out.Path = path.String()
+	}
+
+	if rng, ok := t.Range(); ok {
+		out.Range = &rng
+	}
+
+	// The encoder leaves <, >, and & as they are. The encoding/json
+	// package compacts the bytes of a Marshaler with the escaping that its
+	// caller set. A caller that wants them escaped still gets them escaped.
+	var buf bytes.Buffer
+
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+
+	err := enc.Encode(out)
+	if err != nil {
+		return nil, fmt.Errorf("marshal tree: %w", err)
+	}
+
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
 }
 
 // bindingOf returns the binding err is or wraps along its cause chain, or

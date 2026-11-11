@@ -1,11 +1,14 @@
 package niceyaml_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"iter"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -4040,6 +4043,192 @@ func TestErrorTree_Accessors(t *testing.T) {
 				assert.Zero(t, index)
 			})
 		}
+	})
+}
+
+func TestErrorTree_MarshalJSON(t *testing.T) {
+	t.Parallel()
+
+	source := errorTreeSource()
+	fsys := fstest.MapFS{"config/f.yaml": {Data: []byte("a: 1\nb: 2\n")}}
+
+	fileSource, err := niceyaml.NewSourceFromFS(fsys, "config/f.yaml", niceyaml.WithName("f.yaml"))
+	require.NoError(t, err)
+
+	badA := niceyaml.NewError("bad a", niceyaml.AtPath(paths.Doc().Child("a")))
+	badB := niceyaml.NewError("bad b", niceyaml.AtPath(paths.Doc().Child("b")),
+		niceyaml.WithDetails(niceyaml.NewError("see a", niceyaml.AtPath(paths.Doc().Child("a")))))
+	gone := niceyaml.NewError("gone", niceyaml.AtPath(paths.Doc().Child("x").IndexAll()))
+
+	tcs := map[string]struct {
+		node niceyaml.ErrorTree
+		want string
+	}{
+		"a bound problem writes its location and its context": {
+			node: niceyaml.NewErrorTree(fmt.Errorf("check: %w", yamltest.Bind(t, fileSource, badA))),
+			want: `{
+				"message": "bad a",
+				"context": "check",
+				"name": "f.yaml",
+				"filePath": "config/f.yaml",
+				"path": "$.a",
+				"range": {"start": {"line": 0, "col": 3}, "end": {"line": 0, "col": 4}}
+			}`,
+		},
+		"a detail writes under children": {
+			node: niceyaml.NewErrorTree(yamltest.Bind(t, source, badB)),
+			want: `{
+				"message": "bad b",
+				"name": "f.yaml",
+				"path": "$.b",
+				"range": {"start": {"line": 1, "col": 3}, "end": {"line": 1, "col": 4}},
+				"children": [{
+					"message": "see a",
+					"name": "f.yaml",
+					"path": "$.a",
+					"range": {"start": {"line": 0, "col": 3}, "end": {"line": 0, "col": 4}},
+					"detail": true
+				}]
+			}`,
+		},
+		"a warning writes its severity": {
+			node: niceyaml.NewErrorTree(yamltest.Bind(t, source,
+				niceyaml.NewWarning("old a", niceyaml.AtPath(paths.Doc().Child("a"))))),
+			want: `{
+				"message": "old a",
+				"name": "f.yaml",
+				"path": "$.a",
+				"range": {"start": {"line": 0, "col": 3}, "end": {"line": 0, "col": 4}},
+				"warning": true
+			}`,
+		},
+		"a heading writes the same fields as its problems": {
+			node: niceyaml.NewErrorTree(yamltest.Bind(t, source, niceyaml.NewSummary("2 problems", badA, gone))),
+			want: `{
+				"message": "2 problems",
+				"name": "f.yaml",
+				"children": [
+					{
+						"message": "bad a",
+						"name": "f.yaml",
+						"path": "$.a",
+						"range": {"start": {"line": 0, "col": 3}, "end": {"line": 0, "col": 4}}
+					},
+					{"message": "gone", "name": "f.yaml", "path": "$.x[*]"}
+				]
+			}`,
+		},
+		"a position inside a token writes the range of the token": {
+			node: niceyaml.NewErrorTree(yamltest.Bind(t,
+				niceyaml.NewSourceFromString("key: hello\n", niceyaml.WithName("m.yaml")),
+				niceyaml.NewError("bad", niceyaml.AtPosition(position.New(0, 7))))),
+			want: `{
+				"message": "bad",
+				"name": "m.yaml",
+				"range": {"start": {"line": 0, "col": 5}, "end": {"line": 0, "col": 10}}
+			}`,
+		},
+		"an unbound Error writes its path alone": {
+			node: niceyaml.NewErrorTree(badA),
+			want: `{"message": "bad a", "path": "$.a"}`,
+		},
+		"a plain error writes its message alone": {
+			node: niceyaml.NewErrorTree(errors.New("too old")),
+			want: `{"message": "too old"}`,
+		},
+		"the zero tree writes an empty message": {
+			want: `{"message": ""}`,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := json.Marshal(tc.node)
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.want, string(got))
+		})
+	}
+
+	t.Run("a JSON log handler writes each problem as an object", func(t *testing.T) {
+		t.Parallel()
+
+		err := yamltest.Bind(t, source, niceyaml.NewSummary("2 problems", badA, badB))
+
+		var buf bytes.Buffer
+
+		slog.New(slog.NewJSONHandler(&buf, nil)).Error("decode", slog.Any("err", err),
+			slog.Any("problems", slices.Collect(niceyaml.Problems(err))))
+
+		var record struct {
+			Err      string            `json:"err"`
+			Problems []json.RawMessage `json:"problems"`
+		}
+
+		require.NoError(t, json.Unmarshal(buf.Bytes(), &record))
+
+		// The error stays the string that its LogValue method gives.
+		assert.Contains(t, record.Err, "f.yaml: 2 problems")
+		require.Len(t, record.Problems, 2)
+
+		assert.JSONEq(t, `{
+			"message": "bad a",
+			"name": "f.yaml",
+			"path": "$.a",
+			"range": {"start": {"line": 0, "col": 3}, "end": {"line": 0, "col": 4}}
+		}`, string(record.Problems[0]))
+		assert.JSONEq(t, `{
+			"message": "bad b",
+			"name": "f.yaml",
+			"path": "$.b",
+			"range": {"start": {"line": 1, "col": 3}, "end": {"line": 1, "col": 4}},
+			"children": [{
+				"message": "see a",
+				"name": "f.yaml",
+				"path": "$.a",
+				"range": {"start": {"line": 0, "col": 3}, "end": {"line": 0, "col": 4}},
+				"detail": true
+			}]
+		}`, string(record.Problems[1]))
+	})
+
+	t.Run("the range counts from 0 where the Label counts from 1", func(t *testing.T) {
+		t.Parallel()
+
+		node := niceyaml.NewErrorTree(yamltest.Bind(t, source, badA))
+		assert.Contains(t, node.Label, "1:4: $.a: bad a")
+
+		got, err := json.Marshal(node)
+		require.NoError(t, err)
+		assert.Contains(t, string(got), `"range":{"start":{"line":0,"col":3}`)
+	})
+
+	t.Run("the caller sets the escaping of HTML characters", func(t *testing.T) {
+		t.Parallel()
+
+		node := niceyaml.NewErrorTree(niceyaml.NewError("want >= 2 & <= 5",
+			niceyaml.WithDetails(errors.New("<a> & <b>"))))
+
+		// The json.Marshal function escapes the characters.
+		got, err := json.Marshal(node)
+		require.NoError(t, err)
+		assert.Contains(t, string(got), `"message":"want \u003e= 2 \u0026 \u003c= 5"`)
+		assert.Contains(t, string(got), `"message":"\u003ca\u003e \u0026 \u003cb\u003e"`)
+
+		var buf bytes.Buffer
+
+		enc := json.NewEncoder(&buf)
+		enc.SetEscapeHTML(false)
+		require.NoError(t, enc.Encode(node))
+		assert.Contains(t, buf.String(), `"message":"want >= 2 & <= 5"`)
+		assert.Contains(t, buf.String(), `"message":"<a> & <b>"`)
+
+		// The JSON handler of log/slog does not escape them.
+		buf.Reset()
+		slog.New(slog.NewJSONHandler(&buf, nil)).Error("decode", slog.Any("problem", node))
+		assert.Contains(t, buf.String(), `"message":"want >= 2 & <= 5"`)
+		assert.Contains(t, buf.String(), `"message":"<a> & <b>"`)
 	})
 }
 
