@@ -106,10 +106,13 @@ func renderHTML(view *line.View) string {
 		// the quoted item into three segments. Each "..." of a clipped
 		// line is a segment of its own in kind.UISeparator.
 		//
-		// The printer draws every segment of a changed line in the diff
-		// kind of its flag, with the overlays over that. The class of the
-		// line carries that color, so the segments of a changed line leave
-		// out the spans of their kinds.
+		// By default, the printer draws every segment of a changed line in
+		// the diff kind of its flag, with the overlays over that. The class
+		// of the line carries that color, so the segments of a changed line
+		// leave out the spans of their kinds. A printer with
+		// printer.WithFlagBlend keeps the kind of each segment and tints it
+		// with the diff kind. A renderer that matches that printer keeps
+		// the spans of the kinds inside the class of the line.
 		tokens := flag == line.FlagDefault
 
 		for _, seg := range row.Segments {
