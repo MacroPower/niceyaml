@@ -97,8 +97,8 @@ import (
 //     Hours v2: $.spec.notes: deprecated, but v1 requires it
 //
 //   - A deprecated keyword on the root schema, which warns about every
-//     document of the kind. [Deprecated] on the current version marks a
-//     kind deprecated instead:
+//     document of the kind. [DeprecatedKind] marks a kind deprecated
+//     instead:
 //
 //     Hours v1: $: the root schema is deprecated
 //
@@ -237,7 +237,7 @@ func verifyDeprecations(entry *kindEntry, compiled map[*versionEntry]*jsonschema
 
 	if doc.marked(cv.Schema()) {
 		errs = append(errs, authorError(name+": $: the root schema is deprecated",
-			"use manifest.Deprecated instead"))
+			"use manifest.DeprecatedKind instead"))
 	}
 
 	props := doc.properties()

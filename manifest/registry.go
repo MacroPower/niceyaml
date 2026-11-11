@@ -850,10 +850,16 @@ func loosenedAdvice(w *versionEntry, older []*versionEntry) string {
 		joinAnd(unlist), x.label())
 }
 
-// checkDeprecations checks where [Deprecated] marks the versions of entry.
+// checkDeprecations checks where [Deprecated] marks the versions of entry,
+// and whether [DeprecatedKind] fits the kind.
 func (b *registryBuilder) checkDeprecations(entry *kindEntry) {
 	k := entry.kind
 	current := len(entry.versions) - 1
+
+	if k.cfg.deprecated && k.cfg.required {
+		b.failf("kind %s: manifest.DeprecatedKind on a Required kind leaves the files no change that clears "+
+			"its warning", k.name)
+	}
 
 	for _, v := range entry.versions {
 		if !v.cfg.deprecated {
@@ -864,11 +870,11 @@ func (b *registryBuilder) checkDeprecations(entry *kindEntry) {
 		case v.removal != nil:
 			b.failf("kind %s: %s carries manifest.Deprecated, but manifest.WithRemoved names it", k.name, v.label())
 
-		case v.index == current && k.cfg.required:
-			b.failf("kind %s: manifest.Deprecated on the current version of a Required kind leaves the files "+
-				"no change that clears its warning", k.name)
+		case v.index == current:
+			b.failf("kind %s: %s carries manifest.Deprecated, but it is the current version and no rewrite "+
+				"clears the warning; mark the kind with manifest.DeprecatedKind", k.name, v.label())
 
-		case v.index != current && v.index >= entry.written.index:
+		case v.index >= entry.written.index:
 			b.failf("kind %s: %s carries manifest.Deprecated, but a rewrite does not move a document off the "+
 				"written version or a newer one; %s", k.name, v.label(), deprecatedAdvice(entry, v))
 		}

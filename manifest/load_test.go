@@ -1126,7 +1126,8 @@ func TestRegistry_Load(t *testing.T) {
 				),
 			},
 			opts: withKinds(manifest.NewKind[Tip]("Tip", manifest.NameField(meta.Child("name")),
-				manifest.Version("tip/v1", manifest.Deprecated("cafe 5.0 removes Tip")),
+				manifest.DeprecatedKind("cafe 5.0 removes Tip"),
+				manifest.Version("tip/v1"),
 			)),
 			want: []string{
 				`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`,
@@ -3217,8 +3218,9 @@ func TestRegistry_Load_DeprecationMarks(t *testing.T) {
 	versionOnly := []manifest.RegistryOption{
 		manifest.WithVersionOnly(paths.Doc().Child("version")),
 		manifest.WithKinds(manifest.NewKind[map[string]any]("Config",
+			manifest.DeprecatedKind(),
 			manifest.Version("1", manifest.Deprecated()),
-			manifest.Version("2", manifest.Deprecated()),
+			manifest.Version("2"),
 		)),
 	}
 
@@ -3267,9 +3269,19 @@ func TestRegistry_Load_DeprecationMarks(t *testing.T) {
 			want: []string{"$: deprecated unversioned layout of Hours: version, deprecated"},
 		},
 		"deprecated kind": {
-			opts: hours(manifest.Version("x/v1", manifest.Deprecated())),
+			opts: hours(manifest.DeprecatedKind(), manifest.Version("x/v1")),
 			file: stringtest.LinesLF("apiVersion: x/v1", "kind: Hours"),
 			want: []string{`$.kind: deprecated kind "Hours": kind, deprecated`},
+		},
+		"deprecated kind at an older version": {
+			opts: hours(manifest.DeprecatedKind(), manifest.Version("x/v1alpha1"), manifest.Version("x/v1")),
+			file: stringtest.LinesLF("apiVersion: x/v1alpha1", "kind: Hours"),
+			want: []string{`$.kind: deprecated kind "Hours": kind, deprecated`},
+		},
+		"deprecated kind under the unversioned layout": {
+			opts: hours(manifest.DeprecatedKind(), manifest.Unversioned()),
+			file: "spec: {}\n",
+			want: []string{`$: deprecated kind "Hours": kind, deprecated`},
 		},
 		"deprecated field": {
 			opts: hours(manifest.Version("x/v1", manifest.Schema(legacy))),
@@ -3879,7 +3891,7 @@ func TestRegistry_Load_Problems(t *testing.T) {
 			want: []string{`error "" "" "" $: dangling reference`},
 		},
 		"warning in strict mode": {
-			opts: hours(manifest.Version("x/v1", manifest.Deprecated())),
+			opts: hours(manifest.DeprecatedKind(), manifest.Version("x/v1")),
 			load: []manifest.LoadOption{manifest.WithWarningsAsErrors(true)},
 			files: map[string]string{
 				"hours.yaml": stringtest.LinesLF("apiVersion: x/v1", "kind: Hours"),

@@ -595,9 +595,8 @@ func (d *docState) deprecations() {
 	reg := d.l.reg
 	rt := &d.route
 	v, entry := rt.version, rt.kind
-	current := entry.versions[len(entry.versions)-1]
 
-	if v.cfg.deprecated && v != current {
+	if v.cfg.deprecated {
 		details := append(detailsOf(v.cfg.details), d.hint()...)
 		marks := []error{ErrDeprecatedVersion, ErrDeprecated}
 
@@ -612,7 +611,7 @@ func (d *docState) deprecations() {
 		d.versionWarning = d.problems[len(d.problems)-1]
 	}
 
-	if current.cfg.deprecated {
+	if kc := entry.kind.cfg; kc.deprecated {
 		at := startOf(d.doc)
 
 		switch {
@@ -625,7 +624,7 @@ func (d *docState) deprecations() {
 		marks := []error{ErrDeprecatedKind, ErrDeprecated}
 
 		d.fail(newWarning(marks, fmt.Sprintf("deprecated kind %q", entry.kind.name),
-			at, niceyaml.WithDetails(detailsOf(current.cfg.details)...)))
+			at, niceyaml.WithDetails(detailsOf(kc.details)...)))
 	}
 }
 

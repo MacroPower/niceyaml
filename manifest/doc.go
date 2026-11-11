@@ -522,7 +522,9 @@
 // # Warnings
 //
 // [Deprecated] marks a version deprecated, and a load warns about each
-// document that declares it. [WithWarningFilter] decides which warnings a
+// document that declares it. [DeprecatedKind] marks a whole kind
+// deprecated, and a load warns about each document of the kind.
+// [WithWarningFilter] decides which warnings a
 // load keeps, so a team can accept one deprecation for a while. Its
 // function gets the [*Problem] of each warning. [WithWarningsAsErrors]
 // turns each warning that the load keeps into an error, so a strict load
