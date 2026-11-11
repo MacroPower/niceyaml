@@ -176,8 +176,9 @@ func WithDecodeOptions(opts ...niceyaml.DecodeOption) RegistryOption {
 // a document applies them ahead of the unmarshalers of its Source, even a
 // Source that [Sources] reads. The decode of a manifest, the decode inside
 // a validator, and [go.jacobcolvin.com/niceyaml/edit.Node.Decode] in a
-// step thus apply them. The Node of an [Object] from a Source that Sources
-// reads keeps the unmarshalers of that Source alone.
+// step thus apply them. So does a decode of [Object.Current].
+// [Object.Original] from a Source that Sources reads keeps the unmarshalers
+// of that Source alone.
 //
 // The unmarshalers of the Source of a document apply over them. Those
 // come from [WithSourceOptions], or from the program that built a Source
@@ -249,7 +250,8 @@ func WithRemoved(version, kind string, details ...string) RegistryOption {
 // [Registry.Load] returns that set when the load does not find a later
 // error. Each error and warning that check returns joins the report of the
 // load. An error that check binds in a document, such as through
-// [Object.Bind], leaves that manifest out of [Checked.Set]. Several checks
+// [Object.Bind] or [Object.Current], leaves that manifest out of
+// [Checked.Set]. Several checks
 // run in the order given, and each one runs even when an earlier one
 // returns an error. [NewRegistry] rejects a nil function.
 func WithCheck(check func(ctx context.Context, set *Set) error) RegistryOption {

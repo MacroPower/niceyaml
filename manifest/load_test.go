@@ -1356,6 +1356,34 @@ func TestRegistry_Check(t *testing.T) {
 			},
 			err: "config/menu.yaml:7:9: $.spec.price: too cheap",
 		},
+		"check error bound through the current document": {
+			files: map[string]string{"cafe.yaml": cafeDoc, "menu.yaml": menuDoc},
+			opts: []manifest.RegistryOption{manifest.WithCheck(func(ctx context.Context, set *manifest.Set) error {
+				item, ok := set.Get[MenuItem]("kanelbulle")
+				if !ok {
+					return errors.New("no kanelbulle")
+				}
+
+				// The validator reads the price, which the file of
+				// kanelbulle writes as cost.
+				return item.Current.Validate(ctx, niceyaml.ValidatorFunc(
+					func(ctx context.Context, n *niceyaml.Node) error {
+						price, err := n.DecodeAt[int](ctx, spec.Child("price"))
+						if err != nil {
+							return err
+						}
+
+						return niceyaml.NewError(fmt.Sprintf("%d kr is too cheap", price),
+							niceyaml.AtPath(spec.Child("price")))
+					},
+				))
+			})},
+			want: []string{
+				`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`,
+				`MenuItem "semla" cafe.jacobcolvin.com/v1 up-to-date=true`,
+			},
+			err: "config/menu.yaml:7:9: $.spec.price: 45 kr is too cheap",
+		},
 		"check error bound in no document": {
 			files: map[string]string{"cafe.yaml": cafeDoc, "menu.yaml": menuDoc},
 			opts: []manifest.RegistryOption{manifest.WithCheck(func(context.Context, *manifest.Set) error {
@@ -1377,7 +1405,7 @@ func TestRegistry_Check(t *testing.T) {
 					return errors.New("no semla")
 				}
 
-				return semla.Node.Source().Bind(errors.New("whole file"))
+				return semla.Original.Source().Bind(errors.New("whole file"))
 			})},
 			want: []string{
 				`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`,
@@ -3144,6 +3172,18 @@ func TestRegistry_Load_Warnings(t *testing.T) {
 	}
 	v1 := manifest.Version("cafe.jacobcolvin.com/v1")
 
+	// The check runs the validator on each Shift of the set, in the layout
+	// of the current version.
+	validateOpen := manifest.WithCheck(func(ctx context.Context, set *manifest.Set) error {
+		var errs []error
+
+		for o := range set.All[Shift]() {
+			errs = append(errs, o.Current.Validate(ctx, openWarning))
+		}
+
+		return errors.Join(errs...)
+	})
+
 	shift := func(version, open, closes string) string {
 		return stringtest.LinesLF(
 			"apiVersion: "+version,
@@ -3202,17 +3242,25 @@ func TestRegistry_Load_Warnings(t *testing.T) {
 			warns: "config/shift.yaml:4:9: warning: $.spec.open: open moves to hours",
 		},
 		"a check that runs a validator with its context": {
-			opts: append(shiftOptions(v1), manifest.WithCheck(func(ctx context.Context, set *manifest.Set) error {
-				var errs []error
-
-				for o := range set.All[Shift]() {
-					errs = append(errs, o.Node.Validate(ctx, openWarning))
-				}
-
-				return errors.Join(errs...)
-			})),
+			opts:  append(shiftOptions(v1), validateOpen),
 			file:  shift("cafe.jacobcolvin.com/v1", "07:00", "12:00"),
 			warns: "config/shift.yaml:4:9: warning: $.spec.open: open moves to hours",
+		},
+		"a check that runs a validator on a migrated document": {
+			// The file writes opens, which the step renames to open. The
+			// validator reads the layout of the current version, and its
+			// warning binds where the file writes opens.
+			opts: append(shiftOptions(
+				manifest.Version("cafe.jacobcolvin.com/v1alpha1"),
+				manifest.Version("cafe.jacobcolvin.com/v1", manifest.Migrate(spec.Child("opens"), rename("open"))),
+			), validateOpen),
+			file: stringtest.LinesLF(
+				"apiVersion: cafe.jacobcolvin.com/v1alpha1",
+				"kind: Shift",
+				"spec:",
+				`  opens: "07:00"`,
+			),
+			warns: "config/shift.yaml:4:10: warning: $.spec.open: open moves to hours",
 		},
 	}
 

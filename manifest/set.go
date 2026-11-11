@@ -31,19 +31,54 @@ type setObject struct {
 
 // Object is one manifest of a [Set], where T is the Go type of its kind.
 //
-// Node and Bind keep the [niceyaml.Source] of the file in memory. Bind
-// also keeps a copy of the document in the layout of the current version.
-// For a migrated document, Bind keeps the edits of the migration too. It
-// reads them to bind each error at the line that the user wrote. Copy
-// Value to keep the value alone.
+// A load decodes each document from a copy in the layout of the current
+// version. For a file that declares an older version, the steps of the
+// later versions edit the copy first, and the file stays as it is.
+// Original holds the document of the file, and Current holds the copy.
+// Value, Name, Current, and Bind follow the layout of the current version,
+// whatever version the file declares. A `$` path of that version thus
+// resolves in Current and in Bind. Only Original follows the layout of
+// Version.
+//
+// Current, Original, and Bind keep the [niceyaml.Source] of the file in
+// memory. Current and Bind also keep the copy of the document. For a
+// migrated document, they keep the edits of the migration too. They read
+// the edits to bind each error at the line that the user wrote. Copy Value
+// to keep the value alone.
 //
 // Receive instances from [Set.One], [Set.All], [Set.Get], or
 // [Set.Objects].
 type Object[T any] struct {
 	// Value holds the decoded value of the current version.
 	Value T
-	// Node holds the document as the user wrote it.
-	Node *niceyaml.Node
+	// Current holds the document in the layout of the current version,
+	// which is the document that Value decoded from. A function of
+	// [WithCheck] reads it to decode another Go type, to run a
+	// [niceyaml.Validator], or to resolve a path of the current version.
+	// Its decodes apply the unmarshalers of [WithUnmarshalers].
+	//
+	// Current is a copy of the document in a Source of its own, as
+	// [niceyaml.NewSourceFromDerived] builds one. The copy holds the
+	// lines of this document alone. Each error that binds through Current
+	// lands on the line that the user wrote in the file. Such errors
+	// include those of [niceyaml.Node.Bind], [niceyaml.Node.Validate],
+	// [niceyaml.Node.DecodeAt], and [niceyaml.Node.At].
+	//
+	// Each position that a method of Current takes or returns is a
+	// position in the copy, not in the file. Such methods include
+	// [niceyaml.Node.Range], [niceyaml.Node.Span], [niceyaml.Node.View],
+	// and [niceyaml.Node.DocumentIndex]. The text of the Source of
+	// Current is the text of the copy. For a position in the file, bind
+	// an error through Current and read [niceyaml.ErrorTree.Range] of
+	// the binding, or read Original.
+	Current *niceyaml.Node
+	// Original holds the document as the file writes it, in the layout of
+	// Version. Its Source is the Source of the file. Original thus gives
+	// the name and the text of the file, and the index of the document in
+	// the file. A path of the current version might not resolve in
+	// Original. From a Source that [Sources] reads, Original keeps the
+	// unmarshalers of that Source alone.
+	Original *niceyaml.Node
 	// The function that binds an error with the paths of the current
 	// version.
 	bind func(error) error
@@ -64,14 +99,18 @@ type Object[T any] struct {
 // current version, whatever version the file declares. The error lands on
 // the line that the user wrote, even when the document migrated. An error
 // without a location names the file, and the document in a file of
-// several, as [niceyaml.Node.Bind] does. On an Object that a test builds
-// itself, Bind binds as o.Node.Bind does.
+// several, as [niceyaml.Node.Bind] does.
+//
+// Bind binds as o.Current.Bind does. It also adds a detail to each problem
+// at a field that the file leaves out, which says that the field holds its
+// default. An Object that a test builds itself binds without that detail,
+// and without Current it returns err as it is.
 func (o Object[T]) Bind(err error) error {
 	switch {
 	case o.bind != nil:
 		return o.bind(err)
-	case o.Node != nil:
-		return o.Node.Bind(err) //nolint:wrapcheck // The binding is the error of the caller.
+	case o.Current != nil:
+		return o.Current.Bind(err) //nolint:wrapcheck // The binding is the error of the caller.
 	default:
 		return err
 	}
@@ -98,7 +137,8 @@ func (l *loader) newSet() *Set {
 
 		obj := Object[any]{
 			Value:    d.value,
-			Node:     d.doc,
+			Current:  d.work,
+			Original: d.doc,
 			bind:     d.binder().bind,
 			Name:     d.name,
 			Kind:     entry.kind.name,
@@ -206,7 +246,8 @@ func typed[T any](o Object[any]) Object[T] {
 
 	return Object[T]{
 		Value:    v,
-		Node:     o.Node,
+		Current:  o.Current,
+		Original: o.Original,
 		bind:     o.bind,
 		Name:     o.Name,
 		Kind:     o.Kind,

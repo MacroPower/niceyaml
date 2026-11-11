@@ -1,6 +1,7 @@
 package manifest_test
 
 import (
+	"context"
 	"errors"
 	"runtime"
 	"testing"
@@ -14,6 +15,8 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/manifest"
+	"go.jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml/position"
 )
 
 // loadExample loads the example directory with the registry of
@@ -37,7 +40,7 @@ func TestSet_One(t *testing.T) {
 	assert.Equal(t, "yamull", cafe.Name)
 	assert.Equal(t, 40, cafe.Value.Spec.Seats)
 	assert.Equal(t, "Cafe", cafe.Kind)
-	assert.Equal(t, 0, cafe.Node.DocumentIndex())
+	assert.Equal(t, 0, cafe.Original.DocumentIndex())
 
 	assert.PanicsWithValue(t, "manifest: One needs a kind with manifest.Singleton, and Hours has none", func() {
 		set.One[Hours]()
@@ -129,7 +132,7 @@ func TestObject_Bind(t *testing.T) {
 	assert.Equal(t, errBad, manifest.Object[Cafe]{}.Bind(errBad))
 
 	doc := yamltest.FirstDocument(t, "a: 1\n", niceyaml.WithName("a.yaml"))
-	built := manifest.Object[Cafe]{Node: doc}
+	built := manifest.Object[Cafe]{Current: doc}
 	assert.Equal(t, "a.yaml: bad", built.Bind(errBad).Error())
 
 	set := loadExample(t)
@@ -288,6 +291,145 @@ func TestObject_Bind(t *testing.T) {
 	})
 }
 
+func TestObject_Layouts(t *testing.T) {
+	t.Parallel()
+
+	open := spec.Child("open")
+
+	// The validator reads the open field of the current version and
+	// rejects it.
+	tooEarly := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+		_, err := n.DecodeAt[string](ctx, open)
+		if err != nil {
+			return err
+		}
+
+		return niceyaml.NewError("too early", niceyaml.AtPath(open))
+	})
+
+	t.Run("a document of an older version", func(t *testing.T) {
+		t.Parallel()
+
+		// The file of the hours declares v1alpha1 and writes opens, which
+		// v1 names open.
+		hours, ok := loadExample(t).Get[Hours]("weekday")
+		require.True(t, ok)
+
+		problem := niceyaml.NewError("too early", niceyaml.AtPath(open))
+
+		// Current reads the layout that Value decoded from, and each of
+		// its errors binds where the file writes opens.
+		got, err := hours.Current.DecodeAt[string](t.Context(), open)
+		require.NoError(t, err)
+		assert.Equal(t, hours.Value.Spec.Open, got)
+
+		at, err := hours.Current.At(open)
+		require.NoError(t, err)
+		require.EqualError(t, at.Bind(errors.New("at the node")), "config/hours.yaml:6:10: $.spec.open: at the node")
+
+		require.EqualError(t, hours.Current.Validate(t.Context(), tooEarly),
+			"config/hours.yaml:6:10: $.spec.open: too early")
+		require.EqualError(t, hours.Current.Bind(problem), "config/hours.yaml:6:10: $.spec.open: too early")
+		require.EqualError(t, hours.Bind(problem), "config/hours.yaml:6:10: $.spec.open: too early")
+
+		// Original reads the layout of the version that the file
+		// declares, so it does not hold the path of the current version.
+		got, err = hours.Original.DecodeAt[string](t.Context(), spec.Child("opens"))
+		require.NoError(t, err)
+		assert.Equal(t, "07:00", got)
+
+		_, err = hours.Original.DecodeAt[string](t.Context(), open)
+		require.ErrorIs(t, err, paths.ErrNotFound)
+		require.EqualError(t, hours.Original.Validate(t.Context(), tooEarly),
+			"config/hours.yaml:5:1: $.spec.open: not found")
+		require.EqualError(t, hours.Original.Bind(problem), "config/hours.yaml:5:1: $.spec.open: too early")
+	})
+
+	t.Run("a document after the first of its file", func(t *testing.T) {
+		t.Parallel()
+
+		set := loadExample(t)
+
+		semla, ok := set.Get[MenuItem]("semla")
+		require.True(t, ok)
+
+		// Original is the document of the file, so it gives the place of
+		// the document in the file.
+		assert.Contains(t, set.Sources(), semla.Original.Source())
+		assert.Equal(t, 1, semla.Original.DocumentIndex())
+		assert.Equal(t, position.NewSpan(8, 17), semla.Original.Span())
+
+		// Current is a copy that holds the lines of the document alone,
+		// so its positions describe the copy.
+		assert.NotContains(t, set.Sources(), semla.Current.Source())
+		assert.Equal(t, "config/menu.yaml", semla.Current.Source().Name())
+		assert.Equal(t, 0, semla.Current.DocumentIndex())
+		assert.Equal(t, position.NewSpan(0, 9), semla.Current.Span())
+
+		price := spec.Child("price")
+
+		value, err := semla.Current.At(price)
+		require.NoError(t, err)
+		assert.Equal(t, "6:9-6:11", yamltest.RangeOf(t, value).String())
+
+		// An error that binds through Current still lands in the file,
+		// and its binding holds the position there.
+		bound := semla.Current.Bind(niceyaml.NewError("pricey", niceyaml.AtPath(price)))
+		require.EqualError(t, bound, "config/menu.yaml:15:10: $.spec.price: pricey")
+		require.EqualError(t, semla.Current.Bind(errors.New("pricey")), "config/menu.yaml: document 2: pricey")
+
+		for problem := range niceyaml.Problems(bound) {
+			assert.Equal(t, "14:9-14:11", yamltest.RangeOf(t, problem).String())
+			assert.Same(t, semla.Original.Source(), problem.Source())
+		}
+
+		// An Object of Objects holds the documents of its typed Object.
+		for o := range set.Objects() {
+			if o.Name == semla.Name {
+				assert.Same(t, semla.Current, o.Current)
+				assert.Same(t, semla.Original, o.Original)
+			}
+		}
+	})
+
+	t.Run("the unmarshalers of the registry", func(t *testing.T) {
+		t.Parallel()
+
+		reg := manifest.MustNewRegistry(
+			manifest.WithNameField(meta.Child("name")),
+			manifest.WithUnmarshalers(niceyaml.CustomUnmarshaler(decodeAlarmLevel)),
+			manifest.WithKinds(manifest.NewKind[Alarm]("Alarm", manifest.Version("alarm.jacobcolvin.com/v1"))),
+		)
+
+		// The program built the Source without the unmarshalers of the
+		// registry.
+		set, err := reg.Load(t.Context(), manifest.Sources(niceyaml.NewSourceFromString(
+			stringtest.LinesLF(
+				"apiVersion: alarm.jacobcolvin.com/v1",
+				"kind: Alarm",
+				"metadata:",
+				"  name: smoke",
+				"spec:",
+				"  level: high",
+			),
+			niceyaml.WithName("alarm.yaml"),
+		)))
+		require.NoError(t, err)
+
+		alarm, ok := set.Get[Alarm]("smoke")
+		require.True(t, ok)
+
+		level := spec.Child("level")
+
+		got, err := alarm.Current.DecodeAt[AlarmLevel](t.Context(), level)
+		require.NoError(t, err)
+		assert.Equal(t, alarm.Value.Spec.Level, got)
+
+		_, err = alarm.Original.DecodeAt[AlarmLevel](t.Context(), level)
+		require.EqualError(t, err, "alarm.yaml:6:10: $.spec.level: expected integer, got string")
+	})
+}
+
 // keepOne loads cafe.yaml and hours.yaml, and returns the manifest whose
 // kind is kind. It also returns weak pointers to the Sources of the files
 // that do not hold that manifest.
@@ -316,7 +458,7 @@ func keepOne(t *testing.T, kind string) (manifest.Object[any], []weak.Pointer[ni
 	var others []weak.Pointer[niceyaml.Source]
 
 	for _, src := range set.Sources() {
-		if src != kept.Node.Source() {
+		if src != kept.Original.Source() {
 			others = append(others, weak.Make(src))
 		}
 	}

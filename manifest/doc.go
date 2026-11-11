@@ -76,13 +76,13 @@
 // in a later version, and the step must still write what it wrote before.
 //
 // Every error and every warning about a migrated document binds at the
-// line that the user wrote. The decode and [Object.Bind] read the document
-// in the layout of the current version. Their errors and warnings thus show
-// the path of the value in that version. The schema of each version checks
-// the layout of that version, and its errors and warnings show the path
-// there. So after a step renames old to spec, a decode error at the port
-// shows $.spec.port. An error of the schema of the version before the step
-// shows $.old.port.
+// line that the user wrote. The decode, [Object.Current], and [Object.Bind]
+// read the document in the layout of the current version. Their errors and
+// warnings thus show the path of the value in that version. The schema of
+// each version checks the layout of that version, and its errors and
+// warnings show the path there. So after a step renames old to spec, a
+// decode error at the port shows $.spec.port. An error of the schema of
+// the version before the step shows $.old.port.
 //
 // An error that a step returns shows the path that the step reads, such as
 // the path of its node. So does an error of
@@ -213,8 +213,9 @@
 // gives the unmarshalers to each Source that it builds. Every decode that
 // the load runs on a document applies them too. The decode of a manifest,
 // the decode inside a validator, and the decode of a migration step thus
-// read the types alike. The Node of an [Object] from a Source that
-// [Sources] reads keeps the unmarshalers of that Source alone.
+// read the types alike. So does a decode of [Object.Current].
+// [Object.Original] from a Source that [Sources] reads keeps the
+// unmarshalers of that Source alone.
 //
 // # Routing
 //
@@ -342,6 +343,21 @@
 // Each of these methods panics on a call that cannot succeed on any set,
 // such as a type that is not the Go type of a kind. The first test that
 // runs the line thus fails.
+//
+// An Object holds its document twice. [Object.Current] holds the document
+// in the layout of the current version, which [Object.Value] decoded from.
+// A function of [WithCheck] reads it to decode another Go type, to run a
+// [niceyaml.Validator], or to resolve a path. A path of the current
+// version resolves there, whatever version the file declares:
+//
+//	for item := range set.All[config.MenuItem]() {
+//		errs = append(errs, item.Current.Validate(ctx, affordable))
+//	}
+//
+// [Object.Original] holds the document as the file writes it, in the
+// layout of [Object.Version]. It gives the name of the file and the place
+// of the document there. A path of the current version might not resolve
+// in it, because a step might have renamed or moved the value.
 //
 // # Problems
 //

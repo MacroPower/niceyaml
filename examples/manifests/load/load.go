@@ -202,7 +202,7 @@ func main() {
 	}
 
 	for o := range checked.Set().Objects() {
-		fmt.Printf("%s %q from %s\n", o.Kind, o.Name, o.Node.Source().Name())
+		fmt.Printf("%s %q from %s\n", o.Kind, o.Name, o.Original.Source().Name())
 	}
 
 	fmt.Println("\nCheck a reference across manifests:")
