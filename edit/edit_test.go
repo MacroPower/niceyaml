@@ -10127,6 +10127,17 @@ func TestWithProtected(t *testing.T) {
 			},
 			want: "- w\n- z\n",
 		},
+		"set below an item that a protected path reaches through an alias, where a reference document decides the path of its sequence": {
+			// The reference document decides $.x.k, so the guard keeps the
+			// protected path, and a path through the other alias reaches
+			// the protected item.
+			before:    stringtest.LinesLF("x:", "  k: &m", "    - 1", "    - {z: 2}", "  <<: *r", "c: *m", "e: *m"),
+			ref:       "r: &r {b: 2}\n",
+			protected: []paths.Path{paths.MustParse("$.c[1]")},
+			path:      paths.MustParse("$.e[1].z"),
+			fn:        func(ctx context.Context, n *edit.Node) error { return n.Set(ctx, 5) },
+			err:       "cafe.jacobcolvin.com/v1 sets $.e[1].z, which lies inside a protected value",
+		},
 		"set of the item that took the index of the protected item": {
 			// The protected value is the item that the Apply found at the
 			// path, wherever an earlier call moves it.

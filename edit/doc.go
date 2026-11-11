@@ -64,7 +64,9 @@
 // A path selects each node of the text once. A wildcard or a recursive
 // descent selects a node at its first path in the order of the text. Each
 // path that reaches the node through an alias or a `<<` merge key selects
-// the same node, as [Doc.Apply] describes.
+// the same node, as [Doc.Apply] describes. The nodes that [Node.At] returns
+// in different calls of a Func can still reach one node of the text that
+// way. [Node.Own] returns the same path for each of them.
 //
 // A path that ends at an alias that reads a reference document of
 // [go.jacobcolvin.com/niceyaml.WithReferences] selects the alias. An edit
@@ -241,6 +243,19 @@
 // "&v !t 2". A call at an alias acts on the alias, so a Set there replaces
 // the alias, and a Remove there removes it. The engine writes no anchor and
 // no alias of its own, and it writes no copy of a value at an alias.
+//
+// [Node.Path] returns the path of the node, which can lead through an
+// alias or a merge key. [Node.Own] returns the path of the place in the
+// anchored value. A Func compares the two paths to tell whether the path of
+// the node reads the place through an alias or a merge key. The two paths
+// are equal when the path of the node leads into the anchored value through
+// no alias and no merge key. Every alias and every mapping that merges the
+// value still reads an edit there, and Own does not list those readers.
+//
+// A Move through an alias takes the value away from every reader unless its
+// target lies in the anchored value too. A path below the parent of Own
+// names such a target. A reference document can decide a name of that path,
+// and the Move then fails, as Own describes.
 //
 // No path selects a `<<` merge key, so no call edits the entry of a merge
 // key. A mapping with a merge key hides each entry of the merged mapping
