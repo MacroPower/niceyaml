@@ -5108,15 +5108,244 @@ func TestNode_YAMLComments(t *testing.T) {
 			))},
 			want: yaml.CommentMap{"$.name": {yaml.LineComment(" short")}},
 		},
-		"node below the root keeps the paths of the document": {
+		"node below the root keys from the node": {
 			input: input,
 			path:  paths.Doc().Child("items"),
-			want:  yaml.CommentMap{"$.items.a": want["$.items.a"]},
+			want:  yaml.CommentMap{"$.a": want["$.items.a"]},
 		},
 		"node below the root leaves out an anchor outside it": {
 			input: anchors,
 			path:  paths.Doc().Child("items"),
-			want:  yaml.CommentMap{"$.items.b": {yaml.LineComment(" two")}},
+			want:  yaml.CommentMap{"$.b": {yaml.LineComment(" two")}},
+		},
+		"node below the root leaves out the comments of its key": {
+			input: stringtest.LinesLF("# head", "items: # line", "  a: 1 # one"),
+			path:  paths.Doc().Child("items"),
+			want:  yaml.CommentMap{"$.a": {yaml.LineComment(" one")}},
+		},
+		"node that repeats the keys of the root": {
+			input: stringtest.LinesLF("a: 1 # root a", "b:", "  a: 2 # inner a", "  b: {a: 3} # deep"),
+			path:  paths.Doc().Child("b"),
+			want: yaml.CommentMap{
+				"$.a": {yaml.LineComment(" inner a")},
+				"$.b": {yaml.LineComment(" deep")},
+			},
+		},
+		"node at a name in quotes": {
+			input: stringtest.LinesLF("top:", `  "it's":`, "    a: 1 # q"),
+			path:  paths.Doc().Child("top").Child("it's"),
+			want:  yaml.CommentMap{"$.a": {yaml.LineComment(" q")}},
+		},
+		"node at a scalar": {
+			input: "s: 1 # one\n",
+			path:  paths.Doc().Child("s"),
+			want:  yaml.CommentMap{"$": {yaml.LineComment(" one")}},
+		},
+		"node at a sequence": {
+			input: stringtest.LinesLF("l:", "  - 1 # one", "  - 2 # two"),
+			path:  paths.Doc().Child("l"),
+			want: yaml.CommentMap{
+				"$[0]": {yaml.LineComment(" one")},
+				"$[1]": {yaml.LineComment(" two")},
+			},
+		},
+		"node at an item of a sequence": {
+			input: stringtest.LinesLF("l:", "  - x: 1 # one"),
+			path:  paths.Doc().Child("l").Index(0),
+			want:  yaml.CommentMap{"$.x": {yaml.LineComment(" one")}},
+		},
+		"node at an alias keys from the content of its anchor": {
+			input: stringtest.LinesLF("base: &base", "  x: 1 # x", "m: *base"),
+			path:  paths.Doc().Child("m"),
+			want:  yaml.CommentMap{"$.x": {yaml.LineComment(" x")}},
+		},
+		"node inside an alias keys from the content of its anchor": {
+			input: stringtest.LinesLF("base: &base", "  x:", "    y: 1 # y", "m: *base"),
+			path:  paths.Doc().Child("m").Child("x"),
+			want:  yaml.CommentMap{"$.y": {yaml.LineComment(" y")}},
+		},
+		"node with an anchor": {
+			input: stringtest.LinesLF("a: &a", "  b: 1 # b"),
+			path:  paths.Doc().Child("a"),
+			want:  yaml.CommentMap{"$.b": {yaml.LineComment(" b")}},
+		},
+		"node leaves out the comments of a merge key from outside it": {
+			input: stringtest.LinesLF("base: &base", "  x: 1 # x", "m:", "  <<: *base", "  y: 2 # y"),
+			path:  paths.Doc().Child("m"),
+			want:  yaml.CommentMap{"$.y": {yaml.LineComment(" y")}},
+		},
+		"node leaves out the comments of an alias to an anchor outside it": {
+			input: stringtest.LinesLF("base: &base", "  y: 1 # y", "m:", "  x: *base", "  z: 2 # z"),
+			path:  paths.Doc().Child("m"),
+			want:  yaml.CommentMap{"$.z": {yaml.LineComment(" z")}},
+		},
+		"sequence leaves out the comments of an alias to an anchor outside it": {
+			input: stringtest.LinesLF("b: &b", "  k: 1 # k", "l:", "  - *b", "  - 2 # two"),
+			path:  paths.Doc().Child("l"),
+			want:  yaml.CommentMap{"$[1]": {yaml.LineComment(" two")}},
+		},
+		"node keeps the comments of an alias to an anchor inside it": {
+			input: stringtest.LinesLF("m:", "  a: &a", "    k: 1 # k", "  b: *a"),
+			path:  paths.Doc().Child("m"),
+			want:  yaml.CommentMap{"$.a.k": {yaml.LineComment(" k")}},
+		},
+		"node leaves out a merged comment of a reference document at one of its paths": {
+			// The reference comment has the key $.a.b.k, which names a node
+			// of the document below $.a that holds no comment.
+			input: stringtest.LinesLF("a:", "  <<: *base", "  b:", "    k: 2"),
+			path:  paths.Doc().Child("a"),
+			source: []niceyaml.SourceOption{yamltest.References(stringtest.LinesLF(
+				"a:",
+				"  b: &base",
+				"    k: 1 # refk",
+			))},
+			want: yaml.CommentMap{},
+		},
+		"node at an alias to a reference document": {
+			input: stringtest.LinesLF("server: *base", "name: api # short"),
+			path:  paths.Doc().Child("server"),
+			source: []niceyaml.SourceOption{yamltest.References(stringtest.LinesLF(
+				"base: &base",
+				"  port: 80 # http",
+			))},
+			want: yaml.CommentMap{"$.port": {yaml.LineComment(" http")}},
+		},
+		"document leaves out the comments of a merge key from a reference document": {
+			input: stringtest.LinesLF("m:", "  <<: *base", "  y: 2 # y"),
+			source: []niceyaml.SourceOption{yamltest.References(stringtest.LinesLF(
+				"base: &base",
+				"  x: 1 # x",
+			))},
+			want: yaml.CommentMap{"$.m.y": {yaml.LineComment(" y")}},
+		},
+		"document of an alias to a reference document": {
+			input: "*base\n",
+			source: []niceyaml.SourceOption{yamltest.References(stringtest.LinesLF(
+				"base: &base",
+				"  port: 80 # http",
+			))},
+			want: yaml.CommentMap{"$.port": {yaml.LineComment(" http")}},
+		},
+		"node keeps its own comment of another kind at the path of a merged comment": {
+			// The reference line comment has the key $.a.b.k, where the
+			// document holds a head comment.
+			input: stringtest.LinesLF("a:", "  <<: *base", "  b:", "    # head", "    k: 2"),
+			path:  paths.Doc().Child("a"),
+			source: []niceyaml.SourceOption{yamltest.References(stringtest.LinesLF(
+				"a:",
+				"  b: &base",
+				"    k: 1 # refk",
+			))},
+			want: yaml.CommentMap{"$.b.k": {yaml.HeadComment(" head")}},
+		},
+		"merged comment of a reference document replaces one of the same kind": {
+			input: stringtest.LinesLF("a:", "  <<: *base", "  b:", "    k: 2 # mine"),
+			path:  paths.Doc().Child("a"),
+			source: []niceyaml.SourceOption{yamltest.References(stringtest.LinesLF(
+				"a:",
+				"  b: &base",
+				"    k: 1 # refk",
+			))},
+			want: yaml.CommentMap{"$.b.k": {yaml.LineComment(" refk")}},
+		},
+		"node at an item leaves out the head comment of the item": {
+			input: stringtest.LinesLF("items:", "  # first", "  - a # la"),
+			path:  paths.Doc().Child("items").Index(0),
+			want:  yaml.CommentMap{"$": {yaml.LineComment(" la")}},
+		},
+		"node at the last value leaves out the foot comment after it": {
+			input: stringtest.LinesLF("a:", "  b: 1", "  # foot of a", "c: 2"),
+			path:  paths.Doc().Child("a").Child("b"),
+			want:  yaml.CommentMap{},
+		},
+		"document with a head and a line comment on a flow mapping": {
+			input: stringtest.LinesLF("# h", "{a: 1, b: 2} # l"),
+			want:  yaml.CommentMap{"$.a": {yaml.HeadComment(" h")}},
+		},
+		"document with a head comment on an empty flow mapping": {
+			input: stringtest.LinesLF("# h", "{}"),
+			want:  yaml.CommentMap{"$": {yaml.HeadComment(" h")}},
+		},
+		"node with a head comment on an empty flow mapping": {
+			input: stringtest.LinesLF("m:", "  # h", "  {}"),
+			path:  paths.Doc().Child("m"),
+			want:  yaml.CommentMap{"$": {yaml.HeadComment(" h")}},
+		},
+		"document with a comment after an explicit key": {
+			input: stringtest.LinesLF("? a", ": # c", "  1"),
+			want:  yaml.CommentMap{"$.a": {yaml.LineComment(" c")}},
+		},
+		"node with a comment after an explicit key": {
+			input: stringtest.LinesLF("m:", "  ? a", "  : # c", "    1"),
+			path:  paths.Doc().Child("m"),
+			want:  yaml.CommentMap{"$.a": {yaml.LineComment(" c")}},
+		},
+		"document with a head comment on a later item": {
+			input: stringtest.LinesLF("- 1", "# second", "- 2"),
+			want:  yaml.CommentMap{"$[1]": {yaml.HeadComment(" second")}},
+		},
+		"node with a head comment on a later item": {
+			input: stringtest.LinesLF("l:", "  - 1", "  # second", "  - 2"),
+			path:  paths.Doc().Child("l"),
+			want:  yaml.CommentMap{"$[1]": {yaml.HeadComment(" second")}},
+		},
+		"document with a head comment on the first item": {
+			input: stringtest.LinesLF("# first", "- 1", "- 2"),
+			want:  yaml.CommentMap{"$[0]": {yaml.HeadComment(" first")}},
+		},
+		"node with a head comment on the first item": {
+			input: stringtest.LinesLF("l:", "  # first", "  - 1", "  - 2"),
+			path:  paths.Doc().Child("l"),
+			want:  yaml.CommentMap{"$[0]": {yaml.HeadComment(" first")}},
+		},
+		"document with a foot comment of a sequence": {
+			input: stringtest.LinesLF("- 1", "- 2", "# foot"),
+			want:  yaml.CommentMap{"$[1]": {yaml.FootComment(" foot")}},
+		},
+		"node with a foot comment of a sequence": {
+			input: stringtest.LinesLF("m:", "  l:", "    - 1", "    - 2", "    # foot", "  k: 3"),
+			path:  paths.Doc().Child("m"),
+			want:  yaml.CommentMap{"$.l[1]": {yaml.FootComment(" foot")}},
+		},
+		"document with a foot comment of a mapping": {
+			input: stringtest.LinesLF("a:", "  b: 1", "  # foot of a", "c: 2"),
+			want:  yaml.CommentMap{"$.a.b": {yaml.FootComment(" foot of a")}},
+		},
+		"node with a foot comment of a mapping": {
+			input: stringtest.LinesLF("m:", "  a:", "    b: 1", "    # foot of a", "  c: 2"),
+			path:  paths.Doc().Child("m"),
+			want:  yaml.CommentMap{"$.a.b": {yaml.FootComment(" foot of a")}},
+		},
+		"document with a foot comment of an entry": {
+			input: stringtest.LinesLF("a: 1", "# foot"),
+			want:  yaml.CommentMap{"$.a": {yaml.FootComment(" foot")}},
+		},
+		"node with a foot comment of an entry": {
+			input: stringtest.LinesLF("m:", "  a: 1", "  # foot"),
+			path:  paths.Doc().Child("m"),
+			want:  yaml.CommentMap{"$.a": {yaml.FootComment(" foot")}},
+		},
+		"document with a head comment on the first key": {
+			input: stringtest.LinesLF("# head", "a: 1", "b: 2"),
+			want:  yaml.CommentMap{"$.a": {yaml.HeadComment(" head")}},
+		},
+		"node with a head comment on the first key": {
+			input: stringtest.LinesLF("m:", "  # head", "  a: 1", "  b: 2"),
+			path:  paths.Doc().Child("m"),
+			want:  yaml.CommentMap{"$.a": {yaml.HeadComment(" head")}},
+		},
+		"document with a head comment on a later key": {
+			input: stringtest.LinesLF("a: 1", "# head b", "b: 2"),
+			want:  yaml.CommentMap{"$.b": {yaml.HeadComment(" head b")}},
+		},
+		"node with a head comment on a later key": {
+			input: stringtest.LinesLF("m:", "  a: 1", "  # head b", "  b: 2"),
+			path:  paths.Doc().Child("m"),
+			want:  yaml.CommentMap{"$.b": {yaml.HeadComment(" head b")}},
+		},
+		"document with a head comment on an anchor": {
+			input: stringtest.LinesLF("# head", "&a", "b: 1"),
+			want:  yaml.CommentMap{"$": {yaml.HeadComment(" head")}},
 		},
 		"document without comments": {
 			input: "name: api\n",
@@ -5175,6 +5404,31 @@ func TestNode_YAMLComments(t *testing.T) {
 			"    name: x",
 			"# The name of the service.",
 			"name: web # short",
+		), string(out))
+	})
+
+	t.Run("the encoder writes the comments of a scoped node back", func(t *testing.T) {
+		t.Parallel()
+
+		n := yamltest.At(t, yamltest.FirstDocument(t, stringtest.LinesLF(
+			"a: 1 # root a",
+			"b:",
+			"  a: 2 # inner a",
+			"  b: {a: 3} # deep",
+		)), paths.Doc().Child("b"))
+
+		got, err := n.Decode[yaml.MapSlice](t.Context(), niceyaml.WithYAMLOrderedMaps(true))
+		require.NoError(t, err)
+
+		comments, err := n.YAMLComments(t.Context())
+		require.NoError(t, err)
+
+		out, err := encoder.Marshal(t.Context(), got, encoder.WithYAMLComments(comments))
+		require.NoError(t, err)
+		assert.Equal(t, stringtest.LinesLF(
+			"a: 2 # inner a",
+			"b: # deep",
+			"  a: 3",
 		), string(out))
 	})
 
