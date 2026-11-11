@@ -776,6 +776,27 @@
 // field as it is too, unless the field is a pointer. The Defaults section
 // describes the starting value of each value that a decode creates.
 //
+// A field, an element, or a map entry of type [ast.Node], or of a pointer to
+// a node type of the go-yaml ast package, gets a node of the document. The
+// node is the one that [Node.AST] returns for its place, and at an alias it
+// is the content of the anchor. It prints the text of the document, and
+// [Node.DocumentResolver] resolves paths from it. The go-yaml decoder reads a
+// tree of its own, which gives some anchors new names. The decode then puts
+// the node of the document in place of each node of that tree. A value of a
+// node type that is not a pointer, such as [ast.MappingNode], gets a copy of
+// the node of the document. The copy prints the text of the document, but it is not
+// the node that [Node.AST] returns.
+//
+// The decode does not reach a node that the decoder hands an UnmarshalYAML
+// method, or a node inside a type that decodes itself. A node inside an
+// anchor of a reference document from [WithReferences] stays the decoder's
+// node too. Such a node spells an alias to a renamed anchor with a count in
+// brackets, such as `*x [2]`, which is not valid YAML. It spells a !!int tag
+// on an integer in the verbatim form `!<tag:yaml.org,2002:int>`. The
+// resolver of the document does not know the node. A caller can decode a
+// value from such a node and read the positions of its tokens, but should
+// not write its text out as YAML.
+//
 // A [DecodeOption] sets how one decode runs, and it applies only to the call
 // that gets it. A setting that describes the documents, such as
 // [WithReferences] or [WithAliasLimit], belongs to the [Source], which

@@ -3,6 +3,7 @@ package decodetree
 import (
 	"index/suffixarray"
 	"maps"
+	"reflect"
 	"slices"
 	"sort"
 	"strconv"
@@ -79,7 +80,9 @@ import (
 // carries the new name in its text as well. Each [ast.Node] that the
 // decoder fills or hands an UnmarshalYAML method thus spells an alias to a
 // renamed anchor with the new name, such as `*x [2]`. It spells each
-// anchor as the document does.
+// anchor as the document does. [Tree.Original] returns the node of the
+// document that such a node stands for, so a decode can hand its caller
+// the document's own nodes.
 //
 // Any other document reads the tree of the Source through [DecodeView].
 // DecodeView copies only the aliases and the nodes above them, to drop
@@ -123,6 +126,9 @@ type Tree struct {
 	// The function that returns the aliases to a reference document that a
 	// decode of body reads. It lists them on the first call.
 	bodyReads func() []aliasRead
+	// The function that returns the node of source that each node of body
+	// stands for, by its [nodeKey]. It lists them on the first call.
+	originals func() map[nodeKey]ast.Node
 }
 
 // Options says how [New] builds a tree that changes the document.
@@ -171,8 +177,66 @@ func New(body ast.Node, facts *aliasing.Facts, opts Options) *Tree {
 	t.merges = sync.OnceValue(t.unresolvedMerges)
 	t.aliases = sync.OnceValue(t.offsetAliases)
 	t.bodyReads = sync.OnceValue(func() []aliasRead { return t.walkReferenceReads(t.body) })
+	t.originals = sync.OnceValue(t.newOriginals)
 
 	return t
+}
+
+// nodeKey names a node of the tree. A copy that [DecodeView] makes of a
+// node keeps its type and its token, so the key names every copy of the
+// node as well.
+//
+//nolint:unused // The fields tell the keys of the map apart.
+type nodeKey struct {
+	typ reflect.Type
+	tk  *token.Token
+}
+
+// keyOf returns the [nodeKey] of node.
+func keyOf(node ast.Node) nodeKey {
+	return nodeKey{typ: reflect.TypeOf(node), tk: astnode.Token(node)}
+}
+
+// Original returns the node of the document that node stands for. The
+// argument node is a node that the decoder read from the tree, or a copy
+// of one that keeps its type and its token, as a [DecodeView] does. The
+// result is a node of the tree the Source shares, with the names, the
+// tags, and the aliases the document spells. Original reports false for
+// any other node, such as a node of a reference document from
+// niceyaml.WithReferences.
+func (t *Tree) Original(node ast.Node) (ast.Node, bool) {
+	if astnode.IsNil(node) || astnode.Token(node) == nil {
+		return nil, false
+	}
+
+	original, ok := t.originals()[keyOf(node)]
+
+	return original, ok && original != nil
+}
+
+// newOriginals maps the [nodeKey] of each node of the body to the node of
+// the document it stands for. A key that two nodes of the document share
+// maps to nil, so [Tree.Original] does not pick one of them.
+func (t *Tree) newOriginals() map[nodeKey]ast.Node {
+	source := astnode.Nodes(t.source)
+	originals := make(map[nodeKey]ast.Node, len(source))
+
+	for _, n := range source {
+		if astnode.Token(n) == nil {
+			continue
+		}
+
+		key := keyOf(t.Parsed(n))
+		if _, ok := originals[key]; ok {
+			originals[key] = nil
+
+			continue
+		}
+
+		originals[key] = n
+	}
+
+	return originals
 }
 
 // parse makes the body of the tree from the second parse opts returns. It

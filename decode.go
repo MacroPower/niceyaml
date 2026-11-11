@@ -27,6 +27,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/rejection"
 	"go.jacobcolvin.com/niceyaml/internal/taggedscalar"
 	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
+	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 )
@@ -824,11 +825,238 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig, comments
 		return err
 	}
 
+	n.ownNodes(v)
+
 	if cfg.skipSelfValidation {
 		return nil
 	}
 
 	return n.selfValidate(ctx, v, cfg)
+}
+
+// isNodeType reports whether the go-yaml decoder sets a value of type t to
+// the node it decodes.
+func isNodeType(t reflect.Type) bool {
+	return t == astNodeType || unmarshaler.IsSyntaxNode(t)
+}
+
+// reachesNodes reports whether a decode into a value of type t can set a
+// node of the syntax tree in the value, outside the types that decode
+// themselves.
+func reachesNodes(t reflect.Type) bool {
+	return holdsNodes.Get(t, func(t reflect.Type) bool {
+		return yamlfield.Reaches(t, func(t reflect.Type) (bool, bool) {
+			return isNodeType(t), unmarshaler.DecodesItself(t)
+		})
+	})
+}
+
+// ownNodes puts the node of the document in place of each node of the
+// decoder's tree in v, the target of a decode of n. The decoder reads a
+// tree that can rename anchors and copy nodes, as [decodetree.Tree]
+// describes. It sets each [ast.Node] in v to a node of that tree. The
+// swap reads the fields, elements, and entries that the decoder fills. It
+// does not read below a type that decodes itself, so a node that such a
+// type keeps stays the decoder's. A node of a reference document stays
+// too, because the document does not hold it. A v whose type reaches no
+// node costs nothing.
+func (n *Node) ownNodes(v any) {
+	rv := reflect.ValueOf(v)
+	if !reachesNodes(rv.Type().Elem()) {
+		return
+	}
+
+	s := nodeSwapper{tree: n.doc.tree(), seen: map[uintptr]map[reflect.Type]bool{}}
+	s.walk(rv.Elem())
+}
+
+// nodeSwapper puts the nodes of the document in place of the nodes of a
+// [decodetree.Tree] in a decoded value, as [Node.ownNodes] describes.
+type nodeSwapper struct {
+	// The tree the decoder read.
+	tree *decodetree.Tree
+	// The types read at each address the walk followed a pointer to, so a
+	// value that points to itself ends the walk.
+	seen map[uintptr]map[reflect.Type]bool
+}
+
+// walk swaps the nodes in v, a value that the walk can set. It reports
+// whether it set a node.
+func (s nodeSwapper) walk(v reflect.Value) bool {
+	t := v.Type()
+	if !reachesNodes(t) {
+		return false
+	}
+
+	if t == astNodeType || t.Kind() == reflect.Pointer && unmarshaler.IsSyntaxNode(t.Elem()) {
+		return !v.IsNil() && s.swap(v)
+	}
+
+	// The decoder sets a node held by value to a copy of its own node. The
+	// copy shares the slices of that node, so the walk sets the whole value
+	// and never writes below it.
+	if unmarshaler.IsSyntaxNode(t) {
+		return s.swapValue(v)
+	}
+
+	changed := false
+
+	switch v.Kind() {
+	case reflect.Pointer:
+		if !v.IsNil() && s.enter(v) {
+			changed = s.walk(v.Elem())
+		}
+
+	case reflect.Slice, reflect.Array:
+		if v.Kind() == reflect.Slice && (v.IsNil() || !s.enter(v)) {
+			return false
+		}
+
+		for i := range v.Len() {
+			changed = s.walk(v.Index(i)) || changed
+		}
+
+	case reflect.Map:
+		changed = s.walkMap(v)
+
+	case reflect.Struct:
+		for i, field := range slices.Collect(t.Fields()) {
+			if _, _, skip := yamlfield.Name(field); skip {
+				continue
+			}
+
+			if f := v.Field(i); f.CanSet() {
+				changed = s.walk(f) || changed
+			}
+		}
+
+	default:
+	}
+
+	return changed
+}
+
+// enter reports whether the walk reads v, a pointer or a slice, for the
+// first time as a value of its type.
+func (s nodeSwapper) enter(v reflect.Value) bool {
+	addr := v.Pointer()
+
+	types := s.seen[addr]
+	if types == nil {
+		types = map[reflect.Type]bool{}
+		s.seen[addr] = types
+	}
+
+	if types[v.Type()] {
+		return false
+	}
+
+	types[v.Type()] = true
+
+	return true
+}
+
+// walkMap swaps the nodes in the keys and the values of v, a map, and
+// reports whether it set a node. A map does not hand out its entries to
+// set, so the walk swaps the nodes in a copy of each entry. When it
+// changes an entry, it clears v and adds every entry back. A key that does
+// not equal itself, such as a NaN, thus keeps one entry for each entry
+// the map held.
+func (s nodeSwapper) walkMap(v reflect.Value) bool {
+	if v.IsNil() || !s.enter(v) {
+		return false
+	}
+
+	t := v.Type()
+	keys, values := reachesNodes(t.Key()), reachesNodes(t.Elem())
+
+	type entry struct{ key, value reflect.Value }
+
+	entries := make([]entry, 0, v.Len())
+
+	for iter := v.MapRange(); iter.Next(); {
+		entries = append(entries, entry{key: iter.Key(), value: iter.Value()})
+	}
+
+	changed := false
+
+	for i, e := range entries {
+		key := reflect.New(t.Key()).Elem()
+		key.Set(e.key)
+
+		value := reflect.New(t.Elem()).Elem()
+		value.Set(e.value)
+
+		keyChanged := keys && s.walk(key)
+		valueChanged := values && s.walk(value)
+
+		if keyChanged || valueChanged {
+			entries[i] = entry{key: key, value: value}
+			changed = true
+		}
+	}
+
+	if !changed {
+		return false
+	}
+
+	v.Clear()
+
+	for _, e := range entries {
+		v.SetMapIndex(e.key, e.value)
+	}
+
+	return true
+}
+
+// swap sets v, an [ast.Node] or a pointer to a node type, to the node of
+// the document that the node in v stands for, and reports whether that
+// node differs from the node in v. It leaves v as it is when the document
+// does not hold such a node, or holds one of another type.
+func (s nodeSwapper) swap(v reflect.Value) bool {
+	node, ok := reflect.TypeAssert[ast.Node](v)
+	if !ok {
+		return false
+	}
+
+	original, ok := s.tree.Original(node)
+	if !ok || original == node {
+		return false
+	}
+
+	o := reflect.ValueOf(original)
+	if !o.Type().AssignableTo(v.Type()) {
+		return false
+	}
+
+	v.Set(o)
+
+	return true
+}
+
+// swapValue sets v, a node type of the go-yaml ast package held by value,
+// to a copy of the node of the document that v stands for. It reports
+// whether it set v, and it leaves v as it is when the document does not hold
+// such a node, or holds one of another type.
+func (s nodeSwapper) swapValue(v reflect.Value) bool {
+	node, ok := reflect.TypeAssert[ast.Node](v.Addr())
+	if !ok {
+		return false
+	}
+
+	original, ok := s.tree.Original(node)
+	if !ok || original == node {
+		return false
+	}
+
+	o := reflect.ValueOf(original)
+	if o.Type() != v.Addr().Type() {
+		return false
+	}
+
+	v.Set(o.Elem())
+
+	return true
 }
 
 // warnUnknownFields hands each unknown field of a decode of n into a value
@@ -1430,10 +1658,20 @@ func (n *Node) readOrder(ctx context.Context, cfg decodeConfig, t reflect.Type, 
 	}
 }
 
-// errPlaced marks an error of a decode that [decodeWithRecover] or
-// [Node.rejection] placed in the source, so [Node.locateDecodeError]
-// does not look for the value that reported it.
-var errPlaced = errors.New("placed")
+var (
+	// The mark of an error of a decode that [decodeWithRecover] or
+	// [Node.rejection] placed in the source, so [Node.locateDecodeError]
+	// does not look for the value that reported it.
+	errPlaced = errors.New("placed")
+
+	// The [ast.Node] interface, which the go-yaml decoder sets to the
+	// node it decodes.
+	astNodeType = reflect.TypeFor[ast.Node]()
+
+	// Whether a decode into each type reaches a node of the syntax tree,
+	// as [reachesNodes] reports.
+	holdsNodes unmarshaler.TypeCache[bool]
+)
 
 // markDecode returns err as an error of a decode. The result matches
 // [ErrDecode], [errInvalid], and each mark that is not nil, such as the
@@ -1516,8 +1754,11 @@ func decodeAtWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, 
 // the text as the document wrote it, and the String method of
 // [Node.AST] gives the YAML text of any node.
 //
-// An [ast.Node] in the result is part of a tree the document shares, so
-// a caller must not modify it.
+// An [ast.Node] in the result is the node that [Node.AST] returns for its
+// place, and at an alias it is the content of the anchor. The node is
+// part of the tree that [Source.File] returns, so a caller must not
+// modify it. The Decoding section of the package documentation names the
+// nodes that a decode hands out from a tree of its own.
 func (n *Node) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, error) {
 	var zero T
 
