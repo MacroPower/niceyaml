@@ -31,7 +31,7 @@ func main() {
 		printer.WithStyles(theme.Charm.Styles().With(
 			style.Inherit(highlightKind, kind.GenericHighlight),
 		)),
-		printer.WithBox(),
+		printer.WithBox(true),
 	)
 
 	// Finders ignore case and diacritics by default.

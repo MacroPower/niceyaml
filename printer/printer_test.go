@@ -318,20 +318,38 @@ func TestWithBox(t *testing.T) {
 			want: []string{"a: 1", "b: longer", "c: 3"},
 		},
 		"box pads every row to the widest and one cell more": {
-			opts: []printer.Option{printer.WithBox()},
+			opts: []printer.Option{printer.WithBox(true)},
 			want: []string{"a: 1      ", "b: longer ", "c: 3      "},
 		},
 		"box pads every row to the container width": {
-			opts: []printer.Option{printer.WithBox(), printer.WithContainerWidth(12)},
+			opts: []printer.Option{printer.WithBox(true), printer.WithContainerWidth(12)},
 			want: []string{"a: 1        ", "b: longer   ", "c: 3        "},
 		},
-		"later container style replaces the box": {
-			opts: []printer.Option{printer.WithBox(), printer.WithContainerStyle(lipgloss.NewStyle())},
+		"box off leaves each row as wide as its content": {
+			opts: []printer.Option{printer.WithBox(true), printer.WithBox(false)},
 			want: []string{"a: 1", "b: longer", "c: 3"},
 		},
-		"later box replaces the container style": {
-			opts: []printer.Option{printer.WithContainerStyle(border), printer.WithBox()},
+		"empty container style keeps the box": {
+			opts: []printer.Option{printer.WithBox(true), printer.WithContainerStyle(lipgloss.NewStyle())},
 			want: []string{"a: 1      ", "b: longer ", "c: 3      "},
+		},
+		"box fills a frame set before it": {
+			opts: []printer.Option{printer.WithContainerStyle(border), printer.WithBox(true)},
+			want: []string{"┌──────────┐", "│a: 1      │", "│b: longer │", "│c: 3      │", "└──────────┘"},
+		},
+		"box fills a frame set after it": {
+			opts: []printer.Option{printer.WithBox(true), printer.WithContainerStyle(border)},
+			want: []string{"┌──────────┐", "│a: 1      │", "│b: longer │", "│c: 3      │", "└──────────┘"},
+		},
+		"box adds one cell to the right padding of the frame": {
+			opts: []printer.Option{printer.WithBox(true), printer.WithContainerStyle(border.PaddingRight(2))},
+			want: []string{
+				"┌────────────┐",
+				"│a: 1        │",
+				"│b: longer   │",
+				"│c: 3        │",
+				"└────────────┘",
+			},
 		},
 	}
 
@@ -352,8 +370,8 @@ func TestWithBox(t *testing.T) {
 		second := style.New(lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff00")))
 
 		for _, p := range []*printer.Printer{
-			printer.New(printer.WithStyles(first), printer.WithBox()),
-			printer.New(printer.WithBox(), printer.WithStyles(first)),
+			printer.New(printer.WithStyles(first), printer.WithBox(true)),
+			printer.New(printer.WithBox(true), printer.WithStyles(first)),
 		} {
 			assert.Equal(t, first.Style(kind.Text).PaddingRight(1), p.ContainerStyle())
 
@@ -361,6 +379,89 @@ func TestWithBox(t *testing.T) {
 			assert.Equal(t, second.Style(kind.Text).PaddingRight(1),
 				p.With(printer.WithStyles(second)).ContainerStyle())
 		}
+	})
+
+	t.Run("framed box takes the text style of the final styles", func(t *testing.T) {
+		t.Parallel()
+
+		first := style.New(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#ff0000")).
+			Background(lipgloss.Color("#000000")))
+		second := style.New(lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff00")))
+
+		p := printer.New(
+			printer.WithStyles(first),
+			printer.WithBox(true),
+			printer.WithContainerStyle(border),
+		)
+
+		got := p.ContainerStyle()
+		assert.Equal(t, lipgloss.NormalBorder(), got.GetBorderStyle())
+		assert.Equal(t, 1, got.GetPaddingRight())
+		assert.Equal(t, first.Style(kind.Text).GetForeground(), got.GetForeground())
+		assert.Equal(t, first.Style(kind.Text).GetBackground(), got.GetBackground())
+
+		got = p.With(printer.WithStyles(second)).ContainerStyle()
+		assert.Equal(t, lipgloss.NormalBorder(), got.GetBorderStyle())
+		assert.Equal(t, second.Style(kind.Text).GetForeground(), got.GetForeground())
+		assert.Equal(t, lipgloss.NoColor{}, got.GetBackground())
+	})
+
+	t.Run("colors of the frame win over the text style", func(t *testing.T) {
+		t.Parallel()
+
+		text := style.New(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#ff0000")).
+			Background(lipgloss.Color("#000000")))
+
+		got := printer.New(
+			printer.WithStyles(text),
+			printer.WithBox(true),
+			printer.WithContainerStyle(lipgloss.NewStyle().Background(lipgloss.Color("#0000ff"))),
+		).ContainerStyle()
+
+		assert.Equal(t, lipgloss.Color("#ff0000"), got.GetForeground())
+		assert.Equal(t, lipgloss.Color("#0000ff"), got.GetBackground())
+	})
+
+	t.Run("background of the text style stays out of the margins", func(t *testing.T) {
+		t.Parallel()
+
+		text := style.New(lipgloss.NewStyle().Background(lipgloss.Color("#000000")))
+		p := printer.New(
+			printer.WithStyles(text),
+			printer.WithGutter(printer.NoGutter),
+			printer.WithBox(true),
+			printer.WithContainerStyle(lipgloss.NewStyle().MarginLeft(1)),
+		)
+
+		got := p.Print(src.View())
+
+		assert.Contains(t, got, "48;2;0;0;0")
+
+		for row := range strings.SplitSeq(got, "\n") {
+			assert.True(t, strings.HasPrefix(row, " "), "row %q starts with a colored margin", row)
+		}
+	})
+
+	t.Run("container style passed back with the box off keeps the output", func(t *testing.T) {
+		t.Parallel()
+
+		p := printer.New(printer.WithStyles(theme.Charm), printer.WithBox(true))
+		got := p.With(printer.WithContainerStyle(p.ContainerStyle()), printer.WithBox(false))
+
+		assert.Equal(t, p.ContainerStyle(), got.ContainerStyle())
+		assert.Equal(t, p.Print(src.View()), got.Print(src.View()))
+	})
+
+	t.Run("container style passed back with the box on adds the box again", func(t *testing.T) {
+		t.Parallel()
+
+		p := printer.New(printer.WithStyles(theme.Charm), printer.WithBox(true))
+		got := p.With(printer.WithContainerStyle(p.ContainerStyle()))
+
+		assert.Equal(t, 1, p.ContainerStyle().GetPaddingRight())
+		assert.Equal(t, 2, got.ContainerStyle().GetPaddingRight())
 	})
 
 	t.Run("box fills with the surface of the styles", func(t *testing.T) {
@@ -374,8 +475,9 @@ func TestWithBox(t *testing.T) {
 		view := src.View()
 		view.AddOverlay(kind.GenericHighlight, yamltest.LineRange(1, 3, 9))
 
-		painted := printer.New(printer.WithStyles(surface), printer.WithBox()).Print(view)
-		plain := printer.New(printer.WithStyles(surface.With(style.WithSurface(nil))), printer.WithBox()).Print(view)
+		painted := printer.New(printer.WithStyles(surface), printer.WithBox(true)).Print(view)
+		plain := printer.New(printer.WithStyles(surface.With(style.WithSurface(nil))), printer.WithBox(true)).
+			Print(view)
 
 		// Both draw the same box, and only the painted one fills it.
 		assert.Equal(t, ansi.Strip(painted), ansi.Strip(plain))
@@ -384,6 +486,89 @@ func TestWithBox(t *testing.T) {
 
 		// The highlight keeps its fill without the surface.
 		assert.Contains(t, plain, "48;2;255;0;255")
+	})
+}
+
+func TestWithContainerStyle(t *testing.T) {
+	t.Parallel()
+
+	src := niceyaml.NewSourceFromString(stringtest.LinesLF("name: value-x", "other: value"))
+	frame := lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
+	want := stringtest.JoinLF(
+		"╭─────────────╮",
+		"│name: value-x│",
+		"│other: value │",
+		"╰─────────────╯",
+	)
+
+	// Each style draws the frame alone, so every row of the layout prints
+	// as one row inside it.
+	tcs := map[string]struct {
+		container lipgloss.Style
+	}{
+		"frame": {
+			container: frame,
+		},
+		"width": {
+			container: frame.Width(8),
+		},
+		"wide width": {
+			container: frame.Width(30),
+		},
+		"height and vertical alignment": {
+			container: frame.Height(6).AlignVertical(lipgloss.Bottom),
+		},
+		"horizontal alignment": {
+			container: frame.AlignHorizontal(lipgloss.Right),
+		},
+		"max width": {
+			container: frame.MaxWidth(8),
+		},
+		"max height": {
+			container: frame.MaxHeight(2),
+		},
+		"inline": {
+			container: frame.Inline(true),
+		},
+		"transform": {
+			container: frame.Transform(strings.ToUpper),
+		},
+		"string": {
+			container: frame.SetString("title"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := testPrinter().With(
+				printer.WithContainerStyle(tc.container),
+				printer.WithWrapWidth(40),
+			)
+			view := src.View()
+
+			assert.Equal(t, want, p.Print(view))
+			assert.Equal(t, 2, p.Layout(view).Rows())
+
+			got := p.ContainerStyle()
+			assert.Equal(t, frame.GetBorderStyle(), got.GetBorderStyle())
+			assert.Zero(t, got.GetWidth())
+			assert.Zero(t, got.GetHeight())
+			assert.Zero(t, got.GetMaxWidth())
+			assert.Zero(t, got.GetMaxHeight())
+			assert.False(t, got.GetInline())
+			assert.Nil(t, got.GetTransform())
+			assert.Empty(t, got.Value())
+		})
+	}
+
+	t.Run("text attribute pads every row", func(t *testing.T) {
+		t.Parallel()
+
+		p := testPrinter().With(printer.WithContainerStyle(lipgloss.NewStyle().Bold(true)))
+
+		assert.Equal(t, stringtest.JoinLF("name: value-x", "other: value "), ansi.Strip(p.Print(src.View())))
 	})
 }
 
@@ -5297,11 +5482,11 @@ func TestPrinter_WrapWidth_FitsFrame(t *testing.T) {
 		"default container":        {width: 40},
 		"narrow default container": {width: 30},
 		"box": {
-			opts:  []printer.Option{printer.WithBox()},
+			opts:  []printer.Option{printer.WithBox(true)},
 			width: 40,
 		},
 		"narrow box": {
-			opts:  []printer.Option{printer.WithBox()},
+			opts:  []printer.Option{printer.WithBox(true)},
 			width: 30,
 		},
 		"bordered container": {

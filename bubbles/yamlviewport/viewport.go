@@ -267,10 +267,8 @@ type config struct {
 //
 // The viewport never modifies the printer. Each render derives a copy with
 // [printer.Printer.With] and the viewport's wrap width, so other renderers
-// can share the same printer. The viewport sizes that copy's container to
-// the content area, so it ignores any Width, Height, MaxWidth, or MaxHeight
-// on the printer's container style. To fix the size of the viewport, set
-// them on [WithContainerStyle] instead.
+// can share the same printer. The viewport pins that copy's container to
+// the width of the content area.
 func WithPrinter(p *printer.Printer) Option {
 	return func(c *config) {
 		c.printer = p
@@ -510,7 +508,7 @@ func (m *Model) setInitialValues() {
 // caller does not set one. It renders with [theme.Charm] inside the box of
 // [printer.WithBox].
 func defaultPrinter() *printer.Printer {
-	return printer.New(printer.WithStyles(theme.Charm), printer.WithBox())
+	return printer.New(printer.WithStyles(theme.Charm), printer.WithBox(true))
 }
 
 // Init returns the command that starts the viewport. The viewport does not
@@ -701,11 +699,6 @@ func (m *Model) anchorTop() {
 // to the widest row of the window. A window of short lines then draws its
 // border inside the edge of the content area.
 //
-// The viewport sizes the printer's container itself, so renderPrinter drops
-// any Width, Height, MaxWidth, or MaxHeight from its style. With those
-// sizes, Print wraps, pads, or cuts the rows after the layout counts them.
-// The scroll bounds then differ from the rows on screen.
-//
 // A render prints a slice of the view, so renderPrinter sizes the gutter for
 // the largest line number of the whole view rather than of the window. Every
 // window then lines up with the layout. In side-by-side mode both panes get
@@ -719,17 +712,10 @@ func (m *Model) renderPrinter(width int) *printer.Printer {
 		wrapWidth = width
 	}
 
-	container := m.printer.ContainerStyle().
-		UnsetWidth().
-		UnsetHeight().
-		UnsetMaxWidth().
-		UnsetMaxHeight()
-
 	return m.printer.With(
 		printer.WithWrapWidth(wrapWidth),
 		printer.WithMaxNumber(m.rows.maxNumber),
 		printer.WithContainerWidth(width),
-		printer.WithContainerStyle(container),
 	)
 }
 

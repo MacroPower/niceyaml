@@ -5538,7 +5538,7 @@ func TestViewport_NilPrinterSelectsDefault(t *testing.T) {
 
 	// The default printer draws the Charm theme in a box.
 	ref := yamlviewport.New(yamlviewport.WithPrinter(
-		printer.New(printer.WithStyles(theme.Charm), printer.WithBox()),
+		printer.New(printer.WithStyles(theme.Charm), printer.WithBox(true)),
 	))
 	setup(&ref)
 

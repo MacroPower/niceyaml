@@ -2,6 +2,7 @@ package printer
 
 import (
 	"fmt"
+	"image/color"
 	"iter"
 	"slices"
 	"strconv"
@@ -111,18 +112,69 @@ func (p *Printer) With(opts ...Option) *Printer {
 	return &c
 }
 
-// apply runs opts and then, when [WithBox] is in effect, derives the
-// container style from the styles they leave. The box thus follows a
-// [WithStyles] on either side of it.
+// apply runs opts and then derives the container style from the frame of
+// [WithContainerStyle], the box of [WithBox], and the styles they leave.
+// The box thus follows a [WithStyles] on either side of it, and the
+// options compose in any order.
 func (p *Printer) apply(opts []Option) {
 	for _, opt := range opts {
 		opt(&p.config)
 	}
 
+	container := p.frameStyle
 	if p.box {
-		p.style = p.styles.Style(kind.Text).
-			PaddingRight(1)
+		container = boxStyle(container, p.styles.Style(kind.Text))
 	}
+
+	p.style = containerFrame(container)
+}
+
+// boxStyle returns frame filled as the box of [WithBox] fills it. The
+// properties that frame sets win, and text fills the rest, apart from the
+// margins and the padding. The box adds one cell to the right padding of
+// frame. The background of text fills the area inside the margins, and
+// it leaves the margins as frame colors them.
+//
+//nolint:gocritic // hugeParam: Copying.
+func boxStyle(frame, text lipgloss.Style) lipgloss.Style {
+	// Inherit also copies a background into the margins, so the background
+	// of text joins after it.
+	box := frame.Inherit(text.UnsetBackground()).
+		PaddingRight(frame.GetPaddingRight() + 1)
+
+	if bg := text.GetBackground(); isNoColor(frame.GetBackground()) && !isNoColor(bg) {
+		box = box.Background(bg)
+	}
+
+	return box
+}
+
+// isNoColor reports whether c is the [lipgloss.NoColor] that a style
+// returns for a color it does not set.
+func isNoColor(c color.Color) bool {
+	_, ok := c.(lipgloss.NoColor)
+
+	return ok
+}
+
+// containerFrame returns s without the properties that size, align, or
+// rewrite the rows it wraps. It drops the width, the height, the maximum
+// width and height, the alignment, Inline, the transform, and the string
+// that [lipgloss.Style.SetString] sets. Every other property of s stays.
+// None of them changes the rows of the output, so each row of a [Layout]
+// prints as one row of [Printer.Print].
+//
+//nolint:gocritic // hugeParam: Copying.
+func containerFrame(s lipgloss.Style) lipgloss.Style {
+	return s.
+		UnsetWidth().
+		UnsetHeight().
+		UnsetMaxWidth().
+		UnsetMaxHeight().
+		UnsetAlign().
+		UnsetInline().
+		UnsetTransform().
+		UnsetString()
 }
 
 // Option configures a [Printer].
@@ -143,7 +195,11 @@ type Option func(*config)
 // of the [Printer] that embeds it, so only [New] and [Printer.With] can
 // apply one.
 type config struct {
-	styles         style.Styler
+	styles style.Styler
+	// The style WithContainerStyle sets, as the caller passed it.
+	frameStyle lipgloss.Style
+	// The container style apply derives from the frame, the box, and the
+	// styles.
 	style          lipgloss.Style
 	gutter         Gutter
 	annotationFunc AnnotationFunc
@@ -154,8 +210,8 @@ type config struct {
 	wrap           int
 	containerWidth int
 	maxNumber      int
-	// Whether apply derives the container style from the styles. WithBox
-	// sets it, and WithContainerStyle clears it.
+	// Whether apply fills the container with the kind.Text style, as
+	// WithBox sets it.
 	box bool
 }
 
@@ -787,40 +843,55 @@ func (noGutter) Render(GutterContext) string {
 // WithContainerStyle is an [Option] that sets the [lipgloss.Style] the
 // printer wraps around the whole rendered output. By default the container
 // is an empty style, which leaves each row as the printer renders it. A
-// container that sets any property, such as a border or a background,
-// pads every row to the widest one. It replaces the box of an earlier
-// [WithBox].
+// container that sets any property the printer keeps, such as a border, a
+// background, or bold text, pads every row to the widest one.
 //
-// A width or a height on s applies to the joined rows. A narrow width
-// wraps them, and a vertical alignment moves them, so the rows of a
-// [Layout] then do not match the rows of [Printer.Print]. Use
-// [WithContainerWidth] to pin the width.
+// The printer owns the size and the alignment of the container. It
+// ignores the width, the height, the maximum width and height, the
+// alignment, Inline, the transform, and the string that
+// [lipgloss.Style.SetString] sets. It draws s with every other property,
+// such as the margins, the border, the padding, the colors, and the text
+// attributes. Each row of a [Layout] thus prints as one row of
+// [Printer.Print]. Use [WithContainerWidth] to pin the width.
 //
-// To set the theme, which styles the tokens inside, use [WithStyles].
+// The box of [WithBox] fills the frame of s, in either order of the two
+// options. To set the theme, which styles the tokens inside, use
+// [WithStyles].
 //
 //nolint:gocritic // hugeParam: Copying.
 func WithContainerStyle(s lipgloss.Style) Option {
 	return func(c *config) {
-		c.style = s
-		c.box = false
+		c.frameStyle = s
 	}
 }
 
-// WithBox is an [Option] that draws the output as a box in the [kind.Text]
-// style of the theme. The container takes that style with one cell of
-// right padding. Every row reaches the width of the widest row plus one
-// cell. When [WithContainerWidth] pins a width, every row reaches that
-// width instead. A theme that sets a surface, such as
+// WithBox is an [Option] that, when enabled, draws the output as a box in
+// the [kind.Text] style of the theme. The box adds one cell of right
+// padding to the container. Every row reaches the width of the widest row
+// plus one cell. When [WithContainerWidth] pins a width, every row reaches
+// that width instead. A theme that sets a surface, such as
 // [go.jacobcolvin.com/niceyaml/style/theme.Charm], fills the box with that
 // color. Use WithBox for a full-screen viewer, where the document shows as
-// one block of the theme's background.
+// one block of the theme's background. WithBox(false), the default, turns
+// the box off.
 //
-// The box takes its style from the styles the printer holds after every
-// option applies. It thus follows a [WithStyles] that comes before or
-// after it. A later [WithContainerStyle] replaces the box.
-func WithBox() Option {
+// The box fills the frame of [WithContainerStyle], so a border goes around
+// a filled box:
+//
+//	p := printer.New(
+//		printer.WithStyles(theme.Charm),
+//		printer.WithBox(true),
+//		printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.RoundedBorder())),
+//	)
+//
+// The colors and the other properties that the container style sets win
+// over those of [kind.Text]. The background of [kind.Text] stays out of
+// the margins. The box takes its style from the styles the printer holds
+// after every option applies. It thus follows a [WithStyles] that comes
+// before or after it.
+func WithBox(enabled bool) Option {
 	return func(c *config) {
-		c.box = true
+		c.box = enabled
 	}
 }
 
@@ -954,8 +1025,16 @@ func (p *Printer) MaxNumber(view *line.View) int {
 }
 
 // ContainerStyle returns the [lipgloss.Style] the printer wraps around the
-// whole rendered output: the style of [WithContainerStyle], the box of
-// [WithBox], or the empty style by default.
+// whole rendered output. It holds the style of [WithContainerStyle]
+// without the properties that option ignores, filled with the box of
+// [WithBox]. By default it returns the empty style.
+//
+// Read the returned style for its frame size and its colors. It already
+// holds the box, with its [kind.Text] colors and its extra cell of right
+// padding. Passing it back to [WithContainerStyle] while the box is on
+// adds the box a second time. The frame then also keeps the [kind.Text]
+// colors after a later [WithStyles]. Pass [WithBox] with false together
+// with it to keep the output the same.
 func (p *Printer) ContainerStyle() lipgloss.Style {
 	return p.style
 }
@@ -1047,9 +1126,9 @@ func flagKind(f line.Flag) kind.Kind {
 // and the annotations of the line follow its columns onto that row.
 //
 // The default container leaves each row as wide as its content. A
-// container that sets any property, such as the box of [WithBox], pads
-// every row to the widest one. [WithContainerWidth] instead pads every row
-// to the width it pins.
+// container that sets any property the printer keeps, such as the box of
+// [WithBox], a border, or bold text, pads every row to the widest one.
+// [WithContainerWidth] instead pads every row to the width it pins.
 func (p *Printer) Print(view *line.View) string {
 	return p.render(view, false).String()
 }

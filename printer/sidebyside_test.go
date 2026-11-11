@@ -84,6 +84,20 @@ func TestPrinter_RenderSideBySide(t *testing.T) {
 			wantRight:      []string{"   1  a: 1", "   2  b: 2"},
 			wantRightStart: 13,
 		},
+		// Each pane wraps to (38-3-3)/2 = 16 cells, which fit the gutter
+		// and the 10 cells of the line.
+		"box stays out of the panes": {
+			views: func() (*line.View, *line.View) { return view("a: 1234567"), view("a: 1234567") },
+			opts: []printer.Option{
+				printer.WithWrapWidth(38),
+				printer.WithBox(true),
+				printer.WithContainerStyle(border),
+			},
+			want:           []string{"   1  a: 1234567 │    1  a: 1234567"},
+			wantLeft:       []string{"   1  a: 1234567"},
+			wantRight:      []string{"   1  a: 1234567"},
+			wantRightStart: 19,
+		},
 		"filler rows keep the panes as long as each other": {
 			views:          unevenPanes,
 			opts:           []printer.Option{printer.WithWrapWidth(31)},

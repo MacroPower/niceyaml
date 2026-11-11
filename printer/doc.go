@@ -29,7 +29,7 @@
 // token. For a full-screen viewer, [WithBox] fills the rest of the
 // rectangle around the rows with the surface:
 //
-//	p := printer.New(printer.WithStyles(theme.Charm), printer.WithBox())
+//	p := printer.New(printer.WithStyles(theme.Charm), printer.WithBox(true))
 //
 // To draw such a theme on the terminal's own background instead, remove
 // its surface with [style.WithSurface]:
@@ -86,9 +86,10 @@
 // of [go.jacobcolvin.com/niceyaml/style/theme] covers it.
 //
 // Output without its sequences is not the plain text of a view.
-// [WithWrapWidth] wraps a long line onto several rows. [WithBox],
-// [WithContainerWidth], and a container style that sets any property pad
-// rows with spaces.
+// [WithWrapWidth] wraps a long line onto several rows. [WithBox] and
+// [WithContainerWidth] pad rows with spaces. So does a container style
+// that sets any property the printer keeps, such as a frame, a color, or
+// bold text.
 //
 // [line.View.String] renders a view as plain text, without padding or
 // wrapping. It shows the flags and the annotations of the view. Each
