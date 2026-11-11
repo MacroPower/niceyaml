@@ -145,7 +145,8 @@ type directiveSite struct {
 // in doc. A program might keep a Ref from an earlier lookup and check
 // another document with it. The directive does not stand in that
 // document, so locate returns err as it is. It does the same for a nil
-// site.
+// site. The lookup that calls locate puts the result inside
+// [niceyaml.Unchecked].
 func (s *directiveSite) locate(doc *niceyaml.Node, err error) error {
 	if s == nil || s.doc != weak.Make(doc.Document()) {
 		return err
@@ -293,14 +294,14 @@ func (directiveResolver) Resolve(_ context.Context, doc *niceyaml.Node) (Ref, er
 	// comment locates each error of the reference and of the schema.
 	at := niceyaml.AtPosition(directive.Position)
 
-	ref, err := RefBeside(doc, path)
+	ref, err := refBeside(doc, path)
 	if errors.Is(err, ErrNoBaseDir) && doc.FilePath() == "" {
-		return Ref{}, niceyaml.Locate(fmt.Errorf("%w: %w", ErrNoFilePath, err), at)
+		return Ref{}, niceyaml.Unchecked(fmt.Errorf("%w: %w", ErrNoFilePath, err), at)
 	}
 
 	if err != nil {
 		//nolint:wrapcheck // The reference error already names the reference.
-		return Ref{}, niceyaml.Locate(err, at)
+		return Ref{}, niceyaml.Unchecked(err, at)
 	}
 
 	if fragment != "" {

@@ -402,7 +402,12 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 //
 // Returns [ErrResolve] if a resolver applied but could not name the
 // schema. Returns an error that holds a [*LoadError] matching [ErrLoad]
-// or [ErrCompile] if loading or compiling the schema fails.
+// or [ErrCompile] if loading or compiling the schema fails. Each error
+// but ErrNoMatch comes inside [niceyaml.Unchecked], because the lookup
+// could not name a schema to check the document with. So
+// [niceyaml.IsInvalid] does not report it, even from a check that returns
+// it as it is, such as a [niceyaml.WithValueCheck] function. A problem
+// that a resolver declares as a fault of the document stays one.
 //
 // When ctx ends before a resolver names a schema, or before Lookup finds
 // that every resolver declines, Lookup returns [ErrResolve] wrapping the
@@ -537,7 +542,23 @@ func (r *Registry) Resolve(ctx context.Context, doc *niceyaml.Node) (Ref, error)
 // document. It reports true when every resolver declined the document. A
 // load error might wrap [ErrNoMatch] too, so the error alone cannot
 // tell.
+//
+// Every error but the decline of every resolver comes inside
+// [niceyaml.Unchecked], because the lookup could not name a schema to
+// check the document with. A problem that declares a fault of its own,
+// such as the error of a resolver that found the document at fault,
+// stays a fault inside it.
 func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Node) (*Schema, bool, error) {
+	v, unmatched, err := r.lookupSchema(ctx, doc)
+	if err != nil && !unmatched {
+		err = niceyaml.Unchecked(err)
+	}
+
+	return v, unmatched, err
+}
+
+// lookupSchema is [Registry.lookup] before lookup wraps the error.
+func (r *Registry) lookupSchema(ctx context.Context, doc *niceyaml.Node) (*Schema, bool, error) {
 	if !doc.Path().IsRoot() {
 		return nil, false, fmt.Errorf("%w: node is scoped to %s", ErrScopedDocument, doc.Path())
 	}
@@ -582,7 +603,7 @@ func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Node) (*Schema, boo
 			continue
 		}
 
-		v, err := r.Schema(ctx, ref)
+		v, err := r.loadSchema(ctx, ref)
 		if err != nil {
 			// The cache remembers the failure without a location, so each
 			// document that names the schema locates it at its own
@@ -797,7 +818,8 @@ func (e reasonError) Unwrap() error {
 //
 // Returns validation errors if the document does not conform to the
 // schema. Returns resolution, loading, or compilation errors if schema
-// preparation fails. When ctx ends before the lookup finishes, Check
+// preparation fails, inside [niceyaml.Unchecked], as [Registry.Lookup]
+// returns them. When ctx ends before the lookup finishes, Check
 // returns the error that [Registry.Lookup] returns for it, even with
 // [WithRequireSchema] set false. For a document that did not parse,
 // Check returns the error that [niceyaml.Node.Err] returns, even with
@@ -891,6 +913,10 @@ func (r *Registry) Check(ctx context.Context, n *niceyaml.Node) error {
 // could not read, such as one past the limit of [WithLoadLimit] or a
 // response with a status other than 200 OK.
 //
+// The document is not at fault for any error of Schema, so each one
+// comes inside [niceyaml.Unchecked]. [niceyaml.IsInvalid] does not report
+// it, even from a check that returns it as it is.
+//
 // A Ref that a document names, as [RefBeside] and [Directive] build it,
 // loads only in a registry that [WithAccess] gave an [Access]. In any
 // other registry, Schema returns [ErrLoad] wrapping [ErrAccessNotSet]
@@ -946,6 +972,18 @@ func (r *Registry) Check(ctx context.Context, n *niceyaml.Node) error {
 // caller that shared it. The registry does not remember a panic or a
 // Goexit, so the next request runs the load again.
 func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
+	v, err := r.loadSchema(ctx, ref)
+	if err != nil {
+		return nil, niceyaml.Unchecked(err)
+	}
+
+	return v, nil
+}
+
+// loadSchema is [Registry.Schema] without the [niceyaml.Unchecked] around
+// the error. A lookup wraps the error itself, after it locates the error
+// at the directive that named the schema.
+func (r *Registry) loadSchema(ctx context.Context, ref Ref) (*Schema, error) {
 	if ref.Schema() != nil {
 		return ref.Schema(), nil
 	}
@@ -1049,6 +1087,8 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 // document. A file or URL larger than the limit of [WithLoadLimit] fails
 // to load. Each error is a [*LoadError] that matches [ErrLoad], with a
 // [*FetchError] inside it for a file or URL that Load could not read.
+// The LoadError comes inside [niceyaml.Unchecked], as the errors of
+// [Registry.Schema] do.
 //
 // The bytes are the text that the file, the URL, or the load holds, in
 // JSON or YAML. Load does not convert one format into the other, so a
@@ -1066,12 +1106,12 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 func (r *Registry) Load(ctx context.Context, ref Ref) ([]byte, error) {
 	err := r.checkNamed(ref)
 	if err != nil {
-		return nil, &LoadError{Ref: ref, Phase: ErrLoad, Err: err}
+		return nil, niceyaml.Unchecked(&LoadError{Ref: ref, Phase: ErrLoad, Err: err})
 	}
 
 	data, err := r.load(ctx, ref)
 	if err != nil {
-		return nil, &LoadError{Ref: ref, Phase: ErrLoad, Err: err}
+		return nil, niceyaml.Unchecked(&LoadError{Ref: ref, Phase: ErrLoad, Err: err})
 	}
 
 	return data, nil

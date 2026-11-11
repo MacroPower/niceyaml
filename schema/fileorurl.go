@@ -129,7 +129,10 @@ func FileOrURL(baseDir, ref string) (Ref, error) {
 // with the directory of the document's file as the base directory. A
 // relative path thus names a file beside the document. A document
 // without a file path does not have such a directory, and a relative
-// path then reports [ErrNoBaseDir].
+// path then reports [ErrNoBaseDir]. Each error of RefBeside comes inside
+// [niceyaml.Unchecked], because the check could not find a schema to
+// run. [niceyaml.IsInvalid] does not report it, even from a check that
+// returns it as it is.
 //
 // A document with a relative file path and without a file system does
 // not have such a directory either. A relative reference beside it
@@ -182,6 +185,18 @@ func FileOrURL(baseDir, ref string) (Ref, error) {
 // section of the package documentation gives the registry options that
 // confine a reference from another trust domain.
 func RefBeside(doc *niceyaml.Node, ref string) (Ref, error) {
+	r, err := refBeside(doc, ref)
+	if err != nil {
+		return Ref{}, niceyaml.Unchecked(err)
+	}
+
+	return r, nil
+}
+
+// refBeside is [RefBeside] without the [niceyaml.Unchecked] around the
+// error. [Directive] locates the error at its comment inside Unchecked
+// itself.
+func refBeside(doc *niceyaml.Node, ref string) (Ref, error) {
 	var baseDir string
 
 	// A relative path on disk names a file only against the working

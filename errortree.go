@@ -554,7 +554,7 @@ func (t ErrorTree) rowMessage() string {
 
 	// The part of the message the children show depends on the end of the
 	// cause chain, so the walk finds that end alone.
-	end := walkChildren(t.Err, func(*SourceError) {}, func(error, childBase, bool) {})
+	end := walkChildren(t.Err, func(*SourceError, childBase) {}, func(error, childBase, bool) {})
 
 	return bareMessage(t.Err, end)
 }
@@ -938,7 +938,7 @@ func (e *SourceError) underHeadings(above wrapperText) *SourceError {
 func ownMessage(err error) string {
 	// The part of the message the children show depends on the end of the
 	// cause chain, so the walk finds that end alone.
-	end := walkChildren(err, func(*SourceError) {}, func(error, childBase, bool) {})
+	end := walkChildren(err, func(*SourceError, childBase) {}, func(error, childBase, bool) {})
 
 	own, _, _, _ := end.cut(err.Error())
 
@@ -959,7 +959,7 @@ func wrapperMessage(err error, bound *SourceError) string {
 
 	// The part of the message the children show depends on the end of the
 	// cause chain, so the walk finds that end alone.
-	end := walkChildren(err, func(*SourceError) {}, func(error, childBase, bool) {})
+	end := walkChildren(err, func(*SourceError, childBase) {}, func(error, childBase, bool) {})
 
 	own, _, _, cut := end.cut(err.Error())
 
@@ -1122,10 +1122,14 @@ func appendTrees(dst []ErrorTree, err error) []ErrorTree {
 		return dst
 	}
 
-	bound := joinBinding(err)
+	// The Errors above a binding of a join add nothing but the fault that
+	// they declare, and that fault reaches each problem below the binding.
+	base, peeled := peel(err)
+
+	bound := joinBinding(peeled)
 	if bound != nil {
 		for _, t := range trees(appendBoundChildren(nil, bound, true)) {
-			dst = appendTree(dst, t)
+			dst = appendTree(dst, base.markTree(t))
 		}
 
 		return dst
@@ -1300,12 +1304,20 @@ func peel(err error) (childBase, error) {
 // children returns the nodes of the children [walkChildren] finds on the
 // cause chain of err, and the [chainEnd] of that chain. The children of a
 // binding that does not have a line of its own name their source, because
-// the rows above them do not name it.
+// the rows above them do not name it. The fault of the Errors above a
+// binding reaches each problem below it, as [childBase.markTree] puts it.
 func children(err error) ([]ErrorTree, chainEnd) {
 	var kids []positioned
 
 	end := walkChildren(err,
-		func(x *SourceError) { kids = appendBoundChildren(kids, x, x.headline() == "") },
+		func(x *SourceError, base childBase) {
+			from := len(kids)
+			kids = appendBoundChildren(kids, x, x.headline() == "")
+
+			for i := from; i < len(kids); i++ {
+				kids[i].tree = base.markTree(kids[i].tree)
+			}
+		},
 		func(n error, base childBase, detail bool) {
 			tree := buildTree(base.rebase(n, detail))
 			if detail {
@@ -1407,7 +1419,7 @@ func (c chainEnd) cut(text string) (string, int, int, bool) {
 // already, so it ends the walk and goes to onBinding in their place.
 func walkChildren(
 	err error,
-	onBinding func(*SourceError),
+	onBinding func(x *SourceError, base childBase),
 	onChild func(n error, base childBase, detail bool),
 ) chainEnd {
 	var (
@@ -1418,7 +1430,7 @@ func walkChildren(
 	for cur := err; !isNothing(cur); {
 		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
 		case *SourceError:
-			onBinding(x)
+			onBinding(x, base)
 
 			return chainEnd{err: x, wrapped: wrapped}
 
@@ -1609,7 +1621,9 @@ func (c childBase) cross(x *Error) childBase {
 // location of the heading above it, as [childBase.inherit] gives it. A
 // problem below an Error that matches [errInvalid] is the document's
 // fault too, unless the fault is one a hook presumes and n holds an Error
-// from [Unchecked].
+// from [Unchecked]. A problem below an Error from Unchecked takes the mark
+// of Unchecked, so a fault presumed later does not reach it apart from
+// that Error either.
 func (c childBase) rebase(n error, detail bool) error {
 	d := c.fault
 	if detail {
@@ -1626,6 +1640,35 @@ func (c childBase) rebase(n error, detail bool) error {
 	m.movesOnly = m.movesOnly || detail
 
 	return rebase(n, m, d)
+}
+
+// markTree returns t with the declaration of the base on the error of each
+// node that is not a detail, as [markFault] puts it on that error. A node
+// whose error declares a fault already keeps its error. A node whose error
+// holds an Error from [Unchecked] stops a presumed fault, so the nodes
+// below it stay as they are, as [declaration.under] stops it on a chain.
+// Below an Unchecked, each node takes its mark, so a fault presumed later
+// does not reach it either.
+func (c childBase) markTree(t ErrorTree) ErrorTree {
+	d := c.fault.on(t.Err)
+	if d == undeclared || t.Detail {
+		return t
+	}
+
+	if !declaresInvalid(t.Err) {
+		t.Err = markFault(t.Err, d)
+	}
+
+	if len(t.Children) > 0 {
+		kids := make([]ErrorTree, len(t.Children))
+		for i, kid := range t.Children {
+			kids[i] = childBase{fault: d}.markTree(kid)
+		}
+
+		t.Children = kids
+	}
+
+	return t
 }
 
 // inherit returns n with the location of the heading above it on each

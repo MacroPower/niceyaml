@@ -359,6 +359,37 @@ func TestRegistry_Lookup(t *testing.T) {
 		assert.False(t, niceyaml.IsInvalid(err))
 		assert.Zero(t, fallbackLoads.Load())
 	})
+
+	t.Run("a load error is no fault wherever it goes", func(t *testing.T) {
+		t.Parallel()
+
+		errGone := errors.New("schema is gone")
+		reg := schema.NewRegistry(schema.WithResolvers(loading("gone.json", nil, errGone)))
+		doc := yamltest.FirstDocument(t, "kind: Service")
+
+		// The error comes inside Unchecked, so a value check that returns
+		// it as it is does not report a fault, and neither does a check of
+		// the document.
+		var data map[string]any
+
+		err := doc.DecodeInto(t.Context(), &data,
+			niceyaml.WithValueCheck(func(ctx context.Context, _ *map[string]any) error {
+				_, err := reg.Lookup(ctx, doc)
+
+				return err //nolint:wrapcheck // The test returns the lookup error as it is.
+			}))
+		require.ErrorIs(t, err, schema.ErrLoad)
+		require.ErrorIs(t, err, errGone)
+		assert.False(t, niceyaml.IsInvalid(err))
+
+		err = doc.Validate(t.Context(), reg)
+		require.ErrorIs(t, err, schema.ErrLoad)
+		assert.False(t, niceyaml.IsInvalid(err))
+
+		err = doc.Validate(t.Context(), niceyaml.MultiValidator(reg, niceyaml.NoValidator))
+		require.ErrorIs(t, err, schema.ErrLoad)
+		assert.False(t, niceyaml.IsInvalid(err))
+	})
 }
 
 func TestRegistry_Resolve(t *testing.T) {
@@ -4392,6 +4423,13 @@ func TestRegistry_Load(t *testing.T) {
 		_, err = reg.Load(t.Context(), schema.Ref{})
 		require.ErrorIs(t, err, schema.ErrLoad)
 	})
+
+	t.Run("an error is no fault of the document", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := schema.NewRegistry().Load(t.Context(), loading("gone.json", nil, errors.New("schema is gone")))
+		requireNoFault(t, err, schema.ErrLoad)
+	})
 }
 
 func TestRegistry_Schema(t *testing.T) {
@@ -4500,6 +4538,21 @@ func TestRegistry_Schema(t *testing.T) {
 		}
 
 		assert.Equal(t, int32(1), loads.Load())
+	})
+
+	t.Run("an error is no fault of the document", func(t *testing.T) {
+		t.Parallel()
+
+		errGone := errors.New("schema is gone")
+		reg := schema.NewRegistry()
+
+		// A check that loads a schema itself returns the error of the
+		// load or the compile as it is.
+		_, err := reg.Schema(t.Context(), loading("gone.json", nil, errGone))
+		requireNoFault(t, err, schema.ErrLoad)
+
+		_, err = reg.Schema(t.Context(), loading("bad.json", []byte(`{"type": 42}`), nil))
+		requireNoFault(t, err, schema.ErrCompile)
 	})
 }
 

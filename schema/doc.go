@@ -235,9 +235,10 @@
 //
 //	compile schema: "file:///etc/app/config.schema.yaml": YAML decode: 3:9: ...
 //
-// The schema is at fault for that error, so it does not wrap an error of
-// the root package. [go.jacobcolvin.com/niceyaml.IsInvalid] does not
-// report it as a fault of the document that the schema validates.
+// The schema is at fault for that error, so it comes inside
+// [go.jacobcolvin.com/niceyaml.Unchecked].
+// [go.jacobcolvin.com/niceyaml.IsInvalid] does not report it as a fault of
+// the document that the schema validates.
 //
 // The go-yaml decoder takes several hundred times the size of the text
 // in memory. A registry therefore refuses a schema file, URL, or YAML

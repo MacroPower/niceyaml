@@ -35,12 +35,10 @@ var (
 	// [*niceyaml.Error] with path information. Such an error matches
 	// [ErrViolation] and does not wrap this sentinel. [niceyaml.IsInvalid]
 	// reports a violation. An error that wraps ErrValidate means that the
-	// validation could not run. IsInvalid does not report such an error,
-	// even when a scoped [niceyaml.Node.Bind] places it at the value it
-	// checked. When a Validate method or a [niceyaml.WithValueCheck]
-	// function returns an error that does not declare anything, a decode
-	// presumes the document at fault. Either one thus returns an error that
-	// wraps ErrValidate inside [niceyaml.Unchecked].
+	// validation could not run, so it comes inside [niceyaml.Unchecked].
+	// IsInvalid does not report such an error wherever it goes, even when
+	// a check returns it as it is or a scoped [niceyaml.Node.Bind] places
+	// it at the value it checked.
 	ErrValidate = errors.New("validate schema")
 
 	// ErrViolation indicates a value that breaks a constraint of a schema.
@@ -227,10 +225,12 @@ func WithRequireRefs(require bool) CompileOption {
 //
 //	compile schema: YAML decode: 3:9: ...
 //
-// The data is at fault for that error, so it does not wrap an error of
-// the root package, and [niceyaml.IsInvalid] does not report it. A YAML
-// schema holds the values a decode into any yields. The package
-// documentation says how that decode reads numbers such as 1e3 and 010.
+// The data is at fault for that error, and a document that the schema
+// validates is not. So every error of Compile comes inside
+// [niceyaml.Unchecked], and [niceyaml.IsInvalid] does not report it, even
+// from a check that returns it as it is. A YAML schema holds the values
+// a decode into any yields. The package documentation says how that
+// decode reads numbers such as 1e3 and 010.
 //
 // The go-yaml decoder takes several hundred times the size of the text
 // in memory, so Compile refuses YAML of more than [DefaultLoadLimit]
@@ -266,7 +266,7 @@ func WithRequireRefs(require bool) CompileOption {
 func Compile(ctx context.Context, data []byte, opts ...CompileOption) (*Schema, error) {
 	compiled, err := compileDocument(ctx, data, DefaultLoadLimit, opts)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrCompile, err)
+		return nil, niceyaml.Unchecked(fmt.Errorf("%w: %w", ErrCompile, err))
 	}
 
 	return compiled, nil
@@ -737,11 +737,10 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 // document. The text of that error names the path of each violation, as
 // in "$.port: 0 is less than 1". When the check cannot run, such as for a
 // $ref the validator cannot resolve, ValidateValue returns an error
-// wrapping [ErrValidate]. When a Validate method or a
-// [niceyaml.WithValueCheck] function returns an error that does not
-// declare anything, a decode presumes the document at fault. Either one
-// that calls ValidateValue thus returns an error that wraps ErrValidate
-// inside [niceyaml.Unchecked].
+// wrapping [ErrValidate] inside [niceyaml.Unchecked]. A Validate method or
+// a [niceyaml.WithValueCheck] function that calls ValidateValue thus
+// returns the result as it is, and a decode does not presume the document
+// at fault for that error.
 //
 // # Conversions
 //
@@ -957,14 +956,14 @@ func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) ([]er
 	// failure.
 	ve, ok := errors.AsType[*jsonschema.ValidationError](err)
 	if !ok {
-		return nil, fmt.Errorf("%w: %w", ErrValidate, err)
+		return nil, niceyaml.Unchecked(fmt.Errorf("%w: %w", ErrValidate, err))
 	}
 
 	// A $ref the validator cannot resolve arrives as a validation failure
 	// at the referencing location, but the data there broke no constraint,
 	// so report the schema problem rather than point at the document.
 	if refErrs := unresolvedRefs(ve); len(refErrs) > 0 {
-		return nil, fmt.Errorf("%w: %w", ErrValidate, errors.Join(refErrs...))
+		return nil, niceyaml.Unchecked(fmt.Errorf("%w: %w", ErrValidate, errors.Join(refErrs...)))
 	}
 
 	return c.deprecations(records, instance), c.validationError(ve)
@@ -1290,17 +1289,18 @@ func stringText(node ast.Node) (string, bool) {
 	return "", false
 }
 
-// checkExpansion returns an error wrapping [ErrValidate] when a map or
-// slice in data contains itself. It returns one matching
-// [ErrExcessiveAliasing] when aliases make up too much of the data the
-// validator reads. The data is at fault for that error, so it comes from
-// [niceyaml.Invalid] and does not wrap ErrValidate.
+// checkExpansion returns an error wrapping [ErrValidate] inside
+// [niceyaml.Unchecked] when a map or slice in data contains itself. It
+// returns one matching [ErrExcessiveAliasing] when aliases make up too
+// much of the data the validator reads. The data is at fault for that
+// error, so it comes from [niceyaml.Invalid] and does not wrap
+// ErrValidate.
 func checkExpansion(data any) error {
 	w := expansionWalker{sizes: map[sharedKey]int{}, onPath: map[sharedKey]bool{}}
 
 	_, err := w.walk(data)
 	if err != nil {
-		return err
+		return niceyaml.Unchecked(err)
 	}
 
 	if aliaslimit.Excessive(w.distinct, w.aliased) {

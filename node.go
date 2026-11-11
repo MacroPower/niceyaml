@@ -440,8 +440,10 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 // source. An alias that does not resolve gives one wrapping
 // [paths.ErrAlias]. Aliases or merge keys that lead a selector to far
 // more nodes than the document holds give [ErrExcessiveAliasing] or
-// [paths.ErrExcessiveMerging]. A document that did not parse returns the
-// error that [Node.Err] returns.
+// [paths.ErrExcessiveMerging]. The document is not at fault for either,
+// so each comes inside [Unchecked], and a validator that returns it does
+// not report a fault. A document that did not parse returns the error
+// that [Node.Err] returns.
 func (n *Node) Nodes(path paths.Path) ([]*Node, error) {
 	if n.doc.err != nil {
 		return nil, n.doc.err
@@ -453,7 +455,7 @@ func (n *Node) Nodes(path paths.Path) ([]*Node, error) {
 			return nil, bound
 		}
 
-		return nil, n.bindOwn(err)
+		return nil, n.bindLookup(err)
 	}
 
 	nodes := make([]*Node, 0, len(found))
@@ -1063,14 +1065,15 @@ func (n *Node) aliasLocation(path paths.Path, reason error) (location, bool) {
 // bare [paths.ErrNotFound] text, because the binding writes the path in
 // front of it. An alias that the path cannot follow, such as one without
 // an anchor or one inside the value of its own anchor, binds at the alias,
-// as [Node.bindAlias] binds it.
+// as [Node.bindAlias] binds it. Any other reason binds as
+// [Node.bindLookup] binds it.
 func (n *Node) bindUnresolved(path paths.Path, reason error) error {
 	if bound, ok := n.bindAlias(path, reason); ok {
 		return bound
 	}
 
 	if !errors.Is(reason, paths.ErrNotFound) {
-		return n.bindOwn(reason)
+		return n.bindLookup(reason)
 	}
 
 	if _, ok := n.nearestLocation(path, reason); !ok {
@@ -1080,12 +1083,26 @@ func (n *Node) bindUnresolved(path paths.Path, reason error) error {
 	return n.bindOwn(Invalid(&markedError{err: reason, msg: paths.ErrNotFound.Error()}, AtPath(path)))
 }
 
+// bindLookup binds reason, the error of a lookup that neither misses a
+// value nor stops at an alias that [Node.bindAlias] binds. An alias of the
+// document that does not resolve binds as it is. Any other reason, such as
+// a path past a limit or a wildcard path that [Node.At] rejects, binds
+// inside [Unchecked], because the document is not at fault for it. A
+// validator that returns such an error thus does not report a fault.
+func (n *Node) bindLookup(reason error) error {
+	if errors.Is(reason, paths.ErrAlias) && !errors.Is(reason, paths.ErrReferenceAlias) {
+		return n.bindOwn(reason)
+	}
+
+	return n.bindOwn(Unchecked(reason))
+}
+
 // bindAlias binds reason, the error that path failed to resolve with, as
 // [Invalid] at the alias that reason names, under the path that reads that
 // alias, as [Node.aliasLocation] finds it, when the alias lies in the
 // document and does not resolve. An alias that reads a reference document
-// binds there too, but the document is not at fault for it, so
-// [IsInvalid] reports false. The message names path when the alias lies
+// binds there too, as [Unchecked] binds an error, because the document is
+// not at fault for it. The message names path when the alias lies
 // elsewhere. It reports false for any other reason.
 func (n *Node) bindAlias(path paths.Path, reason error) (error, bool) {
 	loc, ok := n.aliasLocation(path, reason)
@@ -1107,10 +1124,11 @@ func (n *Node) bindAlias(path paths.Path, reason error) (error, bool) {
 	}
 
 	// An alias of a reference document is no fault of the document, so its
-	// error binds there without a fault.
+	// error binds there as one whose check could not run. A validator that
+	// returns it thus does not report a fault either.
 	locate := Invalid
 	if errors.Is(reason, paths.ErrReferenceAlias) {
-		locate = Locate
+		locate = Unchecked
 	}
 
 	err := locate(&markedError{err: reason, msg: msg}, AtPath(*loc.near), AtPosition(loc.pos))
