@@ -10109,9 +10109,12 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 		))
 		outer := requireBound(t, src, errors.Join(fmt.Errorf("spec: %w", joined), errors.New("lint")))
 
+		// The node of the wrapper is a heading whose whole text is the
+		// context of the problems below it.
 		child := yamltest.ProblemsOf(outer)[0]
 		assert.Equal(t, "spec:", child.Bound.Message())
-		assert.Equal(t, "spec:", child.Message())
+		assert.Empty(t, child.Message())
+		assert.Equal(t, "spec", child.Context())
 	})
 
 	t.Run("an Error with details around a binding keeps the inner message", func(t *testing.T) {
@@ -12218,7 +12221,7 @@ func TestLocate(t *testing.T) {
 					niceyaml.AtPath(licensePath),
 				)),
 				want:    "cfg.yaml:4:10: warning: $.license: lint: inc.yaml:1:6: $.key: old key",
-				message: "lint: inc.yaml:1:6: $.key: old key",
+				message: "inc.yaml:1:6: $.key: old key",
 			},
 			"of another source takes the location": {
 				// The location of the options names a place in cfg.yaml that

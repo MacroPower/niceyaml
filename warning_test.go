@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"iter"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -84,6 +86,37 @@ func (mixedSpec) Validate() error {
 	)
 }
 
+// wrappedSpec is a type whose Validate method returns its problems below
+// one wrapper. Seats that are not set give an error, and so do tables
+// that are not set. A patio that is not set gives a warning.
+type wrappedSpec struct {
+	Seats  int `yaml:"seats"`
+	Tables int `yaml:"tables"`
+	Patio  int `yaml:"patio"`
+}
+
+func (s wrappedSpec) Validate() error {
+	var errs []error
+
+	if s.Seats == 0 {
+		errs = append(errs, yamltest.ErrorAt("seats not set", "seats"))
+	}
+
+	if s.Tables == 0 {
+		errs = append(errs, yamltest.ErrorAt("tables not set", "tables"))
+	}
+
+	if s.Patio == 0 {
+		errs = append(errs, niceyaml.NewWarning("patio not set", niceyaml.AtPath(paths.Current().Child("patio"))))
+	}
+
+	if len(errs) == 0 {
+		return nil
+	}
+
+	return fmt.Errorf("spec: %w", errors.Join(errs...))
+}
+
 // mixedCafeDoc is the parent of a [mixedSpec].
 type mixedCafeDoc struct {
 	Spec  mixedSpec `yaml:"spec"`
@@ -159,6 +192,30 @@ func warningRows(w *niceyaml.Warnings) []string {
 	return rows
 }
 
+// contextRows returns a row for each problem of err, with the context and
+// the message that a report carries for it.
+func contextRows(err error) []string {
+	var rows []string
+
+	for problem := range niceyaml.Problems(err) {
+		rows = append(rows, fmt.Sprintf("[%s] %s", problem.Context(), problem.Message()))
+	}
+
+	return rows
+}
+
+// heldContextRows returns a row for each warning that w holds, with the
+// context and the message that a report carries for it.
+func heldContextRows(w *niceyaml.Warnings) []string {
+	var rows []string
+
+	for warning := range w.All() {
+		rows = append(rows, fmt.Sprintf("[%s] %s", warning.Context(), warning.Message()))
+	}
+
+	return rows
+}
+
 func TestNewWarning(t *testing.T) {
 	t.Parallel()
 
@@ -196,11 +253,12 @@ func TestNewWarning(t *testing.T) {
 			message: "old layout",
 		},
 		"wrapped in a binding with context": {
-			// The text of the wrapper joins the message, and the row that
-			// the tree draws puts the place and the label in front of it.
+			// The row that the tree draws puts the place and the label in
+			// front of the text of the wrapper. The message of the problem
+			// leaves that text out.
 			err:       fmt.Errorf("load: %w", doc.Bind(niceyaml.NewWarning("old layout"))),
 			want:      "load: cafe.yaml: warning: old layout",
-			message:   "load: old layout",
+			message:   "old layout",
 			formatted: "cafe.yaml: warning: load: old layout",
 		},
 		"unbound at an @ path": {
@@ -978,6 +1036,391 @@ func TestWarnings(t *testing.T) {
 		assert.Equal(t, "cafe.yaml:1:1: warning: $.spec~: old spec", warnings.Err().Error())
 	})
 
+	t.Run("each problem of a hook keeps the context of the wrapper above it", func(t *testing.T) {
+		t.Parallel()
+
+		badExtra := func() error { return yamltest.ErrorAt("bad extra", "extra") }
+		badSeats := func() error { return yamltest.ErrorAt("bad seats", "spec", "seats") }
+		badSpec := func() error { return yamltest.ErrorAt("bad spec", "spec") }
+		oldSpec := func() error {
+			return niceyaml.NewWarning("old spec", niceyaml.AtPath(paths.Current().Child("spec").Key()))
+		}
+		oldLayout := func() error { return niceyaml.NewWarning("old layout") }
+
+		// A call takes the warnings of a hook out of the result of the
+		// hook. A problem below a wrapper must keep the text of that
+		// wrapper, whether the wrapper holds that problem alone, several
+		// problems of one severity, or errors beside warnings.
+		tcs := map[string]struct {
+			run func(ctx context.Context) error
+			// The context and the message of each problem of the error that
+			// the call returns, and of each warning that the collector holds.
+			err      []string
+			warnings []string
+		}{
+			"validator wrapper around one warning": {
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, returns(fmt.Errorf("check: %w", oldSpec())))
+				},
+				warnings: []string{"[check] old spec"},
+			},
+			"validator wrapper around several warnings": {
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, returns(fmt.Errorf("check: %w", errors.Join(oldSpec(), oldLayout()))))
+				},
+				warnings: []string{"[check] old spec", "[check] old layout"},
+			},
+			"validator wrapper around an error and a warning": {
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, returns(fmt.Errorf("check: %w", errors.Join(badExtra(), oldSpec()))))
+				},
+				err:      []string{"[check] bad extra"},
+				warnings: []string{"[check] old spec"},
+			},
+			"validator wrapper around several errors and several warnings": {
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, returns(fmt.Errorf("check: %w",
+						errors.Join(badSeats(), oldSpec(), badExtra(), oldLayout()))))
+				},
+				err:      []string{"[check] bad seats", "[check] bad extra"},
+				warnings: []string{"[check] old spec", "[check] old layout"},
+			},
+			"validator wrapper that adds text after an error and a warning": {
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, returns(fmt.Errorf("%w (see docs)", errors.Join(badExtra(), oldSpec()))))
+				},
+				err:      []string{"[(see docs)] bad extra"},
+				warnings: []string{"[(see docs)] old spec"},
+			},
+			"validator wrappers around an error and around a wrapped warning": {
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, returns(fmt.Errorf("check: %w",
+						errors.Join(badExtra(), fmt.Errorf("lint: %w", oldSpec())))))
+				},
+				err:      []string{"[check] bad extra"},
+				warnings: []string{"[check: lint] old spec"},
+			},
+			"validator wrapper with a sentinel around an error and a warning": {
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, returns(fmt.Errorf("%w: %w",
+						errors.New("bad cafe"), errors.Join(badExtra(), oldSpec()))))
+				},
+				err:      []string{"[bad cafe] bad extra"},
+				warnings: []string{"[bad cafe] old spec"},
+			},
+			"validator wrapper of its own type around an error and a warning": {
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, returns(&yamltest.CheckError{Err: errors.Join(badExtra(), oldSpec())}))
+				},
+				err:      []string{"[check] bad extra"},
+				warnings: []string{"[check] old spec"},
+			},
+			"validator wrapper that rewrites the text of an error and a warning": {
+				// The text of the wrapper does not hold the text of the
+				// problems, so its whole text is their context.
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, returns(yamltest.RewriteError{Err: errors.Join(badExtra(), oldSpec())}))
+				},
+				err:      []string{"[rewritten] bad extra"},
+				warnings: []string{"[rewritten] old spec"},
+			},
+			"validator summary over a wrapper around several errors": {
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, returns(niceyaml.NewSummary("load failed",
+						fmt.Errorf("check: %w", errors.Join(badSeats(), badExtra())), badSpec())))
+				},
+				err: []string{"[] bad spec", "[check] bad seats", "[check] bad extra"},
+			},
+			"validator summary over a wrapper around an error and a warning": {
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, returns(niceyaml.NewSummary("load failed",
+						fmt.Errorf("check: %w", errors.Join(badSeats(), oldSpec())), badSpec())))
+				},
+				err:      []string{"[] bad spec", "[check] bad seats"},
+				warnings: []string{"[check] old spec"},
+			},
+			"validator wrapper around a summary over a wrapped error and a warning": {
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, returns(fmt.Errorf("load: %w", niceyaml.NewSummary("some problems",
+						fmt.Errorf("check: %w", errors.Join(badSeats(), oldSpec())), badSpec()))))
+				},
+				err:      []string{"[load] bad spec", "[load: check] bad seats"},
+				warnings: []string{"[load: check] old spec"},
+			},
+			"validator wrappers around an error and around a wrapped error and warning": {
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, returns(fmt.Errorf("check: %w",
+						errors.Join(badExtra(), fmt.Errorf("lint: %w", errors.Join(badSeats(), oldSpec()))))))
+				},
+				err:      []string{"[check] bad extra", "[check: lint] bad seats"},
+				warnings: []string{"[check: lint] old spec"},
+			},
+			"validator wrappers around errors and around a wrapper of several warnings": {
+				// The call takes two wrappers away from the wrapper around
+				// the warnings, and the text of the outer one stays in front.
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, returns(fmt.Errorf("check: %w", errors.Join(badExtra(),
+						fmt.Errorf("lint: %w", errors.Join(badSeats(),
+							fmt.Errorf("rule: %w", errors.Join(oldSpec(), oldLayout()))))))))
+				},
+				err:      []string{"[check] bad extra", "[check: lint] bad seats"},
+				warnings: []string{"[check: lint: rule] old spec", "[check: lint: rule] old layout"},
+			},
+			"validator wrapper around an error and a join of warnings": {
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, returns(fmt.Errorf("check: %w",
+						errors.Join(badExtra(), errors.Join(oldSpec(), oldLayout())))))
+				},
+				err:      []string{"[check] bad extra"},
+				warnings: []string{"[check] old spec", "[check] old layout"},
+			},
+			"validator wrapper around an error and located warnings": {
+				// The located Error does not have a row, so each warning
+				// below it takes the text of the wrapper.
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, returns(fmt.Errorf("check: %w", errors.Join(badExtra(),
+						niceyaml.Locate(errors.Join(oldLayout(), niceyaml.NewWarning("old plan")),
+							niceyaml.AtPath(paths.Current().Child("spec")))))))
+				},
+				err:      []string{"[check] bad extra"},
+				warnings: []string{"[check] old layout", "[check] old plan"},
+			},
+			"validator wrapper around an error and a wrapper without text around warnings": {
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, returns(fmt.Errorf("check: %w",
+						errors.Join(badExtra(), fmt.Errorf("%w", errors.Join(oldSpec(), oldLayout()))))))
+				},
+				err:      []string{"[check] bad extra"},
+				warnings: []string{"[check] old spec", "[check] old layout"},
+			},
+			"validator wrapper around an error and a binding of several warnings": {
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, returns(fmt.Errorf("check: %w",
+						errors.Join(badExtra(), doc.Bind(errors.Join(oldSpec(), oldLayout()))))))
+				},
+				err:      []string{"[check] bad extra"},
+				warnings: []string{"[check] old spec", "[check] old layout"},
+			},
+			"validator wrapper around an error and a binding of a summary of warnings": {
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, returns(fmt.Errorf("check: %w", errors.Join(badExtra(),
+						doc.Bind(niceyaml.NewSummary("old cafe", oldSpec(), oldLayout()))))))
+				},
+				err:      []string{"[check] bad extra"},
+				warnings: []string{"[check] old spec", "[check] old layout"},
+			},
+			"validator wrapper around an error and warnings that BindValue bound": {
+				// The document places the warnings again, and they keep the
+				// text of the wrapper.
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, returns(fmt.Errorf("check: %w",
+						errors.Join(badExtra(), niceyaml.BindValue(errors.Join(oldSpec(), oldLayout()))))))
+				},
+				err:      []string{"[check] bad extra"},
+				warnings: []string{"[check] old spec", "[check] old layout"},
+			},
+			"Validate wrapper around one warning": {
+				run: func(ctx context.Context) error {
+					return niceyaml.SelfValidateValue(ctx, wrappedSpec{Seats: 4, Tables: 2})
+				},
+				warnings: []string{"[spec] patio not set"},
+			},
+			"Validate wrapper around an error and a warning": {
+				run: func(ctx context.Context) error {
+					return niceyaml.SelfValidateValue(ctx, wrappedSpec{Seats: 4})
+				},
+				err:      []string{"[spec] tables not set"},
+				warnings: []string{"[spec] patio not set"},
+			},
+			"Validate wrapper around several errors and a warning": {
+				run: func(ctx context.Context) error {
+					return niceyaml.SelfValidateValue(ctx, wrappedSpec{})
+				},
+				err:      []string{"[spec] seats not set", "[spec] tables not set"},
+				warnings: []string{"[spec] patio not set"},
+			},
+			"value check wrapper around an error and a warning": {
+				run: func(ctx context.Context) error {
+					var got checkedCafeDoc
+
+					return doc.DecodeInto(ctx, &got, niceyaml.WithValueCheck(func(context.Context, *seatsOnly) error {
+						return fmt.Errorf("check: %w", errors.Join(
+							yamltest.ErrorAt("bad seats", "seats"),
+							niceyaml.NewWarning("few seats", niceyaml.AtPath(paths.Current().Child("seats"))),
+						))
+					}))
+				},
+				err:      []string{"[check] bad seats"},
+				warnings: []string{"[check] few seats"},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				warnings := niceyaml.NewWarnings()
+
+				err := tc.run(warnings.Context(t.Context()))
+
+				assert.ElementsMatch(t, tc.err, contextRows(err))
+				assert.ElementsMatch(t, tc.warnings, heldContextRows(warnings))
+				assert.ElementsMatch(t, tc.warnings, contextRows(warnings.Err()))
+
+				// The report of the call lists each problem with the same
+				// context.
+				assert.ElementsMatch(t, slices.Concat(tc.err, tc.warnings), contextRows(warnings.Report(err)))
+			})
+		}
+	})
+
+	t.Run("the warnings of a hook keep one order beside an error", func(t *testing.T) {
+		t.Parallel()
+
+		menu := yamltest.FirstDocument(t, "seats: 2\nname: menu\n", niceyaml.WithName("menu.yaml"))
+
+		fewSeats := func() error {
+			return niceyaml.NewWarning("few seats", niceyaml.AtPath(paths.Current().Child("spec", "seats")))
+		}
+		oldSeats := func() error {
+			return niceyaml.NewWarning("old seats", niceyaml.AtPath(paths.Current().Child("spec", "seats")))
+		}
+		oldSpec := func() error {
+			return niceyaml.NewWarning("old spec", niceyaml.AtPath(paths.Current().Child("spec").Key()))
+		}
+		menuSeats := func() error {
+			return menu.Bind(niceyaml.NewWarning("menu seats", niceyaml.AtPath(paths.Current().Child("seats"))))
+		}
+		menuName := func() error {
+			return menu.Bind(niceyaml.NewWarning("menu name", niceyaml.AtPath(paths.Current().Child("name"))))
+		}
+		joined := func(beside []error, errs ...error) error {
+			return errors.Join(slices.Concat(errs, beside)...)
+		}
+		rows := func(problems iter.Seq[niceyaml.ErrorTree]) []string {
+			var out []string
+
+			for problem := range problems {
+				if problem.Warning {
+					out = append(out, fmt.Sprintf("%s [%s] %s", problem.Name(), problem.Context(), problem.Message()))
+				}
+			}
+
+			return out
+		}
+
+		// A call takes the warnings of a hook out of the result of the
+		// hook, then binds and sorts them. The warnings below a heading
+		// must stay below it, as they do in a result without an error.
+		// Otherwise two warnings at one position swap rows, and two
+		// sources swap places, when an error appears beside them.
+		tcs := map[string]struct {
+			// The result of the hook, with the errors beside its warnings.
+			result func(beside ...error) error
+			// The source, the context, and the message of each warning, in
+			// the order that the collector lists them.
+			want []string
+		}{
+			"wrapper around two warnings beside a warning at the position of one": {
+				result: func(beside ...error) error {
+					return joined(beside, fmt.Errorf("rule one: %w", errors.Join(fewSeats(), oldSpec())), oldSeats())
+				},
+				want: []string{
+					"cafe.yaml [rule one] old spec",
+					"cafe.yaml [] old seats",
+					"cafe.yaml [rule one] few seats",
+				},
+			},
+			"summary over two warnings beside a warning at the position of one": {
+				result: func(beside ...error) error {
+					return joined(beside, niceyaml.NewSummary("deprecations", fewSeats(), oldSpec()), oldSeats())
+				},
+				want: []string{
+					"cafe.yaml [] old spec",
+					"cafe.yaml [] old seats",
+					"cafe.yaml [] few seats",
+				},
+			},
+			"wrapper around the errors and a wrapper around two warnings": {
+				result: func(beside ...error) error {
+					return fmt.Errorf("check: %w", joined(beside,
+						fmt.Errorf("rule one: %w", errors.Join(fewSeats(), oldSpec())), oldSeats()))
+				},
+				want: []string{
+					"cafe.yaml [check: rule one] old spec",
+					"cafe.yaml [check] old seats",
+					"cafe.yaml [check: rule one] few seats",
+				},
+			},
+			"wrapper around the errors and a summary over two warnings": {
+				result: func(beside ...error) error {
+					return fmt.Errorf("check: %w", joined(beside,
+						niceyaml.NewSummary("deprecations", fewSeats(), oldSpec()), oldSeats()))
+				},
+				want: []string{
+					"cafe.yaml [check] old spec",
+					"cafe.yaml [check] old seats",
+					"cafe.yaml [check] few seats",
+				},
+			},
+			"summary over the warnings of two sources beside a warning of each": {
+				result: func(beside ...error) error {
+					return joined(
+						beside,
+						niceyaml.NewSummary("old seats", menuSeats(), oldSeats()),
+						oldSpec(),
+						menuName(),
+					)
+				},
+				want: []string{
+					"cafe.yaml [] old spec",
+					"cafe.yaml [] old seats",
+					"menu.yaml [] menu seats",
+					"menu.yaml [] menu name",
+				},
+			},
+			"summary bound in another source beside a warning of the document": {
+				result: func(beside ...error) error {
+					return joined(beside, menu.Bind(niceyaml.NewSummary(
+						"old menu",
+						niceyaml.NewWarning("menu layout"),
+						niceyaml.NewWarning(
+							"menu seats",
+							niceyaml.AtPath(paths.Current().Child("seats")),
+						),
+					)), oldSeats())
+				},
+				want: []string{
+					"cafe.yaml [] old seats",
+					"menu.yaml [] menu seats",
+					"menu.yaml [] menu layout",
+				},
+			},
+		}
+
+		besides := map[string][]error{
+			"warnings alone":  nil,
+			"beside an error": {yamltest.ErrorAt("bad extra", "extra")},
+		}
+
+		for name, tc := range tcs {
+			for beside, errs := range besides {
+				t.Run(name+" "+beside, func(t *testing.T) {
+					t.Parallel()
+
+					warnings := niceyaml.NewWarnings()
+
+					err := doc.Validate(warnings.Context(t.Context()), returns(tc.result(errs...)))
+					assert.Len(t, contextRows(err), len(errs))
+
+					assert.Equal(t, tc.want, rows(warnings.All()))
+					assert.Equal(t, tc.want, rows(niceyaml.Problems(warnings.Err())))
+					assert.Equal(t, tc.want, rows(niceyaml.Problems(warnings.Report(err))))
+				})
+			}
+		}
+	})
+
 	t.Run("calls in several goroutines share one collector", func(t *testing.T) {
 		t.Parallel()
 
@@ -1284,6 +1727,186 @@ func TestWarnings(t *testing.T) {
 				assert.Equal(t, tc.doc, index)
 				assert.Equal(t, tc.inDoc, ok)
 				assert.NotNil(t, rows[0].Source(), "the row of a live source")
+			})
+		}
+	})
+
+	t.Run("a warning keeps one row for each line that it prints", func(t *testing.T) {
+		t.Parallel()
+
+		oldSpec := func() error {
+			return niceyaml.NewWarning("old spec", niceyaml.AtPath(paths.Current().Child("spec").Key()))
+		}
+		oldExtra := func() error {
+			return niceyaml.NewWarning("old extra", niceyaml.AtPath(paths.Current().Child("extra").Key()))
+		}
+		fewSeats := func() error {
+			return niceyaml.NewWarning("few seats", niceyaml.AtPath(paths.Current().Child("spec").Child("seats")))
+		}
+
+		const (
+			specRow      = "cafe.yaml:1:1: warning: $.spec~: old spec"
+			lintSpecRow  = "cafe.yaml:1:1: warning: $.spec~: lint: old spec"
+			styleSpecRow = "cafe.yaml:1:1: warning: $.spec~: style: old spec"
+			seatsRow     = "cafe.yaml:2:10: warning: $.spec.seats: few seats"
+			extraRow     = "cafe.yaml:3:1: warning: $.extra~: old extra"
+			badExtraRow  = "cafe.yaml:3:8: $.extra: bad extra"
+		)
+
+		// A call that fails with the warning below a heading, beside an
+		// error.
+		failure := func() error {
+			return doc.Bind(fmt.Errorf("lint: %w", errors.Join(oldSpec(), yamltest.ErrorAt("bad extra", "extra"))))
+		}
+
+		// The collector compares the line that each row prints. A wrapper
+		// that holds a warning alone writes its text in that line, and a
+		// wrapper that heads several warnings does not. The lines that the
+		// collector prints thus must not repeat, and must not change with
+		// the order in which the warnings reach it. A row that two headings
+		// share keeps the context of the warning that came first.
+		tcs := map[string]struct {
+			first  error
+			second error
+			// The lines of the error of the collector, in either order.
+			want []string
+			// The lines of the report of the collector for failure, in
+			// either order.
+			report []string
+			// The context and the message of each warning that the collector
+			// holds after first and then second, and after second and then
+			// first.
+			held     []string
+			reversed []string
+		}{
+			"two wrappers that each hold the warning alone": {
+				first:  fmt.Errorf("lint: %w", oldSpec()),
+				second: fmt.Errorf("style: %w", oldSpec()),
+				want: []string{
+					"cafe.yaml: 2 warnings",
+					lintSpecRow,
+					styleSpecRow,
+				},
+				report: []string{
+					"cafe.yaml: 1 error, 3 warnings",
+					specRow,
+					lintSpecRow,
+					styleSpecRow,
+					badExtraRow,
+				},
+				held:     []string{"[lint] old spec", "[style] old spec"},
+				reversed: []string{"[lint] old spec", "[style] old spec"},
+			},
+			"two wrappers that each head several warnings": {
+				first:  fmt.Errorf("lint: %w", errors.Join(oldSpec(), oldExtra())),
+				second: fmt.Errorf("style: %w", errors.Join(oldSpec(), fewSeats())),
+				want: []string{
+					"cafe.yaml: 3 warnings",
+					specRow,
+					seatsRow,
+					extraRow,
+				},
+				report: []string{
+					"cafe.yaml: 1 error, 3 warnings",
+					specRow,
+					seatsRow,
+					extraRow,
+					badExtraRow,
+				},
+				held:     []string{"[lint] old spec", "[style] few seats", "[lint] old extra"},
+				reversed: []string{"[style] old spec", "[style] few seats", "[lint] old extra"},
+			},
+			"one wrapper alone and another that heads several warnings": {
+				first:  fmt.Errorf("lint: %w", oldSpec()),
+				second: fmt.Errorf("style: %w", errors.Join(oldSpec(), fewSeats())),
+				want: []string{
+					"cafe.yaml: 3 warnings",
+					lintSpecRow,
+					specRow,
+					seatsRow,
+				},
+				report: []string{
+					"cafe.yaml: 1 error, 3 warnings",
+					specRow,
+					lintSpecRow,
+					seatsRow,
+					badExtraRow,
+				},
+				held:     []string{"[lint] old spec", "[style] old spec", "[style] few seats"},
+				reversed: []string{"[lint] old spec", "[style] old spec", "[style] few seats"},
+			},
+			"one text around the warning alone and over several": {
+				first:  fmt.Errorf("lint: %w", oldSpec()),
+				second: fmt.Errorf("lint: %w", errors.Join(oldSpec(), oldExtra())),
+				want: []string{
+					"cafe.yaml: 3 warnings",
+					lintSpecRow,
+					specRow,
+					extraRow,
+				},
+				report: []string{
+					"cafe.yaml: 1 error, 3 warnings",
+					specRow,
+					lintSpecRow,
+					extraRow,
+					badExtraRow,
+				},
+				held:     []string{"[lint] old spec", "[lint] old spec", "[lint] old extra"},
+				reversed: []string{"[lint] old spec", "[lint] old spec", "[lint] old extra"},
+			},
+			"a warning below a heading and the same warning without a wrapper": {
+				first:  fmt.Errorf("lint: %w", errors.Join(oldSpec(), oldExtra())),
+				second: oldSpec(),
+				want: []string{
+					"cafe.yaml: 2 warnings",
+					specRow,
+					extraRow,
+				},
+				report: []string{
+					"cafe.yaml: 1 error, 2 warnings",
+					specRow,
+					extraRow,
+					badExtraRow,
+				},
+				held:     []string{"[lint] old spec", "[lint] old extra"},
+				reversed: []string{"[] old spec", "[lint] old extra"},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				orders := map[string]struct {
+					warn []error
+					held []string
+				}{
+					"first then second": {warn: []error{tc.first, tc.second}, held: tc.held},
+					"second then first": {warn: []error{tc.second, tc.first}, held: tc.reversed},
+				}
+
+				for order, o := range orders {
+					warnings := niceyaml.NewWarnings()
+					ctx := warnings.Context(t.Context())
+
+					for _, err := range o.warn {
+						doc.Warn(ctx, err)
+					}
+
+					got := warnings.Err()
+					require.Error(t, got, order)
+
+					// Two rows at one position keep the order in which they
+					// reached the collector, so the test compares the lines
+					// without that order.
+					assert.ElementsMatch(t, tc.want, strings.Split(got.Error(), "\n"), order)
+					assert.ElementsMatch(t, o.held, heldContextRows(warnings), order)
+					assert.ElementsMatch(t, o.held, contextRows(got), order)
+
+					report := warnings.Report(failure())
+					require.Error(t, report, order)
+					assert.ElementsMatch(t, tc.report, strings.Split(report.Error(), "\n"), order)
+				}
 			})
 		}
 	})
@@ -1639,6 +2262,18 @@ func TestWarnings_Report(t *testing.T) {
 				"cafe.yaml:3:8: $.extra: permission denied",
 			),
 		},
+		"a copy of a held warning below a wrapper of several problems shows once": {
+			// The wrapper heads the problems, so the report leaves it out,
+			// and the held warning still counts as the copy below it.
+			err:  doc.Bind(fmt.Errorf("lint: %w", errors.Join(oldSpec, badExtra))),
+			warn: []error{oldSpec},
+			is:   fs.ErrPermission,
+			want: stringtest.JoinLF(
+				"cafe.yaml: 1 error, 1 warning",
+				"cafe.yaml:1:1: warning: $.spec~: old spec",
+				"cafe.yaml:3:8: $.extra: permission denied",
+			),
+		},
 		"a located copy of a held warning shows once": {
 			// The location of the held warning did not resolve, so the
 			// result of Locate gives it the location of the options. The
@@ -1733,6 +2368,18 @@ func TestWarnings_Report(t *testing.T) {
 				"read other.yaml: file does not exist",
 			),
 		},
+		"a wrapped error that no source bound keeps the text of its wrapper": {
+			// The heading binds the error outside any document, so its row
+			// names the path and does not have a position.
+			err:  fmt.Errorf("load: %w", badExtra),
+			warn: []error{oldSpec},
+			is:   fs.ErrPermission,
+			want: stringtest.JoinLF(
+				"1 error, 1 warning",
+				"cafe.yaml:1:1: warning: $.spec~: old spec",
+				"$.extra: load: permission denied",
+			),
+		},
 	}
 
 	for name, tc := range tcs {
@@ -1774,6 +2421,132 @@ func TestWarnings_Report(t *testing.T) {
 
 		assert.Same(t, err, none.Report(err))
 		require.NoError(t, none.Report(nil))
+	})
+
+	t.Run("each problem keeps the context of the wrapper above it", func(t *testing.T) {
+		t.Parallel()
+
+		// The report leaves out the heading that a wrapper makes over
+		// several problems. Each problem must still report the text of
+		// that wrapper, as it does in the error and for one problem alone.
+		tcs := map[string]struct {
+			err error
+			// The context and the message of each problem of the report.
+			want []string
+			// The text of the report, which holds the text of a wrapper
+			// only in the row that the wrapper shares with one problem.
+			text string
+			// A problem of err that the report matches as err does.
+			is error
+		}{
+			"wrapper around one bound problem": {
+				err:  fmt.Errorf("load: %w", doc.Bind(badSeats)),
+				is:   badSeats,
+				want: []string{"[] old spec", "[load] bad seats"},
+				text: stringtest.JoinLF(
+					"cafe.yaml: 1 error, 1 warning",
+					"cafe.yaml:1:1: warning: $.spec~: old spec",
+					"cafe.yaml:2:10: $.spec.seats: load: bad seats",
+				),
+			},
+			"wrapper around several bound problems": {
+				err:  fmt.Errorf("load: %w", doc.Bind(errors.Join(badSeats, badExtra))),
+				is:   badSeats,
+				want: []string{"[] old spec", "[load] bad seats", "[load] permission denied"},
+				text: stringtest.JoinLF(
+					"cafe.yaml: 2 errors, 1 warning",
+					"cafe.yaml:1:1: warning: $.spec~: old spec",
+					"cafe.yaml:2:10: $.spec.seats: bad seats",
+					"cafe.yaml:3:8: $.extra: permission denied",
+				),
+			},
+			"binding of a wrapper around several problems": {
+				err:  doc.Bind(fmt.Errorf("load: %w", errors.Join(badSeats, badExtra))),
+				is:   badSeats,
+				want: []string{"[] old spec", "[load] bad seats", "[load] permission denied"},
+				text: stringtest.JoinLF(
+					"cafe.yaml: 2 errors, 1 warning",
+					"cafe.yaml:1:1: warning: $.spec~: old spec",
+					"cafe.yaml:2:10: $.spec.seats: bad seats",
+					"cafe.yaml:3:8: $.extra: permission denied",
+				),
+			},
+			"wrappers around a heading and around a problem below it": {
+				err: fmt.Errorf("%w (see docs)", doc.Bind(niceyaml.NewSummary("some problems",
+					fmt.Errorf("decode seats: %w", badSeats), badExtra,
+				))),
+				is:   badSeats,
+				want: []string{"[] old spec", "[decode seats: (see docs)] bad seats", "[(see docs)] permission denied"},
+				text: stringtest.JoinLF(
+					"cafe.yaml: 2 errors, 1 warning",
+					"cafe.yaml:1:1: warning: $.spec~: old spec",
+					"cafe.yaml:2:10: $.spec.seats: decode seats: bad seats",
+					"cafe.yaml:3:8: $.extra: permission denied",
+				),
+			},
+			"wrapper around several problems that no source bound": {
+				err:  fmt.Errorf("load: %w", errors.Join(badSeats, badExtra)),
+				is:   badSeats,
+				want: []string{"[] old spec", "[load] bad seats", "[load] permission denied"},
+				text: stringtest.JoinLF(
+					"2 errors, 1 warning",
+					"cafe.yaml:1:1: warning: $.spec~: old spec",
+					"$.spec.seats: bad seats",
+					"$.extra: permission denied",
+				),
+			},
+			"wrapper around several problems that BindValue bound": {
+				err:  fmt.Errorf("load: %w", niceyaml.BindValue(errors.Join(badSeats, badExtra))),
+				is:   badSeats,
+				want: []string{"[] old spec", "[load] bad seats", "[load] permission denied"},
+				text: stringtest.JoinLF(
+					"2 errors, 1 warning",
+					"cafe.yaml:1:1: warning: $.spec~: old spec",
+					"$.spec.seats: bad seats",
+					"$.extra: permission denied",
+				),
+			},
+			"wrapper around several errors without a location": {
+				err:  fmt.Errorf("load: %w", errors.Join(fs.ErrPermission, fs.ErrNotExist)),
+				is:   fs.ErrNotExist,
+				want: []string{"[] old spec", "[load] permission denied", "[load] file does not exist"},
+				text: stringtest.JoinLF(
+					"2 errors, 1 warning",
+					"cafe.yaml:1:1: warning: $.spec~: old spec",
+					"permission denied",
+					"file does not exist",
+				),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				warnings := niceyaml.NewWarnings()
+
+				doc.Warn(warnings.Context(t.Context()), oldSpec)
+
+				got := warnings.Report(tc.err)
+				require.Error(t, got)
+
+				assert.Equal(t, tc.want, contextRows(got))
+
+				assert.Equal(t, tc.text, got.Error())
+
+				// Each problem reads in the report as it reads in the error.
+				// A document that binds the report later places each
+				// problem that no document bound, and keeps its context.
+				assert.ElementsMatch(t, tc.want[1:], contextRows(tc.err))
+				assert.ElementsMatch(t, tc.want, contextRows(doc.Bind(got)))
+
+				// So do a detached copy of the report and the copy that
+				// AsErrors returns for it.
+				assert.Equal(t, tc.want, contextRows(niceyaml.Detach(got)))
+				assert.Equal(t, tc.want, contextRows(niceyaml.AsErrors(got)))
+				require.ErrorIs(t, got, tc.is)
+			})
+		}
 	})
 
 	t.Run("a held warning shows unless err holds one that reads alike", func(t *testing.T) {
@@ -1954,7 +2727,8 @@ func TestNode_Warn(t *testing.T) {
 
 		// The wrapper keeps the text that fmt wrote. The row of the tree
 		// holds the text of the wrapper and takes its severity, although
-		// the binding inside it is an error.
+		// the binding inside it is an error. The text of the wrapper is
+		// the context of the problem and stays out of its message.
 		got := warnings.Err()
 		require.Error(t, got)
 		assert.Equal(t, "check: menu.yaml:1:1: $.items: odd", got.Error())
@@ -1962,7 +2736,88 @@ func TestNode_Warn(t *testing.T) {
 		problem := yamltest.OnlyProblem(t, got)
 		assert.True(t, problem.Warning)
 		assert.Equal(t, "menu.yaml:1:1: warning: $.items: check: odd", problem.Label)
-		assert.Equal(t, "check: odd", problem.Message())
+		assert.Equal(t, "odd", problem.Message())
+		assert.Equal(t, "check", problem.Context())
+	})
+
+	t.Run("each warning keeps the context of the wrapper above it", func(t *testing.T) {
+		t.Parallel()
+
+		oddPrice := niceyaml.NewWarning("odd price", niceyaml.AtPath(paths.Current().Child("price")))
+		oddItem := niceyaml.NewWarning("odd item")
+
+		// The collector holds each warning apart from the heading that a
+		// wrapper makes over several. Each warning must still report the
+		// text of that wrapper, as one warning alone does.
+		tcs := map[string]struct {
+			warn error
+			want []string
+		}{
+			"wrapper around one warning": {
+				warn: fmt.Errorf("check: %w", oddPrice),
+				want: []string{"[check] odd price"},
+			},
+			"wrapper around several warnings": {
+				warn: fmt.Errorf("check: %w", errors.Join(oddPrice, oddItem)),
+				want: []string{"[check] odd price", "[check] odd item"},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				warnings := niceyaml.NewWarnings()
+
+				item.Warn(warnings.Context(t.Context()), tc.warn)
+
+				assert.ElementsMatch(t, tc.want, heldContextRows(warnings))
+				assert.ElementsMatch(t, tc.want, contextRows(warnings.Err()))
+			})
+		}
+	})
+
+	t.Run("a located warning leaves the label out of the line of a binding", func(t *testing.T) {
+		t.Parallel()
+
+		included := niceyaml.NewSourceFromString("key: 1\n", niceyaml.WithName("inc.yaml"))
+		atPrice := niceyaml.AtPath(paths.Current().Child("price"))
+		old := func() error { return included.Bind(niceyaml.NewWarning("old")) }
+
+		// The warning keeps its location above the binding of another
+		// source, so its message holds the line of that binding. Each row
+		// reports the severity apart from the message, whether or not the
+		// wrapper kept the line of the binding in its text.
+		tcs := map[string]struct {
+			warn error
+			want string
+		}{
+			"wrapper that keeps the line": {
+				warn: niceyaml.Invalid(fmt.Errorf("check: %w", old()), atPrice),
+				want: "[check] inc.yaml: old",
+			},
+			"wrapper that rewrites the line": {
+				warn: niceyaml.Invalid(rewrittenError{msg: "config is invalid", err: old()}, atPrice),
+				want: "[config is invalid] inc.yaml: old",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				warnings := niceyaml.NewWarnings()
+
+				item.Warn(warnings.Context(t.Context()), tc.warn)
+
+				assert.Equal(t, []string{tc.want}, heldContextRows(warnings))
+				assert.Equal(t, []string{tc.want}, contextRows(warnings.Err()))
+
+				for warning := range warnings.All() {
+					assert.True(t, warning.Warning)
+				}
+			})
+		}
 	})
 
 	t.Run("a wrapper with several verbs warns each problem it heads", func(t *testing.T) {

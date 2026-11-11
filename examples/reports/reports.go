@@ -104,6 +104,13 @@ func main() {
 	// GitHub turns each command into an annotation on the line of the file
 	// that the line property names. The level is error, warning, or notice,
 	// and the Warning field of each problem picks between error and warning.
+	//
+	// The message of a problem leaves out the text that a wrapper such as
+	// fmt.Errorf added above it, and Context returns that text. The message
+	// thus reads the same whichever step of the check reports the problem,
+	// and the title of the command says which step did. A problem without a
+	// wrapper does not have a title.
+	//
 	// Each child of a problem points at a related place, and the loop writes
 	// it as a notice. The title of the notice holds the message of the
 	// problem, so a reviewer who reads only the notice knows which problem it
@@ -114,7 +121,7 @@ func main() {
 			level = "warning"
 		}
 
-		fmt.Println(workflowCommand(level, problem, ""))
+		fmt.Println(workflowCommand(level, problem, problem.Context()))
 
 		for _, detail := range problem.Children {
 			fmt.Println(workflowCommand("notice", detail, problem.Message()))

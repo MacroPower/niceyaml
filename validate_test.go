@@ -7990,7 +7990,10 @@ func TestEach(t *testing.T) {
 			return nil
 		})
 
-		const message = "decode price: expected integer, got string"
+		const (
+			message = "expected integer, got string"
+			row     = "decode price: " + message
+		)
 
 		tcs := map[string]struct {
 			input string
@@ -7998,13 +8001,13 @@ func TestEach(t *testing.T) {
 		}{
 			"one item fails": {
 				input: "menu:\n  - item: a\n    price: free\n  - item: b\n    price: 2\n",
-				want:  []string{"f.yaml:3:12: $.menu[0].price: " + message},
+				want:  []string{"f.yaml:3:12: $.menu[0].price: " + row},
 			},
 			"two items fail": {
 				input: "menu:\n  - item: a\n    price: free\n  - item: b\n    price: free\n",
 				want: []string{
-					"f.yaml:3:12: $.menu[0].price: " + message,
-					"f.yaml:5:12: $.menu[1].price: " + message,
+					"f.yaml:3:12: $.menu[0].price: " + row,
+					"f.yaml:5:12: $.menu[1].price: " + row,
 				},
 			},
 		}
@@ -8021,6 +8024,7 @@ func TestEach(t *testing.T) {
 
 				for problem := range niceyaml.Problems(err) {
 					assert.Equal(t, message, problem.Message())
+					assert.Equal(t, "decode price", problem.Context())
 
 					labels = append(labels, problem.Label)
 				}
