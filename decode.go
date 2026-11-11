@@ -197,6 +197,18 @@ func WithSelfValidation(enabled bool) DecodeOption {
 // returns the error of such a failure inside [Unchecked], as the lookup in
 // the example does.
 //
+// Only the context of the call stops the walk. An fn that holds a deadline
+// of its own can return an error that matches [context.DeadlineExceeded]
+// when the context of the call is still live. The walk reports that error
+// at the value and checks the values that remain. The Cancellation section
+// of the package documentation describes both cases.
+//
+// The walk does not presume the document at fault for a result of fn that
+// matches [context.Canceled] or [context.DeadlineExceeded]. A join with
+// one such branch matches as a whole, so the walk does not presume a fault
+// for any problem of that join. An fn that returns other problems beside a
+// timeout should declare each of them with [NewError] or [Invalid].
+//
 // A struct field the document leaves out reaches fn as its zero value. A
 // map key, a map value, and a value inside an interface reach fn as a
 // pointer to a copy, so fn must not change v.

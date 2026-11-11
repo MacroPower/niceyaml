@@ -514,6 +514,14 @@ func Invalid(err error, opts ...ErrorOption) error {
 // does an Unchecked in one branch of a wrapper that [fmt.Errorf] builds
 // with several %w verbs and that heads several problems.
 //
+// The result of a Validate method or a function from WithValueCheck is an
+// exception. When any branch of that result matches [context.Canceled] or
+// [context.DeadlineExceeded], the decode does not presume a fault for any of
+// its branches, with Unchecked or without it.
+// Only a branch that declares a fault, as one from [NewError] or Invalid
+// does, stays a fault. The Cancellation section of the package
+// documentation describes that rule.
+//
 // Unchecked returns nil for a nil err, and for a nil [*Error] or
 // [*SourceError] pointer, whatever the options. It returns an error rather
 // than an [*Error] for the reason Invalid gives. An err that is a join
@@ -748,14 +756,18 @@ func NewSummary(msg string, errs ...error) error {
 // [errors.Is].
 //
 // An Error from [NewError] or [Invalid] declares the fault, with a location
-// or without. So does the Error a decode puts around an error that a
-// [SelfValidator] or a function from [WithValueCheck] returns, unless an
-// Error from [Unchecked] sits on the cause chain of that error. An Error
-// from Unchecked, [Locate], or [Rebase], a summary from [NewSummary], and
-// the Error a scoped [Node.Bind] puts around an error do not declare a
-// fault. Neither does an Error from Invalid around the error of a context
-// that ended. Any other target matches through the errors the Error wraps,
-// as [Error.Unwrap] returns them.
+// or without. So does the Error a decode puts around the result of a
+// [SelfValidator] or a function from [WithValueCheck], with two exceptions.
+// That Error does not declare the fault when an Error from [Unchecked] sits
+// on the cause chain of the result. It does not declare the fault either
+// when any branch of the result matches [context.Canceled] or
+// [context.DeadlineExceeded]. The Cancellation section of the package
+// documentation describes that rule. An Error from Unchecked, [Locate], or
+// [Rebase], a summary from [NewSummary], and the Error a scoped [Node.Bind]
+// puts around an error do not declare a fault. Neither does an Error from
+// Invalid around the error of a context that ended. Any other target
+// matches through the errors the Error wraps, as [Error.Unwrap] returns
+// them.
 func (e *Error) Is(target error) bool {
 	return target == errInvalid && e != nil && e.fault.invalid()
 }
