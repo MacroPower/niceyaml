@@ -13,6 +13,24 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/quantity"
 )
 
+// URLError is the error of a URL that [Get] refuses before it sends a
+// request. Its message starts with "parse URL" and names the URL as [Get]
+// describes.
+type URLError struct {
+	// Err holds the message and the cause of the refusal.
+	Err error
+}
+
+// Error returns the message of Err.
+func (e *URLError) Error() string {
+	return e.Err.Error()
+}
+
+// Unwrap returns Err.
+func (e *URLError) Unwrap() error {
+	return e.Err
+}
+
 // Error is the error of a [Get] that tried to fetch its URL. It holds the
 // URL as [Redacted] spells it and the status of the response, and it
 // wraps the cause.
@@ -67,8 +85,8 @@ func (e sizeError) Is(target error) bool {
 //
 // Get refuses a URL that does not parse, an http or https URL with an
 // empty host, and a URL whose host ends in a colon before an "@". It
-// refuses each one before it sends a request, with an error of its own.
-// Every other error is an [*Error]. The [*Error] holds the status of the
+// refuses each one before it sends a request, with a [*URLError]. Every
+// other error is an [*Error]. The [*Error] holds the status of the
 // response, or 0 when Get did not get a response.
 //
 // Errors name the URL as [Redacted] spells it. [Redacted] replaces any
@@ -108,21 +126,23 @@ func Get(ctx context.Context, client *http.Client, rawURL string, limit int) ([]
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		if _, ok := redactSpan(rawURL); ok {
-			return nil, fmt.Errorf("%s: reason withheld because it can quote the password", parsePrefix(rawURL))
+			return nil, &URLError{
+				Err: fmt.Errorf("%s: reason withheld because it can quote the password", parsePrefix(rawURL)),
+			}
 		}
 
-		return nil, fmt.Errorf("%s: %w", parsePrefix(rawURL), reason(err))
+		return nil, &URLError{Err: fmt.Errorf("%s: %w", parsePrefix(rawURL), reason(err))}
 	}
 
 	if namesNoHost(u, rawURL) {
-		return nil, fmt.Errorf("%s: URL names no host", parsePrefix(rawURL))
+		return nil, &URLError{Err: fmt.Errorf("%s: URL names no host", parsePrefix(rawURL))}
 	}
 
 	if hidesPassword(u, rawURL) {
-		return nil, fmt.Errorf(
+		return nil, &URLError{Err: fmt.Errorf(
 			`%s: empty port and a later "@" suggest a password with an unencoded "/", "?" or "#"`,
 			parsePrefix(rawURL),
-		)
+		)}
 	}
 
 	name := redacted(u, nil, rawURL)

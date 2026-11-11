@@ -506,12 +506,20 @@
 // for an empty reference. The registry fetches every URL outside the
 // prefixes of [WithLoader] with one client, which [WithHTTPClient] sets.
 // So that client's timeout or proxy applies to every resolver that names
-// such a URL:
+// such a URL. A [go.jacobcolvin.com/niceyaml/schema/schemastore.Store]
+// fetches its catalog with a client of its own, so a program behind a
+// proxy passes the client to
+// [go.jacobcolvin.com/niceyaml/schema/schemastore.WithHTTPClient] too:
+//
+//	client := &http.Client{Timeout: 10 * time.Second}
 //
 //	reg := schema.NewRegistry(
 //	    schema.WithAccess(schema.Unrestricted),
-//	    schema.WithHTTPClient(&http.Client{Timeout: 10 * time.Second}),
-//	    schema.WithResolvers(schema.Directive(), schemastore.New()),
+//	    schema.WithHTTPClient(client),
+//	    schema.WithResolvers(
+//	        schema.Directive(),
+//	        schemastore.New(schemastore.WithHTTPClient(client)),
+//	    ),
 //	)
 //
 // # Resolver Order
@@ -542,7 +550,7 @@
 // [ErrLoad], or [ErrCompile] ends it too, even when it wraps ErrNoMatch.
 // The error of a [Registry] that is a resolver is one example. Until a
 // catalog loads, a [go.jacobcolvin.com/niceyaml/schema/schemastore.Store]
-// that cannot reach SchemaStore.org ends the lookup this way. Place it
+// that cannot load its catalog ends the lookup this way. Place it
 // after any resolver that should still apply without the catalog.
 //
 // # SchemaStore Integration

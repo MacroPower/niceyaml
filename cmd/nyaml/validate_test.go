@@ -687,7 +687,7 @@ func TestValidateCmdSchemaPolicy(t *testing.T) {
 
 			out := &bytes.Buffer{}
 
-			cmd := validateCmd(schemastore.WithCatalogURL(srv.URL + "/catalog.json"))
+			cmd := validateCmd(schemastore.WithCatalog(schema.URL(srv.URL + "/catalog.json")))
 			cmd.SilenceErrors = true
 			cmd.SilenceUsage = true
 			cmd.SetOut(out)

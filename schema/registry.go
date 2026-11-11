@@ -195,17 +195,24 @@ type registryConfig struct {
 // schema host that accepts a connection and never answers cannot hang a
 // caller whose context does not have a deadline:
 //
+//	client := &http.Client{Timeout: 10 * time.Second}
+//
 //	reg := schema.NewRegistry(
 //	    schema.WithAccess(schema.Unrestricted),
-//	    schema.WithHTTPClient(&http.Client{Timeout: 10 * time.Second}),
-//	    schema.WithResolvers(schema.Directive(), schemastore.New()),
+//	    schema.WithHTTPClient(client),
+//	    schema.WithResolvers(
+//	        schema.Directive(),
+//	        schemastore.New(schemastore.WithHTTPClient(client)),
+//	    ),
 //	)
 //
 // The default client bounds each fetch at 30 seconds and otherwise
 // matches [http.DefaultClient]. A nil client keeps the default. A
 // [go.jacobcolvin.com/niceyaml/schema/schemastore.Store] fetches its
 // catalog with a client of its own, because the catalog is not a schema
-// that the registry loads.
+// that the registry loads. The client reaches the catalog only through
+// [go.jacobcolvin.com/niceyaml/schema/schemastore.WithHTTPClient], as
+// the example shows.
 //
 // An [Access] from [WithAccess] can limit the URLs that the registry
 // fetches with the client. The registry then fetches with a copy of the

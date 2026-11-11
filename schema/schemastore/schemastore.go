@@ -30,9 +30,9 @@ const (
 )
 
 var (
-	// ErrFetchCatalog indicates that the store could not fetch the
-	// SchemaStore catalog. A lookup reports it only when the store does
-	// not hold an earlier catalog to match against. [Store.Refresh]
+	// ErrFetchCatalog indicates that the store could not load the catalog
+	// that [WithCatalog] names. A lookup reports it only when the store
+	// does not hold an earlier catalog to match against. [Store.Refresh]
 	// reports it for every fetch that fails.
 	ErrFetchCatalog = errors.New("fetch schema catalog")
 
@@ -60,8 +60,17 @@ var (
 )
 
 // Catalog represents the SchemaStore.org catalog as the catalog API
-// returns it. You can marshal a Catalog to JSON to serve a catalog of your
-// own, such as one for a test or one that a program embeds.
+// returns it. The bytes that the [schema.Ref] of [WithCatalog] names hold
+// a Catalog in JSON. You can marshal a Catalog of your own to JSON and
+// pass the bytes to the store through [schema.Embedded], such as for a
+// test or for a program that ships a catalog of its own:
+//
+//	data, err := json.Marshal(catalog)
+//	if err != nil {
+//	    return err
+//	}
+//
+//	store := schemastore.New(schemastore.WithCatalog(schema.Embedded(data)))
 //
 // A Catalog holds every entry as the catalog lists it. The store drops
 // some entries and patterns when it loads the catalog, and
@@ -102,15 +111,15 @@ type CatalogEntry struct {
 // or with the loader of [go.jacobcolvin.com/niceyaml/schema.WithLoader]
 // whose prefix covers the URL.
 // The store's own client, refresh timeout, and load limit apply only to
-// the catalog.
+// the catalog, which [WithCatalog] names.
 //
 // The store fetches the catalog on the first lookup and caches it for the
 // configured time to live (TTL). After the cache expires, the next lookup
 // refreshes it. A refresh that fails leaves the previous catalog in use.
 // When a fetch fails before any catalog has loaded, the lookup reports
 // [ErrFetchCatalog]. After a failed fetch, the store waits the retry
-// interval before it contacts the catalog URL again. So an unreachable
-// catalog costs one timeout per interval rather than one per lookup.
+// interval before it loads the catalog again. So an unreachable catalog
+// costs one timeout per interval rather than one per lookup.
 //
 // [Store.Entries] loads the catalog as a lookup does, so a program can
 // call it at startup to fetch the catalog before the first document.
@@ -152,6 +161,7 @@ type Store struct {
 	lastAttempt time.Time                 // Last fetch, successful or not.
 	inflight    *fetchCall                // Fetch in progress, or nil when the store is not fetching.
 	lastErr     error                     // Error from the last fetch, or nil when it succeeded.
+	loader      *schema.Registry          // Loads the catalog Ref with the client and limit of the config.
 	lastMatch   atomic.Pointer[matchMemo] // Outcome of the last scan in FindMatch.
 	entries     []CatalogEntry
 	config
@@ -169,7 +179,7 @@ type fetchCall struct {
 // Option configures [Store] creation.
 //
 // Available options:
-//   - [WithCatalogURL]
+//   - [WithCatalog]
 //   - [WithHTTPClient]
 //   - [WithCacheTTL]
 //   - [WithRefreshTimeout]
@@ -184,24 +194,76 @@ type Option func(*config)
 type config struct {
 	client         *http.Client
 	filter         func(CatalogEntry) bool
-	catalogURL     string
+	catalogRef     schema.Ref
 	cacheTTL       time.Duration
 	refreshTimeout time.Duration
 	retryAfter     time.Duration
 	loadLimit      int
 }
 
-// WithCatalogURL is an [Option] that sets a custom catalog URL.
+// WithCatalog is an [Option] that sets the [schema.Ref] that names the
+// catalog. The bytes of the Ref hold a [Catalog] in JSON.
 //
-// The default URL is "https://www.schemastore.org/api/json/catalog.json".
-func WithCatalogURL(url string) Option {
+// The default is the Ref of [schema.URL] for
+// "https://www.schemastore.org/api/json/catalog.json". The store loads
+// the catalog as [schema.Registry.Load] does, in a registry of its own.
+// That registry fetches a Ref from [schema.URL] with the client of
+// [WithHTTPClient], and it reads a file or a URL within the limit of
+// [WithLoadLimit]. It reads every file that a Ref from [schema.File]
+// names. The registry that the store serves does not take part, so its
+// client, its [schema.Access], and its loaders do not apply to the
+// catalog.
+//
+// The store loads the Ref again each time the cache TTL expires, so a Ref
+// from [schema.File] or [schema.Loadable] can supply a catalog that
+// changes. The registry of the store keeps nothing by key, and it runs
+// the load of a Ref from [schema.Loadable] on each load of the catalog.
+// So the load of a Ref that names the catalog can return different bytes
+// each time it runs, unlike the load of a Ref that names a schema:
+//
+//	//go:embed catalog.json
+//	var catalogJSON []byte
+//
+//	// A catalog that the program ships.
+//	pinned := schemastore.New(schemastore.WithCatalog(schema.Embedded(catalogJSON)))
+//
+//	// A catalog on disk.
+//	local := schemastore.New(schemastore.WithCatalog(schema.File("/etc/app/catalog.json")))
+//
+//	// A mirror of the catalog, fetched through a proxy.
+//	mirror := schemastore.New(
+//	    schemastore.WithCatalog(schema.URL("https://mirror.example.com/catalog.json")),
+//	    schemastore.WithHTTPClient(proxied),
+//	)
+//
+//	// The live catalog, with the shipped one when the download fails.
+//	live := schemastore.New(schemastore.WithCatalog(
+//	    schema.Loadable("catalog", func(ctx context.Context) ([]byte, error) {
+//	        data, err := download(ctx)
+//	        if err != nil {
+//	            return catalogJSON, nil
+//	        }
+//
+//	        return data, nil
+//	    }),
+//	))
+//
+// The zero Ref and a Ref that carries a compiled schema, such as one from
+// [schema.Schema.Ref], do not name any bytes. With either Ref, every load
+// fails, so the first lookup reports [ErrFetchCatalog]. The registry of
+// the store has no [schema.Access], so it refuses a Ref that a document
+// names, such as one from [schema.RefBeside]. With such a Ref, the first
+// lookup reports [ErrFetchCatalog] with a cause that matches
+// [schema.ErrAccessNotSet].
+func WithCatalog(ref schema.Ref) Option {
 	return func(c *config) {
-		c.catalogURL = url
+		c.catalogRef = ref
 	}
 }
 
 // WithHTTPClient is an [Option] that sets a custom HTTP client for fetching
-// the catalog. A nil client keeps the default, [http.DefaultClient]. The
+// the catalog, when [WithCatalog] names it with a [schema.URL]. A nil
+// client keeps the default, [http.DefaultClient]. The
 // registry fetches the schemas that the catalog names with its own client,
 // from [go.jacobcolvin.com/niceyaml/schema.WithHTTPClient].
 func WithHTTPClient(client *http.Client) Option {
@@ -247,7 +309,7 @@ func WithRefreshTimeout(timeout time.Duration) Option {
 // WithRetryAfter is an [Option] that sets how long the store waits after a
 // failed catalog fetch before it tries again.
 //
-// Until the interval passes, lookups do not contact the catalog URL. They
+// Until the interval passes, lookups do not load the catalog. They
 // use the previous catalog when one exists, and otherwise report
 // [ErrFetchCatalog] with the last fetch error. The interval does not
 // apply to [Store.Refresh], which fetches at once.
@@ -263,10 +325,14 @@ func WithRetryAfter(interval time.Duration) Option {
 }
 
 // WithLoadLimit is an [Option] that sets the most bytes of the catalog
-// that the store reads. The fetch of a larger catalog fails with a
-// [*schema.FetchError] whose cause matches [niceyaml.ErrLimit]. The store
-// treats that failure like any other failed fetch. It keeps the previous
-// catalog when one has loaded, and otherwise reports [ErrFetchCatalog].
+// that the store reads from a file or a URL, when [WithCatalog] names it
+// with a [schema.File], [schema.FileFS], or [schema.URL]. The read or
+// fetch of a larger catalog fails with a [*schema.FetchError] whose cause
+// matches [niceyaml.ErrLimit]. The store treats that failure like any
+// other failed fetch. It keeps the previous catalog when one has loaded,
+// and otherwise reports [ErrFetchCatalog]. The limit does not cover the
+// bytes of a Ref from [schema.Embedded] or [schema.Loadable].
+//
 // The limit covers only the catalog. The registry reads each schema that
 // the catalog names within the limit of [schema.WithLoadLimit].
 //
@@ -317,7 +383,7 @@ func WithFilter(fn func(CatalogEntry) bool) Option {
 //	)
 func New(opts ...Option) *Store {
 	store := &Store{
-		catalogURL:     defaultCatalogURL,
+		catalogRef:     schema.URL(defaultCatalogURL),
 		client:         http.DefaultClient,
 		cacheTTL:       defaultCacheTTL,
 		refreshTimeout: defaultRefreshTimeout,
@@ -327,6 +393,11 @@ func New(opts ...Option) *Store {
 	for _, opt := range opts {
 		opt(&store.config)
 	}
+
+	store.loader = schema.NewRegistry(
+		schema.WithHTTPClient(store.client),
+		schema.WithLoadLimit(store.loadLimit),
+	)
 
 	return store
 }
@@ -456,7 +527,7 @@ func (s *Store) Entries(ctx context.Context) ([]CatalogEntry, error) {
 // match against that earlier catalog. So a long-running service can call
 // Refresh on a ticker and log the error to learn that its catalog went
 // stale. Refresh does not wait out the retry interval, so the ticker sets
-// how often the store contacts the catalog URL.
+// how often the store loads the catalog.
 //
 // When ctx ends before the fetch finishes, Refresh returns
 // [ErrFetchCatalog] wrapping the error of ctx, and the fetch keeps
@@ -588,7 +659,7 @@ func (s *Store) join(ctx context.Context) (*fetchCall, []CatalogEntry, error) {
 
 	case s.lastErr != nil && time.Since(s.lastAttempt) < s.retryAfter:
 		// The last fetch failed within the retry interval, so leave the
-		// catalog URL alone.
+		// catalog alone.
 		entries, err := s.staleLocked(s.lastErr)
 
 		return nil, entries, err
@@ -687,41 +758,67 @@ func (s *Store) staleLocked(cause error) ([]CatalogEntry, error) {
 	return s.entries, nil
 }
 
-// fetch retrieves the catalog from the configured URL and returns the
+// fetch loads the catalog that [WithCatalog] names and returns the
 // filtered entries. It does not hold a lock, so a slow catalog server
 // blocks only the lookups that wait on this fetch.
 //
-// The HTTP GET is the one that [schema.URL] uses, with the limit of
-// [WithLoadLimit]. A fetch that fails after the URL passes the checks of
-// [httpfetch.Get] returns a [*schema.FetchError]. Only the catalog JSON
-// parsing is specific to SchemaStore.
+// The private registry of the store loads the Ref, so a Ref from
+// [schema.URL] fails with a [*schema.FetchError] as it does in any
+// registry. Only the catalog JSON parsing is specific to SchemaStore.
 func (s *Store) fetch(ctx context.Context) ([]CatalogEntry, error) {
-	data, err := httpfetch.Get(ctx, s.client, s.catalogURL, s.loadLimit)
-	if fetchErr, ok := errors.AsType[*httpfetch.Error](err); ok {
-		return nil, &schema.FetchError{URL: fetchErr.URL, StatusCode: fetchErr.StatusCode, Err: fetchErr.Err}
-	}
-
+	data, err := s.loader.Load(ctx, s.catalogRef)
 	if err != nil {
-		//nolint:wrapcheck // The error already names the catalog URL.
-		return nil, err
+		return nil, s.loadError(err)
 	}
 
 	var catalog Catalog
 
 	err = json.Unmarshal(data, &catalog)
 	if err != nil {
-		return nil, fmt.Errorf("parse catalog from %s: %w", httpfetch.Redacted(s.catalogURL), err)
+		return nil, fmt.Errorf("parse catalog from %s: %w", s.catalogRef.Name(), err)
 	}
 
 	// A body with no schemas array, such as null or an error object,
 	// decodes without error, so fetch rejects it here. The store then keeps
 	// the previous catalog rather than replacing it with an empty one.
 	if catalog.Schemas == nil {
-		return nil, fmt.Errorf("parse catalog from %s: no schemas array", httpfetch.Redacted(s.catalogURL))
+		return nil, fmt.Errorf("parse catalog from %s: no schemas array", s.catalogRef.Name())
 	}
 
 	// Prefilter entries to those with supported patterns that pass the filter.
 	return s.filterAndNormalizeEntries(catalog.Schemas), nil
+}
+
+// loadError returns the error of a catalog load that failed with err, an
+// error of [schema.Registry.Load]. The [*schema.LoadError] of err calls
+// the catalog a schema, so loadError drops it and keeps its cause. The
+// registry reads a File Ref and fetches a URL Ref with errors that name
+// the file or URL already. Each such error is a [*schema.FetchError] or
+// an [*httpfetch.URLError] that the registry does not wrap. So loadError
+// returns a cause of either type as it is. Any other cause gets "load
+// catalog" and the name of the Ref. When the Ref does not have a name,
+// the cause gets only "load catalog". A cause that wraps one of the two
+// types gets the prefix too. So the error of a Loadable names the
+// catalog even when it wraps the error of another registry.
+func (s *Store) loadError(err error) error {
+	if loadErr, ok := errors.AsType[*schema.LoadError](err); ok {
+		err = loadErr.Err
+	}
+
+	// Only the errors that the registry returns itself count, and the
+	// registry returns them unwrapped. A search of the whole chain lets
+	// the error that a Loadable wraps decide the message.
+	switch err.(type) { //nolint:errorlint // Only the direct cause counts.
+	case *schema.FetchError, *httpfetch.URLError:
+		return err
+	}
+
+	name := s.catalogRef.Name()
+	if name == "" {
+		return fmt.Errorf("load catalog: %w", err)
+	}
+
+	return fmt.Errorf("load catalog %q: %w", name, err)
 }
 
 // filterAndNormalizeEntries keeps only the catalog entries that have an
