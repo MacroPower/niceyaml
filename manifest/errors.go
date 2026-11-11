@@ -50,8 +50,10 @@ import (
 // cause.
 var (
 	// ErrEncoding indicates a text that is not UTF-8, such as a file with a
-	// byte that UTF-8 does not allow or one in UTF-16.
-	ErrEncoding = errors.New("text is not UTF-8")
+	// byte that UTF-8 does not allow or one in UTF-16. It is
+	// [niceyaml.ErrEncoding], which the parse of each Source of a load
+	// returns.
+	ErrEncoding = niceyaml.ErrEncoding
 
 	// ErrOutsideLink indicates a symbolic link that a directory walk found
 	// and does not follow. The target of the link lies outside the input

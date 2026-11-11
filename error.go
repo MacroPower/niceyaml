@@ -200,7 +200,9 @@ var (
 	//
 	// A document past the depth limit of [WithDepthLimit] does not parse
 	// either, and neither does the one document of a text past the byte limit
-	// of [WithByteLimit]. The errors of both match [ErrLimit] instead.
+	// of [WithByteLimit]. The errors of both match [ErrLimit] instead. The
+	// one document of a text that is not UTF-8 does not parse either, and
+	// its error matches [ErrEncoding] instead.
 	//
 	// Each of these calls returns the error bound as a [SourceError] at the
 	// offending token. The error of a file with several such documents is a
@@ -284,6 +286,43 @@ var (
 	// schema or the catalog is at fault for that error, not the document, so
 	// IsInvalid reports false for it.
 	ErrLimit = fault.ErrLimit
+
+	// ErrEncoding indicates a text that is not UTF-8, such as a file with a
+	// Latin-1 byte or a file in UTF-16. A Source keeps such a text with its
+	// tokens and its lines. It thus renders, diffs, and searches the text as
+	// it does any other. The parser does not read the text, so the whole text
+	// is one document that fails with the error, as a document that does not
+	// parse does. [Source.File], [Source.Document], [Node.Err], and every
+	// decode and validation of the Source thus return it. The error matches
+	// ErrEncoding and not [ErrSyntax]. The document is at fault for it, as
+	// [IsInvalid] describes. A text past the byte limit of [WithByteLimit]
+	// fails with an error that matches [ErrLimit] instead.
+	//
+	// A UTF-8 byte order mark can start the text. A text whose byte order
+	// mark or leading zero bytes show UTF-16 or UTF-32 fails with no
+	// location, as in "app.yaml: file is UTF-16, not UTF-8". Any other text
+	// fails at its first byte that UTF-8 does not allow, as in
+	// "app.yaml:1:10: byte 0xe9 is not UTF-8". The detail of the error says
+	// "save the file as UTF-8" for a Source with a file path, as
+	// [Source.FilePath] reports. It says "encode the text as UTF-8" for any
+	// other Source.
+	//
+	// The check reads the text of the Source. A Source of
+	// [NewSourceFromTokens] holds no text, so its parse skips the check. It
+	// reads the tokens as the lexer wrote them, with U+FFFD in place of each
+	// byte that UTF-8 does not allow.
+	//
+	// A program that accepts such a text replaces those bytes itself before
+	// it builds the Source. For example, [strings.ToValidUTF8] puts one
+	// U+FFFD in place of each run of them:
+	//
+	//	src := niceyaml.NewSourceFromString(strings.ToValidUTF8(text, "\uFFFD"))
+	ErrEncoding = errors.New("text is not UTF-8")
+
+	// The details of an error that matches [ErrEncoding]: one for a Source
+	// with a file path, and one for a Source without one.
+	errSaveUTF8   = errors.New("save the file as UTF-8")
+	errEncodeUTF8 = errors.New("encode the text as UTF-8")
 
 	// The reason of a [SourceError] whose error does not carry a location. A
 	// missing location is not a failure to resolve one, so

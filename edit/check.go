@@ -1119,6 +1119,21 @@ func unprintableIn(text string) (string, bool) {
 	return "", false
 }
 
+// invalidByteIn returns the words that name the first byte of text that
+// UTF-8 does not allow, as [unprintableAt] names it.
+func invalidByteIn(text string) (string, bool) {
+	for off := 0; off < len(text); {
+		r, size := utf8.DecodeRuneInString(text[off:])
+		if r == utf8.RuneError && size <= 1 {
+			return unprintableAt(text, off)
+		}
+
+		off += size
+	}
+
+	return "", false
+}
+
 // unprintableAt returns the words that name the character of text at off,
 // as in "U+0001", when YAML does not allow it in a text, as [printable]
 // tells. A byte that is not UTF-8 counts too.

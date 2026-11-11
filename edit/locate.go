@@ -104,7 +104,11 @@ func isBreak(text string, off int) bool {
 }
 
 // parse parses the current text with its tail, as the parser reads the
-// document in its file, and records its lines. The problem of a text that
+// document in its file, and records its lines. The parse reads the text
+// as [lexed] gives it, so a byte that is not UTF-8 and that a call wrote
+// reaches [Doc.printableProblem]. That problem names the byte and the
+// encoder that wrote it. The user's text holds no such byte, because [New]
+// refuses it. The problem of a text that
 // go-yaml's parser refuses names the parser and gives its message and its
 // place. The engine wrote that text, so the problem does not keep the
 // fault of the document that the parse declares. A refusal at a byte that
@@ -120,7 +124,7 @@ func (d *Doc) parse() error {
 
 	defer func() { d.own, d.capture = own, held }()
 
-	src := niceyaml.NewSourceFromDerived(d.cur+d.tail, d.user, d.locate,
+	src := niceyaml.NewSourceFromDerived(lexed(d.cur+d.tail), d.user, d.locate,
 		niceyaml.WithUnmarshalers(d.cfg.unmarshalers...), niceyaml.WithoutLimits())
 
 	d.src = src
@@ -161,6 +165,34 @@ func (d *Doc) parse() error {
 	}
 
 	return nil
+}
+
+// lexed returns text with U+FFFD in place of each byte that is not UTF-8,
+// as go-yaml's lexer reads such a byte. A Source refuses a text with such
+// a byte, and it takes the text that lexed returns. Each such byte and
+// its U+FFFD take one column, so each position of the parse is a position
+// of text too. Lexed returns a text that is UTF-8 as it is.
+func lexed(text string) string {
+	if utf8.ValidString(text) {
+		return text
+	}
+
+	var b strings.Builder
+
+	b.Grow(len(text) + 2*utf8.UTFMax)
+
+	for off := 0; off < len(text); {
+		r, size := utf8.DecodeRuneInString(text[off:])
+		if r == utf8.RuneError && size <= 1 {
+			b.WriteRune(utf8.RuneError)
+		} else {
+			b.WriteString(text[off : off+size])
+		}
+
+		off += max(size, 1)
+	}
+
+	return b.String()
 }
 
 // offset returns the offset in the current text of pos, as [offsetIn]

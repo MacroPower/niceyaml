@@ -204,7 +204,8 @@ func (n *Node) DocumentAST() *ast.DocumentNode {
 // Err returns the error of a document that did not parse, or nil for a
 // document that parsed and for a nil Node. The error matches [ErrSyntax] for
 // text that the parser rejects. It matches [ErrLimit] for a document past the
-// depth limit or a text past the byte limit of the Source. A syntax error
+// depth limit or a text past the byte limit of the Source. It matches
+// [ErrEncoding] for the one document of a text that is not UTF-8. A syntax error
 // fails the one document that holds it, and [Source.AllDocuments] returns a
 // Node for that document too. The error is a [*SourceError] bound to the
 // Source and to that document, so [SourceError.Document] returns its root. It

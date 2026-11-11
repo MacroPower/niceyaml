@@ -1227,7 +1227,7 @@ func (d *Doc) misnestedAliases() map[[2]int]bool {
 
 	b.WriteString(d.cur[last:] + d.tail)
 
-	src := niceyaml.NewSourceFromDerived(b.String(), d.user, d.locate,
+	src := niceyaml.NewSourceFromDerived(lexed(b.String()), d.user, d.locate,
 		niceyaml.WithUnmarshalers(d.cfg.unmarshalers...), niceyaml.WithoutLimits())
 
 	for _, n := range src.AllDocuments() {

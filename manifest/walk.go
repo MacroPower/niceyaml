@@ -329,17 +329,9 @@ func (r *reader) fail(name string, err error, t target) {
 	r.files = append(r.files, &file{err: namedSource(name).Bind(err), target: t, name: name})
 }
 
-// add adds f, a file that the load read, with the problem of its encoding.
-// A Source whose text is longer than its byte limit skips the check. The
-// load then reports that limit, as it does for a file that the read
-// refused past the limit.
+// add adds f, a file that the load read.
 func (r *reader) add(f *file) {
 	f.name = f.src.Name()
-
-	if bytes := f.src.ByteLimit(); bytes == 0 || len(f.src.Text()) <= bytes {
-		f.err = checkEncoding(f.src)
-	}
-
 	r.files = append(r.files, f)
 }
 
