@@ -24,6 +24,7 @@ func TestNode_Set(t *testing.T) {
 		value  any
 		before string
 		path   paths.Path
+		opts   []edit.SetOption
 		// A second Set gives the key thenKey below path the value
 		// thenValue, when thenKey is set.
 		thenKey   string
@@ -186,7 +187,15 @@ func TestNode_Set(t *testing.T) {
 			before: stringtest.LinesLF("k:\t# c", "z: 1"),
 			path:   paths.Doc().Child("k"),
 			value:  []int{1, 2},
+			opts:   []edit.SetOption{edit.Flow()},
 			want:   stringtest.LinesLF("k:\t[1, 2] # c", "z: 1"),
+		},
+		"block sequence in place of an empty value with a tab and a comment after its colon": {
+			// The tab and the comment stay on the line of the key.
+			before: stringtest.LinesLF("k:\t# c", "z: 1"),
+			path:   paths.Doc().Child("k"),
+			value:  []int{1, 2},
+			want:   stringtest.LinesLF("k:\t# c", "  - 1", "  - 2", "z: 1"),
 		},
 		"scalar in place of an empty item with a tab and a comment after its dash": {
 			before: stringtest.LinesLF("-\t# c", "- 2"),
@@ -295,11 +304,12 @@ func TestNode_Set(t *testing.T) {
 			want:   stringtest.LinesLF("a: z # c", "b: 1"),
 		},
 		"mapping with \"\\r\\n\" lines that a marshaler writes": {
-			// Control: the encoder writes the mapping in flow style.
+			// Control: the encoder writes the mapping with "\n" lines, and
+			// the new lines take the line breaks of the file.
 			before: "a: 1\r\n",
 			path:   paths.Doc().Child("a"),
 			value:  yamlMarshaler("x: 1\r\ny: 2\r\n"),
-			want:   "a: {x: 1, y: 2}\r\n",
+			want:   "a:\r\n  x: 1\r\n  y: 2\r\n",
 		},
 		"float that go-yaml's encoder writes in an exponent form": {
 			// The encoder of go-yaml writes 1e+06, which its decoder reads as
@@ -356,7 +366,7 @@ func TestNode_Set(t *testing.T) {
 			before: "v: 1\n",
 			path:   paths.Doc().Child("v"),
 			value:  map[textMarshaler]int{"k": 1},
-			want:   "v: {k: 1}\n",
+			want:   stringtest.LinesLF("v:", "  k: 1"),
 		},
 		"small float that go-yaml's encoder writes in an exponent form": {
 			before: "replicas: 3\n",
@@ -377,11 +387,19 @@ func TestNode_Set(t *testing.T) {
 			engine: true,
 		},
 		"mapping with a key that holds a colon in place of a scalar": {
-			// The value takes flow style, and go-yaml's flow encoder quotes
-			// the key, which go-yaml reads as a key and a value otherwise.
+			// Go-yaml reads the key of a block mapping up to the ": ".
 			before: "a: 1\n",
 			path:   paths.Doc().Child("a"),
 			value:  map[string]any{"x:y": 1.0},
+			want:   stringtest.LinesLF("a:", "  x:y: 1.0"),
+		},
+		"mapping with a key that holds a colon in flow style": {
+			// Go-yaml's flow encoder quotes the key, which go-yaml reads as a
+			// key and a value otherwise.
+			before: "a: 1\n",
+			path:   paths.Doc().Child("a"),
+			value:  map[string]any{"x:y": 1.0},
+			opts:   []edit.SetOption{edit.Flow()},
 			want:   "a: {\"x:y\": 1.0}\n",
 		},
 		"mapping with a key that holds a colon as a new item of a flow sequence": {
@@ -394,7 +412,7 @@ func TestNode_Set(t *testing.T) {
 			before: "a: 1\n",
 			path:   paths.Doc().Child("a"),
 			value:  []byte("hi"),
-			want:   "a: [104, 105]\n",
+			want:   stringtest.LinesLF("a:", "  - 104", "  - 105"),
 		},
 		"time in a new entry": {
 			// Go-yaml's encoder writes a time.Time as a plain timestamp.
@@ -517,7 +535,7 @@ func TestNode_Set(t *testing.T) {
 			before: stringtest.LinesLF("a: 1", "b: 2"),
 			path:   paths.Doc().Child("b"),
 			value:  valueMarshaler{[]any{1, valueMarshaler{"x"}}},
-			want:   stringtest.LinesLF("a: 1", "b: [1, x]"),
+			want:   stringtest.LinesLF("a: 1", "b:", "  - 1", "  - x"),
 		},
 		"nil pointer with a marshaler": {
 			// Go-yaml's encoder writes a nil pointer as null without a call of
@@ -672,7 +690,7 @@ func TestNode_Set(t *testing.T) {
 			before: stringtest.LinesLF("a: 1", "b: 2"),
 			path:   paths.Doc().Child("b"),
 			value:  yamlMarshaler("a: |+\n  x\n\n"),
-			want:   stringtest.LinesLF("a: 1", `b: {a: "x\n\n"}`),
+			want:   stringtest.LinesLF("a: 1", "b:", `  a: "x\n\n"`),
 		},
 		"YAML marshaler that writes a tagged flow sequence": {
 			before: stringtest.LinesLF("a: 1", "b: 2"),
@@ -959,14 +977,14 @@ func TestNode_Set(t *testing.T) {
 			before: "a: 1\n",
 			path:   paths.Doc().Child("a"),
 			value:  sharedMap(),
-			want:   "a: {p: {k: 1}, q: {k: 1}}\n",
+			want:   stringtest.LinesLF("a:", "  p:", "    k: 1", "  q:", "    k: 1"),
 		},
 		"struct that the encoder writes without its field back to itself": {
 			// The encoder skips the field that the tag names "-".
 			before: "a: 1\n",
 			path:   paths.Doc().Child("a"),
 			value:  childStruct(),
-			want:   "a: {name: c}\n",
+			want:   stringtest.LinesLF("a:", "  name: c"),
 		},
 		"map with a nil key, on which go-yaml's encoder panics": {
 			before: "a: 1\n",
@@ -1517,7 +1535,8 @@ func TestNode_Set(t *testing.T) {
 			value: []string{"vegan"},
 			want: stringtest.LinesLF(
 				"spec:",
-				"  tags: [vegan]",
+				"  tags:",
+				"    - vegan",
 				"  price: 5",
 			),
 		},
@@ -1526,7 +1545,7 @@ func TestNode_Set(t *testing.T) {
 			before: stringtest.LinesLF("spec:", "  tags: !!str 'vegan'"),
 			path:   spec.Child("tags"),
 			value:  []string{"vegan"},
-			want:   stringtest.LinesLF("spec:", "  tags: [vegan]"),
+			want:   stringtest.LinesLF("spec:", "  tags:", "    - vegan"),
 		},
 		"block mapping over a block mapping": {
 			before: stringtest.LinesLF(
@@ -2035,7 +2054,7 @@ func TestNode_Set(t *testing.T) {
 			d := newDoc(t, tc.before, opts...)
 
 			set := func(ctx context.Context, n *edit.Node) error {
-				err := n.Set(ctx, tc.value)
+				err := n.Set(ctx, tc.value, tc.opts...)
 				if err != nil || tc.thenKey == "" {
 					return err
 				}
@@ -2077,6 +2096,7 @@ func TestNode_Set(t *testing.T) {
 		tcs := map[string]struct {
 			yaml string
 			want string
+			opts []edit.SetOption
 			// Whether the Set may fail with ErrEngine instead.
 			engine bool
 		}{
@@ -2104,6 +2124,7 @@ func TestNode_Set(t *testing.T) {
 				// A control: go-yaml's encoder writes the mapping in flow style,
 				// where YAML reads it as go-yaml does.
 				yaml: "x: !t\ny: 1\n",
+				opts: []edit.SetOption{edit.Flow()},
 				want: "a: {x: !t {y: 1}}\n",
 			},
 			"int tag on an integer past the range of an int64": {
@@ -2122,7 +2143,7 @@ func TestNode_Set(t *testing.T) {
 				d := newDoc(t, "a: 1\n")
 
 				err := applyAt(t, d, paths.Doc().Child("a"), func(ctx context.Context, n *edit.Node) error {
-					return n.Set(ctx, yamlMarshaler(tc.yaml))
+					return n.Set(ctx, yamlMarshaler(tc.yaml), tc.opts...)
 				})
 				if err != nil && tc.engine {
 					require.ErrorIs(t, err, edit.ErrEngine)
@@ -2280,7 +2301,16 @@ func TestNode_Set_Anchor(t *testing.T) {
 			aliases: []string{"$.f[1]"},
 		},
 		"mapping over a flow mapping": {
+			// The user wrote the old mapping in flow style, so the new one
+			// keeps it.
 			before:  stringtest.LinesLF("a: &v {k: 1}", "b: *v"),
+			path:    "$.a",
+			value:   map[string]any{"k": 2},
+			want:    stringtest.LinesLF("a: &v {k: 2}", "b: *v"),
+			aliases: []string{"$.b"},
+		},
+		"mapping over an empty flow mapping": {
+			before:  stringtest.LinesLF("a: &v {}", "b: *v"),
 			path:    "$.a",
 			value:   map[string]any{"k": 2},
 			want:    stringtest.LinesLF("a: &v", "  k: 2", "b: *v"),
@@ -2500,17 +2530,17 @@ func TestNode_Set_Unsupported(t *testing.T) {
 			// Control: the encoder quotes the key, so go-yaml reads the
 			// string.
 			value: map[string]any{"<<": 1},
-			want:  "a: 1\nb: {\"<<\": 1}\n",
+			want:  stringtest.LinesLF("a: 1", "b:", `  "<<": 1`),
 		},
 		"string key that YAML reads as an explicit key": {
 			// Control: the encoder quotes the key.
 			value: map[string]any{"? x": 1},
-			want:  "a: 1\nb: {\"? x\": 1}\n",
+			want:  stringtest.LinesLF("a: 1", "b:", `  "? x": 1`),
 		},
 		"string key that YAML reads as infinity": {
 			// Control: the encoder quotes the key.
 			value: map[string]any{".inf": 1},
-			want:  "a: 1\nb: {\".inf\": 1}\n",
+			want:  stringtest.LinesLF("a: 1", "b:", `  ".inf": 1`),
 		},
 	}
 
@@ -2894,7 +2924,7 @@ func TestNode_Set_Placement(t *testing.T) {
 			path:   paths.Doc().Child("m").Child("z"),
 			value:  0,
 			opts:   []edit.SetOption{edit.First()},
-			want:   "m: {z: 0}\n",
+			want:   stringtest.LinesLF("m:", "  z: 0"),
 		},
 		"first with the mappings that the Set creates": {
 			before: stringtest.LinesLF("a: 1", "b: 2"),
@@ -3112,6 +3142,426 @@ func TestNode_Set_Placement(t *testing.T) {
 	}
 }
 
+func TestNode_Set_Style(t *testing.T) {
+	t.Parallel()
+
+	one := map[string]int{"k": 1}
+	two := map[string]int{"j": 2, "k": 1}
+
+	tcs := map[string]struct {
+		value  any
+		before string
+		path   paths.Path
+		opts   []edit.SetOption
+		want   string
+	}{
+		"mapping over a scalar": {
+			before: stringtest.LinesLF("mode: none", "b: 1"),
+			path:   paths.Doc().Child("mode"),
+			value:  two,
+			want:   stringtest.LinesLF("mode:", "  j: 2", "  k: 1", "b: 1"),
+		},
+		"mapping over a scalar with a comment": {
+			// The comment stays on the line of the key.
+			before: stringtest.LinesLF("a: x # c", "b: 1"),
+			path:   paths.Doc().Child("a"),
+			value:  two,
+			want:   stringtest.LinesLF("a: # c", "  j: 2", "  k: 1", "b: 1"),
+		},
+		"mapping over an empty value with a comment": {
+			// The blanks before the comment stay as the user wrote them.
+			before: stringtest.LinesLF("resources:   # fill me", "b: 1"),
+			path:   paths.Doc().Child("resources"),
+			value:  map[string]map[string]string{"limits": {"cpu": "200m"}},
+			want:   stringtest.LinesLF("resources:   # fill me", "  limits:", "    cpu: 200m", "b: 1"),
+		},
+		"mapping over an empty value with spaces after its colon": {
+			before: stringtest.LinesLF("a:   ", "b: 1"),
+			path:   paths.Doc().Child("a"),
+			value:  one,
+			want:   stringtest.LinesLF("a:", "  k: 1", "b: 1"),
+		},
+		"mapping over null": {
+			before: stringtest.LinesLF("a: null", "b: 1"),
+			path:   paths.Doc().Child("a"),
+			value:  one,
+			want:   stringtest.LinesLF("a:", "  k: 1", "b: 1"),
+		},
+		"mapping over an empty flow mapping": {
+			before: stringtest.LinesLF("a: {}", "b: 1"),
+			path:   paths.Doc().Child("a"),
+			value:  one,
+			want:   stringtest.LinesLF("a:", "  k: 1", "b: 1"),
+		},
+		"sequence over an empty flow sequence": {
+			before: stringtest.LinesLF("a: []", "b: 1"),
+			path:   paths.Doc().Child("a"),
+			value:  []int{80, 443},
+			want:   stringtest.LinesLF("a:", "  - 80", "  - 443", "b: 1"),
+		},
+		"sequence over a flow sequence with an item": {
+			// The user wrote the old sequence in flow style, so the new one
+			// keeps it.
+			before: stringtest.LinesLF("ports: [80] # web", "b: 1"),
+			path:   paths.Doc().Child("ports"),
+			value:  []int{80, 443},
+			want:   stringtest.LinesLF("ports: [80, 443] # web", "b: 1"),
+		},
+		"mapping in a flow collection": {
+			before: "a: {x: [1], y: 2}\n",
+			path:   paths.MustParse("$.a.x"),
+			value:  one,
+			want:   "a: {x: {k: 1}, y: 2}\n",
+		},
+		"mapping over a block scalar with a comment on its header": {
+			before: stringtest.LinesLF("a: |- # note", "  text", "b: 1"),
+			path:   paths.Doc().Child("a"),
+			value:  one,
+			want:   stringtest.LinesLF("a: # note", "  k: 1", "b: 1"),
+		},
+		"mapping over a scalar below its key": {
+			// The comment after the old value goes after the first line.
+			before: stringtest.LinesLF("a: # top", "  x # c", "b: 1"),
+			path:   paths.Doc().Child("a"),
+			value:  two,
+			want:   stringtest.LinesLF("a: # top", "  j: 2 # c", "  k: 1", "b: 1"),
+		},
+		"mapping over a scalar of several lines": {
+			before: stringtest.LinesLF("a: 'p", "  q' # c", "b: 1"),
+			path:   paths.Doc().Child("a"),
+			value:  one,
+			want:   stringtest.LinesLF("a: # c", "  k: 1", "b: 1"),
+		},
+		"mapping over a tagged scalar": {
+			before: stringtest.LinesLF("a: !t x", "b: 1"),
+			path:   paths.Doc().Child("a"),
+			value:  one,
+			want:   stringtest.LinesLF("a:", "  k: 1", "b: 1"),
+		},
+		"mapping with a string of several lines over a scalar": {
+			before: stringtest.LinesLF("a: x", "b: 1"),
+			path:   paths.Doc().Child("a"),
+			value:  map[string]string{"script": "line1\nline2\n"},
+			want:   stringtest.LinesLF("a:", "  script: |", "    line1", "    line2", "b: 1"),
+		},
+		"mapping over an item": {
+			before: stringtest.LinesLF("s:", "  - x", "  - y"),
+			path:   paths.MustParse("$.s[0]"),
+			value:  two,
+			want:   stringtest.LinesLF("s:", "  - j: 2", "    k: 1", "  - y"),
+		},
+		"mapping over an item with a comment": {
+			// The comment keeps the line of the "-", so the lines go below it.
+			before: stringtest.LinesLF("s:", "  - x # c", "  - y"),
+			path:   paths.MustParse("$.s[0]"),
+			value:  two,
+			want:   stringtest.LinesLF("s:", "  - # c", "    j: 2", "    k: 1", "  - y"),
+		},
+		"mapping over an empty item": {
+			before: stringtest.LinesLF("s:", "  -", "  - y"),
+			path:   paths.MustParse("$.s[0]"),
+			value:  one,
+			want:   stringtest.LinesLF("s:", "  - k: 1", "  - y"),
+		},
+		"sequence over an item": {
+			before: stringtest.LinesLF("s:", "  - x", "  - y"),
+			path:   paths.MustParse("$.s[0]"),
+			value:  []int{1, 2},
+			want:   stringtest.LinesLF("s:", "  - - 1", "    - 2", "  - y"),
+		},
+		"first entry of an empty flow mapping": {
+			// The user wrote the empty mapping, which takes block lines all the
+			// same.
+			before: stringtest.LinesLF("m: {}", "b: 1"),
+			path:   paths.MustParse("$.m.z"),
+			value:  1,
+			want:   stringtest.LinesLF("m:", "  z: 1", "b: 1"),
+		},
+		"first item of an empty flow sequence with a comment": {
+			before: stringtest.LinesLF("s: [] # c", "b: 1"),
+			path:   paths.MustParse("$.s[0]"),
+			value:  "z",
+			want:   stringtest.LinesLF("s: # c", "  - z", "b: 1"),
+		},
+		"first entry of an empty flow mapping with a space inside": {
+			before: stringtest.LinesLF("m: { }", "b: 1"),
+			path:   paths.MustParse("$.m.z"),
+			value:  1,
+			want:   stringtest.LinesLF("m:", "  z: 1", "b: 1"),
+		},
+		"first entry of an empty flow mapping below its key": {
+			// The lines take the place of the line of the mapping.
+			before: stringtest.LinesLF("m:", "  {}", "b: 1"),
+			path:   paths.MustParse("$.m.z"),
+			value:  1,
+			want:   stringtest.LinesLF("m:", "  z: 1", "b: 1"),
+		},
+		"first entry of an empty flow mapping below its key with a comment": {
+			// The comment keeps its line, and the lines go below it.
+			before: stringtest.LinesLF("m:", "  {} # c", "b: 1"),
+			path:   paths.MustParse("$.m.z"),
+			value:  1,
+			want:   stringtest.LinesLF("m:", "  # c", "  z: 1", "b: 1"),
+		},
+		"first entry of an empty flow mapping below a key with a comment": {
+			before: stringtest.LinesLF("m: # top", "  {}", "b: 1"),
+			path:   paths.MustParse("$.m.z"),
+			value:  1,
+			want:   stringtest.LinesLF("m: # top", "  z: 1", "b: 1"),
+		},
+		"first entry of an anchored empty flow mapping below its key": {
+			before: stringtest.LinesLF("m: &x", "  {}", "b: *x"),
+			path:   paths.MustParse("$.m.z"),
+			value:  1,
+			want:   stringtest.LinesLF("m: &x", "  z: 1", "b: *x"),
+		},
+		"first entry of a tagged empty flow mapping below its key": {
+			before: stringtest.LinesLF("m: !t", "  {}", "b: 1"),
+			path:   paths.MustParse("$.m.z"),
+			value:  1,
+			want:   stringtest.LinesLF("m: !t", "  z: 1", "b: 1"),
+		},
+		"first entry of a nested empty flow mapping below its key": {
+			before: stringtest.LinesLF("a:", "  m:", "    {}", "b: 1"),
+			path:   paths.MustParse("$.a.m.z"),
+			value:  1,
+			want:   stringtest.LinesLF("a:", "  m:", "    z: 1", "b: 1"),
+		},
+		"first entry of an empty flow mapping below its key in a CRLF text": {
+			before: stringtest.JoinCRLF("m:", "  {}", "b: 1"),
+			path:   paths.MustParse("$.m.z"),
+			value:  1,
+			want:   stringtest.JoinCRLF("m:", "  z: 1", "b: 1"),
+		},
+		"first entry of an empty flow mapping below its dash": {
+			before: stringtest.LinesLF("s:", "  -", "    {}", "  - y"),
+			path:   paths.MustParse("$.s[0].z"),
+			value:  1,
+			want:   stringtest.LinesLF("s:", "  -", "    z: 1", "  - y"),
+		},
+		"first entry of an empty flow mapping with a line break inside": {
+			before: stringtest.LinesLF("m: {", "  }", "b: 1"),
+			path:   paths.MustParse("$.m.z"),
+			value:  1,
+			want:   stringtest.LinesLF("m:", "  z: 1", "b: 1"),
+		},
+		"first entry of an empty flow mapping with spaces after it": {
+			// The spaces go with the mapping, so the new line does not end
+			// with them.
+			before: stringtest.LinesLF("m: {}   ", "b: 1"),
+			path:   paths.MustParse("$.m.z"),
+			value:  1,
+			want:   stringtest.LinesLF("m:", "  z: 1", "b: 1"),
+		},
+		"first entry of an empty flow mapping after a tab after its dash": {
+			before: stringtest.LinesLF("s:", "  -\t{}", "  - y"),
+			path:   paths.MustParse("$.s[0].z"),
+			value:  1,
+			want:   stringtest.LinesLF("s:", "  - z: 1", "  - y"),
+		},
+		"first entry of an empty flow mapping at the root with a comment": {
+			// The comment keeps its line, and the lines go below it.
+			before: "{} # c\n",
+			path:   paths.MustParse("$.z"),
+			value:  1,
+			want:   stringtest.LinesLF("# c", "z: 1"),
+		},
+		"first entry of an empty flow mapping after the document header": {
+			before: "--- {}\n",
+			path:   paths.MustParse("$.z"),
+			value:  1,
+			want:   stringtest.LinesLF("---", "z: 1"),
+		},
+		"first entry of an empty flow mapping at the root below its anchor": {
+			// Only an anchor on the line of the mapping keeps it in flow style.
+			before: stringtest.LinesLF("&x", "{}"),
+			path:   paths.MustParse("$.z"),
+			value:  1,
+			want:   stringtest.LinesLF("&x", "z: 1"),
+		},
+		"first entry of an empty flow mapping at the root below its tag": {
+			before: stringtest.LinesLF("--- !!map", "{}"),
+			path:   paths.MustParse("$.z"),
+			value:  1,
+			want:   stringtest.LinesLF("--- !!map", "z: 1"),
+		},
+		"first entry of an empty flow mapping in an item below its anchor": {
+			before: stringtest.LinesLF("- &x", "  {}"),
+			path:   paths.MustParse("$[0].z"),
+			value:  1,
+			want:   stringtest.LinesLF("- &x", "  z: 1"),
+		},
+		"first entry of an anchored empty flow mapping in an item": {
+			before: "- &x {}\n",
+			path:   paths.MustParse("$[0].z"),
+			value:  1,
+			want:   "- &x {z: 1}\n",
+		},
+		"first entry of an empty flow mapping after a tab": {
+			// The tab goes with the mapping, so the line of the key ends at the
+			// ":".
+			before: stringtest.LinesLF("m:\t{}", "b: 1"),
+			path:   paths.MustParse("$.m.z"),
+			value:  1,
+			want:   stringtest.LinesLF("m:", "  z: 1", "b: 1"),
+		},
+		"first item of an empty flow sequence after a tab and spaces": {
+			before: stringtest.LinesLF("s:\t[]  ", "b: 1"),
+			path:   paths.MustParse("$.s[0]"),
+			value:  1,
+			want:   stringtest.LinesLF("s:", "  - 1", "b: 1"),
+		},
+		"first entry of an empty flow mapping of a string << key after a tab": {
+			// Go-yaml reads the key as a merge key without the tab.
+			before: stringtest.LinesLF("<<:\t{}", "b: 1"),
+			path:   paths.Doc().Child("<<").Child("z"),
+			value:  1,
+			want:   stringtest.LinesLF("<<:\t", "  z: 1", "b: 1"),
+		},
+		"mapping over a scalar after a tab": {
+			before: stringtest.LinesLF("a:\tx", "b: 1"),
+			path:   paths.Doc().Child("a"),
+			value:  one,
+			want:   stringtest.LinesLF("a:", "  k: 1", "b: 1"),
+		},
+		"mapping over an empty value with a tab after its colon": {
+			before: stringtest.LinesLF("a:\t", "b: 1"),
+			path:   paths.Doc().Child("a"),
+			value:  one,
+			want:   stringtest.LinesLF("a:", "  k: 1", "b: 1"),
+		},
+		"mapping over a scalar after a tab with a comment": {
+			before: stringtest.LinesLF("a:\tx # c", "b: 1"),
+			path:   paths.Doc().Child("a"),
+			value:  one,
+			want:   stringtest.LinesLF("a:\t# c", "  k: 1", "b: 1"),
+		},
+		"mapping over a scalar of a string << key after a tab": {
+			// Go-yaml reads the key as a merge key without the tab.
+			before: stringtest.LinesLF("<<:\tx", "b: 1"),
+			path:   paths.Doc().Child("<<"),
+			value:  one,
+			want:   stringtest.LinesLF("<<:\t", "  k: 1", "b: 1"),
+		},
+		"flow mapping of a marshaler over a block mapping": {
+			// The YAML of the marshaler gives the style of the value.
+			before: stringtest.LinesLF("a:", "  y: 2", "b: 1"),
+			path:   paths.Doc().Child("a"),
+			value:  yamlMarshaler("{x: 1}"),
+			want:   stringtest.LinesLF("a: {x: 1}", "b: 1"),
+		},
+		"first entry of an anchored empty flow mapping after the document header": {
+			// The anchor keeps the mapping in flow style.
+			before: "--- &x {}\n",
+			path:   paths.MustParse("$.z"),
+			value:  1,
+			want:   "--- &x {z: 1}\n",
+		},
+		"mapping with a block scalar over a scalar before a line of spaces": {
+			// The block scalar reads the spaces as text otherwise, so the line
+			// goes empty.
+			before: stringtest.LinesLF("a: x", "   ", "b: 1"),
+			path:   paths.Doc().Child("a"),
+			value:  map[string]string{"s": "x\n"},
+			want:   stringtest.LinesLF("a:", "  s: |", "    x", "", "b: 1"),
+		},
+		"mapping with a block scalar over a scalar before a deeper comment line": {
+			// The lines of the block scalar go one space past the comment line,
+			// which the scalar reads as text otherwise.
+			before: stringtest.LinesLF("a: x", "      # deep", "b: 1"),
+			path:   paths.Doc().Child("a"),
+			value:  map[string]string{"s": "x\n"},
+			want:   stringtest.LinesLF("a:", "  s: |", "       x", "      # deep", "b: 1"),
+		},
+		"flow mapping of a marshaler in a new entry": {
+			// The YAML of the marshaler gives the style of the value.
+			before: "b: 1\n",
+			path:   paths.Doc().Child("a"),
+			value:  yamlMarshaler("{x: 1}"),
+			want:   stringtest.LinesLF("b: 1", "a: {x: 1}"),
+		},
+		"flow over a scalar": {
+			before: stringtest.LinesLF("tags: vegan # diet", "b: 1"),
+			path:   paths.Doc().Child("tags"),
+			value:  []string{"vegan"},
+			opts:   []edit.SetOption{edit.Flow()},
+			want:   stringtest.LinesLF("tags: [vegan] # diet", "b: 1"),
+		},
+		"flow over a block mapping": {
+			before: stringtest.LinesLF("a:", "  x: 1", "b: 1"),
+			path:   paths.Doc().Child("a"),
+			value:  two,
+			opts:   []edit.SetOption{edit.Flow()},
+			want:   stringtest.LinesLF("a: {j: 2, k: 1}", "b: 1"),
+		},
+		"flow over an item": {
+			before: stringtest.LinesLF("s:", "  - x", "  - y"),
+			path:   paths.MustParse("$.s[0]"),
+			value:  one,
+			opts:   []edit.SetOption{edit.Flow()},
+			want:   stringtest.LinesLF("s:", "  - {k: 1}", "  - y"),
+		},
+		"flow in a new entry": {
+			before: "b: 1\n",
+			path:   paths.Doc().Child("a"),
+			value:  one,
+			opts:   []edit.SetOption{edit.Flow()},
+			want:   stringtest.LinesLF("b: 1", "a: {k: 1}"),
+		},
+		"flow with the mappings that the Set creates": {
+			// The new mappings above the value take block style.
+			before: "b: 1\n",
+			path:   paths.MustParse("$.a.b.c"),
+			value:  one,
+			opts:   []edit.SetOption{edit.Flow()},
+			want:   stringtest.LinesLF("b: 1", "a:", "  b:", "    c: {k: 1}"),
+		},
+		"flow in a new item": {
+			before: stringtest.LinesLF("s:", "  - 1"),
+			path:   paths.MustParse("$.s[1]"),
+			value:  one,
+			opts:   []edit.SetOption{edit.Flow()},
+			want:   stringtest.LinesLF("s:", "  - 1", "  - {k: 1}"),
+		},
+		"flow in a new entry of an empty flow mapping": {
+			// The mapping opens to block lines, and the value takes flow style.
+			before: "m: {}\n",
+			path:   paths.MustParse("$.m.z"),
+			value:  one,
+			opts:   []edit.SetOption{edit.Flow()},
+			want:   stringtest.LinesLF("m:", "  z: {k: 1}"),
+		},
+		"flow string with a line break": {
+			before: "a: 1\n",
+			path:   paths.Doc().Child("a"),
+			value:  "x\ny\n",
+			opts:   []edit.SetOption{edit.Flow()},
+			want:   "a: \"x\\ny\\n\"\n",
+		},
+		"flow with a placement option": {
+			before: "b: 1\n",
+			path:   paths.Doc().Child("a"),
+			value:  []int{1},
+			opts:   []edit.SetOption{edit.Flow(), edit.First()},
+			want:   stringtest.LinesLF("a: [1]", "b: 1"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d := newDoc(t, tc.before)
+
+			err := applyAt(t, d, tc.path, func(ctx context.Context, n *edit.Node) error {
+				return n.Set(ctx, tc.value, tc.opts...)
+			})
+
+			requireEdit(t, d, err, "", tc.want)
+		})
+	}
+}
+
 func TestNode_Insert(t *testing.T) {
 	t.Parallel()
 
@@ -3192,7 +3642,43 @@ func TestNode_Insert(t *testing.T) {
 			before: "s: []\n",
 			path:   paths.Doc().Child("s").Index(0),
 			value:  "z",
-			want:   "s: [z]\n",
+			want:   stringtest.LinesLF("s:", "  - z"),
+		},
+		"item of an empty flow sequence with a space inside": {
+			before: "s: [ ]\n",
+			path:   paths.Doc().Child("s").Index(0),
+			value:  "z",
+			want:   stringtest.LinesLF("s:", "  - z"),
+		},
+		"item of an empty flow sequence below its key": {
+			before: stringtest.LinesLF("s:", "  []", "b: 1"),
+			path:   paths.Doc().Child("s").Index(0),
+			value:  "z",
+			want:   stringtest.LinesLF("s:", "  - z", "b: 1"),
+		},
+		"item of an empty flow sequence below its key with a comment": {
+			before: stringtest.LinesLF("s:", "  [] # c", "b: 1"),
+			path:   paths.Doc().Child("s").Index(0),
+			value:  "z",
+			want:   stringtest.LinesLF("s:", "  # c", "  - z", "b: 1"),
+		},
+		"item of an empty flow sequence with a line break inside": {
+			before: stringtest.LinesLF("s: [", "]", "b: 1"),
+			path:   paths.Doc().Child("s").Index(0),
+			value:  "z",
+			want:   stringtest.LinesLF("s:", "  - z", "b: 1"),
+		},
+		"item of an empty flow sequence at the root with a comment": {
+			before: "[] # c\n",
+			path:   paths.Doc().Index(0),
+			value:  "z",
+			want:   stringtest.LinesLF("# c", "- z"),
+		},
+		"item of an empty flow sequence after the document header with a comment": {
+			before: "--- [] # c\n",
+			path:   paths.Doc().Index(0),
+			value:  "z",
+			want:   stringtest.LinesLF("--- # c", "- z"),
 		},
 		"item of an anchored sequence that an alias reads": {
 			before: stringtest.LinesLF("s: &s", "  - a", "t: *s"),

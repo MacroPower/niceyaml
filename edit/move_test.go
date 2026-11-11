@@ -703,7 +703,7 @@ func TestNode_Move(t *testing.T) {
 		"empty entry of a flow mapping into an empty flow sequence": {
 			before: stringtest.LinesLF("f: {a: 1, b:}", "g: []"),
 			moves:  [][2]paths.Path{{paths.MustParse("$.f.b"), paths.MustParse("$.g[0]")}},
-			want:   stringtest.LinesLF("f: {a: 1}", "g: [null]"),
+			want:   stringtest.LinesLF("f: {a: 1}", "g:", "  -"),
 		},
 		"empty entry of a flow mapping into a mapping item of a flow sequence without braces": {
 			before: stringtest.LinesLF("f: {a: 1, b:}", "g: [k: 0]"),
@@ -1397,6 +1397,15 @@ func TestNode_Move_Placement(t *testing.T) {
 			opts:   []edit.SetOption{edit.First()},
 			err: "test.yaml:1:4: $.a: cafe.jacobcolvin.com/v1 moves $.a to $.s[1] first, but s holds " +
 				"a sequence",
+		},
+		"flow style, which a move ignores": {
+			// The value keeps its style, and the option does not place an
+			// entry, so the move of an item passes.
+			before: stringtest.LinesLF("a:", "  x: 1", "s:", "  - y"),
+			path:   paths.Doc().Child("a"),
+			target: paths.Doc().Child("s").Index(1),
+			opts:   []edit.SetOption{edit.Flow()},
+			want:   stringtest.LinesLF("s:", "  - y", "  - x: 1"),
 		},
 		"placement of an item that exists": {
 			before: stringtest.LinesLF("a: 1", "s: [x]"),

@@ -53,8 +53,12 @@
 // its key or its "-" belong to it, so a new entry or item goes after them.
 // A new entry goes after the last entry of its mapping, or where [First],
 // [Before], or [After] places it. Each value that an edit writes takes the
-// indent step of the mapping that holds it. Go strings keep the quotes of
-// the scalars that they replace.
+// indent step of the mapping that holds it. A Set writes a mapping or a
+// sequence on block lines. It writes one in flow style inside a flow
+// collection, over a flow collection that holds an entry or an item, and
+// with [Flow]. Inside the value, the YAML of a MarshalYAML method or a
+// flow struct tag decides the style, as [Node.Set] describes. Go strings
+// keep the quotes of the scalars that they replace.
 //
 // The value of a Set can be a Node. A Node encodes as the value that it
 // decodes to, so a Func copies the value of one place to another:

@@ -118,6 +118,41 @@ type payload struct {
 // The blank lines after an old block scalar with a keep indicator, as in
 // "|+", belong to its text, so they go with it.
 //
+// Set writes a mapping or a sequence on block lines, below its key or after
+// the "-" of its item, whether it creates the value or replaces one. When
+// the old value sits on the line of its key, the comment at the end of
+// that line stays there, as in "resources: # todo". When the old value
+// sits on the line of the "-" of an item, such a comment keeps that line.
+// The lines of the item then all go below it. When the old value starts
+// below its key or its "-", the comment at the end of its line goes after
+// the first line of the new value. Block lines indent by the indent step
+// of the mapping that holds the value. A block sequence under a key
+// indents its "-" as the first such sequence of the user's document does,
+// or one step when the document has none.
+//
+// The value takes flow style on one line inside a flow collection, in
+// place of a flow collection that holds an entry or an item, and with the
+// [Flow] option. Inside the value, a `yaml:",flow"` struct tag or the YAML
+// of a MarshalYAML method decides the style, so a MarshalYAML method that
+// returns "{x: 1}" writes a flow mapping.
+//
+// An empty flow collection, such as "{}", "[]", or "{ }", gives no style.
+// So the first entry or item that a call adds to one outside a flow
+// collection opens it to block lines, whoever wrote it. At the root and in
+// an item of a block sequence, an anchor or a tag on the line of the
+// collection keeps it in flow style, as in "- &x {}". A collection on a
+// line of its own gives that line to the block lines. So they go below its
+// key, its "-", or an anchor or a tag on a line above it. A comment after
+// the collection keeps its line, and the block lines go below the comment.
+// So does the "---" of a document header before a collection at the root.
+//
+// Block lines below a key take the place of the blanks after its ":". When
+// a comment follows the old value, the comment moves to the line of the
+// key after one space, or after a tab that comes right after the ":". The
+// blanks before the comment of an empty value stay as the user wrote
+// them. A tab after the ":" of a plain "<<" key stays, because go-yaml
+// reads that key as a merge key without it.
+//
 // A [Node] as v, or inside v, encodes as the value that it decodes to in
 // the current text, as [Node.MarshalYAML] describes. A Set thus copies the
 // value of another place. The copy does not hold the comments, the quotes,
@@ -264,24 +299,28 @@ func (n *Node) Set(ctx context.Context, v any, opts ...SetOption) error {
 
 	c := n.d.modelStart(n, "sets "+n.path.String(), true)
 
-	mv, where, err := n.set(ctx, v, false, cfg.at)
+	mv, where, err := n.set(ctx, v, false, cfg)
 
 	return n.d.modelEnd(c, err, func() bool { return c.set(mv, where) })
 }
 
 // SetOption configures one call of [Node.Set], or the target of one call
-// of [Node.Move]. Each option places an entry of a mapping, so a call
-// that creates an item of a sequence fails with one.
+// of [Node.Move]. The placement options [First], [Before], and [After]
+// place an entry of a mapping, so a call that creates an item of a
+// sequence fails with one. [Flow] sets the style of the value of a Set.
 //
 // Options:
 //   - [First]
 //   - [Before]
 //   - [After]
+//   - [Flow]
 type SetOption func(*setConfig)
 
 // setConfig holds the settings that each [SetOption] gives a Set.
 type setConfig struct {
 	at placement
+	// Whether the value goes in flow style, as [Flow] writes it.
+	flow bool
 }
 
 // placeKind is where a call puts the entry that it creates in a mapping.
@@ -372,12 +411,26 @@ func After(key string) SetOption {
 	}
 }
 
+// Flow is a [SetOption] that writes the value of a Set in flow style on
+// one line, as in "tags: [vegan]". The line is that of the key or the "-"
+// of the value, or that of the old value when the old value starts below
+// them. A string with a line break goes in double quotes there. The value
+// of a Set inside a flow collection takes flow style without the option.
+// When the Set creates mappings above the value, those mappings take block
+// style, and the value goes in flow style inside them. A [Node.Move]
+// ignores the option and keeps the style of the value that it moves.
+func Flow() SetOption {
+	return func(c *setConfig) {
+		c.flow = true
+	}
+}
+
 // set is [Node.Set], but it also sets a protected value when protected is
-// true. It puts an entry that it creates at the place that at gives. It
-// returns the value of v as the model reads it, from the encode that gives
-// the text of v, as the edge to its place holds it. It also returns the
-// place of the new entry as the model reads it.
-func (n *Node) set(ctx context.Context, v any, protected bool, at placement) (*edge, modelPlace, error) {
+// true. It writes v as cfg says, and puts an entry that it creates at the
+// place that cfg gives. It returns the value of v as the model reads it,
+// from the encode that gives the text of v, as the edge to its place holds
+// it. It also returns the place of the new entry as the model reads it.
+func (n *Node) set(ctx context.Context, v any, protected bool, cfg setConfig) (*edge, modelPlace, error) {
 	d := n.d
 
 	p, err := n.place(useCreate, "sets")
@@ -412,9 +465,9 @@ func (n *Node) set(ctx context.Context, v any, protected bool, at placement) (*e
 	)
 
 	if p.exists {
-		mv, err = d.setExisting(ctx, n, p, v)
+		mv, err = d.setExisting(ctx, n, p, v, cfg.flow)
 	} else {
-		mv, where, err = d.setCreated(ctx, n, p, v, at)
+		mv, where, err = d.setCreated(ctx, n, p, v, cfg)
 	}
 
 	if err != nil {
@@ -513,7 +566,7 @@ func (n *Node) insert(ctx context.Context, v any) (*edge, error) {
 
 	origin := d.addNote(d.createdNote(holder, named))
 
-	mv, err := d.insertItem(ctx, n, holderPath, holder, seq, last.Index, v, origin)
+	mv, err := d.insertItem(ctx, n, holderPath, holder, seq, last.Index, v, noFlow, origin)
 	if err != nil {
 		return nil, err
 	}
@@ -608,19 +661,19 @@ func (d *Doc) readersInside(s *spot, at *reached, p *place) []*Node {
 	return out
 }
 
-// setExisting replaces the value of p, the place of h, with v. It returns
-// the value of v as the model reads it, as [Node.set] does.
-func (d *Doc) setExisting(ctx context.Context, h *Node, p *place, v any) (*edge, error) {
+// setExisting replaces the value of p, the place of h, with v, in flow
+// style when flow is true. It returns the value of v as the model reads it,
+// as [Node.set] does.
+func (d *Doc) setExisting(ctx context.Context, h *Node, p *place, v any, flow bool) (*edge, error) {
 	d.recordEdit(p, "sets "+h.path.String(), "")
 
-	return d.replaceValue(ctx, h, p, v)
+	return d.replaceValue(ctx, h, p, v, flow)
 }
 
-// setCreated creates the value of p, the place of h, as v, and puts the
-// entry that it creates at the place that at gives. It returns the value
-// of v and the place of the entry as the model reads them, as [Node.set]
-// does.
-func (d *Doc) setCreated(ctx context.Context, h *Node, p *place, v any, at placement) (*edge, modelPlace, error) {
+// setCreated creates the value of p, the place of h, as v, as cfg says. It
+// returns the value of v and the place of the entry as the model reads
+// them, as [Node.set] does.
+func (d *Doc) setCreated(ctx context.Context, h *Node, p *place, v any, cfg setConfig) (*edge, modelPlace, error) {
 	// A merge key can bring in the key that the edit creates in its source
 	// over an entry on the path of h. The path then does not reach the new
 	// value, so the check of the merges names the edit at the value above
@@ -632,7 +685,7 @@ func (d *Doc) setCreated(ctx context.Context, h *Node, p *place, v any, at place
 		d.recordEdit(holder, "sets "+h.path.String(), "")
 	}
 
-	mv, where, err := d.createValue(ctx, h, p, v, at)
+	mv, where, err := d.createValue(ctx, h, p, v, cfg)
 	if err != nil {
 		return nil, modelPlace{}, err
 	}
@@ -646,7 +699,8 @@ func (d *Doc) setCreated(ctx context.Context, h *Node, p *place, v any, at place
 }
 
 // renderPayload returns v as a payload for a place whose block collections
-// indent by step, encoded under the marshalers ms. The text that the payload writes takes
+// indent by step, encoded under the marshalers ms, in flow style from the
+// depth fd on, as [render] writes it. The text that the payload writes takes
 // origin. A Go string keeps the quotes of old, the token of the scalar
 // that it replaces, or nil, as [scalarStyle] writes it. A mapping of v that
 // holds two keys that a decode reads as one fails the call of h before it
@@ -659,11 +713,11 @@ func (d *Doc) setCreated(ctx context.Context, h *Node, p *place, v any, at place
 // those checks of go-yaml. The problem of such a character binds as
 // [Doc.valueBug] binds it, and so does each problem that matches errEncoder.
 func (d *Doc) renderPayload(
-	ctx context.Context, h *Node, v any, step, origin int, old *token.Token, ms []encoder.Marshaler,
+	ctx context.Context, h *Node, v any, fd flowDepth, step, origin int, old *token.Token, ms []encoder.Marshaler,
 ) (payload, error) {
 	seqIndent := d.sequenceIndent()
 
-	r, err := render(ctx, v, step, seqIndent, ms)
+	r, err := render(ctx, v, step, seqIndent, fd, ms)
 
 	// A construct in the YAML of a marshaler of the value can make go-yaml
 	// fail on the text of the encode, as an alias whose anchor the YAML
@@ -966,9 +1020,10 @@ func renderedLine(text string, shift, origin int) line {
 	return line{text: newRun(trimmed, origin), indent: shift + len(text) - len(trimmed)}
 }
 
-// replaceValue replaces the value of p with v. It returns the value of v
-// as the model reads it, as [Node.set] does.
-func (d *Doc) replaceValue(ctx context.Context, h *Node, p *place, v any) (*edge, error) {
+// replaceValue replaces the value of p with v, in flow style when flow is
+// true. It returns the value of v as the model reads it, as [Node.set]
+// does.
+func (d *Doc) replaceValue(ctx context.Context, h *Node, p *place, v any, flow bool) (*edge, error) {
 	n := d.setNote(p, "sets "+h.path.String())
 
 	// The token of a new scalar or alias, and of a new item of a flow
@@ -985,7 +1040,12 @@ func (d *Doc) replaceValue(ctx context.Context, h *Node, p *place, v any) (*edge
 	origin := d.addNote(inside)
 	step := d.stepOf(p, h.path)
 
-	pl, err := d.renderPayload(ctx, h, v, step, origin, scalarToken(p.value), d.cfg.marshalers)
+	fd := noFlow
+	if flow {
+		fd = 0
+	}
+
+	pl, err := d.renderPayload(ctx, h, v, fd, step, origin, scalarToken(p.value), d.cfg.marshalers)
 	if err != nil {
 		return nil, err
 	}
@@ -1132,6 +1192,20 @@ func (d *Doc) separated(at int) (int, string) {
 	return at, " "
 }
 
+// tabKeepsKey reports whether a tab right past the ":" of entry keeps the
+// key that go-yaml reads. Go-yaml reads a plain "<<" key before ":" and a
+// tab as a string key. It reads one before ":" and a line break as a merge
+// key, as [Doc.separated] describes.
+func tabKeepsKey(entry *ast.MappingValueNode) bool {
+	if entry == nil {
+		return false
+	}
+
+	k, ok := astnode.Content(entry.Key).(*ast.StringNode)
+
+	return ok && k.Value == "<<" && k.GetToken().Type == token.StringType
+}
+
 // valueEdits returns the edits that replace the value of p with pl, whose
 // bytes that join its lines take origin. A block mapping of pl that
 // replaces a value on the line of its key indents by step.
@@ -1143,8 +1217,9 @@ func (d *Doc) valueEdits(p *place, pl payload, origin, step int) []edit {
 	oldBlock := !p.flow && p.value != nil && isBlockCollection(p.value)
 
 	// A flow collection holds flow style, and so does a collection that
-	// replaces a scalar or a flow collection.
-	if p.flow || !oldBlock && pl.inline == nil {
+	// replaces a flow collection with an entry or an item, which the user
+	// wrote in that style.
+	if p.flow || filledFlow(p.value) && (pl.inline == nil || pl.collection) {
 		pl.inline, pl.lines = &pl.flow, nil
 	}
 
@@ -1154,6 +1229,11 @@ func (d *Doc) valueEdits(p *place, pl payload, origin, step int) []edit {
 	var edits []edit
 
 	switch {
+	case !oldBlock && pl.inline == nil:
+		// A block collection replaces a value that does not hold one, so its
+		// lines go below the key or after the "-".
+		edits = d.blockEdits(p, pl, origin, keyCol, brk)
+
 	case !oldBlock || d.lineOf(d.contentStart(p)) == keyLine:
 		var text run
 
@@ -1294,6 +1374,130 @@ func (d *Doc) valueEdits(p *place, pl payload, origin, step int) []edit {
 	}
 
 	return edits
+}
+
+// filledFlow reports whether node holds a flow mapping or a flow sequence
+// with an entry or an item, under its anchors and tags. Flow style is the
+// only style of an empty collection, so an empty one such as "{}" says
+// nothing of the style of the text around it.
+func filledFlow(node ast.Node) bool {
+	switch n := astnode.Content(node).(type) {
+	case *ast.MappingNode:
+		return n.IsFlowStyle && len(n.Values) > 0
+	case *ast.SequenceNode:
+		return n.IsFlowStyle && len(n.Values) > 0
+	default:
+		return false
+	}
+}
+
+// blockEdits returns the edits that replace the value of p with pl, a
+// block collection, where the value of p does not hold a block collection.
+// The bytes that join the lines of pl take origin, and its line breaks are
+// brk. The key or the "-" of p starts at the column keyCol. The lines of an
+// entry go below its key. The first line of an item goes after its "-",
+// as a new item writes it. A comment at the end of the line of the old
+// value, or of the indicator of an old block scalar, stays on the line of
+// the key or the "-". The lines of an item then all go below it. A value
+// that the user wrote below its key or its "-" leaves the lines above it
+// as they are. Such a comment then goes after the first line of pl. When a
+// block scalar at the end of pl reads a line after it, such as a comment
+// line that indents deeper, [Doc.keepStrings] writes the scalar again past
+// that line.
+func (d *Doc) blockEdits(p *place, pl payload, origin, keyCol int, brk string) []edit {
+	vs, ve := d.valueStart(p), d.valueEnd(p)
+	empty := p.value == nil || isImplicitNull(p.value)
+
+	// The offset right past the ":" of the entry or the "-" of the item.
+	from := d.valueEnd(&place{entry: p.entry, seq: p.seq, index: p.index})
+	item := p.entry == nil
+
+	end := ve
+
+	var comment int
+
+	switch lit, ok := astnode.Content(p.value).(*ast.LiteralNode); {
+	case empty:
+		comment = d.trailingComment(from)
+
+	case ok:
+		end = d.blockScalarEnd(lit, ve)
+		comment = d.headerComment(lit)
+
+	default:
+		comment = d.trailingComment(end)
+	}
+
+	cut := d.lineEnd(d.lineOf(end))
+
+	var commentRun *run
+
+	if comment >= 0 {
+		r := d.keptRun(comment, d.lineEnd(d.lineOf(comment)))
+		commentRun = &r
+	}
+
+	// The lines of an entry indent from its key. Those of an item start at
+	// the column after its "- ".
+	col := keyCol
+	if item {
+		col = keyCol + 2 - pl.lines[0].indent
+	}
+
+	var (
+		start int
+		text  run
+	)
+
+	switch {
+	case !empty && d.lineOf(vs) > d.lineOf(from):
+		start = d.lineEnd(d.lineOf(vs) - 1)
+		first := pl.lines[0].text
+
+		if commentRun != nil {
+			first = appendRun(appendRun(first, newRun(" ", origin)), *commentRun)
+		}
+
+		lines := slices.Clone(pl.lines)
+		lines[0].text = first
+		text = prefixRun(brk, d.joinLines(lines, col, brk), origin)
+
+	case item && commentRun == nil:
+		start = from
+		text = prefixRun(" ", pl.lines[0].text, origin)
+
+		if len(pl.lines) > 1 {
+			text = appendRun(text, prefixRun(brk, d.joinLines(pl.lines[1:], col, brk), origin))
+		}
+
+	default:
+		// A tab after the ":" of an entry stays before a comment, and so does
+		// one that keeps the key that go-yaml reads. Otherwise the line of
+		// the key ends at the ":".
+		start = from
+
+		sep := " "
+		if !item && (commentRun != nil || tabKeepsKey(p.entry)) {
+			start, sep = d.separated(from)
+		}
+
+		var head run
+
+		switch {
+		case commentRun != nil && empty:
+			// The blanks before the comment of an empty value stay as the
+			// user wrote them.
+			head = d.keptRun(start, cut)
+		case commentRun != nil:
+			head = prefixRun(sep, *commentRun, origin)
+		}
+
+		text = appendRun(head, prefixRun(brk, d.joinLines(pl.lines, col, brk), origin))
+	}
+
+	cut, text = d.keptLinesEnd(pl, cut, text, brk, origin)
+
+	return []edit{{start: start, end: cut, text: text.text, origins: text.origins}}
 }
 
 // headColumn returns the column from which the lines of pl indent. Here pl
@@ -1618,9 +1822,11 @@ func prefixRun(text string, r run, origin int) run {
 }
 
 // createValue creates the value of p, and the mappings above it that the
-// document lacks. It returns the value of v as the model reads it, as
-// [Node.set] does.
-func (d *Doc) createValue(ctx context.Context, h *Node, p *place, v any, at placement) (*edge, modelPlace, error) {
+// document lacks, as cfg says. It returns the value of v as the model
+// reads it, as [Node.set] does.
+func (d *Doc) createValue(ctx context.Context, h *Node, p *place, v any, cfg setConfig) (*edge, modelPlace, error) {
+	at := cfg.at
+
 	var sels []paths.Selector
 
 	for sel := range h.path.Selectors() {
@@ -1670,6 +1876,13 @@ func (d *Doc) createValue(ctx context.Context, h *Node, p *place, v any, at plac
 		wrapped = map[string]any{sels[i].Name: wrapped}
 	}
 
+	// The mappings above v stay in block style, so v goes in flow style
+	// inside them.
+	fd := noFlow
+	if cfg.flow {
+		fd = flowDepth(len(sels) - 1 - p.found)
+	}
+
 	var (
 		mv    *edge
 		where modelPlace
@@ -1685,9 +1898,9 @@ func (d *Doc) createValue(ctx context.Context, h *Node, p *place, v any, at plac
 	origin := d.addNote(d.createdNote(holder, "sets "+h.path.String()))
 
 	if next.Kind == paths.SelectorChild {
-		mv, err = d.insertEntry(ctx, h, holderPath, holder, content, entries, next.Name, wrapped, origin, where)
+		mv, err = d.insertEntry(ctx, h, holderPath, holder, content, entries, next.Name, wrapped, fd, origin, where)
 	} else {
-		mv, err = d.appendItem(ctx, h, holderPath, holder, seq, wrapped, origin)
+		mv, err = d.insertItem(ctx, h, holderPath, holder, seq, len(seq.Values), wrapped, fd, origin)
 	}
 
 	if err != nil {
@@ -1852,7 +2065,8 @@ func (d *Doc) createdNote(holder *place, call string) note {
 }
 
 // insertEntry inserts the entry key with value into the mapping content at
-// holderPath, at the place that where gives. It returns value as the
+// holderPath, at the place that where gives. The value goes in flow style
+// from the depth fd on, as [render] writes it. It returns value as the
 // model reads it, as [Node.set] does.
 func (d *Doc) insertEntry(
 	ctx context.Context,
@@ -1863,6 +2077,7 @@ func (d *Doc) insertEntry(
 	entries []*ast.MappingValueNode,
 	key string,
 	value any,
+	fd flowDepth,
 	origin int,
 	where modelPlace,
 ) (*edge, error) {
@@ -1871,7 +2086,7 @@ func (d *Doc) insertEntry(
 	keyText := renderKey(ctx, key, nil, flow)
 	step := d.stepOf(holder, holderPath)
 
-	pl, err := d.renderPayload(ctx, h, value, step, origin, nil, d.cfg.marshalers)
+	pl, err := d.renderPayload(ctx, h, value, fd, step, origin, nil, d.cfg.marshalers)
 	if err != nil {
 		return nil, err
 	}
@@ -2112,16 +2327,18 @@ func (d *Doc) entryLines(key run, pl payload, col int, brk string) run {
 	return out.run()
 }
 
-// opening is an empty flow collection that an edit wrote in block
-// context. The collection takes block style when a later edit adds to it.
+// opening is an empty flow collection in block context. The collection
+// takes block style when an edit adds to it.
 type opening struct {
-	// The bytes that the block lines take the place of: the collection and
-	// the space before it.
+	// The bytes that the block lines take the place of. On the line of the
+	// key or the "-", they are the collection and the blanks before it.
+	// Below the key or the "-", they are the line of the collection, or
+	// the collection and the blanks after it when a comment follows it.
 	start int
 	end   int
 	// The offset where the block lines go: the end of the collection, or
 	// the end of the comment after it on its line. That comment thus stays
-	// on the line of the key, above the lines.
+	// on its line, above the lines.
 	at int
 	// The start of the key or the "-" of the place that holds it, or of the
 	// collection at the root.
@@ -2133,6 +2350,9 @@ type opening struct {
 	// Whether the first line goes after the "-" of an item. A comment after
 	// the collection keeps the line of the "-", so the lines go below it.
 	dash bool
+	// Whether the lines of the root go below the line of the collection,
+	// which holds a "---" before it or a comment after it.
+	apart bool
 }
 
 // column returns the column of the keys or the "-" of the block lines.
@@ -2156,13 +2376,13 @@ func (o opening) column(d *Doc, step int, indent bool) int {
 // o joined with brk, in place of the collection. The lines of an entry go
 // below its key. The first line of an item goes after its "-", unless a
 // comment after the collection keeps that line. The lines of the root take
-// the place of the collection. The bytes that join the lines to the text
-// before them take origin.
+// the place of the collection, or go below its line when o is apart. The
+// bytes that join the lines to the text before them take origin.
 func (o opening) edits(lines run, brk string, origin int) []edit {
 	text := prefixRun(brk, lines, origin)
 
 	switch {
-	case o.root:
+	case o.root && !o.apart:
 		text = lines
 	case o.dash:
 		trimmed := strings.TrimLeft(lines.text, " ")
@@ -2193,12 +2413,16 @@ func (d *Doc) openingEdits(o opening, lines run, brk string, pl payload, origin 
 }
 
 // blockOpening returns the empty flow collection content, the value of
-// holder, when an edit wrote it in block context. The holder is an entry,
-// the root, or an item of a block sequence. At the root and in an item,
-// the collection must stand alone after the start of its line or the "- ",
-// without an anchor or a tag before it. The root also takes no comment
-// after it. When holder reads content through an alias, the entry or the
-// item that holds content in the text takes the place of holder.
+// holder, when it lies in block context. The collection holds only blanks
+// between its brackets, as in "{}" or "{ }". The holder is an entry, the
+// root, or an item of a block sequence. At the root, the collection must
+// start its line or follow the "---" of the document header. In an item,
+// it must follow the "-" and the blanks after it. In both, an anchor or a
+// tag on the line of the collection keeps it in flow style. A collection
+// of an entry or an item can also start a line below the key or the "-".
+// One at the root can start a line below its anchor or its tag. When
+// holder reads content through an alias, the entry or the item that holds
+// content in the text takes the place of holder.
 func (d *Doc) blockOpening(holder *place, content ast.Node) (opening, bool) {
 	if astnode.Content(holder.value) != content {
 		in, ok := d.holderOf(content)
@@ -2215,7 +2439,7 @@ func (d *Doc) blockOpening(holder *place, content ast.Node) (opening, bool) {
 	}
 
 	s, ok := d.nodeSpan(content)
-	if !ok || s.end-s.start != 2 || d.origin[s.start] >= 0 {
+	if !ok || s.end-s.start < 2 || strings.Trim(d.cur[s.start+1:s.end-1], " \t\r\n") != "" {
 		return opening{}, false
 	}
 
@@ -2235,18 +2459,78 @@ func (d *Doc) blockOpening(holder *place, content ast.Node) (opening, bool) {
 
 	c := d.trailingComment(s.end)
 
+	// The blanks after the collection go with it, so they do not end the
+	// last of the lines.
+	if end := d.lineEnd(d.lineOf(s.end)); c < 0 && strings.Trim(d.cur[s.end:end], " \t") == "" {
+		o.end, o.at = end, end
+	}
+
+	lineStart := d.lineStart(d.lineOf(s.start))
+
+	// The collection starts a line below its key or its "-".
+	below := !o.root && o.start == lineStart
+
+	// The blanks between the "-" of an item and the collection go with it,
+	// as a tab there does.
+	if o.item && !below {
+		if strings.Trim(d.cur[o.keyStart+1:o.start], " \t") != "" {
+			return opening{}, false
+		}
+
+		o.start = o.keyStart + 1
+	}
+
 	switch {
-	case o.root && (o.start != d.lineStart(d.lineOf(s.start)) || c >= 0):
-		return opening{}, false
 	case o.root:
-		o.keyStart = o.start
-	case o.item && o.start != o.keyStart+1:
-		return opening{}, false
+		return d.rootOpening(o, s, c)
+	case below && c >= 0:
+		// The comment keeps its line and its indent, and the lines go below
+		// it.
+		o.start, o.end, o.at = s.start, c, d.lineEnd(d.lineOf(c))
+	case below:
+		// The line of the collection goes, so the lines take its place.
+		o.start = d.lineEnd(d.lineOf(s.start) - 1)
 	case c >= 0:
 		o.at = d.lineEnd(d.lineOf(c))
-	default:
-		o.dash = o.item
+	case o.item:
+		o.dash = true
+	case !tabKeepsKey(holder.entry):
+		// The blanks after the ":" go with the collection, so the line of the
+		// key ends at the ":".
+		for o.start > 0 && (d.cur[o.start-1] == ' ' || d.cur[o.start-1] == '\t') {
+			o.start--
+		}
 	}
+
+	return o, true
+}
+
+// rootOpening returns o, the opening of the collection at the root whose
+// bytes are s, with the place of its block lines. The comment after the
+// collection on its line starts at c, or c is -1. The collection must
+// start its line, or follow the "---" of the document header. A comment
+// after it, or the "---", keeps its line, and the lines go below it. An
+// anchor or a tag on the line of the collection keeps it in flow style. A
+// collection can start a line below its anchor or its tag.
+func (d *Doc) rootOpening(o opening, s span, c int) (opening, bool) {
+	lineStart := d.lineStart(d.lineOf(s.start))
+	header := strings.TrimRight(d.cur[lineStart:o.start], " \t") == "---"
+
+	switch {
+	case header:
+		o.start, o.apart = lineStart+len("---"), true
+	case o.start != lineStart:
+		return opening{}, false
+	case c >= 0:
+		// The comment keeps its indent.
+		o.start, o.end, o.apart = s.start, c, true
+	}
+
+	if c >= 0 {
+		o.at = d.lineEnd(d.lineOf(c))
+	}
+
+	o.keyStart = o.start
 
 	return o, true
 }
@@ -2321,24 +2605,10 @@ func (d *Doc) skipBlank(off, end int) int {
 	return end
 }
 
-// appendItem appends value as the last item of the sequence seq, the
-// value of holder. It returns value as the model reads it, as [Node.set]
-// does.
-func (d *Doc) appendItem(
-	ctx context.Context,
-	h *Node,
-	holderPath paths.Path,
-	holder *place,
-	seq *ast.SequenceNode,
-	value any,
-	origin int,
-) (*edge, error) {
-	return d.insertItem(ctx, h, holderPath, holder, seq, len(seq.Values), value, origin)
-}
-
 // insertItem inserts value as the item at index of the sequence seq, the
 // value of holder, before the item there. An index past the last item
-// appends the value. It returns value as the model reads it, as
+// appends the value. The value goes in flow style from the depth fd on,
+// as [render] writes it. It returns value as the model reads it, as
 // [Node.set] does.
 func (d *Doc) insertItem(
 	ctx context.Context,
@@ -2348,11 +2618,12 @@ func (d *Doc) insertItem(
 	seq *ast.SequenceNode,
 	index int,
 	value any,
+	fd flowDepth,
 	origin int,
 ) (*edge, error) {
 	step := d.stepOf(holder, holderPath)
 
-	pl, err := d.renderPayload(ctx, h, value, step, origin, nil, d.cfg.marshalers)
+	pl, err := d.renderPayload(ctx, h, value, fd, step, origin, nil, d.cfg.marshalers)
 	if err != nil {
 		return nil, err
 	}
