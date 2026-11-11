@@ -149,10 +149,12 @@ type mergeConfig struct {
 // types of the program the same way whichever files exist.
 //
 // For any other layer that the layers do not hold, NewSourceFromLayers
-// returns an error that wraps [ErrUnknownLayer]. It compares pointers, so
-// layer must be the [*Source] or the [*Node] that the layers hold. A Node
-// that another call of [Node.At] returns does not match. The last of
-// several MergeAs options applies.
+// returns an error that wraps [ErrUnknownLayer]. It compares the
+// document that each layer merges, so a [*Source] matches the [*Node]
+// that its [Source.Document] returns, and that Node matches the Source.
+// A Node that another call of [Node.At] returns does not match, and
+// neither does a Source of the same text. The last of several MergeAs
+// options applies.
 func MergeAs(layer Layer) MergeOption {
 	return func(c *mergeConfig) {
 		c.as = layer
@@ -510,9 +512,10 @@ func (s *Source) resolveLayer() resolvedLayer {
 
 // resolveLayers returns the layers of given that add a layer, in the
 // order of given. It also returns the index among them of the layer that
-// the merged Source stands for. That layer is as, or the lowest at index 0
-// when as is nil, a nil Source, or a nil Node. It returns an error that
-// wraps [ErrUnknownLayer] when given does not hold as.
+// the merged Source stands for. That layer is the first that resolves to
+// the document of as, or the lowest at index 0 when as is nil, a nil
+// Source, or a nil Node. It returns an error that wraps [ErrUnknownLayer]
+// when no layer of given resolves to that document.
 func resolveLayers[L Layer](given []L, as Layer) ([]resolvedLayer, int, error) {
 	var named resolvedLayer
 
@@ -538,7 +541,7 @@ func resolveLayers[L Layer](given []L, as Layer) ([]resolvedLayer, int, error) {
 			continue
 		}
 
-		if identity < 0 && layer == as {
+		if identity < 0 && resolved.source == named.source && resolved.node == named.node {
 			identity = len(layers)
 		}
 

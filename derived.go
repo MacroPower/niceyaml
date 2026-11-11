@@ -1,8 +1,6 @@
 package niceyaml
 
 import (
-	"slices"
-
 	"go.jacobcolvin.com/niceyaml/internal/excerpt"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -60,16 +58,21 @@ type Place struct {
 // it is, for a text that keeps every line and column of home.
 //
 // The Source starts from the settings of the Source of home, its name,
-// its file path, its references, and its limits among them. It applies
-// opts over them. The unmarshalers of a [WithUnmarshalers] in opts go
-// ahead of those of home, so a function of home for a type replaces one
-// of opts. The unmarshalers of a Source replace those of a
-// [go.jacobcolvin.com/niceyaml/manifest.Registry] the same way. The byte
-// limit and the depth limit stay those of home, as [Source.ByteLimit] and
-// [Source.DepthLimit] report them. A text that grows past them fails as
-// the text of home fails. [WithoutLimits] turns them off for a copy that
-// passed them already. Such a Source keeps the bounds that the limits of
-// home put on its aliases, because the text holds the aliases of home.
+// its file path, its references, its unmarshalers, and its limits among
+// them. It applies opts over them, as [Source.WithText] does. The
+// unmarshalers of a [WithUnmarshalers] in opts thus apply over those of
+// home. A function of opts for a type replaces one of home, and a nil
+// function removes it. A program that puts defaults of its own under
+// those of home passes both lists in that order:
+//
+//	niceyaml.WithUnmarshalers(slices.Concat(defaults, doc.Source().Unmarshalers())...)
+//
+// The byte limit and the depth limit stay those of home, as
+// [Source.ByteLimit] and [Source.DepthLimit] report them. A text that
+// grows past them fails as the text of home fails. [WithoutLimits] turns
+// them off for a copy that passed them already. Such a Source keeps the
+// bounds that the limits of home put on its aliases, because the text
+// holds the aliases of home.
 //
 // The example expands environment variables before the parse and binds
 // each error at the range that a map of the expansion gives:
@@ -99,14 +102,9 @@ func NewSourceFromDerived(text string, home *Node, locate func(Located) Place, o
 	cfg := home.source.pinned()
 	cfg.aliasBudget = home.doc.state.Budget()
 
-	own := cfg.unmarshalers
-	cfg.unmarshalers = nil
-
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-
-	cfg.unmarshalers = slices.Concat(cfg.unmarshalers, own)
 
 	src := newStringSource(text, cfg)
 	src.relocation = &relocation{home: home, locate: locate}

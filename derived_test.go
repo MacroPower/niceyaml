@@ -3,6 +3,7 @@ package niceyaml_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -387,7 +388,7 @@ func TestNewSourceFromDerived(t *testing.T) {
 		yamltest.AssertBoundTo(t, home, err)
 	})
 
-	t.Run("the unmarshalers of home apply over those of opts", func(t *testing.T) {
+	t.Run("the unmarshalers of opts apply over those of home", func(t *testing.T) {
 		t.Parallel()
 
 		type port int
@@ -406,19 +407,45 @@ func TestNewSourceFromDerived(t *testing.T) {
 		home := niceyaml.NewSourceFromString("p: 0\n", niceyaml.WithUnmarshalers(ofHome))
 		doc := yamltest.Document(t, home)
 
-		work := niceyaml.NewSourceFromDerived("p: 0\n", doc, nil, niceyaml.WithUnmarshalers(ofOpts))
+		tcs := map[string]struct {
+			opts []niceyaml.SourceOption
+			want port
+		}{
+			"no option keeps the function of home": {
+				want: 1,
+			},
+			"a function of opts replaces the one of home": {
+				opts: []niceyaml.SourceOption{niceyaml.WithUnmarshalers(ofOpts)},
+				want: 2,
+			},
+			"a nil function of opts removes the one of home": {
+				opts: []niceyaml.SourceOption{niceyaml.WithUnmarshalers(niceyaml.CustomUnmarshaler[port](nil))},
+				want: 0,
+			},
+			"defaults under the unmarshalers of home keep the function of home": {
+				opts: []niceyaml.SourceOption{
+					niceyaml.WithUnmarshalers(slices.Concat([]niceyaml.Unmarshaler{ofOpts}, home.Unmarshalers())...),
+				},
+				want: 1,
+			},
+		}
 
-		got, err := work.Decode[map[string]port](t.Context())
-		require.NoError(t, err)
-		assert.Equal(t, map[string]port{"p": 1}, got)
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		// Without a function of home for the type, the one of opts reads it.
-		plain := yamltest.Document(t, niceyaml.NewSourceFromString("p: 0\n"))
-		work = niceyaml.NewSourceFromDerived("p: 0\n", plain, nil, niceyaml.WithUnmarshalers(ofOpts))
+				work := niceyaml.NewSourceFromDerived("p: 0\n", doc, nil, tc.opts...)
 
-		got, err = work.Decode[map[string]port](t.Context())
-		require.NoError(t, err)
-		assert.Equal(t, map[string]port{"p": 2}, got)
+				got, err := work.Decode[map[string]port](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, map[string]port{"p": tc.want}, got)
+
+				// WithText applies the same options the same way.
+				got, err = home.WithText("p: 0\n", tc.opts...).Decode[map[string]port](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, map[string]port{"p": tc.want}, got)
+			})
+		}
 	})
 
 	t.Run("a nil home binds in the Source itself", func(t *testing.T) {

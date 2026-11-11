@@ -124,8 +124,9 @@ func (d *Doc) parse() error {
 
 	defer func() { d.own, d.capture = own, held }()
 
+	us := slices.Concat(d.cfg.unmarshalers, d.user.Source().Unmarshalers())
 	src := niceyaml.NewSourceFromDerived(lexed(d.cur+d.tail), d.user, d.locate,
-		niceyaml.WithUnmarshalers(d.cfg.unmarshalers...), niceyaml.WithoutLimits())
+		niceyaml.WithUnmarshalers(us...), niceyaml.WithoutLimits())
 
 	d.src = src
 	d.curLines = lineStarts(d.cur)
