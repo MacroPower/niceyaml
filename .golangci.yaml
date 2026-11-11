@@ -181,6 +181,8 @@ linters:
       settings:
         hugeParam:
           sizeThreshold: 256
+        rangeValCopy:
+          sizeThreshold: 256
 
     godoclint:
       default: all

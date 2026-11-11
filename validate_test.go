@@ -8405,7 +8405,7 @@ func TestEach(t *testing.T) {
 					assert.Equal(t, message, problem.Message())
 					assert.Equal(t, "decode price", problem.Context())
 
-					labels = append(labels, problem.Label)
+					labels = append(labels, problem.Label())
 				}
 
 				assert.Equal(t, tc.want, labels)

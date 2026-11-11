@@ -36,7 +36,7 @@ func detachedRows(err error) []string {
 
 		rows = append(rows, fmt.Sprintf(
 			"%q msg=%q path=%v,%t pos=%v,%t range=%v,%t doc=%d,%t name=%q file=%q invalid=%t warning=%t detail=%t",
-			node.Label, node.Message(), path, hasPath, pos, hasPos, rng, hasRange, doc, hasDoc,
+			node.Label(), node.Message(), path, hasPath, pos, hasPos, rng, hasRange, doc, hasDoc,
 			node.Name(), node.Bound.FilePath(), node.IsInvalid(), node.Warning, node.Detail,
 		))
 	}
@@ -118,13 +118,13 @@ func requireDetaches(t *testing.T, err error, opts ...niceyaml.ExcerptOption) er
 			continue
 		}
 
-		assert.Nil(t, node.Bound.Source(), node.Label)
+		assert.Nil(t, node.Bound.Source(), node.Label())
 
 		_, ok := node.Bound.Node()
-		assert.False(t, ok, node.Label)
+		assert.False(t, ok, node.Label())
 
 		_, ok = node.Bound.Document()
-		assert.False(t, ok, node.Label)
+		assert.False(t, ok, node.Label())
 	}
 
 	return detached //nolint:wrapcheck // The test reads the detached error itself.

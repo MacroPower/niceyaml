@@ -184,7 +184,7 @@ func (p *Printer) PrintReport(rep niceyaml.ErrorReport) string {
 	if rep.Omitted > 0 {
 		// The report shares its children with its caller, so the count
 		// goes on a copy of them.
-		more := niceyaml.ErrorTree{Label: "and " + strconv.Itoa(rep.Omitted) + " more"}
+		more := niceyaml.ErrorTree{Row: niceyaml.ErrorRow{Text: "and " + strconv.Itoa(rep.Omitted) + " more"}}
 		tree.Children = append(slices.Clip(tree.Children), more)
 	}
 
@@ -223,7 +223,7 @@ func (p *Printer) PrintReport(rep niceyaml.ErrorReport) string {
 // connectors render in the foreground of [kind.UILineNumber], so they
 // take the color of the gutter's line numbers. They leave out the
 // background of the gutter, because the message text beside them does
-// not have it. Each message takes the rows errorText returns for it.
+// not have it. Each message takes the rows errorRows returns for it.
 func (p *Printer) renderErrorTree(t niceyaml.ErrorTree) string {
 	branch := lipgloss.NewStyle().
 		Foreground(p.styles.Style(kind.UILineNumber).GetForeground()).
@@ -285,31 +285,34 @@ func (p *Printer) appendErrorBranches(
 	return rows
 }
 
-// errorRows returns the rows of the message of t at depth connectors from
-// the left edge, as errorText lays them out. The "warning:" label of a
-// warning renders in [kind.TextWarn].
+// errorRows returns the rows of the row of t at depth connectors from the
+// left edge, wrapped to the width that the connectors leave.
+// [escape.Message] lays out each part of the row first. It replaces each
+// tab with spaces, such as the tab in front of each suggestion that Cobra
+// lists. It draws the other control characters as [escape.Control] draws
+// them. A line break in the message stays a line break, because a wrapper
+// around a joined error keeps the breaks between its branches in its own
+// text.
+//
+// The [niceyaml.ErrorRow.Severity] of the row renders in [kind.TextWarn]
+// with its colon. The style goes on that part before the wrap, so the
+// label keeps its color on whichever row the wrap puts it.
 func (p *Printer) errorRows(t niceyaml.ErrorTree, depth int) []string {
-	rows := p.errorText(t.Label, depth)
+	row := t.Row
 
-	if t.Warning && !t.Detail && len(rows) > 0 {
-		label := p.styles.Style(kind.TextWarn).Render(warningLabel)
-		rows[0] = strings.Replace(rows[0], warningLabel, label, 1)
+	text := escape.Message(row.String())
+	if row.Severity != "" {
+		label := p.styles.Style(kind.TextWarn).Render(escape.Message(row.Severity + ":"))
+		before := escape.Message(niceyaml.ErrorRow{Location: row.Location}.String())
+		after := escape.Message(niceyaml.ErrorRow{Path: row.Path, Text: row.Text}.String())
+		text = joinNonEmpty(before, label, after)
 	}
 
-	return rows
+	return p.wrapTo(text, p.textWidth(depth*errorConnectorWidth))
 }
 
-// warningLabel is the label that the row of a warning carries after its
-// position.
-const warningLabel = "warning:"
-
-// errorText returns the rows of one message of the tree at depth connectors
-// from the left edge, wrapped to the width that the connectors leave.
-// [escape.Message] lays the text out first. It replaces each tab with
-// spaces, such as the tab in front of each suggestion that Cobra lists. It
-// draws the other control characters as [escape.Control] draws them. A line
-// break in the message stays a line break, because a wrapper around a
-// joined error keeps the breaks between its branches in its own text.
-func (p *Printer) errorText(text string, depth int) []string {
-	return p.wrapTo(escape.Message(text), p.textWidth(depth*errorConnectorWidth))
+// joinNonEmpty joins the parts that are not empty with a space between
+// each two of them, as [niceyaml.ErrorRow.String] joins the parts of a row.
+func joinNonEmpty(parts ...string) string {
+	return strings.Join(slices.DeleteFunc(parts, func(s string) bool { return s == "" }), " ")
 }

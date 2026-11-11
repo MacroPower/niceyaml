@@ -197,11 +197,11 @@ func workflowCommand(level string, node niceyaml.ErrorTree, title string) string
 // without a label, such as a join, does not add a row, and its children
 // take its place.
 func markdownTree(node niceyaml.ErrorTree, depth int) {
-	if node.Label != "" {
+	if label := node.Label(); label != "" {
 		// A label holds the message as the check wrote it and the name of
 		// the source as the program gave it. Either might hold a control
 		// character.
-		fmt.Printf("%s- %s\n", strings.Repeat("  ", depth), escape.Control(node.Label))
+		fmt.Printf("%s- %s\n", strings.Repeat("  ", depth), escape.Control(label))
 
 		depth++
 	}

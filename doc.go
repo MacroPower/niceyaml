@@ -540,8 +540,8 @@
 // A report in JSON encodes each node. [ErrorTree.MarshalJSON] writes the
 // message, the context, the name, the file path, and the path as its text.
 // It writes [ErrorTree.Range] counted from 0, as every position in this
-// module counts, and does not write the position. The Label of a node
-// counts from 1, so a problem that the Label shows at 2:7 writes a range
+// module counts, and does not write the position. The row of a node
+// counts from 1, so a problem that the row shows at 2:7 writes a range
 // that starts at {"line":1,"col":6}. For a position from [AtPosition], the
 // range starts at the content of the token, so a report that needs the
 // exact position reads [ErrorTree.Position]:
@@ -563,7 +563,10 @@
 // FormatError and PrintError both draw the [ErrorReport] that
 // [NewErrorReport] builds. The report holds the tree, the excerpt of each
 // source, and the bindings that get a reason in place of an excerpt. A custom
-// renderer, such as one that writes HTML, draws the same report.
+// renderer, such as one that writes HTML, draws the same report. It reads
+// the row of each node in parts from [ErrorTree.Row], so it can style the
+// location, the "warning:" label, and the path apart from the text. A
+// renderer that draws plain text reads [ErrorTree.Label] instead.
 //
 // A bound error keeps its [Source] alive, with every line, token, and parse
 // of the file, and so does its report. A program that holds errors after it

@@ -3744,7 +3744,7 @@ func TestWithDetails(t *testing.T) {
 			require.Len(t, problem.Children, 2)
 
 			for _, detail := range problem.Children {
-				assert.True(t, detail.Detail, detail.Label)
+				assert.True(t, detail.Detail, detail.Label())
 			}
 		}
 	})
@@ -6534,7 +6534,7 @@ func renderings(err error) map[string]string {
 	}
 
 	for node := range niceyaml.NewErrorTree(err).All() {
-		rows = append(rows, node.Label)
+		rows = append(rows, node.Label())
 	}
 
 	return map[string]string{
@@ -8311,7 +8311,7 @@ func TestRebase(t *testing.T) {
 		var rows []string
 
 		for problem := range niceyaml.NewErrorTree(dd.Bind(niceyaml.Rebase(joined, hours))).Problems() {
-			rows = append(rows, strings.TrimSpace(problem.Label))
+			rows = append(rows, strings.TrimSpace(problem.Label()))
 		}
 
 		assert.Equal(t, []string{"2:1: $.hours:"}, rows)
@@ -11454,18 +11454,18 @@ func TestInvalid(t *testing.T) {
 func locatedLabel(problem niceyaml.ErrorTree) string {
 	x, ok := errors.AsType[*niceyaml.Error](problem.Err)
 	if !ok {
-		return problem.Label
+		return problem.Label()
 	}
 
 	if r, ok := x.Range(); ok {
-		return r.String() + " " + problem.Label
+		return r.String() + " " + problem.Label()
 	}
 
 	if pos, ok := x.Position(); ok {
-		return pos.String() + " " + problem.Label
+		return pos.String() + " " + problem.Label()
 	}
 
-	return problem.Label
+	return problem.Label()
 }
 
 func TestUnchecked(t *testing.T) {
@@ -11821,7 +11821,7 @@ func TestUnchecked(t *testing.T) {
 				var problems []string
 
 				for problem := range niceyaml.NewErrorTree(err).Problems() {
-					problems = append(problems, fmt.Sprintf("%s %t", problem.Label, problem.IsInvalid()))
+					problems = append(problems, fmt.Sprintf("%s %t", problem.Label(), problem.IsInvalid()))
 				}
 
 				assert.Equal(t, tc.problems, problems)
@@ -11904,7 +11904,7 @@ func TestUnchecked(t *testing.T) {
 				var problems []string
 
 				for problem := range niceyaml.NewErrorTree(err).Problems() {
-					problems = append(problems, fmt.Sprintf("%s %t", problem.Label, problem.IsInvalid()))
+					problems = append(problems, fmt.Sprintf("%s %t", problem.Label(), problem.IsInvalid()))
 				}
 
 				assert.Equal(t, tc.problems, problems)
@@ -12151,7 +12151,7 @@ func TestLocate(t *testing.T) {
 					var problems []string
 
 					for problem := range niceyaml.NewErrorTree(err).Problems() {
-						problems = append(problems, fmt.Sprintf("%s %t", problem.Label, problem.IsInvalid()))
+						problems = append(problems, fmt.Sprintf("%s %t", problem.Label(), problem.IsInvalid()))
 					}
 
 					assert.Equal(t, tc.problems, problems, hook)
@@ -14049,7 +14049,7 @@ func TestIsInvalid(t *testing.T) {
 			assert.Equal(t, tc.want, tree.IsInvalid())
 
 			for problem := range tree.Problems() {
-				assert.Equal(t, niceyaml.IsInvalid(problem.Err), problem.IsInvalid(), problem.Label)
+				assert.Equal(t, niceyaml.IsInvalid(problem.Err), problem.IsInvalid(), problem.Label())
 			}
 		})
 	}
@@ -14764,7 +14764,7 @@ func TestPanicError_Recovered(t *testing.T) {
 
 			var p *niceyaml.PanicError
 
-			assert.Equal(t, !problem.IsInvalid(), errors.As(problem.Err, &p), problem.Label)
+			assert.Equal(t, !problem.IsInvalid(), errors.As(problem.Err, &p), problem.Label())
 		}
 
 		assert.Equal(t, map[string]bool{
