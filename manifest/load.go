@@ -95,6 +95,12 @@ func WithSetChecks(enabled bool) LoadOption {
 // [Set.Warnings]. [Registry.Check] runs the same checks and returns the
 // manifests that pass beside the problems.
 //
+// Load also hands each warning that it keeps to the [niceyaml.Warnings]
+// collector on ctx, whether the load passes or fails. A warning that
+// [WithWarningsAsErrors] turns into an error does not reach the collector.
+// The Warnings section of the package documentation describes the form of
+// each warning.
+//
 // The heading of the error starts with the name of the input. The name is
 // the path of a lone [input.Path] or [input.FS] input, or the name of a
 // lone [input.Stdin] or [input.Reader] input. A lone [input.Sources] input
@@ -128,6 +134,9 @@ func (r *Registry) Load(ctx context.Context, in input.Input, opts ...LoadOption)
 // finish. One such case is a ctx that ends. The other is an input that
 // fails before Check reads a file, such as a pattern that Load rejects or
 // an input path that does not exist.
+//
+// Check hands its warnings to the [niceyaml.Warnings] collector on ctx, as
+// Load does.
 func (r *Registry) Check(ctx context.Context, in input.Input, opts ...LoadOption) (*Checked, error) {
 	cfg := newLoadConfig(opts)
 
@@ -154,6 +163,8 @@ func (r *Registry) Check(ctx context.Context, in input.Input, opts ...LoadOption
 
 	c := &Checked{}
 	c.err, c.warnings = l.outcome(rows)
+
+	deliver(ctx, rows)
 
 	// Build a new set rather than filter the one that the functions of
 	// WithCheck saw, because a function might keep that set. It holds each
@@ -549,6 +560,25 @@ func (l *loader) outcome(rows []*row) (error, error) {
 	return nil, newLoadError(l.named, errs)
 }
 
+// deliver hands each warning of rows, the finished rows of a load, to the
+// collectors of ctx. Strict mode has turned some warnings into errors,
+// and those rows do not reach the collectors.
+func deliver(ctx context.Context, rows []*row) {
+	for _, r := range rows {
+		if !niceyaml.HasErrors(r.err) {
+			hook.Warn(ctx, r.err)
+		}
+	}
+}
+
+// isolate returns a copy of ctx whose collector is w alone, as
+// [hook.Isolate] describes. Each check of a load runs with such a copy.
+// The warnings of the check thus reach the collectors of the caller only
+// through [deliver], after the load filters them.
+func isolate(ctx context.Context, w *niceyaml.Warnings) context.Context {
+	return hook.Isolate(ctx, w)
+}
+
 // compareRows orders two rows in load order: by file, then by document,
 // then by position, with the rows that lack a position first.
 func compareRows(a, b *row) int {
@@ -626,7 +656,7 @@ func (l *loader) addDoc(d *docState) {
 // [niceyaml.PanicError].
 func (l *loader) runChecks(ctx context.Context, set *Set) error {
 	warnings := niceyaml.NewWarnings()
-	cctx := warnings.Context(ctx)
+	cctx := isolate(ctx, warnings)
 
 	for _, check := range l.reg.cfg.checks {
 		err := runCheck(cctx, check, set)

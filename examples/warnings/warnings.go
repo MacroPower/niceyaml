@@ -46,8 +46,19 @@ func main() {
 	fmt.Println("\nDecode without a collector:")
 
 	// A decode hands its warnings to the collector on its context. This
-	// context does not carry one, so the decode drops both warnings.
-	m, err := source.Decode[menu](ctx, warnUnknown)
+	// context does not carry one, so the decode fails before it reads the
+	// document rather than drop the warnings that the call asks for.
+	_, err := source.Decode[menu](ctx, warnUnknown)
+	lipgloss.Println(p.PrintError(err))
+	fmt.Println("Matches ErrNoWarnings:", errors.Is(err, niceyaml.ErrNoWarnings))
+
+	fmt.Println("\nPrint the warnings of a decode that passes:")
+
+	// Context returns a copy of ctx that carries the collector. The decode
+	// returns nil, and Err returns the warnings that the collector holds.
+	warnings := niceyaml.NewWarnings()
+
+	m, err := source.Decode[menu](warnings.Context(ctx), warnUnknown)
 	if err != nil {
 		lipgloss.Println(p.PrintError(err))
 
@@ -55,21 +66,6 @@ func main() {
 	}
 
 	fmt.Printf("%s: decoded %d items\n", source.Name(), len(m.Fika))
-
-	fmt.Println("\nPrint the warnings of a decode that passes:")
-
-	// Context returns a copy of ctx that carries the collector. The decode
-	// still returns nil, and Err returns the warnings that the collector
-	// holds.
-	warnings := niceyaml.NewWarnings()
-
-	_, err = source.Decode[menu](warnings.Context(ctx), warnUnknown)
-	if err != nil {
-		lipgloss.Println(p.PrintError(err))
-
-		return
-	}
-
 	lipgloss.Println(p.PrintError(warnings.Err()))
 
 	fmt.Println("\nReport the warnings beside the errors:")

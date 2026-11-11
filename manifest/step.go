@@ -105,7 +105,7 @@ func (d *docState) runSteps(ctx context.Context, ed *edit.Doc, v *versionEntry) 
 
 			warnings := niceyaml.NewWarnings()
 
-			err := callStep(warnings.Context(ctx), id, s.fn, n)
+			err := callStep(isolate(ctx, warnings), id, s.fn, n)
 
 			d.warn(warnings.Err())
 

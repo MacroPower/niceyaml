@@ -100,7 +100,12 @@ func (d *docState) check(ctx context.Context) {
 	reg := d.l.reg
 
 	for _, m := range reg.cfg.ignores {
-		ok, err := m.Match(ctx, doc)
+		warnings := niceyaml.NewWarnings()
+
+		ok, err := m.Match(isolate(ctx, warnings), doc)
+
+		d.warn(warnings.Err())
+
 		if err != nil {
 			d.fail(doc.Bind(err))
 
@@ -504,7 +509,7 @@ func (d *docState) claims(ctx context.Context, e *kindEntry) (bool, error) {
 	for _, m := range e.kind.cfg.claims {
 		warnings := niceyaml.NewWarnings()
 
-		ok, err := m.Match(warnings.Context(ctx), d.doc)
+		ok, err := m.Match(isolate(ctx, warnings), d.doc)
 
 		d.warn(warnings.Err())
 
@@ -704,7 +709,7 @@ func (d *docState) checkSchema(ctx context.Context, v *versionEntry, detail erro
 
 	warnings := niceyaml.NewWarnings()
 
-	err = d.work.Validate(warnings.Context(ctx), sch)
+	err = d.work.Validate(isolate(ctx, warnings), sch)
 
 	d.warn(warnings.Err())
 
@@ -743,7 +748,7 @@ func (d *docState) decode(ctx context.Context) bool {
 
 	warnings := niceyaml.NewWarnings()
 
-	v, err := entry.kind.decode(warnings.Context(ctx), d.work, opts)
+	v, err := entry.kind.decode(isolate(ctx, warnings), d.work, opts)
 
 	// A Validate method reports a field that the document leaves out at
 	// the mapping that lacks it, with a detail that names the field.

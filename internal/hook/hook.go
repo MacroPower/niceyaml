@@ -35,6 +35,14 @@ var (
 	// niceyaml.Node.Warn does, and does not bind it to a document.
 	Warn func(ctx context.Context, err error)
 
+	// Isolate returns a copy of ctx whose collector is w, a
+	// *niceyaml.Warnings, alone. The collectors of ctx do not get the
+	// warnings of a call that runs with the copy. The caller can thus filter
+	// those warnings and deliver them later with Warn. The copy counts as
+	// the context of a call of niceyaml, as the context of a hook does. A
+	// collector that code derives from it with niceyaml.Warnings.Context
+	// thus hands its warnings to w as well.
+	Isolate func(ctx context.Context, w any) context.Context
 	// Rewrap returns err with wrap applied to the error that it binds, when
 	// err is a *niceyaml.SourceError, and wrap(err) otherwise. The result
 	// keeps the location, the source, and the children of the binding. So

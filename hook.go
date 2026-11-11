@@ -25,6 +25,11 @@ func init() {
 			deliver(ctx, remark(err, severityWarning))
 		}
 	}
+	hook.Isolate = func(ctx context.Context, w any) context.Context {
+		held, _ := w.(*Warnings) //nolint:errcheck // The hook takes a *Warnings.
+
+		return isolate(ctx, held)
+	}
 	hook.Rewrap = rewrap
 	hook.Defaults = func(t reflect.Type, opts any) reflect.Value {
 		o, _ := opts.([]DecodeOption) //nolint:errcheck // The hook takes the options of a decode.

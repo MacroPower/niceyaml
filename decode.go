@@ -253,10 +253,24 @@ func WithValueCheck[T any](fn func(ctx context.Context, v *T) error) DecodeOptio
 // UnknownFieldsMode sets what a decode does with each unknown field, which
 // is a mapping key that does not have a field in the target struct.
 // [WithUnknownFields] takes one. Its text is "ignore", "warn", or
-// "reject", so a program reads a flag into one with [flag.TextVar]:
+// "reject", so a program reads a flag into one with [flag.TextVar]. A
+// decode under "warn" fails without a [Warnings] collector on its
+// context, so the program puts one there and prints what it collects:
 //
 //	mode := niceyaml.UnknownFieldsReject
 //	flag.TextVar(&mode, "unknown-fields", mode, "ignore, warn, or reject unknown fields")
+//	flag.Parse()
+//
+//	warnings := niceyaml.NewWarnings()
+//
+//	cfg, err := src.Decode[Config](warnings.Context(ctx), niceyaml.WithUnknownFields(mode))
+//	if err != nil {
+//		return warnings.Report(err)
+//	}
+//
+//	if w := warnings.Err(); w != nil {
+//		log.Print(niceyaml.FormatError(w))
+//	}
 type UnknownFieldsMode int
 
 const (
@@ -264,7 +278,8 @@ const (
 	UnknownFieldsIgnore UnknownFieldsMode = iota
 	// UnknownFieldsWarn decodes as UnknownFieldsIgnore does, and it hands
 	// each unknown field to the [Warnings] collector of the context as a
-	// warning.
+	// warning. A decode whose context does not carry a collector fails
+	// with an error that wraps [ErrNoWarnings].
 	UnknownFieldsWarn
 	// UnknownFieldsReject fails the decode with an error for each unknown
 	// field.
@@ -348,11 +363,16 @@ func (m *UnknownFieldsMode) UnmarshalText(text []byte) error {
 //
 //	cfg, err := doc.Decode[Config](warnings.Context(ctx), niceyaml.WithUnknownFields(niceyaml.UnknownFieldsWarn))
 //
-// Under UnknownFieldsWarn, a decode whose context carries a [Warnings]
-// collector searches the document for unknown fields, even when the
-// decode passes. A decode without a collector drops every warning, so it
-// does not search. Under UnknownFieldsReject, the search runs only after
-// the decoder rejects the document.
+// Under UnknownFieldsWarn, a decode whose context does not carry a
+// [Warnings] collector returns an error that wraps [ErrNoWarnings] before
+// anything runs. The error comes inside [Unchecked], because the mistake
+// lies in the program and not in the document. A hook of a call, such as a
+// [Validator], gets a context that carries a collector, so a decode inside
+// it passes the check.
+//
+// Under UnknownFieldsWarn, a decode searches the document for unknown
+// fields, even when the decode passes. Under UnknownFieldsReject, the
+// search runs only after the decoder rejects the document.
 //
 // The search decodes once more each struct that decodes itself from a
 // mapping and that it reads, so the unmarshaler of that struct runs again.
@@ -360,7 +380,9 @@ func (m *UnknownFieldsMode) UnmarshalText(text []byte) error {
 // of one anchor share that decode. When the decode rejects a field, the
 // search runs the unmarshaler of the outermost such struct again for each
 // key at or below it. Those calls get a context without the collector, so
-// their warnings do not reach it.
+// their warnings do not reach it. A decode under UnknownFieldsWarn that
+// such a call runs with that context does not fail for the missing
+// collector, and it drops its warnings.
 //
 // UnknownFieldsWarn and UnknownFieldsReject differ beyond the severity of
 // the fields. Under UnknownFieldsReject, the decoder stops at the first
@@ -723,7 +745,9 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // The decode runs the steps the Decoding section of the package documentation
 // lists, and the first that fails ends it. For a v that is nil, a nil
 // pointer, or not a pointer, DecodeInto returns an error that wraps
-// [ErrDecodeTarget] before anything runs. When the node holds an alias, the
+// [ErrDecodeTarget] before anything runs. So does a decode under
+// [UnknownFieldsWarn] whose ctx does not carry a [Warnings] collector,
+// with an error that wraps [ErrNoWarnings]. When the node holds an alias, the
 // decode counts what a decode of the whole document reads, with each alias
 // reading its content in full. When aliases make up too much of that count,
 // DecodeInto returns an error that matches [ErrExcessiveAliasing], bound at
@@ -751,7 +775,7 @@ func (n *Node) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) erro
 // decodeInto is [Node.DecodeInto] with its settings resolved. It also
 // collects the comments of the node in comments, unless comments is nil.
 func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig, comments yaml.CommentMap) error {
-	err := checkTarget(v, ErrDecodeTarget, true)
+	err := checkDecode(ctx, v, cfg)
 	if err != nil {
 		return n.bindOwn(err)
 	}
@@ -848,6 +872,26 @@ func (n *Node) aliasingError(err error) error {
 	}
 
 	return n.Bind(Invalid(err, atToken(astnode.StartToken(n.AST()))))
+}
+
+// checkDecode returns the error of a decode into v with cfg that cannot
+// start, or nil. For a v that [checkTarget] rejects, the error wraps
+// [ErrDecodeTarget]. For a decode under [UnknownFieldsWarn] whose ctx does
+// not carry a collector, it wraps [ErrNoWarnings]. A decode that niceyaml
+// runs again with a context from [withoutWarnings] drops its warnings on
+// purpose, so it passes the check. Each error is a mistake of the caller,
+// so it comes inside [Unchecked].
+func checkDecode(ctx context.Context, v any, cfg decodeConfig) error {
+	err := checkTarget(v, ErrDecodeTarget, true)
+	if err != nil {
+		return err
+	}
+
+	if cfg.unknownFields == UnknownFieldsWarn && !takesWarnings(ctx) {
+		return Unchecked(fmt.Errorf("unknown fields mode %q: %w", UnknownFieldsWarn, ErrNoWarnings))
+	}
+
+	return nil
 }
 
 // checkTarget returns an error wrapping sentinel when v is nil or a nil
@@ -1465,7 +1509,17 @@ func decodeAtWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, 
 func (n *Node) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, error) {
 	var zero T
 
-	start, err := newDecodeConfig(n.source, opts).defaults.start(reflect.TypeFor[T](), n.AST())
+	ctx = enterCall(ctx)
+	cfg := newDecodeConfig(n.source, opts)
+
+	// The check of the context runs before the functions of WithDefaults,
+	// so a decode that cannot start runs no code of the caller.
+	err := checkDecode(ctx, &zero, cfg)
+	if err != nil {
+		return zero, n.bindOwn(err)
+	}
+
+	start, err := cfg.defaults.start(reflect.TypeFor[T](), n.AST())
 	if err != nil {
 		return zero, n.bindOwn(err)
 	}
@@ -1473,7 +1527,7 @@ func (n *Node) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, erro
 	// A nil interface asserts to the zero value, which it is.
 	v, _ := reflect.TypeAssert[T](start)
 
-	err = n.DecodeInto(ctx, &v, opts...)
+	err = n.decodeInto(ctx, &v, cfg, nil)
 	if err != nil {
 		return zero, err
 	}
@@ -1792,8 +1846,10 @@ func (n *Node) DecodeAt[T any](ctx context.Context, path paths.Path, opts ...Dec
 //
 // The target v must be a non-nil pointer. For any other v,
 // DecodeIfPresent returns an error that wraps [ErrDecodeTarget], bound to
-// the source, before the path resolves. The mistake thus shows whether or
-// not the document holds the value.
+// the source, before the path resolves. So does a decode under
+// [UnknownFieldsWarn] whose context does not carry a [Warnings] collector,
+// with an error that wraps [ErrNoWarnings]. Each mistake thus shows
+// whether or not the document holds the value.
 //
 // DecodeIfPresent returns false and a nil error only when At returns an
 // error that matches [paths.ErrNotFound]. Every other failure returns
@@ -1814,9 +1870,11 @@ func (n *Node) DecodeAt[T any](ctx context.Context, path paths.Path, opts ...Dec
 // The decode runs on the scoped Node and drops it, as [Node.DecodeAt]
 // describes.
 func (n *Node) DecodeIfPresent(ctx context.Context, path paths.Path, v any, opts ...DecodeOption) (bool, error) {
-	// The target check runs first, so a wrong target fails for an absent
-	// path too, where no decode would run to reject it.
-	err := checkTarget(v, ErrDecodeTarget, true)
+	// The checks of the target and of the context run first. A mistake thus
+	// fails for an absent path too, where no decode runs to reject it.
+	cfg := newDecodeConfig(n.source, opts)
+
+	err := checkDecode(ctx, v, cfg)
 	if err != nil {
 		return false, n.bindOwn(err)
 	}
@@ -1832,7 +1890,7 @@ func (n *Node) DecodeIfPresent(ctx context.Context, path paths.Path, v any, opts
 
 	// The decode can return an error that matches paths.ErrNotFound too,
 	// so only the error of At above counts as an absent value.
-	err = node.DecodeInto(ctx, v, opts...)
+	err = node.decodeInto(enterCall(ctx), v, cfg, nil)
 	if err != nil {
 		return false, err
 	}

@@ -1999,25 +1999,123 @@ func TestWithUnknownFields(t *testing.T) {
 			assert.Equal(t, 3, count)
 		})
 
-		t.Run("a decode without a collector does not search", func(t *testing.T) {
+		t.Run("a decode without a collector fails before it runs", func(t *testing.T) {
 			t.Parallel()
 
 			doc := yamltest.FirstDocument(t, "self: {a: 1, b: 2, c: 3}\n")
-			decode := func(ctx context.Context) int {
-				calls := &problemCalls{}
+			validated := false
+			validator := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+				validated = true
 
-				_, err := doc.Decode[struct {
-					Self problemMirror `yaml:"self"`
-				}](context.WithValue(ctx, callsKey{}, calls), warn)
-				require.NoError(t, err)
+				return nil
+			})
 
-				return calls.count
+			type target struct {
+				Self problemMirror `yaml:"self"`
 			}
 
-			// The search decodes the struct once more, and only for a decode
-			// whose context carries a collector.
-			assert.Equal(t, 1, decode(t.Context()))
-			assert.Equal(t, 2, decode(niceyaml.NewWarnings().Context(t.Context())))
+			defaulted := false
+			defaults := niceyaml.WithDefaults(func(*target) { defaulted = true })
+
+			calls := &problemCalls{}
+			_, err := doc.Decode[target](context.WithValue(t.Context(), callsKey{}, calls),
+				warn, defaults, niceyaml.WithValidator(validator))
+
+			require.ErrorIs(t, err, niceyaml.ErrNoWarnings)
+			require.EqualError(t, err, `unknown fields mode "warn": no Warnings collector on the context`)
+			assert.False(t, niceyaml.IsInvalid(err))
+			require.NotErrorIs(t, err, niceyaml.ErrDecode)
+			assert.False(t, defaulted)
+			assert.False(t, validated)
+			assert.Zero(t, calls.count)
+
+			// The search decodes the struct once more.
+			calls = &problemCalls{}
+			ctx := context.WithValue(niceyaml.NewWarnings().Context(t.Context()), callsKey{}, calls)
+			_, err = doc.Decode[struct {
+				Self problemMirror `yaml:"self"`
+			}](ctx, warn)
+			require.NoError(t, err)
+			assert.Equal(t, 2, calls.count)
+		})
+
+		t.Run("a decode into a target without a collector fails before it runs", func(t *testing.T) {
+			t.Parallel()
+
+			const input = "self: {a: 1, b: 2, c: 3}\n"
+
+			type inner struct {
+				A int `yaml:"a"`
+			}
+
+			type target struct {
+				Self *inner `yaml:"self"`
+			}
+
+			intos := map[string]func(context.Context, any, ...niceyaml.DecodeOption) error{
+				"node": func(ctx context.Context, v any, opts ...niceyaml.DecodeOption) error {
+					return yamltest.FirstDocument(t, input).DecodeInto(ctx, v, opts...)
+				},
+				"source": func(ctx context.Context, v any, opts ...niceyaml.DecodeOption) error {
+					return niceyaml.NewSourceFromString(input).DecodeInto(ctx, v, opts...)
+				},
+			}
+
+			for name, into := range intos {
+				t.Run(name, func(t *testing.T) {
+					t.Parallel()
+
+					validated := false
+					validator := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+						validated = true
+
+						return nil
+					})
+
+					defaulted := false
+					defaults := niceyaml.WithDefaults(func(*inner) { defaulted = true })
+
+					got := target{Self: &inner{A: 7}}
+					err := into(t.Context(), &got, warn, defaults, niceyaml.WithValidator(validator))
+
+					require.ErrorIs(t, err, niceyaml.ErrNoWarnings)
+					assert.False(t, niceyaml.IsInvalid(err))
+					require.NotErrorIs(t, err, niceyaml.ErrDecode)
+					assert.Equal(t, target{Self: &inner{A: 7}}, got)
+					assert.False(t, defaulted)
+					assert.False(t, validated)
+
+					warnings := niceyaml.NewWarnings()
+					got = target{}
+					err = into(warnings.Context(t.Context()), &got, warn, defaults, niceyaml.WithValidator(validator))
+					require.NoError(t, err)
+					assert.Equal(t, target{Self: &inner{A: 1}}, got)
+					assert.True(t, validated)
+					require.Error(t, warnings.Err())
+					assert.False(t, niceyaml.HasErrors(warnings.Err()))
+				})
+			}
+		})
+
+		t.Run("a decode that the search runs again keeps its warn mode", func(t *testing.T) {
+			t.Parallel()
+
+			// The unmarshaler decodes a document of its own in warn mode. The
+			// search runs it again on a context that drops its warnings, and
+			// that inner decode passes there too.
+			warnings := niceyaml.NewWarnings()
+			doc := yamltest.FirstDocument(t, "self: {a: 1, d: 2}\n", niceyaml.WithName("menu.yaml"))
+
+			_, err := doc.Decode[struct {
+				Self problemInnerWarn `yaml:"self"`
+			}](warnings.Context(t.Context()), warn)
+			require.NoError(t, err)
+
+			assert.EqualError(t, warnings.Err(), stringtest.JoinLF(
+				"2 warnings",
+				`inner.yaml:2:1: warning: $.b~: unknown field "b"`,
+				`menu.yaml:1:14: warning: $.self.d~: unknown field "d"`,
+			))
 		})
 
 		t.Run("the aliases of one anchor share the decode of the search", func(t *testing.T) {
@@ -10290,6 +10388,24 @@ func TestNode_DecodeIfPresent(t *testing.T) {
 		})
 	}
 
+	t.Run("warn mode without a collector fails an absent path", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocumentWithPath(t, "name: app\n", "cfg.yaml")
+		warn := niceyaml.WithUnknownFields(niceyaml.UnknownFieldsWarn)
+		version := 1
+
+		found, err := doc.DecodeIfPresent(t.Context(), versionPath, &version, warn)
+		require.ErrorIs(t, err, niceyaml.ErrNoWarnings)
+		require.EqualError(t, err, `cfg.yaml: unknown fields mode "warn": no Warnings collector on the context`)
+		assert.False(t, found)
+		assert.False(t, niceyaml.IsInvalid(err))
+
+		found, err = doc.DecodeIfPresent(niceyaml.NewWarnings().Context(t.Context()), versionPath, &version, warn)
+		require.NoError(t, err)
+		assert.False(t, found)
+	})
+
 	t.Run("a validator that reads a required key fails a present node", func(t *testing.T) {
 		t.Parallel()
 
@@ -10610,6 +10726,26 @@ func (p *problemPorted) UnmarshalYAML(unmarshal func(any) error) error {
 	}
 
 	return nil
+}
+
+// problemInnerWarn decodes itself through a second type with the same
+// fields, as [problemMirror] does. Each call first decodes a document of
+// its own under [niceyaml.UnknownFieldsWarn] with its context.
+type problemInnerWarn struct {
+	A int `yaml:"a"`
+}
+
+func (w *problemInnerWarn) UnmarshalYAML(ctx context.Context, unmarshal func(any) error) error {
+	_, err := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("inner.yaml")).Decode[struct {
+		A int `yaml:"a"`
+	}](ctx, niceyaml.WithUnknownFields(niceyaml.UnknownFieldsWarn))
+	if err != nil {
+		return err
+	}
+
+	type plain problemInnerWarn
+
+	return unmarshal((*plain)(w))
 }
 
 // callsKey is the context key of the [*problemCalls] of a decode.
