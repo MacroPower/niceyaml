@@ -344,6 +344,9 @@ type parseIndex struct {
 	// The merge entries of the parse by the starts of their keys, or nil
 	// before [Doc.mergeKeyStarts] reads them.
 	mergeStarts map[int]*ast.MappingValueNode
+	// The mapping of each entry of the parse by the start of the entry, or
+	// nil before [Doc.entryMappings] reads them.
+	entryMaps map[int]ast.Node
 	// The span of each node that [Doc.nodeSpan] read in the text of the
 	// parse.
 	spans map[ast.Node]spanOf

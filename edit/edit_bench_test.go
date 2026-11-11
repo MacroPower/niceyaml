@@ -79,6 +79,86 @@ func BenchmarkDoc_Apply(b *testing.B) {
 	}
 }
 
+func BenchmarkDoc_Apply_KeyText(b *testing.B) {
+	name := paths.Doc().Child("name")
+
+	// Each Apply sets a value beside a mapping whose keys each read as
+	// another value than their text, as the key 01 reads as 1. No call
+	// reaches such a key.
+	for _, entries := range []int{1000, 2000, 4000} {
+		var text strings.Builder
+
+		text.WriteString("name: x\nids:\n")
+
+		for i := range entries {
+			fmt.Fprintf(&text, "  0%d: v\n", i+1)
+		}
+
+		b.Run(fmt.Sprintf("set_beside_entries_%d", entries), func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				b.StopTimer()
+
+				doc := yamltest.FirstDocument(b, text.String(), yamltest.NoSizeLimits()...)
+
+				d, err := edit.New(doc)
+				require.NoError(b, err)
+
+				b.StartTimer()
+
+				require.NoError(b, d.Apply(b.Context(), paths.Doc(), func(ctx context.Context, n *edit.Node) error {
+					return n.At(name).Set(ctx, "y")
+				}))
+			}
+		})
+	}
+
+	ids := paths.Doc().Child("ids")
+
+	// Each Apply removes a sequence of mappings, so the Remove takes the
+	// mapping of each key whole. The time of the quoted keys is the time to
+	// compare with, because the engine edits such a key.
+	items := []struct {
+		name, item string
+	}{
+		{name: "remove_items", item: "  - 0%d: v\n    k: 1\n"},
+		{name: "remove_one_entry_items", item: "  - 0%d: v\n"},
+		{name: "remove_quoted_items", item: "  - \"0%d\": v\n    k: 1\n"},
+	}
+
+	for _, it := range items {
+		for _, entries := range []int{1000, 2000, 4000} {
+			var text strings.Builder
+
+			text.WriteString("name: x\nids:\n")
+
+			for i := range entries {
+				fmt.Fprintf(&text, it.item, i+1)
+			}
+
+			b.Run(fmt.Sprintf("%s_%d", it.name, entries), func(b *testing.B) {
+				b.ReportAllocs()
+
+				for b.Loop() {
+					b.StopTimer()
+
+					doc := yamltest.FirstDocument(b, text.String(), yamltest.NoSizeLimits()...)
+
+					d, err := edit.New(doc)
+					require.NoError(b, err)
+
+					b.StartTimer()
+
+					require.NoError(b, d.Apply(b.Context(), paths.Doc(), func(_ context.Context, n *edit.Node) error {
+						return n.At(ids).Remove()
+					}))
+				}
+			})
+		}
+	}
+}
+
 func BenchmarkDoc_Apply_NestedAliases(b *testing.B) {
 	var (
 		k   = paths.MustParse("$.top.a.k")

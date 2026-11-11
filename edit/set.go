@@ -221,11 +221,12 @@ type payload struct {
 // must not hold an anchor or an alias, which [ConstructValueAlias] names,
 // as the anchor and alias options of a yaml struct tag write them. Nor must
 // they hold a << merge key, an explicit key, a comment inside a flow
-// collection, a pair without braces in a flow sequence, or a construct
-// that [New] refuses, such as the float key 1.0 of a map[any]any, which
-// reads as 1. The error binds at the place of the Set, its InValue is
-// true, and [niceyaml.IsInvalid] reports false for it, because the program
-// wrote the construct. Such a construct can make go-yaml fail on the text
+// collection, a pair without braces in a flow sequence, a construct that
+// [New] refuses, or a key that reads as another value than its text, such
+// as the float key 1.0 of a map[any]any, which reads as 1. The error binds
+// at the place of the Set, its InValue is true, and [niceyaml.IsInvalid]
+// reports false for it, because the program wrote the construct. Such a
+// construct can make go-yaml fail on the text
 // of the encode, as an alias whose anchor the YAML lacks does, and the Set
 // then fails with the construct. A scalar that go-yaml reads as a value of
 // another kind fails the Set with ErrEngine before such a construct does.
