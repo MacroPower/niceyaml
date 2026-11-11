@@ -79,7 +79,8 @@
 // # Search
 //
 // Call [Model.SetSearchTerm] to highlight matches.
-// Navigate between matches with [Model.SearchNext] and [Model.SearchPrevious].
+// Navigate between matches with [Model.SearchNext] and [Model.SearchPrevious],
+// or select one by its index with [Model.SetSearchIndex].
 // The viewport automatically scrolls to center the row of the current
 // match. With wrapping off, it scrolls sideways only when the match ends
 // past the right edge of the first screen. It then centers the start of the

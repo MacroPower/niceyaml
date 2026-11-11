@@ -2763,9 +2763,10 @@ func holds(view *line.View, pos position.Position) bool {
 // The term stays set across content changes. A change of content, as the
 // [Model] doc defines it, restarts the search at the first match in the new
 // content and scrolls to it. A new term likewise starts at its first
-// match, but setting the same term again keeps the current match. Before the
-// content area has room for a row, the scroll to the match waits until the
-// area has room, as the [Model] doc describes.
+// match, but setting the same term again keeps the current match. To restart
+// the search at its first match, call [Model.SetSearchIndex] with 0 after
+// SetSearchTerm. Before the content area has room for a row, the scroll to
+// the match waits until the area has room, as the [Model] doc describes.
 //
 // [Model.ReplaceRevision] searches the views it reads again, keeps the
 // index of the current match, and does not scroll.
@@ -2828,6 +2829,28 @@ func (m *Model) SearchPrevious() {
 	m.navigateSearch(-1)
 }
 
+// SetSearchIndex makes match i the current search match, scrolls to it as
+// [Model.SearchNext] does, and reports true. It reports false and changes
+// nothing for an i outside [0, [Model.SearchCount]).
+//
+// The index counts the matches in the order SearchNext steps through them,
+// as [Model.SearchIndex] does. Every i below SearchCount is valid, which
+// includes a match that [Model.SearchMatch] reports false for.
+//
+// SetSearchIndex scrolls to the match even when i is the current index. A
+// parent therefore restarts a search at its first match with
+// [Model.SetSearchTerm] followed by SetSearchIndex(0), whether or not the
+// term is already set.
+func (m *Model) SetSearchIndex(i int) bool {
+	if i < 0 || i >= len(m.searchMatches) {
+		return false
+	}
+
+	m.selectMatch(i)
+
+	return true
+}
+
 // navigateSearch moves the search index by delta and wraps around at either
 // end of the matches.
 func (m *Model) navigateSearch(delta int) {
@@ -2835,8 +2858,14 @@ func (m *Model) navigateSearch(delta int) {
 		return
 	}
 
+	m.selectMatch((m.searchIndex + delta + len(m.searchMatches)) % len(m.searchMatches))
+}
+
+// selectMatch makes match i the current search match and scrolls to it. The
+// caller checks that i indexes a match.
+func (m *Model) selectMatch(i int) {
 	prev := m.searchMatches[m.searchIndex]
-	m.searchIndex = (m.searchIndex + delta + len(m.searchMatches)) % len(m.searchMatches)
+	m.searchIndex = i
 
 	// Only the match that lost the selection and the one that gained it
 	// change style, so only their lines need new row counts. Rendering
