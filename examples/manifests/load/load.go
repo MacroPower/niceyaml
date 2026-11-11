@@ -55,6 +55,11 @@ var (
 	//go:embed config broken menu-item.v1.json
 	files embed.FS
 
+	// Each manifest of a kind that takes this option gets its name from
+	// metadata.name. Two manifests of one such kind must not share a name.
+	// The kinds share one option, because they keep the name at one path.
+	named = manifest.NameField(paths.Doc().Child("metadata", "name"))
+
 	// The registry holds the kinds of the app. A load routes each document
 	// by its apiVersion and kind fields to the Go type of its kind. The
 	// decode rejects each key that the Go type does not declare, apart from
@@ -63,17 +68,16 @@ var (
 		// The messages of a load name the app, such as the hint under an
 		// unknown kind.
 		manifest.WithAppName("cafe"),
-		// Each manifest takes its name from this path, and two manifests of
-		// one kind must not share a name.
-		manifest.WithNameField(paths.Doc().Child("metadata", "name")),
 		manifest.WithKinds(
 			// A load fails without a Cafe, and fails with two.
 			manifest.NewKind[Cafe]("Cafe",
+				named,
 				manifest.Required(),
 				manifest.Singleton(),
 				manifest.Version("cafe.jacobcolvin.com/v1"),
 			),
 			manifest.NewKind[MenuItem]("MenuItem",
+				named,
 				manifest.Version("cafe.jacobcolvin.com/v1",
 					manifest.Schema(schema.FileFS(files, "menu-item.v1.json")),
 				),
@@ -82,6 +86,7 @@ var (
 			// the last. A rewrite moves each document off the deprecated
 			// version to the last version.
 			manifest.NewKind[Hours]("Hours",
+				named,
 				manifest.Version("cafe.jacobcolvin.com/v1alpha1",
 					manifest.Deprecated("cafe 2.0 removes cafe.jacobcolvin.com/v1alpha1"),
 				),

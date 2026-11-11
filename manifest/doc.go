@@ -10,10 +10,10 @@
 // current version, and lists its versions oldest first:
 //
 //	var Registry = manifest.MustNewRegistry(
-//		manifest.WithNameField(paths.Doc().Child("metadata", "name")),
 //		manifest.WithAppName("cafe"),
 //		manifest.WithKinds(
 //			manifest.NewKind[Cafe]("Cafe",
+//				manifest.NameField(paths.Doc().Child("metadata", "name")),
 //				manifest.Required(),
 //				manifest.Singleton(),
 //				manifest.Version("cafe.jacobcolvin.com/v1",
@@ -382,7 +382,7 @@
 //     of the version run. The result must pass the schema of the version.
 //  5. The result decodes into the Go type of its kind, and every value
 //     that implements [niceyaml.SelfValidator] validates itself.
-//  6. The document must hold a name, when [WithNameField] reads names.
+//  6. The document must hold a name, when its kind has [NameField].
 //
 // The check of each schema sees only the type fields that the schema
 // declares under properties, with the names of its version. A closed
@@ -427,22 +427,22 @@
 // the user.
 //
 // After each document has run its checks, the load compares the names of
-// the manifests of each kind. It counts the manifests of each kind that
-// [Required] or [Singleton] marks. When the load has not found an error in
-// a file, a document, or these checks, it calls the functions of
-// [WithCheck] with the set. A warning does not stop them, even in strict
-// mode. A function can thus rely on the counts of each Required and
-// Singleton kind. A reference that it cannot resolve never points at a
-// manifest that failed its own checks. [WithSetChecks] turns off the
-// checks of names and counts and the functions of [WithCheck], for a load
-// of part of a set.
+// the manifests of each kind with [NameField]. It counts the manifests of
+// each kind that [Required] or [Singleton] marks. When the load has not
+// found an error in a file, a document, or these checks, it calls the
+// functions of [WithCheck] with the set. A warning does not stop them,
+// even in strict mode. A function can thus rely on the counts of each
+// Required and Singleton kind. A reference that it cannot resolve never
+// points at a manifest that failed its own checks. [WithSetChecks] turns
+// off the checks of names and counts and the functions of [WithCheck], for
+// a load of part of a set.
 //
 // # Typed Access
 //
 // A [Set] returns its manifests as [Object] values of the Go type of their
 // kind. [Set.One] returns the manifest of a [Singleton] kind, [Set.All]
 // yields the manifests of a kind in load order, and [Set.Get] returns one
-// by its name:
+// by its name, for a kind with [NameField]:
 //
 //	cafe, _ := set.One[config.Cafe]()
 //	fmt.Printf("%s seats %d\n", cafe.Name, cafe.Value.Spec.Seats)

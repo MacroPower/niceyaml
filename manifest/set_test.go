@@ -96,7 +96,7 @@ func TestSet_Get(t *testing.T) {
 	unnamed, err := reg.Load(t.Context(), manifest.Sources())
 	require.NoError(t, err)
 
-	assert.PanicsWithValue(t, "manifest: Get needs a registry with manifest.WithNameField", func() {
+	assert.PanicsWithValue(t, "manifest: Get needs a kind with manifest.NameField, and Cafe has none", func() {
 		unnamed.Get[Cafe]("yamull")
 	})
 }
@@ -396,9 +396,9 @@ func TestObject_Layouts(t *testing.T) {
 		t.Parallel()
 
 		reg := manifest.MustNewRegistry(
-			manifest.WithNameField(meta.Child("name")),
 			manifest.WithUnmarshalers(niceyaml.CustomUnmarshaler(decodeAlarmLevel)),
-			manifest.WithKinds(manifest.NewKind[Alarm]("Alarm", manifest.Version("alarm.jacobcolvin.com/v1"))),
+			manifest.WithKinds(manifest.NewKind[Alarm]("Alarm",
+				manifest.NameField(meta.Child("name")), manifest.Version("alarm.jacobcolvin.com/v1"))),
 		)
 
 		// The program built the Source without the unmarshalers of the

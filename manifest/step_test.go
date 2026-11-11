@@ -77,8 +77,7 @@ func drinkOptions(lagging bool) []manifest.RegistryOption {
 func adoptOptions() []manifest.RegistryOption {
 	return []manifest.RegistryOption{
 		manifest.WithAppName("cafe"),
-		manifest.WithNameField(meta.Child("name")),
-		manifest.WithKinds(manifest.NewKind[Cafe]("Cafe",
+		manifest.WithKinds(manifest.NewKind[Cafe]("Cafe", manifest.NameField(meta.Child("name")),
 			manifest.Unversioned(),
 			manifest.Version("cafe.jacobcolvin.com/v1",
 				manifest.Migrate(paths.Doc().Child("name"), func(_ context.Context, n *edit.Node) error {

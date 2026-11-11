@@ -44,9 +44,9 @@ var (
 	// version thus writes steps only for the previous version.
 	registry = manifest.MustNewRegistry(
 		manifest.WithAppName("cafe"),
-		manifest.WithNameField(paths.Doc().Child("metadata", "name")),
 		manifest.WithMigrateHint(`run "cafe config migrate" to update this file`),
 		manifest.WithKinds(manifest.NewKind[MenuItem]("MenuItem",
+			manifest.NameField(paths.Doc().Child("metadata", "name")),
 			// Documents of v1beta1 write the kind as Dish, its old name.
 			manifest.Version("cafe.jacobcolvin.com/v1beta1", manifest.KindName("Dish")),
 			// A rewrite writes the last version. An older version that carries

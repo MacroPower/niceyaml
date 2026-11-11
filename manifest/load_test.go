@@ -652,9 +652,44 @@ func TestRegistry_Load(t *testing.T) {
 			),
 			matches: []error{manifest.ErrFieldAlias},
 		},
-		"name and type fields before a merge key that reads a reference document": {
-			// The path of the name passes through metadata, so the detail
-			// names metadata, the first of those keys.
+		"metadata before a merge key that reads a reference document": {
+			// The type fields come after the merge key, so the read of the
+			// name meets it. The path of the name passes through metadata,
+			// so the detail names metadata.
+			opts: []manifest.RegistryOption{
+				manifest.WithDecodeOptions(niceyaml.WithUnknownFields(niceyaml.UnknownFieldsIgnore)),
+			},
+			files: map[string]string{
+				"cafe.yaml": cafeDoc,
+				"hours.yaml": stringtest.LinesLF(
+					"metadata:",
+					"  name: weekday",
+					"<<: *b",
+					"apiVersion: cafe.jacobcolvin.com/v1",
+					"kind: Hours",
+				),
+			},
+			in: []manifest.InputOption{
+				manifest.WithSourceOptions(niceyaml.WithReferences(
+					niceyaml.NewSourceFromString("base: &b {spec: {open: 8}}\n"),
+				)),
+			},
+			err: stringtest.JoinLF(
+				"config/hours.yaml:3:1: $.metadata.name: name might come from a merge key that reads a reference document",
+				"`-- put the merge key before metadata",
+				"",
+				"   1 | metadata:",
+				"   2 |   name: weekday",
+				"   3 | <<: *b",
+				"     | ^^",
+				"   4 | apiVersion: cafe.jacobcolvin.com/v1",
+				"   5 | kind: Hours",
+			),
+			matches: []error{manifest.ErrFieldAlias},
+		},
+		"metadata and type fields before a merge key that reads a reference document": {
+			// Routing reads the type fields before it knows the kind, so the
+			// detail names apiVersion and leaves out the path of the name.
 			opts: []manifest.RegistryOption{
 				manifest.WithDecodeOptions(niceyaml.WithUnknownFields(niceyaml.UnknownFieldsIgnore)),
 			},
@@ -675,7 +710,7 @@ func TestRegistry_Load(t *testing.T) {
 			},
 			err: stringtest.JoinLF(
 				"config/hours.yaml:5:1: $.apiVersion: apiVersion might come from a merge key that reads a reference document",
-				"`-- put the merge key before metadata",
+				"`-- put the merge key before apiVersion",
 				"",
 				"   3 | apiVersion: cafe.jacobcolvin.com/v1",
 				"   4 | kind: Hours",
@@ -694,9 +729,9 @@ func TestRegistry_Load(t *testing.T) {
 				"cafe.yaml": cafeDoc,
 				"hours.yaml": stringtest.LinesLF(
 					"metadata: {name: weekday, labels: &x {<<: *b}}",
+					"<<: *x",
 					"apiVersion: cafe.jacobcolvin.com/v1",
 					"kind: Hours",
-					"<<: *x",
 				),
 			},
 			in: []manifest.InputOption{
@@ -705,13 +740,14 @@ func TestRegistry_Load(t *testing.T) {
 				)),
 			},
 			err: stringtest.JoinLF(
-				"config/hours.yaml:4:1: $.apiVersion: apiVersion might come from a merge key that reads a reference document",
+				"config/hours.yaml:2:1: $.metadata.name: name might come from a merge key that reads a reference document",
 				"`-- move the anchor x out of metadata, then put the merge key before metadata",
 				"",
-				"   2 | apiVersion: cafe.jacobcolvin.com/v1",
-				"   3 | kind: Hours",
-				"   4 | <<: *x",
+				"   1 | metadata: {name: weekday, labels: &x {<<: *b}}",
+				"   2 | <<: *x",
 				"     | ^^",
+				"   3 | apiVersion: cafe.jacobcolvin.com/v1",
+				"   4 | kind: Hours",
 			),
 			matches: []error{manifest.ErrFieldAlias},
 		},
@@ -1063,7 +1099,7 @@ func TestRegistry_Load(t *testing.T) {
 					"  name: jar",
 				),
 			},
-			opts: withKinds(manifest.NewKind[Tip]("Tip",
+			opts: withKinds(manifest.NewKind[Tip]("Tip", manifest.NameField(meta.Child("name")),
 				manifest.Version("tip/v1", manifest.Deprecated("cafe 5.0 removes Tip")),
 			)),
 			want: []string{
@@ -2494,6 +2530,7 @@ func TestRegistry_Load_KindOnly(t *testing.T) {
 	t.Parallel()
 
 	typ := paths.Doc().Child("type")
+	id := manifest.NameField(paths.Doc().Child("id"))
 	// A closed schema that leaves the type field out.
 	sinkSchema := schema.Embedded([]byte(
 		`{"additionalProperties": false, "properties": {"id": {"type": "string"}, "url": {"type": "string"}}}`,
@@ -2505,11 +2542,13 @@ func TestRegistry_Load_KindOnly(t *testing.T) {
 		return []manifest.RegistryOption{
 			manifest.WithAppName("pipectl"),
 			manifest.WithKindField(typ),
-			manifest.WithNameField(paths.Doc().Child("id")),
 			manifest.WithKinds(
-				manifest.NewKind[stageSource]("source", manifest.Unversioned()),
-				manifest.NewKind[stageTransform]("transform", manifest.Unversioned()),
-				manifest.NewKind[stageSink]("sink", append(sink, manifest.Unversioned(manifest.Schema(sinkSchema)))...),
+				manifest.NewKind[stageSource]("source", id, manifest.Unversioned()),
+				manifest.NewKind[stageTransform]("transform", id, manifest.Unversioned()),
+				manifest.NewKind[stageSink]("sink",
+					slices.Concat([]manifest.KindOption{id}, sink, []manifest.KindOption{
+						manifest.Unversioned(manifest.Schema(sinkSchema)),
+					})...),
 			),
 		}
 	}
@@ -2532,8 +2571,7 @@ func TestRegistry_Load_KindOnly(t *testing.T) {
 		return []manifest.RegistryOption{
 			manifest.WithAppName("pipectl"),
 			manifest.WithKindField(typ),
-			manifest.WithNameField(paths.Doc().Child("id")),
-			manifest.WithKinds(manifest.NewKind[stageSink]("sink",
+			manifest.WithKinds(manifest.NewKind[stageSink]("sink", id,
 				manifest.Unversioned(append([]manifest.VersionOption{branchSchema}, layout...)...))),
 		}
 	}
@@ -2546,10 +2584,9 @@ func TestRegistry_Load_KindOnly(t *testing.T) {
 		manifest.WithAppName("pipectl"),
 		manifest.WithKindField(typ),
 		manifest.WithVersionField(paths.Doc().Child("v")),
-		manifest.WithNameField(paths.Doc().Child("id")),
 		manifest.WithKinds(
-			manifest.NewKind[stageSource]("source", manifest.Unversioned()),
-			manifest.NewKind[stageSink]("sink",
+			manifest.NewKind[stageSource]("source", id, manifest.Unversioned()),
+			manifest.NewKind[stageSink]("sink", id,
 				manifest.Unversioned(),
 				manifest.Version("2", manifest.Migrate(paths.Doc().Child("endpoint"),
 					func(_ context.Context, n *edit.Node) error { return n.SetKey("url") })),
@@ -3138,9 +3175,8 @@ func deprecationOptions() []manifest.RegistryOption {
   "legacyPricing": {"deprecated": true, "deprecationMessage": "legacyPricing has no effect. Remove it."}}}}}`
 
 	return []manifest.RegistryOption{
-		manifest.WithNameField(meta.Child("name")),
 		manifest.WithAppName("cafe"),
-		manifest.WithKinds(manifest.NewKind[MenuItem]("MenuItem",
+		manifest.WithKinds(manifest.NewKind[MenuItem]("MenuItem", manifest.NameField(meta.Child("name")),
 			manifest.Version("cafe.jacobcolvin.com/v1beta1",
 				manifest.KindName("Dish"),
 				manifest.Schema(schema.Embedded([]byte(older))),
@@ -3478,12 +3514,11 @@ func TestRegistry_Load_Defaults(t *testing.T) {
 	t.Parallel()
 
 	reg := manifest.MustNewRegistry(
-		manifest.WithNameField(meta.Child("name")),
 		manifest.WithDecodeOptions(niceyaml.WithDefaults(func(s *CafeSpec) {
 			s.Seats = 20
 			s.Currency = "SEK"
 		})),
-		manifest.WithKinds(manifest.NewKind[Cafe]("Cafe",
+		manifest.WithKinds(manifest.NewKind[Cafe]("Cafe", manifest.NameField(meta.Child("name")),
 			manifest.DecodeOptions(niceyaml.WithDefaults(func(s *CafeSpec) { s.Currency = "EUR" })),
 			manifest.Version("cafe.jacobcolvin.com/v1"),
 		)),
@@ -3588,11 +3623,10 @@ func TestRegistry_Load_Unmarshalers(t *testing.T) {
 		})
 
 		return []manifest.RegistryOption{
-			manifest.WithNameField(meta.Child("name")),
 			manifest.WithUnmarshalers(us...),
 			manifest.WithDecodeOptions(niceyaml.WithValidator(readLevel)),
 			manifest.WithDecodeOptions(decodeOpts...),
-			manifest.WithKinds(manifest.NewKind[Alarm]("Alarm",
+			manifest.WithKinds(manifest.NewKind[Alarm]("Alarm", manifest.NameField(meta.Child("name")),
 				manifest.Version("alarm.jacobcolvin.com/v1alpha1"),
 				manifest.Version("alarm.jacobcolvin.com/v1",
 					manifest.Migrate(spec.Child("severity"), func(ctx context.Context, n *edit.Node) error {
@@ -3727,9 +3761,9 @@ func TestRegistry_Load_AliasExpansion(t *testing.T) {
 	) + yamltest.GenerateLines(20, "    l%d: *a") + stringtest.LinesLF("spec:", "  level: high")
 
 	reg := manifest.MustNewRegistry(
-		manifest.WithNameField(meta.Child("name")),
 		manifest.WithUnmarshalers(niceyaml.CustomUnmarshaler(decodeAlarmLevel)),
-		manifest.WithKinds(manifest.NewKind[Alarm]("Alarm", manifest.Version("alarm.jacobcolvin.com/v1"))),
+		manifest.WithKinds(manifest.NewKind[Alarm]("Alarm",
+			manifest.NameField(meta.Child("name")), manifest.Version("alarm.jacobcolvin.com/v1"))),
 	)
 
 	tcs := map[string]struct {
@@ -4529,9 +4563,8 @@ func TestRegistry_Load_TypeFields(t *testing.T) {
 			}
 
 			reg := manifest.MustNewRegistry(
-				manifest.WithNameField(meta.Child("name")),
 				manifest.WithDecodeOptions(tc.decode...),
-				manifest.WithKinds(manifest.NewKind[Brew]("Brew",
+				manifest.WithKinds(manifest.NewKind[Brew]("Brew", manifest.NameField(meta.Child("name")),
 					manifest.Version("v1", append(v1, manifest.KindName("Coffee"))...),
 					manifest.Version("v2", v2...),
 				)),
@@ -4960,13 +4993,12 @@ func TestRegistry_Load_SchemaTypeFields(t *testing.T) {
 				v2 = append([]manifest.VersionOption{sch}, v2...)
 			}
 
-			kind := []manifest.KindOption{v1, manifest.Version("v2", v2...)}
+			kind := []manifest.KindOption{manifest.NameField(meta.Child("name")), v1, manifest.Version("v2", v2...)}
 			if tc.claim {
 				kind = append(kind, manifest.Claim(matcher.Exists(meta)))
 			}
 
 			reg := manifest.MustNewRegistry(
-				manifest.WithNameField(meta.Child("name")),
 				manifest.WithKinds(manifest.NewKind[Brew]("Brew", kind...)),
 			)
 
@@ -5283,6 +5315,7 @@ func TestRegistry_Load_SelfDecodingTypes(t *testing.T) {
 	t.Parallel()
 
 	yamull := Metadata{Name: "yamull"}
+	named := manifest.NameField(meta.Child("name"))
 
 	tcs := map[string]struct {
 		// The options of the registry, whose unmarshaler counts each of
@@ -5311,7 +5344,7 @@ func TestRegistry_Load_SelfDecodingTypes(t *testing.T) {
 							return err
 						},
 					)),
-					manifest.WithKinds(manifest.NewKind[Cafe]("Cafe", manifest.Version("v1"))),
+					manifest.WithKinds(manifest.NewKind[Cafe]("Cafe", named, manifest.Version("v1"))),
 				}
 			},
 			want:  Cafe{Metadata: yamull},
@@ -5333,7 +5366,7 @@ func TestRegistry_Load_SelfDecodingTypes(t *testing.T) {
 							return err
 						},
 					)),
-					manifest.WithKinds(manifest.NewKind[Brew]("Brew", manifest.Version("v1"))),
+					manifest.WithKinds(manifest.NewKind[Brew]("Brew", named, manifest.Version("v1"))),
 				}
 			},
 			// The unmarshaler does not see the type fields.
@@ -5356,7 +5389,7 @@ func TestRegistry_Load_SelfDecodingTypes(t *testing.T) {
 							return err
 						},
 					)),
-					manifest.WithKinds(manifest.NewKind[Brew]("Brew", manifest.Version("v1"))),
+					manifest.WithKinds(manifest.NewKind[Brew]("Brew", named, manifest.Version("v1"))),
 				}
 			},
 			want:  Brew{TypeMeta: TypeMeta{APIVersion: "v1", Kind: "Brew"}, Metadata: yamull},
@@ -5367,7 +5400,7 @@ func TestRegistry_Load_SelfDecodingTypes(t *testing.T) {
 			opts: func(*atomic.Int32) []manifest.RegistryOption {
 				return []manifest.RegistryOption{
 					manifest.WithUnmarshalers(niceyaml.JSONUnmarshalers(true)),
-					manifest.WithKinds(manifest.NewKind[jsonCafe]("Cafe", manifest.Version("v1"))),
+					manifest.WithKinds(manifest.NewKind[jsonCafe]("Cafe", named, manifest.Version("v1"))),
 				}
 			},
 			want: jsonCafe{Metadata: yamull},
@@ -5380,7 +5413,7 @@ func TestRegistry_Load_SelfDecodingTypes(t *testing.T) {
 
 			var calls atomic.Int32
 
-			reg := manifest.MustNewRegistry(append(tc.opts(&calls), manifest.WithNameField(meta.Child("name")))...)
+			reg := manifest.MustNewRegistry(tc.opts(&calls)...)
 
 			doc := stringtest.LinesLF("apiVersion: v1", "kind: "+tc.kind, "metadata:", "  name: yamull")
 
@@ -5432,8 +5465,7 @@ func TestRegistry_Load_NestedTypeField(t *testing.T) {
 
 			reg := manifest.MustNewRegistry(
 				manifest.WithKindField(meta.Child("kind")),
-				manifest.WithNameField(meta.Child("name")),
-				manifest.WithKinds(manifest.NewKind[Cafe]("Cafe",
+				manifest.WithKinds(manifest.NewKind[Cafe]("Cafe", manifest.NameField(meta.Child("name")),
 					manifest.Version("v1", manifest.Schema(schema.Embedded([]byte(tc.schema)))),
 				)),
 			)

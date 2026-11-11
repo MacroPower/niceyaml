@@ -82,7 +82,8 @@ type Object[T any] struct {
 	// The function that binds an error with the paths of the current
 	// version.
 	bind func(error) error
-	// Name holds the name, from the field of [WithNameField].
+	// Name holds the name, from the field of the [NameField] of the kind.
+	// It is empty for a kind without NameField.
 	Name string
 	// Kind holds the name of the kind, as [NewKind] gives it, even for a
 	// document that declares an old name from [KindName].
@@ -197,11 +198,11 @@ func (s *Set) All[T any]() iter.Seq[Object[T]] {
 // name, and false when the set does not hold one.
 //
 // Get panics when T is not the Go type of a kind of the registry, or when
-// the registry does not read names, as [WithNameField] gives them.
+// the kind has no [NameField].
 func (s *Set) Get[T any](name string) (Object[T], bool) {
 	entry := s.reg.kindOf(reflect.TypeFor[T]())
-	if !s.reg.cfg.hasNameField {
-		panic("manifest: Get needs a registry with manifest.WithNameField")
+	if !entry.kind.cfg.hasNameField {
+		panic(fmt.Sprintf("manifest: Get needs a kind with manifest.NameField, and %s has none", entry.kind.name))
 	}
 
 	for _, o := range s.objects {
@@ -259,13 +260,9 @@ func typed[T any](o Object[any]) Object[T] {
 // checkNames reports each manifest whose name an earlier manifest of its
 // kind took, in load order. Every document that reached the layout of the
 // current version with a name takes part, even one that a later check
-// failed.
+// failed. Only the documents of a kind with a [NameField] hold a name.
 func (l *loader) checkNames() {
 	reg := l.reg
-	if !reg.cfg.hasNameField {
-		return
-	}
-
 	seen := make(map[*kindEntry]map[string]*docState)
 
 	for _, d := range l.docs {
@@ -274,6 +271,7 @@ func (l *loader) checkNames() {
 		}
 
 		entry := d.route.kind
+		namePath := entry.kind.cfg.nameField
 
 		names := seen[entry]
 		if names == nil {
@@ -289,11 +287,11 @@ func (l *loader) checkNames() {
 		}
 
 		details := []error{first.work.Bind(niceyaml.NewError("first defined here",
-			niceyaml.AtPath(reg.cfg.nameField)))}
+			niceyaml.AtPath(namePath)))}
 		details = append(details, reg.oldName(entry, d.route.wroteKind)...)
 
 		err := d.work.Bind(newProblem(ErrDuplicateName, fmt.Sprintf("duplicate %s %q", entry.kind.name, d.name),
-			niceyaml.AtPath(reg.cfg.nameField), niceyaml.WithDetails(details...)))
+			niceyaml.AtPath(namePath), niceyaml.WithDetails(details...)))
 
 		l.add(&row{err: err, doc: d, file: d.file, index: d.index})
 	}

@@ -56,6 +56,7 @@ func NewKind[T any](name string, opts ...KindOption) *Kind {
 // Available options:
 //   - [Version]
 //   - [Unversioned]
+//   - [NameField]
 //   - [Claim]
 //   - [Required]
 //   - [Singleton]
@@ -67,6 +68,8 @@ type kindConfig struct {
 	claims        []matcher.Matcher
 	versions      []*versionConfig
 	decodeOptions []niceyaml.DecodeOption
+	nameField     paths.Path
+	hasNameField  bool
 	required      bool
 	singleton     bool
 }
@@ -107,6 +110,36 @@ func Unversioned(opts ...VersionOption) KindOption {
 		}
 
 		c.versions = append(c.versions, v)
+	}
+}
+
+// NameField is a [KindOption] that gives each manifest of the kind a name,
+// read from the `$` path p, such as `$.metadata.name`. The path names the
+// field as the current version spells it. Each manifest of the kind must
+// hold a non-empty string there, and two manifests of the kind must not
+// share a name. [Set.Get] finds a manifest of the kind by its name.
+//
+// A kind without NameField does not have names. The [Object.Name] of each
+// of its manifests stays empty, and a load does not check names for the
+// kind. A plain settings file that an app adopts through [Unversioned] can
+// thus sit beside named kinds.
+//
+// Kinds that keep their names at one path can share one option:
+//
+//	named := manifest.NameField(paths.Doc().Child("metadata", "name"))
+//
+//	manifest.WithKinds(
+//		manifest.NewKind[Settings]("Settings", manifest.Singleton(), manifest.Unversioned()),
+//		manifest.NewKind[Plugin]("Plugin", named, manifest.Version("v1")),
+//		manifest.NewKind[Hook]("Hook", named, manifest.Version("v1")),
+//	)
+//
+// A kind whose manifests take their identity from more than one field
+// leaves NameField off, and a function of [WithCheck] checks that the
+// manifests do not repeat it.
+func NameField(p paths.Path) KindOption {
+	return func(c *kindConfig) {
+		c.nameField, c.hasNameField = p, true
 	}
 }
 
