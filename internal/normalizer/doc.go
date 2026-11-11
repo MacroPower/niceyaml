@@ -8,14 +8,13 @@
 //
 // A [Normalizer] handles all three by chaining Unicode transformations into
 // a pipeline that [New] defines once at construction time. Transformations
-// run in a fixed order: width folding, diacritics removal, case folding, then
-// any custom transformers. Option order does not change that sequence.
+// run in a fixed order: width folding, diacritics removal, then case
+// folding. Option order does not change that sequence.
 //
 // By default, the pipeline removes diacritics and case-folds text:
 //
 //	n := normalizer.New()
 //	n.Normalize("Café") // "cafe"
 //
-// [Option] values toggle individual pipeline stages or append custom
-// [transform.Transformer] implementations with [WithTransformer].
+// [Option] values toggle individual pipeline stages.
 package normalizer

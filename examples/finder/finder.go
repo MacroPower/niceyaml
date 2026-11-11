@@ -9,7 +9,6 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/finder"
-	"go.jacobcolvin.com/niceyaml/normalizer"
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/kind"
@@ -53,9 +52,9 @@ func main() {
 
 	fmt.Println("\nMatch characters exactly:")
 
-	// Finder.Exact turns off case and diacritic folding, so "cafe" does
-	// not find "Café". Only the exact spelling "Café" matches.
-	exact := finder.New(finder.WithNormalizer(finder.Exact)).Load(source.Lines())
+	// The finder.Exact option turns off every built-in fold, so "cafe"
+	// does not find "Café". Only the exact spelling "Café" matches.
+	exact := finder.New(finder.Exact()).Load(source.Lines())
 
 	for _, search := range []string{"cafe", "Café"} {
 		fmt.Printf("%q matches: %d\n", search, len(exact.Find(search)))
@@ -63,13 +62,10 @@ func main() {
 
 	fmt.Println("\nFold case but keep diacritics:")
 
-	// By default, finders normalize text with normalizer.New. Options such
-	// as normalizer.WithDiacriticFold turn single stages of the
-	// normalizer's pipeline on or off. Without diacritic folding, "CAFÉ"
-	// finds "Café", but "cafe" does not.
-	cased := finder.New(finder.WithNormalizer(
-		normalizer.New(normalizer.WithDiacriticFold(false)),
-	)).Load(source.Lines())
+	// Options such as finder.WithDiacriticFold turn single built-in folds
+	// on or off. Without diacritic folding, "CAFÉ" finds "Café", but
+	// "cafe" does not.
+	cased := finder.New(finder.WithDiacriticFold(false)).Load(source.Lines())
 
 	for _, search := range []string{"cafe", "CAFÉ"} {
 		fmt.Printf("%q matches: %d\n", search, len(cased.Find(search)))

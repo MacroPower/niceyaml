@@ -36,7 +36,6 @@ rules:
       - internal
       - line
       - manifest
-      - normalizer
       - paths
       - position
       - printer

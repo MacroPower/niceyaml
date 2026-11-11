@@ -11,46 +11,33 @@ import (
 	"go.jacobcolvin.com/x/stringtest"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
-	"golang.org/x/text/runes"
-	"golang.org/x/text/transform"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/finder"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
-	"go.jacobcolvin.com/niceyaml/normalizer"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
-// noSpace returns a normalizer that drops whitespace.
-func noSpace() *normalizer.Normalizer {
-	return normalizer.New(normalizer.WithTransformer(func() transform.Transformer {
-		return runes.Remove(runes.In(unicode.White_Space))
-	}))
+// noSpace is a fold that drops whitespace.
+func noSpace(char string) string {
+	return strings.TrimFunc(char, unicode.IsSpace)
 }
 
 func TestFinder_Find(t *testing.T) {
 	t.Parallel()
 
 	// Title casing depends on the preceding character.
-	titleCase := normalizer.New(
-		normalizer.WithCaseFold(false),
-		normalizer.WithDiacriticFold(false),
-		normalizer.WithTransformer(func() transform.Transformer {
-			return cases.Title(language.Und)
-		}),
-	)
+	titleCase := func(char string) string {
+		return cases.Title(language.Und).String(char)
+	}
 
 	tcs := map[string]struct {
-		input      string
-		search     string
-		normalizer finder.Normalizer
-		// Matches characters exactly, through finder.Exact.
-		exact bool
-		// Passes a nil Normalizer, which keeps the default.
-		nilOpt bool
+		input  string
+		search string
+		opts   []finder.Option
 		want   position.Ranges
 	}{
 		"single token match": {
@@ -103,128 +90,213 @@ func TestFinder_Find(t *testing.T) {
 			search: "1\nb",
 			want:   position.Ranges{position.NewRange(position.New(0, 3), position.New(1, 1))},
 		},
-		"with normalizer - diacritic match": {
-			input:      "name: Thaïs",
-			search:     "Thais",
-			normalizer: normalizer.New(),
-			want:       position.Ranges{yamltest.LineRange(0, 6, 11)},
+		"default folds - diacritic match": {
+			input:  "name: Thaïs",
+			search: "Thais",
+			want:   position.Ranges{yamltest.LineRange(0, 6, 11)},
 		},
-		"with normalizer - search has diacritic": {
-			input:      "name: Thais",
-			search:     "Thaïs",
-			normalizer: normalizer.New(),
-			want:       position.Ranges{yamltest.LineRange(0, 6, 11)},
+		"default folds - search has diacritic": {
+			input:  "name: Thais",
+			search: "Thaïs",
+			want:   position.Ranges{yamltest.LineRange(0, 6, 11)},
 		},
-		"with normalizer - kana voicing mark distinguishes": {
-			input:      "name: \u30ac",
-			search:     "\u30ab",
-			normalizer: normalizer.New(),
+		"default folds - kana voicing mark distinguishes": {
+			input:  "name: \u30ac",
+			search: "\u30ab",
 		},
-		"with normalizer - kana voicing mark distinguishes decomposed source": {
-			input:      "name: \u30ab\u3099",
-			search:     "\u30ab",
-			normalizer: normalizer.New(),
+		"default folds - kana voicing mark distinguishes decomposed source": {
+			input:  "name: \u30ab\u3099",
+			search: "\u30ab",
 		},
-		"with normalizer - katakana precomposed source, decomposed search": {
-			input:      "name: \u30ac",
-			search:     "\u30ab\u3099",
-			normalizer: normalizer.New(),
-			want:       position.Ranges{yamltest.LineRange(0, 6, 7)},
+		"default folds - katakana precomposed source, decomposed search": {
+			input:  "name: \u30ac",
+			search: "\u30ab\u3099",
+			want:   position.Ranges{yamltest.LineRange(0, 6, 7)},
 		},
-		"with normalizer - katakana decomposed source, precomposed search": {
-			input:      "name: \u30ab\u3099",
-			search:     "\u30ac",
-			normalizer: normalizer.New(),
-			want:       position.Ranges{yamltest.LineRange(0, 6, 8)},
+		"default folds - katakana decomposed source, precomposed search": {
+			input:  "name: \u30ab\u3099",
+			search: "\u30ac",
+			want:   position.Ranges{yamltest.LineRange(0, 6, 8)},
 		},
-		"with normalizer - hiragana decomposed source, precomposed search": {
-			input:      "name: \u304b\u3099",
-			search:     "\u304c",
-			normalizer: normalizer.New(),
-			want:       position.Ranges{yamltest.LineRange(0, 6, 8)},
+		"default folds - hiragana decomposed source, precomposed search": {
+			input:  "name: \u304b\u3099",
+			search: "\u304c",
+			want:   position.Ranges{yamltest.LineRange(0, 6, 8)},
 		},
-		"with normalizer - hangul precomposed source, decomposed search": {
-			input:      "name: \ud55c\uad6d",
-			search:     "\u1112\u1161\u11ab\u1100\u116e\u11a8",
-			normalizer: normalizer.New(),
-			want:       position.Ranges{yamltest.LineRange(0, 6, 8)},
+		"default folds - hangul precomposed source, decomposed search": {
+			input:  "name: \ud55c\uad6d",
+			search: "\u1112\u1161\u11ab\u1100\u116e\u11a8",
+			want:   position.Ranges{yamltest.LineRange(0, 6, 8)},
 		},
-		"with normalizer - hangul decomposed source, precomposed search": {
-			input:      "name: \u1112\u1161\u11ab\u1100\u116e\u11a8",
-			search:     "\ud55c\uad6d",
-			normalizer: normalizer.New(),
-			want:       position.Ranges{yamltest.LineRange(0, 6, 12)},
+		"default folds - hangul decomposed source, precomposed search": {
+			input:  "name: \u1112\u1161\u11ab\u1100\u116e\u11a8",
+			search: "\ud55c\uad6d",
+			want:   position.Ranges{yamltest.LineRange(0, 6, 12)},
 		},
-		"with normalizer - width fold matches halfwidth voiced katakana": {
-			input:      "name: ガ",
-			search:     "ｶﾞ",
-			normalizer: normalizer.New(normalizer.WithWidthFold(true)),
-			want:       position.Ranges{yamltest.LineRange(0, 6, 7)},
+		"default folds - width fold matches halfwidth voiced katakana": {
+			input:  "name: ガ",
+			search: "ｶﾞ",
+			opts:   []finder.Option{finder.WithWidthFold(true)},
+			want:   position.Ranges{yamltest.LineRange(0, 6, 7)},
 		},
-		"with normalizer - width fold finds halfwidth voiced katakana": {
-			input:      "name: ｶﾞ",
-			search:     "ガ",
-			normalizer: normalizer.New(normalizer.WithWidthFold(true)),
-			want:       position.Ranges{yamltest.LineRange(0, 6, 8)},
+		"default folds - width fold finds halfwidth voiced katakana": {
+			input:  "name: ｶﾞ",
+			search: "ガ",
+			opts:   []finder.Option{finder.WithWidthFold(true)},
+			want:   position.Ranges{yamltest.LineRange(0, 6, 8)},
 		},
-		"with normalizer - cherokee uppercase search": {
-			input:      "name: \uab70",
-			search:     "\u13a0",
-			normalizer: normalizer.New(),
-			want:       position.Ranges{yamltest.LineRange(0, 6, 7)},
+		"default folds - cherokee uppercase search": {
+			input:  "name: \uab70",
+			search: "\u13a0",
+			want:   position.Ranges{yamltest.LineRange(0, 6, 7)},
 		},
-		"with normalizer - cherokee lowercase search": {
-			input:      "name: \u13a0",
-			search:     "\uab70",
-			normalizer: normalizer.New(),
-			want:       position.Ranges{yamltest.LineRange(0, 6, 7)},
+		"default folds - cherokee lowercase search": {
+			input:  "name: \u13a0",
+			search: "\uab70",
+			want:   position.Ranges{yamltest.LineRange(0, 6, 7)},
 		},
 		"exact matching - no match": {
 			input:  "key: VALUE",
 			search: "value",
-			exact:  true,
+			opts:   []finder.Option{finder.Exact()},
 		},
 		"exact matching - match covers a trailing combining mark": {
 			input:  "name: cafe\u0301",
 			search: "cafe",
-			exact:  true,
+			opts:   []finder.Option{finder.Exact()},
 			want:   position.Ranges{yamltest.LineRange(0, 6, 11)},
 		},
-		"nil normalizer pointer keeps the default": {
-			input:      "key: VALUE",
-			search:     "value",
-			normalizer: (*normalizer.Normalizer)(nil),
-			want:       position.Ranges{yamltest.LineRange(0, 5, 10)},
-		},
-		"nil normalizer func keeps the default": {
-			input:      "key: VALUE",
-			search:     "value",
-			normalizer: yamltest.NormalizerFunc(nil),
-			want:       position.Ranges{yamltest.LineRange(0, 5, 10)},
-		},
-		"nil normalizer keeps the default": {
+		"nil fold keeps the default folds": {
 			input:  "key: VALUE",
 			search: "value",
-			nilOpt: true,
+			opts:   []finder.Option{finder.WithFold(nil)},
 			want:   position.Ranges{yamltest.LineRange(0, 5, 10)},
 		},
-		"case insensitive with normalizer": {
-			input:      "key: VALUE",
-			search:     "value",
-			normalizer: yamltest.NormalizerFunc(strings.ToLower),
-			want:       position.Ranges{yamltest.LineRange(0, 5, 10)},
+		"case fold off keeps case": {
+			input:  "name: Café",
+			search: "cafe",
+			opts:   []finder.Option{finder.WithCaseFold(false)},
 		},
-		"normalizer dropping whitespace joins lines": {
-			input:      "a: 1\nb: 2\n",
-			search:     "1b",
-			normalizer: noSpace(),
-			want:       position.Ranges{position.NewRange(position.New(0, 3), position.New(1, 1))},
+		"case fold off still ignores diacritics": {
+			input:  "name: Café",
+			search: "Cafe",
+			opts:   []finder.Option{finder.WithCaseFold(false)},
+			want:   position.Ranges{yamltest.LineRange(0, 6, 10)},
 		},
-		"normalizer dropping whitespace covers the dropped space": {
-			input:      "k: ab cd",
-			search:     "ab",
-			normalizer: noSpace(),
-			want:       position.Ranges{yamltest.LineRange(0, 3, 6)},
+		"diacritic fold off keeps diacritics": {
+			input:  "name: Café",
+			search: "cafe",
+			opts:   []finder.Option{finder.WithDiacriticFold(false)},
+		},
+		"diacritic fold off - katakana precomposed source, decomposed search": {
+			input:  "name: ガ",
+			search: "ガ",
+			opts:   []finder.Option{finder.WithDiacriticFold(false)},
+		},
+		"diacritic fold off - katakana decomposed source, precomposed search": {
+			input:  "name: ガ",
+			search: "ガ",
+			opts:   []finder.Option{finder.WithDiacriticFold(false)},
+		},
+		"diacritic fold off - latin precomposed source, decomposed search": {
+			input:  "name: café",
+			search: "café",
+			opts:   []finder.Option{finder.WithDiacriticFold(false)},
+		},
+		"diacritic fold off still folds case": {
+			input:  "name: Café",
+			search: "CAFÉ",
+			opts:   []finder.Option{finder.WithDiacriticFold(false)},
+			want:   position.Ranges{yamltest.LineRange(0, 6, 10)},
+		},
+		"case fold after exact folds case": {
+			input:  "name: Café",
+			search: "CAFÉ",
+			opts:   []finder.Option{finder.Exact(), finder.WithCaseFold(true)},
+			want:   position.Ranges{yamltest.LineRange(0, 6, 10)},
+		},
+		"case fold after exact keeps diacritics": {
+			input:  "name: Café",
+			search: "cafe",
+			opts:   []finder.Option{finder.Exact(), finder.WithCaseFold(true)},
+		},
+		"exact after case fold folds nothing": {
+			input:  "name: Café",
+			search: "CAFÉ",
+			opts:   []finder.Option{finder.WithCaseFold(true), finder.Exact()},
+		},
+		"exact turns width fold off": {
+			input:  "k: ａｂｃ",
+			search: "abc",
+			opts:   []finder.Option{finder.WithWidthFold(true), finder.Exact()},
+		},
+		"fold runs after the default folds": {
+			input:  "key:    Value",
+			search: "KEY:value",
+			opts:   []finder.Option{finder.WithFold(noSpace)},
+			want:   position.Ranges{yamltest.LineRange(0, 0, 13)},
+		},
+		// The fold maps only the lowercase "a", so the search "A" reaches it
+		// as "a" only when case folding runs first.
+		"fold receives the case-folded character": {
+			input:  "k: b",
+			search: "A",
+			opts:   []finder.Option{finder.WithFold(strings.NewReplacer("a", "b").Replace)},
+			want:   position.Ranges{yamltest.LineRange(0, 3, 4)},
+		},
+		// Case folding expands "ß" to "ss", and the fold receives that whole
+		// expansion as one character.
+		"fold receives the expansion of one character": {
+			input:  "x: ß",
+			search: "z",
+			opts: []finder.Option{finder.WithFold(func(char string) string {
+				if char == "ss" {
+					return "z"
+				}
+
+				return char
+			})},
+			want: position.Ranges{yamltest.LineRange(0, 3, 4)},
+		},
+		"fold with exact runs alone": {
+			input:  "key: VALUE",
+			search: "value",
+			opts:   []finder.Option{finder.Exact(), finder.WithFold(strings.ToLower)},
+			want:   position.Ranges{yamltest.LineRange(0, 5, 10)},
+		},
+		"folds run in the order they were added": {
+			input:  "k: z",
+			search: "x",
+			opts: []finder.Option{
+				finder.WithFold(strings.NewReplacer("x", "y").Replace),
+				finder.WithFold(strings.NewReplacer("y", "z").Replace),
+			},
+			want: position.Ranges{yamltest.LineRange(0, 3, 4)},
+		},
+		// The default folds drop a lone combining mark, and a fold never
+		// receives an empty string.
+		"fold does not receive a character the default folds drop": {
+			input:  "key: value\n",
+			search: "\u0301",
+			opts: []finder.Option{finder.WithFold(func(char string) string {
+				if char == "" {
+					panic("fold received an empty character")
+				}
+
+				return char
+			})},
+		},
+		"fold dropping whitespace joins lines": {
+			input:  "a: 1\nb: 2\n",
+			search: "1b",
+			opts:   []finder.Option{finder.WithFold(noSpace)},
+			want:   position.Ranges{position.NewRange(position.New(0, 3), position.New(1, 1))},
+		},
+		"fold dropping whitespace covers the dropped space": {
+			input:  "k: ab cd",
+			search: "ab",
+			opts:   []finder.Option{finder.WithFold(noSpace)},
+			want:   position.Ranges{yamltest.LineRange(0, 3, 6)},
 		},
 		"single character match": {
 			input:  "a: b",
@@ -256,17 +328,15 @@ func TestFinder_Find(t *testing.T) {
 			search: "öffentlich",
 			want:   position.Ranges{yamltest.LineRange(0, 10, 20)},
 		},
-		"utf8 - normalizer finds diacritic as ascii": {
-			input:      "key: über öffentlich",
-			search:     "o",
-			normalizer: normalizer.New(),
-			want:       position.Ranges{yamltest.LineRange(0, 10, 11)},
+		"utf8 - default folds find diacritic as ascii": {
+			input:  "key: über öffentlich",
+			search: "o",
+			want:   position.Ranges{yamltest.LineRange(0, 10, 11)},
 		},
-		"utf8 - combined normalizer case and diacritics": {
-			input:      "name: THAÏS test",
-			search:     "thais",
-			normalizer: normalizer.New(),
-			want:       position.Ranges{yamltest.LineRange(0, 6, 11)},
+		"utf8 - default folds combine case and diacritics": {
+			input:  "name: THAÏS test",
+			search: "thais",
+			want:   position.Ranges{yamltest.LineRange(0, 6, 11)},
 		},
 		"utf8 - japanese characters partial match": {
 			input:  "key: 日本酒",
@@ -341,92 +411,83 @@ func TestFinder_Find(t *testing.T) {
 			search: "1\nb",
 			want:   position.Ranges{position.NewRange(position.New(0, 3), position.New(1, 1))},
 		},
-		// A search of only combining marks normalizes to an empty string, which
+		// A search of only combining marks folds to an empty string, which
 		// must yield no matches rather than match at every offset.
-		"search that normalizes to empty": {
-			input:      "key: value\n",
-			search:     "\u0301",
-			normalizer: normalizer.New(),
+		"search that folds to empty": {
+			input:  "key: value\n",
+			search: "\u0301",
 		},
 		// The accent is a combining mark that belongs to the "e" before it, and
-		// the normalizer drops it. A match ending at that "e" covers the accent,
+		// the default folds drop it. A match ending at that "e" covers the accent,
 		// as a match ending inside an expansion covers the whole character, so
 		// the highlight ends where the next character begins.
 		"match ending at a dropped combining mark": {
-			input:      "k: cafe\u0301x\n",
-			search:     "caf\u00e9",
-			normalizer: normalizer.New(),
-			want:       position.Ranges{yamltest.LineRange(0, 3, 8)},
+			input:  "k: cafe\u0301x\n",
+			search: "caf\u00e9",
+			want:   position.Ranges{yamltest.LineRange(0, 3, 8)},
 		},
 		"match starting at a character with a dropped combining mark": {
-			input:      "k: cafe\u0301x\n",
-			search:     "ex",
-			normalizer: normalizer.New(),
-			want:       position.Ranges{yamltest.LineRange(0, 6, 9)},
+			input:  "k: cafe\u0301x\n",
+			search: "ex",
+			want:   position.Ranges{yamltest.LineRange(0, 6, 9)},
 		},
 		// Title casing would produce "Abc" for a whole string but "ABC" rune
-		// by rune. Both sides go through the normalizer the same way, so the
+		// by rune. Both sides go through the fold the same way, so the
 		// search still finds the text.
-		"context-sensitive normalizer - lowercase search": {
-			input:      "k: abc\n",
-			search:     "abc",
-			normalizer: titleCase,
-			want:       position.Ranges{yamltest.LineRange(0, 3, 6)},
+		"context-sensitive fold - lowercase search": {
+			input:  "k: abc\n",
+			search: "abc",
+			opts:   []finder.Option{finder.Exact(), finder.WithFold(titleCase)},
+			want:   position.Ranges{yamltest.LineRange(0, 3, 6)},
 		},
-		"context-sensitive normalizer - uppercase search": {
-			input:      "k: abc\n",
-			search:     "ABC",
-			normalizer: titleCase,
-			want:       position.Ranges{yamltest.LineRange(0, 3, 6)},
+		"context-sensitive fold - uppercase search": {
+			input:  "k: abc\n",
+			search: "ABC",
+			opts:   []finder.Option{finder.Exact(), finder.WithFold(titleCase)},
+			want:   position.Ranges{yamltest.LineRange(0, 3, 6)},
 		},
-		// Case folding turns one source rune into two normalized chars, so a
+		// Case folding turns one source rune into two folded chars, so a
 		// one-char needle could match twice inside it and report the same range
 		// twice. Only the match that begins at the source rune counts.
 		"needle inside an expansion matches once": {
-			input:      "x: ß",
-			search:     "s",
-			normalizer: normalizer.New(),
-			want:       position.Ranges{yamltest.LineRange(0, 3, 4)},
+			input:  "x: ß",
+			search: "s",
+			want:   position.Ranges{yamltest.LineRange(0, 3, 4)},
 		},
 		"needle covering the expansion": {
-			input:      "x: ß",
-			search:     "ss",
-			normalizer: normalizer.New(),
-			want:       position.Ranges{yamltest.LineRange(0, 3, 4)},
+			input:  "x: ß",
+			search: "ss",
+			want:   position.Ranges{yamltest.LineRange(0, 3, 4)},
 		},
 		"needle ending inside an expansion covers the rune": {
-			input:      "x: aß",
-			search:     "as",
-			normalizer: normalizer.New(),
-			want:       position.Ranges{yamltest.LineRange(0, 3, 5)},
+			input:  "x: aß",
+			search: "as",
+			want:   position.Ranges{yamltest.LineRange(0, 3, 5)},
 		},
 		"needle starting inside an expansion does not match": {
-			input:      "x: ßa",
-			search:     "sa",
-			normalizer: normalizer.New(),
+			input:  "x: ßa",
+			search: "sa",
 		},
 		"expansion next to a plain match": {
-			input:      "x: ßs",
-			search:     "s",
-			normalizer: normalizer.New(),
-			want:       position.Ranges{yamltest.LineRange(0, 3, 4), yamltest.LineRange(0, 4, 5)},
+			input:  "x: ßs",
+			search: "s",
+			want:   position.Ranges{yamltest.LineRange(0, 3, 4), yamltest.LineRange(0, 4, 5)},
 		},
 		"multibyte character between expansions": {
-			input:      "x: ß日 ß",
-			search:     "ss",
-			normalizer: normalizer.New(),
-			want:       position.Ranges{yamltest.LineRange(0, 3, 4), yamltest.LineRange(0, 6, 7)},
+			input:  "x: ß日 ß",
+			search: "ss",
+			want:   position.Ranges{yamltest.LineRange(0, 3, 4), yamltest.LineRange(0, 6, 7)},
 		},
 		// A stray continuation byte must not match inside a multi-byte rune and
 		// then report the position of an unrelated rune.
-		"continuation byte without normalizer": {
+		"continuation byte with exact matching": {
 			input:  "x: a\u00e9",
 			search: "\xa9",
+			opts:   []finder.Option{finder.Exact()},
 		},
-		"continuation byte with normalizer": {
-			input:      "x: a\u00e9",
-			search:     "\xa9",
-			normalizer: normalizer.New(),
+		"continuation byte with the default folds": {
+			input:  "x: a\u00e9",
+			search: "\xa9",
 		},
 		"truncated rune": {
 			input:  "x: a\u00e9",
@@ -442,27 +503,27 @@ func TestFinder_Find(t *testing.T) {
 			// reads as U+FFFD and matches any other.
 			input:  "a: x\xfey\n",
 			search: "\xff",
-			exact:  true,
+			opts:   []finder.Option{finder.Exact()},
 			want:   position.Ranges{yamltest.LineRange(0, 4, 5)},
 		},
 		"U+FFFD needle with exact matching": {
 			input:  "a: x\xfey\n",
 			search: "\ufffd",
-			exact:  true,
+			opts:   []finder.Option{finder.Exact()},
 			want:   position.Ranges{yamltest.LineRange(0, 4, 5)},
 		},
-		"normalizer emitting an invalid byte": {
-			// The needle and the index both pass through the normalizer,
-			// so an invalid byte it emits must read the same on both sides.
+		"fold emitting an invalid byte": {
+			// The needle and the index both pass through the fold, so an
+			// invalid byte it emits must read the same on both sides.
 			input:  "a: x",
 			search: "x",
-			normalizer: yamltest.NormalizerFunc(func(in string) string {
-				if in == "x" {
+			opts: []finder.Option{finder.Exact(), finder.WithFold(func(char string) string {
+				if char == "x" {
 					return "\xff"
 				}
 
-				return in
-			}),
+				return char
+			})},
 			want: position.Ranges{yamltest.LineRange(0, 3, 4)},
 		},
 	}
@@ -471,19 +532,8 @@ func TestFinder_Find(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			var opts []finder.Option
-
-			switch {
-			case tc.exact:
-				opts = append(opts, finder.WithNormalizer(finder.Exact))
-			case tc.nilOpt:
-				opts = append(opts, finder.WithNormalizer(nil))
-			case tc.normalizer != nil:
-				opts = append(opts, finder.WithNormalizer(tc.normalizer))
-			}
-
 			lines := niceyaml.NewSourceFromString(tc.input).Lines()
-			assert.Equal(t, tc.want, finder.New(opts...).Load(lines).Find(tc.search))
+			assert.Equal(t, tc.want, finder.New(tc.opts...).Load(lines).Find(tc.search))
 		})
 	}
 }
@@ -568,10 +618,10 @@ func TestFinder_Load(t *testing.T) {
 	)
 
 	tcs := map[string]struct {
-		lines      line.Sequence
-		normalizer finder.Normalizer
-		search     string
-		want       position.Ranges
+		lines  line.Sequence
+		opts   []finder.Option
+		search string
+		want   position.Ranges
 	}{
 		"zero lines":           {lines: line.Lines{}, search: "test"},
 		"nil sequence":         {lines: nil, search: "test"},
@@ -617,16 +667,16 @@ func TestFinder_Load(t *testing.T) {
 			lines:  gapped,
 			search: "1\nname",
 		},
-		"normalizer dropping whitespace joins held lines in a row": {
-			lines:      gapped,
-			normalizer: noSpace(),
-			search:     "xport",
-			want:       position.Ranges{position.NewRange(position.New(3, 6), position.New(4, 4))},
+		"fold dropping whitespace joins held lines in a row": {
+			lines:  gapped,
+			opts:   []finder.Option{finder.WithFold(noSpace)},
+			search: "xport",
+			want:   position.Ranges{position.NewRange(position.New(3, 6), position.New(4, 4))},
 		},
-		"normalizer dropping whitespace does not join text across a gap": {
-			lines:      gapped,
-			normalizer: noSpace(),
-			search:     "1name",
+		"fold dropping whitespace does not join text across a gap": {
+			lines:  gapped,
+			opts:   []finder.Option{finder.WithFold(noSpace)},
+			search: "1name",
 		},
 		"match that overlaps one crossing a gap": {
 			lines:  repeated,
@@ -708,13 +758,7 @@ func TestFinder_Load(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			var opts []finder.Option
-
-			if tc.normalizer != nil {
-				opts = append(opts, finder.WithNormalizer(tc.normalizer))
-			}
-
-			got := finder.New(opts...).Load(tc.lines).Find(tc.search)
+			got := finder.New(tc.opts...).Load(tc.lines).Find(tc.search)
 
 			assert.Equal(t, tc.want, got)
 		})
@@ -762,10 +806,22 @@ func TestFinder_Reload(t *testing.T) {
 	})
 }
 
+func TestFinder_ZeroValue(t *testing.T) {
+	t.Parallel()
+
+	// A zero Finder folds case and ignores diacritics, as one from New
+	// without options does.
+	lines := niceyaml.NewSourceFromString("name: Café").Lines()
+	want := position.Ranges{yamltest.LineRange(0, 6, 10)}
+
+	assert.Equal(t, want, new(finder.Finder).Load(lines).Find("CAFE"))
+	assert.Equal(t, want, finder.New().Load(lines).Find("CAFE"))
+}
+
 func TestIndex_Find_Concurrent(t *testing.T) {
 	t.Parallel()
 
-	// The default normalizer is safe for concurrent use, so goroutines that
+	// The default folds are safe for concurrent use, so goroutines that
 	// share one Index get the ranges a single goroutine gets.
 	source := niceyaml.NewSourceFromString(stringtest.LinesLF(
 		"name: Café",

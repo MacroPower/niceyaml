@@ -100,7 +100,7 @@
 //
 //	p := printer.New(printer.WithGutter(gutter)) // DefaultGutter when numbered is false
 //
-// Turning a feature off takes a named value, such as
+// Turning a feature off takes a named value or option, such as
 // [go.jacobcolvin.com/niceyaml/printer.NoGutter] or
 // [go.jacobcolvin.com/niceyaml/finder.Exact], so the off state is visible
 // at the call site. The exception is an option whose value is a security
@@ -1883,11 +1883,11 @@
 // and returns [position.Range] values for [line.View.AddOverlay] and
 // [line.View.BlendOverlay].
 //
-// A search folds case and ignores diacritics by default, through
-// [go.jacobcolvin.com/niceyaml/normalizer.New].
-// [go.jacobcolvin.com/niceyaml/finder.WithNormalizer] sets a normalizer of
-// the caller's own, or [go.jacobcolvin.com/niceyaml/finder.Exact] for exact
-// matching:
+// A search folds case and ignores diacritics by default. Options such as
+// [go.jacobcolvin.com/niceyaml/finder.WithDiacriticFold] turn each built-in
+// fold on or off, [go.jacobcolvin.com/niceyaml/finder.Exact] turns them all
+// off, and [go.jacobcolvin.com/niceyaml/finder.WithFold] adds a fold of the
+// caller's own:
 //
 //	idx := finder.New().Load(source.Lines())
 //	view := source.View()

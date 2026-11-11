@@ -5908,7 +5908,7 @@ func TestViewport_WithSearcher(t *testing.T) {
 	t.Run("WithFinder searches through the finder", func(t *testing.T) {
 		t.Parallel()
 
-		exact := finder.New(finder.WithNormalizer(exactNormalizer{}))
+		exact := finder.New(finder.Exact())
 		m := testModel(testPrinter(), 80, 10, yamlviewport.WithFinder(exact))
 		setRevision(&m, "key: Value\n")
 
@@ -5947,16 +5947,6 @@ func TestViewport_WithSearcher(t *testing.T) {
 			})
 		}
 	})
-}
-
-// exactNormalizer is a [finder.Normalizer] that returns its input, so a
-// finder with it matches characters exactly. The test keeps its own copy
-// rather than name finder.Exact, so the package still builds against the
-// niceyaml version that its go.mod requires.
-type exactNormalizer struct{}
-
-func (exactNormalizer) Normalize(in string) string {
-	return in
 }
 
 // reverseSearcher wraps a [finder.Finder] in an Index that returns its
