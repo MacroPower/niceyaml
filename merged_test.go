@@ -8,6 +8,7 @@ import (
 	"log"
 	"math"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1922,6 +1923,36 @@ func TestNewSourceFromLayers_Context(t *testing.T) {
 		bound := yamltest.RequireSourceError(t, err)
 		assert.Same(t, sources[0], bound.Source())
 
+		// A layer that fails for another reason returns the error of the
+		// context alone, and the merge does not read the layers above it.
+		broken := niceyaml.NewSourceFromString("a: [1\n", niceyaml.WithName("broken.yaml"))
+
+		merged, err = niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{broken, sources[1]})
+		require.EqualError(t, err, "broken.yaml: context canceled")
+		require.ErrorIs(t, err, context.Canceled)
+		require.NotErrorIs(t, err, niceyaml.ErrSyntax)
+		assert.Nil(t, merged)
+
+		bound = yamltest.RequireSourceError(t, err)
+		assert.Same(t, broken, bound.Source())
+
+		// The error of the context binds in the Node of the lowest layer,
+		// even though Node layers that parse together share another error.
+		docs := yamltest.AllDocuments(t,
+			niceyaml.NewSourceFromString(stringtest.LinesLF("a: &x", "---", "b: ["),
+				niceyaml.WithName("docs.yaml")), 2)
+		require.ErrorIs(t, docs[0].Err(), niceyaml.ErrSyntax)
+		require.Same(t, docs[0].Err(), docs[1].Err())
+
+		merged, err = niceyaml.NewSourceFromLayers(ctx, docs)
+		require.EqualError(t, err, "docs.yaml: document 1: context canceled")
+		require.ErrorIs(t, err, context.Canceled)
+		require.NotErrorIs(t, err, niceyaml.ErrSyntax)
+		assert.Nil(t, merged)
+
+		bound = yamltest.RequireSourceError(t, err)
+		assert.Same(t, docs[0], yamltest.BoundNode(t, bound))
+
 		// A merge of no layer reads nothing.
 		merged, err = niceyaml.NewSourceFromLayers(ctx, []niceyaml.Layer{})
 		require.NoError(t, err)
@@ -1938,6 +1969,25 @@ func TestNewSourceFromLayers_Context(t *testing.T) {
 		merged, err := niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{base, prod})
 		require.EqualError(t, err, "prod.yaml: context canceled")
 		require.ErrorIs(t, err, context.Canceled)
+		assert.Nil(t, merged)
+
+		bound := yamltest.RequireSourceError(t, err)
+		assert.Same(t, prod, bound.Source())
+	})
+
+	t.Run("a context that ends after a lower layer failed returns its error alone", func(t *testing.T) {
+		t.Parallel()
+
+		broken := niceyaml.NewSourceFromString("a: [1\n", niceyaml.WithName("broken.yaml"))
+
+		// The syntax error of broken.yaml does not read the context, so the
+		// context ends among the values the aliases of prod.yaml write.
+		ctx := &endingContext{Context: t.Context(), lasts: 100}
+
+		merged, err := niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{broken, prod})
+		require.EqualError(t, err, "prod.yaml: context canceled")
+		require.ErrorIs(t, err, context.Canceled)
+		require.NotErrorIs(t, err, niceyaml.ErrSyntax)
 		assert.Nil(t, merged)
 
 		bound := yamltest.RequireSourceError(t, err)
@@ -2614,20 +2664,207 @@ func TestNewSourceFromLayers(t *testing.T) {
 		assert.Nil(t, merged)
 	})
 
-	t.Run("the lowest layer that holds no value names the error", func(t *testing.T) {
+	t.Run("every layer that holds no value reports its error, lowest first", func(t *testing.T) {
 		t.Parallel()
 
 		// Each outer layer fails as a decode of it alone does.
 		nodes := layerNodes(t, "server: *missing\n", layerBadPort, "name: *gone\n")
 
-		_, alone := nodes[0].Decode[any](t.Context())
-		require.EqualError(t, alone, "base.yaml:1:9: $.server: could not find alias \"missing\"")
+		_, base := nodes[0].Decode[any](t.Context())
+		require.EqualError(t, base, "base.yaml:1:9: $.server: could not find alias \"missing\"")
 
-		_, err := niceyaml.NewSourceFromLayers(t.Context(), nodes)
-		require.EqualError(t, err, alone.Error())
+		_, prod := nodes[2].Decode[any](t.Context())
+		require.EqualError(t, prod, "prod.yaml:1:7: $.name: could not find alias \"gone\"")
 
+		merged, err := niceyaml.NewSourceFromLayers(t.Context(), nodes)
+		require.EqualError(t, err, base.Error()+"\n"+prod.Error())
+		assert.Nil(t, merged)
+
+		// The binding of the lowest layer comes first.
 		bound := yamltest.RequireSourceError(t, err)
 		assert.Same(t, nodes[0], yamltest.BoundNode(t, bound))
+
+		problems := slices.Collect(niceyaml.Problems(err))
+		require.Len(t, problems, 2)
+		assert.Same(t, nodes[0].Source(), problems[0].Source())
+		assert.Same(t, nodes[2].Source(), problems[1].Source())
+
+		// One failing layer returns its error as it is.
+		_, err = niceyaml.NewSourceFromLayers(t.Context(), nodes[1:])
+		require.EqualError(t, err, prod.Error())
+		assert.Same(t, nodes[2], yamltest.BoundNode(t, yamltest.RequireSourceError(t, err)))
+	})
+
+	t.Run("each Source that the merge cannot read reports its error, lowest first", func(t *testing.T) {
+		t.Parallel()
+
+		base := niceyaml.NewSourceFromString("a: [1\nb: 2\n", niceyaml.WithName("base.yaml"))
+		prod := niceyaml.NewSourceFromString(layerProdHost, niceyaml.WithName("prod.yaml"))
+		local := niceyaml.NewSourceFromString("c: {x\n", niceyaml.WithName("local.yaml"))
+		twice := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\n", niceyaml.WithName("twice.yaml"))
+
+		sources := []*niceyaml.Source{base, prod, local, twice}
+
+		merged, err := niceyaml.NewSourceFromLayers(t.Context(), sources)
+		require.ErrorIs(t, err, niceyaml.ErrSyntax)
+		require.ErrorIs(t, err, niceyaml.ErrMultipleDocuments)
+		assert.Nil(t, merged)
+
+		problems := slices.Collect(niceyaml.Problems(err))
+		require.Len(t, problems, 3)
+		assert.Same(t, base, problems[0].Source())
+		assert.Same(t, local, problems[1].Source())
+		assert.Same(t, twice, problems[2].Source())
+
+		assert.Same(t, base, yamltest.RequireSourceError(t, err).Source())
+	})
+
+	t.Run("Node layers that parse together report their error once", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(stringtest.LinesLF("a: &x", "---", "b: ["),
+			niceyaml.WithName("prod.yaml"))
+		all := yamltest.AllDocuments(t, source, 2)
+		require.Same(t, all[0].Err(), all[1].Err())
+
+		merged, err := niceyaml.NewSourceFromLayers(t.Context(), all)
+		require.ErrorIs(t, err, niceyaml.ErrSyntax)
+		assert.Same(t, all[0].Err(), err)
+		assert.Nil(t, merged)
+	})
+
+	t.Run("a Source and its Nodes report each syntax error once in any order", func(t *testing.T) {
+		t.Parallel()
+
+		// Each document fails to parse on its own, so the Source fails
+		// with the join of both errors, and each Node with one of them.
+		two := niceyaml.NewSourceFromString(stringtest.LinesLF("a: [", "---", "b: {"),
+			niceyaml.WithName("two.yaml"))
+		docs := yamltest.AllDocuments(t, two, 2)
+		require.NotSame(t, docs[0].Err(), docs[1].Err())
+
+		_, fileErr := two.File()
+		require.Error(t, fileErr)
+
+		want := slices.Collect(niceyaml.Problems(fileErr))
+		require.Len(t, want, 2)
+
+		tcs := map[string]struct {
+			layers []niceyaml.Layer
+			want   []niceyaml.ErrorTree
+		}{
+			"Source first": {
+				layers: []niceyaml.Layer{two, docs[0], docs[1]},
+				want:   want,
+			},
+			"Nodes first": {
+				layers: []niceyaml.Layer{docs[0], docs[1], two},
+				want:   want,
+			},
+			"Source between its Nodes": {
+				layers: []niceyaml.Layer{docs[0], two, docs[1]},
+				want:   want,
+			},
+			"second Node first": {
+				layers: []niceyaml.Layer{docs[1], two},
+				want:   []niceyaml.ErrorTree{want[1], want[0]},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				merged, err := niceyaml.NewSourceFromLayers(t.Context(), tc.layers)
+				require.ErrorIs(t, err, niceyaml.ErrSyntax)
+				assert.Nil(t, merged)
+
+				problems := slices.Collect(niceyaml.Problems(err))
+				require.Len(t, problems, len(tc.want))
+
+				for i, p := range problems {
+					assert.Equal(t, tc.want[i].Label(), p.Label())
+				}
+			})
+		}
+	})
+
+	t.Run("Sources that read one broken reference report its error once", func(t *testing.T) {
+		t.Parallel()
+
+		ref := niceyaml.NewSourceFromString("x: &r [1\n", niceyaml.WithName("ref.yaml"))
+		base := niceyaml.NewSourceFromString("a: *r\n", niceyaml.WithName("base.yaml"),
+			niceyaml.WithReferences(ref))
+		prod := niceyaml.NewSourceFromString("b: *r\n", niceyaml.WithName("prod.yaml"),
+			niceyaml.WithReferences(ref))
+
+		merged, err := niceyaml.NewSourceFromLayers(t.Context(), []*niceyaml.Source{base, prod})
+		require.ErrorIs(t, err, niceyaml.ErrSyntax)
+		assert.Nil(t, merged)
+
+		problems := slices.Collect(niceyaml.Problems(err))
+		require.Len(t, problems, 1)
+		assert.Same(t, ref, problems[0].Source())
+
+		// A Source given twice reports the error of its parse once.
+		broken := niceyaml.NewSourceFromString("a: [1\n", niceyaml.WithName("broken.yaml"))
+
+		merged, err = niceyaml.NewSourceFromLayers(t.Context(), []*niceyaml.Source{broken, broken})
+		require.ErrorIs(t, err, niceyaml.ErrSyntax)
+		assert.Nil(t, merged)
+
+		problems = slices.Collect(niceyaml.Problems(err))
+		require.Len(t, problems, 1)
+		assert.Same(t, broken, problems[0].Source())
+	})
+
+	t.Run("a layer given more than once reports its error once", func(t *testing.T) {
+		t.Parallel()
+
+		// The layer parses, so it fails in the decode, which builds its
+		// error anew on each read.
+		miss := niceyaml.NewSourceFromString("a: *missing\n", niceyaml.WithName("miss.yaml"))
+		doc, err := miss.Document()
+		require.NoError(t, err)
+
+		_, alone := doc.Decode[any](t.Context())
+		require.EqualError(t, alone, "miss.yaml:1:4: $.a: could not find alias \"missing\"")
+
+		tcs := map[string]struct {
+			layers []niceyaml.Layer
+		}{
+			"Node twice": {
+				layers: []niceyaml.Layer{doc, doc},
+			},
+			"Source twice": {
+				layers: []niceyaml.Layer{miss, miss},
+			},
+			"Source and its Node": {
+				layers: []niceyaml.Layer{miss, doc},
+			},
+			"Node and its Source with a layer between": {
+				layers: []niceyaml.Layer{
+					doc,
+					niceyaml.NewSourceFromString("b: 1\n", niceyaml.WithName("ok.yaml")),
+					miss,
+				},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				merged, err := niceyaml.NewSourceFromLayers(t.Context(), tc.layers)
+				require.EqualError(t, err, alone.Error())
+				assert.Nil(t, merged)
+
+				problems := slices.Collect(niceyaml.Problems(err))
+				require.Len(t, problems, 1)
+				assert.Same(t, miss, problems[0].Source())
+				assert.Same(t, doc, yamltest.BoundNode(t, yamltest.RequireSourceError(t, err)))
+			})
+		}
 	})
 }
 
