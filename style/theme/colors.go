@@ -26,8 +26,9 @@ import (
 // [lipgloss.Color] returns a NoColor for text it cannot read, such as
 // #2b1d1, so a mistyped color reads as unset and takes the default that
 // its field describes, without an error. A program that reads colors from
-// user input parses them with [style.ParseColor], which returns an error
-// for such text.
+// user input holds them in a [Palette], whose [Palette.Colors] returns an
+// error for such text. A Colors value also holds colors that a Palette
+// cannot name, such as the ANSI colors of the terminal's own palette.
 type Colors struct {
 	// Fg is the color of the body text. An unset Fg leaves the terminal's
 	// own foreground in place. [Derive] then derives the other kinds from
@@ -52,13 +53,14 @@ type Colors struct {
 	// Error colors error text, error headings, deleted lines, and the
 	// locations of errors. An unset Error takes a red picked for the mode.
 	Error color.Color
-	// Mode is the background the theme targets. It also picks the
-	// direction of the derived shifts. [kind.TextSubtle] and
-	// [kind.TextSubtleDim] move toward the background, but
-	// [kind.TextAccentDim] moves away from it. The dimmed accent thus reads
-	// brighter than the accent on a [Dark] theme and darker on a [Light]
-	// one. An accent that cannot move further from the background, such as
-	// black on a [Light] theme, dims toward it instead.
+	// Mode is the background the theme targets, and [Derive] and
+	// [FromColors] reject one that is unset. It also picks the direction
+	// of the derived shifts. [kind.TextSubtle] and [kind.TextSubtleDim]
+	// move toward the background, but [kind.TextAccentDim] moves away
+	// from it. The dimmed accent thus reads brighter than the accent on a
+	// [Dark] theme and darker on a [Light] one. An accent that cannot move
+	// further from the background, such as black on a [Light] theme, dims
+	// toward it instead.
 	Mode Mode
 }
 
@@ -73,8 +75,8 @@ type Colors struct {
 //
 // A Token decodes from text, such as a YAML or JSON string, through
 // [Token.UnmarshalText], which rejects a spec that [style.Parse] rejects.
-// A program that decodes a theme file into a map of Tokens thus gets the
-// error from the decode.
+// A program that decodes a theme file into a [Palette] or a map of Tokens
+// thus gets the error from the decode.
 //
 // A type that holds a Token reads text. A niceyaml decode into such a type
 // thus holds the aliases of the whole document to the bound on the text
@@ -82,7 +84,7 @@ type Colors struct {
 // describes. When the document holds an alias, the decode counts that
 // text once for the whole document. A config loader whose documents repeat
 // large anchors decodes the tokens as strings and converts them to Tokens,
-// which [FromColors] checks.
+// which [FromColors] and [Palette.Theme] check.
 type Token string
 
 // UnmarshalText sets t to text when [style.Parse] accepts it. Otherwise it
@@ -104,13 +106,15 @@ func (t *Token) UnmarshalText(text []byte) error {
 // takes its [Mode] from c. It keeps a copy of tokens, so a later change
 // to the map does not change the theme.
 //
-// FromColors checks each token when it creates the theme. It returns an
-// error for each token that [style.Parse] rejects, sorted by kind and
-// joined with [errors.Join]. Each error names the kind of its token and
-// wraps the error from style.Parse. A decoder that calls
-// [Token.UnmarshalText], such as niceyaml, go-yaml, or encoding/json,
-// rejects such a token earlier, when it decodes the theme file. A
-// niceyaml decode also reports where the file holds the token.
+// FromColors checks the mode and each token when it creates the theme,
+// and joins the errors with [errors.Join]. A Mode in c other than [Light]
+// and [Dark], such as the unset zero Mode, gives an error that wraps
+// [ErrUnknownMode]. Each token that [style.Parse] rejects gives an error,
+// sorted by kind, that names the kind of the token and wraps the error
+// from style.Parse. A decoder that calls [Token.UnmarshalText], such as
+// niceyaml, go-yaml, or encoding/json, rejects such a token earlier, when
+// it decodes the theme file. A niceyaml decode also reports where the
+// file holds the token.
 //
 // A Token that a program sets any other way reaches FromColors unchecked,
 // and the error for it does not name a place in a file. Such Tokens
@@ -120,11 +124,10 @@ func (t *Token) UnmarshalText(text []byte) error {
 //
 // A token for a kind outside the hierarchy, such as a custom kind or a
 // misspelled name, styles that kind alone. Only a renderer or an overlay
-// that names the kind draws it. A program that reads tokens from a file
-// checks each key with [kind.IsPredefined] when the file must not style
-// kinds of its own.
+// that names the kind draws it. [Palette.Theme] rejects such a token, for
+// a theme file that must not style kinds of its own.
 func FromColors(name string, c Colors, tokens map[kind.Kind]Token) (Theme, error) {
-	err := checkTokens(tokens)
+	err := check(c.Mode, tokens)
 	if err != nil {
 		return Theme{}, err
 	}
@@ -135,7 +138,8 @@ func FromColors(name string, c Colors, tokens map[kind.Kind]Token) (Theme, error
 // MustFromColors is like [FromColors] but panics when FromColors returns
 // an error.
 //
-// Use it for a theme whose tokens the program spells out in its source.
+// Use it for a theme whose mode and tokens the program spells out in its
+// source.
 func MustFromColors(name string, c Colors, tokens map[kind.Kind]Token) Theme {
 	t, err := FromColors(name, c, tokens)
 	if err != nil {
@@ -146,11 +150,11 @@ func MustFromColors(name string, c Colors, tokens map[kind.Kind]Token) Theme {
 }
 
 // fromColors creates a new [Theme] that derives its styles from c and
-// tokens as [FromColors] does, but without checking or copying tokens.
-// The first call to [Theme.Styles] panics on a token that [style.Parse]
-// rejects. The built-in catalog creates its themes with fromColors. A
-// program that imports the package thus does not parse every built-in
-// token at startup.
+// tokens as [FromColors] does. It does not check the mode or the tokens,
+// and it does not copy tokens. The first call to [Theme.Styles] panics on
+// a token that [style.Parse] rejects. The built-in catalog creates its
+// themes with fromColors. A program that imports the package thus does
+// not parse every built-in token at startup.
 func fromColors(name string, c Colors, tokens map[kind.Kind]Token) Theme {
 	return New(name, c.Mode, func() style.Styles {
 		return derive(c, tokens)
@@ -241,13 +245,15 @@ func fromColors(name string, c Colors, tokens map[kind.Kind]Token) Theme {
 // later release. A test that pins the exact output of Derive might then
 // fail.
 //
-// Derive returns an error for each token that [style.Parse] rejects,
-// sorted by kind and joined with [errors.Join]. Each error names the kind
-// of its token and wraps the error from style.Parse. A decoder that calls
-// [Token.UnmarshalText] rejects such a token earlier, as [FromColors]
-// describes.
+// Derive returns an error that wraps [ErrUnknownMode] for a Mode in c
+// other than [Light] and [Dark], such as the unset zero Mode. It also
+// returns an error for each token that [style.Parse] rejects, sorted by
+// kind. Each such error names the kind of its token and wraps the error
+// from style.Parse. Derive joins the errors with [errors.Join]. A decoder
+// that calls [Token.UnmarshalText] rejects such a token earlier, as
+// [FromColors] describes.
 func Derive(c Colors, tokens map[kind.Kind]Token) (style.Styles, error) {
-	err := checkTokens(tokens)
+	err := check(c.Mode, tokens)
 	if err != nil {
 		return style.Styles{}, err
 	}
@@ -257,8 +263,8 @@ func Derive(c Colors, tokens map[kind.Kind]Token) (style.Styles, error) {
 
 // MustDerive is like [Derive] but panics when Derive returns an error.
 //
-// Use it for tokens that the program spells out in its source, such as in
-// the build function of a theme from [New].
+// Use it for a mode and tokens that the program spells out in its source,
+// such as in the build function of a theme from [New].
 func MustDerive(c Colors, tokens map[kind.Kind]Token) style.Styles {
 	s, err := Derive(c, tokens)
 	if err != nil {
@@ -268,8 +274,8 @@ func MustDerive(c Colors, tokens map[kind.Kind]Token) style.Styles {
 	return s
 }
 
-// derive builds the styles that [Derive] describes, without checking
-// tokens first. It panics on a token that [style.Parse] rejects.
+// derive builds the styles that [Derive] describes, without checking the
+// mode or tokens first. It panics on a token that [style.Parse] rejects.
 func derive(c Colors, tokens map[kind.Kind]Token) style.Styles {
 	c = c.filled()
 	fg, bg := c.surface()
@@ -282,20 +288,44 @@ func derive(c Colors, tokens map[kind.Kind]Token) style.Styles {
 	return build(c, tokens, dim, surface)
 }
 
-// checkTokens joins an error for each token that [style.Parse] rejects,
-// in the order of the kinds. It returns nil when style.Parse accepts every
-// token.
-func checkTokens(tokens map[kind.Kind]Token) error {
+// check joins the error for a mode that is neither [Light] nor [Dark] with
+// the errors of checkTokens for tokens. It returns nil when the mode and
+// every token pass.
+func check(mode Mode, tokens map[kind.Kind]Token) error {
+	var errs []error
+
+	err := mode.check()
+	if err != nil {
+		errs = append(errs, err)
+	}
+
+	return errors.Join(append(errs, checkTokens(tokens)...)...)
+}
+
+// checkTokens returns an error from checkToken for each token that
+// [style.Parse] rejects, in the order of the kinds.
+func checkTokens(tokens map[kind.Kind]Token) []error {
 	var errs []error
 
 	for _, k := range slices.Sorted(maps.Keys(tokens)) {
-		_, err := style.Parse(string(tokens[k]))
+		err := checkToken(k, tokens[k])
 		if err != nil {
-			errs = append(errs, fmt.Errorf("token for %q: %w", k, err))
+			errs = append(errs, err)
 		}
 	}
 
-	return errors.Join(errs...)
+	return errs
+}
+
+// checkToken returns an error that names k and wraps the error from
+// [style.Parse] when style.Parse rejects t.
+func checkToken(k kind.Kind, t Token) error {
+	_, err := style.Parse(string(t))
+	if err != nil {
+		return fmt.Errorf("token for %q: %w", k, err)
+	}
+
+	return nil
 }
 
 // filled returns c with each unset color other than Fg and Bg replaced by

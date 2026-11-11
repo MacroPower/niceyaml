@@ -1,0 +1,6 @@
+---
+fg: "#f3e9dc"
+bg: "#2b1d14"
+
+tokens:
+  comment: "italic #9c8a7a"

@@ -19,10 +19,11 @@ import (
 // "dark", so a Mode decodes from a YAML or JSON string, and
 // [flag.TextVar] reads one from a flag.
 //
-// A decoder does not call [Mode.UnmarshalText] for a missing or null
-// value. The Mode then keeps the value it held, which is [Light] for a
-// zero Mode. A program that requires a mode decodes it into a [*Mode]
-// and treats nil as missing.
+// The zero Mode is unset and names neither background. A decoder does not
+// call [Mode.UnmarshalText] for a missing or null value, so a Mode that a
+// file leaves out stays unset. [Palette.Theme], [FromColors], and [Derive]
+// reject an unset Mode with [ErrUnknownMode]. [New] does not check the
+// Mode it gets.
 //
 // A type that holds a Mode reads text. A niceyaml decode into such a type
 // thus holds the aliases of the whole document to the bound on the text
@@ -36,13 +37,14 @@ type Mode int
 // Background modes.
 const (
 	// Light marks themes that target light backgrounds.
-	Light Mode = iota
+	Light Mode = iota + 1
 	// Dark marks themes that target dark backgrounds.
 	Dark
 )
 
 // String returns "light" for [Light] and "dark" for [Dark]. For any other
-// value, it returns the value in the form Mode(2).
+// value, it returns the value in the form Mode(3). The zero Mode thus
+// prints as Mode(0).
 func (m Mode) String() string {
 	switch m {
 	case Light:
@@ -55,11 +57,12 @@ func (m Mode) String() string {
 }
 
 // MarshalText returns the name that [Mode.String] returns. For a value
-// other than [Light] and [Dark], it returns an error that wraps
-// [ErrUnknownMode].
+// other than [Light] and [Dark], such as the zero Mode, it returns an
+// error that wraps [ErrUnknownMode].
 func (m Mode) MarshalText() ([]byte, error) {
-	if m != Light && m != Dark {
-		return nil, fmt.Errorf("%w: %d", ErrUnknownMode, int(m))
+	err := m.check()
+	if err != nil {
+		return nil, err
 	}
 
 	return []byte(m.String()), nil
@@ -81,15 +84,28 @@ func (m *Mode) UnmarshalText(text []byte) error {
 	return nil
 }
 
+// check returns an error that wraps [ErrUnknownMode] when m is neither
+// [Light] nor [Dark].
+func (m Mode) check() error {
+	switch m {
+	case Light, Dark:
+		return nil
+	case 0:
+		return fmt.Errorf("%w: mode is unset", ErrUnknownMode)
+	}
+
+	return fmt.Errorf("%w: %d", ErrUnknownMode, int(m))
+}
+
 // Theme is a named color theme with its mode and a lazily built
 // [style.Styles]. [Theme.Style] resolves one kind from those styles, so a
 // Theme goes wherever a [style.Styler] does, such as
 // [go.jacobcolvin.com/niceyaml/printer.WithStyles].
 //
 // Find one by name with [Catalog.Get], or list them all with
-// [Catalog.All]. Create custom themes with [FromColors] or [New] and add
-// them to a catalog with [Catalog.With]. [Theme.With] adjusts the styles
-// of a theme and keeps its name and mode.
+// [Catalog.All]. Create custom themes with [Palette.Theme], [FromColors],
+// or [New] and add them to a catalog with [Catalog.With]. [Theme.With]
+// adjusts the styles of a theme and keeps its name and mode.
 type Theme struct {
 	// The memoized builder for the [style.Styles]. The first call builds
 	// them, and copies of the Theme share the result. It is nil for the
@@ -98,13 +114,17 @@ type Theme struct {
 	// Name is the kebab-case identifier for the theme, such as "monokai" or
 	// "dracula".
 	Name string
-	// Mode is the background the theme targets, light or dark.
+	// Mode is the background the theme targets, light or dark. The zero
+	// Theme holds the unset [Mode].
 	Mode Mode
 }
 
 // New creates a new [Theme] whose [Theme.Styles] calls build at most once
 // and returns the same value afterwards. A nil build gives a Theme whose
 // Styles returns a zero [style.Styles].
+//
+// New keeps mode as it is, so a mode other than [Light] and [Dark] gives
+// a Theme that [Catalog.Mode] lists for neither background.
 //
 // The theme styles only the kinds that build sets, and every other kind
 // takes the style of its closest set ancestor. [FromColors] derives the
@@ -164,7 +184,7 @@ func (t Theme) Style(st kind.Kind) lipgloss.Style {
 
 var (
 	// ErrUnknownMode reports text or a [Mode] value that names neither
-	// [Light] nor [Dark].
+	// [Light] nor [Dark]. The unset zero Mode is such a value.
 	ErrUnknownMode = errors.New("unknown mode")
 
 	// Charm is the theme of CharmTone colors for a dark background. It
@@ -187,7 +207,7 @@ var (
 	builtin = func() Catalog {
 		themes := make([]Theme, 0, len(palettes)+2)
 		for name, p := range palettes {
-			themes = append(themes, fromColors(name, p.colors(), p.Tokens))
+			themes = append(themes, fromColors(name, p.unchecked(), p.Tokens))
 		}
 
 		themes = append(themes, Charm, CharmLight)

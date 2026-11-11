@@ -84,9 +84,9 @@
 // and the marks of errors and warnings from the colors. A theme from
 // FromColors thus presents every kind that a built-in theme does.
 //
-// FromColors returns an error for a token that style.Parse rejects.
-// [MustFromColors] panics on one instead, for tokens that a program
-// spells out in its source:
+// FromColors returns an error for an unset mode and for a token that
+// style.Parse rejects. [MustFromColors] panics instead, for a theme that a
+// program spells out in its source:
 //
 //	corp := theme.MustFromColors("corp", theme.Colors{
 //		Fg:     lipgloss.Color("#e6e6e6"),
@@ -98,21 +98,6 @@
 //		kind.NameTag:       "bold #ff6f00",
 //		kind.LiteralString: "#9ccc65",
 //	})
-//
-// A program that reads a theme from a file decodes its tokens into a map
-// of Tokens and calls FromColors. A Token rejects a spec that style.Parse
-// rejects when it decodes, so a niceyaml decode reports each bad token
-// where the file holds it.
-//
-// Such a program reads each color with [style.ParseColor], because
-// [lipgloss.Color] reads a mistyped color as unset. ParseColor reads an
-// empty string as unset too. YAML reads the color in bg: #2b1d14 as a
-// comment, so the key holds null. A null leaves a string field as it was,
-// so a field that starts empty stays empty. After the decode, a check for
-// an empty field thus rejects a null, an empty string, and a color key
-// that the file leaves out. A program that allows a missing key checks
-// each color node that the file holds instead, for example with
-// [go.jacobcolvin.com/niceyaml.Each].
 //
 // [Catalog.With] adds themes to a catalog. It returns a new Catalog and
 // leaves the receiver as it was. A program adds its theme to the built-in
@@ -148,6 +133,44 @@
 //   - [kind.UI] for gutters, annotations, and hunk headers, which
 //     otherwise take the whole comment style.
 //
+// # Theme Files
+//
+// A [Palette] holds a whole theme as plain values that decode from text. A
+// program that reads a theme from a YAML or JSON file decodes the file
+// into a Palette and calls [Palette.Theme]:
+//
+//	pal, err := source.Decode[theme.Palette](ctx,
+//		niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject))
+//	if err != nil {
+//		return err
+//	}
+//
+//	corp, err := pal.Theme()
+//
+// A [Mode], a [Hex], and a [Token] each reject bad text when they decode.
+// A niceyaml decode thus reports a mistyped mode, color, or token where
+// the file holds it, without a validator. A Palette also decodes as a
+// field of a larger config type, and the path of each error then starts
+// at that field.
+//
+// Theme reports what a decode cannot. It rejects an empty name, an unset
+// mode, and a token for a kind that [kind.IsPredefined] rejects, such as a
+// misspelled name. These errors name the field or the kind and not a
+// place in the file. A program that wants a place for one of them adds a
+// validator for it to the decode.
+//
+// A decode does not report an unquoted color. YAML reads the color in
+// bg: #2b1d14 as a comment, so the key holds null, and a null leaves the
+// field unset. To report such a key, a program checks each color node
+// that the file holds, for example with
+// [go.jacobcolvin.com/niceyaml.Each].
+//
+// A Hex names an RGB color, so a Palette cannot hold a color of the
+// terminal's own palette. A program that wants one sets it in a [Colors]
+// value and calls FromColors. A program whose theme file styles kinds of
+// its own also calls FromColors, with the colors that [Palette.Colors]
+// returns.
+//
 // # Theme Structure
 //
 // Themes define colors for YAML token kinds, such as keys
@@ -158,11 +181,11 @@
 // the kinds it customizes, and every other kind takes the style of its
 // parent.
 //
-// Every built-in theme other than [Charm] and [CharmLight] comes from
-// [FromColors]. Each of these themes lists a base foreground and
-// background, an accent color, OK, warning, and error colors, and the
-// token kinds it colors. [Derive] derives the remaining kinds from those
-// colors, so every built-in theme presents the same set of kinds.
+// Every built-in theme other than [Charm] and [CharmLight] comes from a
+// [Palette]. Each of these themes lists a base foreground and background,
+// an accent color, OK, warning, and error colors, and the token kinds it
+// colors. [Derive] derives the remaining kinds from those colors, so
+// every built-in theme presents the same set of kinds.
 //
 // # Surfaces
 //
