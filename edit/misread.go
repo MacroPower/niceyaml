@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"fmt"
 	"slices"
-	"strings"
 
 	"github.com/goccy/go-yaml/ast"
 
@@ -27,10 +26,11 @@ func (e *misreadError) Error() string {
 	return e.msg
 }
 
-// misreadKind is a kind of YAML that [New] refuses with [ErrMisread], as
+// misreadKind is a kind of YAML that go-yaml reads otherwise than YAML
+// does. [New] refuses the kinds of `<<` merge keys with [ErrMisread], as
 // the list of the Supported YAML section of the package documentation names
-// them, in the order of that list. Two instances at one place come in that
-// order.
+// them, in the order of that list. Two instances at one place come in the
+// order of the kinds.
 type misreadKind int
 
 const (
@@ -40,8 +40,9 @@ const (
 	// A key that two mappings of one `<<` merge key bring in, which
 	// go-yaml's decoder reads from the later mapping.
 	misreadOrder
-	// A byte order mark at the start of the text of the first document of a
-	// file, which go-yaml reads as text of the document.
+	// A byte order mark that a call moved to a place where the tokenizer of
+	// the Source drops it, or that the YAML of a Set value holds at such a
+	// place. Go-yaml reads such a mark as text.
 	misreadMark
 )
 
@@ -63,14 +64,11 @@ type misreadFound struct {
 	order [2]int
 }
 
-// misreads returns each instance of a misread kind in the current text, in
-// the order of the text and, at one place, in the order of the kinds.
+// misreads returns each instance of a misread kind of `<<` merge keys in
+// the current text, as [Doc.precedenceMisreads] finds them, in the order of
+// the text and, at one place, in the order of the kinds.
 func (d *Doc) misreads() []misreadFound {
 	out := d.precedenceMisreads()
-
-	if m, ok := d.markMisread(); ok {
-		out = append(out, m)
-	}
 
 	slices.SortStableFunc(out, func(a, b misreadFound) int {
 		return cmp.Or(cmp.Compare(a.start, b.start), cmp.Compare(a.kind, b.kind))
@@ -125,8 +123,10 @@ func (d *Doc) convertsCollection() bool {
 // of the calls holds each merge key as an entry of its mapping, not the
 // entries that it brings in. So the check of the model does not see which
 // entry go-yaml's decoder reads through the merge key. The text that the
-// Apply found holds no such instance, because New refuses such a text and
-// each call checks the text that it leaves. So the call made the instance.
+// Apply found holds no such instance, and each call checks the text that it
+// leaves. New refuses a text with a misread of a merge key, and it takes
+// each mark that the tokenizer drops out of the text. So the call made the
+// instance.
 // The problem matches [ErrEngine], and the Apply records it.
 func (d *Doc) madeMisread(named string) error {
 	found := d.precedenceMisreads()
@@ -186,39 +186,6 @@ func (d *Doc) valueMisread() (misreadFound, bool) {
 	return misreadFound{
 		kind: misreadMark, start: marks[0],
 		msg: fmt.Sprintf("go-yaml reads the byte order mark at %d:%d as text of the value", at.Line+1, at.Col+1),
-		fix: markFix,
-	}, true
-}
-
-// markMisread returns the first byte order mark of the user's text that
-// go-yaml reads as text of the first document of its file, but that the
-// tokenizer of the Source drops, as YAML does. Such a mark stands at the
-// start of the file, or in the text of the document before its first
-// token, after comment lines, directives, and empty lines, as
-// [Doc.markPlaces] finds it. A mark of a later document is go-yaml's
-// reading, and [Doc.Text] and [FileText] keep it. The misread binds at the
-// mark.
-func (d *Doc) markMisread() (misreadFound, bool) {
-	if d.user.DocumentIndex() > 0 {
-		return misreadFound{}, false
-	}
-
-	first := -1
-	if prefix, _ := d.markPlaces(); len(prefix) > 0 {
-		first = prefix[0]
-	}
-
-	if strings.HasSuffix(d.user.Source().Text()[:d.start], bom.Mark) {
-		first = 0
-	}
-
-	if first < 0 {
-		return misreadFound{}, false
-	}
-
-	return misreadFound{
-		kind: misreadMark, at: d.offsetSite(first, 1), start: first,
-		msg: fmt.Sprintf("go-yaml reads the byte order mark at %s as text of the document", d.userAt(first)),
 		fix: markFix,
 	}, true
 }

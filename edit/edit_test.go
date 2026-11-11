@@ -10239,6 +10239,26 @@ func TestFileText(t *testing.T) {
 			},
 			want: stringtest.LinesLF("a: 20", "k: 20", "---", "b: 20", "---", "\ufeffc: 3"),
 		},
+		"byte order mark at the start of a file": {
+			// The mark stands before the text of the document, so FileText
+			// writes it back in front of the edited text.
+			docs: func(t *testing.T) (*niceyaml.Source, []*edit.Doc) {
+				t.Helper()
+
+				src := niceyaml.NewSourceFromString(stringtest.LinesLF("\ufeffname: api", "b: 2"))
+
+				d, err := edit.New(src.Documents()[0])
+				require.NoError(t, err)
+
+				remove := func(_ context.Context, n *edit.Node) error {
+					return n.Remove()
+				}
+				require.NoError(t, d.Apply(t.Context(), paths.Doc().Child("name"), remove))
+
+				return src, []*edit.Doc{d}
+			},
+			want: stringtest.LinesLF("\ufeffb: 2"),
+		},
 		"documents at the byte limit": {
 			// The text holds 48 bytes, and each Doc adds one.
 			docs: func(t *testing.T) (*niceyaml.Source, []*edit.Doc) {
@@ -10373,6 +10393,19 @@ func TestDoc_Text(t *testing.T) {
 			before: stringtest.LinesLF("---", "a: 2 # second"),
 			want:   stringtest.LinesLF("---", "a: 20 # second"),
 		},
+		"byte order mark at the start of the file": {
+			// The mark stands before the text of the document.
+			text:   "\ufeffa: 1\n",
+			before: "a: 1\n",
+			want:   "a: 20\n",
+		},
+		"byte order mark after a comment line of the first document": {
+			// The tokenizer drops the mark in the prefix of the document, and
+			// the text keeps it before the line of the key.
+			text:   stringtest.LinesLF("# c", "\ufeffa: 1"),
+			before: stringtest.LinesLF("# c", "\ufeffa: 1"),
+			want:   stringtest.LinesLF("# c", "\ufeffa: 20"),
+		},
 		"byte order mark before the header of the next document": {
 			// The mark belongs to the line of the header, so the edit writes
 			// after the last line of the document.
@@ -10430,6 +10463,82 @@ func TestDoc_Text(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, d.Text())
 			requireChanges(t, src, d)
+		})
+	}
+}
+
+func TestDoc_Text_PrefixMark(t *testing.T) {
+	t.Parallel()
+
+	setZ := func(opt edit.SetOption) edit.Func {
+		return func(ctx context.Context, n *edit.Node) error {
+			return n.At(paths.MustParse("$.z")).Set(ctx, 0, opt)
+		}
+	}
+
+	tcs := map[string]struct {
+		text string
+		fn   edit.Func
+		want string
+		// The index of the document in text.
+		doc int
+	}{
+		"key first before a mark after a comment line": {
+			// The tokenizer drops the mark only in the prefix of the document,
+			// so the mark goes before the key that the Set writes.
+			text: stringtest.LinesLF("# c", "\ufeffa: 1", "b: 2"),
+			fn:   setZ(edit.First()),
+			want: stringtest.LinesLF("# c", "\ufeffz: 0", "a: 1", "b: 2"),
+		},
+		"key before the key of a mark after a comment line": {
+			text: stringtest.LinesLF("# c", "\ufeffa: 1", "b: 2"),
+			fn:   setZ(edit.Before("a")),
+			want: stringtest.LinesLF("# c", "\ufeffz: 0", "a: 1", "b: 2"),
+		},
+		"key first before a mark after a comment line of a later document": {
+			text: stringtest.LinesLF("x: 1", "...", "# c", "\ufeffa: 1", "b: 2"),
+			doc:  1,
+			fn:   setZ(edit.First()),
+			want: stringtest.LinesLF("x: 1", "...", "# c", "\ufeffz: 0", "a: 1", "b: 2"),
+		},
+		"key after the key of a mark after a comment line": {
+			// The mark stays in the prefix in front of its line.
+			text: stringtest.LinesLF("# c", "\ufeffa: 1", "b: 2"),
+			fn:   setZ(edit.Before("b")),
+			want: stringtest.LinesLF("# c", "\ufeffa: 1", "z: 0", "b: 2"),
+		},
+		"key first after a mark at the start of the file": {
+			// The mark stands before the text of the document.
+			text: stringtest.LinesLF("\ufeffa: 1", "b: 2"),
+			fn:   setZ(edit.First()),
+			want: stringtest.LinesLF("\ufeffz: 0", "a: 1", "b: 2"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			src := niceyaml.NewSourceFromString(tc.text)
+			docs := src.Documents()
+			require.Greater(t, len(docs), tc.doc)
+
+			d, err := edit.New(docs[tc.doc])
+			require.NoError(t, err)
+
+			require.NoError(t, d.Apply(t.Context(), paths.Doc(), tc.fn))
+
+			got, err := edit.FileText(src, d)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+
+			// The Source reads each key of the edited text without the mark.
+			reread := niceyaml.NewSourceFromString(got).Documents()
+			require.Len(t, reread, len(docs))
+
+			v, err := reread[tc.doc].Decode[map[string]int](t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, map[string]int{"a": 1, "b": 2, "z": 0}, v)
 		})
 	}
 }

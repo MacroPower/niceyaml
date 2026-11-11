@@ -2766,34 +2766,30 @@ func (d *Doc) offsetSite(off, size int) site {
 	return site{path: d.offsetPath(off), at: d.userRange(off, off+size), origin: d.originAt(off)}
 }
 
-// markPlaces returns the offsets in orig of the byte order marks of the
-// user's text that the tokenizer dropped, as [bom.Drop] finds them: first
-// the marks in the prefix of the document, then the marks inside the
-// document. A mark in the prefix stands before the first token of the
-// document and its "---", after comment lines, directives and empty lines
-// alone. A mark after a "..." line that ends the document stands in the
-// prefix of the next document, so it counts in neither. Each other mark
+// insideMarks returns the offsets in orig of the byte order marks of the
+// user's text that the tokenizer dropped inside the document, as
+// [bom.Drop] finds them. A mark before the first token of the document and
+// its "---", after comment lines, directives and empty lines alone, stands
+// in the prefix of the document. A mark after a "..." line that ends the
+// document stands in the prefix of the next document. Each other mark
 // stands inside the document, as after its "---".
-func (d *Doc) markPlaces() ([]int, []int) {
+func (d *Doc) insideMarks() []int {
 	const (
 		inPrefix = iota
 		inDocument
 		afterEnd
 	)
 
-	var prefix, inside []int
+	var inside []int
 
 	state, i := inPrefix, 0
 	starts := lineStarts(d.orig)
 
-	// Take sorts the marks before the offset end by the state of the lines
-	// before them.
+	// Take keeps the marks before the offset end that the lines before them
+	// put inside the document.
 	take := func(end int) {
 		for ; i < len(d.marks) && d.marks[i] <= end; i++ {
-			switch state {
-			case inPrefix:
-				prefix = append(prefix, d.marks[i])
-			case inDocument:
+			if state == inDocument {
 				inside = append(inside, d.marks[i])
 			}
 		}
@@ -2821,26 +2817,57 @@ func (d *Doc) markPlaces() ([]int, []int) {
 
 	take(len(d.orig))
 
-	return prefix, inside
+	return inside
+}
+
+// secondMark returns the offset in orig of the first byte order mark of the
+// user's text right after a mark that the tokenizer of the Source dropped,
+// and true. The tokenizer drops one mark at the start of a line and reads
+// the next one as text. [bom.Drop] of the text of the document drops that
+// next one too. On the first line of the document, readDoc starts the text
+// past the dropped mark, and its drop takes the next one. On a later line,
+// orig still holds the next mark at a place where bom.Drop drops it.
+func (d *Doc) secondMark() (int, bool) {
+	if strings.HasPrefix(d.user.Source().Text()[d.start:], bom.Mark) {
+		return 0, true
+	}
+
+	if _, marks := bom.Drop(d.orig); len(marks) > 0 {
+		return marks[0], true
+	}
+
+	return 0, false
 }
 
 // markRefusal returns the problem of the user's text when it holds a byte
-// order mark inside the document, which YAML allows only in the prefix of a
-// document, as [Doc.markPlaces] finds it, or nil. The tokenizer of the
+// order mark that the Source does not read as YAML does, or nil. YAML
+// allows a mark only in the prefix of a document. The tokenizer of the
 // Source drops a mark at the start of a line after the "---" of a
-// document, but go-yaml reads such a mark as text. The problem binds at the
-// line of the mark, and [niceyaml.IsInvalid] reports it.
+// document, as [Doc.insideMarks] finds it. Go-yaml reads such a mark as
+// text. YAML allows a mark right after another one in the prefix. The
+// tokenizer drops only the first and reads the second as text, as
+// [Doc.secondMark] finds it. The engine drops that second mark. The problem
+// binds at the first such mark, and [niceyaml.IsInvalid] reports it.
 func (d *Doc) markRefusal() error {
-	_, inside := d.markPlaces()
-	if len(inside) == 0 {
+	at, msg := -1, ""
+
+	if inside := d.insideMarks(); len(inside) > 0 {
+		at, msg = inside[0], "inside the document, where YAML does not allow it"
+	}
+
+	if second, ok := d.secondMark(); ok && (at < 0 || second < at) {
+		at, msg = second, "after another one, which the tokenizer of the Source reads as text"
+	}
+
+	if at < 0 {
 		return nil
 	}
 
-	s := d.offsetSite(inside[0], 1)
+	s := d.offsetSite(at, 1)
 
 	//nolint:wrapcheck // The binding is the problem of the document.
 	return d.user.Bind(niceyaml.Invalid(
-		fmt.Errorf("%w at %s inside the document, where YAML does not allow it", errMarkInside, d.userAt(inside[0])),
+		fmt.Errorf("%w at %s %s", errMarkPlace, d.userAt(at), msg),
 		niceyaml.AtRange(s.at), niceyaml.AtPath(s.path),
 		niceyaml.WithDetails(errors.New(markFix)),
 	))

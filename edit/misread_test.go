@@ -271,13 +271,8 @@ func TestNew_Misread(t *testing.T) {
 			err: "test.yaml:4:3: $.r1: go-yaml's decoder reads $.r1.c from the source at 4:14 of the merge key at " +
 				"4:3, but the merge spec keeps the earlier source at 2:3",
 		},
-		"byte order mark before the document": {
-			text: "\ufeffa: 1\n",
-			err:  "test.yaml:1:1: $: go-yaml reads the byte order mark at 1:1 as text of the document",
-			fix:  "remove the byte order mark",
-		},
-		"byte order mark and an own key before a merge key at one place": {
-			// The first instance by the order of the list.
+		"own key before a merge key after a byte order mark at the start of the file": {
+			// The tokenizer drops the mark, so the misread binds at the key after it.
 			text: stringtest.LinesLF("\ufeffa: 2", "<<: {a: 1}"),
 			err: "test.yaml:1:1: $.a: go-yaml's decoder reads $.a from the merge key at 2:1, but the merge spec keeps " +
 				"the own entry written before it",

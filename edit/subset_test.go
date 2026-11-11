@@ -1164,67 +1164,74 @@ func TestNew_ByteOrderMark(t *testing.T) {
 
 	tcs := map[string]struct {
 		text string
-		// A line of the error of New, which matches edit.ErrMisread, or the
-		// user error of a mark that YAML does not allow, or "" for a
-		// document that New takes.
+		// A line of the error of New for a mark that the Source does not read as
+		// YAML does, or "" for a document that New takes.
 		err string
-		// The document of the text that New takes.
+		// The document of the text that New reads.
 		doc int
-		// Whether YAML does not allow the mark, so the error is a user error.
-		invalid bool
 	}{
 		"mark after the header of the document": {
 			// YAML does not allow a mark inside a document, and the tokenizer
 			// drops the mark that go-yaml reads as part of the key.
-			text:    "---\n\ufeffa: 1\n",
-			err:     "2:1: $: a byte order mark at 2:1 inside the document, where YAML does not allow it",
-			invalid: true,
+			text: "---\n\ufeffa: 1\n",
+			err:  "2:1: $: a byte order mark at 2:1 inside the document, where YAML does not allow it",
 		},
 		"mark after the header of a later document": {
-			text:    stringtest.LinesLF("a: 1", "---", "\ufeffb: 1"),
-			doc:     1,
-			err:     "3:1: $: a byte order mark at 3:1 inside the document, where YAML does not allow it",
-			invalid: true,
+			text: stringtest.LinesLF("a: 1", "---", "\ufeffb: 1"),
+			doc:  1,
+			err:  "3:1: $: a byte order mark at 3:1 inside the document, where YAML does not allow it",
 		},
 		"mark alone on the line after the header of a later document": {
-			text:    stringtest.LinesLF("a: 1", "---", "\ufeff", "b: 1"),
-			doc:     1,
-			err:     "3:1: $: a byte order mark at 3:1 inside the document, where YAML does not allow it",
-			invalid: true,
+			text: stringtest.LinesLF("a: 1", "---", "\ufeff", "b: 1"),
+			doc:  1,
+			err:  "3:1: $: a byte order mark at 3:1 inside the document, where YAML does not allow it",
 		},
 		"mark before a comment line": {
-			// The tokenizer drops the mark, and go-yaml reads it as text.
+			// The tokenizer drops the mark in the prefix of the document, and
+			// FileText keeps it.
 			text: "\ufeff# c\na: 1\n",
-			err:  "1:1: $: go-yaml reads the byte order mark at 1:1 as text of the document",
 		},
 		"mark before the header of the document": {
 			text: "\ufeff---\na: 1\n",
-			err:  "1:1: $: go-yaml reads the byte order mark at 1:1 as text of the document",
 		},
 		"mark before a key that the text repeats with a mark": {
+			// The Source reads the first key as a and the second as "\ufeffa".
 			text: "\ufeffa: 1\n\"\ufeffa\": 2\n",
-			err:  "1:1: $: go-yaml reads the byte order mark at 1:1 as text of the document",
 		},
 		"mark before a key": {
-			// Go-yaml's parser takes the text, and it reads the mark as part of
-			// the key.
 			text: "\ufeffa: 1\n",
-			err:  "1:1: $: go-yaml reads the byte order mark at 1:1 as text of the document",
 		},
 		"mark before a flow mapping": {
 			text: "\ufeff{a: 1}\n",
-			err:  "1:1: $: go-yaml reads the byte order mark at 1:1 as text of the document",
 		},
-
 		"mark after a comment line before a key": {
 			// YAML allows the mark in the prefix of the document, after its
 			// comment lines.
 			text: "# c\n\ufeffa: 1\n",
-			err:  "2:1: $: go-yaml reads the byte order mark at 2:1 as text of the document",
 		},
 		"two marks before a key": {
+			// The tokenizer drops the first mark and reads the second one as
+			// text of the key.
 			text: "\ufeff\ufeffa: 1\n",
-			err:  "1:1: $: go-yaml reads the byte order mark at 1:1 as text of the document",
+			err:  "1:1: $: a byte order mark at 1:1 after another one, which the tokenizer of the Source reads as text",
+		},
+		"two marks after a comment line before a key": {
+			text: stringtest.LinesLF("# c", "\ufeff\ufeffa: 1"),
+			err:  "2:1: $: a byte order mark at 2:1 after another one, which the tokenizer of the Source reads as text",
+		},
+		"two marks at the start of a later document": {
+			text: stringtest.LinesLF("a: 1", "...", "\ufeff\ufeffb: 1"),
+			doc:  1,
+			err:  "3:1: $: a byte order mark at 3:1 after another one, which the tokenizer of the Source reads as text",
+		},
+		"two marks after a comment line of a later document": {
+			text: stringtest.LinesLF("a: 1", "...", "# c", "\ufeff\ufeffb: 1"),
+			doc:  1,
+			err:  "4:1: $: a byte order mark at 4:1 after another one, which the tokenizer of the Source reads as text",
+		},
+		"mark before the document of a file whose later document New takes": {
+			text: stringtest.LinesLF("\ufeffa: 1", "---", "b: 2"),
+			doc:  1,
 		},
 		"mark after the end of a document before a comment line and the header of the next one": {
 			// The mark lies in the prefix of the next document. The text of the
@@ -1250,8 +1257,8 @@ func TestNew_ByteOrderMark(t *testing.T) {
 			doc:  1,
 		},
 		"mark after a comment line of a later document": {
-			// The mark lies in the prefix of the document, which is go-yaml's
-			// reading in a later document.
+			// The tokenizer drops the mark in the prefix of the document, and
+			// FileText keeps it.
 			text: stringtest.LinesLF("a: 1", "...", "# c", "\ufeffb: 2"),
 			doc:  1,
 		},
@@ -1277,19 +1284,9 @@ func TestNew_ByteOrderMark(t *testing.T) {
 				return
 			}
 
-			if tc.invalid {
-				require.Error(t, err)
-				require.NotErrorIs(t, err, edit.ErrEngine)
-				assert.True(t, niceyaml.IsInvalid(err))
-				assert.Contains(t, niceyaml.FormatError(err), tc.err)
-				assert.Contains(t, niceyaml.FormatError(err), "`-- remove the byte order mark")
-
-				return
-			}
-
-			require.ErrorIs(t, err, edit.ErrMisread)
+			require.Error(t, err)
 			require.NotErrorIs(t, err, edit.ErrEngine)
-			require.NotErrorIs(t, err, edit.ErrUnsupported)
+			require.NotErrorIs(t, err, edit.ErrMisread)
 			assert.True(t, niceyaml.IsInvalid(err))
 			assert.Contains(t, niceyaml.FormatError(err), tc.err)
 			assert.Contains(t, niceyaml.FormatError(err), "`-- remove the byte order mark")
