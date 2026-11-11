@@ -121,6 +121,28 @@ func (e rewrittenError) Unwrap() error {
 	return e.err
 }
 
+// causeError is an error of its own type that can wrap a cause. Its
+// Unwrap method returns nil when it does not have one.
+type causeError struct {
+	cause error
+	msg   string
+}
+
+// Error returns the message, and the message of the cause behind it when
+// the error has one.
+func (e *causeError) Error() string {
+	if e.cause == nil {
+		return e.msg
+	}
+
+	return e.msg + ": " + e.cause.Error()
+}
+
+// Unwrap returns the cause, which can be nil.
+func (e *causeError) Unwrap() error {
+	return e.cause
+}
+
 // violationsError is a multi-error of its own type, as a validator might
 // build one. Its message counts its branches rather than listing them.
 type violationsError []error
@@ -2496,7 +2518,7 @@ func TestErrorTree_IsInvalid(t *testing.T) {
 		"fmt wrapper over a mixed join": {
 			err: fmt.Errorf("load: %w", errors.Join(badA(), errRead)),
 			wantNodes: []string{
-				"load: false",
+				"load false",
 				"bad a true",
 				"read g.yaml: permission denied false",
 			},
@@ -2588,11 +2610,18 @@ func TestErrorTree_IsInvalid(t *testing.T) {
 		},
 	}
 
+	// A heading that a wrapper makes of a join does not have a message, so
+	// its row names its context.
 	answers := func(tree niceyaml.ErrorTree) []string {
 		var out []string
 
 		for node := range tree.All() {
-			out = append(out, fmt.Sprintf("%s %t", node.Message(), node.IsInvalid()))
+			text := node.Message()
+			if text == "" {
+				text = node.Context()
+			}
+
+			out = append(out, fmt.Sprintf("%s %t", text, node.IsInvalid()))
 		}
 
 		return out
@@ -2675,7 +2704,7 @@ func TestErrorTree_IsInvalid_HandBuilt(t *testing.T) {
 	}
 }
 
-func TestErrorTree_MessageAndPath(t *testing.T) {
+func TestErrorTree_MessageContextAndPath(t *testing.T) {
 	t.Parallel()
 
 	source := errorTreeSource()
@@ -2709,10 +2738,52 @@ func TestErrorTree_MessageAndPath(t *testing.T) {
 	_, errMissing := niceyaml.NewSourceFromFS(fstest.MapFS{}, "missing.yaml")
 	require.Error(t, errMissing)
 
+	// A located Error keeps its location above a binding of another
+	// source, and above a binding whose location did not resolve.
+	included := niceyaml.NewSourceFromString("key: 1\nport: 2\n", niceyaml.WithName("inc.yaml"))
+	badKey, badPort := badKeyError("key"), badKeyError("port")
+	atB := niceyaml.AtPath(pathB)
+
+	// The wrapper does not keep the line of the binding that it wraps.
+	rewrite := func(err error) error { return rewrittenError{msg: "config is invalid", err: err} }
+
+	// The binding of a join binds the wrapper around a binding again, so
+	// the first problem of the join holds a binding that adopted one.
+	rewritten := yamltest.ProblemsOf(yamltest.Bind(t, included, errors.Join(
+		rewrite(yamltest.Bind(t, included, badKey())),
+		badPort(),
+	)))[0].Bound
+	require.NotNil(t, rewritten)
+
+	// The wrapper around the binding has the text of the wrapper inside
+	// it, and the binding does not resolve a location.
+	rewrittenTwice := yamltest.ProblemsOf(yamltest.Bind(t, included, errors.Join(
+		rewrite(yamltest.Bind(t, included, rewrite(niceyaml.NewError("no place")))),
+		badPort(),
+	)))[1].Bound
+	require.NotNil(t, rewrittenTwice)
+
+	check := func(err error) error { return fmt.Errorf("check: %w", err) }
+	oldKey := func() error {
+		return niceyaml.NewWarning("old key", niceyaml.AtPath(paths.Current().Child("key")))
+	}
+	checkedSummary := func(src *niceyaml.Source, errs ...error) error {
+		return yamltest.Bind(t, src, check(niceyaml.NewSummary("some problems", errs...)))
+	}
+	checkedJoin := func(src *niceyaml.Source, errs ...error) error {
+		return yamltest.Bind(t, src, check(errors.Join(errs...)))
+	}
+
+	oldA := func() error {
+		return niceyaml.NewWarning("old a", niceyaml.AtPath(paths.Doc().Child("a")))
+	}
+
 	tcs := map[string]struct {
-		want     string
-		wantPath string
-		node     niceyaml.ErrorTree
+		want        string
+		wantContext string
+		wantPath    string
+		node        niceyaml.ErrorTree
+		wantWarning bool
 	}{
 		"bound root": {
 			node:     niceyaml.NewErrorTree(yamltest.Bind(t, source, badA())),
@@ -2753,58 +2824,195 @@ func TestErrorTree_MessageAndPath(t *testing.T) {
 			want: "read file: open missing.yaml: file does not exist",
 		},
 		"wrapper around a binding": {
-			// The message holds the text the wrapper added and leaves out
-			// the location of the binding.
-			node:     niceyaml.NewErrorTree(fmt.Errorf("load config: %w", yamltest.Bind(t, source, badA()))),
-			want:     "load config: bad a",
-			wantPath: "$.a",
+			// The message leaves out the location of the binding and the
+			// text the wrapper added, which is the context.
+			node:        niceyaml.NewErrorTree(fmt.Errorf("load config: %w", yamltest.Bind(t, source, badA()))),
+			want:        "bad a",
+			wantContext: "load config",
+			wantPath:    "$.a",
 		},
 		"wrapper that adds text after a binding": {
-			node:     niceyaml.NewErrorTree(fmt.Errorf("%w: see docs", yamltest.Bind(t, source, badA()))),
-			want:     "bad a: see docs",
-			wantPath: "$.a",
+			node:        niceyaml.NewErrorTree(fmt.Errorf("%w: see docs", yamltest.Bind(t, source, badA()))),
+			want:        "bad a",
+			wantContext: "see docs",
+			wantPath:    "$.a",
+		},
+		"wrapper that adds text around a binding": {
+			node:        niceyaml.NewErrorTree(fmt.Errorf("item %w is bad", yamltest.Bind(t, source, badA()))),
+			want:        "bad a",
+			wantContext: "item is bad",
+			wantPath:    "$.a",
+		},
+		"wrappers that add text on both sides of a binding": {
+			node: niceyaml.NewErrorTree(
+				fmt.Errorf("%w: see docs", fmt.Errorf("load config: %w", yamltest.Bind(t, source, badA()))),
+			),
+			want:        "bad a",
+			wantContext: "load config: see docs",
+			wantPath:    "$.a",
 		},
 		"wrapper that rewrites the line of a binding": {
 			// The text of the wrapper does not hold the line of the
-			// binding, so the message is the one the binding reports.
+			// binding, so the whole of it is the context.
 			node: niceyaml.NewErrorTree(rewrittenError{
 				msg: "config is invalid",
 				err: yamltest.Bind(t, source, badA()),
 			}),
-			want:     "bad a",
-			wantPath: "$.a",
+			want:        "bad a",
+			wantContext: "config is invalid",
+			wantPath:    "$.a",
+		},
+		"wrapper that rewrites the message of an unbound Error": {
+			node:        niceyaml.NewErrorTree(rewrittenError{msg: "config is invalid", err: badA()}),
+			want:        "bad a",
+			wantContext: "config is invalid",
+			wantPath:    "@.a",
 		},
 		"wrapper around a wrapped warning in a bound join": {
 			node: problems(yamltest.Bind(t, source, errors.Join(
 				fmt.Errorf("ctx: %w", yamltest.Bind(t, source, niceyaml.NewWarning("old", niceyaml.AtPath(pathA)))),
 				badB(),
 			)))[0],
-			want:     "ctx: old",
-			wantPath: "$.a",
+			want:        "old",
+			wantContext: "ctx",
+			wantPath:    "$.a",
+			wantWarning: true,
 		},
 		"wrapper around a binding in a bound join": {
 			node: problems(yamltest.Bind(t, source, errors.Join(
 				fmt.Errorf("load config: %w", yamltest.Bind(t, source, badA())),
 				badB(),
 			)))[0],
-			want:     "load config: bad a",
-			wantPath: "$.a",
+			want:        "bad a",
+			wantContext: "load config",
+			wantPath:    "$.a",
 		},
 		"wrapper around a bound join": {
-			// The wrapper heads the problems of the join, so its message
-			// is its own text and leaves the problems out.
+			// The wrapper heads the problems of the join, so its text is
+			// context alone and the node does not have a message.
 			node: niceyaml.NewErrorTree(errors.Join(
 				fmt.Errorf("spec: %w", yamltest.Bind(t, source, errors.Join(badA(), badB()))),
 				errors.New("lint"),
 			)).Children[0],
-			want: "spec:",
+			wantContext: "spec",
 		},
 		"wrapper around an unbound Error": {
 			// The text of the node puts the path in front of the text the
-			// wrapper added, and the message leaves the path out.
-			node:     niceyaml.NewErrorTree(fmt.Errorf("load config: %w", badA())),
-			want:     "load config: bad a",
-			wantPath: "@.a",
+			// wrapper added, and the message leaves both out.
+			node:        niceyaml.NewErrorTree(fmt.Errorf("load config: %w", badA())),
+			want:        "bad a",
+			wantContext: "load config",
+			wantPath:    "@.a",
+		},
+		"wrapper inside a binding": {
+			// A validator adds the context before a Node binds the error.
+			node:        niceyaml.NewErrorTree(yamltest.Bind(t, source, fmt.Errorf("decode a: %w", badA()))),
+			want:        "bad a",
+			wantContext: "decode a",
+			wantPath:    "$.a",
+		},
+		"wrappers inside and around a binding that adopted a binding": {
+			node: niceyaml.NewErrorTree(fmt.Errorf("load config: %w", yamltest.Bind(t, source,
+				fmt.Errorf("check: %w", yamltest.Bind(t, source, fmt.Errorf("decode a: %w", badA()))),
+			))),
+			want:        "bad a",
+			wantContext: "load config: check: decode a",
+			wantPath:    "$.a",
+		},
+		"wrapper around a located Error around a wrapper": {
+			node: niceyaml.NewErrorTree(fmt.Errorf("load config: %w",
+				niceyaml.Invalid(fmt.Errorf("decode a: %w", niceyaml.NewError("bad a")), niceyaml.AtPath(pathA)),
+			)),
+			want:        "bad a",
+			wantContext: "load config: decode a",
+			wantPath:    "@.a",
+		},
+		"wrapper around an Error that wraps a plain error": {
+			// The Error is the problem, so the text below it is the
+			// message, and only the wrapper above it is context.
+			node: niceyaml.NewErrorTree(fmt.Errorf("load config: %w",
+				niceyaml.Invalid(fmt.Errorf("parse a: %w", errors.New("not a number")), niceyaml.AtPath(pathA)),
+			)),
+			want:        "parse a: not a number",
+			wantContext: "load config",
+			wantPath:    "@.a",
+		},
+		"wrapper around a plain error": {
+			// A chain that holds neither an Error nor a binding does not
+			// name its problem, so its whole text is the message.
+			node: niceyaml.NewErrorTree(fmt.Errorf("load config: %w", errors.New("too old"))),
+			want: "load config: too old",
+		},
+		"binding of a wrapper around a plain error": {
+			node: niceyaml.NewErrorTree(yamltest.Bind(t, source, fmt.Errorf("load config: %w", errors.New("too old")))),
+			want: "load config: too old",
+		},
+		"wrapper around a binding of a plain error": {
+			node: niceyaml.NewErrorTree(
+				fmt.Errorf("load config: %w", yamltest.Bind(t, source, fmt.Errorf("parse: %w", errors.New("too old")))),
+			),
+			want:        "parse: too old",
+			wantContext: "load config",
+		},
+		"unbound warning": {
+			// The label of the severity stays out of the message.
+			node:        niceyaml.NewErrorTree(niceyaml.NewWarning("old layout")),
+			want:        "old layout",
+			wantWarning: true,
+		},
+		"wrapper around an unbound warning": {
+			node:        niceyaml.NewErrorTree(fmt.Errorf("load plugin: %w", niceyaml.NewWarning("old layout"))),
+			want:        "old layout",
+			wantContext: "load plugin",
+			wantWarning: true,
+		},
+		"wrapper around a summary": {
+			// The summary keeps its own message, which is not context.
+			node: niceyaml.NewErrorTree(
+				fmt.Errorf("load config: %w", niceyaml.NewSummary("2 problems", badA(), badB())),
+			),
+			want:        "2 problems",
+			wantContext: "load config",
+		},
+		"wrapper around a bound summary": {
+			node: niceyaml.NewErrorTree(
+				fmt.Errorf(
+					"load config: %w",
+					yamltest.Bind(t, source, niceyaml.NewSummary("2 problems", badA(), badB())),
+				),
+			),
+			want:        "2 problems",
+			wantContext: "load config",
+		},
+		"wrapper around a join": {
+			node:        niceyaml.NewErrorTree(fmt.Errorf("check: %w", errors.Join(badA(), badB()))),
+			wantContext: "check",
+		},
+		"binding of a wrapper around a join": {
+			node: niceyaml.NewErrorTree(
+				yamltest.Bind(t, source, fmt.Errorf("check: %w", errors.Join(badA(), badB()))),
+			),
+			wantContext: "check",
+		},
+		"wrapper with several verbs around several problems": {
+			// The wrapper is a heading whose text is its own message.
+			node: niceyaml.NewErrorTree(
+				fmt.Errorf("check: %w, %w", niceyaml.NewError("bad a"), niceyaml.NewError("bad b")),
+			),
+			want: "check: bad a, bad b",
+		},
+		"wrapper with several verbs around sentinels": {
+			// No branch is a problem, so the whole text is the message.
+			node: niceyaml.NewErrorTree(fmt.Errorf("%w: %w", errors.New("bad config"), errors.New("too old"))),
+			want: "bad config: too old",
+		},
+		"wrapper with a sentinel around a binding": {
+			node: niceyaml.NewErrorTree(
+				fmt.Errorf("%w: %w", errors.New("bad config"), yamltest.Bind(t, source, badA())),
+			),
+			want:        "bad a",
+			wantContext: "bad config",
+			wantPath:    "$.a",
 		},
 		"Error with a path of its own around a binding": {
 			// The binding resolved its location already, so the node reads
@@ -2840,6 +3048,214 @@ func TestErrorTree_MessageAndPath(t *testing.T) {
 			want:     "$.a: bad a",
 			wantPath: "@.b",
 		},
+		"unbound located Error above a value binding of a warning": {
+			// The node reports the severity in Warning, so the message
+			// leaves out the label that the line of the binding holds.
+			node:        niceyaml.NewErrorTree(niceyaml.Locate(niceyaml.BindValue(oldA()), atB)),
+			want:        "$.a: old a",
+			wantPath:    "@.b",
+			wantWarning: true,
+		},
+		"wrapper around an unbound located Error above a value binding of a warning": {
+			node: niceyaml.NewErrorTree(
+				fmt.Errorf("load: %w", niceyaml.Locate(niceyaml.BindValue(oldA()), atB)),
+			),
+			want:        "$.a: old a",
+			wantContext: "load",
+			wantPath:    "@.b",
+			wantWarning: true,
+		},
+		"unbound located Error above a wrapper around a value binding of a warning": {
+			node:        niceyaml.NewErrorTree(niceyaml.Locate(check(niceyaml.BindValue(oldA())), atB)),
+			want:        "$.a: old a",
+			wantContext: "check",
+			wantPath:    "@.b",
+			wantWarning: true,
+		},
+		"unbound located Error above a value binding of a wrapped warning": {
+			node:        niceyaml.NewErrorTree(niceyaml.Locate(niceyaml.BindValue(check(oldA())), atB)),
+			want:        "$.a: old a",
+			wantContext: "check",
+			wantPath:    "@.b",
+			wantWarning: true,
+		},
+		"located Error above a value binding of a warning": {
+			// The source that binds the Error gives the binding its place,
+			// so the message is that of the warning alone.
+			node: niceyaml.NewErrorTree(yamltest.Bind(t, source,
+				niceyaml.Locate(niceyaml.BindValue(oldA()), atB),
+			)),
+			want:        "old a",
+			wantPath:    "$.b",
+			wantWarning: true,
+		},
+		"located Error above a binding of a wrapper in another source": {
+			// The message holds the line of the binding with the message
+			// of its problem, and the text of the wrapper is context.
+			node: niceyaml.NewErrorTree(yamltest.Bind(t, source,
+				niceyaml.Locate(yamltest.Bind(t, included, check(badKey())), atB),
+			)),
+			want:        "inc.yaml:1:6: $.key: bad key",
+			wantContext: "check",
+			wantPath:    "$.b",
+		},
+		"located Error above a wrapper around a binding in another source": {
+			// The wrapper reads the same outside the binding.
+			node: niceyaml.NewErrorTree(yamltest.Bind(t, source,
+				niceyaml.Locate(check(yamltest.Bind(t, included, badKey())), atB),
+			)),
+			want:        "inc.yaml:1:6: $.key: bad key",
+			wantContext: "check",
+			wantPath:    "$.b",
+		},
+		"located Error above a binding of a wrapped warning in another source": {
+			node: niceyaml.NewErrorTree(yamltest.Bind(t, source, niceyaml.Locate(
+				yamltest.Bind(t, included, check(oldKey())),
+				atB,
+			))),
+			want:        "inc.yaml:1:6: $.key: old key",
+			wantContext: "check",
+			wantPath:    "$.b",
+			wantWarning: true,
+		},
+		"wrappers around and below a located Error above a binding in another source": {
+			node: niceyaml.NewErrorTree(yamltest.Bind(t, source, fmt.Errorf("include: %w",
+				niceyaml.Locate(yamltest.Bind(t, included, check(badKey())), atB),
+			))),
+			want:        "inc.yaml:1:6: $.key: bad key",
+			wantContext: "include: check",
+			wantPath:    "$.b",
+		},
+		"located Error above a binding of a wrapper that rewrites a line in another source": {
+			// The whole text of the wrapper is context, and the message
+			// holds the line of the binding that the wrapper wraps.
+			node:        niceyaml.NewErrorTree(yamltest.Bind(t, source, niceyaml.Locate(rewritten, atB))),
+			want:        "inc.yaml:1:6: $.key: bad key",
+			wantContext: "config is invalid",
+			wantPath:    "$.b",
+		},
+		"located Error above a binding of wrappers that rewrite a line with one text": {
+			// The message names the source of the binding, although the
+			// text of each wrapper ends with the text of the other.
+			node:        niceyaml.NewErrorTree(yamltest.Bind(t, source, niceyaml.Locate(rewrittenTwice, atB))),
+			want:        "inc.yaml: no place",
+			wantContext: "config is invalid: config is invalid",
+			wantPath:    "$.b",
+		},
+		"unbound located Error above a binding of wrappers that rewrite a line with one text": {
+			node:        niceyaml.NewErrorTree(niceyaml.Locate(rewrittenTwice, atB)),
+			want:        "inc.yaml: no place",
+			wantContext: "config is invalid: config is invalid",
+			wantPath:    "@.b",
+		},
+		"located Error above a binding that adopted a rewritten warning in another source": {
+			node: niceyaml.NewErrorTree(yamltest.Bind(t, source, niceyaml.Locate(
+				yamltest.Bind(t, included, rewrite(yamltest.Bind(t, included, oldKey()))),
+				atB,
+			))),
+			want:        "inc.yaml:1:6: $.key: old key",
+			wantContext: "config is invalid",
+			wantPath:    "$.b",
+			wantWarning: true,
+		},
+		"located Error above a wrapper that rewrites the line of a warning in another source": {
+			// The wrapper does not keep the line of the binding, and the
+			// message reads as it does below a wrapper that keeps it.
+			node: niceyaml.NewErrorTree(yamltest.Bind(t, source,
+				niceyaml.Locate(rewrite(yamltest.Bind(t, included, oldKey())), atB),
+			)),
+			want:        "inc.yaml:1:6: $.key: old key",
+			wantContext: "config is invalid",
+			wantPath:    "$.b",
+			wantWarning: true,
+		},
+		"wrapper that rewrites the line of a located Error above a warning in another source": {
+			node: niceyaml.NewErrorTree(yamltest.Bind(t, source,
+				rewrite(niceyaml.Locate(yamltest.Bind(t, included, oldKey()), atB)),
+			)),
+			want:        "inc.yaml:1:6: $.key: old key",
+			wantContext: "config is invalid",
+			wantPath:    "$.b",
+			wantWarning: true,
+		},
+		"located Error above a wrapper that rewrites the line of a warning whose location did not resolve": {
+			// The source that binds the Error bound the warning too, so
+			// the message leaves out its name as well as the label.
+			node: niceyaml.NewErrorTree(yamltest.Bind(t, source,
+				niceyaml.Locate(rewrite(yamltest.Bind(t, source, niceyaml.NewWarning("old"))), atB),
+			)),
+			want:        "old",
+			wantContext: "config is invalid",
+			wantPath:    "$.b",
+			wantWarning: true,
+		},
+		"located Error above a wrapper that rewrites the line of a binding whose location did not resolve": {
+			node: niceyaml.NewErrorTree(yamltest.Bind(t, source,
+				niceyaml.Locate(rewrite(yamltest.Bind(t, source, niceyaml.NewError("no place"))), atB),
+			)),
+			want:        "no place",
+			wantContext: "config is invalid",
+			wantPath:    "$.b",
+		},
+		"located Error above a binding of a wrapper whose location did not resolve": {
+			node: niceyaml.NewErrorTree(yamltest.Bind(t, source,
+				niceyaml.Locate(yamltest.Bind(t, source, check(niceyaml.NewError("no place"))), atB),
+			)),
+			want:        "no place",
+			wantContext: "check",
+			wantPath:    "$.b",
+		},
+		"unbound located Error above a binding of a wrapper whose location did not resolve": {
+			node: niceyaml.NewErrorTree(
+				niceyaml.Locate(yamltest.Bind(t, source, check(niceyaml.NewError("no place"))), atB),
+			),
+			want:        "f.yaml: no place",
+			wantContext: "check",
+			wantPath:    "@.b",
+		},
+		"located Error above a binding of a wrapped summary": {
+			node: niceyaml.NewErrorTree(yamltest.Bind(t, source,
+				niceyaml.Locate(checkedSummary(source, badA(), badB()), atB),
+			)),
+			want:        "some problems",
+			wantContext: "check",
+			wantPath:    "$.b",
+		},
+		"unbound located Error above a binding of a wrapped summary": {
+			node:        niceyaml.NewErrorTree(niceyaml.Locate(checkedSummary(source, badA(), badB()), atB)),
+			want:        "f.yaml: some problems",
+			wantContext: "check",
+			wantPath:    "@.b",
+		},
+		"located Error above a binding of a wrapped summary in another source": {
+			node: niceyaml.NewErrorTree(yamltest.Bind(t, source,
+				niceyaml.Locate(checkedSummary(included, badKey(), badPort()), atB),
+			)),
+			want:        "inc.yaml: some problems",
+			wantContext: "check",
+			wantPath:    "$.b",
+		},
+		"located Error above a binding of a wrapped join": {
+			// The wrapper heads the problems of the join, so its text is
+			// context alone below a located Error too.
+			node: niceyaml.NewErrorTree(yamltest.Bind(t, source,
+				niceyaml.Locate(checkedJoin(source, badA(), badB()), atB),
+			)),
+			wantContext: "check",
+			wantPath:    "$.b",
+		},
+		"unbound located Error above a binding of a wrapped join": {
+			node:        niceyaml.NewErrorTree(niceyaml.Locate(checkedJoin(source, badA(), badB()), atB)),
+			wantContext: "check",
+			wantPath:    "@.b",
+		},
+		"located Error above a binding of a wrapped join in another source": {
+			node: niceyaml.NewErrorTree(yamltest.Bind(t, source,
+				niceyaml.Locate(checkedJoin(included, badKey(), badPort()), atB),
+			)),
+			wantContext: "check",
+			wantPath:    "$.b",
+		},
 		"summary": {
 			node: niceyaml.NewErrorTree(niceyaml.NewSummary("2 problems", badA(), badB())),
 			want: "2 problems",
@@ -2852,6 +3268,21 @@ func TestErrorTree_MessageAndPath(t *testing.T) {
 			want:     "see b",
 			wantPath: "@.b",
 		},
+		"detail of a wrapped problem": {
+			// A detail does not take the context of the problem it
+			// explains.
+			node:     detailOf(fmt.Errorf("load config: %w", yamltest.Bind(t, source, withDetail()))),
+			want:     "see b",
+			wantPath: "$.b",
+		},
+		"wrapped detail": {
+			node: detailOf(yamltest.Bind(t, source, badA().With(
+				niceyaml.WithDetails(fmt.Errorf("first use: %w", yamltest.ErrorAt("see b", "b"))),
+			))),
+			want:        "see b",
+			wantContext: "first use",
+			wantPath:    "$.b",
+		},
 		"bound detail": {
 			node:     detailOf(yamltest.Bind(t, source, withDetail())),
 			want:     "see b",
@@ -2861,6 +3292,28 @@ func TestErrorTree_MessageAndPath(t *testing.T) {
 			node: niceyaml.ErrorTree{Err: errors.New("disk full"), Label: "write cache: disk full"},
 			want: "write cache: disk full",
 		},
+		"hand-built node of a wrapper": {
+			node: niceyaml.ErrorTree{
+				Err:   fmt.Errorf("load config: %w", niceyaml.NewError("bad a")),
+				Label: "load config: bad a",
+			},
+			want:        "bad a",
+			wantContext: "load config",
+		},
+		"hand-built node whose error does not hold its binding": {
+			// The node cannot tell the wrappers of the binding from its
+			// message. So the message is that of the binding, and the node
+			// does not have a context. The wrapper in Err does not add one
+			// either.
+			node: niceyaml.ErrorTree{
+				Err:   fmt.Errorf("write cache: %w", niceyaml.NewError("disk full")),
+				Bound: yamltest.RequireSourceError(t, yamltest.Bind(t, source, fmt.Errorf("decode a: %w", badA()))),
+				Label: "write cache: disk full",
+			},
+			want:     "decode a: bad a",
+			wantPath: "$.a",
+		},
+		"zero node": {},
 	}
 
 	for name, tc := range tcs {
@@ -2868,6 +3321,8 @@ func TestErrorTree_MessageAndPath(t *testing.T) {
 			t.Parallel()
 
 			assert.Equal(t, tc.want, tc.node.Message())
+			assert.Equal(t, tc.wantContext, tc.node.Context())
+			assert.Equal(t, tc.wantWarning, tc.node.Warning)
 
 			path, ok := tc.node.Path()
 			if tc.wantPath == "" {
@@ -2880,6 +3335,579 @@ func TestErrorTree_MessageAndPath(t *testing.T) {
 			assert.Equal(t, tc.wantPath, path.String())
 		})
 	}
+}
+
+func TestErrorTree_Context(t *testing.T) {
+	t.Parallel()
+
+	source := errorTreeSource()
+	badA, badB := badKeyError("a"), badKeyError("b")
+
+	// A row holds the context and the message that a report carries for a
+	// problem.
+	rows := func(err error) []string {
+		var got []string
+
+		for problem := range niceyaml.Problems(err) {
+			got = append(got, fmt.Sprintf("[%s] %s", problem.Context(), problem.Message()))
+		}
+
+		return got
+	}
+
+	// Each wrap puts a wrapper around the problems it receives. The row of
+	// the problem at a must not change with the number of problems beside
+	// it, whether the wrapper shares its row or heads several.
+	tcs := map[string]struct {
+		wrap func(errs ...error) error
+		want string
+	}{
+		"wrapper around a join": {
+			wrap: func(errs ...error) error { return fmt.Errorf("check: %w", errors.Join(errs...)) },
+			want: "check",
+		},
+		"wrapper around a bound join": {
+			wrap: func(errs ...error) error {
+				return fmt.Errorf("load item: %w", yamltest.Bind(t, source, errors.Join(errs...)))
+			},
+			want: "load item",
+		},
+		"binding of a wrapper around a join": {
+			wrap: func(errs ...error) error {
+				return yamltest.Bind(t, source, fmt.Errorf("check: %w", errors.Join(errs...)))
+			},
+			want: "check",
+		},
+		"wrapper around a summary": {
+			// The summary returns one problem alone, and its heading over
+			// several is not context.
+			wrap: func(errs ...error) error {
+				return fmt.Errorf("load item: %w", niceyaml.NewSummary("some problems", errs...))
+			},
+			want: "load item",
+		},
+		"wrapper around a bound summary": {
+			wrap: func(errs ...error) error {
+				return fmt.Errorf("load item: %w",
+					yamltest.Bind(t, source, niceyaml.NewSummary("some problems", errs...)))
+			},
+			want: "load item",
+		},
+		"wrappers around and inside a binding": {
+			wrap: func(errs ...error) error {
+				return fmt.Errorf("load item: %w",
+					yamltest.Bind(t, source, fmt.Errorf("check: %w", errors.Join(errs...))))
+			},
+			want: "load item: check",
+		},
+		"wrapper with a sentinel around a join": {
+			wrap: func(errs ...error) error {
+				return fmt.Errorf("%w: %w", errors.New("bad item"), errors.Join(errs...))
+			},
+			want: "bad item",
+		},
+		"wrapper that adds text after a join": {
+			wrap: func(errs ...error) error { return fmt.Errorf("%w (see docs)", errors.Join(errs...)) },
+			want: "(see docs)",
+		},
+		"nested wrappers around joins": {
+			wrap: func(errs ...error) error {
+				inner := fmt.Errorf("check: %w", errors.Join(errs...))
+
+				return fmt.Errorf("load item: %w", errors.Join(inner, errors.New("lint")))
+			},
+			want: "load item: check",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			wantA := "[" + tc.want + "] bad a"
+			wantB := "[" + tc.want + "] bad b"
+
+			assert.Equal(t, wantA, rows(tc.wrap(badA()))[0])
+
+			two := rows(tc.wrap(badA(), badB()))
+			require.GreaterOrEqual(t, len(two), 2)
+			assert.Equal(t, []string{wantA, wantB}, two[:2])
+		})
+	}
+
+	t.Run("a problem beside a wrapped heading does not take its context", func(t *testing.T) {
+		t.Parallel()
+
+		err := errors.Join(
+			fmt.Errorf("check: %w", errors.Join(badA(), badB())),
+			niceyaml.NewError("too old"),
+		)
+
+		assert.Equal(t, []string{"[check] bad a", "[check] bad b", "[] too old"}, rows(err))
+	})
+
+	// The wrapper of a heading reads around the wrapper of each problem
+	// below it as it reads around the wrapper of one problem alone. It does
+	// so whatever the side that it writes its text on.
+	decodeA := func() error { return fmt.Errorf("decode a: %w", badA()) }
+	decodeB := func() error { return fmt.Errorf("decode b: %w", badB()) }
+
+	heads := map[string]func(errs ...error) error{
+		"summary": func(errs ...error) error { return niceyaml.NewSummary("some problems", errs...) },
+		"bound summary": func(errs ...error) error {
+			return yamltest.Bind(t, source, niceyaml.NewSummary("some problems", errs...))
+		},
+		"join": errors.Join,
+		"bound join": func(errs ...error) error {
+			return yamltest.Bind(t, source, errors.Join(errs...))
+		},
+	}
+
+	forms := map[string]struct {
+		// The format of the wrapper, and the context of the problem at
+		// each key, with %s for the key.
+		format string
+		want   string
+	}{
+		"text in front with a colon":    {format: "check: %w", want: "check: decode %s"},
+		"text in front without a colon": {format: "check %w", want: "check decode %s"},
+		"text in front with a comma":    {format: "load config, %w", want: "load config, decode %s"},
+		"text behind":                   {format: "%w (see docs)", want: "decode %s: (see docs)"},
+		"text on both sides":            {format: "item %w is bad", want: "item decode %s: is bad"},
+	}
+
+	for headName, head := range heads {
+		for formName, form := range forms {
+			t.Run("wrapper with "+formName+" around a "+headName+" of wrapped problems", func(t *testing.T) {
+				t.Parallel()
+
+				wantA := "[" + fmt.Sprintf(form.want, "a") + "] bad a"
+				wantB := "[" + fmt.Sprintf(form.want, "b") + "] bad b"
+
+				assert.Equal(t, []string{wantA}, rows(fmt.Errorf(form.format, head(decodeA()))))
+				assert.Equal(t, []string{wantA, wantB}, rows(fmt.Errorf(form.format, head(decodeA(), decodeB()))))
+			})
+		}
+	}
+
+	// The wrapper of a heading can meet a wrapper of each problem below it
+	// that writes its text on the same side, or that rewrites the text of
+	// its problem. The context joins the two texts in one order, and with
+	// one joiner, around one problem and around several.
+	rewrite := func(err error) error { return rewrittenError{msg: "config is invalid", err: err} }
+	plain := func(err error) error { return err }
+	behind := func(format string) func(err error) error {
+		return func(err error) error { return fmt.Errorf(format, err) }
+	}
+
+	stacked := map[string]struct {
+		// The wrapper around each problem, the format of the wrapper
+		// around the head, and the context of each problem.
+		inner  func(err error) error
+		format string
+		want   string
+	}{
+		"text behind around text behind": {
+			inner:  behind("%w (inner)"),
+			format: "%w (outer)",
+			want:   "(inner) (outer)",
+		},
+		"text behind a colon around text behind a colon": {
+			inner:  behind("%w: see spec"),
+			format: "%w: see guide",
+			want:   "see spec: see guide",
+		},
+		"text in front and text behind a colon": {
+			inner:  plain,
+			format: "check %w: see docs",
+			want:   "check: see docs",
+		},
+		"text in front around a wrapper that rewrites the text": {
+			inner:  rewrite,
+			format: "load %w",
+			want:   "load config is invalid",
+		},
+	}
+
+	for headName, head := range heads {
+		for stackName, stack := range stacked {
+			t.Run("wrapper with "+stackName+" of each problem of a "+headName, func(t *testing.T) {
+				t.Parallel()
+
+				wantA := "[" + stack.want + "] bad a"
+				wantB := "[" + stack.want + "] bad b"
+
+				one := fmt.Errorf(stack.format, head(stack.inner(badA())))
+				two := fmt.Errorf(stack.format, head(stack.inner(badA()), stack.inner(badB())))
+
+				assert.Equal(t, []string{wantA}, rows(one))
+				assert.Equal(t, []string{wantA, wantB}, rows(two))
+
+				assert.Equal(t, []string{wantA}, rows(yamltest.Bind(t, source, one)))
+				assert.Equal(t, []string{wantA, wantB}, rows(yamltest.Bind(t, source, two)))
+			})
+		}
+	}
+
+	t.Run("the detail of a heading does not take the context above the heading", func(t *testing.T) {
+		t.Parallel()
+
+		// A row holds the context and the message of a node, and marks a
+		// detail. The place of a detail among the rows is not under test.
+		nodes := func(err error) []string {
+			var got []string
+
+			for node := range niceyaml.NewErrorTree(err).All() {
+				row := fmt.Sprintf("[%s] %s", node.Context(), node.Message())
+				if node.Detail {
+					row = "detail " + row
+				}
+
+				got = append(got, row)
+			}
+
+			return got
+		}
+
+		// The Error with the detail does not have a row above a wrapper
+		// around a join, so the detail explains the heading of that wrapper.
+		checked := fmt.Errorf("load: %w", niceyaml.Invalid(
+			fmt.Errorf("check: %w", errors.Join(badA(), badB())),
+			niceyaml.WithDetails(errors.New("see docs")),
+		))
+		wantChecked := []string{"[load: check] ", "[load: check] bad a", "[load: check] bad b", "detail [] see docs"}
+
+		assert.ElementsMatch(t, wantChecked, nodes(checked))
+		assert.ElementsMatch(t, wantChecked, nodes(yamltest.Bind(t, source, checked)))
+
+		// The detail of a summary keeps the text of its own wrapper alone.
+		summed := fmt.Errorf("load: %w", niceyaml.Invalid(
+			niceyaml.NewSummary("2 violations", badA(), badB()),
+			niceyaml.WithDetails(fmt.Errorf("hint: %w", niceyaml.NewError("see docs"))),
+		))
+		wantSummed := []string{"[load] 2 violations", "[load] bad a", "[load] bad b", "detail [hint] see docs"}
+
+		assert.ElementsMatch(t, wantSummed, nodes(summed))
+		assert.ElementsMatch(t, wantSummed, nodes(yamltest.Bind(t, source, summed)))
+	})
+
+	// The words of a wrapper can repeat the message of the problem at a.
+	// The text of the wrapper then holds that message in several places.
+	// The wrapper must still read around one problem as it reads around
+	// several.
+	sentinel := func() error { return errors.New("bad a") }
+
+	repeats := map[string]struct {
+		wrap func(err error) error
+		want string
+	}{
+		"text in front": {
+			wrap: func(err error) error { return fmt.Errorf("bad a: %w", err) },
+			want: "bad a",
+		},
+		"text behind a colon": {
+			wrap: func(err error) error { return fmt.Errorf("%w: bad a in registry", err) },
+			want: "bad a in registry",
+		},
+		"text behind in parentheses": {
+			wrap: func(err error) error { return fmt.Errorf("%w (bad a or bad b)", err) },
+			want: "(bad a or bad b)",
+		},
+		"a sentinel in front": {
+			wrap: func(err error) error { return fmt.Errorf("%w: %w", sentinel(), err) },
+			want: "bad a",
+		},
+		"a sentinel behind": {
+			wrap: func(err error) error { return fmt.Errorf("%w: %w", err, errors.New("key bad a")) },
+			want: "key bad a",
+		},
+		"a sentinel on each side": {
+			wrap: func(err error) error { return fmt.Errorf("%w: %w: %w", sentinel(), err, sentinel()) },
+			want: "bad a: bad a",
+		},
+		"a sentinel in front and text behind": {
+			wrap: func(err error) error { return fmt.Errorf("%w: %w: bad a in registry", sentinel(), err) },
+			want: "bad a: bad a in registry",
+		},
+		"text in front and a sentinel behind": {
+			wrap: func(err error) error { return fmt.Errorf("bad a item: %w: %w", err, errors.New("lookup")) },
+			want: "bad a item: lookup",
+		},
+		"a sentinel in front that holds the message, and text behind": {
+			// The search for the problem starts behind the sentinel, so it
+			// does not read the "bad a" of the sentinel as the problem.
+			wrap: func(err error) error { return fmt.Errorf("%w: %w (see docs)", errors.New("key bad a"), err) },
+			want: "key bad a: (see docs)",
+		},
+		"text in front and two sentinels behind": {
+			// The search for the problem ends in front of the first of the
+			// sentinels, although that one holds the message too.
+			wrap: func(err error) error {
+				return fmt.Errorf("check %w: %w: %w", err, errors.New("very bad a"), errors.New("z"))
+			},
+			want: "check: very bad a: z",
+		},
+	}
+
+	// A wrapper must give one context to a lone problem and to each of
+	// several problems, whether a source binds the wrapper or not.
+	sameAround := func(t *testing.T, wrap func(err error) error, want string) {
+		t.Helper()
+
+		wantA := "[" + want + "] bad a"
+		wantB := "[" + want + "] bad b"
+
+		assert.Equal(t, []string{wantA}, rows(wrap(badA())))
+		assert.Equal(t, []string{wantA, wantB}, rows(wrap(errors.Join(badA(), badB()))))
+
+		assert.Equal(t, []string{wantA}, rows(yamltest.Bind(t, source, wrap(badA()))))
+		assert.Equal(t, []string{wantA, wantB},
+			rows(yamltest.Bind(t, source, wrap(errors.Join(badA(), badB())))))
+	}
+
+	for name, tc := range repeats {
+		t.Run("wrapper with "+name+" that repeats the message", func(t *testing.T) {
+			t.Parallel()
+
+			sameAround(t, tc.wrap, tc.want)
+		})
+	}
+
+	// A wrapper with explicit argument indexes can write its errors in
+	// another order than the order that it unwraps them in. The text of
+	// the wrapper then does not hold the errors beside the problem where
+	// the unwrap order puts them. A nil [*niceyaml.Error] among the errors
+	// does not write any text. The wrapper must still read around one
+	// problem as it reads around several.
+	var none *niceyaml.Error
+
+	lookup := func() error { return errors.New("lookup") }
+	registry := func() error { return errors.New("registry") }
+
+	reordered := map[string]struct {
+		wrap func(err error) error
+		want string
+	}{
+		"a sentinel behind the problem that it writes in front": {
+			wrap: func(err error) error { return fmt.Errorf("%[2]w: %[1]w", err, lookup()) },
+			want: "lookup",
+		},
+		"a sentinel in front of the problem that it writes behind": {
+			wrap: func(err error) error { return fmt.Errorf("%[2]w: %[1]w", lookup(), err) },
+			want: "lookup",
+		},
+		"two sentinels in front that it writes in the other order": {
+			wrap: func(err error) error { return fmt.Errorf("%[2]w %[1]w %[3]w", lookup(), registry(), err) },
+			want: "registry lookup",
+		},
+		"two sentinels behind that it writes in the other order": {
+			wrap: func(err error) error { return fmt.Errorf("%[1]w: %[3]w %[2]w", err, lookup(), registry()) },
+			want: "registry lookup",
+		},
+		"three errors that it writes in reverse": {
+			wrap: func(err error) error { return fmt.Errorf("%[3]w: %[2]w: %[1]w", lookup(), err, registry()) },
+			want: "registry: lookup",
+		},
+		"a nil Error in front of the problem": {
+			wrap: func(err error) error { return fmt.Errorf("%w: %w", none, err) },
+			want: "",
+		},
+		"a nil Error behind the problem": {
+			wrap: func(err error) error { return fmt.Errorf("%w: %w", err, none) },
+			want: "",
+		},
+		"a nil Error and a sentinel on each side of the problem": {
+			wrap: func(err error) error {
+				return fmt.Errorf("%w%w: %w: %w%w", none, lookup(), err, registry(), none)
+			},
+			want: "lookup: registry",
+		},
+	}
+
+	for name, tc := range reordered {
+		t.Run("wrapper with "+name, func(t *testing.T) {
+			t.Parallel()
+
+			sameAround(t, tc.wrap, tc.want)
+		})
+	}
+
+	t.Run("wrapper with text on both sides that repeats the message", func(t *testing.T) {
+		t.Parallel()
+
+		// The text of the wrapper does not tell which "bad a" the wrapper
+		// wraps. The split of a lone problem thus takes the one at the end.
+		atEnd := func(err error) error { return fmt.Errorf("item %w was bad a", err) }
+
+		assert.Equal(t, []string{"[item bad a was] bad a"}, rows(atEnd(badA())))
+		assert.Equal(t, []string{"[item was bad a] bad a", "[item was bad a] bad b"},
+			rows(atEnd(errors.Join(badA(), badB()))))
+
+		// Neither "bad a" stands at an end, so the whole text is context.
+		inside := func(err error) error { return fmt.Errorf("item %w was bad a here", err) }
+
+		assert.Equal(t, []string{"[item bad a was bad a here] bad a"}, rows(inside(badA())))
+		assert.Equal(t, []string{"[item was bad a here] bad a", "[item was bad a here] bad b"},
+			rows(inside(errors.Join(badA(), badB()))))
+	})
+
+	t.Run("wrapper with a nil pointer behind the problem", func(t *testing.T) {
+		t.Parallel()
+
+		// The fmt package writes "<nil>" for a nil pointer whose Error
+		// method panics, and the context holds that text.
+		var missing *customTestError
+
+		wrap := func(err error) error { return fmt.Errorf("%w: %w", err, missing) }
+
+		assert.Equal(t, []string{"[<nil>] bad a"}, rows(wrap(badA())))
+		assert.Equal(t, []string{"[<nil>] bad a", "[<nil>] bad b"}, rows(wrap(errors.Join(badA(), badB()))))
+	})
+
+	// A located Error keeps its location above a binding of another source
+	// and above a binding that heads several problems. The wrapper that
+	// such a binding binds is context for each problem either way.
+	included := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("inc.yaml"))
+	atB := niceyaml.AtPath(paths.Current().Child("b"))
+
+	located := map[string]func(errs ...error) error{
+		"wrapped summary": func(errs ...error) error {
+			return niceyaml.Locate(yamltest.Bind(t, source,
+				fmt.Errorf("check: %w", niceyaml.NewSummary("some problems", errs...))), atB)
+		},
+		"wrapped join": func(errs ...error) error {
+			return niceyaml.Locate(yamltest.Bind(t, source, fmt.Errorf("check: %w", errors.Join(errs...))), atB)
+		},
+		"wrapped summary in another source": func(errs ...error) error {
+			return niceyaml.Locate(yamltest.Bind(t, included,
+				fmt.Errorf("check: %w", niceyaml.NewSummary("some problems", errs...))), atB)
+		},
+		"wrapped join in another source": func(errs ...error) error {
+			return niceyaml.Locate(yamltest.Bind(t, included, fmt.Errorf("check: %w", errors.Join(errs...))), atB)
+		},
+	}
+
+	contexts := func(err error) []string {
+		var got []string
+
+		for problem := range niceyaml.Problems(err) {
+			got = append(got, problem.Context())
+		}
+
+		return got
+	}
+
+	for name, locate := range located {
+		t.Run("located Error above a binding of a "+name, func(t *testing.T) {
+			t.Parallel()
+
+			one, two := []string{"check"}, []string{"check", "check"}
+
+			assert.Equal(t, one, contexts(locate(badA())))
+			assert.Equal(t, two, contexts(locate(badA(), badB())))
+
+			// The source that binds the located Error leaves the context
+			// as it is, and so does a wrapper above that Error.
+			assert.Equal(t, one, contexts(yamltest.Bind(t, source, locate(badA()))))
+			assert.Equal(t, two, contexts(yamltest.Bind(t, source, locate(badA(), badB()))))
+
+			include := []string{"include: check", "include: check"}
+
+			assert.Equal(t, include[:1],
+				contexts(yamltest.Bind(t, source, fmt.Errorf("include: %w", locate(badA())))))
+			assert.Equal(t, include,
+				contexts(yamltest.Bind(t, source, fmt.Errorf("include: %w", locate(badA(), badB())))))
+		})
+	}
+
+	t.Run("an error without an Error or a binding takes the context of its headings alone", func(t *testing.T) {
+		t.Parallel()
+
+		tooOld, tooNew := errors.New("too old"), errors.New("too new")
+
+		// The summary returns one member as it is. The wrapper then
+		// shares a row with a plain error, which keeps the whole text.
+		one := fmt.Errorf("load: %w", niceyaml.NewSummary("some problems", tooOld))
+		two := fmt.Errorf("load: %w", niceyaml.NewSummary("some problems", tooOld, tooNew))
+
+		assert.Equal(t, []string{"[] load: too old"}, rows(one))
+		assert.Equal(t, []string{"[load] too old", "[load] too new"}, rows(two))
+	})
+
+	// The cause chain of an Error can end without another Error or a
+	// binding. The text of each wrapper below the Error is then part of its
+	// message, and only a wrapper above the Error adds context. A chain
+	// without an Error keeps its whole text as its message.
+	ends := map[string]func() error{
+		"an error that does not have a cause": func() error { return &causeError{msg: "no cause"} },
+		"an error that has a plain cause": func() error {
+			return &causeError{msg: "open", cause: errors.New("no file")}
+		},
+		"a wrapper with several verbs around sentinels": func() error {
+			return fmt.Errorf("%w: %w", errors.New("plugin"), errors.New("no file"))
+		},
+	}
+
+	for name, end := range ends {
+		t.Run("chain that ends at "+name, func(t *testing.T) {
+			t.Parallel()
+
+			chain := func() error { return fmt.Errorf("read config: %w", end()) }
+			text := chain().Error()
+
+			load := func(err error) error { return fmt.Errorf("load: %w", err) }
+
+			tcs := map[string]struct {
+				err  error
+				want string
+			}{
+				"plain chain":                  {err: chain(), want: "[] " + text},
+				"Error around the chain":       {err: niceyaml.Invalid(chain()), want: "[] " + text},
+				"wrapper around such an Error": {err: load(niceyaml.Invalid(chain())), want: "[load] " + text},
+				"wrapper around a plain chain": {err: load(chain()), want: "[] load: " + text},
+			}
+
+			for shape, tc := range tcs {
+				assert.Equal(t, []string{tc.want}, rows(tc.err), shape)
+				assert.Equal(t, []string{tc.want}, rows(yamltest.Bind(t, source, tc.err)), shape+", bound")
+			}
+		})
+	}
+
+	t.Run("every node of the tree carries its context", func(t *testing.T) {
+		t.Parallel()
+
+		err := fmt.Errorf("load item: %w", yamltest.Bind(t, source, niceyaml.NewSummary("2 problems", badA(), badB())))
+
+		var got []string
+
+		for node := range niceyaml.NewErrorTree(err).All() {
+			got = append(got, fmt.Sprintf("[%s] %s", node.Context(), node.Message()))
+		}
+
+		assert.Equal(t, []string{"[load item] 2 problems", "[load item] bad a", "[load item] bad b"}, got)
+	})
+
+	t.Run("the rendering keeps the text of the wrapper where it was", func(t *testing.T) {
+		t.Parallel()
+
+		one := fmt.Errorf("load item: %w", yamltest.Bind(t, source, badA()))
+		two := fmt.Errorf("load item: %w", yamltest.Bind(t, source, niceyaml.NewSummary("2 problems", badA(), badB())))
+
+		assert.Equal(t, "f.yaml:1:4: $.a: load item: bad a", niceyaml.NewErrorTree(one).Label)
+
+		var labels []string
+
+		for node := range niceyaml.NewErrorTree(two).All() {
+			labels = append(labels, node.Label)
+		}
+
+		assert.Equal(t, []string{
+			"f.yaml: load item: 2 problems",
+			"1:4: $.a: bad a",
+			"2:4: $.b: bad b",
+		}, labels)
+	})
 }
 
 func TestErrorTree_Accessors(t *testing.T) {
@@ -3025,8 +4053,9 @@ func TestProblems(t *testing.T) {
 		niceyaml.WithDetails(niceyaml.NewError("see a", niceyaml.AtPath(paths.Doc().Child("a")))))
 
 	// A row joins what the report example in the docs reads from a node:
-	// the file, the line, the path, the message, and the related messages
-	// of the details, leaving out the ones the node lacks.
+	// the file, the line, the path, the context, the message, and the
+	// related messages of the details, leaving out the ones the node
+	// lacks.
 	rows := func(err error) []string {
 		var got []string
 
@@ -3043,6 +4072,10 @@ func TestProblems(t *testing.T) {
 
 			if path, ok := problem.Path(); ok {
 				parts = append(parts, path.String())
+			}
+
+			if context := problem.Context(); context != "" {
+				parts = append(parts, context)
 			}
 
 			parts = append(parts, problem.Message())
@@ -3070,7 +4103,7 @@ func TestProblems(t *testing.T) {
 		},
 		"an unbound Error yields its row with no file": {
 			err:  fmt.Errorf("load config: %w", badA),
-			want: []string{"$.a | load config: bad a"},
+			want: []string{"$.a | load config | bad a"},
 		},
 		"a join of a binding and a plain error": {
 			err: errors.Join(yamltest.Bind(t, source, badA), errors.New("too old")),
@@ -3138,7 +4171,7 @@ func TestProblems_WrapperBranches(t *testing.T) {
 			second: niceyaml.NewWarning("legacy layout"),
 			want: []string{
 				"port is required [error, invalid]",
-				"warning: legacy layout [warning, invalid]",
+				"legacy layout [warning, invalid]",
 			},
 			hasErrors: true,
 			invalid:   true,
@@ -3148,7 +4181,7 @@ func TestProblems_WrapperBranches(t *testing.T) {
 			second: niceyaml.NewWarning("legacy layout"),
 			want: []string{
 				"port is required [error, invalid]",
-				"warning: legacy layout [warning, invalid]",
+				"legacy layout [warning, invalid]",
 			},
 			hasErrors: true,
 			invalid:   true,
@@ -3177,8 +4210,8 @@ func TestProblems_WrapperBranches(t *testing.T) {
 			first:  niceyaml.NewWarning("legacy layout"),
 			second: niceyaml.NewWarning("legacy port"),
 			want: []string{
-				"warning: legacy layout [warning, invalid]",
-				"warning: legacy port [warning, invalid]",
+				"legacy layout [warning, invalid]",
+				"legacy port [warning, invalid]",
 			},
 			invalid: true,
 		},
@@ -3205,7 +4238,7 @@ func TestProblems_WrapperBranches(t *testing.T) {
 			second: niceyaml.NewWarning("legacy layout"),
 			want: []string{
 				"permission denied [error, no fault]",
-				"warning: legacy layout [warning, invalid]",
+				"legacy layout [warning, invalid]",
 			},
 			hasErrors: true,
 		},
@@ -3214,7 +4247,7 @@ func TestProblems_WrapperBranches(t *testing.T) {
 			second: niceyaml.NewWarning("legacy layout"),
 			want: []string{
 				"permission denied [error, invalid]",
-				"warning: legacy layout [warning, invalid]",
+				"legacy layout [warning, invalid]",
 			},
 			hasErrors: true,
 			invalid:   true,
@@ -3224,7 +4257,7 @@ func TestProblems_WrapperBranches(t *testing.T) {
 			second: niceyaml.NewWarning("legacy layout"),
 			want: []string{
 				"legacy port [error, invalid]",
-				"warning: legacy layout [warning, invalid]",
+				"legacy layout [warning, invalid]",
 			},
 			hasErrors: true,
 			invalid:   true,
@@ -3236,7 +4269,7 @@ func TestProblems_WrapperBranches(t *testing.T) {
 			want: []string{
 				"port is required [error, invalid]",
 				"host is required [error, invalid]",
-				"warning: legacy layout [warning, invalid]",
+				"legacy layout [warning, invalid]",
 			},
 			hasErrors: true,
 			invalid:   true,

@@ -403,21 +403,7 @@ func mark(err error, sev severity) error {
 // as [remark] marks them. A binding of one problem gets the mark above the
 // error it binds, so it keeps its location and its children.
 func (e *SourceError) remarked(sev severity) *SourceError {
-	c := &SourceError{
-		err:     e.err,
-		free:    e.free,
-		locErr:  e.locErr,
-		source:  e.source,
-		node:    e.node,
-		kept:    e.kept,
-		keptDoc: e.keptDoc,
-		loc:     e.loc,
-		end:     e.end,
-		ranges:  e.ranges,
-		below:   e.below,
-		rng:     e.rng,
-		adopted: e.adopted,
-	}
+	c := e.copied()
 
 	if e.heads() {
 		c.below = make([]boundChild, 0, len(e.below))
@@ -447,6 +433,26 @@ func (e *SourceError) remarked(sev severity) *SourceError {
 	}
 
 	return c
+}
+
+// copied returns a copy of e that builds its own texts, so a caller can
+// change the error that the copy binds.
+func (e *SourceError) copied() *SourceError {
+	return &SourceError{
+		err:     e.err,
+		free:    e.free,
+		locErr:  e.locErr,
+		source:  e.source,
+		node:    e.node,
+		kept:    e.kept,
+		keptDoc: e.keptDoc,
+		loc:     e.loc,
+		end:     e.end,
+		ranges:  e.ranges,
+		below:   e.below,
+		rng:     e.rng,
+		adopted: e.adopted,
+	}
 }
 
 // retally returns err with each tally along its chain of Errors rebuilt.
@@ -546,22 +552,30 @@ func countText(errs, warns int) string {
 // A call whose context does not carry a collector drops its warnings,
 // whether it passes or fails.
 //
-// Of the warnings that share a source, a place, and a message, the
-// collector keeps one. The place of a warning is its position and its
-// path. In a file of several documents, the message of a warning without
-// a position names the document that binds it, as "document 2". That
-// document is part of the place too.
+// Of the warnings whose rows read alike, the collector keeps one. Two rows
+// read alike when they share a source, a place, and the message that the
+// row shows behind its location. The place of a warning is its position
+// and its path. In a file of several documents, the row of a warning
+// without a position names the document that binds it, as "document 2".
+// That document is part of the place too.
 //
 // A deprecation that two checks report thus shows once. A warning at one
 // position shows once as well, whichever document of the file reports it.
 // A warning without a position shows once for each document that reports
 // it.
 //
+// The row of a warning holds the text of a wrapper that holds that warning
+// alone, as in "lint: old spec". Two such wrappers with different texts
+// around one warning thus keep a row each. A wrapper that heads several
+// warnings does not write its text in their rows, so each of those rows
+// reads as "old spec". Two such wrappers with different texts over one
+// warning keep one row for it. That row keeps the [ErrorTree.Context] of
+// the warning that reached the collector first.
+//
 // A copy that [Detach] detached shares the source and the place of the
 // warning it copies. Of the two, the collector keeps the warning,
 // whichever reaches it first, so [Warnings.All] reports its Source and
-// [Annotate] marks it. The message holds the text of each wrapper around
-// the warning, so two wrappers around one warning keep a row each.
+// [Annotate] marks it.
 //
 // A Warnings is safe for concurrent use, so calls in several goroutines
 // can share one. A nil *Warnings does not collect or hold any warning.
@@ -615,8 +629,11 @@ func (w *Warnings) Context(ctx context.Context) context.Context {
 // [ErrorTree] per warning. The warnings sort by position, within the
 // order their sources first reached w, and the warnings that do not carry
 // a position come last. Each tree holds the warning bound as the call
-// bound it, with its details as its Children. A program reads the fields
-// of each tree as it reads those of a node that [Problems] yields:
+// bound it, with its details as its Children. A wrapper around several
+// warnings is a heading, which w does not hold. Each of those warnings
+// keeps the text of the wrapper as its [ErrorTree.Context]. A program reads
+// the fields of each tree as it reads those of a node that [Problems]
+// yields:
 //
 //	for warning := range warnings.All() {
 //		pos, _ := warning.Position()
@@ -679,8 +696,9 @@ func (w *Warnings) Err() error {
 // Report builds a new error and leaves err as it is. The result keeps
 // each problem of err for [errors.Is] and [errors.As], but not the
 // headings and the wrappers above them. A program thus classifies the
-// failure with err itself. When w does not hold a warning, Report returns
-// err as it is.
+// failure with err itself. Each problem keeps the text of those wrappers
+// as its [ErrorTree.Context], and the rows of the result do not show that
+// text. When w does not hold a warning, Report returns err as it is.
 func (w *Warnings) Report(err error) error {
 	held := w.sorted()
 	if len(held) == 0 {
@@ -703,10 +721,11 @@ func (w *Warnings) Report(err error) error {
 	return tallyRows(sortRows(rows))
 }
 
-// keep adds each of rows unless w holds a row that shares its source, its
-// place, and its message, as [warningRow.same] reports. Of two such rows,
-// w keeps the row of a live [Source]. A copy that [Detach] detached thus
-// gives way to the warning it copies.
+// keep adds each of rows unless w holds a row that reads alike, as
+// [warningRow.same] reports. Of two such rows, w keeps the row of a live
+// [Source]. A copy that [Detach] detached thus gives way to the warning
+// it copies. Otherwise w keeps the row that it holds, with the context
+// that the error of that row carries.
 func (w *Warnings) keep(rows []warningRow) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -843,7 +862,13 @@ func deliver(ctx context.Context, err error) {
 // returns err whole as the warnings. For an err that holds both,
 // [splitBelow] keeps the join or the wrapper on top of the errors when it
 // can split err. Otherwise splitWarnings returns each severity as the
-// join of its problems, in the order that [Problems] yields them.
+// join of its problems, as [splitProblems] returns them.
+//
+// The warnings of a branch that does not hold an error thus stay below
+// the headings of that branch, as they do in a result that holds warnings
+// alone. A call binds and sorts the warnings of a hook as one error. The
+// rows of those warnings thus keep one order, whatever the errors beside
+// them.
 func splitWarnings(err error) (error, error) {
 	var failure, warnings error
 
@@ -865,15 +890,19 @@ func splitWarnings(err error) (error, error) {
 
 // splitProblems returns the join of the errors and then the join of the
 // warnings among the problems of err, in the order [Problems] yields
-// them.
+// them. The join leaves out the headings above each problem. Each problem
+// thus carries the text of the wrappers of those headings, as
+// [underHeadings] puts that text on an error, and keeps its context.
 func splitProblems(err error) (error, error) {
 	var errs, warns []error
 
 	for problem := range Problems(err) {
+		kept := underHeadings(problem.Err, problem.above)
+
 		if isWarning(problem.Err) {
-			warns = append(warns, problem.Err)
+			warns = append(warns, kept)
 		} else {
-			errs = append(errs, problem.Err)
+			errs = append(errs, kept)
 		}
 	}
 
@@ -903,8 +932,8 @@ func splitBelow(err error) (error, error) {
 // splitJoin splits err branch by branch when err is a join, as
 // [splitWarnings] splits each branch. The errors keep the join over the
 // branches that hold errors, and an [errors.Join] of one such branch
-// reads as that branch. For an err that is not a join, splitJoin returns
-// a nil failure.
+// reads as that branch. The warnings are the join of the warnings of each
+// branch. For an err that is not a join, splitJoin returns a nil failure.
 func splitJoin(err error) (error, error) {
 	branches, _, ok := joinBranches(err)
 	if !ok {
@@ -931,25 +960,29 @@ func splitJoin(err error) (error, error) {
 	return multierr.Rejoin(err, errs), multierr.Join(warns)
 }
 
-// splitWrapper splits wrapper below it. The wrapper wraps below alone.
-// The errors keep a stand-in that matches the wrapper. The text of the
-// stand-in holds the errors of below in place of the text of below. For a
-// wrapper whose text does not show the text of below exactly one time,
-// splitWrapper returns a nil failure.
-func splitWrapper(wrapper, below error) (error, error) {
+// splitWrapper splits err below it. The wrapper err wraps below alone.
+// The errors keep a stand-in that matches err. The text of the stand-in
+// holds the errors of below in place of the text of below. The warnings
+// of below do not keep err above them. Each of them thus carries the text
+// that err wrote around below, as [underHeadings] puts that text on an
+// error, and keeps its context. For an err whose text does not show the
+// text of below exactly one time, splitWrapper returns a nil failure.
+func splitWrapper(err, below error) (error, error) {
 	failure, warnings := splitWarnings(below)
 	if failure == nil || warnings == nil {
 		return nil, nil //nolint:nilnil // A nil failure means that the wrapper does not split.
 	}
 
-	msg := wrapper.Error()
+	msg := err.Error()
 
 	text := replaceText(msg, below.Error(), failure.Error())
 	if text == msg {
 		return nil, nil //nolint:nilnil // A nil failure means that the wrapper does not split.
 	}
 
-	return multierr.Replace(wrapper, failure, text, nil), warnings
+	added := wrapperText{}.around([]wrapper{{err: err, next: below}})
+
+	return multierr.Replace(err, failure, text, nil), underHeadings(warnings, added)
 }
 
 // Warn reports err as a warning to the collector of ctx, as [Warnings]
@@ -979,6 +1012,10 @@ func (n *Node) Warn(ctx context.Context, err error) {
 // [Warnings.Report] lists. It holds the source, the place, and the message
 // that identify the problem.
 type warningRow struct {
+	// The error of the problem. It carries the text of the wrappers of the
+	// headings that stood above the problem, as [underHeadings] puts that
+	// text on an error. A tree of it thus reports that text as its
+	// context, and the row of the problem does not show it.
 	err error
 	// The source of the problem, as [SourceError.origin] gives it, or nil
 	// for a problem that is not bound to a source.
@@ -987,13 +1024,16 @@ type warningRow struct {
 	// for a row without a source. [warningRow.sameSource] compares rows
 	// through it, so a comparison does not make a weak pointer.
 	id weak.Pointer[Source]
-	// The message of the problem, with the text that each wrapper around
-	// its binding adds.
+	// The message that the row of the problem shows behind its location,
+	// as [ErrorTree.rowMessage] returns it. It holds the text of each
+	// wrapper that holds the problem alone, and not the text of a wrapper
+	// that headed several problems.
 	msg string
 	// The message of the binding of the problem, without the text that a
 	// wrapper around the binding adds, as [repeatKey] reads it. A binding
 	// that adopted such a wrapper gives the message of the binding inside
-	// the wrapper, as [SourceError.innermost] finds it.
+	// the wrapper, as [SourceError.innermost] finds it. A problem without a
+	// binding gives the message that its row shows.
 	bound string
 	path  string
 	// The document that the message of the problem names, as "document
@@ -1011,8 +1051,8 @@ func rowsOf(err error) []warningRow {
 
 	for problem := range Problems(err) {
 		row := sourceRow(problem.Bound.origin())
-		row.err = problem.Err
-		row.msg = problem.Message()
+		row.err = underHeadings(problem.Err, problem.above)
+		row.msg = problem.rowMessage()
 
 		row.bound = row.msg
 		if problem.Bound != nil {
@@ -1107,8 +1147,11 @@ func sourceRow(src excerptSource) warningRow {
 	return warningRow{src: src, id: src.identity()}
 }
 
-// same reports whether r and o share a place, as [warningRow.samePlace]
-// reports it, and a message.
+// same reports whether r and o read alike. They do when they share a
+// place, as [warningRow.samePlace] reports it, and the message that each
+// row shows. The comparison leaves out the text that a row carries from a
+// heading, because a row does not show that text. Two rows that match thus
+// print one line, and two rows that print different lines do not match.
 func (r *warningRow) same(o *warningRow) bool {
 	return r.samePlace(o) && r.msg == o.msg
 }

@@ -1,0 +1,7 @@
+---
+cafe: Café Yamüll Östermalm
+menu:
+  - item: ["Kaffe", "Te"]
+    price: 35
+  - item: "Kanelbulle"
+    price: 45

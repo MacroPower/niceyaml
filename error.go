@@ -330,6 +330,12 @@ type Error struct {
 	err    error
 	move   *move
 	errors []error
+	// The text that the wrappers of the headings above the Error wrote, in
+	// the error that a [Warnings] or a hook of a call took the Error from.
+	// The Error does not write that text. [ErrorTree.Context] reports it
+	// for each problem of the Error. A problem thus has one context below
+	// those headings and outside them. It is empty for every other Error.
+	headings wrapperText
 	errorConfig
 	fault declaration
 	// The severity mark of the Error, which decides the severity of the
@@ -3084,8 +3090,11 @@ func (e *SourceError) DocumentIndex() (int, bool) {
 // document, or path in front. It is the message [NewError] or [Invalid]
 // gave an [*Error], or the text of any other error as it is, with any text
 // a wrapper such as [fmt.Errorf] added around it. [SourceError.Excerpt]
-// annotates a location with it, and a structured report carries it beside
-// [SourceError.Position] and [SourceError.Path], as [Problems] describes.
+// annotates a location with it. A structured report reads
+// [ErrorTree.Message] and [ErrorTree.Context] of each node that [Problems]
+// yields instead, which hold the message and the text of the wrappers
+// apart.
+//
 // The errors [SourceError.Error] lists below the message are not part of
 // it, so the message of a summary is its heading alone. A binding of a
 // join does not have a line of its own. Its message holds the message of
@@ -3271,9 +3280,9 @@ func (e *SourceError) buildTexts() boundTexts {
 		switch {
 		case !ok:
 		case sameSource(inner.origin(), e.origin()):
-			shown, rewrites = inner.unnamedLine(e), true
+			shown, rewrites = inner.unnamedLine(e, inner.text()), true
 		case inner.labels():
-			shown, rewrites = inner.unlabeledLine(), true
+			shown, rewrites = inner.unlabeledLine(inner.text()), true
 		}
 
 		if rewrites {
@@ -3444,19 +3453,17 @@ func wrapLine(own string, inner *SourceError, msg string) (*SourceError, string)
 	return t.rows, strings.TrimRightFunc(before+msg+after, unicode.IsSpace)
 }
 
-// unnamedLine returns the line of e without the name of its source and
-// without the "warning:" label. Outer is a binding of the same source that
-// gives e its location, and it writes this line behind that location, as
-// [Locate] describes. The line leaves out the document of e when outer is
+// unnamedLine returns the line of e with the message msg, without the
+// name of its source and without the "warning:" label. Outer is a binding
+// of the same source that gives e its location. It writes this line behind
+// that location with the [SourceError.text] of e as msg, as [Locate]
+// describes. The line leaves out the document of e when outer is
 // bound to that same document, because the location of outer names it
 // already. The line leaves out the path of e when the row of outer shows
 // that path and the line does not name a document. A document label sets
 // the two paths apart, so the line keeps the path behind it.
-func (e *SourceError) unnamedLine(outer *SourceError) string {
-	rows, msg := e, e.text()
-	if t := e.texts(); t.wraps {
-		rows = t.rows
-	}
+func (e *SourceError) unnamedLine(outer *SourceError, msg string) string {
+	rows := e.lineRows()
 
 	var document string
 
@@ -3475,19 +3482,39 @@ func (e *SourceError) unnamedLine(outer *SourceError) string {
 	return prefix(suffixed(document), msg)
 }
 
-// unlabeledLine returns the line of e without the "warning:" label. The
-// binding of a [Locate] result in another source writes this line behind
-// the location that it gives e, because the row of that binding shows the
-// severity.
-func (e *SourceError) unlabeledLine() string {
-	rows, msg := e, e.text()
-	if t := e.texts(); t.wraps {
-		rows = t.rows
-	}
-
-	_, row := rows.lineAs(msg, false)
+// unlabeledLine returns the line of e with the message msg, without the
+// "warning:" label. The binding of a [Locate] result in another source
+// writes this line behind the location that it gives e, with the
+// [SourceError.text] of e as msg. The row of that binding shows the
+// severity, so the line leaves the label out.
+func (e *SourceError) unlabeledLine(msg string) string {
+	_, row := e.lineRows().lineAs(msg, false)
 
 	return row
+}
+
+// lineRows returns the binding whose position and path stand in front of
+// the message in a line of e, as [SourceError.unnamedLine] and
+// [SourceError.unlabeledLine] write that line. When the line of e holds
+// the message of a binding below it, the result is the rows of e, as
+// [boundTexts] holds them. A wrapper that rewrote the line of the binding
+// that e adopted is context, so the result is the rows of that binding.
+// The binding of a join does not have a line, so a binding that adopted
+// one keeps its own rows. So does every other binding.
+func (e *SourceError) lineRows() *SourceError {
+	for {
+		t := e.texts()
+		if t.wraps {
+			return t.rows
+		}
+
+		inner := e.inner()
+		if t.rows != nil || inner == nil || joinBinding(inner) != nil {
+			return e
+		}
+
+		e = inner
+	}
 }
 
 // labels reports whether the line of e carries the "warning:" label. A
@@ -3734,6 +3761,99 @@ func (e *SourceError) text() string {
 	}
 
 	return bareMessage(e.err, e.end)
+}
+
+// problemMessage returns the message of the problem that e binds, as
+// [ErrorTree.Message] reports it: the message of e without the text of
+// each wrapper above the innermost [*Error] or binding that e binds. A
+// binding that reads as the binding of a join does not have a message.
+//
+// A located [*Error] that keeps its location above a binding is the
+// problem. Its message holds the line of that binding as
+// [SourceError.Message] describes, with the message of the problem of
+// that binding in place of its text. The text of each wrapper that the
+// binding binds thus stays out, as the text of a wrapper above the binding
+// does. A binding without a message gives the located Error an empty
+// message too.
+func (e *SourceError) problemMessage() string {
+	if e == nil || joinBinding(e) != nil {
+		return ""
+	}
+
+	wrappers, core := problemOf(e.err)
+	inner := asBinding(core)
+
+	switch {
+	case inner != nil && e.adopted:
+		return inner.problemMessage()
+
+	case inner != nil:
+		return e.lineBelow(inner)
+
+	case len(wrappers) > 0:
+		return ownMessage(core)
+
+	default:
+		return e.text()
+	}
+}
+
+// lineBelow returns the line of inner as e writes it behind the location
+// that it gives inner, with the message of the problem of inner in place
+// of the text of inner. The binding inner stands below a located [*Error]
+// that e binds, and e did not adopt it. The line is empty when inner does
+// not have such a message, as a binding of a wrapper around a join does
+// not.
+//
+// When inner and e name one source, the line reads as
+// [SourceError.unnamedLine] writes it. Otherwise it reads as
+// [SourceError.unlabeledLine] writes it. A wrapper between e and inner
+// does not change the line, whether or not its text holds the line of
+// inner.
+func (e *SourceError) lineBelow(inner *SourceError) string {
+	msg := inner.problemMessage()
+
+	switch {
+	case msg == "":
+		return ""
+
+	case sameSource(inner.origin(), e.origin()):
+		return inner.unnamedLine(e, msg)
+
+	default:
+		return inner.unlabeledLine(msg)
+	}
+}
+
+// problemLine returns the line of e with the message of its problem, as
+// [SourceError.problemMessage] returns it, in place of the text that the
+// line holds. It is empty for a binding without such a message. The line
+// reads as [SourceError.unlabeledLine] writes it, so it leaves out the
+// "warning:" label. The node of a located [*Error] that no source bound
+// has this line as its message, and reports the severity beside it.
+func (e *SourceError) problemLine() string {
+	msg := e.problemMessage()
+	if msg == "" {
+		return ""
+	}
+
+	return e.unlabeledLine(msg)
+}
+
+// wrapperText returns the text that the wrappers above the problem that e
+// binds wrote around its message, as [SourceError.problemMessage] finds
+// that problem. The wrappers are those that e binds and those that the
+// binding at the end of them binds. That binding is the one that e
+// adopted, or the one below a located [*Error] that keeps its location.
+func (e *SourceError) wrapperText() wrapperText {
+	if e == nil || joinBinding(e) != nil {
+		return wrapperText{}
+	}
+
+	wrappers, core := problemOf(e.err)
+
+	// The binding at the end holds the wrappers below the ones e binds.
+	return asBinding(core).wrapperText().around(wrappers)
 }
 
 // joinText returns the text of each binding that [SourceError.Error] lists
@@ -4255,7 +4375,7 @@ func (e *SourceError) Annotate(view *line.View) bool {
 // the same columns with an annotation in [kind.TextError] below each line
 // the highlight covers. A renderer draws a caret run under the columns of
 // each annotation. The first annotation on the line of the location carries
-// the [ErrorTree.Message] of the node of the binding, with each tab as four
+// the message that the row of the binding shows, with each tab as four
 // spaces, and the others do not carry a message. That message is the
 // [SourceError.Message] of the binding, with the text that a wrapper around
 // the binding added. An error without a message thus gets caret runs alone.

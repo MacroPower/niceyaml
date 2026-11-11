@@ -228,13 +228,24 @@
 // found". The row reads the same when the call joins that problem with
 // others.
 //
-// [ErrorTree.Message] of that problem, as [Problems] yields it, holds
-// "decode price: not found" in both cases. In a join, so do the
-// [SourceError.Message] of the binding that niceyaml builds around the
-// wrapper and the mark in the excerpt. [errors.As] on a lone wrapper finds
-// the binding inside it, whose message is "not found", so a report reads
-// its fields from Problems. The message of the wrapper itself keeps the
-// position behind the context, as [fmt.Errorf] wrote it.
+// [Problems] yields that problem with "not found" as its
+// [ErrorTree.Message] and "decode price" as its [ErrorTree.Context] in both
+// cases. A wrapper around several problems is a heading above them, and
+// each of those problems reports the text of the wrapper as its context
+// too. A report thus carries the same message and the same context for a
+// problem, however many other problems the wrapper holds.
+//
+// The problem is an [*Error] or a binding. An error that holds neither,
+// such as the error of [os.Open], is the exception. It keeps the text of
+// each wrapper that shares its row in its message. Its context holds only
+// the text of the headings above it, as [ErrorTree.Context] describes.
+//
+// In a join, the [SourceError.Message] of the binding that niceyaml builds
+// around the wrapper holds "decode price: not found", and so does the mark
+// in the excerpt. [errors.As] on a lone wrapper finds the binding inside
+// it, whose message is "not found", so a report reads its fields from
+// Problems. The message of the wrapper itself keeps the position behind
+// the context, as [fmt.Errorf] wrote it.
 //
 // An [Invalid], [Unchecked], or [Locate] with a location around such an
 // error does not move it, because the binding resolved its location in
@@ -470,10 +481,13 @@
 // annotations, or editor diagnostics, a program walks [Problems]. Problems
 // yields one node of the [ErrorTree] per problem, with its details below it.
 // A row takes its fields from the node through [ErrorTree.Message],
-// [ErrorTree.Path], [ErrorTree.Name], and [ErrorTree.Position], rather than
-// from its label. A tool that opens the file, such as an editor, reads
-// [ErrorTree.FilePath] in place of the name. [errors.As] on the Err field
-// of the node finds the typed error of that problem.
+// [ErrorTree.Context], [ErrorTree.Path], [ErrorTree.Name], and
+// [ErrorTree.Position], rather than from its label. The message is that of
+// the problem alone. The context is the text that each wrapper above the
+// problem added, such as "decode price", whether the wrapper holds that
+// problem alone or heads several. A tool that opens the file, such as an
+// editor, reads [ErrorTree.FilePath] in place of the name. [errors.As] on
+// the Err field of the node finds the typed error of that problem.
 //
 // A terminal gets color from
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError], which takes the
@@ -591,6 +605,10 @@
 // both, such as a summary from [NewSummary], becomes the join of its errors.
 // That join drops the heading and the type of the error, so [errors.As] does
 // not find that type.
+//
+// Each problem keeps its [ErrorTree.Context] through that split. A warning
+// that the call removes from a wrapper still reports the text of that
+// wrapper, and so does each error of such a join.
 //
 // A program that prints only the error of a call does not show its warnings.
 // A renderer that lists the warnings between the errors, as a compiler does,

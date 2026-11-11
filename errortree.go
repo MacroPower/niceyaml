@@ -2,6 +2,7 @@ package niceyaml
 
 import (
 	"errors"
+	"fmt"
 	"iter"
 	"slices"
 	"strconv"
@@ -28,10 +29,11 @@ import (
 // resolved its location. Each report that a program reads takes its
 // fields from the node rather than from the label. Such reports include
 // JSON lines, CI annotations, and editor diagnostics. They read
-// [ErrorTree.Message] and [ErrorTree.Path] from the node, and
-// [ErrorTree.Name], [ErrorTree.FilePath], and [ErrorTree.Position] from
-// its binding. [Problems] yields the nodes that such a report lists, one
-// per problem, and [ErrorTree.All] yields every node of the tree.
+// [ErrorTree.Message], [ErrorTree.Context], and [ErrorTree.Path] from the
+// node, and [ErrorTree.Name], [ErrorTree.FilePath], and
+// [ErrorTree.Position] from its binding. [Problems] yields the nodes that
+// such a report lists, one per problem, and [ErrorTree.All] yields every
+// node of the tree.
 //
 // Each node with Detail set explains its parent, and a renderer that
 // draws details apart from problems reads that field.
@@ -59,9 +61,14 @@ type ErrorTree struct {
 	//
 	// Label is empty for a node that stands for several errors and does
 	// not add a message of its own, such as one built from [errors.Join].
-	// [ErrorTree.Message] returns the message alone, the field a report
-	// carries.
+	// A report carries [ErrorTree.Message] and [ErrorTree.Context] instead.
+	// They return the message of the problem alone and the text that the
+	// wrappers above the problem added.
 	Label string
+	// The text that the wrappers of the headings above the node wrote
+	// around its problem. [ErrorTree.Context] puts that text around the
+	// text of the wrappers of the node itself.
+	above wrapperText
 	// Children are the nodes of the errors below the node, in the order
 	// that the tree shows them. They are the problems that a heading
 	// stands over and the details that explain the node. Each detail has
@@ -133,7 +140,44 @@ type ErrorTree struct {
 // bound problem of a join keeps its own place after that bind too, as
 // [Locate] describes.
 func NewErrorTree(err error) ErrorTree {
+	t := buildTree(err)
+	inheritContext(&t, wrapperText{})
+
+	return t
+}
+
+// buildTree returns the tree of err, as [NewErrorTree] documents it,
+// before the nodes take the context of the headings above them.
+func buildTree(err error) ErrorTree {
 	return newTree(ErrorTree{}, appendTrees(nil, err))
+}
+
+// inheritContext gives t the text above, which the wrappers of the
+// headings over t wrote. It gives each node below t the text of the
+// headings over that node. A problem below a heading takes the text of
+// that heading, which holds the text above. The problem thus has the
+// context that it has when the wrappers of the heading wrap it alone. A
+// detail explains one problem, so it does not take the text of that
+// problem.
+func inheritContext(t *ErrorTree, above wrapperText) {
+	t.above = above
+
+	var below wrapperText
+
+	if t.heads() {
+		below = t.wrapperText().under(above)
+	}
+
+	for i := range t.Children {
+		child := &t.Children[i]
+		if child.Detail {
+			inheritContext(child, wrapperText{})
+
+			continue
+		}
+
+		inheritContext(child, below)
+	}
 }
 
 // All returns an iterator over the nodes of the tree, t first and each
@@ -179,14 +223,20 @@ func (t ErrorTree) All() iter.Seq[ErrorTree] {
 // that did not read. The rows match the lines that [SourceError.Error]
 // lists.
 //
-// A row reads [ErrorTree.Message] and [ErrorTree.Path], which answer for
-// every node. It also reads [ErrorTree.Source] and [ErrorTree.Position],
-// which return zero values for a node that is not bound to a source.
-// [errors.Is] and [errors.As] on Err search the problem and skip its
-// details:
+// A row reads [ErrorTree.Message], [ErrorTree.Context], and
+// [ErrorTree.Path], which answer for every node. The context holds the
+// text of each wrapper above the problem, the wrappers that are headings
+// included. A row thus does not need the headings that the walk skips. A
+// row also reads [ErrorTree.Source] and [ErrorTree.Position], which return
+// zero values for a node that is not bound to a source. [errors.Is] and
+// [errors.As] on Err search the problem and skip its details:
 //
 //	for problem := range niceyaml.Problems(err) {
-//		row := Row{Message: problem.Message(), Invalid: problem.IsInvalid()}
+//		row := Row{
+//			Message: problem.Message(),
+//			Context: problem.Context(),
+//			Invalid: problem.IsInvalid(),
+//		}
 //		if rule, ok := errors.AsType[*RuleError](problem.Err); ok {
 //			row.Rule = rule.ID
 //		}
@@ -207,7 +257,7 @@ func (t ErrorTree) Problems() iter.Seq[ErrorTree] {
 //	for problem := range niceyaml.Problems(err) {
 //		path, _ := problem.Path()
 //		pos, _ := problem.Position()
-//		emit(problem.Name(), pos, problem.Message(), path)
+//		emit(problem.Name(), pos, path, problem.Context(), problem.Message())
 //	}
 //
 // Problems does not yield a node for a nil err.
@@ -322,49 +372,178 @@ func declaresInvalid(err error) bool {
 	return false
 }
 
-// Message returns the message of the node, and it does not put its own
-// position, document, or path in front. A report carries that field beside
-// the position and the path. Label holds the same message behind the
-// location the row of the node shows, in a form that depends on where the
-// node sits in the tree. A [Locate], [Invalid], or [Unchecked] result can
-// give its location to a binding inside it. The message of such a result
-// then holds the path, the document, or the whole line of that binding,
-// as [SourceError.Message] describes.
+// Message returns the message of the problem that the node stands for. It
+// leaves out the position, the document, and the path of the node, the
+// "warning:" label, and the text of each wrapper above the problem. A
+// report carries that field beside the position and the path, and reads
+// the text of the wrappers from [ErrorTree.Context]. The message of a
+// problem thus stays the same however many other problems a wrapper holds
+// beside it. Label holds the row that a renderer draws instead, in a form
+// that depends on where the node sits in the tree.
+//
+// The problem is the innermost [*Error] or binding along the cause chain
+// of Err:
+//
+//   - For an Error from [NewError], the message is the one NewError
+//     received. A wrapper from [fmt.Errorf]("load item: %w", err) around
+//     the Error leaves that message as it is, and Context returns "load
+//     item".
+//   - For an Error from [Invalid], [Unchecked], or [Locate] around an
+//     error that holds neither an Error nor a binding, the message is the
+//     whole text of that error. So is the message of a binding of such an
+//     error.
+//   - For an error that holds neither an Error nor a binding, the message
+//     is Label, which holds the whole text of the error.
+//
+// A wrapper whose text does not hold the text of the error it wraps
+// leaves the message as it is too, and Context returns the whole text of
+// that wrapper.
+//
+// A [Locate], [Invalid], or [Unchecked] result can give its location to a
+// binding inside it. The result is then the problem, and its message
+// holds the path, the document, or the whole line of that binding, as
+// [SourceError.Message] describes. The node of a result that no source
+// bound reads the same way. When the source of the binding inside the
+// result later binds the result, the message leaves out the name of that
+// source. The node message "main.yaml: $.other.deep: bad deep" thus
+// becomes "$.other.deep: bad deep".
+//
+// The line of that binding holds the message of its problem alone. The
+// "warning:" label of the binding stays out, whether or not a source bound
+// the result. The Warning field of the node reports the severity. The
+// text of each wrapper that the binding binds stays out, and Context
+// returns it, as it does for a wrapper above the binding. Take a check of
+// an included file that wraps its error with "check:". The result then
+// has the message "inc.yaml:1:6: $.key: bad key" and the context "check".
+// A binding without a message, such as the binding of a wrapper around a
+// join, gives the result an empty message.
+//
+// A heading reports its own message, as "2 violations" for a summary from
+// [NewSummary]. So does any other error that heads several problems and
+// keeps a text of its own, such as a wrapper that [fmt.Errorf] builds with
+// several %w verbs around several problems. A heading that a wrapper makes
+// of a join does not have a message, because all of its text is context.
+// Neither does a node without a label, such as the root of a join. A
+// detail answers like any other node, so a report that lists the related
+// locations of a problem reads the message of each detail.
+func (t ErrorTree) Message() string {
+	_, core := problemOf(t.Err)
+	inner := asBinding(core)
+
+	switch {
+	case t.Bound != nil && inner != t.Bound:
+		// The walk did not reach the binding of a node built by hand, so
+		// the text of its wrappers stays in its message.
+		return t.rowMessage()
+
+	case t.Bound != nil:
+		return t.Bound.problemMessage()
+
+	case inner != nil:
+		// A located Error that no source bound keeps its location above
+		// the binding, so the line of the binding is its message. The node
+		// reports the severity in Warning, so the line leaves the label
+		// out, as it does after a source binds the Error.
+		return inner.problemLine()
+
+	case core == nil:
+		return t.Label
+
+	default:
+		return ownMessage(core)
+	}
+}
+
+// Context returns the text that wrappers added above the problem of the
+// node, outermost first, or "" when the problem does not have a wrapper.
+// A report carries that field beside [ErrorTree.Message], as in "load
+// item" beside "expected integer, got string".
+//
+// A wrapper around one problem shares a row with that problem, and a
+// wrapper around several problems is a heading above them. Context returns
+// the text of the wrapper for each of those problems either way. For a
+// wrapper from [fmt.Errorf]("load %s: %w", path, err), an err with one
+// problem and an err with several both give each problem the context
+// "load cfg.yaml". Each problem that [ErrorTree.Problems] yields thus has
+// its context, although the walk skips the headings.
+//
+// The context is the text that the wrappers put in front of the message,
+// then the text that they put behind it. Each part leaves out the white
+// space and the colon that joined it to the message. A wrapper from
+// [fmt.Errorf]("item %w is bad", err) thus adds "item is bad". A problem
+// below a heading reads as it does when each wrapper of the heading wraps
+// that problem alone. The text of those wrappers thus stands around the
+// text of the wrappers of the problem itself, as in "load cfg.yaml: decode
+// price".
+//
+// A wrapper does not record where it wrote the text of the error that it
+// wraps. Context thus finds that text in the text of the wrapper. The
+// words of a wrapper can repeat the message of a lone problem. Context
+// then reads the problem at the end of the text of the wrapper, where most
+// wrappers write it, or else at the start. White space and a colon can
+// stand between the problem and that end. Take a wrapper from
+// [fmt.Errorf]("%w: not found in registry", err) around the message "not
+// found". It adds "not found in registry".
+//
+// A wrapper with several %w verbs holds the text of each of its errors in
+// order. Context thus reads the problem in the part between the errors
+// beside it, at the end of that part or else at its start.
+//
+// That rule has a limit. Some wrappers write text behind the problem and
+// repeat the message of the problem in the rest of their text. Such a
+// wrapper might add one context around a lone problem and another around
+// several problems. Take a wrapper from [fmt.Errorf]("item %w was not
+// found", err). Around a lone "not found", it adds "item not found was".
+// Around several problems, it adds "item was not found". When the text of
+// such a wrapper holds the message in several places and at neither end,
+// the whole text of the wrapper is the context of a lone problem.
+//
+// The problem is an [*Error] or a binding, as [ErrorTree.Message] finds
+// it. An error that holds neither is the exception to the rule that a
+// wrapper reads the same around one problem and around several. Such an
+// error keeps the text of each wrapper that shares its row in its message.
+// Its context holds the text of the headings above it alone. A wrapper
+// from [fmt.Errorf]("load: %w", err) around a lone [io.ErrUnexpectedEOF]
+// thus gives the message "load: unexpected EOF" and an empty context.
+// Below a heading from that wrapper, the same error has the message
+// "unexpected EOF" and the context "load".
+//
+// A binding below a [Locate], [Invalid], or [Unchecked] result that keeps
+// its location adds the text of the wrappers that it binds, as Message
+// describes.
+//
+// A heading does not add its own message to the context of the problems
+// below it. A summary from [NewSummary] and a heading that counts its
+// problems thus do not add any context. Each of them reports the text of
+// the wrappers above itself as its own context. A detail has the context of
+// the wrappers around the detail alone, without that of the problem it
+// explains.
+//
+// [NewErrorTree] gives each node the context of the headings above it. A
+// [Warnings] lists each problem without the headings that stood above it.
+// Each problem of [Warnings.Report], [Warnings.Err], and [Warnings.All]
+// keeps the context that it had below those headings.
+//
+// A node that a program builds by hand has the context of the wrappers in
+// its own Err. When that Err does not hold the Bound of the node, the node
+// has the [SourceError.Message] of Bound as its message and does not have a
+// context.
+func (t ErrorTree) Context() string {
+	return t.wrapperText().under(t.above).context()
+}
+
+// rowMessage returns the message that the row of the node shows behind
+// its location. It is the message of the problem with the text that each
+// wrapper around the problem added. An excerpt annotates the location of a wrapped
+// binding with it.
 //
 //   - For a node with a binding, it is the [SourceError.Message] of
 //     Bound, with the text that a wrapper around Bound added.
 //   - For a node that is not bound to a source and names a path, as
 //     [ErrorTree.Path] reports, it is the message of Err without the path
-//     Label puts in front of it. A binding of Err to another source has the
-//     same [SourceError.Message]. When the source of a binding inside Err
-//     binds Err, the message leaves out the name of that source, and the
-//     document and the path as SourceError.Message describes. The node
-//     message "main.yaml: $.other.deep: bad deep" thus becomes
-//     "$.other.deep: bad deep".
+//     Label puts in front of it.
 //   - For any other node, it is Label.
-//
-// A node that does not have a label of its own, such as the root of a
-// join, has an empty message. A detail answers like any other node, so a
-// report that lists the related locations of a problem reads the message
-// of each detail.
-//
-// The node of a wrapper around a binding holds that binding in Bound. Its
-// message is the one that [SourceError.Message] returns for a binding of
-// the wrapper. It holds the text that the wrapper added, such as the
-// context of a [fmt.Errorf] call, without the location of the binding. A
-// wrapper around the binding of a join heads the problems of the join,
-// and the join does not have a line of its own. The message of its node
-// is thus the text of the wrapper alone, as "load config:".
-//
-// The text of a wrapper thus reaches the message of a problem only when
-// the wrapper wraps that problem alone. For a wrapper from
-// [fmt.Errorf]("load %s: %w", path, err), an err with one problem gives
-// that problem the message "load cfg.yaml: not found". An err with several
-// problems gives each of them its own message, as "not found", below the
-// heading of the wrapper. A report that needs the context of every
-// problem adds it to each row itself, or reads it from the heading above
-// the problems in the tree.
-func (t ErrorTree) Message() string {
+func (t ErrorTree) rowMessage() string {
 	if t.Bound != nil {
 		return wrapperMessage(t.Err, t.Bound)
 	}
@@ -378,6 +557,392 @@ func (t ErrorTree) Message() string {
 	end := walkChildren(t.Err, func(*SourceError) {}, func(error, childBase, bool) {})
 
 	return bareMessage(t.Err, end)
+}
+
+// wrapperText returns the text that the wrappers above the problem of t
+// wrote around its message. It leaves out the context of the headings
+// above t.
+func (t ErrorTree) wrapperText() wrapperText {
+	wrappers, core := problemOf(t.Err)
+	inner := asBinding(core)
+
+	// The walk did not reach the binding of a node built by hand, so the
+	// text of its wrappers stays in its message.
+	if t.Bound != nil && inner != t.Bound {
+		return wrapperText{}
+	}
+
+	// The binding that ends the walk holds the wrappers below the ones
+	// above it. It is Bound, or the binding below a located Error that no
+	// source bound.
+	return inner.wrapperText().around(wrappers)
+}
+
+// asBinding returns err when it is a binding, and nil when it is any other
+// error, such as one that wraps a binding. The error that ends the walk of
+// [problemOf] is a binding when the problem stands in that binding.
+func asBinding(err error) *SourceError {
+	x, ok := err.(*SourceError) //nolint:errorlint // The error itself, not a chain search.
+	if !ok {
+		return nil
+	}
+
+	return x
+}
+
+// wrapperText holds the text that the wrappers above a problem wrote
+// around the message of that problem.
+type wrapperText struct {
+	// The text in front of the message, outermost wrapper first.
+	before string
+	// The text behind the message, innermost wrapper first.
+	after string
+}
+
+// around returns w with the text of wrappers around it. The wrappers
+// stand above the problem of w, outermost first, as [problemOf] returns
+// them.
+func (w wrapperText) around(wrappers []wrapper) wrapperText {
+	var outer wrapperText
+
+	for _, x := range wrappers {
+		b, a := x.added()
+		outer.before += b
+		outer.after = a + outer.after
+	}
+
+	return w.under(outer)
+}
+
+// under returns w with the text of outer around it. The wrappers of outer
+// stand above those of w.
+func (w wrapperText) under(outer wrapperText) wrapperText {
+	return wrapperText{before: outer.before + w.before, after: w.after + outer.after}
+}
+
+// context returns the text of w as [ErrorTree.Context] reports it. The
+// text in front of the message comes first, then the text behind it. Each
+// part leaves out the white space and the colon that joined it to the
+// message. The two parts join with a colon when either had one there, and
+// with a space otherwise.
+func (w wrapperText) context() string {
+	before, after := strings.TrimSpace(w.before), strings.TrimSpace(w.after)
+	colon := strings.HasSuffix(before, ":") || strings.HasPrefix(after, ":")
+
+	before = strings.TrimSpace(strings.TrimSuffix(before, ":"))
+	after = strings.TrimSpace(strings.TrimPrefix(after, ":"))
+
+	switch {
+	case before == "":
+		return after
+	case after == "":
+		return before
+	case colon:
+		return before + ": " + after
+	default:
+		return before + " " + after
+	}
+}
+
+// wrapper is an error that wraps one error and writes text of its own
+// around the text of that error, as a [fmt.Errorf] call with one %w verb
+// does. A [fmt.Errorf] wrapper with several %w verbs is a wrapper too when
+// [followBranches] returns one of its branches as the next link. An
+// [*Error] that carries the text of the headings that stood above its
+// problem is a wrapper as well, as [underHeadings] builds one. It does not
+// write that text, so the wrapper holds the text in carried and does not
+// hold an error.
+type wrapper struct {
+	err, next error
+	carried   wrapperText
+	// The branches in front of next and those behind it, in the order that
+	// err unwraps to them, for an err that holds several errors.
+	front, back []error
+}
+
+// added returns the text that w wrote in front of the text of the error
+// it wraps and behind it. The text of a wrapper with several %w verbs holds
+// the text of each branch in order. The search for the text of the wrapped
+// error thus runs between the branches beside it. A wrapper that does not
+// hold the text of the error it wraps rewrote that text. Its whole text
+// then stands in front, behind a colon, as the text of a wrapper from
+// [fmt.Errorf]("%s: %w", text, err) does. So does the text of a wrapper
+// that [cutAround] cannot split. A wrapper that carries its text returns
+// that text.
+func (w wrapper) added() (string, string) {
+	if w.err == nil {
+		return w.carried.before, w.carried.after
+	}
+
+	text, inner := w.err.Error(), w.next.Error()
+
+	lo, hi := w.between(text)
+	if before, after, ok := cutAround(text[lo:hi], inner); ok {
+		return text[:lo] + before, after + text[hi:]
+	}
+
+	// The branches beside the wrapped error did not stand in order around
+	// its text, so the search takes the whole text.
+	if before, after, ok := cutAround(text, inner); ok {
+		return before, after
+	}
+
+	return text + ": ", ""
+}
+
+// between returns the bounds of the part of text that holds the text of
+// the wrapped error. The text is that of w. The part starts behind the
+// text of each branch in front of the wrapped error. It ends in front of
+// the text of each branch behind that error. The search for a branch in
+// front starts at the end of the branch before it. The search for a branch
+// behind runs from the end of text. The bounds are those of the whole text
+// when w does not hold a branch beside the wrapped error. So are the
+// bounds of a text that does not hold the text of each such branch in
+// order.
+func (w wrapper) between(text string) (int, int) {
+	lo, hi := 0, len(text)
+
+	for _, branch := range w.front {
+		if isNothing(branch) {
+			continue
+		}
+
+		msg := branchText(branch)
+
+		i := strings.Index(text[lo:], msg)
+		if i < 0 {
+			return 0, len(text)
+		}
+
+		lo += i + len(msg)
+	}
+
+	for _, branch := range slices.Backward(w.back) {
+		if isNothing(branch) {
+			continue
+		}
+
+		i := strings.LastIndex(text[lo:hi], branchText(branch))
+		if i < 0 {
+			return 0, len(text)
+		}
+
+		hi = lo + i
+	}
+
+	return lo, hi
+}
+
+// branchText returns the text that [fmt.Errorf] writes for branch at a %w
+// verb, which is the message of branch. For a nil pointer whose Error
+// method panics, the fmt package writes "<nil>" in place of a message, and
+// so does branchText.
+func branchText(branch error) string {
+	return fmt.Sprint(branch)
+}
+
+// cutAround returns the text in front of inner in text and the text behind
+// it, and whether it found the place of inner. A text that holds inner in
+// several places is ambiguous. Most wrappers write their text in front of
+// the error that they wrap. The last inner is thus the first choice when
+// only a joiner stands behind it, as [isJoiner] reports. The first inner
+// is the second choice when only a joiner stands in front of it. A text
+// that holds inner in several places and at neither end does not split.
+func cutAround(text, inner string) (string, string, bool) {
+	if i := strings.LastIndex(text, inner); i >= 0 && isJoiner(text[i+len(inner):]) {
+		return text[:i], text[i+len(inner):], true
+	}
+
+	if i := strings.Index(text, inner); i >= 0 && isJoiner(text[:i]) {
+		return text[:i], text[i+len(inner):], true
+	}
+
+	if strings.Count(text, inner) != 1 {
+		return "", "", false
+	}
+
+	return strings.Cut(text, inner)
+}
+
+// isJoiner reports whether s holds only the text that joins the text of a
+// wrapper to the message beside it. That text is white space around one
+// colon at most, and [wrapperText.context] leaves it out. An empty s is a
+// joiner.
+func isJoiner(s string) bool {
+	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(s), ":")) == ""
+}
+
+// problemOf returns the error on the cause chain of err whose text is the
+// message of the problem that err stands for. It also returns the wrappers
+// above that error, outermost first. That error is the innermost [*Error]
+// on the chain. A [*SourceError] ends the walk, because a binding answers
+// for the errors that it binds. So does an error with several problems
+// below it, which is a heading. For a chain that does not hold any of
+// those, the whole text is the message, so problemOf returns a nil error
+// and no wrappers. An Error that carries the text of headings counts as a
+// wrapper above itself, in the place that those headings had.
+func problemOf(err error) ([]wrapper, error) {
+	var (
+		wrappers []wrapper
+		core     error
+		above    int
+	)
+
+	// The walk sets core at each candidate and counts the wrappers above
+	// it, so a wrapper below the last candidate stays out of the result.
+	// That wrapper might not wrap any error.
+	follow := func(w wrapper) error {
+		wrappers = append(wrappers, w)
+
+		return w.next
+	}
+
+	for cur := err; !isNothing(cur); {
+		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
+		case *SourceError:
+			return wrappers, cur
+
+		case *Error:
+			if x.headings != (wrapperText{}) {
+				wrappers = append(wrappers, wrapper{carried: x.headings})
+			}
+
+			core, above = cur, len(wrappers)
+			cur = x.err
+
+		case interface{ Unwrap() error }:
+			cur = follow(wrapper{err: cur, next: x.Unwrap()})
+
+		case interface{ Unwrap() []error }:
+			branches := x.Unwrap()
+
+			kept, at := keepBranches(cur, branches)
+			if at >= 0 {
+				cur = follow(wrapper{err: cur, next: branches[at], front: branches[:at], back: branches[at+1:]})
+
+				continue
+			}
+
+			if len(kept) > 0 {
+				return wrappers, cur
+			}
+
+			return wrappers[:above], core
+
+		default:
+			return wrappers[:above], core
+		}
+	}
+
+	return wrappers[:above], core
+}
+
+// underHeadings returns err with the text above carried on each of its
+// problems. The wrappers of the headings that stood over err wrote that
+// text. A tree that holds the result outside those headings then reports
+// the context that each problem had below them. The result has the text,
+// the locations, and the children of err. An err that did not stand below
+// such a wrapper stays as it is.
+//
+// A problem gets an [*Error] above it that adds the text alone. So does a
+// heading with a row of its own, such as a wrapper around a join.
+// [inheritContext] gives each problem below such a heading the text that
+// the heading carries, in front of the text of the heading itself. A
+// binding carries the text as [SourceError.underHeadings] describes.
+//
+// Every other heading keeps its place and passes the text to the errors
+// that it heads. A join and a binding without a row do not have a node in
+// the tree that can carry the text. Neither does an Error around a
+// heading, nor a wrapper that does not write text around the heading that
+// it wraps.
+func underHeadings(err error, above wrapperText) error {
+	if above == (wrapperText{}) || isNothing(err) {
+		return err
+	}
+
+	carry := func(branch error) error { return underHeadings(branch, above) }
+
+	switch x := err.(type) { //nolint:errorlint // The node itself, not a chain search.
+	case *SourceError:
+		return x.underHeadings(above)
+
+	case *Error:
+		switch {
+		case x.headings != (wrapperText{}):
+			// The Error carries the text of a heading that stood below
+			// those of above, so the text above goes on top of it.
+
+		case heads(x.err):
+			c := *x
+			c.err = carry(x.err)
+			c.details = slices.Clone(x.details)
+
+			return &c
+		}
+	}
+
+	joined := mapJoin(err, carry)
+	if joined != nil {
+		return joined
+	}
+
+	// A wrapper that does not write text around a heading does not have a
+	// row either. A stand-in for it thus wraps the heading with the text.
+	w, ok := err.(interface{ Unwrap() error }) //nolint:errorlint // The node itself, not a chain search.
+	if ok {
+		inner := w.Unwrap()
+
+		msg := err.Error()
+		if heads(inner) && msg == inner.Error() {
+			return multierr.Replace(err, carry(inner), msg, nil)
+		}
+	}
+
+	return &Error{err: err, headings: above}
+}
+
+// underHeadings returns a copy of e that carries the text above, as the
+// function [underHeadings] carries it on an error. A binding with a row of
+// its own carries the text on the error that it binds, as
+// [SourceError.remarked] puts a severity there. The copy keeps the location
+// and the children of e. A binding without a row gives the text to each
+// problem that it heads, and its details stay as they are. The error that
+// [BindValue] bound carries the text too, so a document that places that
+// error later keeps the text.
+func (e *SourceError) underHeadings(above wrapperText) *SourceError {
+	c := e.copied()
+	c.free = underHeadings(e.free, above)
+
+	if !e.headsAlone() {
+		c.err = &Error{err: e.err, headings: above}
+
+		return c
+	}
+
+	c.below = make([]boundChild, 0, len(e.below))
+
+	for _, child := range e.below {
+		if !child.detail {
+			child.bound = child.bound.underHeadings(above)
+		}
+
+		c.below = append(c.below, child)
+	}
+
+	return c
+}
+
+// ownMessage returns the text of err without the part that the errors
+// below it show, as [chainEnd.cut] leaves it. A join does not have text of
+// its own, so its message is empty.
+func ownMessage(err error) string {
+	// The part of the message the children show depends on the end of the
+	// cause chain, so the walk finds that end alone.
+	end := walkChildren(err, func(*SourceError) {}, func(error, childBase, bool) {})
+
+	own, _, _, _ := end.cut(err.Error())
+
+	return own
 }
 
 // wrapperMessage returns the message of err, which bound is or wraps along
@@ -742,7 +1307,7 @@ func children(err error) ([]ErrorTree, chainEnd) {
 	end := walkChildren(err,
 		func(x *SourceError) { kids = appendBoundChildren(kids, x, x.headline() == "") },
 		func(n error, base childBase, detail bool) {
-			tree := NewErrorTree(base.rebase(n, detail))
+			tree := buildTree(base.rebase(n, detail))
 			if detail {
 				tree = asDetail(tree)
 			}
@@ -912,25 +1477,40 @@ func walkChildren(
 // [isLeaf] reports as a sentinel, whose text the wrapper shows. It
 // returns a lone kept branch as the next link.
 func followBranches(err error, branches []error) ([]error, error) {
+	kept, at := keepBranches(err, branches)
+	if at >= 0 {
+		return nil, branches[at]
+	}
+
+	return kept, nil
+}
+
+// keepBranches returns the branches that [followBranches] keeps. It also
+// returns the index in branches of the one that followBranches returns as
+// the next link, or -1 when err does not have a next link.
+func keepBranches(err error, branches []error) ([]error, int) {
 	// The type check runs first, so an error of any other type never
 	// formats its message here, where the result would go unused.
 	wrapper := multierr.IsWrapErrors(err) && !multierr.JoinMessage(err.Error(), branches)
 
-	var kept []error
+	var (
+		kept []error
+		at   int
+	)
 
-	for _, branch := range branches {
+	for i, branch := range branches {
 		if isNothing(branch) || (wrapper && isLeaf(branch)) {
 			continue
 		}
 
-		kept = append(kept, branch)
+		kept, at = append(kept, branch), i
 	}
 
 	if wrapper && len(kept) == 1 {
-		return nil, kept[0]
+		return kept, at
 	}
 
-	return kept, nil
+	return kept, -1
 }
 
 // isLeaf reports whether err reads as a sentinel rather than a problem
@@ -1618,8 +2198,8 @@ func newErrorReport(err error, cfg excerptConfig, limit int) ErrorReport {
 }
 
 // wrapperMark is what the node of a wrapper around a binding gives the
-// mark of that binding: the message of the node, as [ErrorTree.Message]
-// returns it, and the severity of the node.
+// mark of that binding: the message of the node with the text of the
+// wrapper, and the severity of the node.
 type wrapperMark struct {
 	message string
 	warning bool
@@ -1654,7 +2234,7 @@ func wrapperMarks(t ErrorTree) map[*SourceError]wrapperMark {
 		}
 
 		// A heading is not a warning, and neither is a binding that heads.
-		marks[node.Bound] = wrapperMark{message: node.Message(), warning: node.Warning && !node.heads()}
+		marks[node.Bound] = wrapperMark{message: node.rowMessage(), warning: node.Warning && !node.heads()}
 	}
 
 	return marks
@@ -1798,7 +2378,7 @@ func marksExcerpt(bound *SourceError) bool {
 func repeatKey(t ErrorTree) string {
 	var sb strings.Builder
 
-	msg := t.Message()
+	msg := t.rowMessage()
 	if t.Bound != nil {
 		msg = t.Bound.innermost().Message()
 	}
