@@ -4503,7 +4503,9 @@ func (e *SourceError) Unresolved() error {
 //     too short for an index, or a scalar that a name or an index looks
 //     into. The range covers the key of a mapping, a sequence, or a null,
 //     or the token [AtPath] describes for one without a key. It covers the
-//     text of a scalar. [SourceError.Unresolved] returns nil.
+//     text of a scalar, and the alias where the document writes one,
+//     whatever the content of its anchor. [SourceError.Unresolved] returns
+//     nil.
 //   - An alias on the path that the document cannot follow, such as one to
 //     an anchor of a reference document from [WithReferences]. The range
 //     covers the `*` of the alias, and SourceError.Unresolved returns a

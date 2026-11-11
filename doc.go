@@ -721,15 +721,17 @@
 //     parse.
 //  3. Each [Validator] from [WithValidator] checks the node, in the order the
 //     caller gives them.
-//  4. A node that holds an alias fails with an error that matches
-//     [ErrExcessiveAliasing] when nested aliases make a decode of the document
-//     read far more than the document holds. The type of the target reads text
-//     when any type that a decode into it reaches reads text. Those types
-//     include the types of its fields and elements, and the key and value
-//     types of its maps. For such a target, the decode also fails when the
-//     aliases of the whole document repeat more text than the document byte
-//     limit of the [Source] allows. It fails as well when they nest the
-//     document past its depth limit, as the Limits section describes.
+//  4. A decode of a value that holds an alias fails with an error that
+//     matches [ErrExcessiveAliasing] when nested aliases make a decode of the
+//     document read far more than the document holds. The Alias Limit
+//     section names the value that a decode of a Node at an alias reads.
+//     The type of the target reads text when any type that a decode into it
+//     reaches reads text. Those types include the types of its fields and
+//     elements, and the key and value types of its maps. For such a target,
+//     the decode also fails when the aliases of the whole document repeat
+//     more text than the document byte limit of the [Source] allows. It
+//     fails as well when they nest the document past its depth limit, as
+//     the Limits section describes.
 //  5. The go-yaml decoder fills the target.
 //  6. Every value in the result that implements [SelfValidator] or
 //     [SelfValidatorContext] validates itself, and each function from
@@ -1248,6 +1250,22 @@
 // belongs to the whole document, so an `@` path that it resolves reads from
 // the root, where an `@` path of [Node.At] reads from the Node.
 //
+// A path that ends at an alias scopes the alias, as the document writes it,
+// whether the alias carries a tag and wherever its anchor lies.
+// [Node.AST], [Node.Tokens], [Node.Span], [Node.View], and [Node.Range]
+// describe the alias, and an error at the root of the scope binds there. A
+// decode, [Node.Kind], and an `@` path below the Node read the content of
+// the anchor. [Node.Target] returns the Node of that content, where the
+// anchor defines it, and returns the receiver for a Node that is not at an
+// alias:
+//
+//	c, err := doc.At(paths.Doc().Child("c")) // c: *x
+//	if err != nil {
+//		return err
+//	}
+//
+//	base, err := c.Target() // the Node at $.base, where &x defines it
+//
 // The decode steps run on a scoped Node as they run on a document. Decode
 // reads the one value, and a validator that the caller passes checks that
 // node. An `@` path in an error from the validator, the decoder, a
@@ -1262,6 +1280,12 @@
 //	}
 //
 //	h, err := hours.Decode[Hours](ctx, niceyaml.WithValidator(hoursSchema))
+//
+// A value at an alias reports other lines in one case. A decode of the Node
+// at the alias binds a rejection of the whole value at the root of the Node,
+// which is the alias. A decode of an enclosing Node binds the same rejection
+// at the anchor, as the Decoding section describes. Both errors carry the
+// path of the alias.
 //
 // A Node encodes as the value that it decodes to, so
 // [go.jacobcolvin.com/niceyaml/encoder.Marshal] prints the nodes that a path
@@ -1436,7 +1460,8 @@
 // reference document as the alias, and it does not enter that alias.
 // [Node.At] and [Node.Nodes] thus scope such an alias, and a decode or a
 // validator of the scoped Node reads the anchor through the reference
-// documents. A path that enters the alias returns an error that wraps
+// documents. [Node.Target] returns the Node of the anchor in its reference
+// document. A path that enters the alias returns an error that wraps
 // [go.jacobcolvin.com/niceyaml/paths.ErrReferenceAlias], and [IsInvalid]
 // does not report that error. The error also wraps
 // [go.jacobcolvin.com/niceyaml/paths.ErrAlias], and it binds at the alias
@@ -1827,12 +1852,23 @@
 // [go.jacobcolvin.com/niceyaml/schema.Schema], and a
 // [go.jacobcolvin.com/niceyaml/matcher.Content] or
 // [go.jacobcolvin.com/niceyaml/matcher.Text] matcher therefore refuse
-// a node that holds an alias when the aliases of its document exceed the
-// limit. The error matches [ErrExcessiveAliasing], and [IsInvalid] reports
-// it, because the aliases of the document are the cause wherever the count
-// runs. The error binds at the alias of the document that repeats the most
-// nodes, as in "app.yaml:14:30: aliases expand the document past the alias
-// limit". That alias can lie outside the node that the call reads.
+// to read a value that holds an alias when the aliases of its document
+// exceed the limit. The error matches [ErrExcessiveAliasing], and
+// [IsInvalid] reports it, because the aliases of the document are the
+// cause wherever the count runs. The error binds at the alias of the
+// document that repeats the most nodes, as in "app.yaml:14:30: aliases
+// expand the document past the alias limit". That alias can lie outside
+// the node that the call reads.
+//
+// The value of a Node at a local alias without a tag that lies outside
+// the content of its anchor is the content of the anchor. So the check
+// weighs that content, not the alias. A decode of such a Node in a
+// document past the limit thus passes when that content does not hold an
+// alias. The value of a Node at a tagged alias is the tag, which holds the
+// alias. The value of a Node at an alias that reads
+// a reference document, or at an alias inside the content of its own
+// anchor, is the alias itself. A decode of either Node fails in a
+// document past the limit.
 //
 // A path through a mapping whose `<<` merge key reads a reference document
 // finds its entry by reading the merge sources of that mapping, as the
@@ -1960,7 +1996,7 @@
 // document repeats the anchor. A document can thus fit the document byte
 // limit where one file that also defines the anchors does not.
 //
-// Such a decode or merge of a node that holds an alias checks the whole
+// Such a decode or merge of a value that holds an alias checks the whole
 // document before it writes any text. The check does not follow which values
 // read text. It counts every alias of the document, including an alias that a
 // plain string field reads. It fails on a document past either bound with an

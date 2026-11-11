@@ -32,9 +32,13 @@ func init() {
 }
 
 // documentState returns the [*aliasing.State] of the document of n, a
-// [*Node], or nil for a nil Node. Other packages of the module call it as
-// [aliasing.StateOf].
+// [*Node] or the [decodedValue] of one, or nil for a nil Node. Other
+// packages of the module call it as [aliasing.StateOf].
 func documentState(n any) *aliasing.State {
+	if v, ok := n.(decodedValue); ok {
+		n = v.node
+	}
+
 	node, ok := n.(*Node)
 	if !ok {
 		panic(fmt.Sprintf("aliasing.StateOf: %T is not a *niceyaml.Node", n))
@@ -145,7 +149,10 @@ func (d *document) pastAliasLimit() bool {
 // through any Node. [Node.Decode] decodes the node alone, [Node.Validate]
 // runs a [Validator] on it, and [Node.Bind] resolves the `@` paths of an
 // error from it. A check written for the type of a value thus reports the
-// same lines whether the value is the whole document or one inside it.
+// same lines whether the value is the whole document or one inside it. A
+// value at an alias differs in one case. A decode of the Node at the alias
+// binds a rejection of the whole value at the alias. A decode of an
+// enclosing Node binds the same rejection at the anchor.
 //
 // Receive instances from [Source.Documents], [Source.AllDocuments],
 // [Source.Document], [Node.At], [Node.Nodes], [Node.Document],
@@ -169,10 +176,15 @@ func (d *document) pastAliasLimit() bool {
 // document that its layers merge into. Each error it returns binds in the
 // file of a layer, as NewSourceFromLayers describes.
 type Node struct {
-	// The node the scope selects, which At or Nodes resolves once when it
-	// scopes the Node. The root of a document leaves it unset, because its
-	// node is the body of the document.
-	node   ast.Node
+	// The node the document writes at the scope, which At or Nodes resolves
+	// once when it scopes the Node. At an alias, it is the alias, or the tag
+	// on it. The root of a document leaves it unset, because its node is
+	// the body of the document.
+	node ast.Node
+	// The node a decode reads, as paths.Resolver.Node gives it for the
+	// scope. It differs from node at an alias that the resolver follows to
+	// the content of its anchor. The root leaves it unset too.
+	value  ast.Node
 	source *Source
 	// The enclosing document.
 	doc *document
@@ -296,11 +308,13 @@ func (n *Node) Document() *Node {
 	return n.doc.node
 }
 
-// AST returns the [ast.Node] the Node selects, the one [Node.Decode]
-// decodes. For the root Node, it is the body of the whole document. For a
-// Node from [Node.At] or [Node.Nodes], it is the node that method resolved
-// when it scoped the Node. The String method of any node, a mapping or a
-// sequence included, returns its text:
+// AST returns the [ast.Node] that the document writes at the scope of the
+// Node. For the root Node, it is the body of the whole document. For a
+// Node from [Node.At] or [Node.Nodes], it is the node at the path that
+// method scoped. [Node.Decode] decodes that node, except at an alias,
+// where a decode reads the content of the anchor that [Node.Target]
+// returns. The String method of any node, a mapping or a sequence
+// included, returns its text:
 //
 //	scoped, err := doc.At(path)
 //	if err != nil {
@@ -325,19 +339,46 @@ func (n *Node) Document() *Node {
 // returns. Every Node of the Source shares that tree and resolves against
 // it, so a caller must not modify the node.
 //
-// The node keeps the anchor or the tag written on it, so a type switch on
-// it can see an [*ast.AnchorNode] or an [*ast.TagNode] where the source
-// holds a mapping. A Node at an alias that reads a reference document of
-// [WithReferences] holds the [*ast.AliasNode], or the tag on it, because
-// the anchor lies in that document. [Node.Kind] looks through those and
-// through an alias, and reports whether the Node holds a mapping, a
-// sequence, or a scalar.
+// The body of the root Node keeps the anchor or the tag written on it.
+// The node of a Node from At or Nodes keeps the tag. A type switch on
+// the node can thus see an [*ast.AnchorNode] or an [*ast.TagNode] where
+// the source holds a mapping. A Node at an alias holds the
+// [*ast.AliasNode], or the tag on it, as the document writes it at the
+// path. The content of the anchor lies where the anchor defines it, and
+// [Node.Target] returns the Node there. AST thus differs from the node
+// that [paths.Resolver.Node] gives for [Node.Path] at an alias that the
+// resolver follows. [Node.Kind] looks through the tag and the alias,
+// and reports whether the Node holds a mapping, a sequence, or a
+// scalar.
 func (n *Node) AST() ast.Node {
 	if n.base.IsRoot() {
 		return n.doc.root.Body
 	}
 
 	return n.node
+}
+
+// decodedValue is the [aliasing.Node] of what a decode of node reads. Its
+// AST is [Node.valueNode], so the alias checks of a Node at an alias weigh
+// the content of the anchor that the decode reads rather than the alias.
+type decodedValue struct {
+	node *Node
+}
+
+// AST returns the node that a decode of the [Node] reads.
+func (v decodedValue) AST() ast.Node {
+	return v.node.valueNode()
+}
+
+// valueNode returns the node that a decode of n reads. It is the node
+// that [paths.Resolver.Node] gives for the scope, which lies at the anchor
+// for a Node at an alias that the resolver follows.
+func (n *Node) valueNode() ast.Node {
+	if n.base.IsRoot() {
+		return n.doc.root.Body
+	}
+
+	return n.value
 }
 
 // At returns a [*Node] scoped to the node that path selects. An `@` path
@@ -351,18 +392,20 @@ func (n *Node) AST() ast.Node {
 // That Node spans the whole document, its preamble and its comments
 // included. A function that takes only the root of a document takes it.
 //
-// A path that ends at an alias that reads a reference document of
-// [WithReferences] scopes the alias, and a decode of that Node reads the
-// anchor there. A path that enters such an alias returns an error that
-// wraps [paths.ErrReferenceAlias], as the References section of the
-// package documentation describes.
+// A path that ends at an alias scopes the alias, or the tag on it, as the
+// document writes it at the path. [Node.AST], [Node.Tokens], [Node.Span],
+// [Node.View], and [Node.Range] describe the alias, and an error at the
+// root of the scope binds there. A decode of that Node, [Node.Kind], and
+// an `@` path below it read the content of the anchor. [Node.Target]
+// returns the Node of that content, where the anchor defines it.
 //
-// An alias inside the content of the anchor that it refers to reads null,
-// as the go.jacobcolvin.com/niceyaml/paths package describes. A path that
-// ends at such an alias scopes the alias, or the tag on it, and a decode
-// of that Node reads null. So in "a: &x {b: *x}" and "c: *x", the path
-// $.a.b scopes the alias *x, and the path $.c scopes {b: *x}. A path that
-// enters such an alias returns an error that wraps [paths.ErrAlias].
+// A path that enters an alias that reads a reference document of
+// [WithReferences] returns an error that wraps [paths.ErrReferenceAlias],
+// as the References section of the package documentation describes. An
+// alias inside the content of the anchor that it refers to reads null, as
+// the go.jacobcolvin.com/niceyaml/paths package describes. A decode of a
+// Node at such an alias thus reads null. A path that enters such an alias
+// returns an error that wraps [paths.ErrAlias].
 //
 // A sequence element and the root do not have a key. A path with the `~`
 // selector of [paths.Path.Key] after either thus does not select a node,
@@ -442,12 +485,10 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 // header. Where the root path selects a node, Nodes gives the root that
 // [Node.Document] returns for it, as Node.At does.
 //
-// Nodes scopes an alias that reads a reference document of
-// [WithReferences] as Node.At does. A `[*]` thus scopes an element that
-// reads its value from a reference document at its alias, beside the
-// elements that the document holds. Nodes also scopes an alias inside the
-// content of its own anchor as Node.At does, and a `..*` selector does not
-// descend below such an alias.
+// Nodes scopes an alias as Node.At does. A `[*]` thus scopes an element
+// that the document writes as an alias at the alias, beside the elements
+// that the document holds. A `..*` selector lists each alias and does not
+// descend below it, as [paths.Path.RecursiveAll] describes.
 //
 // The errors that [paths.Resolver.Nodes] returns come back bound to the
 // source. An alias that does not resolve gives one wrapping
@@ -483,47 +524,82 @@ func (n *Node) Nodes(path paths.Path) ([]*Node, error) {
 // scopedAt returns the Node that [Node.At] gives for path, a `$` path that
 // selects node. The root path gives the root of the document, so a
 // document has one Node at `$`. Any other path gives a copy of n that
-// [Node.scoped] scopes to node.
+// [Node.scoped] scopes to node. A path that ends at an alias gives a copy
+// scoped to the alias, as the document writes it at the path, that reads
+// node.
 func (n *Node) scopedAt(path paths.Path, node ast.Node) *Node {
 	if path.IsRoot() {
 		return n.doc.node
 	}
 
-	return n.scoped(path, node)
+	written := n.writtenAt(path)
+	if _, ok := astnode.Content(written).(*ast.AliasNode); !ok {
+		return n.scoped(path, node)
+	}
+
+	c := n.scoped(path, written)
+	c.value = node
+
+	return c
 }
 
-// scoped returns a copy of n scoped at path, a `$` path that selects node.
-// The span of a mapping or a sequence starts at the key or "-" that
-// introduces it, so it holds the token [paths.Resolver.Token] gives path.
+// writtenAt returns the node that the document writes at path, a `$` path
+// other than the root, or nil when no entry or element holds it. A path
+// that ends in `~` names the key of its entry.
+func (n *Node) writtenAt(path paths.Path) ast.Node {
+	// ParentAt gives no holder for a `~`, which picks the key of an entry.
+	in := datapath.ParentAt(n.doc.pathResolver(), path)
+
+	switch last, _ := path.Last(); {
+	case in.Entry != nil:
+		return in.Entry.Value
+	case in.Sequence != nil && in.Index < len(in.Sequence.Values):
+		return in.Sequence.Values[in.Index]
+	case last.Kind == paths.SelectorKey:
+		return n.entryKey(path)
+	default:
+		return nil
+	}
+}
+
+// scoped returns a copy of n scoped at path, a `$` path that selects node,
+// which a decode of the copy reads. The span of a mapping or a sequence
+// starts at the key or "-" that introduces it, so it holds the token
+// [paths.Resolver.Token] gives path.
 func (n *Node) scoped(path paths.Path, node ast.Node) *Node {
+	return n.scopedBy(path, node, func() *token.Token {
+		in := datapath.ParentAt(n.doc.pathResolver(), path)
+
+		var value ast.Node
+
+		switch {
+		case in.Entry != nil:
+			value = in.Entry.Value
+		case in.Sequence != nil && in.Index < len(in.Sequence.Values):
+			value = in.Sequence.Values[in.Index]
+		}
+
+		return astnode.PathToken(value, in)
+	})
+}
+
+// scopedBy returns a copy of n scoped at path, a `$` path that names node,
+// as [Node.scoped] describes. The span of a mapping or a sequence starts
+// at the token that intro gives, the key or "-" that introduces it.
+func (n *Node) scopedBy(path paths.Path, node ast.Node, intro func() *token.Token) *Node {
 	c := *n
 	c.base = path
 	c.node = node
+	c.value = node
 	c.span, c.content = n.extent(node)
 
-	// A scalar is its own token, so no token above it introduces it.
+	// A scalar or an alias is its own token, so no token above it
+	// introduces it.
 	if astnode.IsScalar(astnode.Content(node)) {
 		return &c
 	}
 
-	in := datapath.ParentAt(n.doc.pathResolver(), path)
-
-	var value ast.Node
-
-	switch {
-	case in.Entry != nil:
-		value = in.Entry.Value
-	case in.Sequence != nil && in.Index < len(in.Sequence.Values):
-		value = in.Sequence.Values[in.Index]
-	}
-
-	// The content behind an alias lies at its anchor, so the key or the
-	// "-" in front of the alias introduces none of the lines of node.
-	if _, ok := astnode.Content(value).(*ast.AliasNode); ok {
-		return &c
-	}
-
-	tk := astnode.PathToken(value, in)
+	tk := intro()
 	if tk == nil || tk.Position == nil {
 		return &c
 	}
@@ -733,23 +809,23 @@ func (n *Node) FS() fs.FS {
 //	hours:      # the span of $.hours starts here
 //	  open: 9
 //
-// A path that ends at an alias whose anchor the document defines, such as
-// `$.c` in `c: *x`, covers the content of the anchor. That content is what
-// [Node.AST] and [Node.Decode] read. Node.Ranges and an error at its root
-// resolve to the alias instead. When the anchor and the alias lie on
-// different lines, [SourceError.Annotate] does not mark anything on
-// [Node.View] and reports false. A caller then adds the line of the error
-// with [line.View.Slice]. An error at a Node of the document that
-// [NewSourceFromLayers] builds binds in the file of a layer, so a caller
-// marks the view of its [Node.Origin] instead.
+// A path that ends at an alias, such as `$.c` in `c: *x`, covers the
+// lines of the alias alone, as a scalar does, wherever its anchor lies.
+// The span of `spec:` with `*base` on the next line thus leaves out the
+// line of the key, even where [Node.Kind] reports a mapping. Node.Ranges
+// and an error at the root of such a Node resolve to the alias.
+// [SourceError.Annotate] thus marks the error on [Node.View]. A key or an
+// index that the content of the anchor lacks directly below the alias,
+// such as a missing required key, binds at the alias too. Annotate marks
+// its error on Node.View as well. An error at a node that the content
+// holds binds at the anchor, such as one that a decode reports for a
+// value of the anchor. A path that the content lacks deeper down binds at
+// the nearest node that the content holds, inside the anchor. Annotate
+// marks both errors on the view of the Node that [Node.Target] returns.
 //
-// A path that ends at an alias that reads a reference document of
-// [WithReferences] covers the lines of the alias alone. The anchor of such
-// an alias lies in the reference document. The span of `spec:` with
-// `*base` on the next line thus leaves out the line of the key, even where
-// [Node.Kind] reports a mapping. Node.Ranges and an error at or below such
-// a Node resolve to the alias, so SourceError.Annotate marks the error on
-// Node.View.
+// An error at a Node of the document that [NewSourceFromLayers] builds
+// binds in the file of a layer. A caller thus marks the view of its
+// [Node.Origin] instead.
 //
 // [Node.View] returns a view sliced to the span, and the span slices any
 // other view over the source, such as one with decoration already:
@@ -779,15 +855,15 @@ func (n *Node) Span() position.Span {
 // its own token. For `y:` that position is the column after the ":", and
 // for an element written as `- ` alone, the column after the "-".
 //
-// A Node from a path that ends at an alias covers the alias instead, as
-// the document writes it at the path, with the tag written on it. For
+// A Node from a path that ends at an alias covers the alias, as the
+// document writes it at the path, with the tag written on it. For
 // `c: *x`, `$.c` covers `*x`, which holds the token that [Node.Ranges]
-// highlights. [Node.AST] returns the content of the anchor, and
-// [Node.Span] covers its lines. A path that ends in `~` covers a key
-// written as an alias the same way. A path through the alias, such as
-// `$.c.b`, covers the text at the anchor. So does a path to an entry that
-// a `<<` merge key brings in. The key of such an entry lies at the anchor
-// too.
+// highlights. A path that ends in `~` covers a key written as an alias
+// the same way. A path through the alias, such as `$.c.b`, covers the
+// text at the anchor. So does a path to an entry that a `<<` merge key
+// brings in. The key of such an entry lies at the anchor too.
+// [Node.Target] gives the Node of the content of the anchor, whose Range
+// covers that content.
 //
 // Range, [Node.Ranges], and [Node.Span] describe one node in three ways.
 // Range is its extent. Ranges of a path is what an error at the path
@@ -810,10 +886,6 @@ func (n *Node) Range() (position.Range, bool) {
 	}
 
 	node := n.AST()
-	if alias, ok := n.writtenAlias(); ok {
-		node = alias
-	}
-
 	if !astnode.HasContent(node) {
 		return position.Range{}, false
 	}
@@ -864,36 +936,6 @@ func (n *Node) entryKey(path paths.Path) ast.Node {
 	}
 
 	return key
-}
-
-// writtenAlias returns the node that the document writes at the path of
-// n, and true when that node is an alias. The node keeps the tag written
-// on the alias. [Node.AST] holds the content of the anchor that the alias
-// refers to. A path that ends in `~` names the key of its entry.
-func (n *Node) writtenAlias() (ast.Node, bool) {
-	if n.base.IsRoot() {
-		return nil, false
-	}
-
-	var written ast.Node
-
-	// ParentAt gives no holder for a `~`, which picks the key of an entry.
-	in := datapath.ParentAt(n.doc.pathResolver(), n.base)
-
-	switch last, _ := n.base.Last(); {
-	case in.Entry != nil:
-		written = in.Entry.Value
-	case in.Sequence != nil && in.Index < len(in.Sequence.Values):
-		written = in.Sequence.Values[in.Index]
-	case last.Kind == paths.SelectorKey:
-		written = n.entryKey(n.base)
-	}
-
-	if _, ok := astnode.Content(written).(*ast.AliasNode); !ok {
-		return nil, false
-	}
-
-	return written, true
 }
 
 // rangeOf returns the range of the text of node in the lines of the
@@ -983,8 +1025,10 @@ func (n *Node) View() *line.View {
 //	view.AddOverlay(kind.GenericHighlight, ranges...)
 //
 // To mark every line of a mapping or a sequence, use [Node.Span] or
-// [Node.View] of the Node [Node.At] returns. [Node.Range] gives the
-// columns of its text, from its first token through its last.
+// [Node.View] of the Node [Node.At] returns. For a Node at an alias, that
+// Span covers the alias alone, and the Span of the Node that
+// [Node.Target] returns covers the content of the anchor. [Node.Range]
+// gives the columns of its text, from its first token through its last.
 //
 // A path that does not resolve returns the error [paths.Resolver.Token]
 // describes, bound to the source as [Node.At] binds it. A token without a
@@ -1027,10 +1071,12 @@ func (n *Node) pathLocation(path paths.Path) (location, error) {
 // the document holds, as [paths.Resolver.Nearest] finds it. A mapping, a
 // sequence, or a null binds at the key of its entry, the "-" of its
 // element, or the first token of the root. A scalar binds at its own
-// token, where an error at its path binds. An element or a root that a
-// `~` passes can be an alias that does not resolve, and it binds at that
-// alias. It reports true only when
-// reason wraps [paths.ErrNotFound] and that token has a position.
+// token, where an error at its path binds. An alias that the document
+// writes at the path of the node binds at the alias, whatever the content
+// of its anchor. A Node at the alias covers the alias alone. An element
+// or a root that a `~` passes can be an alias that does not resolve, and
+// it binds at that alias. It reports true only when reason wraps
+// [paths.ErrNotFound] and that token has a position.
 func (n *Node) nearestLocation(path paths.Path, reason error) (location, bool) {
 	if !errors.Is(reason, paths.ErrNotFound) {
 		return location{}, false
@@ -1046,7 +1092,7 @@ func (n *Node) nearestLocation(path paths.Path, reason error) (location, bool) {
 	at := near.Key()
 
 	node, err := resolver.Node(near)
-	if err == nil && heldScalar(n.doc.content(node)) {
+	if err == nil && heldScalar(n.doc.content(node)) || n.writesAlias(near) {
 		at = near
 	}
 
@@ -1056,6 +1102,18 @@ func (n *Node) nearestLocation(path paths.Path, reason error) (location, bool) {
 	}
 
 	return location{pos: position.NewFromToken(tk), tk: tk, near: &near}, true
+}
+
+// writesAlias reports whether the document of n writes an alias, or a tag
+// on one, at path, a `$` path.
+func (n *Node) writesAlias(path paths.Path) bool {
+	if path.IsRoot() {
+		return false
+	}
+
+	_, ok := astnode.Content(n.writtenAt(path)).(*ast.AliasNode)
+
+	return ok
 }
 
 // heldScalar reports whether content, a mapping, a sequence, or a scalar
@@ -1636,15 +1694,14 @@ func (k NodeKind) String() string {
 // `&r {a: 1}` and of `!!map {a: 1}` is thus a mapping, but [Node.AST] gives
 // the anchor or the tag that wraps it. A decode reads the value under a tag
 // such as !!str or !!null as a scalar, so "!!str *k" and "!!null *k" are
-// scalars when k is a sequence. A Node that [Node.At] or [Node.Nodes] scopes
-// at an alias holds the content of its anchor, so [NodeKind] does not have a
-// kind for an alias. A Node at an alias that reads a reference document of
-// [WithReferences] holds the alias, and Kind reports the kind of the content
-// of its anchor there, as a decode reads it. A Node at an alias inside the
-// content of its own anchor holds the alias too. A decode reads that alias
-// as null, so Kind reports [NodeScalar]. The root of a document that is
-// an alias without an anchor before it or in its reference documents does
-// not hold a value.
+// scalars when k is a sequence. A Node at an alias reports the kind of the
+// content of its anchor, as a decode reads it, and that anchor can lie in
+// a reference document of [WithReferences]. [NodeKind] thus does not have
+// a kind for an alias, and [Node.Target] tells a Node at an alias apart.
+// A Node at an alias inside the content of its own anchor holds a value
+// that a decode reads as null, so Kind reports [NodeScalar]. The root of
+// a document that is an alias without an anchor before it or in its
+// reference documents does not hold a value.
 //
 // Every scalar has the same kind, [NodeScalar]. The type that a scalar
 // decodes to depends on its tag, its text, and the Go type that a decode
@@ -1654,7 +1711,7 @@ func (n *Node) Kind() NodeKind {
 		return NodeNone
 	}
 
-	node := n.AST()
+	node := n.valueNode()
 	if !astnode.HasContent(node) {
 		return NodeNone
 	}
@@ -1734,14 +1791,24 @@ func (d *document) contentAfter(node ast.Node, followed []*ast.AliasNode) ast.No
 // in "&k !!str *k", which a decode reads as null. Returns the error of
 // [paths.Resolver.Anchor] for an alias that does not find an anchor.
 func (d *document) aliasContent(alias *ast.AliasNode) (ast.Node, error) {
-	res := d.pathResolver()
+	anchor, err := d.aliasAnchor(alias)
+	if err != nil {
+		return nil, err
+	}
 
-	anchor, err := res.Anchor(alias)
+	return anchor.Value, nil
+}
+
+// aliasAnchor returns the anchor that alias reads, as
+// [document.aliasContent] finds it. The anchor lies in the document or in
+// one of its reference documents.
+func (d *document) aliasAnchor(alias *ast.AliasNode) (*ast.AnchorNode, error) {
+	anchor, err := d.pathResolver().Anchor(alias)
 	if errors.Is(err, paths.ErrReferenceAlias) {
 		name, _ := astnode.Name(alias.Value)
 
 		if ref, ok := d.node.source.referenceAnchors().Anchor(name); ok {
-			return ref.Value, nil
+			return ref, nil
 		}
 	}
 
@@ -1750,7 +1817,156 @@ func (d *document) aliasContent(alias *ast.AliasNode) (ast.Node, error) {
 		return nil, err
 	}
 
-	return anchor.Value, nil
+	return anchor, nil
+}
+
+// Target returns the [*Node] of the content of the anchor that the Node
+// reads, for a Node at an alias. A Node that [Node.At] or [Node.Nodes]
+// scopes at an alias describes the alias as the document writes it, as
+// [Node.AST] describes. Target describes the content where the anchor
+// defines it. [Node.Span], [Node.View], [Node.Tokens], and [Node.AST] of
+// the result describe that place, and [Node.Path] of the result is the
+// path that spells the anchor:
+//
+//	base, err := c.Target()
+//	if err != nil {
+//		return err
+//	}
+//
+//	if base != c {
+//		fmt.Println(base.Path()) // $.base, where &x defines the content of *x
+//	}
+//
+// Target returns the receiver for a Node that is not at an alias, so a
+// result other than the receiver tells that the Node is at one. A tag on
+// the alias does not change the result. Target follows one alias, so the
+// result is the Node where the document writes the anchor. An alias
+// inside the content of its own anchor thus gives the Node of that
+// anchor, though a decode reads such an alias as null.
+//
+// An anchor on an entry that a later entry with the same key hides, as
+// [WithAllowDuplicateKeys] allows, gives a Node of the content of that
+// anchor. Its Path is the path that spells the anchor, which selects the
+// later entry or a node below it, or no node at all. An error bound at
+// the root of the Node and an `@` path from the Node resolve by that
+// path, not at the hidden content. So such an error lies outside the
+// View of the Node. A decode of the Node reads the hidden content, and an
+// error that rejects that content binds there.
+//
+// An alias that reads a reference document of [WithReferences] gives a
+// Node of the reference Source, as [Node.Origin] gives a Node of the
+// Source of a layer. An error at that Node binds in the reference Source.
+//
+// Target returns an error that wraps [paths.ErrAlias] for an alias that
+// does not resolve, such as the root of a document that is an alias
+// without an anchor. A document that did not parse returns the error
+// that [Node.Err] returns, and a nil Node returns nil and a nil error.
+func (n *Node) Target() (*Node, error) {
+	if n == nil {
+		return nil, nil //nolint:nilnil // A nil Node is not at an alias.
+	}
+
+	if n.doc.err != nil {
+		return nil, n.doc.err
+	}
+
+	alias, ok := astnode.Content(n.AST()).(*ast.AliasNode)
+	if !ok {
+		return n, nil
+	}
+
+	return n.target(alias)
+}
+
+// target returns the Node of the content of the anchor that alias reads,
+// as [Node.Target] describes it. The error comes back bound to the source
+// of n.
+func (n *Node) target(alias *ast.AliasNode) (*Node, error) {
+	anchor, err := n.doc.aliasAnchor(alias)
+	if err != nil {
+		return nil, n.bindUnresolved(paths.Current(), err)
+	}
+
+	tk := anchor.GetToken()
+
+	doc := n.doc.node
+	if !n.doc.holds(tk) {
+		doc = n.source.referenceDocumentHolding(tk)
+	}
+
+	// Every anchor of a document that parsed lies in a document that the
+	// Source holds, at a path that spells it.
+	if doc == nil {
+		return nil, n.bindOwn(fmt.Errorf("%w: no document holds the anchor of %s", paths.ErrAlias, alias))
+	}
+
+	index := doc.doc.pathIndex()
+
+	path, selects, spelled := index.OwnerPath(doc.doc.pathResolver(), tk)
+
+	switch {
+	case selects:
+		return doc.At(path)
+	case spelled:
+		// The path selects another node, such as a later entry with the
+		// same key, so the Node scopes the content of the anchor itself.
+		return doc.scopedBy(path, anchor.Value, func() *token.Token { return index.OwnerToken(tk) }), nil
+	default:
+		return nil, n.bindOwn(fmt.Errorf("%w: no path spells the anchor of %s", paths.ErrAlias, alias))
+	}
+}
+
+// readsRoot reports whether tk, a token that a decode of n rejects, is
+// the token of the content that n reads through a local alias. Such a
+// Node is at an alias whose anchor the document of n defines, and tk
+// belongs to the node that the anchor holds, not to a node below it.
+func (n *Node) readsRoot(tk *token.Token) bool {
+	if n.base.IsRoot() || n.value == n.node || !n.holdsToken(tk) {
+		return false
+	}
+
+	alias, ok := astnode.Content(n.node).(*ast.AliasNode)
+	if !ok {
+		return false
+	}
+
+	anchor, err := n.doc.aliasAnchor(alias)
+	if err != nil || !n.doc.holds(anchor.GetToken()) {
+		return false
+	}
+
+	index := n.doc.pathIndex()
+	owner := index.OwnerToken(tk)
+
+	return owner != nil && owner == index.OwnerToken(anchor.GetToken())
+}
+
+// holds reports whether tk is a token of the tree of the document, as the
+// parse of its Source copies one.
+func (d *document) holds(tk *token.Token) bool {
+	if tk == nil || tk.Position == nil {
+		return false
+	}
+
+	src := d.node.source
+	if _, ok := src.parsed.get(src.parse).result.Index[tk]; !ok {
+		return false
+	}
+
+	all := d.positioned
+	off := tk.Position.Offset
+
+	for i := sort.Search(len(all), func(i int) bool { return all[i].Position.Offset >= off }); i < len(all); i++ {
+		if all[i].Position.Offset != off {
+			break
+		}
+
+		if segment.SameToken(all[i], tk) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // IsEmpty reports whether the Node is the root of a document that parsed
@@ -1865,11 +2081,18 @@ func (n *Node) mergeLocation(path paths.Path, reason error) (location, error) {
 	}
 
 	// The resolver stops at the first selector it cannot apply, so the
-	// walk starts at the longest path above path that resolves.
+	// walk starts at the longest path above path that resolves. Where the
+	// document writes an alias at that path, the walk starts at the alias
+	// rather than at the content that the resolver gives. A node that the
+	// content does not hold thus binds at the alias.
 	for at, ok := w.full.Parent(); ok; at, ok = at.Parent() {
 		node, err := resolver.Node(at)
 		if err != nil {
 			continue
+		}
+
+		if n.writesAlias(at) {
+			node = n.writtenAt(at)
 		}
 
 		rest, _ := w.full.CutPrefix(at)
@@ -2033,10 +2256,14 @@ func (w *mergeWalk) merge(t datapath.Target, alias *ast.AliasNode) (location, er
 
 // missing returns the location of a node that the node at t does not
 // hold, where content is the content of t. It binds as
-// [Node.nearestLocation] binds such a node. A scalar binds at its own
-// token, and a mapping, a sequence, or a null at the key of its entry.
+// [Node.nearestLocation] binds such a node. A scalar or an alias binds at
+// its own token, and a mapping, a sequence, or a null at the key of its
+// entry.
 func (w *mergeWalk) missing(t datapath.Target, content ast.Node) (location, error) {
-	loc, err := w.at(t, !heldScalar(datapath.Deref(w.resolver, content)), nil)
+	_, alias := astnode.Content(t.Node).(*ast.AliasNode)
+	key := !alias && !heldScalar(datapath.Deref(w.resolver, content))
+
+	loc, err := w.at(t, key, nil)
 	loc.near = &t.Path
 
 	return loc, err

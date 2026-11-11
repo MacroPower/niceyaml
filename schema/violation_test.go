@@ -404,7 +404,9 @@ func TestViolation_MissingMember(t *testing.T) {
 				  port: 1
 				server: *b
 			`),
-			want: []string{`3:1: $.server.name: missing required property "name"`},
+			// The missing member binds at the alias, where an error at
+			// the root of a Node at the alias binds.
+			want: []string{`3:9: $.server.name: missing required property "name"`},
 			near: []string{"$.server"},
 		},
 		"mapping with a merge key": {
