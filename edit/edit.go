@@ -170,8 +170,9 @@ var (
 
 	// The problem of a call of New with a nil Node or a Node below the root.
 	errDocument = usage("New takes the root of a document")
-	// The problem of a document that holds a byte order mark inside it.
-	errMarkInside = errors.New("a byte order mark")
+	// The problem of a document that holds a byte order mark that the
+	// Source does not read as YAML does.
+	errMarkPlace = errors.New("a byte order mark")
 	// The problem of a call of New with a protected path that is not a `$`
 	// path of names and indexes.
 	errProtectedPath = usage("WithProtected takes a $ path of names and indexes")
@@ -427,8 +428,9 @@ type Doc struct {
 	orig string
 	// The offset in orig of each byte that a byte order mark stood in front
 	// of in the user's text. The tokenizer drops such a mark, so orig does
-	// not hold it. [New] refuses such a mark in the first document of a file
-	// and inside a document, and [Doc.Text] writes each other mark again.
+	// not hold it. [New] refuses such a mark inside a document, and a mark
+	// right after one that the tokenizer drops. [Doc.Text] writes each other
+	// mark again.
 	marks []int
 	// The line break that a line an edit adds ends with when the current
 	// text does not have one: the first line break of the user's document,
@@ -896,8 +898,9 @@ func headerEnd(src *niceyaml.Source, line int) int {
 // Otherwise the call fails with [ErrEngine] at the first difference, and
 // each later call of the Apply returns that error. A call also fails with
 // ErrEngine when it leaves a text that [New] refuses with [ErrMisread] for
-// its `<<` merge keys or for a byte order mark, as the package
-// documentation describes.
+// its `<<` merge keys, or when it moves a byte order mark to a place where
+// the tokenizer of the Source drops it, as the package documentation
+// describes.
 //
 // A call fails with [ErrUnsupported] when it reaches YAML that the engine
 // does not edit, as the Supported YAML section of the package
@@ -1043,10 +1046,12 @@ func (d *Doc) endApply() {
 // Text returns the current text of the document. During an Apply, Text
 // returns the text after the last call that passed. A byte order mark that
 // the tokenizer drops after the first line of the document, as after a
-// comment line in the prefix of a later document, stays in front of the
+// comment line in the prefix of the document, stays in front of the
 // line where the user wrote it. When an edit took that line away, the mark
 // stands in front of the next line of the user's text that the edits kept,
-// or goes with the text after it. A mark at the start of the first line of
+// or goes with the text after it. When an edit wrote content in front of
+// the line of a mark in the prefix of the document, the mark moves in front
+// of that content. The tokenizer still drops it there. A mark at the start of
 // the document stands before the text of the document, so Text leaves it
 // out, and [FileText] keeps it.
 func (d *Doc) Text() string {
@@ -1073,6 +1078,11 @@ func (d *Doc) textMarks() []markPlace {
 		last   = 0
 	)
 
+	// The tokenizer drops a mark at the start of each line up to the first
+	// line of content of the text. Those lines make the prefix of the
+	// document.
+	prefix, content := bom.ContentStart(d.orig), bom.ContentStart(d.cur)
+
 	for i := range len(d.cur) {
 		if next == len(d.marks) {
 			break
@@ -1085,8 +1095,13 @@ func (d *Doc) textMarks() []markPlace {
 
 		// The mark goes at the start of the line of the first byte that the
 		// edits kept from its place on, before the bytes that an edit wrote
-		// there.
+		// there. A mark of the prefix stays in the prefix. When an edit wrote
+		// content in front of its line, the mark goes before that content.
 		at := strings.LastIndexByte(d.cur[:i], '\n') + 1
+		if d.marks[next] <= prefix {
+			at = min(at, content)
+		}
+
 		at = max(at, last)
 		last = at
 

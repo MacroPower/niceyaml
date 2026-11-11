@@ -1542,6 +1542,11 @@ func TestPlanFile_After_CommentsBetweenDocuments(t *testing.T) {
 			text: stringtest.LinesLF("version: 1", "port: 1", "...", "# tail", "---", "version: 1", "port: 2"),
 			want: stringtest.LinesLF("version: 2", "listen: 1", "...", "# tail", "---", "version: 2", "listen: 2"),
 		},
+		"byte order mark at the start of a file that migrates": {
+			// The mark stays where the user wrote it.
+			text: stringtest.LinesLF("\ufeffversion: 1", "port: 1"),
+			want: stringtest.LinesLF("\ufeffversion: 2", "listen: 1"),
+		},
 		"byte order mark before the header of the document that migrates": {
 			text: stringtest.LinesLF("version: 2", "listen: 1", "# tail", "\ufeff---", "version: 1", "port: 2"),
 			want: stringtest.LinesLF("version: 2", "listen: 1", "# tail", "\ufeff---", "version: 2", "listen: 2"),

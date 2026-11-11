@@ -149,6 +149,13 @@
 // a "---" header with that header after it, and so do the checks of an
 // Apply. FileText returns the text of the whole file, which go-yaml reads
 // as the edits leave it. The text of the other documents stays as it is.
+// FileText also keeps each byte order mark in the prefix of a document,
+// such as one at the start of the file or after the comment lines of a
+// document. A program that reads that text with go-yaml directly, without
+// the Source, does not drop such a mark. Go-yaml reads the mark as text,
+// such as part of the key after it, or refuses the file. It refuses a file
+// that holds a mark in front of a comment line or a "---" header. The
+// edits can change which key the mark joins.
 //
 // # Empty Documents
 //
@@ -522,13 +529,9 @@
 //   - a key that two mappings of one `<<` merge key bring in, as in
 //     "<<: [*a, *b]", where go-yaml's decoder reads the entry of the later
 //     mapping
-//   - a byte order mark at the start of the file, or before the first
-//     token of the first document of the file after its comment lines and
-//     directives, which go-yaml reads as text
 //
 // The merge spec keeps the own entry and the entry of the earlier mapping,
-// and so do the rules of the calls for merge keys. The tokenizer of the
-// Source drops such a byte order mark, as YAML does. New reads the tree of
+// and so do the rules of the calls for merge keys. New reads the tree of
 // the document alone, not the reference documents of
 // [go.jacobcolvin.com/niceyaml.WithReferences]. So a key that a merge key
 // brings in from a reference document counts for neither kind, and a path
@@ -549,17 +552,32 @@
 // alias can also come before the sources that hold the key, and the
 // reference document can hold the key there. The message then names no
 // source that the merge spec keeps.
-// A byte order mark in the prefix of a later document, as after the
-// "..." line that ends a document, is go-yaml's reading. So New takes such
-// a document, and [FileText] keeps the mark. [Doc.Text] keeps a mark after
-// the first line of the document, as after a comment line, and leaves out
-// a mark at the start of that line, which stands before the text of the
-// document. New refuses a byte order mark at the start of the line after
-// the "---" of a document, which the tokenizer of the Source drops and
-// YAML does not allow inside a document. That error is one that
-// [go.jacobcolvin.com/niceyaml.IsInvalid] reports. A mark at the start of
-// a later line of a document is go-yaml's reading too, and the Source and
-// go-yaml read it as text of the key after it.
+//
+// The tokenizer of the Source drops a byte order mark in the prefix of a
+// document, as YAML does. Such a mark stands in one of these places:
+//
+//   - at the start of the file
+//   - after the blank and comment lines of the prefix
+//   - in front of the "---" header of the document
+//   - after the "..." line that ends the document before it
+//
+// The engine reads the document without the mark, so New takes such a
+// document, and [FileText] keeps the mark. [Doc.Text] keeps a mark after
+// the first line of the document, as after a comment line. It leaves out a
+// mark at the start of that line, which stands before the text of the
+// document. A call can write a key in front of the line of a mark after a
+// comment line, as [First] does. Text then moves the mark in front of that
+// key. So the mark stays in the prefix, and the Source reads each key
+// without it.
+//
+// New refuses a byte order mark at the start of the line after the "---"
+// of a document, which the tokenizer of the Source drops and YAML does not
+// allow inside a document. The tokenizer drops one mark at the start of a
+// line of the prefix and reads a second mark right after it as text of the
+// document. New refuses such a second mark too. Each of these errors is one
+// that [go.jacobcolvin.com/niceyaml.IsInvalid] reports. The tokenizer keeps
+// a mark at the start of a later line of a document, and the Source and
+// go-yaml both read it as text of the key after it.
 //
 // A call can make an own key before a merge key, or a key that two
 // mappings of one merge key bring in. It can also move a byte order mark of

@@ -97,6 +97,34 @@ func TestDrop(t *testing.T) {
 	}
 }
 
+func TestContentStart(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  int
+	}{
+		"empty":                         {input: "", want: 0},
+		"content first":                 {input: stringtest.LinesLF("a: 1", "b: 2"), want: 0},
+		"after a comment":               {input: stringtest.LinesLF("# c", "a: 1"), want: 4},
+		"after blank lines":             {input: stringtest.LinesLF("", "  ", "a: 1"), want: 4},
+		"indented comment":              {input: stringtest.LinesLF("  # c", "a: 1"), want: 6},
+		"CRLF line endings":             {input: "# c\r\na: 1\r\n", want: 5},
+		"document marker":               {input: stringtest.LinesLF("# c", "---", "a: 1"), want: 4},
+		"directive":                     {input: stringtest.LinesLF("%YAML 1.2", "---"), want: 0},
+		"only comments":                 {input: stringtest.LinesLF("# c", "# d"), want: 8},
+		"comment without a line ending": {input: "# c", want: 3},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, bom.ContentStart(tc.input))
+		})
+	}
+}
+
 func TestIndex_Offset(t *testing.T) {
 	t.Parallel()
 

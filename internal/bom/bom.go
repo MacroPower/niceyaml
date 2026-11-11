@@ -63,6 +63,25 @@ func Drop(src string) (string, []int) {
 	return sb.String(), marks
 }
 
+// ContentStart returns the byte offset in src of the start of its first
+// line that is not blank or a comment, as [Drop] cuts lines. It returns
+// the length of src when every line is blank or a comment. The lines up to
+// that one come before the content of a document that src starts. So Drop
+// drops a mark at the start of each of them.
+func ContentStart(src string) int {
+	at := 0
+
+	for line := range lineend.Lines(src) {
+		if !isBlankOrComment(line) {
+			return at
+		}
+
+		at += len(line)
+	}
+
+	return len(src)
+}
+
 // isDocumentMarker reports whether line opens with a "---" or "..."
 // marker followed by a space, a tab, or the end of the line.
 func isDocumentMarker(line string) bool {
