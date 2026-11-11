@@ -697,13 +697,115 @@ func TestFetchError_FileRead(t *testing.T) {
 func TestFetchError_RefusedURL(t *testing.T) {
 	t.Parallel()
 
-	// The registry refuses a URL outside its prefixes before any fetch, so
-	// the error holds no FetchError.
-	reg := schema.NewRegistry(withAccess(t, schema.AllowURLPrefixes("https://schemas.example.com/")))
+	// The registry refuses a URL outside its prefixes before any fetch. The
+	// error still holds a FetchError that names the URL, as it does for a
+	// refused path.
+	client := routes(map[string]string{
+		"/root.json": `{"properties": {"a": {"$ref": "https://user:secret@evil.test/defs.json#/x"}}}`,
+	}, nil).Client()
 
-	_, err := reg.Load(t.Context(), schema.URL("https://example.com/s.json"))
-	requireLoadError(t, err, schema.ErrURLNotAllowed)
-	assert.Empty(t, fetchErrors(err))
+	reg := schema.NewRegistry(
+		withAccess(t, schema.AllowURLPrefixes("https://schemas.example.com/")),
+		schema.WithHTTPClient(client),
+	)
+
+	tcs := map[string]struct {
+		ref  schema.Ref
+		want string
+		msg  string
+	}{
+		"Ref": {
+			ref:  schema.URL("https://user:secret@example.com/s.json"),
+			want: "https://user:xxxxx@example.com/s.json",
+			msg:  "fetch https://user:xxxxx@example.com/s.json: URL not allowed",
+		},
+		"$ref": {
+			ref:  schema.URL("https://schemas.example.com/root.json"),
+			want: "https://user:xxxxx@evil.test/defs.json",
+			msg:  "fetch https://user:xxxxx@evil.test/defs.json: URL not allowed",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := reg.Schema(t.Context(), tc.ref)
+			requireLoadError(t, err, schema.ErrURLNotAllowed)
+			assert.False(t, niceyaml.IsInvalid(err))
+
+			found := fetchErrors(err)
+			require.Len(t, found, 1)
+
+			fetchErr := found[0]
+			assert.Equal(t, tc.want, fetchErr.URL)
+			assert.Zero(t, fetchErr.StatusCode)
+			// The sentinel itself, not a wrap of it, marks a URL that the
+			// registry never requested.
+			assert.Equal(t, schema.ErrURLNotAllowed, fetchErr.Err)
+			assert.Equal(t, tc.msg, fetchErr.Error())
+		})
+	}
+}
+
+func TestFetchError_UnparsableURL(t *testing.T) {
+	t.Parallel()
+
+	// An HTTP URL that does not parse fails before any fetch. An Access that
+	// does not allow every URL refuses it with a FetchError. Under one that
+	// allows every URL, the fetch refuses it without a FetchError.
+	tcs := map[string]struct {
+		access []schema.AccessOption
+		url    string
+		msg    string
+		fetch  bool
+	}{
+		"bad escape, no URL allowed": {
+			url:   "https://%zz/s.json",
+			msg:   "fetch https://%zz/s.json: URL not allowed",
+			fetch: true,
+		},
+		"space in host, under a prefix": {
+			access: []schema.AccessOption{schema.AllowURLPrefixes("https://ok.test/")},
+			url:    "https://exa mple.com/s.json",
+			msg:    "fetch https://exa mple.com/s.json: URL not allowed",
+			fetch:  true,
+		},
+		"bad escape, any URL allowed": {
+			access: []schema.AccessOption{schema.AllowAnyURL()},
+			url:    "https://%zz/s.json",
+		},
+		"space in host, any URL allowed": {
+			access: []schema.AccessOption{schema.AllowAnyURL()},
+			url:    "https://exa mple.com/s.json",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			client, requests := recordingClient(anySchema)
+			reg := schema.NewRegistry(withAccess(t, tc.access...), schema.WithHTTPClient(client))
+
+			_, err := reg.Schema(t.Context(), schema.URL(tc.url))
+			require.ErrorIs(t, err, schema.ErrLoad)
+			assert.Empty(t, requests())
+
+			found := fetchErrors(err)
+			if !tc.fetch {
+				assert.Empty(t, found)
+				assert.NotErrorIs(t, err, schema.ErrURLNotAllowed)
+
+				return
+			}
+
+			require.Len(t, found, 1)
+			assert.Equal(t, tc.url, found[0].URL)
+			assert.Equal(t, schema.ErrURLNotAllowed, found[0].Err)
+			assert.Equal(t, tc.msg, found[0].Error())
+		})
+	}
 }
 
 func TestFetchError_RefusedPath(t *testing.T) {

@@ -62,8 +62,9 @@ func WithLoadLimit(n int) RegistryOption {
 //
 // A program that shows the error to the author of a document, such as a
 // server, can build a message of its own from the fields. The
-// [*FetchError] of each document whose read or fetch failed names the
-// file or URL. For a URL, it holds the status of the response:
+// [*FetchError] of each document that did not load names the file or
+// URL, including one that the [Access] refused. For a URL that the
+// registry fetched, it holds the status of the response:
 //
 //	fetchErr, ok := errors.AsType[*schema.FetchError](err)
 //	if ok && fetchErr.StatusCode == http.StatusNotFound {
@@ -128,31 +129,48 @@ func (e *LoadError) DetachErrors(detach func(error) error) error {
 	return &c
 }
 
-// FetchError is the error of one schema document whose read or fetch
-// failed. The document is a file that the registry reads, a URL that it
-// fetches, or the catalog that a
+// FetchError is the error of one schema document that the registry did
+// not load. The document is a file that the registry
+// reads, an HTTP or HTTPS URL that it fetches, or the catalog that a
 // [go.jacobcolvin.com/niceyaml/schema/schemastore.Store] reads or
 // fetches. A
 // [*LoadError] holds the FetchError of the schema that it names, or the
 // FetchError of each failed document that a $ref names. [errors.As] finds
 // one inside a join of several too.
 //
-// The registry refuses some URLs before any fetch, such as a URL that
-// does not parse or one that its [Access] does not allow. The error of
-// such a URL does not hold a FetchError. The registry still reports a
-// FetchError for a path that it refuses before any read. The Err of
-// such a FetchError matches [ErrFileNotAllowed] for a path that the
-// Access does not allow. It matches the same sentinel for a path that
-// leads out of a file system, such as an absolute path. Off Windows, a
-// drive-letter path on disk fails before any read with [fs.ErrInvalid]
-// under an Access that allows any file, as [Unrestricted] does. A path
-// that names a directory, or anything else that is not a regular file,
-// fails with [fs.ErrInvalid] too.
+// A FetchError names each such file or URL, whether the [Access] refused
+// it or the read or fetch failed. The Err of a FetchError for a path that
+// the Access does not allow matches [ErrFileNotAllowed]. It matches the
+// same sentinel for a path that leads out of a file system, such as an
+// absolute path.
+//
+// The Err of a FetchError for a URL that the Access does not allow is
+// [ErrURLNotAllowed] itself. The registry did not send a request for that
+// URL. For a redirect that the Access refuses, the registry sent the
+// request for the URL that the FetchError names. Its Err wraps
+// ErrURLNotAllowed after "redirect:" and names the refused hop. So
+// [errors.Is] matches the sentinel for both, but only a URL that the
+// registry never requested has the sentinel itself as its Err.
+//
+// The registry refuses a URL that is not an HTTP or HTTPS URL before any
+// fetch. The error of such a URL does not hold a FetchError. An HTTP
+// or HTTPS URL that does not parse fails before any fetch too. When the
+// Access does not allow every URL, the Access refuses such a URL, and
+// its FetchError has an Err of ErrURLNotAllowed. When the Access allows
+// every URL, as [AllowAnyURL] and [Unrestricted] do, the fetch refuses
+// it, and its error does not hold a FetchError.
+//
+// Off Windows, a drive-letter path on disk fails before any read with
+// [fs.ErrInvalid] under an Access that allows any file, as [Unrestricted]
+// does. A path that names a directory, or anything else that is not a
+// regular file, fails with [fs.ErrInvalid] too.
 //
 // The message reads as "fetch https://example.com/s.json: status 404"
 // for a URL and as "read /srv/schemas/s.json: ..." for a file. The
-// message of a refused path reads "read <path>: file not allowed: ...",
-// though the registry did not read anything.
+// message of a refused URL reads "fetch <url>: URL not allowed". The
+// message of a refused path reads "read <path>: file not allowed: ...".
+// Each keeps its verb, though the registry did not fetch or read
+// anything.
 //
 // A document can name a path through its directive. So the message
 // renders as [go.jacobcolvin.com/niceyaml/escape.Line] draws it. Each tab

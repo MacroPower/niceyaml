@@ -5822,7 +5822,7 @@ func TestRegistry_Lookup_AtDirective(t *testing.T) {
 		"URL that a confined registry refuses": {
 			reg:   nested,
 			input: yamltest.SchemaDirective("https://evil.test/s.json", "a: 1\n"),
-			want:  `app.yaml:1:1: load schema: "https://evil.test/s.json": URL not under an allowed prefix`,
+			want:  `app.yaml:1:1: load schema: "https://evil.test/s.json": fetch https://evil.test/s.json: URL not allowed`,
 			err:   []error{schema.ErrLoad, schema.ErrURLNotAllowed},
 		},
 		"relative directive without a file path": {

@@ -736,8 +736,10 @@
 //     [WithLoadLimit].
 //   - [ErrCompile] for a schema that does not compile.
 //
-// A [*FetchError] inside the error holds the status of the response for
-// a URL. The error holds a [*LoadError] with the [Ref] of the schema, and
-// [errors.As] finds that LoadError. [Ref.Name] names that Ref without the
-// password of a URL, and the Ref formats and logs as that name.
+// Each [*FetchError] inside the error names a file or URL that did not
+// load, including one that the Access refused. For a URL that the
+// registry fetched, it holds the status of the response. The error
+// holds a [*LoadError] with the [Ref] of the schema, and [errors.As]
+// finds that LoadError. [Ref.Name] names that Ref without the password
+// of a URL, and the Ref formats and logs as that name.
 package schema

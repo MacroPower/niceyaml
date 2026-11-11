@@ -15,9 +15,12 @@ import (
 // ErrURLNotAllowed indicates that the registry refused to fetch a URL
 // that its [Access] does not allow, and did not send a request for it.
 // The program set the Access, so the document that names the URL is not
-// at fault, and [niceyaml.IsInvalid] reports false for the error. A
-// refused file matches [ErrFileNotAllowed] instead.
-var ErrURLNotAllowed = errors.New("URL not under an allowed prefix")
+// at fault, and [niceyaml.IsInvalid] reports false for the error. The
+// registry reports the refusal as a [*FetchError] that names the URL. For
+// a redirect that the Access refuses, the FetchError names the requested
+// URL, and its Err names the refused hop. A refused file matches
+// [ErrFileNotAllowed] instead.
+var ErrURLNotAllowed = errors.New("URL not allowed")
 
 // AllowURLPrefixes is an [AccessOption] that allows the URLs under each
 // of prefixes:
