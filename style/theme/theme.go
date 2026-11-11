@@ -88,7 +88,8 @@ func (m *Mode) UnmarshalText(text []byte) error {
 //
 // Find one by name with [Catalog.Get], or list them all with
 // [Catalog.All]. Create custom themes with [FromColors] or [New] and add
-// them to a catalog with [Catalog.With].
+// them to a catalog with [Catalog.With]. [Theme.With] adjusts the styles
+// of a theme and keeps its name and mode.
 type Theme struct {
 	// The memoized builder for the [style.Styles]. The first call builds
 	// them, and copies of the Theme share the result. It is nil for the
@@ -127,6 +128,30 @@ func (t Theme) Styles() style.Styles {
 	}
 
 	return t.styles()
+}
+
+// With returns a [Theme] with the Name and Mode of t, whose styles are
+// those of t with opts applied as [style.Styles.With] applies them. The
+// returned Theme builds its styles on its first call to [Theme.Styles], so
+// With does not build the styles of t. With leaves t unchanged.
+//
+// With [style.Update], a program adjusts a theme relative to its own
+// colors:
+//
+//	mine := t.With(style.Update(kind.Comment, func(s lipgloss.Style) lipgloss.Style {
+//		return s.Italic(true)
+//	}))
+//
+// The returned Theme has the name of t, so [Catalog.With] puts it in the
+// place of t in a catalog that holds t. To list both themes, set another
+// Name on the returned one. The zero Theme applies opts to a zero
+// [style.Styles].
+func (t Theme) With(opts ...style.Option) Theme {
+	opts = slices.Clone(opts)
+
+	return New(t.Name, t.Mode, func() style.Styles {
+		return t.Styles().With(opts...)
+	})
 }
 
 // Style returns the [lipgloss.Style] for st from [Theme.Styles], so a Theme

@@ -384,8 +384,6 @@ func build(c Colors, tokens map[kind.Kind]Token, dimSurface, surface color.Color
 		style.Set(kind.TextError, base.Foreground(c.Error)),
 	}
 
-	s := style.New(base, derived...)
-
 	// The printer paints whole inserted and deleted lines and their + and -
 	// markers in these kinds. It marks errors with a GenericError overlay
 	// and warnings with a GenericWarn overlay, and each overlay replaces the
@@ -414,48 +412,52 @@ func build(c Colors, tokens map[kind.Kind]Token, dimSurface, surface color.Color
 		}
 	}
 
-	// A token layers over the style its kind already resolves to. A token
-	// of "bold" alone thus keeps the ancestor's colors. Parents come
-	// first, so a child layers over the parent's finished style. The pass
-	// visits UI even when tokens leaves it out, because the chrome takes its
-	// color from the finished comments. ByDepth puts the two entries of a
-	// kind that specs and marks both hold side by side, and Compact drops
-	// the second.
+	// A token layers over the style its kind already resolves to, which
+	// [style.Update] passes without the surface. A token of "bold" alone
+	// thus keeps the ancestor's colors. Parents come first, so a child
+	// layers over the parent's finished style. The pass visits UI even when
+	// tokens leaves it out, because the chrome takes its color from the
+	// finished comments. ByDepth puts the two entries of a kind that specs
+	// and marks both hold side by side, and Compact drops the second.
 	kinds := slices.Compact(byDepth(slices.Concat(
 		slices.Collect(maps.Keys(specs)),
 		slices.Collect(maps.Keys(marks)),
 		[]kind.Kind{kind.UI},
 	)))
 
+	opts := slices.Grow(derived, len(kinds)+1)
+
 	for _, st := range kinds {
-		cur := s.Style(st)
-		if st == kind.UI {
-			// The chrome takes the comment color alone. A token that sets
-			// comments in italics or bold styles the comments, and a line
-			// number drawn the same way reads as one. UI comes after
-			// Comment and ahead of its own children in the depth order. A
-			// UI token thus layers over this style, and a token for a child
-			// layers over UI rather than over the comments.
-			cur = base.Foreground(s.Style(kind.Comment).GetForeground())
-		}
+		opts = append(opts, style.Update(st, func(cur lipgloss.Style) lipgloss.Style {
+			if st == kind.UI {
+				// The chrome takes the comment color alone. A token that
+				// sets comments in italics or bold styles the comments, and
+				// a line number drawn the same way reads as one. UI
+				// inherits from Comment and comes after it in the depth
+				// order, so cur is the finished comment style here. UI
+				// comes ahead of its own children. A UI token thus layers
+				// over this style, and a token for a child layers over UI
+				// rather than over the comments.
+				cur = base.Foreground(cur.GetForeground())
+			}
 
-		if spec, ok := specs[st]; ok {
-			cur = layer(cur, spec)
-		} else if mark, ok := marks[st]; ok {
-			cur = paint(cur, mark)
-		}
+			if spec, ok := specs[st]; ok {
+				return layer(cur, spec)
+			}
 
-		s = s.With(style.Set(st, cur))
+			if mark, ok := marks[st]; ok {
+				return paint(cur, mark)
+			}
+
+			return cur
+		}))
 	}
 
-	// The token pass layers each token over a style it reads from s. A
-	// style read with the surface in place carries the surface as a fill
-	// of its own, so the surface comes last.
 	if isColorSet(c.Bg) {
-		s = s.With(style.WithSurface(c.Bg))
+		opts = append(opts, style.WithSurface(c.Bg))
 	}
 
-	return s
+	return style.New(base, opts...)
 }
 
 // dimShift separates a dimmed variant from its source color.

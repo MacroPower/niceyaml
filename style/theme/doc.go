@@ -41,6 +41,20 @@
 //	styles := theme.Charm.Styles().With(style.Set(kind.Comment, dim))
 //	p := printer.New(printer.WithStyles(styles), printer.WithBox())
 //
+// [Theme.With] applies the same options and returns a Theme with the same
+// name and mode, so the result goes into a [Catalog]. [style.Update]
+// adjusts a kind relative to the style the theme gives it, where
+// [style.Set] replaces that style. One Update thus suits every theme in a
+// catalog:
+//
+//	italic := style.Update(kind.Comment, func(s lipgloss.Style) lipgloss.Style {
+//		return s.Italic(true)
+//	})
+//
+//	if t, ok := theme.Builtin().Get("dracula"); ok {
+//		catalog := theme.Builtin().With(t.With(italic))
+//	}
+//
 // A program that names a kind of its own, such as one for an overlay, gives
 // it a parent with [style.Inherit]. The kind then takes the parent's style
 // under every theme in the catalog:

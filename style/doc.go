@@ -33,6 +33,17 @@
 // [Styles.With] derives a new value with more overrides and resolves
 // inheritance again, so overriding a parent later reaches its children too.
 //
+// [Update] adjusts a kind relative to the style it already has, where
+// [Set] replaces the whole style. Its function takes the style that the
+// kind resolves to and returns the style to set. A program thus changes
+// one property of a kind under any theme and keeps the theme's colors:
+//
+//	italic := style.Update(kind.Comment, func(s lipgloss.Style) lipgloss.Style {
+//		return s.Italic(true)
+//	})
+//
+//	styles := theme.Charm.Styles().With(italic)
+//
 // A custom kind, such as one a program names for its own overlay, does not
 // have a parent of its own, so it inherits from [kind.Text]. [Inherit]
 // places it under a predefined kind, and it then takes that kind's style
@@ -59,6 +70,12 @@
 //
 // Each theme picks its colors for its own surface. On a terminal
 // background of another color, some of its text might be hard to read.
+//
+// [Styles.Style] returns a kind that takes the surface with the surface as
+// its background. A [Set] of a style read that way gives the kind the
+// surface as a fill of its own. The kind then keeps that fill when the
+// surface changes. [Update] passes its function the style without the
+// surface, so a kind adjusted through it stays on the surface.
 //
 // [Default] does not set a surface, so it suits output that a program
 // prints inline. It takes whether the terminal's background is dark and

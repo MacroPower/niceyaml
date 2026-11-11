@@ -24,6 +24,21 @@ var (
 	grayStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#808080"))
 )
 
+// italic turns on italics and keeps the rest of the style, for
+// [style.Update].
+//
+//nolint:gocritic // hugeParam: value semantics match lipgloss.
+func italic(s lipgloss.Style) lipgloss.Style {
+	return s.Italic(true)
+}
+
+// bold turns on bold and keeps the rest of the style, for [style.Update].
+//
+//nolint:gocritic // hugeParam: value semantics match lipgloss.
+func bold(s lipgloss.Style) lipgloss.Style {
+	return s.Bold(true)
+}
+
 // assertStyles asserts that styles holds the style want names for each of
 // its kinds.
 func assertStyles(t *testing.T, want map[kind.Kind]lipgloss.Style, styles style.Styles) {
@@ -387,6 +402,223 @@ func TestStyles_Surface(t *testing.T) {
 	// The receiver keeps its surface.
 	assert.Equal(t, surface, painted.Surface())
 	assert.Equal(t, greenStyle.Background(surface), painted.Style(kind.Comment))
+}
+
+func TestUpdate(t *testing.T) {
+	t.Parallel()
+
+	const custom kind.Kind = "customUpdate"
+
+	fill := lipgloss.NewStyle().Background(lipgloss.Color("#ff00ff"))
+
+	// Each case builds its styles over baseStyle.
+	tcs := map[string]struct {
+		want map[kind.Kind]lipgloss.Style
+		opts []style.Option
+	}{
+		"adjusts the style a Set gave the kind": {
+			opts: []style.Option{
+				style.Set(kind.Comment, greenStyle),
+				style.Update(kind.Comment, italic),
+			},
+			want: map[kind.Kind]lipgloss.Style{
+				kind.Comment:      greenStyle.Italic(true),
+				kind.UILineNumber: greenStyle.Italic(true),
+				kind.Text:         baseStyle,
+			},
+		},
+		"adjusts the style of the closest set ancestor": {
+			opts: []style.Option{
+				style.Set(kind.LiteralNumber, redStyle),
+				style.Update(kind.LiteralNumberFloat, bold),
+			},
+			want: map[kind.Kind]lipgloss.Style{
+				kind.LiteralNumberFloat:   redStyle.Bold(true),
+				kind.LiteralNumber:        redStyle,
+				kind.LiteralNumberInteger: redStyle,
+			},
+		},
+		"adjusts the base style when no ancestor is set": {
+			opts: []style.Option{style.Update(kind.NameTag, bold)},
+			want: map[kind.Kind]lipgloss.Style{
+				kind.NameTag: baseStyle.Bold(true),
+				kind.Name:    baseStyle,
+				kind.Text:    baseStyle,
+			},
+		},
+		"adjusts the base style through kind.Text": {
+			opts: []style.Option{
+				style.Set(kind.Comment, greenStyle),
+				style.Update(kind.Text, bold),
+			},
+			want: map[kind.Kind]lipgloss.Style{
+				kind.Text:    baseStyle.Bold(true),
+				kind.NameTag: baseStyle.Bold(true),
+				kind.Comment: greenStyle,
+			},
+		},
+		"takes the style of an Inherit parent": {
+			opts: []style.Option{
+				style.Set(kind.GenericHighlight, fill),
+				style.Inherit(custom, kind.GenericHighlight),
+				style.Update(custom, bold),
+			},
+			want: map[kind.Kind]lipgloss.Style{
+				custom:                fill.Bold(true),
+				kind.GenericHighlight: fill,
+			},
+		},
+		"takes a Set style of the kind over an Inherit parent": {
+			opts: []style.Option{
+				style.Set(kind.GenericHighlight, fill),
+				style.Set(custom, redStyle),
+				style.Inherit(custom, kind.GenericHighlight),
+				style.Update(custom, bold),
+			},
+			want: map[kind.Kind]lipgloss.Style{
+				custom:                redStyle.Bold(true),
+				kind.GenericHighlight: fill,
+			},
+		},
+		"second Update adjusts the result of the first": {
+			opts: []style.Option{
+				style.Update(kind.Comment, italic),
+				style.Update(kind.Comment, bold),
+			},
+			want: map[kind.Kind]lipgloss.Style{kind.Comment: baseStyle.Italic(true).Bold(true)},
+		},
+		"later Set on the kind replaces the result": {
+			opts: []style.Option{
+				style.Update(kind.Comment, italic),
+				style.Set(kind.Comment, greenStyle),
+			},
+			want: map[kind.Kind]lipgloss.Style{kind.Comment: greenStyle},
+		},
+		"later Set on an ancestor does not reach the kind": {
+			opts: []style.Option{
+				style.Update(kind.LiteralNumberFloat, bold),
+				style.Set(kind.LiteralNumber, redStyle),
+			},
+			want: map[kind.Kind]lipgloss.Style{
+				kind.LiteralNumberFloat:   baseStyle.Bold(true),
+				kind.LiteralNumber:        redStyle,
+				kind.LiteralNumberInteger: redStyle,
+			},
+		},
+		"later Inherit on the kind does not reach the kind": {
+			opts: []style.Option{
+				style.Set(kind.GenericHighlight, fill),
+				style.Update(custom, italic),
+				style.Inherit(custom, kind.GenericHighlight),
+			},
+			want: map[kind.Kind]lipgloss.Style{
+				custom:                baseStyle.Italic(true),
+				kind.GenericHighlight: fill,
+			},
+		},
+		"nil function leaves the kind inheriting": {
+			opts: []style.Option{
+				style.Update(kind.LiteralNumberFloat, nil),
+				style.Set(kind.LiteralNumber, redStyle),
+			},
+			want: map[kind.Kind]lipgloss.Style{kind.LiteralNumberFloat: redStyle},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assertStyles(t, tc.want, style.New(baseStyle, tc.opts...))
+		})
+	}
+
+	t.Run("With adjusts the style of the receiver", func(t *testing.T) {
+		t.Parallel()
+
+		original := style.New(baseStyle, style.Set(kind.Comment, greenStyle))
+		result := original.With(style.Update(kind.Comment, italic))
+
+		assert.Equal(t, greenStyle.Italic(true), result.Style(kind.Comment))
+		assert.Equal(t, greenStyle, original.Style(kind.Comment))
+	})
+
+	t.Run("zero value can be extended", func(t *testing.T) {
+		t.Parallel()
+
+		result := style.Styles{}.With(style.Update(kind.Comment, bold))
+
+		assert.Equal(t, lipgloss.NewStyle().Bold(true), result.Style(kind.Comment))
+		assert.Equal(t, lipgloss.Style{}, result.Style(kind.Text))
+	})
+
+	t.Run("function runs one time for each build", func(t *testing.T) {
+		t.Parallel()
+
+		var calls int
+
+		counted := style.Update(kind.Comment, func(s lipgloss.Style) lipgloss.Style {
+			calls++
+
+			return s.Italic(true)
+		})
+
+		styles := style.New(baseStyle, counted)
+
+		assert.Equal(t, 1, calls)
+
+		// A later With keeps the stored style and does not run the
+		// function again.
+		styles = styles.With(style.Set(kind.NameTag, redStyle))
+
+		assert.Equal(t, 1, calls)
+		assert.Equal(t, baseStyle.Italic(true), styles.Style(kind.Comment))
+	})
+
+	t.Run("adjusted kind stays on the surface", func(t *testing.T) {
+		t.Parallel()
+
+		surface := lipgloss.Color("#202020")
+		other := lipgloss.Color("#303030")
+		painted := style.New(baseStyle, style.WithSurface(surface), style.Set(kind.Comment, greenStyle))
+
+		var got lipgloss.Style
+
+		styles := painted.With(style.Update(kind.Comment, func(s lipgloss.Style) lipgloss.Style {
+			got = s
+
+			return s.Italic(true)
+		}))
+
+		// The function takes the style without the surface, and the kind
+		// resolves with the surface behind it.
+		assert.Equal(t, greenStyle, got)
+
+		want := greenStyle.Italic(true)
+		assert.Equal(t, want.Background(surface), styles.Style(kind.Comment))
+		assert.Equal(t, want.Background(surface), styles.Style(kind.UILineNumber))
+
+		// A later surface reaches the adjusted kind and its children.
+		moved := styles.With(style.WithSurface(other))
+		assert.Equal(t, want.Background(other), moved.Style(kind.Comment))
+		assert.Equal(t, want.Background(other), moved.Style(kind.UILineNumber))
+
+		plain := styles.With(style.WithSurface(nil))
+		assert.Equal(t, want, plain.Style(kind.Comment))
+		assert.Equal(t, want, plain.Style(kind.UILineNumber))
+	})
+
+	t.Run("one option adjusts each built-in theme", func(t *testing.T) {
+		t.Parallel()
+
+		for _, th := range theme.Builtin().All() {
+			plain := th.Styles().With(style.WithSurface(nil))
+			got := th.Styles().With(style.Update(kind.Comment, italic), style.WithSurface(nil))
+
+			assert.Equal(t, plain.Style(kind.Comment).Italic(true), got.Style(kind.Comment), th.Name)
+			assert.Equal(t, plain.Style(kind.NameTag), got.Style(kind.NameTag), th.Name)
+		}
+	})
 }
 
 func TestInherit(t *testing.T) {

@@ -517,6 +517,118 @@ func TestThemeStyles(t *testing.T) {
 	})
 }
 
+func TestTheme_With(t *testing.T) {
+	t.Parallel()
+
+	italic := style.Update(kind.Comment, func(s lipgloss.Style) lipgloss.Style {
+		return s.Italic(true)
+	})
+
+	t.Run("adjusts the styles and keeps the name and mode", func(t *testing.T) {
+		t.Parallel()
+
+		for _, th := range []theme.Theme{builtin(t, "dracula"), theme.CharmLight} {
+			got := th.With(italic)
+
+			assert.Equal(t, th.Name, got.Name)
+			assert.Equal(t, th.Mode, got.Mode)
+			assert.Equal(t, th.Style(kind.Comment).Italic(true), got.Style(kind.Comment), th.Name)
+			assert.Equal(t, th.Style(kind.NameTag), got.Style(kind.NameTag), th.Name)
+			assert.Equal(t, th.Styles().Surface(), got.Styles().Surface(), th.Name)
+		}
+	})
+
+	t.Run("receiver is unchanged", func(t *testing.T) {
+		t.Parallel()
+
+		th := theme.New("test-with", theme.Dark, marked(kind.Comment))
+		got := th.With(style.Set(kind.NameTag, lipgloss.NewStyle().Foreground(marker)))
+
+		assert.True(t, isMarked(got.Styles(), kind.Comment))
+		assert.True(t, isMarked(got.Styles(), kind.NameTag))
+		assert.False(t, isMarked(th.Styles(), kind.NameTag))
+	})
+
+	t.Run("adjusted kind follows a later surface", func(t *testing.T) {
+		t.Parallel()
+
+		th := builtin(t, "dracula")
+		plain := th.Styles().With(style.WithSurface(nil))
+		got := th.With(italic).Styles().With(style.WithSurface(nil))
+
+		assert.Equal(t, plain.Style(kind.Comment).Italic(true), got.Style(kind.Comment))
+		assert.True(t, unset(got.Style(kind.Comment).GetBackground()))
+		assert.Equal(t, got.Style(kind.Comment), got.Style(kind.CommentPreproc))
+	})
+
+	t.Run("builds on the first call to Styles", func(t *testing.T) {
+		t.Parallel()
+
+		var builds, updates atomic.Int32
+
+		th := theme.New("test-lazy", theme.Light, func() style.Styles {
+			builds.Add(1)
+
+			return empty()
+		})
+
+		got := th.With(style.Update(kind.Comment, func(s lipgloss.Style) lipgloss.Style {
+			updates.Add(1)
+
+			return s.Foreground(marker)
+		}))
+
+		assert.Equal(t, int32(0), builds.Load())
+		assert.Equal(t, int32(0), updates.Load())
+
+		duplicate := got
+
+		assert.True(t, isMarked(got.Styles(), kind.Comment))
+		assert.True(t, isMarked(duplicate.Styles(), kind.Comment))
+		assert.Equal(t, int32(1), builds.Load())
+		assert.Equal(t, int32(1), updates.Load())
+	})
+
+	t.Run("keeps the options it was given", func(t *testing.T) {
+		t.Parallel()
+
+		opts := []style.Option{style.Set(kind.Comment, lipgloss.NewStyle().Foreground(marker))}
+		got := theme.New("test-opts", theme.Dark, empty).With(opts...)
+
+		// A change to the caller's slice does not reach the theme.
+		opts[0] = style.Set(kind.Comment, lipgloss.NewStyle())
+
+		assert.True(t, isMarked(got.Styles(), kind.Comment))
+	})
+
+	t.Run("result replaces the theme in a catalog", func(t *testing.T) {
+		t.Parallel()
+
+		th := builtin(t, "dracula")
+		catalog := theme.Builtin().With(th.With(italic))
+
+		assert.Equal(t, namesOf(theme.Builtin()), namesOf(catalog))
+
+		got, ok := catalog.Get("dracula")
+		require.True(t, ok)
+		assert.True(t, got.Style(kind.Comment).GetItalic())
+		assert.False(t, th.Style(kind.Comment).GetItalic())
+	})
+
+	t.Run("zero value", func(t *testing.T) {
+		t.Parallel()
+
+		var th theme.Theme
+
+		got := th.With(style.Set(kind.Comment, lipgloss.NewStyle().Foreground(marker)))
+
+		assert.Empty(t, got.Name)
+		assert.True(t, isMarked(got.Styles(), kind.Comment))
+		assert.Equal(t, lipgloss.NewStyle(), got.Style(kind.Text))
+		assert.Equal(t, style.Styles{}, th.Styles())
+	})
+}
+
 func TestPalette_SubtleTextDiffersFromText(t *testing.T) {
 	t.Parallel()
 
