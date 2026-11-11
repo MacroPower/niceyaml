@@ -410,6 +410,7 @@ func TestDirective(t *testing.T) {
 		client, requests := yamltest.CountingClient(http.DefaultTransport)
 
 		reg := schema.NewRegistry(
+			schema.WithAccess(schema.Unrestricted),
 			schema.WithHTTPClient(client),
 			schema.WithResolvers(schema.Directive()),
 		)
@@ -441,7 +442,7 @@ func TestDirective(t *testing.T) {
 			`),
 		})
 
-		reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
+		reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(schema.Directive()))
 
 		tcs := map[string]struct {
 			input string
@@ -502,7 +503,8 @@ func TestDirective(t *testing.T) {
 			filepath.Join(dir, "config.yaml"),
 		)
 
-		err := schema.NewRegistry(schema.WithResolvers(schema.Directive())).Check(t.Context(), doc)
+		err := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(schema.Directive())).
+			Check(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrCompile)
 		assert.Contains(t, err.Error(), "schema.yaml")
 		assert.Contains(t, err.Error(), "YAML decode: 1:11: ")
@@ -681,7 +683,7 @@ func TestDirective_Resolve(t *testing.T) {
 		}`})
 
 		ref := base + "/defs.json#/definitions/Foo"
-		reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
+		reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(schema.Directive()))
 
 		requireAccepts(t, reg, yamltest.SchemaDirective(ref, "name: x\n"))
 		requireRejects(t, reg, yamltest.SchemaDirective(ref, "kind: Deployment\n"), `missing required property "name"`)
@@ -714,7 +716,10 @@ func TestDirective_Resolve(t *testing.T) {
 				assert.Equal(t, fileURL(t, schemaPath)+"#/definitions/Foo", url)
 				assert.Equal(t, schemaData, data)
 
-				reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
+				reg := schema.NewRegistry(
+					schema.WithAccess(schema.Unrestricted),
+					schema.WithResolvers(schema.Directive()),
+				)
 
 				err = reg.Check(t.Context(), doc)
 				require.NoError(t, err)
@@ -760,7 +765,7 @@ func TestDirective_Resolve(t *testing.T) {
 		assert.Contains(t, err.Error(), `"configs/app.yaml"`)
 
 		// A registry reports the error of the resolver.
-		reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
+		reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(schema.Directive()))
 
 		err = reg.Check(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrResolve)
@@ -818,7 +823,7 @@ func TestDirective_Resolve(t *testing.T) {
 				// A schema that rejects every document follows the directive,
 				// so the document passes only if the lookup ends at the
 				// directive.
-				reg := schema.NewRegistry(schema.WithResolvers(
+				reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(
 					schema.Directive(),
 					compileSchema(t, "false"),
 				))
@@ -839,7 +844,8 @@ func TestDirective_ErrorDrawsControlCharacters(t *testing.T) {
 		filepath.Join(t.TempDir(), "config.yaml"),
 	)
 
-	err := schema.NewRegistry(schema.WithResolvers(schema.Directive())).Check(t.Context(), doc)
+	err := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(schema.Directive())).
+		Check(t.Context(), doc)
 	require.ErrorIs(t, err, schema.ErrLoad)
 
 	msg := err.Error()
@@ -874,7 +880,7 @@ func TestDirective_EmbeddedNameMatchesPath(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			reg := schema.NewRegistry(schema.WithResolvers(
+			reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(
 				schema.Directive(),
 				schema.When(
 					matcher.Content(kindPath, "Embedded"),
@@ -1043,7 +1049,7 @@ func TestDirective_LeadingCommentDocument(t *testing.T) {
 
 			docs := yamltest.AllDocuments(t, source, len(tc.want))
 
-			reg := schema.NewRegistry(schema.WithResolvers(
+			reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(
 				schema.Directive(),
 				schema.Embedded([]byte(`{"type": "object"}`)),
 			))
@@ -1085,7 +1091,7 @@ func TestDirective_ResolvesAfterChdir(t *testing.T) {
 
 	t.Chdir(t.TempDir())
 
-	reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
+	reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(schema.Directive()))
 
 	err = source.ValidateDocuments(t.Context(), reg)
 	require.ErrorContains(t, err, `configs/app.yaml:2:7: $.name: expected "string", got "integer"`)

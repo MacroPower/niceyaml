@@ -93,6 +93,12 @@ var ErrNoMatch = errors.New("no matching schema")
 // schema does not have anything to load, and the registry validates with
 // the schema as it is.
 //
+// A Ref from [RefBeside] or [Directive] names what the author of a
+// document picked. A registry loads such a Ref only when [WithAccess]
+// gave it an Access, as [ErrAccessNotSet] describes. A registry does
+// not need the option for the other Refs, which the program names. An
+// Access that the registry holds applies to those Refs too.
+//
 // Create instances with [Loadable], [Embedded], [File], [FileFS], [URL],
 // [FileOrURL], [RefBeside], or [Schema.Ref]. The zero Ref does not name a
 // schema. Return it beside an error, as a resolver does with
@@ -125,6 +131,9 @@ type Ref struct {
 	// Whether the key is an HTTP URL that the registry fetches with its
 	// client.
 	url bool
+	// Whether a document named the Ref, as RefBeside marks it. A registry
+	// loads such a Ref only when WithAccess gave it an access.
+	named bool
 }
 
 // Loadable creates a new [Ref] that names a schema by key and loads its

@@ -47,7 +47,14 @@ func main() {
 		),
 	)
 
-	reg := schema.NewRegistry(resolvers)
+	// A directive lets the document name its schema, so the registry needs
+	// an Access that says what the document can reach. The document and its
+	// schemas live in the embedded file system, which serves the files that
+	// a directive names. NoAccess keeps the disk and the network out of
+	// reach.
+	access := schema.WithAccess(schema.NoAccess)
+
+	reg := schema.NewRegistry(access, resolvers)
 
 	fmt.Println("\nValidate each document against its schema:")
 
@@ -71,7 +78,7 @@ func main() {
 
 	// A registry that requires no schema passes the documents no resolver
 	// applies to, so only the violation is left.
-	lenient := schema.NewRegistry(resolvers, schema.WithRequireSchema(false))
+	lenient := schema.NewRegistry(access, resolvers, schema.WithRequireSchema(false))
 
 	fmt.Println("\nAccept documents that match no schema:")
 

@@ -405,7 +405,7 @@ func TestRefBeside(t *testing.T) {
 	onDisk := yamltest.FirstDocumentWithPath(t, "kind: App\n", filepath.Join(dir, "app.yaml"))
 	noPath := yamltest.FirstDocument(t, "kind: App\n")
 
-	reg := schema.NewRegistry()
+	reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted))
 
 	t.Run("a relative path names a file beside a document in a file system", func(t *testing.T) {
 		t.Parallel()
@@ -582,7 +582,7 @@ func TestRefBeside(t *testing.T) {
 			return schema.RefBeside(doc, "schema.json")
 		})
 
-		byName := schema.NewRegistry(schema.WithResolvers(beside))
+		byName := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(beside))
 
 		require.NoError(t, byName.Check(t.Context(), inBundle))
 		require.NoError(t, byName.Check(t.Context(), onDisk))
@@ -615,7 +615,7 @@ func TestRefBeside_WorkingDirectory(t *testing.T) {
 
 	t.Chdir(wd)
 
-	reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
+	reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(schema.Directive()))
 
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)

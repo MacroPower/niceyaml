@@ -16,6 +16,7 @@ import (
 // dropped loads and compiles it again:
 //
 //	reg := schema.NewRegistry(
+//	    schema.WithAccess(access),
 //	    schema.WithCacheLimit(1024),
 //	    schema.WithResolvers(schema.Directive()),
 //	)

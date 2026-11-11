@@ -45,6 +45,14 @@
 //	    schema.WithCompileOptions(schema.WithRequireRefs(false)),
 //	)
 //
+// The program picks the catalog when it adds the store. A registry
+// therefore loads each schema that the store names as a schema of the
+// program. The registry does not need
+// [go.jacobcolvin.com/niceyaml/schema.WithAccess] for those schemas. That
+// option gates only the schemas that a document names for itself. An
+// Access that the registry does hold applies to them, as
+// [go.jacobcolvin.com/niceyaml/schema.AllowURLPrefixes] describes.
+//
 // [New] does not perform I/O. The first lookup fetches the catalog, and
 // later lookups reuse it until the cache time to live (TTL) expires. A
 // refresh that fails keeps the previous catalog in use. When a fetch fails

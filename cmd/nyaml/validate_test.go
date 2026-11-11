@@ -212,6 +212,7 @@ func TestValidateFileEmpty(t *testing.T) {
 		},
 		"document end marker with no schema": {
 			reg: schema.NewRegistry(
+				schema.WithAccess(schema.Unrestricted),
 				schema.WithResolvers(schema.Directive()),
 				schema.WithRequireSchema(false),
 			),
@@ -279,7 +280,7 @@ func TestValidateFileDotDotAfterSymlink(t *testing.T) {
 	// Joining the name with filepath.Join would clean it to x.yaml.
 	path := dir + "/ldir/../x.yaml"
 
-	reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
+	reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(schema.Directive()))
 
 	require.NoError(t, validateFile(t.Context(), path, reg))
 }

@@ -109,15 +109,27 @@ const defaultRetryAfter = 1 * time.Minute
 // Example:
 //
 //	kindPath := paths.Doc().Child("kind")
-//	reg := schema.NewRegistry(schema.WithResolvers(
-//	    // Directive matching first, for explicit user intent.
-//	    schema.Directive(),
-//	    // Content-based matching.
-//	    schema.When(
-//	        matcher.Content(kindPath, "Deployment"),
-//	        schema.Embedded(deploymentSchema),
+//	reg := schema.NewRegistry(
+//	    // The documents come from the user of the program, so a directive
+//	    // names any file or URL.
+//	    schema.WithAccess(schema.Unrestricted),
+//	    schema.WithResolvers(
+//	        // Directive matching first, for explicit user intent.
+//	        schema.Directive(),
+//	        // Content-based matching.
+//	        schema.When(
+//	            matcher.Content(kindPath, "Deployment"),
+//	            schema.Embedded(deploymentSchema),
+//	        ),
 //	    ),
-//	))
+//	)
+//
+// The registry loads the schema that a document names, as [Directive]
+// and [RefBeside] build it, only when [WithAccess] gave it an [Access].
+// Without the option, such a schema fails to load with
+// [ErrAccessNotSet]. The registry does not need the option for the
+// schemas that the resolvers of the program name. An Access that the
+// registry holds applies to those schemas too.
 //
 // A Registry is a [Resolver] too. So a registry that an [Access]
 // confines can load the schemas that documents pick and serve them to a
@@ -158,6 +170,9 @@ type registryConfig struct {
 	loadLimit   int           // the most bytes of each schema document that the registry reads, or 0 for unlimited
 	// Makes Check report ErrNoMatch when every resolver declines.
 	requireSchema bool
+	// Whether WithAccess gave the registry its access. A registry without
+	// it refuses each Ref that a document named.
+	accessSet bool
 }
 
 // WithHTTPClient is a [RegistryOption] that sets the client that the
@@ -169,6 +184,7 @@ type registryConfig struct {
 // caller whose context does not have a deadline:
 //
 //	reg := schema.NewRegistry(
+//	    schema.WithAccess(schema.Unrestricted),
 //	    schema.WithHTTPClient(&http.Client{Timeout: 10 * time.Second}),
 //	    schema.WithResolvers(schema.Directive(), schemastore.New()),
 //	)
@@ -231,11 +247,17 @@ func WithRetryAfter(interval time.Duration) RegistryOption {
 // explicit user intent before content matching, and content matching
 // before file path conventions:
 //
-//	reg := schema.NewRegistry(schema.WithResolvers(
-//	    schema.Directive(),
-//	    schema.When(matcher.Content(kindPath, "Deployment"), schema.Embedded(deploymentSchema)),
-//	    schemastore.New(),
-//	))
+//	reg := schema.NewRegistry(
+//	    schema.WithAccess(schema.Unrestricted),
+//	    schema.WithResolvers(
+//	        schema.Directive(),
+//	        schema.When(matcher.Content(kindPath, "Deployment"), schema.Embedded(deploymentSchema)),
+//	        schemastore.New(),
+//	    ),
+//	)
+//
+// A registry loads the schema that [Directive] names only under an
+// [Access] from [WithAccess], as [ErrAccessNotSet] describes.
 //
 // Given more than once, each call appends after the resolvers of the one
 // before it.
@@ -269,16 +291,17 @@ func WithResolvers(res ...Resolver) RegistryOption {
 // [niceyaml.WithValidator]:
 //
 //	reg := schema.NewRegistry(
+//	    schema.WithAccess(schema.Unrestricted),
 //	    schema.WithResolvers(schema.Directive(), schemastore.New()),
 //	    schema.WithRequireSchema(false),
 //	)
 //
 //	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))
 //
-// [Directive] lets each document pick its own schema. A program that
-// decodes documents from another trust domain should confine the
-// registry first, as the Untrusted Documents section of the package
-// documentation describes.
+// [Directive] lets each document pick its own schema, and [Unrestricted]
+// lets that schema be any file or URL. A program that decodes documents
+// from another trust domain should confine the registry instead, as the
+// Untrusted Documents section of the package documentation describes.
 //
 // [Registry.Lookup] reports [ErrNoMatch] either way, because a caller
 // that asks for the validator must learn when the lookup does not find
@@ -450,8 +473,9 @@ func (r *Registry) Lookup(ctx context.Context, n *niceyaml.Node) (*Schema, error
 // doc, as a [Ref] from [Schema.Ref]. This registry loads and compiles
 // that schema under its own [Access], cache, and limits. The registry
 // that asked validates with the schema unchanged and does not load
-// anything for it. A $ref that the validation reaches loads through this
-// registry too.
+// anything for it. So it does not need an Access of its own for the
+// schemas that this registry names. A $ref that the validation reaches
+// loads through this registry too.
 //
 // So a program can confine the schemas that its documents pick and trust
 // its own schemas and those of a catalog, each in a registry of its own:
@@ -737,6 +761,7 @@ func (e reasonError) Unwrap() error {
 // false. Check then accepts the document:
 //
 //	reg := schema.NewRegistry(
+//	    schema.WithAccess(schema.Unrestricted),
 //	    schema.WithResolvers(schema.Directive()),
 //	    schema.WithRequireSchema(false),
 //	)
@@ -858,6 +883,14 @@ func (r *Registry) Check(ctx context.Context, n *niceyaml.Node) error {
 // could not read, such as one past the limit of [WithLoadLimit] or a
 // response with a status other than 200 OK.
 //
+// A Ref that a document names, as [RefBeside] and [Directive] build it,
+// loads only in a registry that [WithAccess] gave an [Access]. In any
+// other registry, Schema returns [ErrLoad] wrapping [ErrAccessNotSet]
+// and does not read or fetch anything. Schema refuses before it checks
+// the cache, so the registry does not remember the refusal. A Ref of the
+// program with the same key still loads, and the schema that it cached
+// does not answer the Ref of the document.
+//
 // # References
 //
 // A schema from [File], [FileFS], or [URL] loads only when each document
@@ -911,6 +944,14 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 
 	if ref.Key() == "" {
 		return nil, fmt.Errorf("%w: ref names no schema", ErrResolve)
+	}
+
+	// The refusal runs before the cache, so it does not leave a failure
+	// there for a Ref of the program with the same key. The schema that
+	// such a Ref cached does not answer a Ref that a document named.
+	err := r.checkNamed(ref)
+	if err != nil {
+		return nil, &LoadError{Ref: ref, Phase: ErrLoad, Err: err}
 	}
 
 	// A URL Ref shares its key space with a File Ref, whose key is a
@@ -1015,7 +1056,17 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 // The zero Ref does not name any bytes. A Ref from [Schema.Ref] carries
 // a compiled schema rather than bytes, and [Ref.Schema] returns that
 // schema. Load returns an error for both kinds of Ref.
+//
+// A Ref that a document names, as [RefBeside] and [Directive] build it,
+// loads only in a registry that [WithAccess] gave an Access. In any
+// other registry, Load returns an error wrapping [ErrAccessNotSet] and
+// does not read or fetch anything.
 func (r *Registry) Load(ctx context.Context, ref Ref) ([]byte, error) {
+	err := r.checkNamed(ref)
+	if err != nil {
+		return nil, &LoadError{Ref: ref, Phase: ErrLoad, Err: err}
+	}
+
 	data, err := r.load(ctx, ref)
 	if err != nil {
 		return nil, &LoadError{Ref: ref, Phase: ErrLoad, Err: err}
@@ -1162,7 +1213,22 @@ func (r *Registry) Purge() {
 	r.cache.purge()
 }
 
-// load is [Registry.Load] before Load wraps the error in a [*LoadError].
+// checkNamed returns [ErrAccessNotSet] for a ref that a document named,
+// as [RefBeside] marks it, when [WithAccess] did not give the registry
+// its access. The author of the document picked what such a Ref reads or
+// fetches. So the program must say what the registry can reach before
+// the registry loads anything for it. For any other ref, and in a
+// registry with an access, checkNamed returns nil.
+func (r *Registry) checkNamed(ref Ref) error {
+	if ref.named && !r.accessSet {
+		return ErrAccessNotSet
+	}
+
+	return nil
+}
+
+// load is [Registry.Load] after the check of [Registry.checkNamed] and
+// before Load wraps the error in a [*LoadError].
 func (r *Registry) load(ctx context.Context, ref Ref) ([]byte, error) {
 	switch {
 	case ref.url:

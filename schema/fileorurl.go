@@ -56,7 +56,11 @@ var ErrNoBaseDir = errors.New("relative schema path has no base directory")
 // FileOrURL names a file on disk. A reference that belongs to a document
 // goes through [RefBeside] instead. RefBeside takes the base directory
 // from the document and names the file in the file system that the
-// document came from.
+// document came from. It also marks the [Ref] as one that a document
+// names, and a registry loads such a Ref only under an [Access] from
+// [WithAccess]. A Ref from FileOrURL does not carry the mark, so a
+// registry does not need the option to load it. An Access that the
+// registry holds applies to the Ref too.
 //
 // A program reports the error of a reference from a command line where
 // it reads the flag:
@@ -168,7 +172,13 @@ func FileOrURL(baseDir, ref string) (Ref, error) {
 //	})
 //
 // RefBeside uses the reference as written, so whoever wrote it picks the
-// file or host, as the note on [FileOrURL] says. The Untrusted Documents
+// file or host, as the note on [FileOrURL] says. It therefore marks the
+// Ref as one that a document names. A registry loads such a Ref only
+// when [WithAccess] gave it an [Access]. In a registry without the
+// option, [Registry.Schema] and [Registry.Load] fail with
+// [ErrAccessNotSet]. The rule covers a document in a file system too,
+// because the URLs that the document and its schema name go through the
+// Access. [NoAccess] serves such a document. The Untrusted Documents
 // section of the package documentation gives the registry options that
 // confine a reference from another trust domain.
 func RefBeside(doc *niceyaml.Node, ref string) (Ref, error) {
@@ -193,7 +203,10 @@ func RefBeside(doc *niceyaml.Node, ref string) (Ref, error) {
 		return Ref{}, err
 	}
 
-	return inFS(r, doc.FS()), nil
+	r = inFS(r, doc.FS())
+	r.named = true
+
+	return r, nil
 }
 
 // isFileURL reports whether ref is a file URL, in any letter case. RFC 8089

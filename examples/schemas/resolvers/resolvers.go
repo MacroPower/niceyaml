@@ -26,14 +26,21 @@ func main() {
 	// A registry tries its resolvers in order, and the first that does not
 	// decline names the schema. A directive states what the author of the
 	// file intends, so it comes before the conventions of the program.
-	reg := schema.NewRegistry(schema.WithResolvers(
-		schema.Directive(),
-		// A relative pattern matches the relative path of a document from a
-		// file system, and the braces accept either extension.
-		schema.When(matcher.MustFilePath("menus/*.{yaml,yml}"),
-			schema.FileFS(files, "schemas/menu.schema.yaml")),
-		schema.ResolverFunc(byKind),
-	))
+	reg := schema.NewRegistry(
+		// A registry loads the schema of a directive only under an Access.
+		// The files of the café live in the embedded file system, which
+		// serves each file that a directive names. NoAccess keeps the disk
+		// and the network out of reach.
+		schema.WithAccess(schema.NoAccess),
+		schema.WithResolvers(
+			schema.Directive(),
+			// A relative pattern matches the relative path of a document
+			// from a file system, and the braces accept either extension.
+			schema.When(matcher.MustFilePath("menus/*.{yaml,yml}"),
+				schema.FileFS(files, "schemas/menu.schema.yaml")),
+			schema.ResolverFunc(byKind),
+		),
+	)
 
 	fmt.Println("\nName a subschema in a directive:")
 

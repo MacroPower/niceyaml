@@ -28,7 +28,7 @@ func loadFor(t *testing.T, r schema.Resolver, doc *niceyaml.Node) (string, []byt
 	ref, err := r.Resolve(t.Context(), doc)
 	require.NoError(t, err)
 
-	data, err := schema.NewRegistry().Load(t.Context(), ref)
+	data, err := schema.NewRegistry(schema.WithAccess(schema.Unrestricted)).Load(t.Context(), ref)
 
 	return ref.Key(), data, err //nolint:wrapcheck // Tests inspect the loader's own error.
 }

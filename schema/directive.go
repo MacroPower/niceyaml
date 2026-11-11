@@ -199,7 +199,8 @@ func (s *directiveSite) locate(doc *niceyaml.Node, err error) error {
 // for the document, as it does in yaml-language-server. Resolve names a
 // schema that passes every document without decoding it, as [AcceptAll]
 // does. The lookup thus ends at the directive, and the document does not
-// need a file path.
+// need a file path. Such a directive does not name a file or a URL, so
+// it resolves in a registry without [WithAccess] too.
 //
 // The preamble holds the comments above the "---" header of the document
 // and those below it. A directive in either place names the schema of
@@ -212,16 +213,30 @@ func (s *directiveSite) locate(doc *niceyaml.Node, err error) error {
 // The first directive in the preamble wins. The registry fetches the URL
 // that a directive names with the client that [WithHTTPClient] gave it.
 //
-//	reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
-//
 // The author of the document picks the file or URL that the directive
-// names. A directive can therefore name any file that the registry can
-// read, including a path outside the document's directory. It can also
-// name any host that the client can reach. A program that validates
-// documents from another trust domain gives Directive a registry of its
-// own, and confines that registry with [WithAccess] and
-// [WithCacheLimit]. That registry is a resolver of the registry that
-// holds the program's own schemas, as [Registry.Resolve] describes:
+// names. A registry therefore loads the schema of a directive only when
+// [WithAccess] gave it an [Access]. In a registry without the option, the
+// lookup of a document with a directive fails with [ErrAccessNotSet].
+// The registry does not read or fetch anything for it. A program whose
+// documents come from its own user, such as an editor or a command-line
+// tool, passes [Unrestricted]:
+//
+//	reg := schema.NewRegistry(
+//	    schema.WithAccess(schema.Unrestricted),
+//	    schema.WithResolvers(schema.Directive()),
+//	)
+//
+// A directive there can name any file that the process can read,
+// including a path outside the document's directory. It can also name
+// any host that the client can reach. A program whose documents live in
+// a file system passes [NoAccess], which keeps each directive to the
+// files of that file system.
+//
+// A program that validates documents from another trust domain gives
+// Directive a registry of its own, and confines that registry with
+// [WithAccess] and [WithCacheLimit]. That registry is a resolver of the
+// registry that holds the program's own schemas, as [Registry.Resolve]
+// describes:
 //
 //	untrusted := schema.NewRegistry(
 //	    schema.WithAccess(access),

@@ -12847,7 +12847,7 @@ func TestIsInvalid(t *testing.T) {
 		)
 	}
 
-	byDirective := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
+	byDirective := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(schema.Directive()))
 
 	doc := yamltest.FirstDocument(t, input)
 	hours := yamltest.At(t, doc, hoursPath)
@@ -13159,7 +13159,9 @@ func TestIsInvalid(t *testing.T) {
 			is: schema.ErrValidate,
 		},
 		"no matching schema with reasons": {
-			err:  validated(schema.NewRegistry(schema.WithResolvers(schema.Directive()))),
+			err: validated(
+				schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(schema.Directive())),
+			),
 			is:   schema.ErrNoDirective,
 			want: true,
 		},

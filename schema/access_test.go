@@ -60,6 +60,7 @@ func TestNewAccess(t *testing.T) {
 		}{
 			"no options":  {access: none},
 			"zero Access": {access: &schema.Access{}},
+			"NoAccess":    {access: schema.NoAccess},
 		}
 
 		for name, tc := range tcs {

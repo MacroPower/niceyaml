@@ -136,11 +136,23 @@ func main() {
 
 	fmt.Println("\nValidate the third document in an unrestricted registry:")
 
-	// A registry without WithAccess reads what Unrestricted allows, so it
-	// reads any file that a directive names. The violation then tells the
-	// author the limit that the private schema sets.
-	unrestricted := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
+	// Under Unrestricted, a registry reads any file that a directive
+	// names. The violation then tells the author the limit that the
+	// private schema sets.
+	unrestricted := schema.NewRegistry(
+		schema.WithAccess(schema.Unrestricted),
+		schema.WithResolvers(schema.Directive()),
+	)
 	report(p, docs[2], docs[2].Validate(ctx, unrestricted))
+
+	fmt.Println("\nValidate the third document in a registry without an Access:")
+
+	// A registry built without WithAccess does not load the schema that a
+	// document names. It refuses before it reads anything, and the error
+	// matches ErrAccessNotSet, so the server knows that its own registry
+	// lacks the option.
+	unset := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
+	report(p, docs[2], docs[2].Validate(ctx, unset))
 }
 
 // report prints the result of a validation the way a server answers the
@@ -181,6 +193,11 @@ func report(p *printer.Printer, doc *niceyaml.Node, err error) {
 // without the path or URL that the registry tried.
 func reason(err error) string {
 	switch {
+	// The program built the registry without WithAccess, so the author of
+	// the upload cannot fix this error.
+	case errors.Is(err, schema.ErrAccessNotSet):
+		return "the server does not load schemas that uploads name"
+
 	// The registry refuses a URL outside the prefixes before it sends a
 	// request, and a path outside the root before it reads anything.
 	case errors.Is(err, schema.ErrURLNotAllowed):

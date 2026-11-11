@@ -33,6 +33,7 @@ const DefaultLoadLimit = 10 << 20
 // section of the package documentation describes:
 //
 //	reg := schema.NewRegistry(
+//	    schema.WithAccess(access),
 //	    schema.WithLoadLimit(1<<20),
 //	    schema.WithResolvers(schema.Directive()),
 //	)

@@ -206,10 +206,13 @@ func file(path string) (Ref, error) {
 // whatever file system its other schemas come from. One registry thus
 // serves bundled schemas and schemas on disk:
 //
-//	reg := schema.NewRegistry(schema.WithResolvers(
-//	    schema.Directive(),
-//	    schema.When(isWidget, schema.FileFS(bundle, "schemas/widget.json")),
-//	))
+//	reg := schema.NewRegistry(
+//	    schema.WithAccess(schema.Unrestricted),
+//	    schema.WithResolvers(
+//	        schema.Directive(),
+//	        schema.When(isWidget, schema.FileFS(bundle, "schemas/widget.json")),
+//	    ),
+//	)
 //
 // The working directory does not affect the Ref, and the registry reads
 // it only through fsys, never as a path on disk. An absolute path does

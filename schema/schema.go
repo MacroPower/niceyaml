@@ -92,10 +92,13 @@ var (
 	// directive names. A resolver names AcceptAll for the documents that a
 	// registry must not check:
 	//
-	//	reg := schema.NewRegistry(schema.WithResolvers(
-	//	    schema.When(matcher.Exists(paths.Doc().Child("x-skip")), schema.AcceptAll),
-	//	    schema.Directive(),
-	//	))
+	//	reg := schema.NewRegistry(
+	//	    schema.WithAccess(schema.Unrestricted),
+	//	    schema.WithResolvers(
+	//	        schema.When(matcher.Exists(paths.Doc().Child("x-skip")), schema.AcceptAll),
+	//	        schema.Directive(),
+	//	    ),
+	//	)
 	//
 	// [Schema.Check] on AcceptAll returns only the error of the document,
 	// without a decode, so a document with an undefined alias passes.
@@ -180,6 +183,7 @@ func WithJSONSchemaOptions(opts ...jsonschema.ValidateOption) CompileOption {
 // name a missing document under a rare branch:
 //
 //	reg := schema.NewRegistry(
+//	    schema.WithAccess(schema.Unrestricted),
 //	    schema.WithResolvers(schema.Directive(), schemastore.New()),
 //	    schema.WithCompileOptions(schema.WithRequireRefs(false)),
 //	)
