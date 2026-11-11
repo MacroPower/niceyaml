@@ -295,22 +295,27 @@ const (
 
 // A docID names a document that the registry loads, whatever key a
 // request spells it with. It holds the file system that the document
-// lives in, as a [cacheKey] does, and a URI without userinfo or fragment.
-// The URI of a file is the URL that [fileURL] gives for the path that the
-// registry reads. Any other URI is in the normal form that [canonicalURL]
-// gives.
+// lives in and the kind of its key, as a [cacheKey] does. It also holds
+// a URI without userinfo or fragment. The URI of a file is the URL that
+// [fileURL] gives for the path that the registry reads. Any other URI is
+// in the normal form that [canonicalURL] gives.
+//
+// The kind keeps the document of a Ref from [Loadable] apart from the
+// file or URL that its key spells. A release of one of the two thus
+// leaves the other in the cache.
 //
 //nolint:unused // The fields tell the documents of the registry apart.
 type docID struct {
-	fs  fsID
-	uri string
+	fs   fsID
+	uri  string
+	kind keyKind
 }
 
-// docOf returns the [docID] of the document that key names. The registry
-// reads a file URL by the path that [fileURLPath] finds in it. That path
-// leaves out a query and a localhost authority, so every URL that reads
-// one file gets one docID. Windows reads a drive letter in either case, so
-// docOf spells it in upper case.
+// docOf returns the [docID] of the document that key names, with the
+// kind of key. The registry reads a file URL by the path that
+// [fileURLPath] finds in it. That path leaves out a query and a localhost
+// authority, so every URL that reads one file gets one docID. Windows
+// reads a drive letter in either case, so docOf spells it in upper case.
 func docOf(key cacheKey) docID {
 	if isFileURL(key.uri) {
 		if path, ok := fileURLPath(key.uri); ok {
@@ -318,13 +323,13 @@ func docOf(key cacheKey) docID {
 				path = strings.ToUpper(path[:1]) + path[1:]
 			}
 
-			return docID{fs: key.fs, uri: fileURL(path)}
+			return docID{kind: key.kind, fs: key.fs, uri: fileURL(path)}
 		}
 	}
 
 	uri, _ := splitUserinfo(key.uri)
 
-	return docID{fs: key.fs, uri: canonicalURL(uri)}
+	return docID{kind: key.kind, fs: key.fs, uri: canonicalURL(uri)}
 }
 
 // link adds v to the set that m holds under k.

@@ -3441,6 +3441,15 @@ func TestRegistry_Invalidate(t *testing.T) {
 			"Ref that names no file": {
 				refs: []schema.Ref{schema.FileFS(yamltest.MapFS(files), "../defs.json")},
 			},
+			// A Ref from URL with the key of a file does not name the
+			// file, whether a request loaded the file or a $ref reached
+			// it.
+			"URL Ref with the key of a file": {
+				refs: []schema.Ref{
+					schema.URL(schema.File(filepath.Join(dir, "s.json")).Key()),
+					schema.URL(schema.File(filepath.Join(dir, "defs.json")).Key()),
+				},
+			},
 		}
 
 		for name, tc := range tcs {
@@ -3479,6 +3488,116 @@ func TestRegistry_Invalidate(t *testing.T) {
 
 				assert.Equal(t, opens, fsys.opens.Load())
 				assert.Equal(t, int32(1), loads.Load())
+			})
+		}
+	})
+
+	t.Run("load in flight", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		files := map[string]string{"defs.json": stringDefs}
+
+		tcs := map[string]struct {
+			// The Refs the program passes to Invalidate during the load of
+			// another schema.
+			refs []schema.Ref
+			// Whether the registry keeps the schema of that load.
+			wantKept bool
+		}{
+			"no Ref": {
+				wantKept: true,
+			},
+			"zero Ref": {
+				refs:     []schema.Ref{{}},
+				wantKept: true,
+			},
+			"compiled schema": {
+				refs:     []schema.Ref{schema.MustCompile([]byte(stringA)).Ref()},
+				wantKept: true,
+			},
+			"Ref that names no file": {
+				refs:     []schema.Ref{schema.FileFS(yamltest.MapFS(files), "../defs.json")},
+				wantKept: true,
+			},
+			"URL Ref with the key of a file": {
+				refs:     []schema.Ref{schema.URL(schema.File(filepath.Join(dir, "defs.json")).Key())},
+				wantKept: true,
+			},
+			"file": {
+				refs: []schema.Ref{schema.File(filepath.Join(dir, "defs.json"))},
+			},
+			"file in a file system": {
+				refs: []schema.Ref{schema.FileFS(yamltest.MapFS(files), "defs.json")},
+			},
+			"URL": {
+				refs: []schema.Ref{schema.URL("http://schemas.test/defs.json")},
+			},
+			"another Ref from Loadable": {
+				refs: []schema.Ref{loading("other", []byte(stringA), nil)},
+			},
+			"URL Ref with the key of a file, and the file": {
+				refs: []schema.Ref{
+					schema.URL(schema.File(filepath.Join(dir, "defs.json")).Key()),
+					schema.File(filepath.Join(dir, "defs.json")),
+				},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				type result struct {
+					err error
+					s   *schema.Schema
+				}
+
+				var loads atomic.Int32
+
+				gate := make(chan struct{})
+				started := make(chan struct{}, 2)
+
+				ref := schema.Loadable("gated", func(context.Context) ([]byte, error) {
+					loads.Add(1)
+
+					started <- struct{}{}
+
+					<-gate
+
+					return []byte(stringA), nil
+				})
+
+				reg := schema.NewRegistry()
+
+				during := make(chan result, 1)
+
+				go func() {
+					s, err := reg.Schema(t.Context(), ref)
+					during <- result{s: s, err: err}
+				}()
+
+				<-started
+
+				reg.Invalidate(tc.refs...)
+
+				close(gate)
+
+				fromDuring := <-during
+				require.NoError(t, fromDuring.err)
+
+				again, err := reg.Schema(t.Context(), ref)
+				require.NoError(t, err)
+
+				// A call that names a document keeps the load out of the
+				// cache, so the next request loads the schema again.
+				if tc.wantKept {
+					assert.Same(t, fromDuring.s, again)
+					assert.Equal(t, int32(1), loads.Load())
+				} else {
+					assert.NotSame(t, fromDuring.s, again)
+					assert.Equal(t, int32(2), loads.Load())
+				}
 			})
 		}
 	})
@@ -3554,6 +3673,137 @@ func TestRegistry_Invalidate(t *testing.T) {
 
 				requireCheck(t, reg, schema.URL(tc.schemaURL), "")
 				assert.Equal(t, tc.want, requests())
+			})
+		}
+	})
+
+	t.Run("a loadable and a URL with one key", func(t *testing.T) {
+		t.Parallel()
+
+		// The registry fetches defs.json for its own Ref and again for the
+		// $ref of s.json. The Ref from Loadable goes by the URL of
+		// defs.json.
+		const defsURL = "http://schemas.test/defs.json"
+
+		tcs := map[string]struct {
+			// Builds the Ref the program passes to Invalidate from the Ref
+			// from Loadable.
+			changed func(loadable schema.Ref) schema.Ref
+			// The number of requests the server gets for each path by
+			// the end of the test.
+			want map[string]int
+			// The number of times the load of the Ref from Loadable runs
+			// by the end of the test.
+			wantLoads int32
+		}{
+			"Invalidate for the URL keeps the loadable": {
+				changed:   func(schema.Ref) schema.Ref { return schema.URL(defsURL) },
+				want:      map[string]int{"/s.json": 2, "/defs.json": 4},
+				wantLoads: 1,
+			},
+			"Invalidate for the loadable keeps the URL": {
+				changed:   func(loadable schema.Ref) schema.Ref { return loadable },
+				want:      map[string]int{"/s.json": 1, "/defs.json": 2},
+				wantLoads: 2,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				handler, requests := countingHandler(schemaHandler(map[string]string{
+					"/s.json":    refA,
+					"/defs.json": stringDefs,
+				}))
+				loadable, loads := countingLoader(defsURL, []byte(integerDefs))
+
+				refs := []schema.Ref{
+					schema.URL("http://schemas.test/s.json"),
+					schema.URL(defsURL),
+					loadable,
+				}
+
+				reg := schema.NewRegistry(schema.WithHTTPClient(handlerTransport(handler).Client()))
+
+				for _, ref := range refs {
+					_, err := reg.Schema(t.Context(), ref)
+					require.NoError(t, err)
+				}
+
+				reg.Invalidate(tc.changed(loadable))
+
+				for _, ref := range refs {
+					_, err := reg.Schema(t.Context(), ref)
+					require.NoError(t, err)
+				}
+
+				assert.Equal(t, tc.want, requests())
+				assert.Equal(t, tc.wantLoads, loads.Load())
+			})
+		}
+	})
+
+	t.Run("a loadable and a file with one key", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			// Picks the Ref the program passes to Invalidate.
+			changed func(file, loadable schema.Ref) schema.Ref
+			// Whether the registry keeps the schema of the file.
+			wantFileKept bool
+			// The number of times the load of the Ref from Loadable runs
+			// by the end of the test.
+			wantLoads int32
+		}{
+			"Invalidate for the file keeps the loadable": {
+				changed:   func(file, _ schema.Ref) schema.Ref { return file },
+				wantLoads: 1,
+			},
+			"Invalidate for the loadable keeps the file": {
+				changed:      func(_, loadable schema.Ref) schema.Ref { return loadable },
+				wantFileKept: true,
+				wantLoads:    2,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				// The Ref from Loadable goes by the file URL of s.json.
+				file := schema.File(yamltest.WriteFile(t, t.TempDir(), "s.json", stringDefs))
+				loadable, loads := countingLoader(file.Key(), []byte(integerDefs))
+
+				reg := schema.NewRegistry()
+
+				fromFile, err := reg.Schema(t.Context(), file)
+				require.NoError(t, err)
+
+				fromLoadable, err := reg.Schema(t.Context(), loadable)
+				require.NoError(t, err)
+
+				reg.Invalidate(tc.changed(file, loadable))
+
+				again, err := reg.Schema(t.Context(), file)
+				require.NoError(t, err)
+
+				if tc.wantFileKept {
+					assert.Same(t, fromFile, again)
+				} else {
+					assert.NotSame(t, fromFile, again)
+				}
+
+				again, err = reg.Schema(t.Context(), loadable)
+				require.NoError(t, err)
+
+				if tc.wantFileKept {
+					assert.NotSame(t, fromLoadable, again)
+				} else {
+					assert.Same(t, fromLoadable, again)
+				}
+
+				assert.Equal(t, tc.wantLoads, loads.Load())
 			})
 		}
 	})
@@ -4265,6 +4515,144 @@ func (e *kindError) Error() string {
 
 func (e *kindError) Unwrap() error {
 	return schema.ErrNoMatch
+}
+
+func TestRegistry_Schema_LoadableKey(t *testing.T) {
+	t.Parallel()
+
+	// The URL or the file holds fetched. The Ref from Loadable serves
+	// vendored under the key of that URL or file.
+	const (
+		schemaURL = "https://schemas.test/s.json"
+		fetched   = `{"type": "string"}`
+		vendored  = `{"type": "integer"}`
+	)
+
+	requireFetched := func(t *testing.T, s *schema.Schema) {
+		t.Helper()
+
+		require.NoError(t, s.ValidateValue(t.Context(), "x"))
+		require.Error(t, s.ValidateValue(t.Context(), 5))
+	}
+
+	requireVendored := func(t *testing.T, s *schema.Schema) {
+		t.Helper()
+
+		require.NoError(t, s.ValidateValue(t.Context(), 5))
+		require.Error(t, s.ValidateValue(t.Context(), "x"))
+	}
+
+	tcs := map[string]struct {
+		// Builds the Ref that names the location, and the options that a
+		// registry reaches the location with.
+		located func(t *testing.T) (schema.Ref, []schema.RegistryOption)
+		// The error of a registry whose access refuses the location.
+		refused error
+	}{
+		"URL": {
+			located: func(*testing.T) (schema.Ref, []schema.RegistryOption) {
+				client, _ := memoryClient(map[string]string{"/s.json": fetched})
+
+				return schema.URL(schemaURL), []schema.RegistryOption{schema.WithHTTPClient(client)}
+			},
+			refused: schema.ErrURLNotAllowed,
+		},
+		"file": {
+			located: func(t *testing.T) (schema.Ref, []schema.RegistryOption) {
+				t.Helper()
+
+				return schema.File(yamltest.WriteFile(t, t.TempDir(), "s.json", fetched)), nil
+			},
+			refused: schema.ErrFileNotAllowed,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			t.Run("each Ref gets its own bytes in either order", func(t *testing.T) {
+				t.Parallel()
+
+				for _, loadableFirst := range []bool{true, false} {
+					located, opts := tc.located(t)
+					loadable, loads := countingLoader(located.Key(), []byte(vendored))
+
+					reg := schema.NewRegistry(opts...)
+
+					if loadableFirst {
+						s, err := reg.Schema(t.Context(), loadable)
+						require.NoError(t, err)
+						requireVendored(t, s)
+					}
+
+					fromLocation, err := reg.Schema(t.Context(), located)
+					require.NoError(t, err)
+					requireFetched(t, fromLocation)
+
+					fromLoadable, err := reg.Schema(t.Context(), loadable)
+					require.NoError(t, err)
+					requireVendored(t, fromLoadable)
+
+					assert.Equal(t, int32(1), loads.Load())
+				}
+			})
+
+			t.Run("a refused location does not fail the loadable", func(t *testing.T) {
+				t.Parallel()
+
+				located, opts := tc.located(t)
+				loadable, loads := countingLoader(located.Key(), []byte(vendored))
+
+				// The access does not allow any file or URL.
+				reg := schema.NewRegistry(append(opts, withAccess(t))...)
+
+				_, err := reg.Schema(t.Context(), located)
+				requireLoadError(t, err, tc.refused)
+
+				s, err := reg.Schema(t.Context(), loadable)
+				require.NoError(t, err)
+				requireVendored(t, s)
+				assert.Equal(t, int32(1), loads.Load())
+			})
+
+			t.Run("the loadable does not answer for a refused location", func(t *testing.T) {
+				t.Parallel()
+
+				located, opts := tc.located(t)
+				loadable := loading(located.Key(), []byte(vendored), nil)
+
+				reg := schema.NewRegistry(append(opts, withAccess(t))...)
+
+				_, err := reg.Schema(t.Context(), loadable)
+				require.NoError(t, err)
+
+				_, err = reg.Schema(t.Context(), located)
+				requireLoadError(t, err, tc.refused)
+			})
+		})
+	}
+
+	t.Run("a refused directive does not fail the loadable", func(t *testing.T) {
+		t.Parallel()
+
+		loadable, loads := countingLoader(schemaURL, []byte(vendored))
+
+		reg := schema.NewRegistry(
+			withAccess(t, schema.AllowURLPrefixes("https://only.test/")),
+			schema.WithResolvers(schema.Directive()),
+		)
+
+		doc := yamltest.FirstDocument(t, yamltest.SchemaDirective(schemaURL, "a: 1\n"))
+
+		err := reg.Check(t.Context(), doc)
+		requireLoadError(t, err, schema.ErrURLNotAllowed)
+
+		s, err := reg.Schema(t.Context(), loadable)
+		require.NoError(t, err)
+		requireVendored(t, s)
+		assert.Equal(t, int32(1), loads.Load())
+	})
 }
 
 func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {

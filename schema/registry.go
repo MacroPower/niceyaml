@@ -76,13 +76,16 @@ const defaultRetryAfter = 1 * time.Minute
 // describes.
 //
 // The registry caches the schemas that it compiles by [Ref.Key], and a
-// Ref from [FileFS] by its file system too. It consults that cache before
-// loading. So after a schema compiles, the registry serves it to every
-// later document that names it without loading it again. The registry
-// remembers a failed load or compile for the interval that
-// [WithRetryAfter] sets, one minute by default. Every document that names
-// the Key inside the interval gets the error of that attempt. The first
-// document after the interval loads the schema again.
+// Ref from [FileFS] by its file system too. It caches a Ref from
+// [Loadable] or [Embedded] apart from a Ref that names a file or a URL
+// with the same Key, as Loadable describes. It consults that cache
+// before loading. So after a schema compiles, the registry serves it to
+// every later document that names it without loading it again.
+//
+// The registry remembers a failed load or compile for the interval that
+// [WithRetryAfter] sets, one minute by default. Every document that
+// names the schema inside the interval gets the error of that attempt.
+// The first document after the interval loads the schema again.
 //
 // The registry drops a failure after its interval has passed. It keeps
 // every schema that it compiles until [WithCacheLimit] drops the schema
@@ -839,9 +842,14 @@ func (r *Registry) Check(ctx context.Context, n *niceyaml.Node) error {
 // unchanged. For any other Ref, Schema compiles the bytes that
 // [Registry.Load] loads for it on the first request for its cache key.
 // It compiles with the options that [WithCompileOptions] gave the
-// registry, and it serves the result from the cache after that. The
-// cache key is the [Ref.Key], plus the file system for a Ref from
-// [FileFS]. So one path in two file systems is two schemas.
+// registry, and it serves the result from the cache after that.
+//
+// The cache key is the [Ref.Key], plus the file system for a Ref from
+// [FileFS]. So one path in two file systems is two schemas. The cache
+// key of a Ref from [Loadable] or [Embedded] also differs from the cache
+// key of each Ref that names a file or a URL, whatever Key the two Refs
+// share. So a Ref from Loadable and a Ref from [URL] with one Key are
+// two schemas, as Loadable describes.
 //
 // A load that fails returns an error matching [ErrLoad], and a compile
 // that fails returns one matching [ErrCompile]. [Registry.Lookup] gets
@@ -954,18 +962,12 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 		return nil, &LoadError{Ref: ref, Phase: ErrLoad, Err: err}
 	}
 
-	// A URL Ref shares its key space with a File Ref, whose key is a
-	// file:// URL, so the check runs before the cache. Otherwise such a
-	// URL Ref would return what a File Ref cached and fail on a registry
-	// that holds nothing for its key.
-	if ref.url && !httpfetch.IsHTTPURL(ref.key) {
-		return nil, &LoadError{Ref: ref, Phase: ErrLoad, Err: errNotHTTPURL}
-	}
-
-	// A Ref from File that names no file in this registry has no cache
-	// key, and the check runs before the cache. A path File could not make
-	// absolute shares its Key with the same path under the root, so it
-	// would otherwise return the schema of that other file.
+	// A Ref without a cache key fails here, before the cache. A URL Ref
+	// whose key is not an HTTP URL is such a Ref, because it never loads.
+	// A Ref from File that names no file in this registry is another. A
+	// path File could not make absolute shares its Key with the same path
+	// under the root, so it would otherwise return the schema of that
+	// other file.
 	key, err := keyOf(ref)
 	if err != nil {
 		return nil, &LoadError{Ref: ref, Phase: ErrLoad, Err: err}
@@ -1100,6 +1102,11 @@ func (r *Registry) Load(ctx context.Context, ref Ref) ([]byte, error) {
 // normal form of RFC 3986 section 6.2.2 makes one URL, such as one with
 // an upper-case host or dot segments.
 //
+// A Ref from [Loadable] names a document of its own, apart from the file
+// or URL that its key spells. Invalidate for that URL keeps the schema
+// of the Ref from Loadable, and Invalidate for the Ref from Loadable
+// keeps what the registry fetched from the URL.
+//
 // Invalidate matches a file by its path as the Ref spells it. A symbolic
 // link to the file, or its path in another letter case, names another
 // document. Invalidate ignores the zero Ref, a Ref from [Schema.Ref],
@@ -1107,6 +1114,11 @@ func (r *Registry) Load(ctx context.Context, ref Ref) ([]byte, error) {
 // from FileFS does not name such a file when its path leaves the file
 // system, or when the file system does not have an identity, as FileFS
 // describes.
+//
+// Invalidate also ignores a Ref from [URL] whose key is not an HTTP or
+// HTTPS URL. The registry does not load anything for such a Ref. A file
+// URL in a Ref from URL does not name the file, so a program passes a
+// Ref from [File] for a file.
 //
 // The registry does not check a URL that it fetched for changes.
 // Invalidate for a URL drops that document and each schema that reached
@@ -1136,8 +1148,8 @@ func (r *Registry) Invalidate(refs ...Ref) {
 			continue
 		}
 
-		// A Ref that has no cache key names no file the registry reads,
-		// so the registry keeps nothing under it.
+		// A Ref that has no cache key names no file the registry reads
+		// and no URL it fetches, so the registry keeps nothing under it.
 		key, err := keyOf(ref)
 		if err != nil {
 			continue
@@ -1530,7 +1542,7 @@ func (r *Registry) refOptions(
 			}
 
 			uri = user.apply(uri)
-			key = cacheKey{uri: uri}
+			key = cacheKey{kind: keyURL, uri: uri}
 			load = func() ([]byte, error) {
 				return r.fetch(ctx, uri)
 			}
@@ -1541,7 +1553,7 @@ func (r *Registry) refOptions(
 				return nil, fmt.Errorf("%w: %q", jsonschema.ErrNotResolved, httpfetch.Redacted(uri))
 			}
 
-			key = cacheKey{fs: inFS, uri: uri}
+			key = cacheKey{kind: keyFile, fs: inFS, uri: uri}
 			load = func() ([]byte, error) {
 				return r.readFile(ref.fsys, path)
 			}
@@ -1623,13 +1635,35 @@ func (r *Registry) refOptions(
 // file system that it names alive, as [fsID] describes, for as long as
 // the registry keeps an entry or runs a load under the key.
 //
+// The key also holds its [keyKind]. The kind keeps the schema of a Ref
+// from [Loadable] apart from the file or URL that its key spells.
+//
 //nolint:unused // The fields tell the keys of the registry apart.
 type cacheKey struct {
 	// The file system that uri names a file in, or the zero fsID for a file
 	// on disk and for every key that does not name a file.
-	fs  fsID
-	uri string
+	fs   fsID
+	uri  string
+	kind keyKind
 }
+
+// A keyKind says how the registry loads the bytes that a [cacheKey]
+// names. Two keys of different kinds are different entries, whatever
+// URI they share. So the Ref that a request names decides which bytes
+// answer it, and the order of the requests does not.
+type keyKind uint8
+
+const (
+	// The key is the name of a Ref from [Loadable] or [Embedded], and the
+	// load function of the Ref returns the bytes.
+	keyNamed keyKind = iota + 1
+	// The key is an HTTP URL that the registry fetches, for a Ref from
+	// [URL] or for a $ref.
+	keyURL
+	// The key is the URL of a file that the registry reads, for a Ref
+	// from [File] or [FileFS] or for a $ref.
+	keyFile
+)
 
 // keyOf returns the key that the registry caches the schema of ref
 // under. Its URI is [Ref.Key], except for a [Ref] that names a file,
@@ -1638,9 +1672,23 @@ type cacheKey struct {
 // path in two file systems is two entries. A Ref that does not name a
 // file that the registry can read does not have a key. For such a Ref,
 // keyOf returns the error that its read reports.
+//
+// The kind of the key follows the constructor of ref, as [keyKind]
+// describes. A Ref from [URL] whose key is not an HTTP or HTTPS URL does
+// not have a key either. The registry does not load anything for such a
+// Ref, whatever file its key spells. For such a Ref, keyOf returns
+// errNotHTTPURL.
 func keyOf(ref Ref) (cacheKey, error) {
+	if ref.url {
+		if !httpfetch.IsHTTPURL(ref.key) {
+			return cacheKey{}, errNotHTTPURL
+		}
+
+		return cacheKey{kind: keyURL, uri: ref.Key()}, nil
+	}
+
 	if ref.file == "" {
-		return cacheKey{uri: ref.Key()}, nil
+		return cacheKey{kind: keyNamed, uri: ref.Key()}, nil
 	}
 
 	base, err := fileBase(ref)
@@ -1653,7 +1701,7 @@ func keyOf(ref Ref) (cacheKey, error) {
 		return cacheKey{}, readError(ref.file, err)
 	}
 
-	return cacheKey{fs: inFS, uri: base}, nil
+	return cacheKey{kind: keyFile, fs: inFS, uri: base}, nil
 }
 
 // fileBase returns the URL that the registry knows the file of ref by,
