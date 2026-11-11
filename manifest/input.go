@@ -68,9 +68,35 @@ func Path(p string, opts ...InputOption) Input {
 
 // FS creates a new [Input] that reads the file or the directory at p in
 // fsys, such as an [embed.FS] that ships defaults with the app. It selects
-// files as [Path] does. A walk follows the symbolic links of a file system
-// that reports them through [fs.ReadLinkFS], and reads what Open returns
-// in any other file system.
+// files as [Path] does.
+//
+// A walk applies the link rule of Path only to a symbolic link that fsys
+// reports through [fs.ReadLinkFS]. A file system reports a link when its
+// Lstat describes the link, not the file that the link leads to. A file
+// system without the interface reports no link. [fs.Sub] of that file
+// system has the methods of the interface and reports no link either,
+// because its Lstat follows the link. The same holds for each type that
+// forwards Lstat to that file system with [fs.Lstat].
+//
+// A link whose Lstat fails does not load, and neither does a reported
+// link whose ReadLink fails. The load fails with the error of that method,
+// with or without [WithOutsideLinks].
+//
+// A walk learns that an entry is a link from the listing of its
+// directory. A listing can name a link that fsys does not report. Each of
+// those links to a regular file fails with an error that matches
+// [ErrOutsideLink]. [WithOutsideLinks] makes the walk read what Open
+// returns for that link, wherever the link leads. A type that wraps a
+// file system must forward ReadLink and Lstat to keep the link rule of
+// that file system.
+//
+// A listing can also describe a link as a regular file or as a
+// directory. The walk does not ask fsys about that entry. It reads the
+// entry as that file, and under [WithRecursive] it enters the entry as
+// that directory. The files that it reads there can lie outside the
+// input directory, with or without WithOutsideLinks. A file loads once
+// for each path that reaches it through one of those entries. A file
+// that one entry and its own path both reach thus loads twice.
 //
 // [Plan.Apply] does not write a file of fsys, and fails it with an error
 // that matches [ErrReadOnly].
@@ -200,8 +226,10 @@ func newInputConfig(opts []InputOption) inputConfig {
 }
 
 // WithRecursive is an [InputOption] that sets whether a directory input
-// also reads its subdirectories. A walk never enters a directory that a
-// symbolic link names.
+// also reads its subdirectories. A walk does not enter a directory that
+// a directory listing names as a symbolic link. The listing of an [FS]
+// input can describe that link as a directory, and the walk then enters
+// it, as FS describes.
 func WithRecursive(recursive bool) InputOption {
 	return func(c *inputConfig) {
 		c.recursive = recursive
@@ -241,6 +269,15 @@ func WithHidden(hidden bool) InputOption {
 // ~/.config/cafe. Tools such as GNU stow fill that directory with links to
 // files outside it. An app should not pass it for a directory that a
 // flag names. [Plan.Apply] never rewrites a file outside the directory.
+//
+// The walk of an [FS] input learns where a link leads only when the file
+// system reports the link, as FS describes. A reported link that leaves
+// the file system fails with an error that matches [ErrOutsideLink], even
+// with the option. A walk follows a link that the file system does not
+// report only with the option, and then reads what Open returns. That
+// file can lie outside the input directory, and outside the file system
+// when Open follows a link there. A file that an unreported link and its
+// own path both reach then loads twice.
 func WithOutsideLinks(follow bool) InputOption {
 	return func(c *inputConfig) {
 		c.outsideLinks = follow

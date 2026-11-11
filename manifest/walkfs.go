@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/escape"
 )
 
@@ -110,27 +111,25 @@ func (w *fsWalk) selects(rel string) bool {
 }
 
 // link adds the entry of the link at rel when it leads to a regular file,
-// or the problem of a link that the walk cannot follow. In a file system
-// that reports links through [fs.ReadLinkFS], the walk resolves the link
-// one element at a time. A target that is absolute or climbs out of the
-// input directory leads outside. In any other file system, the walk reads
-// what Open returns.
+// or the problem of a link that the walk cannot follow. The walk resolves
+// a link that the file system reports one element at a time. A target
+// that is absolute or climbs out of the input directory leads outside.
+// [fsWalk.unreportedLink] adds a link that the file system does not
+// report.
 func (w *fsWalk) link(rel string) {
 	full := path.Join(w.root, rel)
 
-	rl, ok := w.fsys.(fs.ReadLinkFS)
-	if !ok {
-		info, err := fs.Stat(w.fsys, full)
+	rl, ok, err := w.reported(full)
 
-		switch {
-		case err != nil:
-			w.selected++
-			w.entries = append(w.entries, walkEntry{rel: rel, err: readError(err)})
+	switch {
+	case err != nil:
+		w.selected++
+		w.entries = append(w.entries, walkEntry{rel: rel, err: readError(err)})
 
-		case info.Mode().IsRegular():
-			w.selected++
-			w.entries = append(w.entries, walkEntry{rel: rel, from: full})
-		}
+		return
+
+	case !ok:
+		w.unreportedLink(rel, full)
 
 		return
 	}
@@ -189,6 +188,73 @@ func (w *fsWalk) link(rel string) {
 	}
 
 	w.entries = append(w.entries, walkEntry{rel: rel, from: resolved, outside: !inside})
+}
+
+// reported returns the file system as an [fs.ReadLinkFS] when it reports
+// the link at full, an entry that the listing of a directory names as a
+// link. The file system reports the link when its Lstat describes a link
+// too. An Lstat that fails returns its error.
+//
+// A file system without [fs.ReadLinkFS] reports no link. [fs.Sub] of that
+// file system implements the interface and reports no link either, because
+// its Lstat follows the link. The walk thus asks Lstat about the link, and
+// does not rely on the type alone. ReadLink does not decide the answer.
+// The walk thus fails a link that Lstat describes and ReadLink cannot
+// read with the error of ReadLink, whatever [WithOutsideLinks] says.
+func (w *fsWalk) reported(full string) (fs.ReadLinkFS, bool, error) {
+	rl, ok := w.fsys.(fs.ReadLinkFS)
+	if !ok {
+		return nil, false, nil
+	}
+
+	info, err := rl.Lstat(full)
+	if err != nil {
+		return nil, false, err //nolint:wrapcheck // The caller reads the error of the file system.
+	}
+
+	if info.Mode()&fs.ModeSymlink == 0 {
+		return nil, false, nil
+	}
+
+	return rl, true, nil
+}
+
+// unreportedLink adds the entry of the link at rel, whose path in the file
+// system is full, when the file system does not report the link. The walk
+// cannot tell whether the link stays inside the input directory. A link to
+// a regular file is thus a problem unless [WithOutsideLinks] is set. With
+// that option, the walk reads what Open returns for the link.
+func (w *fsWalk) unreportedLink(rel, full string) {
+	info, err := fs.Stat(w.fsys, full)
+
+	switch {
+	case err != nil:
+		w.selected++
+		w.entries = append(w.entries, walkEntry{rel: rel, err: readError(err)})
+
+	case !info.Mode().IsRegular():
+		// The walk skips a link to anything but a regular file.
+
+	case !w.p.def.cfg.outsideLinks:
+		w.selected++
+		w.entries = append(w.entries, walkEntry{rel: rel, err: unreportedProblem()})
+
+	default:
+		w.selected++
+		w.entries = append(w.entries, walkEntry{rel: rel, from: full})
+	}
+}
+
+// unreportedProblem returns the problem of a link that the file system
+// does not report. A file system whose type implements [fs.ReadLinkFS]
+// still reports no link when it forwards to one that does not, so the
+// detail names both.
+func unreportedProblem() error {
+	detail := errors.New("pass WithOutsideLinks(true) to read it, or implement fs.ReadLinkFS in the file system " +
+		"and in each file system that it wraps")
+
+	return newProblem(ErrOutsideLink, "is a link, and the file system does not report where it leads",
+		niceyaml.WithDetails(detail))
 }
 
 // resolve follows the links of name, a path in the file system, one

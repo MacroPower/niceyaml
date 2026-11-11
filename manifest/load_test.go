@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -1208,6 +1209,93 @@ func TestRegistry_Load_Inputs(t *testing.T) {
 			assert.Equal(t, tc.want, listObjects(set))
 		})
 	}
+}
+
+// TestRegistry_Load_LinkProblems loads a directory whose only file that
+// the patterns select is a link that the walk cannot read. The walk
+// selected the link, so the missing Cafe does not say that the
+// directory holds no file that matches.
+func TestRegistry_Load_LinkProblems(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		fsys   func(dir string) fs.FS
+		target string
+		// The problem of the link, as the load formats it.
+		problem string
+		err     error
+	}{
+		"link that the file system does not report": {
+			fsys: func(dir string) fs.FS {
+				// The struct hides every method of the file system but Open.
+				return struct{ fs.FS }{os.DirFS(dir)}
+			},
+			target: "../shared/hours.yaml",
+			problem: stringtest.JoinLF(
+				"|-- config/hours.yaml: is a link, and the file system does not report where it leads",
+				"|   `-- pass WithOutsideLinks(true) to read it, or implement fs.ReadLinkFS in the file system "+
+					"and in each file system that it wraps",
+			),
+			err: manifest.ErrOutsideLink,
+		},
+		"link that Lstat cannot describe": {
+			fsys:    func(dir string) fs.FS { return lstatDeniedFS{os.DirFS(dir)} },
+			target:  "../shared/hours.yaml",
+			problem: "|-- config/hours.yaml: permission denied",
+			err:     fs.ErrPermission,
+		},
+		"link outside the directory": {
+			fsys:   os.DirFS,
+			target: "../shared/hours.yaml",
+			problem: stringtest.JoinLF(
+				"|-- config/hours.yaml: links to ../shared/hours.yaml, which leads outside config",
+				"|   `-- copy the file into config, or make config itself the link",
+			),
+			err: manifest.ErrOutsideLink,
+		},
+		"dangling link": {
+			fsys:    os.DirFS,
+			target:  "gone.yaml",
+			problem: "|-- config/hours.yaml: links to gone.yaml, which does not exist",
+			err:     fs.ErrNotExist,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+
+			tree{
+				files: map[string]string{"shared/hours.yaml": hoursDoc},
+				links: map[string]string{"config/hours.yaml": tc.target},
+			}.write(t, dir)
+
+			_, err := newCafeRegistry(t).Load(t.Context(), manifest.FS(tc.fsys(dir), "config"))
+			require.ErrorIs(t, err, tc.err)
+			require.ErrorIs(t, err, manifest.ErrMissingManifest)
+
+			assert.Equal(t, stringtest.JoinLF(
+				"config: 2 errors",
+				tc.problem,
+				"`-- missing Cafe",
+				"    `-- add a document with apiVersion: cafe.jacobcolvin.com/v1 and kind: Cafe",
+			), niceyaml.FormatError(err))
+		})
+	}
+}
+
+// lstatDeniedFS is a file system that implements [fs.ReadLinkFS] and
+// whose Lstat fails with an error that matches [fs.ErrPermission].
+type lstatDeniedFS struct{ fs.FS }
+
+func (f lstatDeniedFS) ReadLink(name string) (string, error) {
+	return fs.ReadLink(f.FS, name) //nolint:wrapcheck // The walk reads the error of the file system.
+}
+
+func (f lstatDeniedFS) Lstat(name string) (fs.FileInfo, error) {
+	return nil, &fs.PathError{Op: "lstat", Path: name, Err: fs.ErrPermission}
 }
 
 func TestRegistry_Load_Context(t *testing.T) {
