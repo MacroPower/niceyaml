@@ -178,14 +178,20 @@ func WithSelfValidation(enabled bool) DecodeOption {
 //	})
 //
 // The self-validation walk calls fn on a value after the values below it
-// and its own Validate method pass, as the Validation section of the
-// package documentation describes. Each WithValueCheck adds a function.
-// For one value, the walk runs the functions for its type in the order
-// given and stops at the first that fails, as a decode runs repeated
-// [WithValidator] options. T matches by its exact type, so a check of
-// string skips a value of a type such as `type Name string`. A field of
-// type *T reaches fn through the value it points to, and a nil pointer
-// skips fn.
+// and after its own Validate method, whatever they return, as the
+// Validation section of the package documentation describes. Each
+// WithValueCheck adds a function. For one value, the walk runs every
+// function for its type in the order given and reports the failure of
+// each. A linter thus gives each independent rule its own WithValueCheck.
+// An fn that reads state that another check guarantees guards it itself.
+// For example, it returns nil when a field it depends on is empty. It can
+// also call the Validate method of the value first and return nil when
+// [HasErrors] reports an error in the result. The result of a Validate
+// that only warns is not nil. A guard that tests it against nil thus
+// skips fn on every value that only warns. T matches by its exact type,
+// so a check of string skips a value of a type such as `type Name
+// string`. A field of type *T reaches fn through the value it points to,
+// and a nil pointer skips fn.
 //
 // The `@` paths of an error from fn read from the value. The walk puts
 // them under the path of the value, as it does for a Validate method. It
