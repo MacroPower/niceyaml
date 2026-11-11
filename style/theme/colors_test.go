@@ -346,6 +346,57 @@ func TestDerive_InvalidToken(t *testing.T) {
 	}
 }
 
+func TestDerive_UnknownMode(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		want string
+		mode theme.Mode
+	}{
+		"unset":        {mode: theme.Mode(0), want: "unknown mode: mode is unset"},
+		"out of range": {mode: theme.Mode(3), want: "unknown mode: 3"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			c := brand
+			c.Mode = tc.mode
+
+			got, err := theme.Derive(c, nil)
+			require.ErrorIs(t, err, theme.ErrUnknownMode)
+			require.EqualError(t, err, tc.want)
+			assert.Equal(t, style.Styles{}, got)
+
+			// MustDerive panics with the error that Derive returns.
+			panicked := panicError(t, func() {
+				theme.MustDerive(c, nil)
+			})
+			assert.Equal(t, err, panicked)
+
+			// FromColors rejects the mode as Derive does.
+			th, err := theme.FromColors("test-mode", c, nil)
+			require.ErrorIs(t, err, theme.ErrUnknownMode)
+			require.EqualError(t, err, tc.want)
+			assert.Equal(t, theme.Theme{}, th)
+		})
+	}
+
+	// Derive reports the mode ahead of the tokens it rejects.
+	t.Run("joins the mode and the tokens", func(t *testing.T) {
+		t.Parallel()
+
+		tokens := map[kind.Kind]theme.Token{kind.NameTag: "#zzz"}
+
+		_, err := theme.Derive(theme.Colors{}, tokens)
+		require.ErrorIs(t, err, theme.ErrUnknownMode)
+		require.ErrorIs(t, err, style.ErrInvalidColor)
+		require.EqualError(t, err, "unknown mode: mode is unset\n"+
+			`token for "nameTag": invalid color: "#zzz"`)
+	})
+}
+
 func TestToken_UnmarshalText(t *testing.T) {
 	t.Parallel()
 

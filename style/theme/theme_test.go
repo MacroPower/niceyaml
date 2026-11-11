@@ -33,7 +33,8 @@ func TestMode_String(t *testing.T) {
 	}{
 		"light":        {mode: theme.Light, want: "light"},
 		"dark":         {mode: theme.Dark, want: "dark"},
-		"out of range": {mode: theme.Mode(2), want: "Mode(2)"},
+		"unset":        {mode: theme.Mode(0), want: "Mode(0)"},
+		"out of range": {mode: theme.Mode(3), want: "Mode(3)"},
 	}
 
 	for name, tc := range tcs {
@@ -55,7 +56,8 @@ func TestMode_MarshalText(t *testing.T) {
 	}{
 		"light":        {mode: theme.Light, want: "light"},
 		"dark":         {mode: theme.Dark, want: "dark"},
-		"out of range": {mode: theme.Mode(2), err: theme.ErrUnknownMode},
+		"unset":        {mode: theme.Mode(0), err: theme.ErrUnknownMode},
+		"out of range": {mode: theme.Mode(3), err: theme.ErrUnknownMode},
 		"negative":     {mode: theme.Mode(-1), err: theme.ErrUnknownMode},
 	}
 
@@ -98,13 +100,13 @@ func TestMode_UnmarshalText(t *testing.T) {
 
 			// Each case starts from a value that no text names, so a
 			// failing case shows that it leaves the value in place.
-			got := theme.Mode(2)
+			got := theme.Mode(3)
 
 			err := got.UnmarshalText([]byte(tc.text))
 			if tc.err != nil {
 				require.ErrorIs(t, err, tc.err)
 				require.ErrorContains(t, err, fmt.Sprintf("%q", tc.text))
-				assert.Equal(t, theme.Mode(2), got)
+				assert.Equal(t, theme.Mode(3), got)
 
 				return
 			}
@@ -149,8 +151,7 @@ func TestMode_Encoding(t *testing.T) {
 		assert.Equal(t, "$.mode", yamltest.PathOf(t, yamltest.RequireError(t, err)).String())
 	})
 
-	// A null never reaches UnmarshalText. A Mode keeps its value, and a
-	// *Mode reads the null as nil.
+	// A null never reaches UnmarshalText, so a Mode keeps its value.
 	t.Run("null", func(t *testing.T) {
 		t.Parallel()
 
@@ -160,15 +161,25 @@ func TestMode_Encoding(t *testing.T) {
 
 		require.NoError(t, json.Unmarshal([]byte(`{"mode":null}`), &got))
 		assert.Equal(t, theme.Dark, got.Mode)
+	})
+
+	// A file that leaves the mode out, or holds a null for it, leaves a
+	// zero Mode unset. The unset Mode names neither background.
+	t.Run("missing mode stays unset", func(t *testing.T) {
+		t.Parallel()
 
 		type file struct {
-			Mode *theme.Mode `yaml:"mode"`
+			Mode theme.Mode `yaml:"mode"`
 		}
 
-		for _, text := range []string{"mode: ~\n", "mode:\n"} {
+		for _, text := range []string{"mode: ~\n", "mode:\n", "name: fika\n"} {
 			decoded, err := niceyaml.NewSourceFromString(text).Decode[file](t.Context())
 			require.NoError(t, err)
-			assert.Nil(t, decoded.Mode, text)
+			assert.NotEqual(t, theme.Light, decoded.Mode, text)
+			assert.NotEqual(t, theme.Dark, decoded.Mode, text)
+
+			_, err = decoded.Mode.MarshalText()
+			require.ErrorIs(t, err, theme.ErrUnknownMode, text)
 		}
 	})
 }
@@ -377,6 +388,10 @@ func TestCatalog_Mode(t *testing.T) {
 		theme.New("a-dark", theme.Dark, empty),
 		theme.New("b-light", theme.Light, empty),
 		theme.New("c-dark", theme.Dark, empty),
+		// New keeps an unset mode, and the zero Theme holds one, so
+		// neither background lists these two.
+		theme.New("d-unset", theme.Mode(0), empty),
+		theme.Theme{Name: "e-zero"},
 	)
 
 	dark := c.Mode(theme.Dark)
@@ -420,6 +435,7 @@ func TestBuiltin(t *testing.T) {
 	// Every entry is complete and builds.
 	for _, th := range all {
 		assert.NotEmpty(t, th.Name)
+		assert.Contains(t, []theme.Mode{theme.Light, theme.Dark}, th.Mode, th.Name)
 		assert.NotEqual(t, style.Styles{}, th.Styles(), th.Name)
 		assert.NotEqual(t, lipgloss.NoColor{}, th.Style(kind.Comment).GetForeground(), th.Name)
 	}

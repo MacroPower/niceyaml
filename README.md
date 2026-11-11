@@ -99,7 +99,7 @@ Views do not depend on the printer. The renderer example writes an HTML renderer
 - [examples/themes/catalog](examples/themes/catalog)
 - [examples/themes/custom](examples/themes/custom)
 
-The catalog example looks up a [theme][niceyaml/style/theme] by name for a `-theme` flag and sets the color profile for a `-color` flag. It also prints with the default styles for the terminal's background, light or dark. The custom example reads a theme from a YAML file, checks each color and style string, and builds the theme with [`theme.FromColors`][niceyaml/style/theme.FromColors].
+The catalog example looks up a [theme][niceyaml/style/theme] by name for a `-theme` flag and sets the color profile for a `-color` flag. It also prints with the default styles for the terminal's background, light or dark. The custom example decodes a theme from a YAML file into a [`theme.Palette`][niceyaml/style/theme.Palette], which checks the mode, each color, and each style string. It then builds the theme with `Palette.Theme`.
 
 ### Diffs
 
@@ -229,7 +229,7 @@ See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pag
 [niceyaml/printer.Printer.Render]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/printer#Printer.Render
 [niceyaml/printer.Printer.RenderSideBySide]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/printer#Printer.RenderSideBySide
 [niceyaml/style/theme]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/style/theme
-[niceyaml/style/theme.FromColors]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/style/theme#FromColors
+[niceyaml/style/theme.Palette]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/style/theme#Palette
 [niceyaml/style/kind.Kind]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/style/kind#Kind
 [niceyaml/bubbles/yamlviewport]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/bubbles/yamlviewport
 [niceyaml/fangs]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/fangs

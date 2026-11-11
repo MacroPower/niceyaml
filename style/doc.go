@@ -91,7 +91,9 @@
 // finds a theme by name and gets [Styles] with the colors of that theme.
 // [go.jacobcolvin.com/niceyaml/style/theme.FromColors] builds a custom
 // theme from a few colors. The custom theme gets diff, error, and
-// highlight kinds derived from those colors.
+// highlight kinds derived from those colors. A
+// [go.jacobcolvin.com/niceyaml/style/theme.Palette] decodes such a theme
+// from a file.
 //
 // # Style Strings
 //
@@ -124,7 +126,7 @@
 // [ErrInvalidColor].
 //
 // [ParseColor] reads one color in the same form, for a color that a
-// program reads on its own, such as a field of a theme file.
+// program reads on its own, such as a field of a config file.
 //
 // Example usage:
 //

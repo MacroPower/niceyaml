@@ -1,41 +1,16 @@
 package theme
 
 import (
-	"charm.land/lipgloss/v2"
-
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
-// palette holds the colors of one built-in theme as hex strings, with the
-// tokens that [Derive] builds the theme from. An empty string leaves its
-// color unset, because [lipgloss.Color] returns a [lipgloss.NoColor] for
-// it.
-type palette struct {
-	Tokens                  map[kind.Kind]Token
-	Fg, Bg                  string
-	Accent, OK, Warn, Error string
-	Mode                    Mode
-}
-
-// colors returns the [Colors] of the palette.
-func (p palette) colors() Colors {
-	return Colors{
-		Fg:     lipgloss.Color(p.Fg),
-		Bg:     lipgloss.Color(p.Bg),
-		Accent: lipgloss.Color(p.Accent),
-		OK:     lipgloss.Color(p.OK),
-		Warn:   lipgloss.Color(p.Warn),
-		Error:  lipgloss.Color(p.Error),
-		Mode:   p.Mode,
-	}
-}
-
 // palettes holds every built-in theme except charm and charm-light, keyed
-// by name.
+// by name. Each [Palette] leaves its Name unset, because its key holds the
+// name.
 //
 // Most entries derive from the Chroma syntax highlighter:
 // https://github.com/alecthomas/chroma
-var palettes = map[string]palette{
+var palettes = map[string]Palette{
 	"abap": {
 		Mode:   Light,
 		Fg:     "#000000",

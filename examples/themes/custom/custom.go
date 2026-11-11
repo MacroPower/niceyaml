@@ -24,74 +24,38 @@ var (
 
 	//go:embed broken.yaml
 	exampleBroken string
-)
 
-// themeFile is the type a theme file decodes into. Each key under tokens
-// names a kind, and each value holds the token for that kind, so the map
-// goes to [theme.FromColors] as it is.
-type themeFile struct {
-	Name   string                    `yaml:"name"`
-	Tokens map[kind.Kind]theme.Token `yaml:"tokens"`
-	Colors struct {
-		Fg     string `yaml:"fg"`
-		Bg     string `yaml:"bg"`
-		Accent string `yaml:"accent"`
-		OK     string `yaml:"ok"`
-		Warn   string `yaml:"warn"`
-		Error  string `yaml:"error"`
-	} `yaml:"colors"`
-	Mode theme.Mode `yaml:"mode"`
-}
+	//go:embed incomplete.yaml
+	exampleIncomplete string
+
+	// The decoder rejects a key that no field of a theme.Palette reads,
+	// such as acent in place of accent.
+	strict = niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject)
+)
 
 func main() {
 	ctx := context.Background()
 	p := printer.New()
 
-	// A theme.Token rejects a spec that style.Parse rejects when it decodes.
-	// The validators run before the decoder, and a validator that fails ends
-	// the decode before the decoder reads the tokens. The validToken rule
-	// thus decodes each token. The decode then reports the problems of the
-	// tokens together with those of the colors, the kinds, and the mode.
-	// Key selects the keys of the tokens rather than their values. Each
-	// passes when its path selects no Node, so it cannot catch a missing
-	// mode. The knownMode rule checks the whole file instead.
-	tokenPath := paths.Current().Child("tokens").ChildAll()
-	rules := niceyaml.WithValidator(niceyaml.MultiValidator(
-		niceyaml.ValidatorFunc(knownMode),
-		niceyaml.Each(paths.Current().Child("colors").ChildAll(), niceyaml.ValidatorFunc(readableColor)),
-		niceyaml.Each(tokenPath.Key(), niceyaml.ValidatorFunc(knownKind)),
-		niceyaml.Each(tokenPath, niceyaml.ValidatorFunc(validToken)),
-	))
-
-	// The decoder rejects a key that no field reads, such as acent in place
-	// of accent.
-	strict := niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject)
-
 	fmt.Println("\nBuild a theme from its file:")
 
+	// A theme.Palette holds a whole theme file. Its mode, its colors, and
+	// its tokens each reject bad text when they decode. The decode thus
+	// reports each of them at its place without a validator.
 	source := niceyaml.NewSourceFromString(exampleFika, niceyaml.WithName("fika.yaml"))
 
-	fikaFile, err := source.Decode[themeFile](ctx, rules, strict)
+	pal, err := source.Decode[theme.Palette](ctx, strict)
 	if err != nil {
 		lipgloss.Println(p.PrintError(err))
 
 		return
 	}
 
-	// FromColors creates a theme whose styles Derive builds from the colors
-	// and the tokens. Derive sets the headings, the highlights, the diff
+	// Theme creates a theme whose styles Derive builds from the colors and
+	// the tokens. Derive sets the headings, the highlights, the diff
 	// lines, and the marks of errors from the colors. It then layers each
-	// token over the style of its kind. The readableColor rule has checked
-	// each color, so lipgloss.Color reads it as style.ParseColor does.
-	fika, err := theme.FromColors(fikaFile.Name, theme.Colors{
-		Fg:     lipgloss.Color(fikaFile.Colors.Fg),
-		Bg:     lipgloss.Color(fikaFile.Colors.Bg),
-		Accent: lipgloss.Color(fikaFile.Colors.Accent),
-		OK:     lipgloss.Color(fikaFile.Colors.OK),
-		Warn:   lipgloss.Color(fikaFile.Colors.Warn),
-		Error:  lipgloss.Color(fikaFile.Colors.Error),
-		Mode:   fikaFile.Mode,
-	}, fikaFile.Tokens)
+	// token over the style of its kind.
+	fika, err := pal.Theme()
 	if err != nil {
 		fmt.Println(err)
 
@@ -132,71 +96,79 @@ func main() {
 
 	fmt.Println("\nReject a broken theme file:")
 
-	// MultiValidator runs every rule, and Each checks every Node that its
-	// path selects, so the decode reports each mistake in the file.
+	// Two optional rules report what a Palette cannot report at its place
+	// in the file. The hasValue rule rejects a key without a value, such as
+	// a color that YAML reads as a comment. The knownKind rule rejects a
+	// misspelled kind, which Theme otherwise reports by name alone. Key
+	// selects the keys of the tokens rather than their values.
+	//
+	// The validators run before the decoder, and a validator that fails
+	// ends the decode before the decoder reads the file. The decodes rule
+	// thus decodes the palette as well. The decode then reports the
+	// problems of the mode, the colors, and the tokens together with those
+	// of the two rules.
+	rules := niceyaml.WithValidator(niceyaml.MultiValidator(
+		niceyaml.ValidatorFunc(decodes),
+		niceyaml.Each(paths.Current().RecursiveAll(), niceyaml.ValidatorFunc(hasValue)),
+		niceyaml.Each(paths.Current().Child("tokens").ChildAll().Key(), niceyaml.ValidatorFunc(knownKind)),
+	))
+
 	broken := niceyaml.NewSourceFromString(exampleBroken, niceyaml.WithName("broken.yaml"))
-	_, err = broken.Decode[themeFile](ctx, rules, strict)
+	_, err = broken.Decode[theme.Palette](ctx, rules, strict)
 	lipgloss.Println(p.PrintError(err))
-}
 
-// knownMode rejects a theme file without a mode, with a null mode, or with
-// a mode that is neither dark nor light. Without the rule, a file without
-// a mode or with mode: ~ decodes as [theme.Light], the zero [theme.Mode].
-func knownMode(ctx context.Context, n *niceyaml.Node) error {
-	modePath := paths.Current().Child("mode")
+	fmt.Println("\nReject a theme file without a name and a mode:")
 
-	// A null never reaches UnmarshalText, but it sets a pointer to nil, so
-	// the rule decodes into a *theme.Mode. The decode rejects a name other
-	// than dark and light.
-	var mode *theme.Mode
+	// A decode cannot report a key that the file leaves out, so the name
+	// and the mode stay unset. Theme rejects both, without a place in the
+	// file.
+	incomplete := niceyaml.NewSourceFromString(exampleIncomplete, niceyaml.WithName("incomplete.yaml"))
 
-	found, err := n.DecodeIfPresent(ctx, modePath, &mode)
+	pal, err = incomplete.Decode[theme.Palette](ctx, rules, strict)
 	if err != nil {
-		return fmt.Errorf("decode mode: %w", err)
+		lipgloss.Println(p.PrintError(err))
+
+		return
 	}
 
-	if !found {
-		return niceyaml.NewError("mode is missing")
-	}
-
-	if mode == nil {
-		return niceyaml.NewError("mode is empty", niceyaml.AtPath(modePath))
-	}
-
-	return nil
+	_, err = pal.Theme()
+	fmt.Println(err)
 }
 
-// readableColor rejects a color that is null or empty, or that
-// style.ParseColor rejects. ParseColor reads an empty string as unset, but
-// each color that the file names must hold a value. The rule decodes into
-// a new string, and a null leaves it empty. YAML reads an unquoted color,
-// such as bg: #2b1d14, as a comment that leaves the key null. The rule
-// gives the hint about the "#" only when a comment stands in place of the
-// value, and not for a null such as bg: ~.
-func readableColor(ctx context.Context, n *niceyaml.Node) error {
-	text, err := n.Decode[string](ctx)
+// decodes rejects a theme file that does not decode into a [theme.Palette].
+func decodes(ctx context.Context, n *niceyaml.Node) error {
+	_, err := n.Decode[theme.Palette](ctx, strict)
+
+	return err
+}
+
+// hasValue rejects a key that holds a null. A null leaves the field of a
+// [theme.Palette] unset without an error, and a theme file has no use for
+// one. YAML reads an unquoted color, such as bg: #2b1d14, as a comment
+// that leaves the key null. The rule gives the hint about the "#" only
+// when a comment stands in place of the value, and not for a null such as
+// bg: ~.
+func hasValue(ctx context.Context, n *niceyaml.Node) error {
+	value, err := n.Decode[any](ctx)
 	if err != nil {
-		return fmt.Errorf("decode color: %w", err)
+		return fmt.Errorf("decode value: %w", err)
 	}
 
-	if text == "" {
-		if tks := n.Tokens(); len(tks) > 0 && tks[0].Type == token.CommentType {
-			return niceyaml.NewError("color is empty",
-				niceyaml.WithDetails(errors.New(`YAML reads an unquoted "#" as the start of a comment`)))
-		}
-
-		return niceyaml.NewError("color is empty")
+	if value != nil {
+		return nil
 	}
 
-	// Invalid returns nil for a color that ParseColor accepts.
-	_, err = style.ParseColor(text)
+	if tks := n.Tokens(); len(tks) > 0 && tks[0].Type == token.CommentType {
+		return niceyaml.NewError("value is empty",
+			niceyaml.WithDetails(errors.New(`YAML reads an unquoted "#" as the start of a comment`)))
+	}
 
-	return niceyaml.Invalid(err)
+	return niceyaml.NewError("value is empty")
 }
 
-// knownKind rejects a key that does not name a predefined kind. FromColors
-// accepts a token for a kind of any name, so a misspelled key styles a kind
-// that no renderer draws.
+// knownKind rejects a key that does not name a predefined kind.
+// [theme.Palette.Theme] rejects such a key too, but it names the kind
+// without a place in the file.
 func knownKind(ctx context.Context, n *niceyaml.Node) error {
 	name, err := n.Decode[kind.Kind](ctx)
 	if err != nil {
@@ -208,15 +180,4 @@ func knownKind(ctx context.Context, n *niceyaml.Node) error {
 	}
 
 	return niceyaml.NewError("unknown kind")
-}
-
-// validToken rejects a token that style.Parse rejects, through the decode
-// into a [theme.Token].
-func validToken(ctx context.Context, n *niceyaml.Node) error {
-	_, err := n.Decode[theme.Token](ctx)
-	if err != nil {
-		return fmt.Errorf("decode token: %w", err)
-	}
-
-	return nil
 }
