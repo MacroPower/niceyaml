@@ -22,6 +22,7 @@ It enables **friendly and predictable handling of YAML-compatible documents** in
 - [`Node`][niceyaml.Node] decoding with validation hooks, and a matching [`encoder`][niceyaml/encoder]
 - JSON schema [validation][niceyaml/schema.Schema] with YAML path errors
 - Document [`edit`][niceyaml/edit]s that keep comments and formatting, with errors bound at the lines the user wrote
+- [`input`][niceyaml/input] discovery of the YAML files in a path, a directory tree, or standard input, with link containment
 - [`manifest`][niceyaml/manifest] loading and migration of configuration that declares its `apiVersion` and `kind`, as Kubernetes manifests do
 - Bubble [`yamlviewport`][niceyaml/bubbles/yamlviewport] for Bubble Tea, in a module of its own
 - [`fangs`][niceyaml/fangs] adapters for CLIs built with fang, in a module of their own
@@ -192,7 +193,7 @@ The `edit` package edits a subset of YAML and refuses the rest with `edit.ErrUns
 - [examples/manifests/load](examples/manifests/load)
 - [examples/manifests/migrate](examples/manifests/migrate)
 
-[`manifest.Registry`][niceyaml/manifest.Registry] declares the kinds of an app once and loads a directory of manifests into typed Go values. The load example reports every problem of a broken directory in one error. The migrate example reads files of version `v1beta1` as the current Go type, then plans, diffs, and applies the rewrite to `v1`.
+[`manifest.Registry`][niceyaml/manifest.Registry] declares the kinds of an app once and loads a directory of manifests into typed Go values. The [`input`][niceyaml/input] package names the files to load, and a tool without kinds, such as a linter, reads the same files with `input.Input.Files`. The load example reports every problem of a broken directory in one error. The migrate example reads files of version `v1beta1` as the current Go type, then plans, diffs, and applies the rewrite to `v1`.
 
 ### Viewport
 
@@ -220,6 +221,7 @@ See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pag
 [niceyaml/finder]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/finder
 [niceyaml/line]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/line
 [niceyaml/line.View]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/line#View
+[niceyaml/input]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/input
 [niceyaml/manifest]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/manifest
 [niceyaml/manifest.Registry]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/manifest#Registry
 [niceyaml/paths]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/paths

@@ -15,6 +15,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/edit"
+	"go.jacobcolvin.com/niceyaml/input"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/manifest"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -67,7 +68,7 @@ func planOf(t *testing.T, opts []manifest.RegistryOption, files map[string]strin
 // load then rejects, so the load of a plan without problems passes, and
 // each object is up to date. Files of the directory config load as
 // [configFS] reads them, so in applies to them.
-func requireReloads(t *testing.T, reg *manifest.Registry, plan *manifest.Plan, in []manifest.InputOption,
+func requireReloads(t *testing.T, reg *manifest.Registry, plan *manifest.Plan, in []input.Option,
 	load ...manifest.LoadOption,
 ) {
 	t.Helper()
@@ -99,12 +100,12 @@ func requireReloads(t *testing.T, reg *manifest.Registry, plan *manifest.Plan, i
 		}
 	}
 
-	input := manifest.Sources(srcs...)
+	src := input.Sources(srcs...)
 	if len(files) == len(srcs) {
-		input = configFS(files, in...)
+		src = configFS(files, in...)
 	}
 
-	set, err := reg.Load(t.Context(), input, append(load, manifest.WithSetChecks(false))...)
+	set, err := reg.Load(t.Context(), src, append(load, manifest.WithSetChecks(false))...)
 	require.NoError(t, err)
 
 	for o := range set.Objects() {
@@ -163,8 +164,8 @@ func TestRegistry_PlanMigration(t *testing.T) {
 	}
 
 	// The input of a reference document whose anchor b holds a spec.
-	baseReference := []manifest.InputOption{
-		manifest.WithSourceOptions(niceyaml.WithReferences(
+	baseReference := []input.Option{
+		input.WithSourceOptions(niceyaml.WithReferences(
 			niceyaml.NewSourceFromString("base: &b {spec: {seats: 5}}\n"),
 		)),
 	}
@@ -172,7 +173,7 @@ func TestRegistry_PlanMigration(t *testing.T) {
 	tcs := map[string]struct {
 		files   map[string]string
 		opts    []manifest.RegistryOption
-		in      []manifest.InputOption
+		in      []input.Option
 		load    []manifest.LoadOption
 		headers []string
 		afters  []string
@@ -600,6 +601,26 @@ func TestRegistry_PlanMigration(t *testing.T) {
 	}
 }
 
+func TestRegistry_PlanMigration_ReaderThenLoad(t *testing.T) {
+	t.Parallel()
+
+	reg := newCafeRegistry(t)
+	in := input.Reader("menu.yaml", strings.NewReader(menuDoc))
+
+	// The plan reads the text, and the load after it reuses that text.
+	plan, err := reg.PlanMigration(t.Context(), in)
+	require.NoError(t, err)
+	require.Len(t, plan.Files(), 1)
+	assert.Equal(t, menuV1Doc, string(plan.Files()[0].After()))
+
+	set, err := reg.Load(t.Context(), in, manifest.WithSetChecks(false))
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		`MenuItem "kanelbulle" cafe.jacobcolvin.com/v1beta1 up-to-date=false`,
+		`MenuItem "semla" cafe.jacobcolvin.com/v1 up-to-date=true`,
+	}, listObjects(set))
+}
+
 func TestRegistry_PlanMigration_WarningFilter(t *testing.T) {
 	t.Parallel()
 
@@ -902,7 +923,7 @@ func TestRegistry_PlanMigration_Limits(t *testing.T) {
 				text = stringtest.LinesLF("version: 1", "port: 80")
 			}
 
-			in := configFS(map[string]string{"config.yaml": text}, manifest.WithSourceOptions(tc.limit))
+			in := configFS(map[string]string{"config.yaml": text}, input.WithSourceOptions(tc.limit))
 
 			plan, err := manifest.MustNewRegistry(tc.opts...).PlanMigration(t.Context(), in)
 			require.NotNil(t, plan)
@@ -922,7 +943,7 @@ func TestRegistry_PlanMigration_Fails(t *testing.T) {
 	files := map[string]string{"cafe.yaml": cafeDoc}
 
 	tcs := map[string]struct {
-		in     manifest.Input
+		in     input.Input
 		err    error
 		cancel bool
 	}{
@@ -932,15 +953,15 @@ func TestRegistry_PlanMigration_Fails(t *testing.T) {
 			err:    context.Canceled,
 		},
 		"bad pattern": {
-			in:  configFS(files, manifest.WithExclude("[")),
+			in:  configFS(files, input.WithExclude("[")),
 			err: matcher.ErrInvalidPattern,
 		},
 		"include pattern for a dot entry without WithHidden": {
-			in:  configFS(files, manifest.WithInclude(".cafe.yaml")),
+			in:  configFS(files, input.WithInclude(".cafe.yaml")),
 			err: matcher.ErrInvalidPattern,
 		},
 		"input path that does not exist": {
-			in:  manifest.Path(filepath.Join(t.TempDir(), "confg")),
+			in:  input.Path(filepath.Join(t.TempDir(), "confg")),
 			err: fs.ErrNotExist,
 		},
 	}
@@ -1047,7 +1068,7 @@ func TestPlanFile_Diff(t *testing.T) {
 	), plan.Files()[0].Diff(3).String())
 
 	hidden, err := newCafeRegistry(t).PlanMigration(t.Context(),
-		configFS(files, manifest.WithSourceOptions(niceyaml.WithExcerpts(false))))
+		configFS(files, input.WithSourceOptions(niceyaml.WithExcerpts(false))))
 	require.NoError(t, err)
 	require.Len(t, hidden.Files(), 1)
 	assert.Equal(t, "   1  3 lines removed, 3 added", stringtest.TrimLineEnds(p.Print(hidden.Files()[0].Diff(3))))
@@ -1089,23 +1110,23 @@ func TestPlanFile_After(t *testing.T) {
 	tcs := map[string]struct {
 		// In returns the input of files and the name that messages give the
 		// file.
-		in func(t *testing.T) (manifest.Input, string)
+		in func(t *testing.T) (input.Input, string)
 		// Hint reports whether the removal carries the migrate hint.
 		hint bool
 	}{
 		"file of a file system": {
-			in: func(*testing.T) (manifest.Input, string) {
+			in: func(*testing.T) (input.Input, string) {
 				return configFS(files), "config/drink.yaml"
 			},
 		},
 		"file of a directory": {
-			in: func(t *testing.T) (manifest.Input, string) {
+			in: func(t *testing.T) (input.Input, string) {
 				t.Helper()
 
 				config := filepath.Join(t.TempDir(), "config")
 				yamltest.WriteFiles(t, config, files)
 
-				return manifest.Path(config), filepath.Join(config, "drink.yaml")
+				return input.Path(config), filepath.Join(config, "drink.yaml")
 			},
 			hint: true,
 		},

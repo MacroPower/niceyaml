@@ -1,4 +1,4 @@
-package manifest
+package input
 
 import (
 	"errors"
@@ -10,6 +10,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/escape"
+	"go.jacobcolvin.com/niceyaml/internal/inputhook"
 )
 
 // maxLinkHops is the number of links that a walk of an [fs.FS] follows
@@ -33,7 +34,7 @@ func (r *reader) walkFS(p *prepared) {
 
 		name := path.Join(root, e.rel)
 		if e.err != nil {
-			r.fail(name, e.err, target{kind: targetFS})
+			r.fail(name, e.err, inputhook.Target{Kind: inputhook.FS})
 
 			continue
 		}
@@ -42,7 +43,7 @@ func (r *reader) walkFS(p *prepared) {
 		r.readFS(p.def.fsys, name, e.from, p.def.cfg.sourceOptions)
 
 		for _, f := range r.files[before:] {
-			f.dir = root
+			f.Dir = root
 		}
 	}
 

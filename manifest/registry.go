@@ -153,8 +153,8 @@ func WithAppName(name string) RegistryOption {
 // WithMigrateHint is a [RegistryOption] that sets the detail that comes
 // last on each problem that a rewrite clears, such as
 // `run "cafe config migrate" to update this file`. Only the problems of the
-// files of a [Path] input carry it, because [WriteAtomic], the default
-// writer of [Plan.Apply], rewrites only those. A file that a link leads
+// files of an [input.Path] input carry it, because [WriteAtomic], the
+// default writer of [Plan.Apply], rewrites only those. A file that a link leads
 // to outside the input directory does not carry it either.
 func WithMigrateHint(hint string) RegistryOption {
 	return func(c *registryConfig) {
@@ -185,15 +185,15 @@ func WithDecodeOptions(opts ...niceyaml.DecodeOption) RegistryOption {
 // A load passes the unmarshalers to each [niceyaml.Source] that it builds,
 // through [niceyaml.WithUnmarshalers]. Every decode that the load runs on
 // a document applies them ahead of the unmarshalers of its Source, even a
-// Source that [Sources] reads. The decode of a manifest, the decode inside
-// a validator, and [go.jacobcolvin.com/niceyaml/edit.Node.Decode] in a
-// step thus apply them. So does a decode of [Object.Current].
+// Source that [input.Sources] reads. The decode of a manifest, the decode
+// inside a validator, and [go.jacobcolvin.com/niceyaml/edit.Node.Decode]
+// in a step thus apply them. So does a decode of [Object.Current].
 // [Object.Original] from a Source that Sources reads keeps the unmarshalers
 // of that Source alone.
 //
 // The unmarshalers of the Source of a document apply over them. Those
-// come from [WithSourceOptions], or from the program that built a Source
-// that [Sources] reads. A [niceyaml.WithUnmarshaler] in
+// come from [input.WithSourceOptions], or from the program that built a
+// Source that [input.Sources] reads. A [niceyaml.WithUnmarshaler] in
 // [WithDecodeOptions] or [DecodeOptions] applies over both in the decode
 // of a manifest. Each WithUnmarshalers adds to the ones before it, so a
 // later function for a type replaces an earlier one.

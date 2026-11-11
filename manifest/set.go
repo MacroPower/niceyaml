@@ -76,8 +76,8 @@ type Object[T any] struct {
 	// Version. Its Source is the Source of the file. Original thus gives
 	// the name and the text of the file, and the index of the document in
 	// the file. A path of the current version might not resolve in
-	// Original. From a Source that [Sources] reads, Original keeps the
-	// unmarshalers of that Source alone.
+	// Original. From a Source that [input.Sources] reads, Original keeps
+	// the unmarshalers of that Source alone.
 	Original *niceyaml.Node
 	// The function that binds an error with the paths of the current
 	// version.

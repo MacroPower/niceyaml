@@ -1,4 +1,4 @@
-package manifest_test
+package input_test
 
 import (
 	"bytes"
@@ -15,13 +15,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
 
-	"go.jacobcolvin.com/niceyaml/manifest"
+	"go.jacobcolvin.com/niceyaml/input"
 )
 
-// TestPath_ExchangedDirectory loads a directory while another goroutine
+// TestPath_ExchangedDirectory reads a directory while another goroutine
 // keeps exchanging its subdirectory with a directory outside it. The
-// subdirectory always holds a file, so each load must either read that
-// file or fail. A load must never drop the file without a problem.
+// subdirectory always holds a file, so each read must either take in that
+// file or fail. A read must never drop the file without a problem.
 func TestPath_ExchangedDirectory(t *testing.T) {
 	t.Parallel()
 
@@ -63,21 +63,20 @@ func TestPath_ExchangedDirectory(t *testing.T) {
 		wg.Wait()
 	})
 
-	reg := newCafeRegistry(t, manifest.WithKinds())
-	input := manifest.Path(filepath.Join(dir, "config"), manifest.WithRecursive(true))
+	in := input.Path(filepath.Join(dir, "config"), input.WithRecursive(true))
 	want := filepath.ToSlash(filepath.Join(dir, "config", "sub", "s.yaml"))
 
 	for range 500 {
-		chk, err := reg.Check(t.Context(), input, manifest.WithSetChecks(false))
-		require.NotNil(t, chk)
+		files, err := readAll(t, in)
+		require.NotNil(t, files)
 
 		if err == nil {
-			require.Contains(t, loadedNames(chk.Set()), want)
+			require.Contains(t, readNames(files), want)
 		}
 	}
 }
 
-// volumeRootEnv names the directory that [TestPath_VolumeRoot] loads as
+// volumeRootEnv names the directory that [TestPath_VolumeRoot] reads as
 // the volume root, in the process that it starts.
 const volumeRootEnv = "NICEYAML_TEST_VOLUME_ROOT"
 
@@ -87,10 +86,10 @@ const volumeRootEnv = "NICEYAML_TEST_VOLUME_ROOT"
 // capability, as AppArmor does on Ubuntu 23.10 and later.
 const noChrootExit = 3
 
-// TestPath_VolumeRoot loads a directory that is the volume root, through
+// TestPath_VolumeRoot reads a directory that is the volume root, through
 // links that name it by an absolute path and by "..". The test starts
 // itself again in a user namespace, which changes its root to the
-// directory before the load.
+// directory before the read.
 func TestPath_VolumeRoot(t *testing.T) {
 	t.Parallel()
 
@@ -103,10 +102,9 @@ func TestPath_VolumeRoot(t *testing.T) {
 
 		require.NoError(t, err)
 
-		reg := newCafeRegistry(t, manifest.WithKinds())
-		set, err := reg.Load(t.Context(), manifest.Path("/"))
+		files, err := readAll(t, input.Path("/"))
 		require.NoError(t, err)
-		assert.ElementsMatch(t, []string{"/a.yaml", "/c.yaml"}, loadedNames(set))
+		assert.ElementsMatch(t, []string{"/a.yaml", "/c.yaml"}, readNames(files))
 
 		return
 	}

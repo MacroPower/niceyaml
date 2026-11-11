@@ -20,6 +20,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/input"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/manifest"
 )
@@ -191,7 +192,7 @@ func applyUnkept(t *testing.T, config, want string, name func(st *syscall.Stat_t
 		want = fmt.Sprintf(want, name(st))
 	}
 
-	plan, err := newCafeRegistry(t).PlanMigration(t.Context(), manifest.Path(config))
+	plan, err := newCafeRegistry(t).PlanMigration(t.Context(), input.Path(config))
 	require.NoError(t, err)
 	require.Len(t, plan.Files(), 1)
 

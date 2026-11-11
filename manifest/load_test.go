@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -20,6 +21,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/edit"
+	"go.jacobcolvin.com/niceyaml/input"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/manifest"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -123,8 +125,33 @@ func mapFS(files map[string]string) fstest.MapFS {
 
 // configFS returns the input of the directory config of a file system
 // that holds files there, read with opts.
-func configFS(files map[string]string, opts ...manifest.InputOption) manifest.Input {
-	return manifest.FS(mapFS(files), "config", opts...)
+func configFS(files map[string]string, opts ...input.Option) input.Input {
+	return input.FS(mapFS(files), "config", opts...)
+}
+
+// notExistReason returns the reason that the system gives for a path
+// that does not exist, such as "no such file or directory".
+func notExistReason(t *testing.T) string {
+	t.Helper()
+
+	return openReason(t, filepath.Join(t.TempDir(), "missing"))
+}
+
+// openReason returns the reason that the system gives when it refuses to
+// open the file at name, such as "permission denied".
+func openReason(t *testing.T, name string) string {
+	t.Helper()
+
+	f, err := os.Open(name) //nolint:gosec // A test file.
+	if err == nil {
+		require.NoError(t, f.Close())
+	}
+
+	var pe *fs.PathError
+
+	require.ErrorAs(t, err, &pe)
+
+	return pe.Err.Error()
 }
 
 // tabOptions returns the options that add the kind Tab and remove its
@@ -160,7 +187,7 @@ func listObjects(set *manifest.Set) []string {
 type loadCase struct {
 	files map[string]string
 	opts  []manifest.RegistryOption
-	in    []manifest.InputOption
+	in    []input.Option
 	load  []manifest.LoadOption
 	want  []string
 	warns string
@@ -525,8 +552,8 @@ func TestRegistry_Load(t *testing.T) {
 				"cafe.yaml":  cafeDoc,
 				"hours.yaml": stringtest.LinesLF("apiVersion: cafe.jacobcolvin.com/v1", "kind: *k"),
 			},
-			in: []manifest.InputOption{
-				manifest.WithSourceOptions(niceyaml.WithReferences(niceyaml.NewSourceFromString("k: &k Hours\n"))),
+			in: []input.Option{
+				input.WithSourceOptions(niceyaml.WithReferences(niceyaml.NewSourceFromString("k: &k Hours\n"))),
 			},
 			err: stringtest.JoinLF(
 				"config/hours.yaml:2:7: $.kind: kind must not come from an alias",
@@ -599,8 +626,8 @@ func TestRegistry_Load(t *testing.T) {
 					"  name: weekday",
 				),
 			},
-			in: []manifest.InputOption{
-				manifest.WithSourceOptions(niceyaml.WithReferences(
+			in: []input.Option{
+				input.WithSourceOptions(niceyaml.WithReferences(
 					niceyaml.NewSourceFromString("base: &b {kind: Cafe, spec: {seats: 2}}\n"),
 				)),
 			},
@@ -633,8 +660,8 @@ func TestRegistry_Load(t *testing.T) {
 					"  name: weekday",
 				),
 			},
-			in: []manifest.InputOption{
-				manifest.WithSourceOptions(niceyaml.WithReferences(
+			in: []input.Option{
+				input.WithSourceOptions(niceyaml.WithReferences(
 					niceyaml.NewSourceFromString("base: &b {spec: {open: 8}}\n"),
 				)),
 			},
@@ -668,8 +695,8 @@ func TestRegistry_Load(t *testing.T) {
 					"kind: Hours",
 				),
 			},
-			in: []manifest.InputOption{
-				manifest.WithSourceOptions(niceyaml.WithReferences(
+			in: []input.Option{
+				input.WithSourceOptions(niceyaml.WithReferences(
 					niceyaml.NewSourceFromString("base: &b {spec: {open: 8}}\n"),
 				)),
 			},
@@ -702,8 +729,8 @@ func TestRegistry_Load(t *testing.T) {
 					"<<: *b",
 				),
 			},
-			in: []manifest.InputOption{
-				manifest.WithSourceOptions(niceyaml.WithReferences(
+			in: []input.Option{
+				input.WithSourceOptions(niceyaml.WithReferences(
 					niceyaml.NewSourceFromString("base: &b {spec: {open: 8}}\n"),
 				)),
 			},
@@ -733,8 +760,8 @@ func TestRegistry_Load(t *testing.T) {
 					"kind: Hours",
 				),
 			},
-			in: []manifest.InputOption{
-				manifest.WithSourceOptions(niceyaml.WithReferences(
+			in: []input.Option{
+				input.WithSourceOptions(niceyaml.WithReferences(
 					niceyaml.NewSourceFromString("base: &b {a: '1'}\n"),
 				)),
 			},
@@ -766,8 +793,8 @@ func TestRegistry_Load(t *testing.T) {
 					"  name: weekday",
 				),
 			},
-			in: []manifest.InputOption{
-				manifest.WithSourceOptions(niceyaml.WithReferences(
+			in: []input.Option{
+				input.WithSourceOptions(niceyaml.WithReferences(
 					niceyaml.NewSourceFromString("base: &b {a: '1'}\n"),
 				)),
 			},
@@ -794,8 +821,8 @@ func TestRegistry_Load(t *testing.T) {
 					"  name: yamull",
 				),
 			},
-			in: []manifest.InputOption{
-				manifest.WithSourceOptions(niceyaml.WithReferences(
+			in: []input.Option{
+				input.WithSourceOptions(niceyaml.WithReferences(
 					niceyaml.NewSourceFromString("base: &b {spec: {seats: 2}}\n"),
 				)),
 			},
@@ -811,8 +838,8 @@ func TestRegistry_Load(t *testing.T) {
 					"  <<: *b",
 				),
 			},
-			in: []manifest.InputOption{
-				manifest.WithSourceOptions(niceyaml.WithReferences(
+			in: []input.Option{
+				input.WithSourceOptions(niceyaml.WithReferences(
 					niceyaml.NewSourceFromString("base: &b {labels: {floor: one}}\n"),
 				)),
 			},
@@ -837,8 +864,8 @@ func TestRegistry_Load(t *testing.T) {
 					"  name: yamull",
 				),
 			},
-			in: []manifest.InputOption{
-				manifest.WithSourceOptions(niceyaml.WithReferences(
+			in: []input.Option{
+				input.WithSourceOptions(niceyaml.WithReferences(
 					niceyaml.NewSourceFromString("base: &b {name: other, labels: {floor: one}}\n"),
 				)),
 			},
@@ -1175,7 +1202,7 @@ func TestRegistry_Load_Inputs(t *testing.T) {
 	tcs := map[string]struct {
 		// The options of the registry, in place of [cafeOptions].
 		opts []manifest.RegistryOption
-		in   manifest.Input
+		in   input.Input
 		want []string
 		err  string
 	}{
@@ -1190,7 +1217,7 @@ func TestRegistry_Load_Inputs(t *testing.T) {
 					manifest.Version("cafe.jacobcolvin.com/v1"),
 				),
 			),
-			in: manifest.Sources(niceyaml.NewSourceFromString("seats: 12\n", niceyaml.WithName("notes.yaml"))),
+			in: input.Sources(niceyaml.NewSourceFromString("seats: 12\n", niceyaml.WithName("notes.yaml"))),
 			err: stringtest.LinesLF(
 				"notes.yaml:1:1: missing kind",
 				"`-- set kind to Cafe or Hours",
@@ -1198,24 +1225,24 @@ func TestRegistry_Load_Inputs(t *testing.T) {
 			),
 		},
 		"sources": {
-			in: manifest.Sources(cafe, hours),
+			in: input.Sources(cafe, hours),
 			want: []string{
 				`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`,
 				`Hours "weekday" cafe.jacobcolvin.com/v1alpha1 up-to-date=false`,
 			},
 		},
 		"directory and a file inside it": {
-			in:   manifest.Inputs(manifest.Path(filepath.Dir(cafePath)), manifest.Path(cafePath)),
+			in:   input.Join(input.Path(filepath.Dir(cafePath)), input.Path(cafePath)),
 			want: []string{`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`},
 		},
 		"one source twice": {
-			in:   manifest.Inputs(manifest.Sources(cafe), manifest.Sources(cafe)),
+			in:   input.Join(input.Sources(cafe), input.Sources(cafe)),
 			want: []string{`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`},
 		},
 		"one file of a file system twice": {
-			in: manifest.Inputs(
+			in: input.Join(
 				configFS(map[string]string{"cafe.yaml": cafeDoc}),
-				manifest.FS(mapFS(map[string]string{"cafe.yaml": cafeDoc}), "config/cafe.yaml"),
+				input.FS(mapFS(map[string]string{"cafe.yaml": cafeDoc}), "config/cafe.yaml"),
 			),
 			want: []string{
 				`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`,
@@ -1224,26 +1251,26 @@ func TestRegistry_Load_Inputs(t *testing.T) {
 			err: "more than one Cafe",
 		},
 		"zero input": {
-			in: manifest.Input{},
+			in: input.Input{},
 			err: stringtest.JoinLF(
 				"missing Cafe",
 				"`-- add a document with apiVersion: cafe.jacobcolvin.com/v1 and kind: Cafe",
 			),
 		},
 		"named heading of a lone source": {
-			in:  manifest.Sources(niceyaml.NewSourceFromString("", niceyaml.WithName("stdin.yaml"))),
+			in:  input.Sources(niceyaml.NewSourceFromString("", niceyaml.WithName("stdin.yaml"))),
 			err: "stdin.yaml: missing Cafe",
 		},
 		"named heading of a lone reader": {
-			in:  manifest.Reader("body.yaml", strings.NewReader("")),
+			in:  input.Reader("body.yaml", strings.NewReader("")),
 			err: "body.yaml: missing Cafe",
 		},
 		"path of a dash": {
-			in:  manifest.Path("-"),
+			in:  input.Path("-"),
 			err: "-: " + notExistReason(t),
 		},
 		"unnamed heading of several inputs": {
-			in:  manifest.Inputs(manifest.Sources(hours), manifest.Sources(nope)),
+			in:  input.Join(input.Sources(hours), input.Sources(nope)),
 			err: "2 errors, 1 warning\n",
 		},
 	}
@@ -1556,7 +1583,7 @@ func TestRegistry_Check_Fails(t *testing.T) {
 	files := map[string]string{"cafe.yaml": cafeDoc}
 
 	tcs := map[string]struct {
-		in     manifest.Input
+		in     input.Input
 		err    error
 		cancel bool
 	}{
@@ -1566,15 +1593,15 @@ func TestRegistry_Check_Fails(t *testing.T) {
 			err:    context.Canceled,
 		},
 		"bad pattern": {
-			in:  configFS(files, manifest.WithExclude("[")),
+			in:  configFS(files, input.WithExclude("[")),
 			err: matcher.ErrInvalidPattern,
 		},
 		"include pattern for a dot entry without WithHidden": {
-			in:  configFS(files, manifest.WithInclude(".cafe.yaml")),
+			in:  configFS(files, input.WithInclude(".cafe.yaml")),
 			err: matcher.ErrInvalidPattern,
 		},
 		"input path that does not exist": {
-			in:  manifest.Path(filepath.Join(t.TempDir(), "confg")),
+			in:  input.Path(filepath.Join(t.TempDir(), "confg")),
 			err: fs.ErrNotExist,
 		},
 	}
@@ -1650,8 +1677,8 @@ func TestRegistry_Load_Unversioned(t *testing.T) {
 	}
 
 	// The input of a reference document that holds the anchor b.
-	baseReference := []manifest.InputOption{
-		manifest.WithSourceOptions(niceyaml.WithReferences(
+	baseReference := []input.Option{
+		input.WithSourceOptions(niceyaml.WithReferences(
 			niceyaml.NewSourceFromString("base: &b {seats: 5}\n"),
 		)),
 	}
@@ -1742,8 +1769,8 @@ func TestRegistry_Load_Unversioned(t *testing.T) {
 		},
 		"version that a later alias key of a reference document reads": {
 			opts: sixteenOptions(),
-			in: []manifest.InputOption{
-				manifest.WithSourceOptions(niceyaml.WithReferences(niceyaml.NewSourceFromString("r: &r 0x10\n"))),
+			in: []input.Option{
+				input.WithSourceOptions(niceyaml.WithReferences(niceyaml.NewSourceFromString("r: &r 0x10\n"))),
 			},
 			files: map[string]string{"cafe.yaml": stringtest.LinesLF(
 				"16: cafe.jacobcolvin.com/v1", "kind: Cafe", "? *r", ": other",
@@ -1929,8 +1956,8 @@ func TestRegistry_Load_Unversioned(t *testing.T) {
 				"kind: Cafe",
 				"<<: *b",
 			)},
-			in: []manifest.InputOption{
-				manifest.WithSourceOptions(niceyaml.WithReferences(
+			in: []input.Option{
+				input.WithSourceOptions(niceyaml.WithReferences(
 					niceyaml.NewSourceFromString("base: &b {seats: 5}\n"),
 				)),
 			},
@@ -1952,8 +1979,8 @@ func TestRegistry_Load_Unversioned(t *testing.T) {
 				"apiVersion: cafe.jacobcolvin.com/v1",
 				"kind: Cafe",
 			)},
-			in: []manifest.InputOption{
-				manifest.WithSourceOptions(niceyaml.WithReferences(
+			in: []input.Option{
+				input.WithSourceOptions(niceyaml.WithReferences(
 					niceyaml.NewSourceFromString("base: &b {seats: 5}\n"),
 				)),
 			},
@@ -2053,8 +2080,8 @@ func TestRegistry_Load_Unversioned(t *testing.T) {
 		"plain document whose merge key reads a reference document, with a nested kind field": {
 			opts:  nested,
 			files: map[string]string{"cafe.yaml": "<<: *b\n"},
-			in: []manifest.InputOption{
-				manifest.WithSourceOptions(niceyaml.WithReferences(
+			in: []input.Option{
+				input.WithSourceOptions(niceyaml.WithReferences(
 					niceyaml.NewSourceFromString("base: &b {spec: {seats: 5}}\n"),
 				)),
 			},
@@ -2073,8 +2100,8 @@ func TestRegistry_Load_Unversioned(t *testing.T) {
 		"plain document whose merge key brings in the mapping of a nested kind field": {
 			opts:  nested,
 			files: map[string]string{"cafe.yaml": "<<: *b\n"},
-			in: []manifest.InputOption{
-				manifest.WithSourceOptions(niceyaml.WithReferences(
+			in: []input.Option{
+				input.WithSourceOptions(niceyaml.WithReferences(
 					niceyaml.NewSourceFromString("base: &b {metadata: {name: yamull}}\n"),
 				)),
 			},
@@ -2961,7 +2988,7 @@ func TestRegistry_Load_SchemaLoad(t *testing.T) {
 		niceyaml.WithName("cafe.yaml"),
 	)
 
-	_, err := reg.Load(t.Context(), manifest.Sources(src))
+	_, err := reg.Load(t.Context(), input.Sources(src))
 	require.ErrorIs(t, err, schema.ErrCompile)
 	assert.False(t, niceyaml.IsInvalid(err))
 	assert.Equal(t, "cafe.yaml: this program cannot load its schema of Cafe v1", firstLine(err.Error()))
@@ -3573,7 +3600,7 @@ func TestRegistry_Load_Unmarshalers(t *testing.T) {
 	)
 
 	tcs := map[string]struct {
-		in         manifest.Input
+		in         input.Input
 		us         []niceyaml.Unmarshaler
 		decodeOpts []niceyaml.DecodeOption
 		err        string
@@ -3585,7 +3612,7 @@ func TestRegistry_Load_Unmarshalers(t *testing.T) {
 			want: alarmHigh,
 		},
 		"a Source the program built": {
-			in:   manifest.Sources(niceyaml.NewSourceFromString(current, niceyaml.WithName("alarm.yaml"))),
+			in:   input.Sources(niceyaml.NewSourceFromString(current, niceyaml.WithName("alarm.yaml"))),
 			us:   []niceyaml.Unmarshaler{levelNames},
 			want: alarmHigh,
 		},
@@ -3595,18 +3622,18 @@ func TestRegistry_Load_Unmarshalers(t *testing.T) {
 			want: alarmHigh,
 		},
 		"the step of a Source the program built": {
-			in:   manifest.Sources(niceyaml.NewSourceFromString(older, niceyaml.WithName("alarm.yaml"))),
+			in:   input.Sources(niceyaml.NewSourceFromString(older, niceyaml.WithName("alarm.yaml"))),
 			us:   []niceyaml.Unmarshaler{levelNames},
 			want: alarmHigh,
 		},
 		"the source options of an input apply over them": {
 			in: configFS(map[string]string{"alarm.yaml": current},
-				manifest.WithSourceOptions(niceyaml.WithUnmarshalers(seven))),
+				input.WithSourceOptions(niceyaml.WithUnmarshalers(seven))),
 			us:   []niceyaml.Unmarshaler{levelNames},
 			want: 7,
 		},
 		"the unmarshalers of a Source the program built apply over them": {
-			in: manifest.Sources(niceyaml.NewSourceFromString(current,
+			in: input.Sources(niceyaml.NewSourceFromString(current,
 				niceyaml.WithName("alarm.yaml"), niceyaml.WithUnmarshalers(seven))),
 			us:   []niceyaml.Unmarshaler{levelNames},
 			want: 7,
@@ -3627,7 +3654,7 @@ func TestRegistry_Load_Unmarshalers(t *testing.T) {
 			err: "config/alarm.yaml:6:10: $.spec.level: expected integer, got string",
 		},
 		"without them, the step reads a level as an integer": {
-			in:  manifest.Sources(niceyaml.NewSourceFromString(older, niceyaml.WithName("alarm.yaml"))),
+			in:  input.Sources(niceyaml.NewSourceFromString(older, niceyaml.WithName("alarm.yaml"))),
 			err: "alarm.yaml:6:13: $.spec.severity: expected integer, got string",
 		},
 	}
@@ -3699,7 +3726,7 @@ func TestRegistry_Load_AliasExpansion(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			in := configFS(map[string]string{"alarm.yaml": doc}, manifest.WithSourceOptions(tc.opts...))
+			in := configFS(map[string]string{"alarm.yaml": doc}, input.WithSourceOptions(tc.opts...))
 
 			set, err := reg.Load(t.Context(), in)
 			if tc.err == "" {
@@ -3951,7 +3978,7 @@ func TestRegistry_Load_Layers(t *testing.T) {
 			top := niceyaml.NewSourceFromString(tc.top, niceyaml.WithName("config/prod/hours.yaml"))
 			merged := yamltest.Layers(t, base, top)
 
-			set, err := newCafeRegistry(t).Load(t.Context(), manifest.Sources(merged), manifest.WithSetChecks(false))
+			set, err := newCafeRegistry(t).Load(t.Context(), input.Sources(merged), manifest.WithSetChecks(false))
 			if tc.err != "" {
 				require.ErrorIs(t, err, manifest.ErrMixedLayers)
 				assert.Equal(t, tc.err, firstTwoLines(niceyaml.FormatError(err)))
@@ -3973,6 +4000,10 @@ func TestRegistry_Load_Hint(t *testing.T) {
 	tcs := map[string]struct {
 		opts  []manifest.RegistryOption
 		files map[string]string
+		// Outside holds files that the case writes beside the directory
+		// config, each of which the load reads through a link of the same
+		// name in config.
+		outside map[string]string
 		// Err is the error of the load, whose formatted text the case
 		// reads in place of the warnings.
 		err error
@@ -3987,6 +4018,11 @@ func TestRegistry_Load_Hint(t *testing.T) {
 			files: map[string]string{"hours.yaml": hoursDoc},
 			want:  stringtest.LinesLF("|-- cafe 4.0 removes cafe.jacobcolvin.com/v1alpha1", hint),
 			hint:  true,
+		},
+		"deprecated version in a file that links outside the directory": {
+			opts:    cafeOptions(),
+			outside: map[string]string{"hours.yaml": hoursDoc},
+			want:    "`-- cafe 4.0 removes cafe.jacobcolvin.com/v1alpha1\n",
 		},
 		"removed version that the kind still lists": {
 			opts:  cafeOptions(tabOptions()...),
@@ -4040,10 +4076,16 @@ func TestRegistry_Load_Hint(t *testing.T) {
 			t.Parallel()
 
 			config := filepath.Join(t.TempDir(), "config")
+			require.NoError(t, os.MkdirAll(config, 0o750))
 			yamltest.WriteFiles(t, config, tc.files)
+			yamltest.WriteFiles(t, filepath.Dir(config), tc.outside)
 
-			set, err := manifest.MustNewRegistry(tc.opts...).Load(t.Context(), manifest.Path(config),
-				manifest.WithSetChecks(false))
+			for name := range tc.outside {
+				yamltest.SymlinkOrSkip(t, filepath.Join("..", name), filepath.Join(config, name))
+			}
+
+			set, err := manifest.MustNewRegistry(tc.opts...).Load(t.Context(),
+				input.Path(config, input.WithOutsideLinks(true)), manifest.WithSetChecks(false))
 
 			var got string
 
@@ -4265,7 +4307,7 @@ func TestRegistry_Load_ValidatorPlainWarning(t *testing.T) {
 		manifest.WithKinds(manifest.NewKind[Shift]("Shift", manifest.Version("cafe.jacobcolvin.com/v1"))),
 	)
 
-	input := configFS(map[string]string{"shift.yaml": stringtest.LinesLF(
+	in := configFS(map[string]string{"shift.yaml": stringtest.LinesLF(
 		"apiVersion: cafe.jacobcolvin.com/v1",
 		"kind: Shift",
 		"spec:",
@@ -4277,7 +4319,7 @@ func TestRegistry_Load_ValidatorPlainWarning(t *testing.T) {
 
 		var got []string
 
-		set, err := reg.Load(t.Context(), input, manifest.WithWarningFilter(func(p *manifest.Problem) bool {
+		set, err := reg.Load(t.Context(), in, manifest.WithWarningFilter(func(p *manifest.Problem) bool {
 			got = append(got, p.Error())
 
 			return true
@@ -4294,7 +4336,7 @@ func TestRegistry_Load_ValidatorPlainWarning(t *testing.T) {
 	t.Run("strict", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := reg.Load(t.Context(), input, manifest.WithWarningsAsErrors(true))
+		_, err := reg.Load(t.Context(), in, manifest.WithWarningsAsErrors(true))
 		require.EqualError(t, err, "config/shift.yaml:4:9: $.spec.open: legacy open")
 		assert.True(t, niceyaml.IsInvalid(err))
 
@@ -4327,7 +4369,7 @@ func TestRegistry_Load_LeftOut(t *testing.T) {
 		niceyaml.WithName("hours.yaml"),
 	)
 
-	_, err := reg.Load(t.Context(), manifest.Sources(src))
+	_, err := reg.Load(t.Context(), input.Sources(src))
 	require.Error(t, err)
 	assert.Equal(t, stringtest.JoinLF(
 		"hours.yaml:3:1: $.spec.close: closes at 17:00, before it opens at 18:00",
@@ -4483,7 +4525,7 @@ func TestRegistry_Load_TypeFields(t *testing.T) {
 			)
 
 			set, err := reg.Load(t.Context(),
-				manifest.Sources(niceyaml.NewSourceFromString(tc.doc, niceyaml.WithName("brew.yaml"))))
+				input.Sources(niceyaml.NewSourceFromString(tc.doc, niceyaml.WithName("brew.yaml"))))
 			if tc.err != "" {
 				require.Error(t, err)
 				assert.Equal(t, tc.err, niceyaml.FormatError(err))
@@ -4918,7 +4960,7 @@ func TestRegistry_Load_SchemaTypeFields(t *testing.T) {
 			// cache of the registry, and must class them as the first did.
 			for range 2 {
 				set, err := reg.Load(t.Context(),
-					manifest.Sources(niceyaml.NewSourceFromString(tc.doc, niceyaml.WithName("brew.yaml"))))
+					input.Sources(niceyaml.NewSourceFromString(tc.doc, niceyaml.WithName("brew.yaml"))))
 				if tc.err == "" {
 					require.NoError(t, err)
 
@@ -5056,7 +5098,7 @@ func TestRegistry_Load_HiddenTypeFields(t *testing.T) {
 			)...)
 
 			_, err := reg.Load(t.Context(),
-				manifest.Sources(niceyaml.NewSourceFromString(tc.doc, niceyaml.WithName("roster.yaml"))))
+				input.Sources(niceyaml.NewSourceFromString(tc.doc, niceyaml.WithName("roster.yaml"))))
 			if tc.err == "" {
 				require.NoError(t, err)
 
@@ -5214,11 +5256,11 @@ func TestRegistry_Load_MergedTypeFields(t *testing.T) {
 				opts = append(opts, manifest.WithDecodeOptions(niceyaml.WithUnknownFields(*tc.mode)))
 			}
 
-			var in []manifest.InputOption
+			var in []input.Option
 
 			if tc.ref != "" {
 				ref := niceyaml.NewSourceFromString(tc.ref)
-				in = append(in, manifest.WithSourceOptions(niceyaml.WithReferences(ref)))
+				in = append(in, input.WithSourceOptions(niceyaml.WithReferences(ref)))
 			}
 
 			set, err := manifest.MustNewRegistry(cafeOptions(opts...)...).Load(t.Context(),
@@ -5268,7 +5310,7 @@ func TestRegistry_Load_DefaultsReferenceMerge(t *testing.T) {
 	// which the Go type does not declare, as the decoder read it.
 	set, err := reg.Load(t.Context(), configFS(map[string]string{
 		"app.yaml": stringtest.LinesLF("meta:", "  <<: *base", "  version: 1", "  name: app"),
-	}, manifest.WithSourceOptions(niceyaml.WithReferences(ref))))
+	}, input.WithSourceOptions(niceyaml.WithReferences(ref))))
 	require.NoError(t, err)
 
 	got, ok := set.One[config]()
@@ -5456,7 +5498,7 @@ func TestRegistry_Load_SelfDecodingTypes(t *testing.T) {
 			doc := stringtest.LinesLF("apiVersion: v1", "kind: "+tc.kind, "metadata:", "  name: yamull")
 
 			set, err := reg.Load(t.Context(),
-				manifest.Sources(niceyaml.NewSourceFromString(doc, niceyaml.WithName("cafe.yaml"))))
+				input.Sources(niceyaml.NewSourceFromString(doc, niceyaml.WithName("cafe.yaml"))))
 			require.NoError(t, err)
 
 			var got []any
@@ -5509,7 +5551,7 @@ func TestRegistry_Load_NestedTypeField(t *testing.T) {
 			)
 
 			set, err := reg.Load(t.Context(),
-				manifest.Sources(niceyaml.NewSourceFromString(doc, niceyaml.WithName("cafe.yaml"))))
+				input.Sources(niceyaml.NewSourceFromString(doc, niceyaml.WithName("cafe.yaml"))))
 			if tc.err != "" {
 				require.Error(t, err)
 				assert.Equal(t, tc.err, firstLine(niceyaml.FormatError(err)))
@@ -5592,7 +5634,7 @@ func TestRegistry_Load_VersionText(t *testing.T) {
 
 			set, err := reg.Load(
 				t.Context(),
-				manifest.Sources(niceyaml.NewSourceFromString(text, niceyaml.WithName("c.yaml"))),
+				input.Sources(niceyaml.NewSourceFromString(text, niceyaml.WithName("c.yaml"))),
 			)
 			if tc.err != "" {
 				require.Error(t, err)
@@ -5704,71 +5746,71 @@ func TestRegistry_Load_EncodingOfEachInput(t *testing.T) {
 	)
 
 	tcs := map[string]struct {
-		in   func(t *testing.T) manifest.Input
+		in   func(t *testing.T) input.Input
 		is   error
 		want string
 	}{
 		"file on disk": {
-			in: func(t *testing.T) manifest.Input {
+			in: func(t *testing.T) input.Input {
 				t.Helper()
 
-				return manifest.Path(yamltest.WriteFile(t, t.TempDir(), "cafe.yaml", latin1))
+				return input.Path(yamltest.WriteFile(t, t.TempDir(), "cafe.yaml", latin1))
 			},
 			is:   manifest.ErrEncoding,
 			want: stringtest.JoinLF("cafe.yaml:4:11: byte 0xf6 is not UTF-8", "`-- save the file as UTF-8"),
 		},
 		"file of a file system": {
-			in: func(*testing.T) manifest.Input {
+			in: func(*testing.T) input.Input {
 				return configFS(map[string]string{"cafe.yaml": latin1})
 			},
 			is:   manifest.ErrEncoding,
 			want: stringtest.JoinLF("config/cafe.yaml:4:11: byte 0xf6 is not UTF-8", "`-- save the file as UTF-8"),
 		},
 		"reader": {
-			in: func(*testing.T) manifest.Input {
-				return manifest.Reader("cafe.yaml", strings.NewReader(latin1))
+			in: func(*testing.T) input.Input {
+				return input.Reader("cafe.yaml", strings.NewReader(latin1))
 			},
 			is:   manifest.ErrEncoding,
 			want: stringtest.JoinLF("cafe.yaml:4:11: byte 0xf6 is not UTF-8", "`-- encode the text as UTF-8"),
 		},
 		"reader with a file path": {
-			in: func(*testing.T) manifest.Input {
-				return manifest.Reader("cafe.yaml", strings.NewReader(latin1),
-					manifest.WithSourceOptions(niceyaml.WithFilePath("cafe.yaml")))
+			in: func(*testing.T) input.Input {
+				return input.Reader("cafe.yaml", strings.NewReader(latin1),
+					input.WithSourceOptions(niceyaml.WithFilePath("cafe.yaml")))
 			},
 			is:   manifest.ErrEncoding,
 			want: stringtest.JoinLF("cafe.yaml:4:11: byte 0xf6 is not UTF-8", "`-- save the file as UTF-8"),
 		},
 		"source": {
-			in: func(*testing.T) manifest.Input {
-				return manifest.Sources(niceyaml.NewSourceFromString(latin1, niceyaml.WithName("cafe.yaml")))
+			in: func(*testing.T) input.Input {
+				return input.Sources(niceyaml.NewSourceFromString(latin1, niceyaml.WithName("cafe.yaml")))
 			},
 			is:   manifest.ErrEncoding,
 			want: stringtest.JoinLF("cafe.yaml:4:11: byte 0xf6 is not UTF-8", "`-- encode the text as UTF-8"),
 		},
 		"source of a file": {
-			in: func(t *testing.T) manifest.Input {
+			in: func(t *testing.T) input.Input {
 				t.Helper()
 
 				src, err := niceyaml.NewSourceFromFile(yamltest.WriteFile(t, t.TempDir(), "cafe.yaml", latin1))
 				require.NoError(t, err)
 
-				return manifest.Sources(src)
+				return input.Sources(src)
 			},
 			is:   manifest.ErrEncoding,
 			want: stringtest.JoinLF("cafe.yaml:4:11: byte 0xf6 is not UTF-8", "`-- save the file as UTF-8"),
 		},
 		"utf-16 source": {
-			in: func(*testing.T) manifest.Input {
-				return manifest.Sources(niceyaml.NewSourceFromString("\xff\xfea\x00:\x00",
+			in: func(*testing.T) input.Input {
+				return input.Sources(niceyaml.NewSourceFromString("\xff\xfea\x00:\x00",
 					niceyaml.WithName("cafe.yaml")))
 			},
 			is:   manifest.ErrEncoding,
 			want: stringtest.JoinLF("cafe.yaml: text is UTF-16, not UTF-8", "`-- encode the text as UTF-8"),
 		},
 		"source past its byte limit": {
-			in: func(*testing.T) manifest.Input {
-				return manifest.Sources(niceyaml.NewSourceFromString(latin1,
+			in: func(*testing.T) input.Input {
+				return input.Sources(niceyaml.NewSourceFromString(latin1,
 					niceyaml.WithName("big.yaml"), niceyaml.WithByteLimit(10)))
 			},
 			is:   niceyaml.ErrLimit,

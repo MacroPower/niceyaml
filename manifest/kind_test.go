@@ -9,6 +9,7 @@ import (
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/input"
 	"go.jacobcolvin.com/niceyaml/manifest"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -80,7 +81,7 @@ func TestNameField(t *testing.T) {
 			}
 
 			set, err := reg.Load(t.Context(),
-				manifest.Sources(niceyaml.NewSourceFromString(text+"\n", niceyaml.WithName("cafe.yaml"))))
+				input.Sources(niceyaml.NewSourceFromString(text+"\n", niceyaml.WithName("cafe.yaml"))))
 			if tc.err != nil {
 				require.ErrorIs(t, err, tc.err)
 

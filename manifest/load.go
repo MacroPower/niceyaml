@@ -8,7 +8,9 @@ import (
 	"slices"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/input"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
+	"go.jacobcolvin.com/niceyaml/internal/inputhook"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 )
@@ -93,19 +95,17 @@ func WithSetChecks(enabled bool) LoadOption {
 // manifests that pass beside the problems.
 //
 // The heading of the error starts with the name of the input. The name is
-// the path of a lone [Path] or [FS] input, or the name of a lone [Stdin]
-// or [Reader] input. A lone [Sources] input that holds one Source gives
-// the name of that Source. Any other load leaves the name out.
+// the path of a lone [input.Path] or [input.FS] input, or the name of a
+// lone [input.Stdin] or [input.Reader] input. A lone [input.Sources] input
+// that holds one Source gives the name of that Source. Any other load
+// leaves the name out.
 //
-// A pattern that does not parse fails Load before it reads a file, with an
-// error that matches
-// [go.jacobcolvin.com/niceyaml/schema/matcher.ErrInvalidPattern]. Without
-// [WithHidden], an include pattern that names an entry whose name starts
-// with "." fails Load the same way, as [WithInclude] describes. An input
-// path that does not exist also fails Load before it reads a file, with an
-// error that matches [fs.ErrNotExist]. A load whose ctx ends fails with an
-// error that matches ctx.Err().
-func (r *Registry) Load(ctx context.Context, in Input, opts ...LoadOption) (*Set, error) {
+// Load fails before it reads a file for each problem that fails
+// [input.Input.Files]: a pattern that the input rejects, which matches
+// [input.ErrInvalidPattern], and an input path that does not exist, which
+// matches [fs.ErrNotExist]. A load whose ctx ends fails with an error
+// that matches ctx.Err().
+func (r *Registry) Load(ctx context.Context, in input.Input, opts ...LoadOption) (*Set, error) {
 	c, err := r.Check(ctx, in, opts...)
 	if err != nil {
 		return nil, err
@@ -127,7 +127,7 @@ func (r *Registry) Load(ctx context.Context, in Input, opts ...LoadOption) (*Set
 // finish. One such case is a ctx that ends. The other is an input that
 // fails before Check reads a file, such as a pattern that Load rejects or
 // an input path that does not exist.
-func (r *Registry) Check(ctx context.Context, in Input, opts ...LoadOption) (*Checked, error) {
+func (r *Registry) Check(ctx context.Context, in input.Input, opts ...LoadOption) (*Checked, error) {
 	cfg := newLoadConfig(opts)
 
 	l, err := r.check(ctx, in, cfg)
@@ -266,18 +266,22 @@ type row struct {
 }
 
 // check reads the files of in and runs the checks of each document.
-func (r *Registry) check(ctx context.Context, in Input, cfg loadConfig) (*loader, error) {
-	rd, err := readInputs(ctx, in, r.cfg.unmarshalers)
+func (r *Registry) check(ctx context.Context, in input.Input, cfg loadConfig) (*loader, error) {
+	rd, err := inputhook.Read(ctx, in, r.cfg.unmarshalers)
 	if err != nil {
-		return nil, err
+		return nil, err //nolint:wrapcheck // The input names the problem.
 	}
 
 	l := &loader{
 		reg:   r,
 		cfg:   cfg,
-		named: namedSource(in.heading()),
-		empty: rd.empty,
-		files: rd.files,
+		named: namedSource(rd.Heading),
+		empty: rd.Empty,
+		files: make([]*file, 0, len(rd.Files)),
+	}
+
+	for _, f := range rd.Files {
+		l.files = append(l.files, newFile(f))
 	}
 
 	for i, f := range l.files {
@@ -333,6 +337,51 @@ func (l *loader) checkFile(ctx context.Context, i int, f *file) {
 	if l.cfg.plan {
 		l.planFile(i, f)
 	}
+}
+
+// file is one file that a load reads.
+type file struct {
+	// The problem of the file as a whole, bound, or nil.
+	err error
+	// The Source of the file, or nil when the read of the file failed.
+	src *niceyaml.Source
+	// The change of the file that a plan writes, or nil.
+	plan *PlanFile
+	// The name of the directory input whose walk found the file, or "".
+	dir string
+	// The name of the file, as messages show it.
+	name string
+	// The documents of the file that the load checked, in order.
+	docs []*docState
+	// Where [WriteAtomic] writes the file.
+	target target
+	// The number of documents of the file that fail to route, so a plan
+	// leaves them as they are.
+	notMigrated int
+	// Whether a problem blocks the rewrite of the file.
+	blocked bool
+}
+
+// newFile returns the file of a load that the input package read as f.
+func newFile(f inputhook.File) *file {
+	return &file{
+		err:  f.Err,
+		src:  f.Source,
+		dir:  f.Dir,
+		name: f.Name,
+		target: target{
+			root:    f.Target.Root,
+			path:    f.Target.Path,
+			kind:    f.Target.Kind,
+			outside: f.Target.Outside,
+		},
+	}
+}
+
+// namedSource returns an empty Source that messages name name, where a
+// problem without a document of its own binds.
+func namedSource(name string) *niceyaml.Source {
+	return niceyaml.NewSourceFromString("", niceyaml.WithName(name))
 }
 
 // writesTypeField reports whether doc writes a type field.

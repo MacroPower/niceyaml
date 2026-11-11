@@ -125,7 +125,7 @@
 // problem, PlanMigration returns the plan beside the error, so a program
 // that migrates the other files tests the plan for nil:
 //
-//	plan, err := config.Registry.PlanMigration(ctx, manifest.Path(dir))
+//	plan, err := config.Registry.PlanMigration(ctx, input.Path(dir))
 //	if plan == nil {
 //		return err
 //	}
@@ -158,7 +158,7 @@
 // WriteAtomic lists what each platform checks. A file whose text changed
 // after the plan read it fails with an error that matches [ErrChanged].
 //
-// WriteAtomic writes only the files that a [Path] input read from disk.
+// WriteAtomic writes only the files that an [input.Path] input read from disk.
 // Each other file fails with an error that matches [ErrReadOnly], but its
 // plan still holds its new text. A dry run thus shows the diff. An app
 // that keeps its files elsewhere passes Apply a [WriteFunc] through
@@ -179,74 +179,40 @@
 //
 // # Loading
 //
-// [Registry.Load] reads an [Input] and returns a [Set]:
+// [Registry.Load] reads the files of an [input.Input] and returns a [Set]:
 //
-//	set, err := config.Registry.Load(ctx, manifest.Path(dir))
+//	set, err := config.Registry.Load(ctx, input.Path(dir))
 //	if err != nil {
 //		return err
 //	}
 //
-// These functions build an Input:
+// The [go.jacobcolvin.com/niceyaml/input] package builds the Input. It
+// reads a file or a directory on disk or in an [io/fs.FS], standard
+// input, an [io.Reader], or Sources that the app built, and it joins
+// several inputs in order. Its options select the files of a directory
+// and decide which symbolic links a walk follows. A program that reads
+// the files without kinds, such as a linter, reads the same Input with
+// [input.Input.Files].
 //
-//   - [Path] reads a file or a directory, so a --config flag takes either.
-//   - [FS] reads a file or a directory of an [io/fs.FS].
-//   - [Stdin] reads standard input.
-//   - [Reader] reads an [io.Reader].
-//   - [Sources] reads Sources that the app built.
-//   - [Inputs] reads several inputs in order.
+// The first load or plan that reads an [input.Stdin] or [input.Reader]
+// input reads its text, and every later one reuses that text. One Input
+// thus serves [Registry.PlanMigration] and the Load after it.
 //
-// Path reads only the file system, so a CLI whose --config flag takes "-"
-// for standard input picks Stdin itself:
+// A load reads the files in the order of the input, and the documents of
+// each file in order. Every report and every iteration of a set follows
+// that load order. A file that the input could not read, such as a link
+// that a walk does not follow, fails the load with the error of its
+// [input.File]. A load fails each file that is not UTF-8 with an error
+// that matches [ErrEncoding]. The text of an [input.Stdin],
+// [input.Reader], or [input.Sources] input counts as a file.
 //
-//	in := manifest.Path(config)
-//	if config == "-" {
-//		in = manifest.Stdin()
-//	}
+// A directory input that selects no file adds a detail to the problem of
+// a [Required] kind that the load misses. The detail names the directory
+// and its patterns.
 //
-// The first load or plan that reads a Stdin or Reader input reads its
-// text, and every later one reuses that text. One Input thus serves
-// [Registry.PlanMigration] and the Load after it.
-//
-// A directory input reads the files that match "*.yaml" or "*.yml", and
-// skips each entry whose name starts with ".". [WithRecursive],
-// [WithInclude], and [WithExclude] change the selection. [WithHidden]
-// keeps the entries whose names start with ".", so the patterns select
-// among them too.
-//
-// A walk reads a file that a symbolic link names only when the link leads
-// inside the input directory to a file that the patterns select.
-// [WithOutsideLinks] also lets a link lead outside. Any other link to a
-// regular file fails with an error that matches [ErrOutsideLink]. A file
-// loads once, however many paths reach it.
-//
-// The walk of an [FS] input applies that rule to each link that the file
-// system reports through [fs.ReadLinkFS], as [FS] describes. A directory
-// listing can name a link that the file system does not report. The walk
-// follows that link only under WithOutsideLinks. It then reads what Open
-// returns for the link, so a file that the link and its own path both
-// reach loads twice.
-//
-// A listing can also describe a link as a regular file or as a
-// directory. The walk then reads the entry as that file, and a recursive
-// walk enters the entry as that directory. A file loads once for each
-// path that reaches it through one of those entries, with or without
-// WithOutsideLinks. A file that one entry and its own path both reach
-// thus loads twice.
-//
-// The walk of a [Path] input lists each directory and opens each file
-// inside it through an [os.Root] of the input directory. Without
-// WithOutsideLinks, the walk thus refuses a link that leads outside even
-// when another process changes the directory during the load. The
-// refusal covers symbolic links only, so the walk reads a file that a
-// hard link names. An [FS] input that reads "." of the FS of an [os.Root]
-// opened on the directory keeps the same refusal. [WriteAtomic] does not
-// rewrite the files of an FS input.
-//
-// A load reads the inputs in order, the files of a directory sorted by
-// path, and the documents of each file in order. Every report and every
-// iteration of a set follows that load order. A load fails each file that
-// is not UTF-8 with an error that matches [ErrEncoding]. The text of a
-// [Stdin], [Reader], or [Sources] input counts as a file.
+// [WriteAtomic] rewrites only the files of an [input.Path] input, and
+// never a file that a walk reached through a link that leads outside the
+// input directory.
 //
 // A load applies the limits of each Source, as [niceyaml.WithByteLimit],
 // [niceyaml.WithDepthLimit], and [niceyaml.WithAliasLimit] describe. The
@@ -261,7 +227,7 @@
 // the load runs on a document applies them too. The decode of a manifest,
 // the decode inside a validator, and the decode of a migration step thus
 // read the types alike. So does a decode of [Object.Current].
-// [Object.Original] from a Source that [Sources] reads keeps the
+// [Object.Original] from a Source that [input.Sources] reads keeps the
 // unmarshalers of that Source alone.
 //
 // [WithMarshalers] sets how the Go types of the kinds write YAML. Each
@@ -537,7 +503,7 @@
 // input path that does not exist. A program that wants what passed thus
 // tests the report for nil, not the error:
 //
-//	checked, err := config.Registry.Check(ctx, manifest.Path(dir))
+//	checked, err := config.Registry.Check(ctx, input.Path(dir))
 //	if checked == nil {
 //		return err
 //	}
@@ -562,7 +528,7 @@
 // turns each warning that the load keeps into an error, so a strict load
 // in CI fails on a deprecated file:
 //
-//	set, err := config.Registry.Load(ctx, manifest.Path(dir),
+//	set, err := config.Registry.Load(ctx, input.Path(dir),
 //		manifest.WithWarningsAsErrors(strict))
 //
 // When [Written] marks a version older than the current one, a step of a

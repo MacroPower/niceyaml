@@ -33,6 +33,7 @@ rules:
       - examples
       - fangs
       - finder
+      - input
       - internal
       - line
       - manifest

@@ -13,6 +13,7 @@ import (
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/input"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/manifest"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -50,7 +51,7 @@ func TestSet_One(t *testing.T) {
 		set.One[CafeSpec]()
 	})
 
-	empty, err := newCafeRegistry(t).Load(t.Context(), manifest.Sources(), manifest.WithSetChecks(false))
+	empty, err := newCafeRegistry(t).Load(t.Context(), input.Sources(), manifest.WithSetChecks(false))
 	require.NoError(t, err)
 
 	_, ok = empty.One[Cafe]()
@@ -93,7 +94,7 @@ func TestSet_Get(t *testing.T) {
 	reg := manifest.MustNewRegistry(manifest.WithKinds(manifest.NewKind[Cafe]("Cafe",
 		manifest.Version("cafe.jacobcolvin.com/v1"))))
 
-	unnamed, err := reg.Load(t.Context(), manifest.Sources())
+	unnamed, err := reg.Load(t.Context(), input.Sources())
 	require.NoError(t, err)
 
 	assert.PanicsWithValue(t, "manifest: Get needs a kind with manifest.NameField, and Cafe has none", func() {
@@ -210,7 +211,7 @@ func TestObject_Bind(t *testing.T) {
 
 		ref := niceyaml.NewSourceFromString("base: &base {currency: SEK}\n")
 
-		set, err := newCafeRegistry(t).Load(t.Context(), manifest.Sources(niceyaml.NewSourceFromString(
+		set, err := newCafeRegistry(t).Load(t.Context(), input.Sources(niceyaml.NewSourceFromString(
 			stringtest.LinesLF(
 				"apiVersion: cafe.jacobcolvin.com/v1",
 				"kind: Cafe",
@@ -261,7 +262,7 @@ func TestObject_Bind(t *testing.T) {
 
 		ref := niceyaml.NewSourceFromString("base: &base {seats: 4}\n")
 
-		set, err := newCafeRegistry(t).Load(t.Context(), manifest.Sources(niceyaml.NewSourceFromString(
+		set, err := newCafeRegistry(t).Load(t.Context(), input.Sources(niceyaml.NewSourceFromString(
 			stringtest.LinesLF(
 				"apiVersion: cafe.jacobcolvin.com/v1",
 				"kind: Cafe",
@@ -403,7 +404,7 @@ func TestObject_Layouts(t *testing.T) {
 
 		// The program built the Source without the unmarshalers of the
 		// registry.
-		set, err := reg.Load(t.Context(), manifest.Sources(niceyaml.NewSourceFromString(
+		set, err := reg.Load(t.Context(), input.Sources(niceyaml.NewSourceFromString(
 			stringtest.LinesLF(
 				"apiVersion: alarm.jacobcolvin.com/v1",
 				"kind: Alarm",
@@ -436,7 +437,7 @@ func TestObject_Layouts(t *testing.T) {
 func keepOne(t *testing.T, kind string) (manifest.Object[any], []weak.Pointer[niceyaml.Source]) {
 	t.Helper()
 
-	set, err := newCafeRegistry(t).Load(t.Context(), manifest.Sources(
+	set, err := newCafeRegistry(t).Load(t.Context(), input.Sources(
 		niceyaml.NewSourceFromString(cafeDoc, niceyaml.WithName("cafe.yaml")),
 		niceyaml.NewSourceFromString(hoursDoc, niceyaml.WithName("hours.yaml")),
 	))

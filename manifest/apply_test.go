@@ -14,6 +14,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/edit"
+	"go.jacobcolvin.com/niceyaml/input"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/manifest"
 )
@@ -26,7 +27,7 @@ func planDir(t *testing.T, reg *manifest.Registry, files map[string]string) (*ma
 	config := filepath.Join(t.TempDir(), "config")
 	yamltest.WriteFiles(t, config, files)
 
-	plan, err := reg.PlanMigration(t.Context(), manifest.Path(config))
+	plan, err := reg.PlanMigration(t.Context(), input.Path(config))
 	require.NotNil(t, plan)
 	require.Equal(t, plan.Err(), err)
 	requireReloads(t, reg, plan, nil)
@@ -61,7 +62,7 @@ func TestPlan_Apply(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, entries, 3)
 
-	again, err := reg.PlanMigration(t.Context(), manifest.Path(config))
+	again, err := reg.PlanMigration(t.Context(), input.Path(config))
 	require.NoError(t, err)
 	assert.Empty(t, again.Files())
 	assert.Equal(t, "3 files up to date, nothing written", again.Summary())
@@ -131,7 +132,7 @@ func TestPlan_Apply_ReadOnly(t *testing.T) {
 	top := niceyaml.NewSourceFromString(stringtest.LinesLF("spec:", `  closes: "20:00"`), niceyaml.WithName("top.yaml"))
 
 	tcs := map[string]struct {
-		in   manifest.Input
+		in   input.Input
 		file string
 		// Kind and version hold the kind and the version of the document
 		// that the reason binds in, and are empty for a reason of the
@@ -151,17 +152,17 @@ func TestPlan_Apply_ReadOnly(t *testing.T) {
 			),
 		},
 		"reader": {
-			in:   manifest.Reader("hours.yaml", strings.NewReader(hoursDoc)),
+			in:   input.Reader("hours.yaml", strings.NewReader(hoursDoc)),
 			file: "hours.yaml",
 			err:  "hours.yaml: cannot rewrite a file that cafe read from a stream",
 		},
 		"source": {
-			in:   manifest.Sources(niceyaml.NewSourceFromString(hoursDoc, niceyaml.WithName("hours.yaml"))),
+			in:   input.Sources(niceyaml.NewSourceFromString(hoursDoc, niceyaml.WithName("hours.yaml"))),
 			file: "hours.yaml",
 			err:  "hours.yaml: cannot rewrite a file that cafe built in memory",
 		},
 		"merged layers": {
-			in:      manifest.Sources(yamltest.Layers(t, base, top)),
+			in:      input.Sources(yamltest.Layers(t, base, top)),
 			file:    "base.yaml",
 			kind:    "Hours",
 			version: "cafe.jacobcolvin.com/v1alpha1",
@@ -206,6 +207,30 @@ func TestPlan_Apply_ReadOnly(t *testing.T) {
 	}
 }
 
+func TestPlan_Apply_OutsideLink(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	tree{
+		files: map[string]string{"shared/hours.yaml": hoursDoc},
+		links: map[string]string{"config/hours.yaml": "../shared/hours.yaml"},
+	}.write(t, dir)
+
+	config := filepath.Join(dir, "config")
+
+	plan, err := newCafeRegistry(t).PlanMigration(t.Context(), input.Path(config, input.WithOutsideLinks(true)))
+	require.NoError(t, err)
+	require.Len(t, plan.Files(), 1)
+
+	res, err := plan.Apply(t.Context())
+	require.ErrorIs(t, err, manifest.ErrReadOnly)
+	assert.Empty(t, res.Files())
+	assert.Equal(t, config+"/hours.yaml: cannot rewrite a file that links outside "+config, niceyaml.FormatError(err))
+
+	// Apply did not write the file that the link leads to.
+	assert.Equal(t, hoursDoc, yamltest.ReadFile(t, filepath.Join(dir, "shared", "hours.yaml")))
+}
+
 func TestPlan_Apply_WithWriter(t *testing.T) {
 	t.Parallel()
 
@@ -215,7 +240,7 @@ func TestPlan_Apply_WithWriter(t *testing.T) {
 	top := niceyaml.NewSourceFromString(stringtest.LinesLF("spec:", `  closes: "20:00"`), niceyaml.WithName("top.yaml"))
 
 	tcs := map[string]struct {
-		in manifest.Input
+		in input.Input
 		// Write returns the problem of the file named name, or nil to store
 		// the file.
 		write func(name string) error
@@ -236,7 +261,7 @@ func TestPlan_Apply_WithWriter(t *testing.T) {
 			),
 		},
 		"source": {
-			in:    manifest.Sources(niceyaml.NewSourceFromString(hoursDoc, niceyaml.WithName("hours.yaml"))),
+			in:    input.Sources(niceyaml.NewSourceFromString(hoursDoc, niceyaml.WithName("hours.yaml"))),
 			write: func(string) error { return nil },
 			want:  []string{"hours.yaml"},
 			summary: stringtest.JoinLF(
@@ -262,7 +287,7 @@ func TestPlan_Apply_WithWriter(t *testing.T) {
 			),
 		},
 		"merged layers": {
-			in:    manifest.Sources(yamltest.Layers(t, base, top)),
+			in:    input.Sources(yamltest.Layers(t, base, top)),
 			write: func(string) error { return nil },
 			err:   manifest.ErrReadOnly,
 			message: stringtest.JoinLF(

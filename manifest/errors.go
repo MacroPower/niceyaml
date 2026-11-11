@@ -27,7 +27,8 @@ import (
 //     [schema.ErrCompile].
 //   - A file that a load cannot read keeps the error of the read, such as
 //     [fs.ErrPermission]. A link to a file that does not exist matches
-//     [fs.ErrNotExist].
+//     [fs.ErrNotExist]. A link that a directory walk does not follow
+//     matches [input.ErrOutsideLink].
 //   - A file or a new text that exceeds a size limit of its Source, such
 //     as that of [niceyaml.WithByteLimit] or [niceyaml.WithDepthLimit],
 //     matches [niceyaml.ErrLimit]. A document whose aliases expand past the
@@ -54,12 +55,6 @@ var (
 	// [niceyaml.ErrEncoding], which the parse of each Source of a load
 	// returns.
 	ErrEncoding = niceyaml.ErrEncoding
-
-	// ErrOutsideLink indicates a symbolic link that a directory walk found
-	// and does not follow. The target of the link lies outside the input
-	// directory or does not match the include patterns, or the file system
-	// does not report the link, as [FS] describes.
-	ErrOutsideLink = errors.New("link leads outside the input directory")
 
 	// ErrMissingTypeField indicates a document without a type field that
 	// the load reads to pick its kind or its version, as the Routing

@@ -13,6 +13,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/edit"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
+	"go.jacobcolvin.com/niceyaml/internal/inputhook"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -193,7 +194,7 @@ func (d *docState) report(migrated bool) {
 // rewritable reports whether a rewrite can write the file of the
 // document, so a problem that a rewrite clears carries the migrate hint.
 func (d *docState) rewritable() bool {
-	return d.f.target.kind == targetDisk && !d.f.target.outside
+	return d.f.target.kind == inputhook.Disk && !d.f.target.outside
 }
 
 // hint returns the migrate hint as the last detail of a problem that a

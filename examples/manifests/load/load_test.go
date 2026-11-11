@@ -6,13 +6,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"go.jacobcolvin.com/niceyaml/manifest"
+	"go.jacobcolvin.com/niceyaml/input"
 )
 
 func TestRegistry(t *testing.T) {
 	t.Parallel()
 
-	set, err := registry.Load(t.Context(), manifest.FS(files, "config"))
+	set, err := registry.Load(t.Context(), input.FS(files, "config"))
 	require.NoError(t, err)
 
 	cafe, ok := set.One[Cafe]()
