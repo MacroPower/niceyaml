@@ -53,9 +53,10 @@ var (
 	// byte that UTF-8 does not allow or one in UTF-16.
 	ErrEncoding = errors.New("text is not UTF-8")
 
-	// ErrOutsideLink indicates a symbolic link that a directory walk found,
-	// whose target lies outside the input directory or does not match the
-	// include patterns.
+	// ErrOutsideLink indicates a symbolic link that a directory walk found
+	// and does not follow. The target of the link lies outside the input
+	// directory or does not match the include patterns, or the file system
+	// does not report the link, as [FS] describes.
 	ErrOutsideLink = errors.New("link leads outside the input directory")
 
 	// ErrMissingTypeField indicates a document without one of the type

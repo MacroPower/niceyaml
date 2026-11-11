@@ -202,6 +202,20 @@
 // regular file fails with an error that matches [ErrOutsideLink]. A file
 // loads once, however many paths reach it.
 //
+// The walk of an [FS] input applies that rule to each link that the file
+// system reports through [fs.ReadLinkFS], as [FS] describes. A directory
+// listing can name a link that the file system does not report. The walk
+// follows that link only under WithOutsideLinks. It then reads what Open
+// returns for the link, so a file that the link and its own path both
+// reach loads twice.
+//
+// A listing can also describe a link as a regular file or as a
+// directory. The walk then reads the entry as that file, and a recursive
+// walk enters the entry as that directory. A file loads once for each
+// path that reaches it through one of those entries, with or without
+// WithOutsideLinks. A file that one entry and its own path both reach
+// thus loads twice.
+//
 // A load reads the inputs in order, the files of a directory sorted by
 // path, and the documents of each file in order. Every report and every
 // iteration of a set follows that load order. A load fails each file that

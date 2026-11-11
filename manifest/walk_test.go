@@ -4,7 +4,9 @@ import (
 	"errors"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -609,27 +611,72 @@ func TestFS_UnreadableLinks(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		input func(dir string) manifest.Input
+		input func(t *testing.T, dir string) manifest.Input
 		links map[string]string
 		err   string
 		is    []error
 	}{
 		"absolute link with outside links allowed": {
-			input: func(dir string) manifest.Input {
+			input: func(_ *testing.T, dir string) manifest.Input {
 				return manifest.FS(os.DirFS(dir), "config", manifest.WithOutsideLinks(true))
 			},
 			links: map[string]string{"config/hours.yaml": "{dir}/shared/hours.yaml"},
 			err:   "config/hours.yaml: links to {dir}/shared/hours.yaml, which leads outside the file system",
 			is:    []error{manifest.ErrOutsideLink},
 		},
-		"dangling link in a file system without ReadLink": {
-			input: func(dir string) manifest.Input {
-				// The struct hides every method of the file system but Open.
-				return manifest.FS(struct{ fs.FS }{os.DirFS(dir)}, "config")
+		"link outside in fs.Sub of a file system that reports links": {
+			input: func(t *testing.T, dir string) manifest.Input {
+				t.Helper()
+
+				return manifest.FS(subFS(t, os.DirFS(filepath.Dir(dir)), filepath.Base(dir)), "config")
 			},
-			links: map[string]string{"config/old.yaml": "gone.yaml"},
-			err:   "config/old.yaml: ",
-			is:    []error{fs.ErrNotExist},
+			links: map[string]string{"config/hours.yaml": "../shared/hours.yaml"},
+			err:   "config/hours.yaml: links to ../shared/hours.yaml, which leads outside config",
+			is:    []error{manifest.ErrOutsideLink},
+		},
+		"link out of fs.Sub of a file system that reports links": {
+			input: func(t *testing.T, dir string) manifest.Input {
+				t.Helper()
+
+				return manifest.FS(subFS(t, os.DirFS(dir), "config"), ".", manifest.WithOutsideLinks(true))
+			},
+			links: map[string]string{"config/hours.yaml": "../shared/hours.yaml"},
+			err:   "hours.yaml: links to ../shared/hours.yaml, which leads outside the file system",
+			is:    []error{manifest.ErrOutsideLink},
+		},
+		"link that ReadLink cannot read": {
+			input: func(_ *testing.T, dir string) manifest.Input {
+				return manifest.FS(deniedFS{FS: os.DirFS(dir), readLink: true}, "config")
+			},
+			links: map[string]string{"config/hours.yaml": "../shared/hours.yaml"},
+			err:   "config/hours.yaml: permission denied",
+			is:    []error{fs.ErrPermission},
+		},
+		"absolute link that ReadLink cannot read with outside links allowed": {
+			input: func(_ *testing.T, dir string) manifest.Input {
+				return manifest.FS(deniedFS{FS: os.DirFS(dir), readLink: true}, "config",
+					manifest.WithOutsideLinks(true))
+			},
+			links: map[string]string{"config/hours.yaml": "{dir}/shared/hours.yaml"},
+			err:   "config/hours.yaml: permission denied",
+			is:    []error{fs.ErrPermission},
+		},
+		"link that Lstat cannot describe": {
+			input: func(_ *testing.T, dir string) manifest.Input {
+				return manifest.FS(deniedFS{FS: os.DirFS(dir), lstat: true}, "config")
+			},
+			links: map[string]string{"config/hours.yaml": "../shared/hours.yaml"},
+			err:   "config/hours.yaml: permission denied",
+			is:    []error{fs.ErrPermission},
+		},
+		"link that Lstat cannot describe with outside links allowed": {
+			input: func(_ *testing.T, dir string) manifest.Input {
+				return manifest.FS(deniedFS{FS: os.DirFS(dir), lstat: true}, "config",
+					manifest.WithOutsideLinks(true))
+			},
+			links: map[string]string{"config/hours.yaml": "../shared/hours.yaml"},
+			err:   "config/hours.yaml: permission denied",
+			is:    []error{fs.ErrPermission},
 		},
 	}
 
@@ -649,8 +696,9 @@ func TestFS_UnreadableLinks(t *testing.T) {
 				links: links,
 			}.write(t, dir)
 
-			_, err := newCafeRegistry(t).Load(t.Context(), tc.input(dir), manifest.WithSetChecks(false))
+			set, err := newCafeRegistry(t).Load(t.Context(), tc.input(t, dir), manifest.WithSetChecks(false))
 			require.Error(t, err)
+			assert.Nil(t, set)
 
 			for _, target := range tc.is {
 				require.ErrorIs(t, err, target)
@@ -658,6 +706,297 @@ func TestFS_UnreadableLinks(t *testing.T) {
 
 			assert.Contains(t, niceyaml.FormatError(err), strings.ReplaceAll(tc.err, "{dir}", dir))
 		})
+	}
+}
+
+// subFS returns the directory at dir in fsys as a file system.
+func subFS(t *testing.T, fsys fs.FS, dir string) fs.FS {
+	t.Helper()
+
+	sub, err := fs.Sub(fsys, dir)
+	require.NoError(t, err)
+
+	return sub
+}
+
+// followFS is a file system that implements [fs.ReadLinkFS] with an Lstat
+// that follows links. Its Lstat thus describes the file that a link leads
+// to, and never the link.
+type followFS struct{ fs.FS }
+
+func (f followFS) ReadLink(name string) (string, error) {
+	return fs.ReadLink(f.FS, name) //nolint:wrapcheck // The walk reads the error of the file system.
+}
+
+func (f followFS) Lstat(name string) (fs.FileInfo, error) {
+	return fs.Stat(f.FS, name) //nolint:wrapcheck // The walk reads the error of the file system.
+}
+
+// deniedFS is a file system that implements [fs.ReadLinkFS] and reports
+// its links. The ReadLink and the Lstat that it names fail with an error
+// that matches [fs.ErrPermission].
+type deniedFS struct {
+	fs.FS
+
+	readLink bool
+	lstat    bool
+}
+
+func (f deniedFS) ReadLink(name string) (string, error) {
+	if f.readLink {
+		return "", &fs.PathError{Op: "readlink", Path: name, Err: fs.ErrPermission}
+	}
+
+	return fs.ReadLink(f.FS, name) //nolint:wrapcheck // The walk reads the error of the file system.
+}
+
+func (f deniedFS) Lstat(name string) (fs.FileInfo, error) {
+	if f.lstat {
+		return nil, &fs.PathError{Op: "lstat", Path: name, Err: fs.ErrPermission}
+	}
+
+	return fs.Lstat(f.FS, name) //nolint:wrapcheck // The walk reads the error of the file system.
+}
+
+// flatFS is a file system without [fs.ReadLinkFS] whose directory
+// listings describe each link as the file or the directory that the link
+// leads to.
+type flatFS struct{ fs.FS }
+
+func (f flatFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	entries, err := fs.ReadDir(f.FS, name)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // The walk reads the error of the file system.
+	}
+
+	for i, e := range entries {
+		info, err := fs.Stat(f.FS, path.Join(name, e.Name()))
+		if err != nil {
+			return nil, err //nolint:wrapcheck // The walk reads the error of the file system.
+		}
+
+		entries[i] = fs.FileInfoToDirEntry(info)
+	}
+
+	return entries, nil
+}
+
+// flatReportFS is a file system that reports its links through
+// [fs.ReadLinkFS] and lists its directories as a [flatFS] does.
+type flatReportFS struct{ flatFS }
+
+func (f flatReportFS) ReadLink(name string) (string, error) {
+	return fs.ReadLink(f.FS, name) //nolint:wrapcheck // The walk reads the error of the file system.
+}
+
+func (f flatReportFS) Lstat(name string) (fs.FileInfo, error) {
+	return fs.Lstat(f.FS, name) //nolint:wrapcheck // The walk reads the error of the file system.
+}
+
+func TestFS_LinksListedAsTargets(t *testing.T) {
+	t.Parallel()
+
+	// Each file system holds the tree of dir, and its listings describe
+	// each link as the file or the directory that the link leads to.
+	fsyss := map[string]func(dir string) fs.FS{
+		"without ReadLinkFS": func(dir string) fs.FS {
+			return flatFS{os.DirFS(dir)}
+		},
+		"that reports links": func(dir string) fs.FS {
+			return flatReportFS{flatFS{os.DirFS(dir)}}
+		},
+	}
+
+	tcs := map[string]struct {
+		// The files that the tree holds besides config/cafe.yaml and
+		// shared/hours.yaml.
+		files map[string]string
+		links map[string]string
+		opts  []manifest.InputOption
+		want  []string
+	}{
+		// A file loads once for each entry that reaches it, and once at
+		// its own path.
+		"link to a file inside": {
+			links: map[string]string{"config/same.yaml": "cafe.yaml"},
+			want:  []string{"config/cafe.yaml", "config/same.yaml"},
+		},
+		"link to a file inside with outside links allowed": {
+			links: map[string]string{"config/same.yaml": "cafe.yaml"},
+			opts:  []manifest.InputOption{manifest.WithOutsideLinks(true)},
+			want:  []string{"config/cafe.yaml", "config/same.yaml"},
+		},
+		"link to a link to a file inside": {
+			links: map[string]string{"config/same.yaml": "cafe.yaml", "config/chain.yaml": "same.yaml"},
+			want:  []string{"config/cafe.yaml", "config/chain.yaml", "config/same.yaml"},
+		},
+		"link to a directory inside in a recursive walk": {
+			files: map[string]string{"config/real/hours.yaml": hoursV1Doc},
+			links: map[string]string{"config/sub": "real"},
+			opts:  []manifest.InputOption{manifest.WithRecursive(true)},
+			want:  []string{"config/cafe.yaml", "config/real/hours.yaml", "config/sub/hours.yaml"},
+		},
+		"link to a file outside": {
+			links: map[string]string{"config/hours.yaml": "../shared/hours.yaml"},
+			want:  []string{"config/cafe.yaml", "config/hours.yaml"},
+		},
+		"link to a file outside with outside links refused": {
+			links: map[string]string{"config/hours.yaml": "../shared/hours.yaml"},
+			opts:  []manifest.InputOption{manifest.WithOutsideLinks(false)},
+			want:  []string{"config/cafe.yaml", "config/hours.yaml"},
+		},
+		"link to a directory outside": {
+			links: map[string]string{"config/sub": "../shared"},
+			want:  []string{"config/cafe.yaml"},
+		},
+		"link to a directory outside in a recursive walk": {
+			links: map[string]string{"config/sub": "../shared"},
+			opts:  []manifest.InputOption{manifest.WithRecursive(true)},
+			want:  []string{"config/cafe.yaml", "config/sub/hours.yaml"},
+		},
+		"link to a directory outside in a recursive walk with outside links refused": {
+			links: map[string]string{"config/sub": "../shared"},
+			opts:  []manifest.InputOption{manifest.WithRecursive(true), manifest.WithOutsideLinks(false)},
+			want:  []string{"config/cafe.yaml", "config/sub/hours.yaml"},
+		},
+	}
+
+	for fsName, newFS := range fsyss {
+		for name, tc := range tcs {
+			t.Run(fsName+"/"+name, func(t *testing.T) {
+				t.Parallel()
+
+				dir := t.TempDir()
+
+				files := map[string]string{"config/cafe.yaml": cafeDoc, "shared/hours.yaml": hoursV1Doc}
+				maps.Copy(files, tc.files)
+
+				tree{files: files, links: tc.links}.write(t, dir)
+
+				// The walk does not ask the file system about an entry that
+				// the listing does not name as a link.
+				set, err := newCafeRegistry(t).Load(t.Context(),
+					manifest.FS(newFS(dir), "config", tc.opts...), manifest.WithSetChecks(false))
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, loadedNames(set))
+			})
+		}
+	}
+}
+
+func TestFS_UnreportedLinks(t *testing.T) {
+	t.Parallel()
+
+	// Each file system holds the tree of dir and reports none of its links.
+	fsyss := map[string]func(t *testing.T, dir string) fs.FS{
+		"without ReadLinkFS": func(_ *testing.T, dir string) fs.FS {
+			// The struct hides every method of the file system but Open.
+			return struct{ fs.FS }{os.DirFS(dir)}
+		},
+		"fs.Sub of one without ReadLinkFS": func(t *testing.T, dir string) fs.FS {
+			t.Helper()
+
+			// The file system that fs.Sub returns implements fs.ReadLinkFS.
+			// Its ReadLink fails and its Lstat follows the link.
+			return subFS(t, struct{ fs.FS }{os.DirFS(filepath.Dir(dir))}, filepath.Base(dir))
+		},
+		"Lstat that follows links": func(_ *testing.T, dir string) fs.FS {
+			return followFS{os.DirFS(dir)}
+		},
+	}
+
+	unreported := func(name string) string {
+		return stringtest.JoinLF(
+			name+": is a link, and the file system does not report where it leads",
+			"`-- pass WithOutsideLinks(true) to read it, or implement fs.ReadLinkFS in the file system "+
+				"and in each file system that it wraps",
+		)
+	}
+
+	tcs := map[string]struct {
+		links map[string]string
+		opts  []manifest.InputOption
+		want  []string
+		err   string
+		is    []error
+	}{
+		"link outside": {
+			links: map[string]string{"config/hours.yaml": "../shared/hours.yaml"},
+			err:   unreported("config/hours.yaml"),
+			is:    []error{manifest.ErrOutsideLink},
+		},
+		"link outside with outside links refused": {
+			links: map[string]string{"config/hours.yaml": "../shared/hours.yaml"},
+			opts:  []manifest.InputOption{manifest.WithOutsideLinks(false)},
+			err:   unreported("config/hours.yaml"),
+			is:    []error{manifest.ErrOutsideLink},
+		},
+		"link outside with outside links allowed": {
+			links: map[string]string{"config/hours.yaml": "../shared/hours.yaml"},
+			opts:  []manifest.InputOption{manifest.WithOutsideLinks(true)},
+			want:  []string{"config/cafe.yaml", "config/hours.yaml"},
+		},
+		"link inside": {
+			links: map[string]string{"config/same.yaml": "cafe.yaml"},
+			err:   unreported("config/same.yaml"),
+			is:    []error{manifest.ErrOutsideLink},
+		},
+		"link inside with outside links allowed": {
+			links: map[string]string{"config/same.yaml": "cafe.yaml"},
+			opts:  []manifest.InputOption{manifest.WithOutsideLinks(true)},
+			want:  []string{"config/cafe.yaml", "config/same.yaml"},
+		},
+		"link that the patterns do not select": {
+			links: map[string]string{"config/hours.txt": "../shared/hours.yaml"},
+			want:  []string{"config/cafe.yaml"},
+		},
+		"link to a directory": {
+			links: map[string]string{"config/shared.yaml": "../shared"},
+			want:  []string{"config/cafe.yaml"},
+		},
+		"dangling link": {
+			links: map[string]string{"config/old.yaml": "gone.yaml"},
+			err:   "config/old.yaml: ",
+			is:    []error{fs.ErrNotExist},
+		},
+		"dangling link with outside links allowed": {
+			links: map[string]string{"config/old.yaml": "gone.yaml"},
+			opts:  []manifest.InputOption{manifest.WithOutsideLinks(true)},
+			err:   "config/old.yaml: ",
+			is:    []error{fs.ErrNotExist},
+		},
+	}
+
+	for fsName, newFS := range fsyss {
+		for name, tc := range tcs {
+			t.Run(fsName+"/"+name, func(t *testing.T) {
+				t.Parallel()
+
+				dir := t.TempDir()
+
+				tree{
+					files: map[string]string{"config/cafe.yaml": cafeDoc, "shared/hours.yaml": hoursV1Doc},
+					links: tc.links,
+				}.write(t, dir)
+
+				set, err := newCafeRegistry(t).Load(t.Context(),
+					manifest.FS(newFS(t, dir), "config", tc.opts...), manifest.WithSetChecks(false))
+				if tc.err != "" {
+					require.Error(t, err)
+
+					for _, target := range tc.is {
+						require.ErrorIs(t, err, target)
+					}
+
+					assert.Contains(t, niceyaml.FormatError(err), tc.err)
+
+					return
+				}
+
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, loadedNames(set))
+			})
+		}
 	}
 }
 
