@@ -35,6 +35,15 @@ func TestPlan_Apply_Link(t *testing.T) {
 			config: "config",
 			target: "config/shared/hours.yaml",
 		},
+		"relative link through a directory link outside the directory and back up": {
+			files: map[string]string{"config/shared/hours.yaml": hoursDoc, "config/sub/notes.txt": ""},
+			links: map[string]string{
+				"x":                 "config/sub",
+				"config/hours.yaml": "../x/../shared/hours.yaml",
+			},
+			config: "config",
+			target: "config/shared/hours.yaml",
+		},
 		"absolute link through a linked directory": {
 			files: map[string]string{"real/config/shared/hours.yaml": hoursDoc},
 			links: map[string]string{
@@ -76,6 +85,60 @@ func TestPlan_Apply_Link(t *testing.T) {
 				t,
 				string(plan.Files()[0].After()),
 				yamltest.ReadFile(t, filepath.Join(dir, filepath.FromSlash(tc.target))),
+			)
+		})
+	}
+}
+
+// TestPlan_Apply_RelativeLink applies plans of a relative input path. It
+// changes the working directory, so it cannot run in parallel.
+//
+//nolint:paralleltest // t.Chdir does not work in a parallel test.
+func TestPlan_Apply_RelativeLink(t *testing.T) {
+	tcs := map[string]struct {
+		links  map[string]string
+		chdir  string
+		config string
+	}{
+		"link that climbs above the working directory": {
+			links:  map[string]string{"config/hours.yaml": "../config/shared/hours.yaml"},
+			chdir:  "config",
+			config: ".",
+		},
+		"link that climbs above the parent of the directory": {
+			links:  map[string]string{"config/hours.yaml": "../../{base}/config/shared/hours.yaml"},
+			config: "config",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+
+			links := make(map[string]string, len(tc.links))
+			for link, target := range tc.links {
+				links[link] = strings.ReplaceAll(target, "{base}", filepath.Base(dir))
+			}
+
+			tree{
+				files: map[string]string{"config/shared/hours.yaml": hoursDoc},
+				links: links,
+			}.write(t, dir)
+
+			t.Chdir(filepath.Join(dir, filepath.FromSlash(tc.chdir)))
+
+			plan, err := newCafeRegistry(t).PlanMigration(t.Context(), manifest.Path(tc.config))
+			require.NoError(t, err)
+			require.Len(t, plan.Files(), 1)
+
+			res, err := plan.Apply(t.Context())
+			require.NoError(t, err)
+			require.NoError(t, res.Err())
+
+			assert.Equal(
+				t,
+				string(plan.Files()[0].After()),
+				yamltest.ReadFile(t, filepath.Join(dir, "config", "shared", "hours.yaml")),
 			)
 		})
 	}

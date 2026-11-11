@@ -270,6 +270,15 @@ func WithHidden(hidden bool) InputOption {
 // files outside it. An app should not pass it for a directory that a
 // flag names. [Plan.Apply] never rewrites a file outside the directory.
 //
+// The walk of a [Path] input opens each file through an [os.Root] of the
+// directory. Without the option, the walk thus refuses a link that leads
+// outside even when another process changes the directory during the
+// load. The refusal covers symbolic links only, so the walk reads a file
+// that a hard link names. An app that only reads a directory can also
+// open an [os.Root] on the directory and pass [FS] its FS and ".". That
+// input keeps the same refusal, and [Plan.Apply] does not rewrite its
+// files.
+//
 // The walk of an [FS] input learns where a link leads only when the file
 // system reports the link, as FS describes. A reported link that leaves
 // the file system fails with an error that matches [ErrOutsideLink], even

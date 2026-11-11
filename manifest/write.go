@@ -9,13 +9,15 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"syscall"
 
 	"go.jacobcolvin.com/niceyaml"
 )
 
-// errOutside indicates a link that leads outside the directory that Apply
-// works in.
+// errOutside indicates a link that leads outside the directory that a
+// walk reads or that Apply works in.
 var errOutside = errors.New("link leads outside the directory")
 
 // maxLinks is the number of links that the resolve of one path follows at
@@ -126,7 +128,11 @@ func writeFile(dir, name string, old, text []byte, app string) error {
 
 	defer root.Close() //nolint:errcheck // A directory has nothing to flush.
 
-	abs, err := filepath.EvalSymlinks(dir)
+	abs, err := filepath.Abs(dir)
+	if err == nil {
+		abs, err = filepath.EvalSymlinks(abs)
+	}
+
 	if err != nil {
 		return systemProblem(err)
 	}
@@ -298,104 +304,204 @@ func syncDir(root *os.Root, dir string) {
 }
 
 // resolveIn returns the path of the file at name in root with every link
-// resolved. Each link must lead to a path below root, or resolveIn returns
-// [errOutside]. The path abs is the path of root with every link resolved.
+// resolved. The path abs is the path of root with every link resolved. It
+// returns [errOutside] when the file lies outside root.
+//
+// It follows each element of the path as the system does, so a ".." after
+// a link climbs from the directory that the link leads to. It reads each
+// element inside root through root. A link can lead outside root and back
+// in, so it reads each element outside root by its path. It returns to
+// root at the element that names the directory of root.
 func resolveIn(root *os.Root, abs, name string) (string, error) {
-	parts := strings.Split(filepath.ToSlash(name), "/")
+	r := &resolve{root: root, abs: abs, parts: splitPath(name)}
 
-	var done []string
-
-	for links := 0; len(parts) > 0; {
-		part := parts[0]
-		parts = parts[1:]
+	for len(r.parts) > 0 {
+		part := r.parts[0]
+		r.parts = r.parts[1:]
 
 		switch part {
 		case "", ".":
 			continue
-
 		case "..":
-			if len(done) > 0 {
-				done = done[:len(done)-1]
-
-				continue
+			err := r.up()
+			if err != nil {
+				return "", err
 			}
-
-			// A link can climb out of root and come back in, as
-			// "../config/x.yaml" does in a directory named config.
-			rel, ok := absBelow(abs, filepath.Join(append([]string{filepath.Dir(abs)}, parts...)...))
-			if !ok {
-				return "", errOutside
-			}
-
-			parts = strings.Split(filepath.ToSlash(rel), "/")
 
 			continue
 		}
 
-		cur := filepath.Join(append(done, part)...)
-
-		info, err := root.Lstat(cur)
+		err := r.step(part)
 		if err != nil {
-			return "", err //nolint:wrapcheck // The caller names the problem.
+			return "", err
 		}
-
-		if info.Mode()&fs.ModeSymlink == 0 {
-			done = append(done, part)
-
-			continue
-		}
-
-		links++
-		if links > maxLinks {
-			return "", errOutside
-		}
-
-		link, err := root.Readlink(cur)
-		if err != nil {
-			return "", err //nolint:wrapcheck // The caller names the problem.
-		}
-
-		if filepath.IsAbs(link) {
-			rel, ok := absBelow(abs, link)
-			if !ok {
-				return "", errOutside
-			}
-
-			done, link = nil, rel
-		}
-
-		parts = append(strings.Split(filepath.ToSlash(link), "/"), parts...)
 	}
 
-	return filepath.Join(done...), nil
+	if r.out != "" {
+		return "", errOutside
+	}
+
+	return filepath.Join(r.done...), nil
 }
 
-// absBelow returns the path of link, an absolute link target, below abs,
-// a directory with every link resolved, and whether link lies below abs.
-// A target whose directory runs through links, such as /tmp on macOS,
-// lies below abs when it does after those links resolve.
-func absBelow(abs, link string) (string, bool) {
-	if rel, ok := relBelow(abs, link); ok {
-		return rel, true
+// resolve is the state of one call of [resolveIn].
+type resolve struct {
+	root *os.Root
+	// The path of root with every link resolved.
+	abs string
+	// The details of root, which [resolve.reach] reads at its first use.
+	info fs.FileInfo
+	// The absolute path that the resolve has reached outside root, with
+	// every link resolved. It is empty while the resolve stays inside root.
+	out string
+	// The elements of the path that the resolve has yet to follow.
+	parts []string
+	// The elements below root that the resolve has followed. None of them
+	// is a link.
+	done []string
+	// The number of links that the resolve has followed.
+	links int
+}
+
+// splitPath returns the elements of the path p.
+func splitPath(p string) []string {
+	return strings.Split(filepath.ToSlash(p), "/")
+}
+
+// up follows a ".." element from the directory that the resolve has
+// reached. Every element that the resolve has followed is a directory and
+// not a link, so the parent of that directory is the parent by text.
+func (r *resolve) up() error {
+	switch {
+	case r.out != "":
+		return r.reach(filepath.Dir(r.out), nil)
+	case len(r.done) > 0:
+		r.done = r.done[:len(r.done)-1]
+
+		return nil
+
+	default:
+		return r.reach(filepath.Dir(r.abs), nil)
+	}
+}
+
+// step follows the element part from the directory that the resolve has
+// reached. It splices the target of a link into the elements that the
+// resolve has yet to follow.
+func (r *resolve) step(part string) error {
+	dir := r.out
+	if dir == "" {
+		dir = filepath.Join(r.done...)
 	}
 
-	dir, err := filepath.EvalSymlinks(filepath.Dir(link))
+	cur := filepath.Join(dir, part)
+
+	info, err := r.lstat(cur)
 	if err != nil {
-		return "", false
+		return err
 	}
 
-	return relBelow(abs, filepath.Join(dir, filepath.Base(link)))
+	if info.Mode()&fs.ModeSymlink == 0 {
+		return r.enter(part, cur, info)
+	}
+
+	r.links++
+	if r.links > maxLinks {
+		return errOutside
+	}
+
+	link, err := r.readlink(cur)
+	if err != nil {
+		return err
+	}
+
+	if filepath.IsAbs(link) {
+		vol := filepath.VolumeName(link)
+
+		err := r.reach(vol+string(filepath.Separator), nil)
+		if err != nil {
+			return err
+		}
+
+		link = link[len(vol):]
+	}
+
+	r.parts = append(splitPath(link), r.parts...)
+
+	return nil
 }
 
-// relBelow returns the path of target below dir, and whether target lies
-// below dir as text.
-func relBelow(dir, target string) (string, bool) {
-	rel, err := filepath.Rel(dir, target)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", false
+// enter moves the resolve to cur, the element part that info describes,
+// which is not a link. A file ends the path, so enter refuses a file that
+// more elements follow, as the system does.
+func (r *resolve) enter(part, cur string, info fs.FileInfo) error {
+	if !info.IsDir() && slices.ContainsFunc(r.parts, func(p string) bool { return p != "" && p != "." }) {
+		return &fs.PathError{Op: "lstat", Path: cur, Err: syscall.ENOTDIR}
 	}
 
-	return rel, true
+	if r.out == "" {
+		r.done = append(r.done, part)
+
+		return nil
+	}
+
+	return r.reach(cur, info)
+}
+
+// reach moves the resolve to dir, an absolute path with every link
+// resolved, which info describes. When info is nil, reach reads it. The
+// resolve returns inside root when dir names the directory of root, as a
+// volume root can.
+func (r *resolve) reach(dir string, info fs.FileInfo) error {
+	if info == nil {
+		var err error
+
+		info, err = os.Stat(dir)
+		if err != nil {
+			return err //nolint:wrapcheck // The caller names the problem.
+		}
+	}
+
+	if info.IsDir() {
+		if r.info == nil {
+			var err error
+
+			r.info, err = r.root.Stat(".")
+			if err != nil {
+				return err //nolint:wrapcheck // The caller names the problem.
+			}
+		}
+
+		if os.SameFile(info, r.info) {
+			r.out, r.done = "", nil
+
+			return nil
+		}
+	}
+
+	r.out, r.done = dir, nil
+
+	return nil
+}
+
+// lstat describes cur, a path below root while the resolve stays inside
+// root, and an absolute path outside it.
+func (r *resolve) lstat(cur string) (fs.FileInfo, error) {
+	if r.out == "" {
+		return r.root.Lstat(cur) //nolint:wrapcheck // The caller names the problem.
+	}
+
+	return os.Lstat(cur) //nolint:wrapcheck // The caller names the problem.
+}
+
+// readlink returns the target of the link at cur, a path below root while
+// the resolve stays inside root, and an absolute path outside it.
+func (r *resolve) readlink(cur string) (string, error) {
+	if r.out == "" {
+		return r.root.Readlink(cur) //nolint:wrapcheck // The caller names the problem.
+	}
+
+	return os.Readlink(cur) //nolint:wrapcheck // The caller names the problem.
 }
 
 // systemProblem returns the problem of a file that the system refuses to
