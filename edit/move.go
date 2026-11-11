@@ -62,8 +62,13 @@ import (
 //
 // A value that Move reaches through an alias or a `<<` merge key leaves the
 // anchored value, for every place that reads it, as it does for Remove. A
-// target through one goes into the anchored value, as a Set there does. A
-// reference document of [go.jacobcolvin.com/niceyaml.WithReferences] that
+// target through one goes into the anchored value, as a Set there does.
+// Target is a `$` path. A target in a mapping that only merges the anchored
+// value gives the value to that mapping alone. To keep the value for every
+// reader, build target from [Node.Own], whose parent names the mapping or
+// the sequence that holds the value.
+//
+// A reference document of [go.jacobcolvin.com/niceyaml.WithReferences] that
 // a merge key reads decides which names the mapping of the merge key reads.
 // A Move of an entry of such a mapping, or into it, fails with a problem
 // that matches [paths.ErrReferenceAlias].

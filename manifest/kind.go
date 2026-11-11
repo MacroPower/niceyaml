@@ -222,6 +222,13 @@ type step struct {
 // a `~`. The Versions section of the package documentation describes the
 // calls.
 //
+// An edit that fn makes through an alias or a `<<` merge key changes the
+// anchored value, for every place of the document that reads it.
+// [edit.Node.Own] returns the path of the place in that value. It differs
+// from [edit.Node.Path] when the path of the node leads through an alias or
+// a merge key. The two paths are equal at a place in the anchored value
+// itself, where every reader still reads an edit.
+//
 // The step runs as one [edit.Doc.Apply], whose messages name the version.
 // [edit.Node.Decode] in fn applies the unmarshalers of [WithUnmarshalers].
 // It leaves out the decode options of the registry and the kind, which

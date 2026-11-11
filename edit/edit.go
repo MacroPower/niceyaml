@@ -686,6 +686,14 @@ func headerEnd(src *niceyaml.Source, line int) int {
 // place that exists, such as `$`, and call [Node.Set] on the node that
 // [Node.At] returns.
 //
+// The one call for each place covers the places that path selects. It does
+// not cover the nodes that [Node.At] returns. Those nodes can reach the
+// same text in two calls. The nodes at `@.retries` do so when path selects
+// each mapping that merges one anchored mapping. An fn that sets that
+// value from the value that it reads then edits it one time for each such
+// mapping. [Node.Own] returns the same path for those nodes, so fn can
+// keep the paths that it edited and skip the later calls.
+//
 // A Source that [niceyaml.WithAllowDuplicateKeys] gives can hold two
 // entries of one key in a mapping. A path of the key selects the last of
 // them, as a decode reads it. A selector that selects more than one value,
@@ -695,6 +703,10 @@ func headerEnd(src *niceyaml.Source, line int) int {
 // of its key too, and an `@` path of [Node.At] reads below that entry. So
 // the node reads the values of its own entry. A call that edits either
 // entry fails with [ErrUnsupported], as [ConstructRepeatedKey] names it.
+//
+// [Node.Own] returns the path of the key for the node of a hidden entry.
+// It can return that path for the node of the last entry too, so fn cannot
+// tell those entries apart by Own.
 //
 // Apply calls fn only on places that hold a value. A recursive selector
 // thus selects nothing below a tag that converts a collection, such as
