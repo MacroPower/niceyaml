@@ -84,11 +84,14 @@ var ErrNoMatch = errors.New("no matching schema")
 // the interval loads it again.
 //
 // The registry caches a Ref from [FileFS] by its file system and its path
-// together, so one path in two file systems is two schemas. The registry
-// compiles every schema with the options that [WithCompileOptions] gave
-// it. [Registry.Load] reads a file from the file system that its Ref
-// names, or from disk. On disk, the [Access] of the registry decides
-// which files it reads. Load fetches a URL with the client that
+// together, so one path in two file systems is two schemas. It caches a
+// Ref from [Loadable] or [Embedded] apart from the Refs that name a file
+// or a URL, as Loadable describes. The registry compiles every schema
+// with the options that [WithCompileOptions] gave it.
+//
+// [Registry.Load] reads a file from the file system that its Ref names,
+// or from disk. On disk, the [Access] of the registry decides which
+// files it reads. Load fetches a URL with the client that
 // [WithHTTPClient] gave the registry. A Ref that carries a compiled
 // schema does not have anything to load, and the registry validates with
 // the schema as it is.
@@ -139,14 +142,22 @@ type Ref struct {
 // Loadable creates a new [Ref] that names a schema by key and loads its
 // bytes with load on demand.
 //
-// The key must identify the schema uniquely, because two Refs with the
-// same key are one schema to every registry that caches on it. The key is
-// a name, not necessarily a fetchable address. [URL] uses the URL, [File]
-// the file URL of the absolute path, and [Embedded] a digest of the bytes.
-// [FileFS] uses the file URL of the path in its file system, and the
-// registry tells two file systems apart itself. The load might be
-// expensive or fail, but it must return the same bytes each time it runs
-// for one key.
+// The key must be unique among the Refs from Loadable. Two such Refs
+// with one key are one schema to every registry that caches them. The
+// key is a name, not necessarily an address that a registry can fetch,
+// so the $id of the schema is a fitting key. A Ref from [Embedded] is a
+// Ref from Loadable whose key is "embedded:" and a digest of its bytes.
+// The load might be expensive or fail, but it must return the same bytes
+// each time it runs for one key.
+//
+// A registry keeps a Ref from Loadable apart from each Ref that names a
+// location, such as one from [URL], [File], or [FileFS]. A key that
+// spells a URL or a file URL is therefore not the schema of that URL or
+// file. A request for the Ref from Loadable gets the schema that load
+// returns, whatever a document named before it. A request for the URL or
+// the file gets the bytes at that location. The registry fetches the
+// URL, or reads a file on disk, only when its [Access] allows the
+// location.
 //
 // Loadable panics if key is empty or load is nil.
 func Loadable(key string, load func(ctx context.Context) ([]byte, error)) Ref {
