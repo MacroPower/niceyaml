@@ -4923,8 +4923,60 @@ func TestNewSourceFromReader(t *testing.T) {
 	t.Run("reports a read error", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := niceyaml.NewSourceFromReader(iotest.ErrReader(errReadFailed))
-		require.ErrorIs(t, err, errReadFailed)
+		denied := &fs.PathError{Op: "open", Path: "/cache/app.yaml", Err: fs.ErrPermission}
+
+		tcs := map[string]struct {
+			err      error
+			is       error
+			want     string
+			wantName string
+			opts     []niceyaml.SourceOption
+		}{
+			"named": {
+				err:      errReadFailed,
+				is:       errReadFailed,
+				opts:     []niceyaml.SourceOption{niceyaml.WithName("<stdin>")},
+				want:     "<stdin>: read failed",
+				wantName: "<stdin>",
+			},
+			"unnamed": {
+				err:  errReadFailed,
+				is:   errReadFailed,
+				want: "read failed",
+			},
+			"path error": {
+				// The name of the Source replaces the path in the message.
+				err:      denied,
+				is:       fs.ErrPermission,
+				opts:     []niceyaml.SourceOption{niceyaml.WithName("remote")},
+				want:     "remote: " + fs.ErrPermission.Error(),
+				wantName: "remote",
+			},
+			"path error under the context of the reader": {
+				// The message keeps the context that the reader put around
+				// the path error, and the path with it.
+				err:      fmt.Errorf("fetch https://example.com/app.yaml: %w", denied),
+				is:       fs.ErrPermission,
+				opts:     []niceyaml.SourceOption{niceyaml.WithName("remote")},
+				want:     "remote: fetch https://example.com/app.yaml: open /cache/app.yaml: " + fs.ErrPermission.Error(),
+				wantName: "remote",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				_, err := niceyaml.NewSourceFromReader(iotest.ErrReader(tc.err), tc.opts...)
+				require.ErrorIs(t, err, tc.is)
+				assert.Equal(t, tc.want, err.Error())
+				assert.False(t, niceyaml.IsInvalid(err))
+
+				bound := slices.Collect(niceyaml.Bindings(err))
+				require.Len(t, bound, 1)
+				assert.Equal(t, tc.wantName, bound[0].Name())
+			})
+		}
 	})
 }
 
@@ -4996,11 +5048,80 @@ func TestNewSourceFromFile(t *testing.T) {
 		})
 	}
 
-	//nolint:paralleltest // See above.
-	t.Run("reports a missing file", func(t *testing.T) {
-		_, err := niceyaml.NewSourceFromFile("configs/missing.yaml")
-		require.ErrorIs(t, err, fs.ErrNotExist)
-	})
+	// The message opens with the name of the Source, drawn as escape.Line
+	// draws it, and goes on with the reason that the system gives.
+	readErrs := map[string]struct {
+		is           error
+		path         string
+		wantPrefix   string
+		wantName     string
+		wantFilePath string
+		opts         []niceyaml.SourceOption
+		unix         bool
+	}{
+		"missing file": {
+			path:         "configs/missing.yaml",
+			is:           fs.ErrNotExist,
+			wantPrefix:   "configs/missing.yaml: ",
+			wantName:     "configs/missing.yaml",
+			wantFilePath: filepath.Join(dir, "configs", "missing.yaml"),
+		},
+		"missing file with a line feed and an escape in its name": {
+			path:         "no\nsuch\x1b[31m.yaml",
+			is:           fs.ErrNotExist,
+			wantPrefix:   "no\u240asuch\u241b[31m.yaml: ",
+			wantName:     "no\nsuch\x1b[31m.yaml",
+			wantFilePath: dir + string(filepath.Separator) + "no\nsuch\x1b[31m.yaml",
+		},
+		"missing file with options": {
+			path: "configs/missing.yaml",
+			opts: []niceyaml.SourceOption{
+				niceyaml.WithName("defaults"),
+				niceyaml.WithFilePath("virtual/app.yaml"),
+			},
+			is:           fs.ErrNotExist,
+			wantPrefix:   "defaults: ",
+			wantName:     "defaults",
+			wantFilePath: "virtual/app.yaml",
+		},
+		"directory": {
+			// The open of a directory succeeds, and the read that follows
+			// it fails.
+			path:         "configs",
+			wantPrefix:   "configs: ",
+			wantName:     "configs",
+			wantFilePath: filepath.Join(dir, "configs"),
+			unix:         true,
+		},
+	}
+
+	for name, tc := range readErrs {
+		//nolint:paralleltest // See above.
+		t.Run(name, func(t *testing.T) {
+			if tc.unix && runtime.GOOS == "windows" {
+				t.Skip("Windows does not open a directory as a file")
+			}
+
+			_, err := niceyaml.NewSourceFromFile(tc.path, tc.opts...)
+			require.Error(t, err)
+
+			if tc.is != nil {
+				require.ErrorIs(t, err, tc.is)
+			}
+
+			assert.False(t, niceyaml.IsInvalid(err))
+
+			pathErr, ok := errors.AsType[*fs.PathError](err)
+			require.True(t, ok, "the chain keeps the error of the system")
+			assert.Equal(t, tc.path, pathErr.Path)
+			assert.Equal(t, tc.wantPrefix+pathErr.Err.Error(), err.Error())
+
+			bound := slices.Collect(niceyaml.Bindings(err))
+			require.Len(t, bound, 1)
+			assert.Equal(t, tc.wantName, bound[0].Name())
+			assert.Equal(t, tc.wantFilePath, bound[0].FilePath())
+		})
+	}
 }
 
 func TestNewSourceFromFile_DotDotAfterSymlink(t *testing.T) {
@@ -5173,10 +5294,109 @@ func TestNewSourceFromFS(t *testing.T) {
 	t.Run("reports a missing file", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := niceyaml.NewSourceFromFS(fsys, "configs/missing.yaml")
-		require.ErrorIs(t, err, fs.ErrNotExist)
+		tcs := map[string]struct {
+			want     string
+			wantName string
+			opts     []niceyaml.SourceOption
+		}{
+			"by its path": {
+				want:     "configs/missing.yaml: " + fs.ErrNotExist.Error(),
+				wantName: "configs/missing.yaml",
+			},
+			"by its name": {
+				opts:     []niceyaml.SourceOption{niceyaml.WithName("defaults")},
+				want:     "defaults: " + fs.ErrNotExist.Error(),
+				wantName: "defaults",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				_, err := niceyaml.NewSourceFromFS(fsys, "configs/missing.yaml", tc.opts...)
+				require.ErrorIs(t, err, fs.ErrNotExist)
+				assert.Equal(t, tc.want, err.Error())
+				assert.False(t, niceyaml.IsInvalid(err))
+
+				var pathErr *fs.PathError
+
+				require.ErrorAs(t, err, &pathErr, "the chain keeps the error of the file system")
+
+				bound := slices.Collect(niceyaml.Bindings(err))
+				require.Len(t, bound, 1)
+				assert.Equal(t, tc.wantName, bound[0].Name())
+				assert.Equal(t, "configs/missing.yaml", bound[0].FilePath())
+			})
+		}
+	})
+
+	t.Run("reports a file that opens and does not read", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			want     string
+			wantName string
+			opts     []niceyaml.SourceOption
+		}{
+			"by its path": {
+				want:     "configs/app\u240a.yaml: " + fs.ErrPermission.Error(),
+				wantName: "configs/app\n.yaml",
+			},
+			"by its name": {
+				opts:     []niceyaml.SourceOption{niceyaml.WithName("defaults")},
+				want:     "defaults: " + fs.ErrPermission.Error(),
+				wantName: "defaults",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				fsys := unreadableFS{err: fs.ErrPermission}
+
+				_, err := niceyaml.NewSourceFromFS(fsys, "configs/app\n.yaml", tc.opts...)
+				require.ErrorIs(t, err, fs.ErrPermission)
+				assert.Equal(t, tc.want, err.Error())
+				assert.False(t, niceyaml.IsInvalid(err))
+
+				pathErr, ok := errors.AsType[*fs.PathError](err)
+				require.True(t, ok, "the chain keeps the error of the file system")
+				assert.Equal(t, "read", pathErr.Op)
+
+				bound := slices.Collect(niceyaml.Bindings(err))
+				require.Len(t, bound, 1)
+				assert.Equal(t, tc.wantName, bound[0].Name())
+				assert.Equal(t, "configs/app\n.yaml", bound[0].FilePath())
+			})
+		}
 	})
 }
+
+// unreadableFS is a file system whose every file opens, and whose every
+// read of a file fails with a [*fs.PathError] that holds err.
+type unreadableFS struct{ err error }
+
+func (f unreadableFS) Open(name string) (fs.File, error) {
+	return unreadableFile{name: name, err: f.err}, nil
+}
+
+// unreadableFile is a file of an [unreadableFS].
+type unreadableFile struct {
+	err  error
+	name string
+}
+
+func (f unreadableFile) Stat() (fs.FileInfo, error) {
+	return nil, &fs.PathError{Op: "stat", Path: f.name, Err: f.err}
+}
+
+func (f unreadableFile) Read([]byte) (int, error) {
+	return 0, &fs.PathError{Op: "read", Path: f.name, Err: f.err}
+}
+
+func (unreadableFile) Close() error { return nil }
 
 func TestSource_Decode(t *testing.T) {
 	t.Parallel()

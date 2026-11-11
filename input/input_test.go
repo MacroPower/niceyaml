@@ -218,7 +218,7 @@ func TestReader(t *testing.T) {
 		},
 		"read that fails": {
 			in:  input.Reader("cafe.yaml", &failingReader{err: errBroken}),
-			err: "cafe.yaml: read: broken pipe",
+			err: "cafe.yaml: broken pipe",
 			is:  []error{errBroken},
 		},
 		"byte limit": {

@@ -472,7 +472,7 @@ func limitError(n int) error {
 func readLimited(r io.Reader, limit int) ([]byte, error) {
 	data, err := limitread.ReadAll(r, limit)
 	if err != nil {
-		return nil, err //nolint:wrapcheck // The caller wraps the error.
+		return nil, err //nolint:wrapcheck // The caller binds the error.
 	}
 
 	if len(data) > limit {
@@ -490,6 +490,13 @@ func readLimited(r io.Reader, limit int) ([]byte, error) {
 // [go.jacobcolvin.com/niceyaml/escape.Line] draws it, so a file name that
 // holds a line feed stays on one line. Source.Name returns the name as
 // given.
+//
+// The name opens the error of a read that fails too, as in
+// "defaults: no such file or directory". Such a message does not spell
+// the path that the read tried. The [*fs.PathError] in the chain of the
+// error holds that path. [SourceError.FilePath] reports the file path of
+// the Source, which is the path that the constructor sets unless
+// [WithFilePath] sets another.
 func WithName(name string) SourceOption {
 	return func(c *sourceConfig) {
 		c.name = name
@@ -806,8 +813,12 @@ func WithExcerpts(enabled bool) SourceOption {
 // wants that form everywhere passes it to WithFilePath.
 //
 // NewSourceFromFile returns a nil Source and an error when it cannot read
-// the file. A file past the byte limit gives an error that names the
-// Source, as [WithByteLimit] describes.
+// the file. The error is a [*SourceError] that names the Source, as in
+// "app.yaml: no such file or directory", so [Bindings] reports the name
+// and the file path of a file that does not read. The error matches what
+// the system returned, such as [fs.ErrNotExist] and a [*fs.PathError],
+// and [IsInvalid] does not report it. A file past the byte limit gives an
+// error that names the Source too, as [WithByteLimit] describes.
 func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
 	// Abs fails only when the working directory has no name, and the path
 	// as given is then the closest one left.
@@ -821,12 +832,8 @@ func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
 	cfg := newSourceConfig(append([]SourceOption{WithName(path), WithFilePath(filePath)}, opts...))
 
 	data, err := readFile(path, cfg.bytes())
-	if errors.Is(err, ErrLimit) {
-		return nil, limitSourceError(cfg, err)
-	}
-
 	if err != nil {
-		return nil, err
+		return nil, readSourceError(cfg, err)
 	}
 
 	return newStringSource(string(data), cfg), nil
@@ -848,25 +855,23 @@ func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
 // fsys for as long as it keeps an entry from it, as [WithFS] describes.
 //
 // NewSourceFromFS returns a nil Source and an error when it cannot read
-// the file. A file past the byte limit gives an error that names the
-// Source, as [WithByteLimit] describes.
+// the file. The error is a [*SourceError] that names the Source, as the
+// error of [NewSourceFromFile] does. It matches what fsys returned, and
+// [IsInvalid] does not report it. A file past the byte limit gives an
+// error that names the Source too, as [WithByteLimit] describes.
 func NewSourceFromFS(fsys fs.FS, path string, opts ...SourceOption) (*Source, error) {
 	cfg := newSourceConfig(append([]SourceOption{WithFilePath(path), WithFS(fsys)}, opts...))
 
 	f, err := fsys.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("read file: %w", err)
+		return nil, readSourceError(cfg, err)
 	}
 
 	defer f.Close() //nolint:errcheck // A read-only file has nothing to flush.
 
 	data, err := readLimited(f, cfg.bytes())
-	if errors.Is(err, ErrLimit) {
-		return nil, limitSourceError(cfg, err)
-	}
-
 	if err != nil {
-		return nil, fmt.Errorf("read file: %w", err)
+		return nil, readSourceError(cfg, err)
 	}
 
 	return newStringSource(string(data), cfg), nil
@@ -879,18 +884,17 @@ func NewSourceFromFS(fsys fs.FS, path string, opts ...SourceOption) (*Source, er
 //	source, err := niceyaml.NewSourceFromReader(os.Stdin, niceyaml.WithName("<stdin>"))
 //
 // NewSourceFromReader returns a nil Source and an error when it cannot
-// read r. A text past the byte limit gives an error that names the Source,
-// as [WithByteLimit] describes.
+// read r. The error is a [*SourceError] that names the Source, as in
+// "<stdin>: unexpected EOF". It matches the error of r, and [IsInvalid]
+// does not report it. Without WithName, the message is the error of r
+// alone. A text past the byte limit gives an error that names the Source
+// too, as [WithByteLimit] describes.
 func NewSourceFromReader(r io.Reader, opts ...SourceOption) (*Source, error) {
 	cfg := newSourceConfig(opts)
 
 	data, err := readLimited(r, cfg.bytes())
-	if errors.Is(err, ErrLimit) {
-		return nil, limitSourceError(cfg, err)
-	}
-
 	if err != nil {
-		return nil, fmt.Errorf("read: %w", err)
+		return nil, readSourceError(cfg, err)
 	}
 
 	return newStringSource(string(data), cfg), nil
@@ -961,12 +965,30 @@ func (s *Source) WithText(text string, opts ...SourceOption) *Source {
 	return newStringSource(text, cfg)
 }
 
-// limitSourceError returns err, the error of a text past the byte limit,
-// bound to a [Source] of cfg without text. The read stopped past the
-// limit, so the Source does not hold the text or any of its lines. The
-// error names the Source as the error of a Source from
-// [NewSourceFromString] names it.
-func limitSourceError(cfg sourceConfig, err error) error {
+// readSourceError returns err, the error of a read that failed, bound to
+// a [Source] of cfg without text. The read did not take the text in, so
+// the Source does not hold the text or any of its lines. The error names
+// the Source as the error of a Source from [NewSourceFromString] names it.
+//
+// The error of a text past the byte limit declares the document at fault
+// already. Any other err is no fault of the document, so the result wraps
+// it in [Unchecked]. [os.Open] and a file read return a [*fs.PathError]
+// itself. For such an err, the message is the reason that the system
+// gives without the path, because the name of the Source opens the
+// message. Any other err keeps its whole message, so the context that a
+// reader adds around a [*fs.PathError] stays in it.
+func readSourceError(cfg sourceConfig, err error) error {
+	if !errors.Is(err, ErrLimit) {
+		reason := err.Error()
+
+		pathErr, ok := err.(*fs.PathError) //nolint:errorlint // Only the error itself, so a wrapper keeps its context.
+		if ok && pathErr.Err != nil {
+			reason = pathErr.Err.Error()
+		}
+
+		err = Unchecked(&markedError{err: err, msg: reason})
+	}
+
 	return (&Source{sourceConfig: cfg}).Bind(err)
 }
 
@@ -975,21 +997,12 @@ func limitSourceError(cfg sourceConfig, err error) error {
 func readFile(path string, limit int) ([]byte, error) {
 	f, err := os.Open(path) //nolint:gosec // User-provided file paths are intentional.
 	if err != nil {
-		return nil, fmt.Errorf("read file: %w", err)
+		return nil, err //nolint:wrapcheck // The caller binds the error.
 	}
 
 	defer f.Close() //nolint:errcheck // A read-only file has nothing to flush.
 
-	data, err := readLimited(f, limit)
-	if errors.Is(err, ErrLimit) {
-		return nil, err
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("read file: %w", err)
-	}
-
-	return data, nil
+	return readLimited(f, limit)
 }
 
 // NewSourceFromTokens creates a new [*Source] from [token.Tokens].
