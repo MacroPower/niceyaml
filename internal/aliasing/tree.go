@@ -1,6 +1,7 @@
 package aliasing
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 
@@ -28,11 +29,27 @@ type Node interface {
 // CheckDecode applies one limit per document, so every node that holds an
 // alias gets the verdict of its document. A node without an alias decodes on
 // its own and does not read anything twice, so it passes. A nil Node passes
-// too. So does every node of a document that the limit does not apply to, as
-// [Limited] reports.
+// too. So does every node of a document whose source turns the limit off
+// with niceyaml.WithAliasLimit.
 //
-// The count depends on the document alone, so the document keeps it, and
-// a check of each item of a list counts the document once.
+// An alias that only a reference document resolves counts what the
+// anchors of its name hold there, as [ReferenceWeights] weighs them. Each
+// reference anchor that the aliases of the document reach also counts
+// once, as the definition of an anchor counts in its own document. A
+// reached anchor inside another reached anchor counts as part of the
+// outer anchor.
+//
+// A document thus gets the verdict that it gets with those anchors defined
+// inside it, unless the anchors form a loop of names or share a name.
+// Where the reference documents define one anchor name more than once,
+// each alias of the name weighs the largest anchor that a decode can read
+// for it. A document whose decode reads a smaller anchor of the name can
+// thus fail. ReferenceWeights describes what a loop and a shared name
+// weigh.
+//
+// The count depends on the document and its reference documents alone, so
+// the document keeps it. A check of each item of a list thus counts the
+// document once.
 func CheckDecode(n Node) error {
 	state := stateOf(n)
 	if state == nil || !state.AliasLimit() || !holdsAlias(n.AST()) {
@@ -40,7 +57,7 @@ func CheckDecode(n Node) error {
 	}
 
 	return state.ExcessiveAliasing(func() error {
-		return checkRead(state.Facts(), readValue, Budget{})
+		return checkRead(state, readValue, Budget{})
 	})
 }
 
@@ -49,9 +66,9 @@ func CheckDecode(n Node) error {
 // verdict of the document whether or not n holds an alias, so it reports
 // true for every node of a document past the limit. It reports false for a
 // nil Node, for a document without an alias, and for every node of a
-// document that the limit does not apply to, as [Limited] reports. The
-// document keeps the count, as it keeps the count of CheckDecode, so only
-// the first call of either counts.
+// document whose source turns the limit off with niceyaml.WithAliasLimit.
+// The document keeps the count, as it keeps the count of CheckDecode, so
+// only the first call of either counts.
 //
 // A reader that reads the content of the aliases of a document in its own
 // way, such as a lookup of the entries that a `<<` merge key brings in,
@@ -64,7 +81,7 @@ func PastLimit(n Node) bool {
 	}
 
 	return state.ExcessiveAliasing(func() error {
-		return checkRead(state.Facts(), readValue, Budget{})
+		return checkRead(state, readValue, Budget{})
 	}) != nil
 }
 
@@ -84,6 +101,12 @@ func PastLimit(n Node) bool {
 // apply to. The document keeps the result of the count, as it keeps the
 // result of CheckDecode.
 //
+// An alias that only a reference document resolves writes out the text
+// that the anchors of its name hold there. That text counts against the
+// limit and the Budget as the text of an anchor of the document does. An
+// alias inside a reference anchor is not an alias of the document. Its
+// text spends the Budget only as a part of that text.
+//
 // A caller that decodes n into a type that [DecodesText] reports runs
 // CheckDecodeText as well as CheckDecode.
 func CheckDecodeText(n Node) error {
@@ -93,7 +116,7 @@ func CheckDecodeText(n Node) error {
 	}
 
 	return state.ExcessiveTextAliasing(func() error {
-		return checkRead(state.Facts(), readText, state.Budget())
+		return checkRead(state, readText, state.Budget())
 	})
 }
 
@@ -172,41 +195,6 @@ func (e *RatioError) Is(target error) bool {
 	return target == aliaslimit.ErrExcessiveAliasing
 }
 
-// Limited reports whether the alias limit applies to the document of n.
-// It applies unless the source of the document turned it off with
-// niceyaml.WithAliasLimit. [CheckDecode] and [CheckDecodeText] pass
-// every node of a document that it does not apply to. A caller that
-// applies [aliaslimit.Excessive] to a value that it decoded from n, as
-// [HoldsReferenceAlias] describes, asks Limited first. The limit does not
-// apply to a nil Node.
-func Limited(n Node) bool {
-	state := stateOf(n)
-
-	return state != nil && state.AliasLimit()
-}
-
-// HoldsReferenceAlias reports whether the document of n holds a
-// reference alias. A reference alias is an alias that does not have an
-// anchor of its name before it in the document. A decode resolves such an
-// alias only against a reference document, such as one of
-// niceyaml.WithReferences. [CheckDecode] and [CheckDecodeText] cannot see
-// a reference document, so they count the alias as one node whatever its
-// anchor holds. A caller that reads a decoded value again at every alias
-// applies [aliaslimit.Excessive] to that value when the document holds a
-// reference alias and [Limited] reports that the limit applies. A nil
-// Node does not hold one.
-//
-// The answer depends on the document alone, so HoldsReferenceAlias reads
-// the [Facts] that the document keeps.
-func HoldsReferenceAlias(n Node) bool {
-	state := stateOf(n)
-	if state == nil {
-		return false
-	}
-
-	return state.Facts().ReferenceAlias
-}
-
 // stateOf returns the state of the document of n, or nil for a nil Node.
 func stateOf(n Node) *State {
 	if n == nil {
@@ -216,26 +204,23 @@ func stateOf(n Node) *State {
 	return StateOf(n)
 }
 
-// checkRead returns the error of what a decode of the document of f reads
-// as mode. It returns an [*ExpansionError] when the aliases of the
+// checkRead returns the error of what a decode of the document of state
+// reads as mode. It returns an [*ExpansionError] when the aliases of the
 // document take it past a bound of budget. It returns a [*RatioError]
 // when they make up too much of the read.
-func checkRead(f *Facts, mode readMode, budget Budget) error {
-	c := treeCounter{
-		resolver:    f.resolver,
-		nulls:       f.nulls,
-		budget:      budget,
-		sizes:       [readModes]map[ast.Node]int{{}, {}},
-		open:        map[ast.Node]bool{},
-		extents:     map[ast.Node]extent{},
-		measuring:   map[ast.Node]bool{},
-		collections: map[*ast.AliasNode]bool{},
-		textKeys:    map[*ast.AliasNode]bool{},
-		binaries:    map[*ast.AliasNode]bool{},
-		repeated:    map[ast.Node]bool{},
-	}
+func checkRead(state *State, mode readMode, budget Budget) error {
+	f := state.Facts()
+
+	c := newTreeCounter(f.nulls)
+	c.resolver = f.resolver
+	c.reference = state.References().lookup()
+	c.reached = map[*refWeight]bool{}
+	c.walked = map[*refAnchor]bool{}
+	c.mode = mode
+	c.budget = budget
 
 	c.count(f.body, true, mode)
+	c.addReached()
 
 	if c.overrun != nil {
 		return c.overrun
@@ -301,12 +286,21 @@ const (
 // covers a mapping that a merge key brings in, which the decoder reads
 // again at every merge.
 //
-// The resolver binds each alias to its content. An alias that does not
-// resolve counts as one unaliased node. So does an alias in the nulls
-// set, which holds the aliases that the decoder reads as null, as
-// [NewFacts] finds them. Either kind of alias counts as one node wherever
-// the counter reads it, so the count does not depend on the order of the
-// aliases.
+// The tree is the body of a document, or an anchor of a reference
+// document that [ReferenceWeights] weighs. In a document, the resolver
+// binds each alias to its content. An alias that the resolver leaves to
+// the reference documents reads the anchors of its name there, and the
+// reference function returns their [refWeight]. Every alias of a
+// reference anchor reads by name, so its counter does not hold a
+// resolver. That holds for an alias inside an anchor of its own name
+// too, so the nulls set of such a counter is empty.
+// [treeCounter.resolve] finds what each alias reads.
+//
+// An alias that does not resolve counts as one unaliased node. So does an
+// alias in the nulls set, which holds the aliases that the decoder reads
+// as null, as [NewFacts] finds them in a document. Either kind of alias
+// counts as one node wherever the counter reads it, so the count does not
+// depend on the order of the aliases.
 //
 // Where the decoder reads a node into a value, an alias to a scalar
 // counts as one unaliased node, as a shared scalar does in a decoded
@@ -349,13 +343,25 @@ const (
 // reading. An alias that leads back into that content then counts as one
 // node, and the count ends.
 //
-// For each alias that [treeCounter.reaches] has followed, the collections
-// map holds whether the alias refers to a mapping or a sequence. The
-// textKeys map holds whether the decoder writes out a key that is the
-// alias as text. The binaries map holds whether such an alias refers to a
-// !!binary scalar. A chain of tagged aliases then costs one walk, however
-// many aliases lead into it. The repeated map holds what
-// [treeCounter.repeats] has found for the content of each alias.
+// The reached set holds the weight of each name of the reference
+// documents whose anchor the aliases of a document reach, as
+// [treeCounter.reach] finds them. The walked set holds each reference
+// anchor whose aliases reach has read. After the counter has read the
+// document, [treeCounter.addReached] adds the reads of those anchors to
+// the count. The mode field holds the mode that the document reads as. A
+// counter of a reference anchor has a nil reached set and does not add
+// any.
+//
+// A counter of a reference anchor shares the [anchorCounts] of its
+// [ReferenceWeights] in the kept field. It keeps there what it found for
+// each anchor of the tree, and takes what the counter of another anchor
+// kept. The kept field of the counter of a document is nil.
+//
+// For each alias that [treeCounter.reaches] has followed, the traits maps
+// hold whether the content that the alias leads to has each [trait]. A
+// chain of tagged aliases then costs one walk, however many aliases lead
+// into it. The repeated map holds what [treeCounter.repeats] has found
+// for the content of each alias.
 //
 // The budget bounds the text that the aliases repeat and the levels that
 // they add to the tree, as [Budget] describes. A bound of zero is off. The
@@ -377,27 +383,192 @@ const (
 // every alias. The heaviestAnchored field holds whether an anchor lies
 // around heaviest.
 type treeCounter struct {
-	resolver    *paths.Resolver
-	nulls       map[*ast.AliasNode]bool
-	sizes       [readModes]map[ast.Node]int
-	open        map[ast.Node]bool
-	extents     map[ast.Node]extent
-	measuring   map[ast.Node]bool
-	collections map[*ast.AliasNode]bool
-	textKeys    map[*ast.AliasNode]bool
-	binaries    map[*ast.AliasNode]bool
-	repeated    map[ast.Node]bool
-	overrun     *ExpansionError
-	heaviest    *ast.AliasNode
-	budget      Budget
-	level       int
-	written     int
-	distinct    int
-	aliased     int
-	anchored    int
+	resolver  *paths.Resolver
+	reference func(name string) *refWeight
+	kept      *anchorCounts
+	nulls     map[*ast.AliasNode]bool
+	reached   map[*refWeight]bool
+	walked    map[*refAnchor]bool
+	sizes     [readModes]map[ast.Node]int
+	open      map[ast.Node]bool
+	extents   map[ast.Node]extent
+	measuring map[ast.Node]bool
+	traits    [traits]map[*ast.AliasNode]bool
+	repeated  map[ast.Node]bool
+	overrun   *ExpansionError
+	heaviest  *ast.AliasNode
+	budget    Budget
+	mode      readMode
+	level     int
+	written   int
+	distinct  int
+	aliased   int
+	anchored  int
 
 	heaviestSize     int
 	heaviestAnchored bool
+}
+
+// newTreeCounter creates a new [*treeCounter] of a tree whose aliases in
+// nulls the decoder reads as null. The counter does not resolve any alias
+// until its caller sets the resolver, the reference function, or both.
+func newTreeCounter(nulls map[*ast.AliasNode]bool) *treeCounter {
+	return &treeCounter{
+		nulls:     nulls,
+		sizes:     [readModes]map[ast.Node]int{{}, {}},
+		open:      map[ast.Node]bool{},
+		extents:   map[ast.Node]extent{},
+		measuring: map[ast.Node]bool{},
+		traits:    [traits]map[*ast.AliasNode]bool{{}, {}, {}},
+		repeated:  map[ast.Node]bool{},
+	}
+}
+
+// resolve returns what alias reads. It reports false for an alias that
+// the counter takes as one node, which is an alias that does not resolve
+// or one that the decoder reads as null. An alias reads one of two things:
+//
+//   - The content of an anchor of the tree, which is the first result.
+//     That content can be nil.
+//   - The anchors of its name in the reference documents, whose weight is
+//     the second result.
+//
+// In a document, the resolver follows a chain such as *a for `&a *b` to
+// the content at its end. Where the chain ends at an alias that only a
+// reference document resolves, the alias reads the weight of that name.
+// Where a tag lies on the way, as in `&a !!str *b`, the alias reads the
+// tag as content, and the counter resolves the alias under the tag when
+// it reads that content.
+func (c *treeCounter) resolve(alias *ast.AliasNode) (ast.Node, *refWeight, bool) {
+	if c.nulls[alias] {
+		return nil, nil, false
+	}
+
+	if c.resolver == nil {
+		ref := c.named(alias)
+
+		return nil, ref, ref != nil
+	}
+
+	target, err := c.resolver.Deref(alias)
+	if err == nil {
+		return target, nil, true
+	}
+
+	if !errors.Is(err, paths.ErrReferenceAlias) {
+		return nil, nil, false
+	}
+
+	// The resolver followed the anchors of the document from alias to an
+	// alias that a reference document resolves. The loop takes the same
+	// steps and stops at that alias, or at a tag before it.
+	for {
+		anchor, err := c.resolver.Anchor(alias)
+		if err != nil {
+			ref := c.named(alias)
+
+			return nil, ref, ref != nil
+		}
+
+		content := anchor.Value
+		for inner, ok := content.(*ast.AnchorNode); ok; inner, ok = content.(*ast.AnchorNode) {
+			content = inner.Value
+		}
+
+		next, ok := content.(*ast.AliasNode)
+		if !ok {
+			return content, nil, true
+		}
+
+		alias = next
+	}
+}
+
+// named returns the weight of the anchors that the reference documents
+// hold for the name of alias, or nil when they do not hold one.
+func (c *treeCounter) named(alias *ast.AliasNode) *refWeight {
+	name, ok := astnode.Name(alias.Value)
+	if !ok || c.reference == nil {
+		return nil
+	}
+
+	return c.reference(name)
+}
+
+// reach records the reference anchor of ref as an anchor that the aliases
+// of a document reach. The decoder reads each such anchor once, before it
+// reads the document. It also reads each anchor that an alias under such
+// an anchor names, so reach records those the same way. The walked set
+// holds each anchor whose aliases reach has read, so it reads the aliases
+// under each reference anchor once for a document.
+func (c *treeCounter) reach(ref *refWeight) {
+	if c.reached == nil || c.reached[ref] {
+		return
+	}
+
+	c.reached[ref] = true
+
+	// A stack keeps a long chain of anchors out of the call stack.
+	for pending := []*refAnchor{ref.read}; len(pending) > 0; {
+		last := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+
+		if c.walked[last] {
+			continue
+		}
+
+		c.walked[last] = true
+
+		for _, item := range last.items {
+			if item.inner != nil {
+				pending = append(pending, item.inner)
+
+				continue
+			}
+
+			next := c.reference(item.name)
+			if next != nil && !c.reached[next] {
+				c.reached[next] = true
+				pending = append(pending, next.read)
+			}
+		}
+	}
+}
+
+// addReached adds the reads of the reference anchors in the reached set
+// to the count of a document. The read of an anchor counts as the
+// definition of the anchor counts in its own document. That read holds
+// the nodes of every anchor inside the anchor. A reached anchor inside
+// another reached anchor therefore does not add a read of its own, and
+// each node of the reference documents counts once.
+func (c *treeCounter) addReached() {
+	// The anchors inside a reached anchor, at every depth.
+	inside := map[*refAnchor]bool{}
+
+	var pending []*refAnchor
+
+	for ref := range c.reached {
+		for pending = ref.read.appendInner(pending[:0]); len(pending) > 0; {
+			last := pending[len(pending)-1]
+			pending = pending[:len(pending)-1]
+
+			// The walk from another reached anchor has marked the
+			// anchors inside a marked anchor.
+			if !inside[last] {
+				inside[last] = true
+				pending = last.appendInner(pending)
+			}
+		}
+	}
+
+	for ref := range c.reached {
+		if inside[ref.read] {
+			continue
+		}
+
+		c.distinct = aliaslimit.AddCapped(c.distinct, ref.distinct[c.mode])
+		c.aliased = aliaslimit.AddCapped(c.aliased, ref.aliased[c.mode])
+	}
 }
 
 // count returns the number of nodes that a decode of node reads as mode.
@@ -488,7 +659,7 @@ func (c *treeCounter) keyAsText(key ast.Node) bool {
 		return false
 	}
 
-	return c.reaches(key, isTextKey, c.textKeys)
+	return c.reaches(key, traitTextKey)
 }
 
 // tagMode returns how the decoder reads the value under tag when it reads
@@ -532,7 +703,37 @@ func isTextTag(node ast.Node) bool {
 // then counts as mode reads it. An anchor on an alias does not define
 // content of its own, so its alias counts the same as an alias without
 // the anchor.
+//
+// A counter of a reference anchor keeps what it found for anchor in its
+// [anchorCounts]. A later count of an anchor around anchor takes that
+// result and does not read the nodes under anchor again.
 func (c *treeCounter) anchor(anchor *ast.AnchorNode, top bool, mode readMode) int {
+	if c.kept == nil {
+		return c.countAnchor(anchor, top, mode)
+	}
+
+	key := anchorCount{anchor: anchor, mode: mode, top: top}
+
+	found, ok := c.kept.counts[key]
+	if !ok {
+		distinct, aliased := c.distinct, c.aliased
+		c.distinct, c.aliased = 0, 0
+
+		found.size = c.countAnchor(anchor, top, mode)
+		found.distinct, found.aliased = c.distinct, c.aliased
+		c.kept.counts[key] = found
+
+		c.distinct, c.aliased = distinct, aliased
+	}
+
+	c.distinct = aliaslimit.AddCapped(c.distinct, found.distinct)
+	c.aliased = aliaslimit.AddCapped(c.aliased, found.aliased)
+
+	return found.size
+}
+
+// countAnchor counts the content of anchor for [treeCounter.anchor].
+func (c *treeCounter) countAnchor(anchor *ast.AnchorNode, top bool, mode readMode) int {
 	_, onAlias := astnode.Content(anchor.Value).(*ast.AliasNode)
 	if top && !onAlias && !isCollection(anchor.Value) {
 		mode = readText
@@ -563,18 +764,52 @@ func (c *treeCounter) anchor(anchor *ast.AnchorNode, top bool, mode readMode) in
 // alias to a tag over another alias, as in `&s !foo *k`, refers to what
 // that alias refers to.
 //
+// An alias that reads the reference documents counts the size that their
+// [refWeight] holds for mode, by the same rules.
+//
 // With top set, the alias lies outside the content of every other alias.
 // It is then a node of the tree itself, so alias adds one to distinct and
 // adds the size of what the alias repeats to aliased. It then checks the
-// alias against the budget with [treeCounter.spend].
+// alias against the budget with [treeCounter.spend]. An alias that reads
+// the reference documents also records their anchors as reached, with
+// [treeCounter.reach].
 func (c *treeCounter) alias(alias *ast.AliasNode, top bool, mode readMode) int {
-	target, err := c.resolver.Deref(alias)
-	if err != nil || c.nulls[alias] || c.open[target] || (mode == readValue && !c.repeats(target)) {
+	target, ref, ok := c.resolve(alias)
+
+	if top && ref != nil {
+		c.reach(ref)
+	}
+
+	if !ok || (ref == nil && c.open[target]) || (mode == readValue && !c.repeats(target, ref)) {
 		if top {
 			c.distinct = aliaslimit.AddCapped(c.distinct, 1)
 		}
 
 		return 1
+	}
+
+	size := c.contentSize(target, ref, mode)
+
+	if top {
+		// The alias is a node of its own, as gopkg.in/yaml.v3 counts it.
+		c.distinct = aliaslimit.AddCapped(c.distinct, 1)
+		c.aliased = aliaslimit.AddCapped(c.aliased, size)
+
+		c.weigh(alias, size)
+		c.spend(alias)
+	}
+
+	return size
+}
+
+// contentSize returns the number of nodes that an alias repeats as mode.
+// The alias reads target, the content of an anchor of the tree, or ref,
+// the weight of the anchors of its name in the reference documents. The
+// counter reads the content of each anchor of the tree once for each
+// mode.
+func (c *treeCounter) contentSize(target ast.Node, ref *refWeight, mode readMode) int {
+	if ref != nil {
+		return ref.sizes[mode]
 	}
 
 	size, ok := c.sizes[mode][target]
@@ -584,15 +819,6 @@ func (c *treeCounter) alias(alias *ast.AliasNode, top bool, mode readMode) int {
 		delete(c.open, target)
 
 		c.sizes[mode][target] = size
-	}
-
-	if top {
-		// The alias is a node of its own, as gopkg.in/yaml.v3 counts it.
-		c.distinct = aliaslimit.AddCapped(c.distinct, 1)
-		c.aliased = aliaslimit.AddCapped(c.aliased, size)
-
-		c.weigh(alias, size)
-		c.spend(alias)
 	}
 
 	return size
@@ -635,7 +861,7 @@ func (c *treeCounter) spend(alias *ast.AliasNode) {
 		return
 	}
 
-	if c.budget.Depth > 0 && c.level+content.depth > c.budget.Depth {
+	if c.budget.Depth > 0 && aliaslimit.AddCapped(c.level, content.depth) > c.budget.Depth {
 		c.overrun = &ExpansionError{Alias: alias, Limit: c.budget.Depth, Depth: true}
 	}
 }
@@ -686,12 +912,24 @@ func (e *extent) text(level int) int {
 // nest adds child, a key, a value, or an element one level inside the
 // mapping or the sequence of e.
 func (e *extent) nest(child extent) {
-	e.depth = max(e.depth, child.depth+1)
+	e.depth = max(e.depth, aliaslimit.AddCapped(child.depth, 1))
 	e.units = aliaslimit.AddCapped(e.units, child.units)
 	e.lines = aliaslimit.AddCapped(e.lines, child.lines)
 	e.levels = aliaslimit.AddCapped(e.levels, aliaslimit.AddCapped(child.levels, child.lines))
 	e.spelled = aliaslimit.AddCapped(e.spelled, child.spelled)
 	e.spelledLines = aliaslimit.AddCapped(e.spelledLines, child.spelledLines)
+}
+
+// widen grows e to hold o as well, so that e weighs at least what either
+// extent weighs at every level. The result is a leaf only when both are.
+func (e *extent) widen(o extent) {
+	e.depth = max(e.depth, o.depth)
+	e.units = max(e.units, o.units)
+	e.lines = max(e.lines, o.lines)
+	e.levels = max(e.levels, o.levels)
+	e.spelled = max(e.spelled, o.spelled)
+	e.spelledLines = max(e.spelledLines, o.spelledLines)
+	e.leaf = e.leaf && o.leaf
 }
 
 // measure returns the [extent] of node. A mapping or a sequence nests one
@@ -710,7 +948,7 @@ func (c *treeCounter) measure(node ast.Node) extent {
 	case *ast.AliasNode:
 		return c.aliasExtent(n)
 	case *ast.AnchorNode:
-		return c.measure(n.Value)
+		return c.anchorExtent(n)
 	case *ast.MappingKeyNode:
 		return c.measure(n.Value)
 	case *ast.CommentGroupNode:
@@ -752,6 +990,24 @@ func (c *treeCounter) measure(node ast.Node) extent {
 	return e
 }
 
+// anchorExtent returns the [extent] of the content of anchor, as
+// [treeCounter.measure] measures it. A counter of a reference anchor
+// keeps the result in its [anchorCounts]. The measure of an anchor around
+// anchor then does not read the nodes under anchor again.
+func (c *treeCounter) anchorExtent(anchor *ast.AnchorNode) extent {
+	if c.kept == nil {
+		return c.measure(anchor.Value)
+	}
+
+	e, ok := c.kept.extents[anchor]
+	if !ok {
+		e = c.measure(anchor.Value)
+		c.kept.extents[anchor] = e
+	}
+
+	return e
+}
+
 // measureEntry nests the key and the value of entry, an entry of the
 // mapping of e, in e. A leaf value goes on the line of its key, so it
 // does not start a line of its own.
@@ -773,27 +1029,18 @@ func (c *treeCounter) measureEntry(e *extent, entry *ast.MappingValueNode) {
 // aliasExtent returns the [extent] of the content of alias. An alias holds
 // a leaf of one byte when it does not resolve, when the decoder reads it
 // as null, or when it leads back into content that [treeCounter.measure]
-// is reading. A writer that copies the content of an alias as the
-// document spells it indents each line of that text to the line of the
-// alias. The spelled text of alias grows by that indentation. The
-// extents map holds the extent of the content of each alias, so a chain
-// of nested aliases costs one walk per anchor.
+// is reading. An alias that reads the reference documents holds the
+// extent that their [refWeight] holds. A writer that copies the content
+// of an alias as the document spells it indents each line of that text to
+// the line of the alias. The spelled text of alias grows by that
+// indentation.
 func (c *treeCounter) aliasExtent(alias *ast.AliasNode) extent {
-	target, err := c.resolver.Deref(alias)
-	if err != nil || c.nulls[alias] || c.measuring[target] {
-		return extent{units: 1, lines: 1, leaf: true}
+	target, ref, ok := c.resolve(alias)
+	if !ok || (ref == nil && c.measuring[target]) {
+		return leafExtent
 	}
 
-	e, ok := c.extents[target]
-	if !ok {
-		c.measuring[target] = true
-		e = c.measure(target)
-		delete(c.measuring, target)
-
-		e.spelled, e.spelledLines = spell(target, e.spelled, e.spelledLines)
-
-		c.extents[target] = e
-	}
+	e := c.contentExtent(target, ref)
 
 	if tk := alias.GetToken(); tk != nil && tk.Position != nil {
 		e.spelled = aliaslimit.AddCapped(e.spelled, mulCapped(e.spelledLines, tk.Position.IndentNum))
@@ -802,26 +1049,104 @@ func (c *treeCounter) aliasExtent(alias *ast.AliasNode) extent {
 	return e
 }
 
-// spell returns the length in bytes and the lines of the text of node as
-// the document spells it, comments and spaces included. The origins of
-// the tokens of node hold that text, from the first token to the last.
-// It adds them to bytes and lines, the text and the lines of the aliases
-// in node.
-func spell(node ast.Node, bytes, lines int) (int, int) {
+// leafExtent is the [extent] of an alias that the counter takes as one
+// node, a leaf of one byte.
+var leafExtent = extent{units: 1, lines: 1, leaf: true}
+
+// contentExtent returns the [extent] of what an alias reads. The alias
+// reads target, the content of an anchor of the tree, or ref, the weight
+// of the anchors of its name in the reference documents. The extents map
+// holds the extent of the content of each anchor of the tree. A chain of
+// nested aliases thus costs one walk per anchor.
+func (c *treeCounter) contentExtent(target ast.Node, ref *refWeight) extent {
+	if ref != nil {
+		return ref.extent
+	}
+
+	e, ok := c.extents[target]
+	if !ok {
+		c.measuring[target] = true
+		e = c.measured(target)
+		delete(c.measuring, target)
+
+		c.extents[target] = e
+	}
+
+	return e
+}
+
+// measured returns the [extent] of node, the content of an anchor, with
+// the text of node as the document spells it.
+func (c *treeCounter) measured(node ast.Node) extent {
+	e := c.measure(node)
+
 	first, last := astnode.Bounds(node)
+	text := spellingOf(first, last, nil)
+	text.spell(&e)
+
+	return e
+}
+
+// spelling is the text of a node as the document spells it, comments and
+// spaces included. The origins of the tokens of the node hold that text,
+// from the first token to the last.
+type spelling struct {
+	// The first token of the text, or nil for a node without a token.
+	start *token.Token
+	// The token after the last token of the text, or nil when the text
+	// ends with the tokens of the document.
+	after *token.Token
+	// The length in bytes of the text.
+	bytes int
+	// The line breaks in the text.
+	breaks int
+}
+
+// spellingOf returns the [spelling] of the node whose tokens with the
+// lowest and the highest offset are first and last, as [astnode.Bounds]
+// returns them. The map inner holds the spelling of nodes inside that
+// node, each by its start token. The text of the node holds the text of
+// each of them. So spellingOf adds what such a spelling holds and goes on
+// after its last token. It then reads each token outside those nodes
+// once.
+func spellingOf(first, last token.Tokens, inner map[*token.Token]spelling) spelling {
 	if len(first) == 0 || len(last) == 0 {
-		return bytes, lines
+		return spelling{}
 	}
 
+	s := spelling{start: first[0]}
 	end := last[0].Position.Offset
-	lines = aliaslimit.AddCapped(lines, 1)
+	tk := first[0]
 
-	for tk := first[0]; tk != nil && tk.Position != nil && tk.Position.Offset <= end; tk = tk.Next {
-		bytes = aliaslimit.AddCapped(bytes, len(tk.Origin))
-		lines = aliaslimit.AddCapped(lines, strings.Count(tk.Origin, "\n"))
+	for tk != nil && tk.Position != nil && tk.Position.Offset <= end {
+		if part, ok := inner[tk]; ok {
+			s.bytes = aliaslimit.AddCapped(s.bytes, part.bytes)
+			s.breaks = aliaslimit.AddCapped(s.breaks, part.breaks)
+			tk = part.after
+
+			continue
+		}
+
+		s.bytes = aliaslimit.AddCapped(s.bytes, len(tk.Origin))
+		s.breaks = aliaslimit.AddCapped(s.breaks, strings.Count(tk.Origin, "\n"))
+		tk = tk.Next
 	}
 
-	return bytes, lines
+	s.after = tk
+
+	return s
+}
+
+// spell adds the text of s to the spelled text and lines of e. Before
+// the call, they hold the text and the lines of the aliases in the node
+// of s. A node without a token does not add any.
+func (s spelling) spell(e *extent) {
+	if s.start == nil {
+		return
+	}
+
+	e.spelled = aliaslimit.AddCapped(e.spelled, s.bytes)
+	e.spelledLines = aliaslimit.AddCapped(aliaslimit.AddCapped(e.spelledLines, 1), s.breaks)
 }
 
 // mulCapped returns a*b, or [aliaslimit.CountCap] when the product is
@@ -835,20 +1160,32 @@ func mulCapped(a, b int) int {
 	return a * b
 }
 
-// repeats reports whether each alias to target, the content of an
-// anchor, reads more than a shared scalar where the decoder reads the
-// alias into a value. It does for a text tag, for a !!binary scalar, and
-// for a mapping or a sequence. The answer depends on target alone, so
-// the counter keeps it. The counter walks the anchors and tags of target
-// once, however many aliases refer to the anchor.
-func (c *treeCounter) repeats(target ast.Node) bool {
+// repeats reports whether each alias reads more than a shared scalar
+// where the decoder reads the alias into a value. The alias reads target,
+// the content of an anchor of the tree, or ref, the weight of the anchors
+// of its name in the reference documents. The answer for target depends on
+// target alone, so the counter keeps it. The counter walks the anchors
+// and tags of target once, however many aliases refer to the anchor.
+func (c *treeCounter) repeats(target ast.Node, ref *refWeight) bool {
+	if ref != nil {
+		return ref.repeats
+	}
+
 	repeated, ok := c.repeated[target]
 	if !ok {
-		repeated = isTextTag(target) || c.holdsBinary(target) || c.holdsCollection(target)
+		repeated = c.repeatsContent(target)
 		c.repeated[target] = repeated
 	}
 
 	return repeated
+}
+
+// repeatsContent reports whether an alias to node, the content of an
+// anchor, reads more than a shared scalar where the decoder reads the
+// alias into a value. It does for a text tag, for a !!binary scalar, and
+// for a mapping or a sequence.
+func (c *treeCounter) repeatsContent(node ast.Node) bool {
+	return isTextTag(node) || c.holdsBinary(node) || c.holdsCollection(node)
 }
 
 // textSize returns the length in bytes of the text of the scalar that
@@ -878,44 +1215,77 @@ func textSize(node ast.Node) int {
 // under its anchors and tags, or refers to one through the aliases that
 // [treeCounter.reaches] follows.
 func (c *treeCounter) holdsCollection(node ast.Node) bool {
-	return c.reaches(node, isCollection, c.collections)
+	return c.reaches(node, traitCollection)
 }
 
 // holdsBinary reports whether node holds a !!binary tag among its
 // anchors and tags, or refers to one through the aliases that
 // [treeCounter.reaches] follows.
 func (c *treeCounter) holdsBinary(node ast.Node) bool {
-	return c.reaches(node, underBinary, c.binaries)
+	return c.reaches(node, traitBinary)
 }
 
-// reaches reports whether match holds for node or for the content of an
-// alias that node leads to. It follows the alias under the anchors and
-// tags of node to the content of its anchor, and goes on from there in
-// the same way. [paths.Resolver.Deref] stops at a tag. An alias to an
+// trait is a property of a node that [treeCounter.reaches] looks for
+// behind the aliases that the node leads to.
+type trait int
+
+const (
+	// The node holds a mapping or a sequence under its anchors and tags.
+	traitCollection trait = iota
+
+	// The decoder writes the node out as text in a key, as [isTextKey]
+	// reports.
+	traitTextKey
+
+	// One of the tags around the content of the node is a !!binary tag.
+	traitBinary
+
+	// The number of traits.
+	traits
+)
+
+// of reports whether node has the trait.
+func (t trait) of(node ast.Node) bool {
+	switch t {
+	case traitCollection:
+		return isCollection(node)
+	case traitTextKey:
+		return isTextKey(node)
+	default:
+		return underBinary(node)
+	}
+}
+
+// reaches reports whether node has the trait want, or the content of an
+// alias that node leads to has it. It follows the alias under the anchors
+// and tags of node to the content of its anchor, and goes on from there
+// in the same way. [paths.Resolver.Deref] stops at a tag. An alias to an
 // anchor such as `&s !foo *k` therefore gives the tag over *k, and
 // reaches goes on to the content that *k refers to. It stops at an alias
 // that does not resolve, at one that the decoder reads as null, and at
-// one that it has followed before.
+// one that it has followed before. At an alias that reads the reference
+// documents, it takes the answer that their [refWeight] holds.
 //
-// For each alias that reaches has followed with match, the results map
-// holds whether match holds for the content that the alias leads to. That
-// answer does not depend on where the walk began. So reaches records it
-// for every alias on the way and stops at an alias that it has recorded. It
-// records an alias as false before it follows it, so a walk that returns
-// to that alias finds false.
-func (c *treeCounter) reaches(node ast.Node, match func(ast.Node) bool, results map[*ast.AliasNode]bool) bool {
-	if match(node) {
+// For each alias that reaches has followed for want, the traits map of
+// want holds whether the content that the alias leads to has the trait.
+// That answer does not depend on where the walk began. So reaches records
+// it for every alias on the way and stops at an alias that it has
+// recorded. It records an alias as false before it follows it, so a walk
+// that returns to that alias finds false.
+func (c *treeCounter) reaches(node ast.Node, want trait) bool {
+	if want.of(node) {
 		return true
 	}
 
 	var (
+		results  = c.traits[want]
 		followed []*ast.AliasNode
 		found    bool
 	)
 
 	for {
 		alias, ok := astnode.Content(node).(*ast.AliasNode)
-		if !ok || c.nulls[alias] {
+		if !ok {
 			break
 		}
 
@@ -928,12 +1298,18 @@ func (c *treeCounter) reaches(node ast.Node, match func(ast.Node) bool, results 
 		results[alias] = false
 		followed = append(followed, alias)
 
-		target, err := c.resolver.Deref(alias)
-		if err != nil {
+		target, ref, ok := c.resolve(alias)
+		if !ok {
 			break
 		}
 
-		if match(target) {
+		if ref != nil {
+			found = ref.traits[want]
+
+			break
+		}
+
+		if want.of(target) {
 			found = true
 
 			break

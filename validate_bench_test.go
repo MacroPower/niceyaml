@@ -3,6 +3,7 @@ package niceyaml_test
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -332,16 +333,20 @@ func (*methodRow) ProtoMessage() {}
 // items each merge a mapping of the document and a mapping of a
 // reference document, as in `<<: [*big, *ref]`. The validator of each
 // item fails at the key v that the item writes, so each failure binds
-// through the merge sources. The lookups keep the keys of each merge
-// source that they read. In the past_limit layout, the aliases to big
-// take the document past the alias limit, so the bindings do not read
-// the merge sources. The trusted layout turns the limit off, and the
-// reference layout merges a reference mapping of 1000 keys alone. The
-// time per item stays flat as the list grows in each layout. The metric
-// retained-B is the heap that the first validation leaves live on a new
-// document and its Source. The documents of each layout read one
-// reference Source. It keeps the keys of its anchor that the validations
-// before the count read, so the count does not hold them.
+// beside the merge key. In the trusted layout and the reference layout,
+// each binding reads the merge sources and binds at the key. The lookups
+// keep the keys of each merge source that they read. The reference layout
+// merges a reference mapping of 1000 keys alone. The merge keys of both
+// layouts repeat more than the alias limit allows, so their Sources turn
+// the limit off. The past_limit layout keeps the limit on. Its aliases to
+// big take the document past the limit, so its bindings do not read the
+// merge sources. Each failure there binds without a position. Each run
+// checks which of the two ways its first failure binds. The time per item
+// stays flat as the list grows in each layout. The metric retained-B is
+// the heap that the first validation leaves live on a new document and its
+// Source. The documents of each layout read one reference Source. It keeps
+// the keys of its anchor that the validations before the count read, so
+// the count does not hold them.
 func BenchmarkNode_Validate_EachBesideReferenceMerge(b *testing.B) {
 	keys := func(count int) string {
 		parts := make([]string, count)
@@ -357,18 +362,20 @@ func BenchmarkNode_Validate_EachBesideReferenceMerge(b *testing.B) {
 	})
 	v := niceyaml.Each(paths.MustParse("$.items[*]"), item)
 
+	// The bindings of a layout with limited set do not read the merge
+	// sources, because its documents are past the alias limit.
 	layouts := []struct {
 		name, big, ref, merge string
-		trusted               bool
+		limited               bool
 	}{
-		{name: "past_limit", big: keys(10000), ref: "{zz: 1}", merge: "[*big, *ref]"},
-		{name: "trusted", big: keys(1000), ref: "{zz: 1}", merge: "[*big, *ref]", trusted: true},
+		{name: "past_limit", big: keys(10000), ref: "{zz: 1}", merge: "[*big, *ref]", limited: true},
+		{name: "trusted", big: keys(1000), ref: "{zz: 1}", merge: "[*big, *ref]"},
 		{name: "reference", big: "{}", ref: keys(1000), merge: "*ref"},
 	}
 
 	for _, layout := range layouts {
 		opts := yamltest.NoSizeLimits(yamltest.References("ref: &ref " + layout.ref + "\n"))
-		if layout.trusted {
+		if !layout.limited {
 			opts = append(opts, niceyaml.WithAliasLimit(false))
 		}
 
@@ -386,6 +393,12 @@ func BenchmarkNode_Validate_EachBesideReferenceMerge(b *testing.B) {
 				b.ReportAllocs()
 
 				doc := newDoc()
+
+				problems := slices.Collect(niceyaml.Problems(doc.Validate(b.Context(), v)))
+				require.Len(b, problems, items)
+
+				_, bound := problems[0].Position()
+				require.Equal(b, !layout.limited, bound, "position of the first failure")
 
 				for b.Loop() {
 					validate(doc)

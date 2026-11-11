@@ -2479,9 +2479,9 @@ func TestSchema_AliasExpansion(t *testing.T) {
 		}
 	})
 
-	// The count of a document cannot see the anchors of a reference
-	// document, so it takes each alias to one as one node. Check then
-	// applies the limit to the value the decode shares between them.
+	// The count of a document reads through each alias that a reference
+	// document resolves. The decode that Check runs thus refuses the
+	// document at the alias that repeats the most.
 	t.Run("reference aliases", func(t *testing.T) {
 		t.Parallel()
 
@@ -2489,8 +2489,8 @@ func TestSchema_AliasExpansion(t *testing.T) {
 		refs := yamltest.References("defaults: &defaults\n" + yamltest.GenerateLines(1000, "  k%d: v"))
 		v := compileSchema(t, `{"maxProperties": 5}`)
 
-		// The refusal carries no location, so each case names where the
-		// node that binds it puts it.
+		// The refusal binds at an alias of the document, even for a node
+		// below the root.
 		tcs := map[string]struct {
 			path  paths.Path
 			input string
@@ -2500,19 +2500,19 @@ func TestSchema_AliasExpansion(t *testing.T) {
 		}{
 			"aliases to a mapping of a reference document": {
 				input: "items: " + yamltest.FlowSequence("*defaults", 300) + "\n",
-				want:  "app.yaml: excessive aliasing",
+				want:  "app.yaml:1:9: aliases expand the document past the alias limit",
 			},
 			"node of aliases to a mapping of a reference document": {
 				path:  paths.Current().Child("items"),
 				input: "items: " + yamltest.FlowSequence("*defaults", 300) + "\n",
-				want:  "app.yaml:1:1: $.items: excessive aliasing",
+				want:  "app.yaml:1:9: aliases expand the document past the alias limit",
 			},
 			"aliases to an anchor on a tagged alias to a reference document": {
 				input: stringtest.LinesLF(
 					"local: &local !foo *defaults",
 					"items: "+yamltest.FlowSequence("*local", 300),
 				),
-				want: "app.yaml: excessive aliasing",
+				want: "app.yaml:2:9: aliases expand the document past the alias limit",
 			},
 			"a few aliases to a mapping of a reference document": {
 				input: "items: " + yamltest.FlowSequence("*defaults", 2) + "\n",

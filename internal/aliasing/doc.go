@@ -35,15 +35,28 @@
 // runs CheckDecodeText on each layer before it writes the merged text, so
 // the Budget bounds that text too.
 //
-// Neither count can see a reference document of a decode, so an alias to
-// one of its anchors counts as one node. [HoldsReferenceAlias] reports a
-// document that holds such an alias. A caller that reads the decoded
-// value again at every alias then limits that value itself.
+// Both counts read through an alias that only a reference document of the
+// decode resolves, such as one of niceyaml.WithReferences. The alias
+// counts what the anchors of its name hold in the reference documents,
+// and [ReferenceWeights] keeps that weight for every document that reads
+// them. For the alias limit, a document thus gets the verdict that it gets
+// with the reference anchors that it reaches defined inside it. Reference
+// anchors that form a loop of names are past the limit instead. An alias
+// of a name that several reference anchors share weighs the largest of
+// them that a decode can read. A document whose decode reads a smaller
+// anchor of the name can thus fail. ReferenceWeights describes what a loop
+// and a shared name weigh.
+//
+// The Budget does not give that same verdict. It bounds the text that the
+// aliases of the document write out, and an alias inside a reference
+// anchor is not one of them. The text of such an alias spends the Budget
+// only where an alias of the document repeats the anchor that holds it.
+// With the anchors defined inside the document, each alias inside them
+// spends the Budget as well.
 //
 // The source of a document turns the limit and the Budget off for all of
 // these readers with niceyaml.WithAliasLimit. Both checks then pass every
-// node of the document, and a caller that limits a decoded value asks
-// [Limited] whether the limit applies.
+// node of the document.
 //
 // Every Node of a document shares one [State], so a check of each item of
 // a list counts the document once. [StateOf] returns that State. The State

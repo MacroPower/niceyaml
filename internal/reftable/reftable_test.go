@@ -118,6 +118,144 @@ func TestTable_Anchor(t *testing.T) {
 	}
 }
 
+func TestTable_Anchors(t *testing.T) {
+	t.Parallel()
+
+	inner := newTable(t, []string{stringtest.LinesLF("o: &o {a: &x 1}", "b: &x 2")})
+	last := newTable(t, []string{stringtest.LinesLF("b: &x 2", "o: &o {a: &x 1}")})
+
+	tcs := map[string]struct {
+		table *reftable.Table
+		name  string
+		// The text of each anchor that an alias of name can read, the
+		// anchor that the table holds first.
+		want []string
+	}{
+		"anchor of a document": {
+			table: newTable(t, []string{"a: &x 1\n"}),
+			name:  "x",
+			want:  []string{"&x 1"},
+		},
+		"earlier anchor outside every anchor": {
+			table: newTable(t, []string{stringtest.LinesLF("a: &x 1", "b: &x 2")}),
+			name:  "x",
+			want:  []string{"&x 2"},
+		},
+		"earlier anchor inside another anchor": {
+			table: inner,
+			name:  "x",
+			want:  []string{"&x 2", "&x 1"},
+		},
+		"last anchor inside another anchor": {
+			table: last,
+			name:  "x",
+			want:  []string{"&x 1"},
+		},
+		"anchors inside an anchor of their name": {
+			// The last anchor x hides the first, so no decode reads the
+			// first and registers the second.
+			table: newTable(t, []string{"a: &x [&x [&x 3]]\n"}),
+			name:  "x",
+			want:  []string{"&x 3"},
+		},
+		"anchors inside an anchor of their name inside an anchor that a decode reads": {
+			table: newTable(t, []string{"a: &o [&x [&x [&x 3]]]\n"}),
+			name:  "x",
+			want:  []string{"&x 3", "&x [&x [&x 3]]", "&x [&x 3]"},
+		},
+		"anchor inside another anchor of a table it reads": {
+			table: newTable(t, []string{"c: &x 3\n"}, inner),
+			name:  "x",
+			want:  []string{"&x 3", "&x 1"},
+		},
+		"table that two tables read": {
+			table: reftable.New(nil, reftable.New(nil, inner), reftable.New(nil, inner)),
+			name:  "x",
+			want:  []string{"&x 2", "&x 1"},
+		},
+		"last anchor inside another anchor of a table that two tables read": {
+			table: reftable.New(nil, reftable.New(nil, last), reftable.New(nil, last)),
+			name:  "x",
+			want:  []string{"&x 1"},
+		},
+		"anchor inside another anchor that a later anchor hides": {
+			// No decode reads the first anchor o, so none registers the
+			// anchor x inside it.
+			table: newTable(t, []string{stringtest.LinesLF("o: &o {a: &x 1}", "b: &o 2", "c: &x 3")}),
+			name:  "x",
+			want:  []string{"&x 3"},
+		},
+		"anchors inside another anchor that a later anchor hides": {
+			table: newTable(t, []string{stringtest.LinesLF("o: &o [&x 1, &x 2]", "b: &o 9", "c: &x 3")}),
+			name:  "x",
+			want:  []string{"&x 3"},
+		},
+		"anchors inside a hidden anchor inside an anchor that a decode reads": {
+			table: newTable(t, []string{stringtest.LinesLF("p: &p {o: &o [&x 1, &x 2]}", "b: &o 9", "c: &x 3")}),
+			name:  "x",
+			want:  []string{"&x 3", "&x 1", "&x 2"},
+		},
+		"anchor inside a hidden anchor inside an anchor that a decode reads": {
+			table: newTable(t, []string{stringtest.LinesLF("p: &p {o: &o {a: &x 1}}", "b: &o 2", "c: &x 3")}),
+			name:  "x",
+			want:  []string{"&x 3", "&x 1"},
+		},
+		"anchor inside an anchor of a table it reads that the table hides": {
+			table: newTable(t, []string{"b: &o 2\n"}, inner),
+			name:  "x",
+			want:  []string{"&x 2"},
+		},
+		"anchors of one name inside another anchor": {
+			table: newTable(t, []string{"o: &o [&x 1, &x 2, &x 3]\n"}),
+			name:  "x",
+			want:  []string{"&x 3", "&x 1", "&x 2"},
+		},
+		"name of no anchor": {
+			table: inner,
+			name:  "y",
+		},
+		"nil table": {
+			name: "x",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var got []string
+
+			for _, anchor := range tc.table.Anchors(tc.name) {
+				got = append(got, anchor.String())
+			}
+
+			assert.Equal(t, tc.want, got)
+
+			if len(tc.want) > 0 {
+				first, ok := tc.table.Anchor(tc.name)
+				require.True(t, ok)
+				assert.Same(t, first, tc.table.Anchors(tc.name)[0])
+			}
+		})
+	}
+}
+
+func TestTable_Weights(t *testing.T) {
+	t.Parallel()
+
+	table := newTable(t, []string{"a: &x 1\n"})
+
+	// The table keeps its weights, and a table over it keeps its own.
+	weights := table.Weights()
+	require.NotNil(t, weights)
+	assert.Same(t, weights, table.Weights())
+	assert.NotSame(t, weights, reftable.New(nil, table).Weights())
+
+	var none *reftable.Table
+
+	assert.Nil(t, none.Weights())
+}
+
 func TestTable_View(t *testing.T) {
 	t.Parallel()
 

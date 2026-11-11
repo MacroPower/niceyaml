@@ -305,8 +305,11 @@ func BenchmarkNode_BindBesideReferenceMergeInEachDocument(b *testing.B) {
 //
 // The views of the anchors share their nodes, and the reference keeps
 // the keys of each level once, however many anchors hold it. So the
-// bindings read the keys of each level once, and the time per error
-// stays flat as the chain grows. The metric reference-B is the heap that
+// bindings read the keys of each level once. The first binding also
+// weighs each anchor for the alias limit. The reference keeps what that
+// weigh found under each anchor for the anchors around it. So the weigh
+// reads each level a fixed number of times, and the time per error stays
+// flat as the chain grows. The metric reference-B is the heap that
 // a new reference Source keeps after a Source that reads it binds each
 // error once and is gone. The metric reference-B/text-B divides it by the
 // bytes of the text of the reference, and it stays flat too.

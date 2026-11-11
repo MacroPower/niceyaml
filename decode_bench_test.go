@@ -466,7 +466,10 @@ func BenchmarkNode_Decode_RejectionInRepeatedReferenceAnchor(b *testing.B) {
 				"b: &b "+flow(count, "x%d: *a"),
 				"u: &u "+flow(count, "y%d: *b"),
 			))
-			newDoc := func() *niceyaml.Node { return yamltest.FirstDocument(b, "port: *u\n", yamltest.NoSizeLimits(ref)...) }
+			// The alias reads every key of a once for each key of b and of
+			// u, so the Source turns the alias limit off.
+			opts := yamltest.NoSizeLimits(ref, niceyaml.WithAliasLimit(false))
+			newDoc := func() *niceyaml.Node { return yamltest.FirstDocument(b, "port: *u\n", opts...) }
 			decode := func(doc *niceyaml.Node) {
 				if !errors.Is(layout.decode(doc), niceyaml.ErrWrongKind) {
 					b.Fatal("got no rejection of the kind of a value")
@@ -523,12 +526,14 @@ func BenchmarkNode_DecodeBracketedAnchorNames(b *testing.B) {
 // search for other problems does not report the others. The keys layout
 // reads one mapping that merges an anchor of more and more keys. The
 // mappings layout reads more and more mappings that each merge one anchor
-// of 200 keys, as an untrusted document can. The go-yaml decoder reads
-// each key that each merge key brings in, so the time per merged key stays
-// flat in both layouts. The metric retained-B is the heap that the first
-// decode leaves live on a new document and its Source. The documents of
-// each size read one reference Source. It keeps the keys of its anchor
-// that the decodes before the count read, so the count does not hold them.
+// of 200 keys. The merge keys of its larger documents repeat more than the
+// alias limit allows, so each Source turns the limit off. The go-yaml
+// decoder reads each key that each merge key brings in, so the time per
+// merged key stays flat in both layouts. The metric retained-B is the heap
+// that the first decode leaves live on a new document and its Source. The
+// documents of each size read one reference Source. It keeps the keys of
+// its anchor that the decodes before the count read, so the count does not
+// hold them.
 func BenchmarkNode_Decode_UnknownFieldsFromReferenceMerge(b *testing.B) {
 	// The anchor writes each key on a line of its own, as a file of
 	// defaults does.
@@ -562,7 +567,8 @@ func BenchmarkNode_Decode_UnknownFieldsFromReferenceMerge(b *testing.B) {
 	for _, size := range sizes {
 		input := "items:\n" + strings.Repeat("  - <<: *u\n", size.mappings)
 		ref := yamltest.References("u: &u" + keys(size.count))
-		newDoc := func() *niceyaml.Node { return yamltest.FirstDocument(b, input, yamltest.NoSizeLimits(ref)...) }
+		opts := yamltest.NoSizeLimits(ref, niceyaml.WithAliasLimit(false))
+		newDoc := func() *niceyaml.Node { return yamltest.FirstDocument(b, input, opts...) }
 
 		b.Run(size.name, func(b *testing.B) {
 			b.ReportAllocs()

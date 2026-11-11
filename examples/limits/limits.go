@@ -97,9 +97,9 @@ func main() {
 	p := printer.New()
 	open := stock{left: map[string]int{"Kaffe": 40, "Te": 0, "Kanelbulle": 12}}
 
-	// The alias limit counts the aliases of each upload but not those of its
-	// reference documents. The server thus passes only files that it trusts
-	// as reference documents, such as the shared file that it ships.
+	// The alias limit of each upload counts what its aliases read in the
+	// shared file. An upload that repeats a shared anchor too often thus
+	// fails, as it does with the anchor defined inside it.
 	shared := niceyaml.NewSourceFromString(exampleShared, niceyaml.WithName("shared.yaml"))
 
 	fmt.Println("\nAccept an order that names shared anchors:")

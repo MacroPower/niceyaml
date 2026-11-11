@@ -569,10 +569,10 @@ func WithAllowDuplicateKeys(allow bool) SourceOption {
 //
 // The option also turns off the bounds that [WithByteLimit] and
 // [WithDepthLimit] put on the text the aliases of a document write out.
-// The option covers the documents of the Source alone. The limit does not
-// count the reference documents of [WithReferences]. The option on a
-// reference Source thus does not change the limit of a Source that reads
-// it. [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] and
+// The option covers the documents of the Source alone. The limit of a
+// Source counts what its aliases read in the reference documents of
+// [WithReferences]. The option on a reference Source does not change
+// that count. [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] and
 // [Node.Nodes] keep their limits whatever the option says. The Alias
 // Limit section of the package documentation describes each limit.
 func WithAliasLimit(enabled bool) SourceOption {
@@ -611,6 +611,13 @@ func WithAliasLimit(enabled bool) SourceOption {
 // one for each validator that decodes and one for each
 // [go.jacobcolvin.com/niceyaml/schema/matcher.Content] matcher of a
 // schema registry. Each of them reads the anchors it reaches.
+//
+// The alias limit of the Source counts what its aliases read in refs. A
+// document that repeats a large anchor of refs many times thus fails, as
+// it does with the anchor defined inside it. [WithAliasLimit] set to
+// false on the Source turns that count off, and the option on a Source of
+// refs does not. The Alias Limit section of the package documentation
+// describes the count.
 //
 // The References section of the package documentation describes how an
 // alias finds its anchor and what a reference Source brings. It also
@@ -988,12 +995,21 @@ func (s *Source) decodeOptions() []yaml.DecodeOption {
 // its documents reads them when it names an anchor that does not appear
 // before it. The first call builds the table over the tables of the
 // reference Sources, which each of them builds once.
+//
+// A Source with one reference Source reads the table of that Source
+// itself, because a table over it alone holds the same anchors. Every
+// Source that reads only that reference Source thus shares what the
+// table keeps, such as the weights of its anchors for the alias limit.
 func (s *Source) referenceAnchors() *reftable.Table {
 	if len(s.references) == 0 {
 		return nil
 	}
 
 	return s.refAnchors.get(func() *reftable.Table {
+		if len(s.references) == 1 {
+			return s.references[0].exportedAnchors()
+		}
+
 		tables := make([]*reftable.Table, len(s.references))
 		for i, ref := range s.references {
 			tables[i] = ref.exportedAnchors()
@@ -1001,6 +1017,13 @@ func (s *Source) referenceAnchors() *reftable.Table {
 
 		return reftable.New(nil, tables...)
 	})
+}
+
+// referenceWeights returns what the alias limit weighs for the anchors of
+// the reference documents of the Source, or nil for a Source without
+// reference documents.
+func (s *Source) referenceWeights() *aliasing.ReferenceWeights {
+	return s.referenceAnchors().Weights()
 }
 
 // referenceValue returns the value of the anchor of name that the
@@ -1928,7 +1951,7 @@ func newDocuments(src *Source, docs []docparse.Document, errs []error) []*Node {
 		doc.resolver = sync.OnceValue(doc.newResolver)
 		doc.state = aliasing.NewState(!src.skipAliasLimit, src.budget(), func() (ast.Node, *paths.Resolver) {
 			return doc.root.Body, doc.pathResolver()
-		})
+		}, src.referenceWeights)
 		nodes[i] = doc.node
 	}
 

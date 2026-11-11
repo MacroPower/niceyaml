@@ -37,8 +37,8 @@ func TestStateOf(t *testing.T) {
 func TestState_AliasLimit(t *testing.T) {
 	t.Parallel()
 
-	assert.True(t, aliasing.NewState(true, aliasing.Budget{}, nil).AliasLimit())
-	assert.False(t, aliasing.NewState(false, aliasing.Budget{}, nil).AliasLimit())
+	assert.True(t, aliasing.NewState(true, aliasing.Budget{}, nil, nil).AliasLimit())
+	assert.False(t, aliasing.NewState(false, aliasing.Budget{}, nil, nil).AliasLimit())
 }
 
 func TestState_Budget(t *testing.T) {
@@ -46,7 +46,7 @@ func TestState_Budget(t *testing.T) {
 
 	budget := aliasing.Budget{Bytes: 1024, Depth: 10}
 
-	assert.Equal(t, budget, aliasing.NewState(true, budget, nil).Budget())
+	assert.Equal(t, budget, aliasing.NewState(true, budget, nil, nil).Budget())
 }
 
 func TestState_Facts(t *testing.T) {
@@ -59,7 +59,7 @@ func TestState_Facts(t *testing.T) {
 		calls++
 
 		return doc.AST(), doc.Resolver()
-	})
+	}, nil)
 
 	first := s.Facts()
 	require.Len(t, first.Aliases, 1)
@@ -67,6 +67,17 @@ func TestState_Facts(t *testing.T) {
 	// Every call returns the facts of the first.
 	assert.Same(t, first, s.Facts())
 	assert.Equal(t, 1, calls)
+}
+
+func TestState_References(t *testing.T) {
+	t.Parallel()
+
+	refs := aliasing.NewReferenceWeights(func(string) []*ast.AnchorNode { return nil })
+
+	s := aliasing.NewState(true, aliasing.Budget{}, nil, func() *aliasing.ReferenceWeights { return refs })
+
+	assert.Same(t, refs, s.References())
+	assert.Nil(t, aliasing.NewState(true, aliasing.Budget{}, nil, nil).References())
 }
 
 func TestState_KeepsFirstResult(t *testing.T) {
@@ -89,7 +100,7 @@ func TestState_KeepsFirstResult(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			s := aliasing.NewState(true, aliasing.Budget{}, nil)
+			s := aliasing.NewState(true, aliasing.Budget{}, nil, nil)
 
 			calls := 0
 			check := func() error {
@@ -120,7 +131,7 @@ func TestState_ExcessiveTextAliasing(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			s := aliasing.NewState(true, aliasing.Budget{}, nil)
+			s := aliasing.NewState(true, aliasing.Budget{}, nil, nil)
 
 			// The State keeps the text result apart from the value result,
 			// so neither count reads the result of the other.
