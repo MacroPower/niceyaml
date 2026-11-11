@@ -3094,21 +3094,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// getViewDimensions returns (width, height, ok). A false ok means that the
-// content area does not have room for rows, and View renders "". The area
-// lacks room in these cases:
-//   - A dimension is 0 or less.
-//   - The frame of the container style takes all of a dimension.
-//   - The separator of the side-by-side view leaves its panes without a
-//     column.
-func (m *Model) getViewDimensions() (int, int, bool) {
-	if !m.canRender() {
-		return 0, 0, false
-	}
-
-	return m.maxWidth(), m.maxHeight(), true
-}
-
 // renderContent applies styling and renders lines into final output. It cuts
 // each row to contentW and pads it to contentW, so the style fills only the
 // rows below them. On a viewport of only a few columns, the printer's gutter
@@ -3139,8 +3124,24 @@ func (m *Model) renderContent(lines []string, contentW, contentH int) string {
 		Render(contents)
 }
 
-// View renders the viewport. It renders "" for a zero Model, which [New]
-// did not create.
+// View renders the viewport.
+//
+// The outer size is [Model.Width] and [Model.Height], capped by any fixed
+// or maximum size on the container style. When the outer height is
+// positive, View returns exactly that many rows, each as wide as the outer
+// width. A parent can therefore stack its own rows above or below the
+// view. View returns "" for a zero Model, which [New] did not create, and
+// when the outer height is 0 or less.
+//
+// The content area lacks room for rows in these cases:
+//   - The outer width is 0 or less.
+//   - The frame of the container style takes all of a dimension.
+//   - The separator of [ViewModeSideBySide] leaves its panes without a
+//     column.
+//
+// In each of them, View renders blank rows without the frame of the
+// container style, and [Model.VisibleLineCount] and
+// [Model.VisibleRowCount] return 0.
 //
 // The rendering behavior depends on the current [ViewMode]:
 //   - [ViewModeFull]: Renders all lines (default behavior).
@@ -3154,10 +3155,16 @@ func (m Model) View() string {
 		return ""
 	}
 
-	w, h, ok := m.getViewDimensions()
-	if !ok {
+	outerW, outerH := m.outerSize()
+	if outerH <= 0 {
 		return ""
 	}
+
+	if !m.canRender() {
+		return strings.Join(slices.Repeat([]string{m.printer.Pad("", outerW)}, outerH), "\n")
+	}
+
+	w, h := m.maxWidth(), m.maxHeight()
 
 	if m.viewMode == ViewModeSideBySide {
 		return m.renderSideBySide(w, h)

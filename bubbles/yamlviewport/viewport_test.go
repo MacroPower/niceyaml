@@ -2742,8 +2742,8 @@ func TestViewport_SideBySideWithoutPaneColumns(t *testing.T) {
 	t.Parallel()
 
 	// The separator takes three columns, so a width of 3 or 4 leaves the
-	// panes no column. The view shows nothing, and the counts of what is
-	// on screen agree with it.
+	// panes no column. The view fills its height with blank rows, and the
+	// counts of what is on screen agree with it.
 	tcs := map[string]struct {
 		width int
 	}{
@@ -2755,11 +2755,19 @@ func TestViewport_SideBySideWithoutPaneColumns(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := testModel(testPrinter(), tc.width, 5)
+			const height = 5
+
+			m := testModel(testPrinter(), tc.width, height)
 			addRevisions(&m, threeYAML, threeChangedYAML)
 			m.SetViewMode(yamlviewport.ViewModeSideBySide)
 
-			assert.Empty(t, m.View())
+			rows := strings.Split(m.View(), "\n")
+			require.Len(t, rows, height)
+
+			for i, row := range rows {
+				assert.Equal(t, strings.Repeat(" ", tc.width), ansi.Strip(row), "row %d", i)
+			}
+
 			assert.Equal(t, 0, m.VisibleLineCount())
 			assert.Equal(t, 0, m.VisibleRowCount())
 		})
@@ -2801,27 +2809,33 @@ func TestViewport_ViewFitsHeight(t *testing.T) {
 
 	border := normalBorder()
 
-	// A view is as tall as the set height, and a height with no room for
-	// content, whether negative or swallowed by the frame of the container
-	// style, renders nothing at all.
+	// A view with a positive height is as tall and as wide as the set size.
+	// When the frame of the container style or a zero width leaves the
+	// content no room, the view renders blank rows. A height of 0 or less
+	// renders nothing at all.
 	tcs := map[string]struct {
-		style    lipgloss.Style
-		height   int
-		wantRows int
+		style     lipgloss.Style
+		width     int
+		height    int
+		wantRows  int
+		wantBlank bool
 	}{
-		"negative height":                   {height: -1},
-		"zero height":                       {height: 0},
-		"one row":                           {height: 1, wantRows: 1},
-		"border with no room":               {style: border, height: 2},
-		"border smaller than its own frame": {style: border, height: 1},
-		"border with one row":               {style: border, height: 3, wantRows: 3},
+		"negative height":                   {width: 20, height: -1},
+		"zero height":                       {width: 20, height: 0},
+		"zero width and height":             {width: 0, height: 0},
+		"one row":                           {width: 20, height: 1, wantRows: 1},
+		"zero width":                        {width: 0, height: 3, wantRows: 3, wantBlank: true},
+		"border with no room":               {style: border, width: 20, height: 2, wantRows: 2, wantBlank: true},
+		"border smaller than its own frame": {style: border, width: 20, height: 1, wantRows: 1, wantBlank: true},
+		"border with no columns":            {style: border, width: 2, height: 4, wantRows: 4, wantBlank: true},
+		"border with one row":               {style: border, width: 20, height: 3, wantRows: 3},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := testModel(testPrinter(), 20, tc.height, yamlviewport.WithContainerStyle(tc.style))
+			m := testModel(testPrinter(), tc.width, tc.height, yamlviewport.WithContainerStyle(tc.style))
 			setRevision(&m, threeYAML)
 
 			view := m.View()
@@ -2831,7 +2845,21 @@ func TestViewport_ViewFitsHeight(t *testing.T) {
 				return
 			}
 
-			assert.Len(t, strings.Split(view, "\n"), tc.wantRows)
+			rows := strings.Split(view, "\n")
+			require.Len(t, rows, tc.wantRows)
+
+			for i, row := range rows {
+				assert.Equal(t, tc.width, ansi.StringWidth(row), "row %d", i)
+
+				if tc.wantBlank {
+					assert.Empty(t, strings.TrimSpace(ansi.Strip(row)), "row %d", i)
+				}
+			}
+
+			if tc.wantBlank {
+				assert.Equal(t, 0, m.VisibleLineCount())
+				assert.Equal(t, 0, m.VisibleRowCount())
+			}
 		})
 	}
 }
