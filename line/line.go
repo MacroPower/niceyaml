@@ -227,5 +227,5 @@ func hasLineEnding(origin string) bool {
 // a view whose largest line number is less than 10000. A line without a
 // number, such as a zero Line, gets a blank gutter.
 func (l *Line) String() string {
-	return contentRow(l.Number(), l.Content(), 4)
+	return contentRow(l.Number(), FlagDefault, l.Content(), 4)
 }

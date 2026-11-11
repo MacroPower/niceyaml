@@ -36,8 +36,8 @@ func TestDiff(t *testing.T) {
 
 		assert.Equal(t, stringtest.JoinLF(
 			"   1 | a: 1",
-			"   2 | b: 2",
-			"   2 | b: 3",
+			"   2 - b: 2",
+			"   2 + b: 3",
 		), got)
 	})
 

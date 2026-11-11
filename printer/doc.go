@@ -91,12 +91,24 @@
 // rows with spaces.
 //
 // [line.View.String] renders a view as plain text, without padding or
-// wrapping. Below each line, it draws the same caret rows that
+// wrapping. It shows the flags and the annotations of the view. Each
+// inserted or deleted line of a diff carries the [line.Flag.Marker] that
+// the gutter of the printer draws. A program that writes to a log or a
+// file should render through [line.View.String], or through
+// [niceyaml.FormatError], which renders an error the same way.
+//
+// Below each line, View.String draws the same caret rows that
 // [DefaultAnnotation] draws. Both draw carets for annotations and not for
 // overlays. An overlay without an annotation, such as a search match, thus
-// shows only through color. A program that writes to a log or a file
-// should render through [line.View.String], or through
-// [niceyaml.FormatError], which renders an error the same way.
+// shows only through color.
+//
+// A program that wants the gutter, the wrapping, or the side-by-side panes
+// of the printer in plain text builds a printer with the zero
+// [style.Styles]. Its output does not hold an escape sequence, and it
+// keeps the diff markers:
+//
+//	plain := printer.New(printer.WithStyles(style.Styles{}))
+//	fmt.Fprintln(logFile, plain.Print(result.Hunks(3)))
 //
 // # Gutters
 //

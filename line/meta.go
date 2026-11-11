@@ -39,13 +39,27 @@ type Flag int
 const (
 	// FlagDefault is the default category for normal lines.
 	FlagDefault Flag = iota
-	// FlagInserted marks a line a diff inserted. It renders with a "+"
-	// prefix.
+	// FlagInserted marks a line a diff inserted. Its [Flag.Marker] is "+".
 	FlagInserted
-	// FlagDeleted marks a line a diff deleted. It renders with a "-"
-	// prefix.
+	// FlagDeleted marks a line a diff deleted. Its [Flag.Marker] is "-".
 	FlagDeleted
 )
+
+// Marker returns the diff marker of the flag: "+" for [FlagInserted], "-"
+// for [FlagDeleted], and " " for [FlagDefault] and any other value. Every
+// marker is one cell wide, so a gutter that holds it keeps one width on
+// every row. [View.String] and the printer mark a flagged line with it.
+func (f Flag) Marker() string {
+	switch f {
+	case FlagInserted:
+		return "+"
+	case FlagDeleted:
+		return "-"
+	case FlagDefault:
+	}
+
+	return " "
+}
 
 // String returns "default" for [FlagDefault], "inserted" for
 // [FlagInserted], "deleted" for [FlagDeleted], and "Flag(n)" for any other

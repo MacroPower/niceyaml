@@ -102,16 +102,16 @@ func TestDiffer_Diff_Sequences(t *testing.T) {
 
 	whole := stringtest.JoinLF(
 		"   1 | a: 1",
-		"   2 | b: 2",
-		"   2 | b: 9",
+		"   2 - b: 2",
+		"   2 + b: 9",
 		"   3 | c: 3",
-		"   4 | d: 4",
+		"   4 + d: 4",
 	)
 	afterAlone := stringtest.JoinLF(
-		"   1 | a: 1",
-		"   2 | b: 9",
-		"   3 | c: 3",
-		"   4 | d: 4",
+		"   1 + a: 1",
+		"   2 + b: 9",
+		"   3 + c: 3",
+		"   4 + d: 4",
 	)
 
 	tcs := map[string]struct {
@@ -142,8 +142,8 @@ func TestDiffer_Diff_Sequences(t *testing.T) {
 			before: before.View().Slice(position.NewSpan(1, 3)),
 			after:  after.View().Slice(position.NewSpan(1, 3)),
 			want: stringtest.JoinLF(
-				"   2 | b: 2",
-				"   2 | b: 9",
+				"   2 - b: 2",
+				"   2 + b: 9",
 				"   3 | c: 3",
 			),
 			wantStats: diff.Stats{Added: 1, Removed: 1},
@@ -154,7 +154,7 @@ func TestDiffer_Diff_Sequences(t *testing.T) {
 			want: stringtest.JoinLF(
 				"   1 | a: 1",
 				"   3 | c: 3",
-				"   4 | d: 4",
+				"   4 + d: 4",
 			),
 			wantStats: diff.Stats{Added: 1},
 		},
@@ -162,8 +162,13 @@ func TestDiffer_Diff_Sequences(t *testing.T) {
 			before: sequenceFunc(func(yield func(int, *line.Line) bool) {
 				_ = yield(0, before.Lines().Line(0)) && yield(2, before.Lines().Line(2))
 			}),
-			after:     after.Lines(),
-			want:      afterAlone,
+			after: after.Lines(),
+			want: stringtest.JoinLF(
+				"   1 | a: 1",
+				"   2 + b: 9",
+				"   3 | c: 3",
+				"   4 + d: 4",
+			),
 			wantStats: diff.Stats{Added: 2},
 		},
 		"nil sequences": {},
@@ -229,7 +234,7 @@ func TestDiffer_Full(t *testing.T) {
 			after:  "a: 1\nb: 2\n",
 			want: stringtest.JoinLF(
 				"   1 | a: 1",
-				"   2 | b: 2",
+				"   2 + b: 2",
 			),
 			wantFlags: map[int]line.Flag{1: line.FlagInserted},
 			wantStats: diff.Stats{Added: 1},
@@ -239,7 +244,7 @@ func TestDiffer_Full(t *testing.T) {
 			after:  "a: 1\n",
 			want: stringtest.JoinLF(
 				"   1 | a: 1",
-				"   2 | b: 2",
+				"   2 - b: 2",
 			),
 			wantFlags: map[int]line.Flag{1: line.FlagDeleted},
 			wantStats: diff.Stats{Removed: 1},
@@ -248,8 +253,8 @@ func TestDiffer_Full(t *testing.T) {
 			before: "key: old\n",
 			after:  "key: new\n",
 			want: stringtest.JoinLF(
-				"   1 | key: old",
-				"   1 | key: new",
+				"   1 - key: old",
+				"   1 + key: new",
 			),
 			wantFlags: map[int]line.Flag{0: line.FlagDeleted, 1: line.FlagInserted},
 			wantStats: diff.Stats{Added: 1, Removed: 1},
@@ -257,14 +262,14 @@ func TestDiffer_Full(t *testing.T) {
 		"empty before": {
 			before:    "",
 			after:     "key: value\n",
-			want:      "   1 | key: value",
+			want:      "   1 + key: value",
 			wantFlags: map[int]line.Flag{0: line.FlagInserted},
 			wantStats: diff.Stats{Added: 1},
 		},
 		"empty after": {
 			before:    "key: value\n",
 			after:     "",
-			want:      "   1 | key: value",
+			want:      "   1 - key: value",
 			wantFlags: map[int]line.Flag{0: line.FlagDeleted},
 			wantStats: diff.Stats{Removed: 1},
 		},
@@ -286,8 +291,8 @@ func TestDiffer_Full(t *testing.T) {
 			),
 			want: stringtest.JoinLF(
 				"   1 | first: 1",
-				"   2 | second: 2",
-				"   2 | second: changed",
+				"   2 - second: 2",
+				"   2 + second: changed",
 				"   3 | third: 3",
 			),
 			wantFlags: map[int]line.Flag{1: line.FlagDeleted, 2: line.FlagInserted},
@@ -309,14 +314,14 @@ func TestDiffer_Full(t *testing.T) {
 				fifth: changed5
 			`),
 			want: stringtest.JoinLF(
-				"   1 | first: 1",
-				"   1 | first: changed1",
+				"   1 - first: 1",
+				"   1 + first: changed1",
 				"   2 | second: 2",
-				"   3 | third: 3",
-				"   3 | third: changed3",
+				"   3 - third: 3",
+				"   3 + third: changed3",
 				"   4 | fourth: 4",
-				"   5 | fifth: 5",
-				"   5 | fifth: changed5",
+				"   5 - fifth: 5",
+				"   5 + fifth: changed5",
 			),
 			wantFlags: map[int]line.Flag{
 				0: line.FlagDeleted,
@@ -342,9 +347,9 @@ func TestDiffer_Full(t *testing.T) {
 			`),
 			want: stringtest.JoinLF(
 				"   1 | before: 1",
-				"   2 | new1: a",
-				"   3 | new2: b",
-				"   4 | new3: c",
+				"   2 + new1: a",
+				"   3 + new2: b",
+				"   4 + new3: c",
 				"   5 | after: 2",
 			),
 			wantFlags: map[int]line.Flag{1: line.FlagInserted, 2: line.FlagInserted, 3: line.FlagInserted},
@@ -364,9 +369,9 @@ func TestDiffer_Full(t *testing.T) {
 			`),
 			want: stringtest.JoinLF(
 				"   1 | before: 1",
-				"   2 | old1: a",
-				"   3 | old2: b",
-				"   4 | old3: c",
+				"   2 - old1: a",
+				"   3 - old2: b",
+				"   4 - old3: c",
 				"   2 | after: 2",
 			),
 			wantFlags: map[int]line.Flag{1: line.FlagDeleted, 2: line.FlagDeleted, 3: line.FlagDeleted},
@@ -394,14 +399,14 @@ func TestDiffer_Full(t *testing.T) {
 			want: stringtest.JoinLF(
 				"   1 | metadata:",
 				"   2 |   name: myapp",
-				"   3 |   namespace: default",
-				"   3 |   namespace: production",
+				"   3 -   namespace: default",
+				"   3 +   namespace: production",
 				"   4 | spec:",
-				"   5 |   replicas: 3",
-				"   5 |   replicas: 5",
+				"   5 -   replicas: 3",
+				"   5 +   replicas: 5",
 				"   6 |   template:",
-				"   7 |     image: nginx:1.19",
-				"   7 |     image: nginx:1.21",
+				"   7 -     image: nginx:1.19",
+				"   7 +     image: nginx:1.21",
 			),
 			wantFlags: map[int]line.Flag{
 				2: line.FlagDeleted,
@@ -427,8 +432,8 @@ func TestDiffer_Full(t *testing.T) {
 				fourth: 4
 			`),
 			want: stringtest.JoinLF(
-				"   1 | first: old",
-				"   1 | first: new",
+				"   1 - first: old",
+				"   1 + first: new",
 				"   2 | second: 2",
 				"   3 | third: 3",
 				"   4 | fourth: 4",
@@ -453,8 +458,8 @@ func TestDiffer_Full(t *testing.T) {
 				"   1 | first: 1",
 				"   2 | second: 2",
 				"   3 | third: 3",
-				"   4 | fourth: old",
-				"   4 | fourth: new",
+				"   4 - fourth: old",
+				"   4 + fourth: new",
 			),
 			wantFlags: map[int]line.Flag{3: line.FlagDeleted, 4: line.FlagInserted},
 			wantStats: diff.Stats{Added: 1, Removed: 1},
@@ -477,8 +482,8 @@ func TestDiffer_Full(t *testing.T) {
 			want: stringtest.JoinLF(
 				"   1 | items:",
 				"   2 |   - name: item1",
-				"   3 |     value: 100",
-				"   3 |     value: 150",
+				"   3 -     value: 100",
+				"   3 +     value: 150",
 				"   4 |   - name: item2",
 				"   5 |     value: 200",
 			),
@@ -500,10 +505,10 @@ func TestDiffer_Full(t *testing.T) {
 			`),
 			want: stringtest.JoinLF(
 				"   1 | keep1: a",
-				"   2 | delete1: x",
-				"   3 | delete2: y",
-				"   2 | insert1: p",
-				"   3 | insert2: q",
+				"   2 - delete1: x",
+				"   3 - delete2: y",
+				"   2 + insert1: p",
+				"   3 + insert2: q",
 				"   4 | keep2: b",
 			),
 			wantFlags: map[int]line.Flag{
@@ -519,7 +524,7 @@ func TestDiffer_Full(t *testing.T) {
 			after:  "a: 1\n\n",
 			want: stringtest.JoinLF(
 				"   1 | a: 1",
-				"   2 | ",
+				"   2 + ",
 			),
 			wantFlags: map[int]line.Flag{1: line.FlagInserted},
 			wantStats: diff.Stats{Added: 1},
@@ -889,8 +894,8 @@ func TestDiffResult_HunksOf(t *testing.T) {
 			want: stringtest.JoinLF(
 				"     | @@ -1,3 +1,3 @@",
 				"   1 | l1: 1",
-				"   2 | l2: 2",
-				"   2 | l2: changed",
+				"   2 - l2: 2",
+				"   2 + l2: changed",
 				"   3 | l3: 3",
 			),
 			context: 1,
@@ -900,8 +905,8 @@ func TestDiffResult_HunksOf(t *testing.T) {
 			want: stringtest.JoinLF(
 				"     | @@ -1,3 +1,3 @@",
 				"   1 | l1: 1",
-				"   2 | l2: 2",
-				"   2 | l2: changed",
+				"   2 - l2: 2",
+				"   2 + l2: changed",
 				"   3 | l3: 3",
 				"     | @@ -11,3 +11,3 @@",
 				"  11 | l11: 11",
@@ -915,8 +920,8 @@ func TestDiffResult_HunksOf(t *testing.T) {
 			view: errorAt(11, position.NewSpan(5, 7)),
 			want: stringtest.JoinLF(
 				"     | @@ -2 +2 @@",
-				"   2 | l2: 2",
-				"   2 | l2: changed",
+				"   2 - l2: 2",
+				"   2 + l2: changed",
 				"     | @@ -12 +12 @@",
 				"  12 | l12: 12",
 				"     |      ^^ bad",
@@ -927,8 +932,8 @@ func TestDiffResult_HunksOf(t *testing.T) {
 			want: stringtest.JoinLF(
 				"     | @@ -1,5 +1,5 @@",
 				"   1 | l1: 1",
-				"   2 | l2: 2",
-				"   2 | l2: changed",
+				"   2 - l2: 2",
+				"   2 + l2: changed",
 				"   3 | l3: 3",
 				"   4 | l4: 4",
 				"     |     ^ bad",
@@ -947,8 +952,8 @@ func TestDiffResult_HunksOf(t *testing.T) {
 			},
 			want: stringtest.JoinLF(
 				"     | @@ -2 +2 @@",
-				"   2 | l2: 2",
-				"   2 | l2: changed",
+				"   2 - l2: 2",
+				"   2 + l2: changed",
 				"     | @@ -10 +10 @@",
 				"     | note",
 				"  10 | l10: 10",
@@ -972,8 +977,8 @@ func TestDiffResult_HunksOf(t *testing.T) {
 			},
 			want: stringtest.JoinLF(
 				"     | @@ -2 +2 @@",
-				"   2 | l2: 2",
-				"   2 | l2: changed",
+				"   2 - l2: 2",
+				"   2 + l2: changed",
 				"     | @@ -12 +12 @@",
 				"  12 | l12: 12",
 				"     |      ^^ bad",
@@ -987,8 +992,8 @@ func TestDiffResult_HunksOf(t *testing.T) {
 			want: stringtest.JoinLF(
 				"     | @@ -1,3 +1,3 @@",
 				"   1 | l1: 1",
-				"   2 | l2: 2",
-				"   2 | l2: changed",
+				"   2 - l2: 2",
+				"   2 + l2: changed",
 				"   3 | l3: 3",
 				"     | @@ -11,3 +11,3 @@",
 				"  11 | l11: 11",
@@ -1005,8 +1010,8 @@ func TestDiffResult_HunksOf(t *testing.T) {
 			want: stringtest.JoinLF(
 				"     | @@ -1,3 +1,3 @@",
 				"   1 | l1: 1",
-				"   2 | l2: 2",
-				"   2 | l2: changed",
+				"   2 - l2: 2",
+				"   2 + l2: changed",
 				"   3 | l3: 3",
 			),
 			context: 3,
@@ -1020,7 +1025,7 @@ func TestDiffResult_HunksOf(t *testing.T) {
 			},
 			want: stringtest.JoinLF(
 				"     | @@ -3,3 +2,4 @@",
-				"   2 | l2: changed",
+				"   2 + l2: changed",
 				"   3 | l3: 3",
 				"   4 | l4: 4",
 				"   5 | l5: 5",
@@ -1034,7 +1039,7 @@ func TestDiffResult_HunksOf(t *testing.T) {
 			want: stringtest.JoinLF(
 				"     | @@ -1,2 +1 @@",
 				"   1 | l1: 1",
-				"   2 | l2: 2",
+				"   2 - l2: 2",
 			),
 			context: 3,
 		},
@@ -1501,6 +1506,63 @@ func TestDiffer_HunksFallBackToPositions(t *testing.T) {
 	}
 }
 
+func TestDiffer_Hunks_PlainText(t *testing.T) {
+	t.Parallel()
+
+	result := yamltest.Diff(
+		stringtest.LinesLF("name: web", "replicas: 3", "ports:", "  - 80"),
+		stringtest.LinesLF("name: web", "replicas: 5", "ports:", "  - 80", "  - 443"),
+	)
+
+	// The plain text of a rendering marks each line the diff deletes or
+	// inserts, so the old and new lines of a change differ.
+	tcs := map[string]struct {
+		got  *line.View
+		want string
+	}{
+		"hunks": {
+			got: result.Hunks(1),
+			want: stringtest.JoinLF(
+				"     | @@ -1,4 +1,5 @@",
+				"   1 | name: web",
+				"   2 - replicas: 3",
+				"   2 + replicas: 5",
+				"   3 | ports:",
+				"   4 |   - 80",
+				"   5 +   - 443",
+			),
+		},
+		"before pane": {
+			got: result.Before(),
+			want: stringtest.JoinLF(
+				"   1 | name: web",
+				"   2 - replicas: 3",
+				"   3 | ports:",
+				"   4 |   - 80",
+				"     | ",
+			),
+		},
+		"after pane": {
+			got: result.After(),
+			want: stringtest.JoinLF(
+				"   1 | name: web",
+				"   2 + replicas: 5",
+				"   3 | ports:",
+				"   4 |   - 80",
+				"   5 +   - 443",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.got.String())
+		})
+	}
+}
+
 // opsAlgorithm is an [lcs.Algorithm] that returns a fixed op sequence.
 type opsAlgorithm []lcs.Op
 
@@ -1516,8 +1578,8 @@ func TestDiffer_WithAlgorithm(t *testing.T) {
 	// The fixed ops and the default algorithm pair the lines alike.
 	want := stringtest.JoinLF(
 		"   1 | a: 1",
-		"   2 | b: 2",
-		"   2 | c: 3",
+		"   2 - b: 2",
+		"   2 + c: 3",
 	)
 	wantFlags := map[int]line.Flag{1: line.FlagDeleted, 2: line.FlagInserted}
 

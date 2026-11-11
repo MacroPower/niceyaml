@@ -743,7 +743,7 @@ func TestView_Slice(t *testing.T) {
 		view := decorated()
 		got := view.Slice(position.NewSpan(2, 3))
 
-		assert.Equal(t, stringtest.JoinLF("   3 | c: 3", "     | ^^^ c: 3"), got.String())
+		assert.Equal(t, stringtest.JoinLF("   3 - c: 3", "     | ^^^ c: 3"), got.String())
 	})
 }
 
@@ -798,6 +798,134 @@ func TestView_Slice_CostIndependentOfContent(t *testing.T) {
 		smallLen, small, largeLen, large)
 }
 
+func TestView_String_Flags(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		decorate func(view *line.View) *line.View
+		input    string
+		want     string
+	}{
+		"inserted line": {
+			input: stringtest.LinesLF("a: 1", "b: 2"),
+			decorate: func(view *line.View) *line.View {
+				view.SetFlag(1, line.FlagInserted)
+
+				return view
+			},
+			want: stringtest.JoinLF(
+				"   1 | a: 1",
+				"   2 + b: 2",
+			),
+		},
+		"deleted line": {
+			input: stringtest.LinesLF("a: 1", "b: 2"),
+			decorate: func(view *line.View) *line.View {
+				view.SetFlag(0, line.FlagDeleted)
+
+				return view
+			},
+			want: stringtest.JoinLF(
+				"   1 - a: 1",
+				"   2 | b: 2",
+			),
+		},
+		"flag set back to the default": {
+			input: stringtest.LinesLF("a: 1", "b: 2"),
+			decorate: func(view *line.View) *line.View {
+				view.SetFlag(0, line.FlagDeleted)
+				view.SetFlag(0, line.FlagDefault)
+
+				return view
+			},
+			want: stringtest.JoinLF(
+				"   1 | a: 1",
+				"   2 | b: 2",
+			),
+		},
+		"flag without a marker keeps the bar": {
+			input: stringtest.LinesLF("a: 1", "b: 2"),
+			decorate: func(view *line.View) *line.View {
+				view.SetFlag(1, line.Flag(7))
+
+				return view
+			},
+			want: stringtest.JoinLF(
+				"   1 | a: 1",
+				"   2 | b: 2",
+			),
+		},
+		"deleted sequence item": {
+			input: stringtest.LinesLF("ports:", "  - 80"),
+			decorate: func(view *line.View) *line.View {
+				view.SetFlag(1, line.FlagDeleted)
+
+				return view
+			},
+			want: stringtest.JoinLF(
+				"   1 | ports:",
+				"   2 -   - 80",
+			),
+		},
+		"annotation rows of a flagged line keep the bar": {
+			input: stringtest.LinesLF("a: 1", "b: 2"),
+			decorate: func(view *line.View) *line.View {
+				view.SetFlag(1, line.FlagInserted)
+				view.Annotate(
+					1,
+					line.Annotation{Content: "@@ -1 +1,2 @@", Kind: kind.UIHunkHeader, Placement: line.Above},
+				)
+				view.Annotate(1, line.Annotation{Content: "new", Placement: line.Below, Cols: position.NewSpan(3, 4)})
+
+				return view
+			},
+			want: stringtest.JoinLF(
+				"   1 | a: 1",
+				"     | @@ -1 +1,2 @@",
+				"   2 + b: 2",
+				"     |    ^ new",
+			),
+		},
+		"overlay on a flagged line": {
+			input: stringtest.LinesLF("a: 1", "b: 2"),
+			decorate: func(view *line.View) *line.View {
+				view.SetFlag(0, line.FlagDeleted)
+				view.AddOverlay(kind.GenericHighlight, yamltest.LineRange(0, 0, 1))
+
+				return view
+			},
+			want: stringtest.JoinLF(
+				"   1 - a: 1",
+				"   2 | b: 2",
+			),
+		},
+		"number column wider than four": {
+			input: strings.Repeat("a: 1\n", 10000),
+			decorate: func(view *line.View) *line.View {
+				view.SetFlag(9998, line.FlagDeleted)
+				view.SetFlag(9999, line.FlagInserted)
+
+				return view.Slice(position.NewSpan(9997, 10000))
+			},
+			want: stringtest.JoinLF(
+				" 9998 | a: 1",
+				" 9999 - a: 1",
+				"10000 + a: 1",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := tc.decorate(newView(tc.input))
+
+			assert.Equal(t, tc.want, got.String())
+		})
+	}
+}
+
 func TestView_String(t *testing.T) {
 	t.Parallel()
 
@@ -832,11 +960,10 @@ func TestView_String(t *testing.T) {
 		assert.Equal(t, want, view.String())
 	})
 
-	t.Run("overlays and flags do not render", func(t *testing.T) {
+	t.Run("overlays do not render", func(t *testing.T) {
 		t.Parallel()
 
 		view := newView("key: value\n")
-		view.SetFlag(0, line.FlagDeleted)
 		view.AddOverlay("test1", yamltest.LineRange(0, 0, 3))
 		view.BlendOverlay("test2", yamltest.LineRange(0, 5, 7))
 
@@ -1948,7 +2075,7 @@ func TestView_Clip_KeepsView(t *testing.T) {
 		assert.Equal(t, position.Spans{position.NewSpan(7, 17), position.NewSpan(25, 35)}, clipped.Windows(1))
 		assert.Equal(t, stringtest.JoinLF(
 			"   1 | a: 1",
-			"   2 | ...xxxxxxxxxx...xxxxxxxxxx...",
+			"   2 + ...xxxxxxxxxx...xxxxxxxxxx...",
 			"     |         ^ more",
 			"     |                      ^^ bad",
 			"   3 | c: 3",
@@ -1964,7 +2091,7 @@ func TestView_Clip_KeepsView(t *testing.T) {
 		assert.Equal(t, window, clipped.Clone().Windows(1))
 		assert.Equal(t, window, clipped.Slice(position.NewSpan(1, 2)).Windows(1))
 		assert.Equal(t, stringtest.JoinLF(
-			"   2 | ...xxxxxxxxxx...",
+			"   2 + ...xxxxxxxxxx...",
 			"     |         ^^ bad",
 		), clipped.Hunks(0).String())
 	})

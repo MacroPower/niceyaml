@@ -5161,6 +5161,43 @@ func TestPrinter_WithGutter_Nil(t *testing.T) {
 	}
 }
 
+func TestPrinter_WithStyles_Zero(t *testing.T) {
+	t.Parallel()
+
+	hunks := yamltest.Diff(
+		stringtest.LinesLF("name: web", "replicas: 3", "ports:", "  - 80"),
+		stringtest.LinesLF("name: web", "replicas: 5", "ports:", "  - 80", "  - 443"),
+	).Hunks(1)
+
+	// A printer with the zero styles renders plain text. The output does
+	// not hold an escape sequence, and the gutter keeps the diff markers.
+	got := printer.New(printer.WithStyles(style.Styles{})).Print(hunks)
+
+	assert.Equal(t, ansi.Strip(got), got)
+	assert.Equal(t, stringtest.JoinLF(
+		"      @@ -1,4 +1,5 @@",
+		"   1  name: web",
+		"   2 -replicas: 3",
+		"   2 +replicas: 5",
+		"   3  ports:",
+		"   4    - 80",
+		"   5 +  - 443",
+	), got)
+
+	// The gutter draws the marker that the flag of each line returns,
+	// after the number and a space. The first row is the hunk header.
+	rows := strings.Split(got, "\n")[1:]
+	require.Len(t, rows, hunks.Count())
+
+	n := 0
+
+	for i := range hunks.All() {
+		assert.Equal(t, hunks.Flag(i).Marker(), rows[n][5:6], "row %d", n)
+
+		n++
+	}
+}
+
 func TestPrinter_WithStyles_Nil(t *testing.T) {
 	t.Parallel()
 

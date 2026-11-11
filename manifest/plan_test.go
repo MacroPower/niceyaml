@@ -870,6 +870,22 @@ func TestPlanFile_Diff(t *testing.T) {
 		`   7 +  close: "19:00"`,
 	), stringtest.TrimLineEnds(p.Print(plan.Files()[0].Diff(3))))
 
+	// The plain text of the view marks the lines the plan removes and
+	// adds, so a log of it reads as a diff.
+	assert.Equal(t, stringtest.JoinLF(
+		"     | @@ -1,7 +1,7 @@",
+		"   1 - apiVersion: cafe.jacobcolvin.com/v1alpha1",
+		"   1 + apiVersion: cafe.jacobcolvin.com/v1",
+		"   2 | kind: Hours",
+		"   3 | metadata:",
+		"   4 |   name: weekday",
+		"   5 | spec:",
+		`   6 -   opens: "07:00" # summer hours`,
+		`   7 -   closes: "19:00"`,
+		`   6 +   open: "07:00" # summer hours`,
+		`   7 +   close: "19:00"`,
+	), plan.Files()[0].Diff(3).String())
+
 	hidden, err := newCafeRegistry(t).PlanMigration(t.Context(),
 		configFS(files, manifest.WithSourceOptions(niceyaml.WithExcerpts(false))))
 	require.NoError(t, err)

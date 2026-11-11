@@ -31,6 +31,19 @@
 // unified view and keep its line indices, so one index marks the same line
 // in both.
 //
+// A program that writes a diff to a log or a golden file renders the view
+// with [line.View.String]. The plain text holds a "-" beside each deleted
+// line and a "+" beside each inserted line:
+//
+//	fmt.Println(result.Hunks(1).String())
+//	//      | @@ -1,4 +1,5 @@
+//	//    1 | name: web
+//	//    2 - replicas: 3
+//	//    2 + replicas: 5
+//	//    3 | ports:
+//	//    4 |   - 80
+//	//    5 +   - 443
+//
 // Each rendering is new content, and its indices are its rows. A position
 // in an input does not apply to a rendering, so the Result maps between
 // the lines of each input and the rows. An [Origin] names a line of an

@@ -56,6 +56,28 @@ func TestFlag_String(t *testing.T) {
 	}
 }
 
+func TestFlag_Marker(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		want string
+		flag line.Flag
+	}{
+		"default":      {flag: line.FlagDefault, want: " "},
+		"inserted":     {flag: line.FlagInserted, want: "+"},
+		"deleted":      {flag: line.FlagDeleted, want: "-"},
+		"out of range": {flag: line.Flag(-1), want: " "},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.flag.Marker())
+		})
+	}
+}
+
 func TestAnnotation_RenderKind(t *testing.T) {
 	t.Parallel()
 

@@ -246,6 +246,10 @@ func (f *PlanFile) Header() string {
 // [niceyaml.WithExcerpts] hides the excerpts of the Source, the view does
 // not show a line of the file. It holds one row instead, which counts the
 // lines that change.
+//
+// A printer renders the view with styles. [line.View.String] renders it
+// as plain text for a log, with a "-" beside each line the plan removes
+// and a "+" beside each line it adds.
 func (f *PlanFile) Diff(lines int) *line.View {
 	result := diff.Diff(f.f.src.Lines(), f.f.src.WithText(string(f.after)).Lines())
 

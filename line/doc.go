@@ -144,8 +144,12 @@
 // [Flag] values categorize lines for special handling. A diff marks lines with
 // [FlagInserted] and [FlagDeleted]:
 //
-//	view.SetFlag(i, line.FlagInserted) // Show with "+" prefix.
-//	view.SetFlag(i, line.FlagDeleted)  // Show with "-" prefix.
+//	view.SetFlag(i, line.FlagInserted) // Show with a "+" marker.
+//	view.SetFlag(i, line.FlagDeleted)  // Show with a "-" marker.
+//
+// [Flag.Marker] returns the marker of a flag. [View.String] and the
+// printer write it beside the number of the line, and a program that
+// renders a view itself reads it the same way.
 //
 // To render the same content two different ways, take two views of it.
 // [View.Clone] copies the decoration of one view. [View.Slice] picks the
@@ -172,6 +176,23 @@
 // label gets a row of its own. The row holds carets under the run and the
 // contents of the run's annotations beside them. A line the view clips
 // renders its windows with "..." in place of the columns between them.
+//
+// A bar separates each number from its line, and the marker of an inserted
+// or a deleted line takes the place of the bar. The plain text of a diff
+// thus tells the old line from the new one:
+//
+//	fmt.Println(hunks.String())
+//	//      | @@ -1,4 +1,5 @@
+//	//    1 | name: web
+//	//    2 - replicas: 3
+//	//    2 + replicas: 5
+//	//    3 | ports:
+//	//    4 |   - 80
+//	//    5 +   - 443
+//
+// View.String shows the flags and the annotations of a view. Overlays
+// alone need color, so a range shows in plain text only when an annotation
+// labels it.
 //
 // The plain text of View.String is the rendering that
 // [go.jacobcolvin.com/niceyaml.FormatError] prints for the excerpt of a

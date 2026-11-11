@@ -711,12 +711,25 @@ func (v *View) Windows(i int) position.Spans {
 }
 
 // String renders the [View] as plain text: each line behind its number,
-// and the annotations above and below it on rows of their own. String
-// does not render flags. The number column is at least four wide and
-// grows to fit the largest number in the view, so every row lines up.
-// An empty view renders as "". A line feed separates the rows, and the
-// last row does not end with one. A program that writes the text into a
-// file or a fenced block adds that line feed itself.
+// and the annotations above and below it on rows of their own. The number
+// column is at least four wide and grows to fit the largest number in the
+// view, so every row lines up. An empty view renders as "". A line feed
+// separates the rows, and the last row does not end with one. A program
+// that writes the text into a file or a fenced block adds that line feed
+// itself.
+//
+// A bar separates the number from the content. On a line with a [Flag]
+// whose [Flag.Marker] is not blank, the marker takes the place of the
+// bar. The text of a diff thus tells a deleted line from an inserted one:
+//
+//	fmt.Println(view.String())
+//	//    1 | name: web
+//	//    2 - replicas: 3
+//	//    2 + replicas: 5
+//
+// The rows of the annotations keep the bar whatever the flag of their
+// line. A marker is as wide as the bar, so the carets of a flagged line
+// stay under the columns they mark.
 //
 // Above a line, each kind of annotation with content gets one row, in
 // the order the kinds first appear, as [Annotations.Groups] groups them.
@@ -735,8 +748,10 @@ func (v *View) Windows(i int) position.Spans {
 // those of [kind.TextWarn], then those of the other kinds in the order
 // the kinds first appear. The rows of one kind come in the order their
 // runs start, and runs that start at one column come shorter first.
-// Overlays do not render a row, so a line with overlays but without an
-// annotation below it does not render a caret.
+//
+// String shows the flags and the annotations of the view. Overlays alone
+// need color. They do not render a row, so a line with overlays but
+// without an annotation below it does not render a caret.
 //
 // An annotation of kind [kind.UISeparator] or [kind.UIHunkHeader] labels
 // its line and not a column of it. Below a line, each of those kinds gets
@@ -758,7 +773,8 @@ func (v *View) Windows(i int) position.Spans {
 // A printer renders the same view with styles.
 // [go.jacobcolvin.com/niceyaml/printer.DefaultAnnotation] lays out the
 // rows below a line as String does, and the printer wraps the line and
-// those rows to its width.
+// those rows to its width. The printer puts the marker of each line in
+// its gutter and does not draw a bar.
 //
 // A line that [View.Clip] clips renders as the [Row] that [View.Row]
 // returns: the windows [View.Windows] returns, with "..." in place of each
@@ -805,7 +821,7 @@ func (v *View) String() string {
 			rows = append(rows, blank+padding+escape.Control(strings.Join(kept.Contents(), "; ")))
 		}
 
-		rows = append(rows, contentRow(ln.Number(), row.Content, width))
+		rows = append(rows, contentRow(ln.Number(), v.Flag(i), row.Content, width))
 
 		// Each run of columns the annotations below the line label gets a
 		// row of its own, as the printer lays them out, errors first.
@@ -850,12 +866,19 @@ func caretLabels(anns Annotations, width int) []caret.Label {
 // behind number, the number of the line. The number sits right-aligned in
 // a gutter that is width cells wide. A line without a number, such as the
 // placeholder a diff puts opposite an inserted or deleted line, gets a
-// blank gutter, as the printer gives it one.
-func contentRow(number int, content string, width int) string {
+// blank gutter, as the printer gives it one. The [Flag.Marker] of flag
+// separates the gutter from the content, and a bar stands in for a blank
+// marker.
+func contentRow(number int, flag Flag, content string, width int) string {
 	gutter := ""
 	if number > 0 {
 		gutter = strconv.Itoa(number)
 	}
 
-	return fmt.Sprintf("%*s | %s", width, gutter, escape.Control(content))
+	sep := flag.Marker()
+	if sep == " " {
+		sep = "|"
+	}
+
+	return fmt.Sprintf("%*s %s %s", width, gutter, sep, escape.Control(content))
 }

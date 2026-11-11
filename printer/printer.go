@@ -652,24 +652,24 @@ func renderLineNumber(ctx GutterContext) string {
 	}
 }
 
-// renderDiffMarker renders the diff marker portion of a gutter. An
-// annotation row does not carry a marker, and it renders in [kind.Text]
-// whatever its flag. A soft-wrapped continuation row keeps the color of
-// its line but not the marker.
+// renderDiffMarker renders the diff marker portion of a gutter, which is
+// the [line.Flag.Marker] of the line. An annotation row does not carry a
+// marker, and it renders in [kind.Text] whatever its flag. A soft-wrapped
+// continuation row keeps the color of its line but not the marker.
 func renderDiffMarker(ctx GutterContext) string {
 	k, marker := kind.Text, " "
 
 	if !ctx.Annotation {
 		switch ctx.Flag {
 		case line.FlagInserted:
-			k, marker = kind.GenericInserted, "+"
+			k = kind.GenericInserted
 		case line.FlagDeleted:
-			k, marker = kind.GenericDeleted, "-"
+			k = kind.GenericDeleted
 		case line.FlagDefault:
 		}
 
-		if ctx.Soft {
-			marker = " "
+		if !ctx.Soft {
+			marker = ctx.Flag.Marker()
 		}
 	}
 

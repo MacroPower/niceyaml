@@ -36,6 +36,12 @@ func main() {
 
 	lipgloss.Println(p.Print(result.Hunks(2)))
 
+	// String renders a view without styles, as a log or a golden file
+	// wants it. It writes the marker of each deleted or inserted line in
+	// place of the bar that follows the number.
+	fmt.Println("\nPrint the summary diff as plain text:")
+	fmt.Println(result.Hunks(2).String())
+
 	// Each change spans the lines it deletes and inserts. The spans are
 	// half-open and count lines from zero, so a program can report or apply
 	// the changes without printing the diff.

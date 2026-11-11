@@ -76,20 +76,17 @@ func renderHTML(view *line.View) string {
 	// content, and every decoration method takes that index.
 	for i, ln := range view.All() {
 		// A diff flags the lines it inserts and deletes, and every other
-		// line has the default flag. The diff marker follows the number,
-		// as in the printer.
-		var class, marker string
+		// line has the default flag. The class of a changed line names
+		// its flag. Marker returns the diff marker of the flag, which
+		// follows the number, as in the printer.
+		flag := view.Flag(i)
 
-		switch view.Flag(i) {
-		case line.FlagInserted:
-			class, marker = "line inserted", "+"
-		case line.FlagDeleted:
-			class, marker = "line deleted", "-"
-		case line.FlagDefault:
-			class, marker = "line", " "
+		class := "line"
+		if flag != line.FlagDefault {
+			class += " " + flag.String()
 		}
 
-		gutter := fmt.Sprintf("%4d %s", ln.Number(), marker)
+		gutter := fmt.Sprintf("%4d %s", ln.Number(), flag.Marker())
 
 		// Row is the line as the printer shows it. A view that clips a
 		// long line, as an error excerpt does, shows a window of columns
@@ -112,7 +109,7 @@ func renderHTML(view *line.View) string {
 		// kind of its flag, with the overlays over that. The class of the
 		// line carries that color, so the segments of a changed line leave
 		// out the spans of their kinds.
-		tokens := view.Flag(i) == line.FlagDefault
+		tokens := flag == line.FlagDefault
 
 		for _, seg := range row.Segments {
 			sb.WriteString(renderSegment(seg, tokens))
