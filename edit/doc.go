@@ -499,9 +499,11 @@
 // [go.jacobcolvin.com/niceyaml.IsInvalid] reports true for a construct of
 // the user's text, so a server that answers an invalid upload with a 4xx
 // status keeps that answer. A construct in the YAML of a value that a Set
-// writes comes from the program, and so does a key that a SetKey repeats in
-// its mapping. The error then binds at the place of the call, its InValue
-// field is true, and IsInvalid reports false.
+// writes comes from the program. So does a key that a SetKey repeats in its
+// mapping. So does a typed key of a SetKey that a decode reads as another
+// value, such as the float 1.0, or as a string at its place. The error then
+// binds at the place of the call, its InValue field is true, and IsInvalid
+// reports false.
 //
 // Every other refusal of a call follows one rule. The program is at fault
 // for a refusal that its arguments decide, whatever the document holds, so
@@ -665,10 +667,14 @@
 //   - [Node.Insert] puts the value before the item at its place, or after
 //     the last item of the sequence when the place lies past it. Where the
 //     text lacks the place, the Insert creates it as a Set does.
-//   - [Node.SetKey] gives the entry the key that the call names, as a
-//     decode reads that string. When a decode reads the key as the new key
-//     and a path by the new key selects the entry already, the SetKey
-//     leaves the text and the model as they are.
+//   - [Node.SetKey] gives the entry the key that the call names. A Go
+//     string writes a string key, and a bool, an integer, or a float
+//     writes a key of its own kind. The name of a key is its text, as a
+//     path names it. When the old key has the name of the new key and a
+//     path by that name selects the entry already, the SetKey leaves the
+//     text and the model as they are. A typed key also needs the old
+//     key to be a plain scalar of that text, which a decode reads as a
+//     value of the kind of the new key at its place.
 //   - [Node.Remove] removes the value.
 //   - [Node.Move] takes the value from its place to the target. A target
 //     that holds an item takes the value before that item. A target at the

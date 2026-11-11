@@ -214,6 +214,15 @@ type payload struct {
 // it checks the constructs of the text that it reaches. YAML allows
 // U+0085, so a string writes that character without an escape.
 //
+// Each key that Set creates for a name of its path is a string key, so the
+// name 404 writes the key "404". To write a key of another kind, a [Func]
+// calls [Node.SetKey] after the Set on a Node at the path of that key.
+// SetKey(404) on the same Node renames the last key of the path. A parent
+// that the Set created takes another kind through a Node at its own path.
+// After a Set of the path 8080.name below a Node n, the call
+// n.At(paths.Current().Child("8080")).SetKey(8080) writes the plain key
+// 8080.
+//
 // A path names a key by its text. Set fails before it writes when a
 // mapping of v holds two keys of one text, such as the int 1 and the
 // string "1" of a map[any]any. The problem matches [ErrValue]. The

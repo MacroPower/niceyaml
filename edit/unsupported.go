@@ -56,7 +56,10 @@ const (
 	// it, other than a Remove of the entry. So does a call that changes how
 	// a decode reads a key, as the first key under a tag such as !t reads as
 	// a string. Such a key in the YAML of a value that a Set writes is one
-	// as well, and its problem has InValue set.
+	// as well, and its problem has InValue set. So is a key of another kind
+	// than a string that a SetKey writes as such text, as the float 1.0
+	// writes 1.0, which reads as 1. So is such a key that a SetKey writes
+	// where a decode reads it as a string, as the first key under !t.
 	ConstructKeyText
 	// ConstructMergeForm is a << merge key in another form than one alias
 	// of an anchored mapping of the document without a merge key of its
@@ -146,9 +149,10 @@ func (c Construct) String() string {
 // the construct comes as a detail. The document is at fault for a construct
 // of its own text, so [niceyaml.IsInvalid] reports such a problem. A
 // construct in the YAML of a value that a Set writes comes from the
-// program, and so does a key that a SetKey repeats in its mapping. Its
-// problem binds at the place of the call, InValue is true, and IsInvalid
-// does not report it.
+// program. So does a key that a SetKey repeats in its mapping. So does a
+// typed key of a SetKey that a decode reads as another value, such as the
+// float 1.0, or as a string at its place. Its problem binds at the place of
+// the call, InValue is true, and IsInvalid does not report it.
 type UnsupportedError struct {
 	// The message of the problem.
 	msg string
