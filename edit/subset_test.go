@@ -1555,24 +1555,24 @@ func TestDoc_Apply_Unsupported(t *testing.T) {
 		"rename through a merge sequence of reference aliases after an own entry": {
 			// The own entry lies outside the zone of the refused form, so no
 			// step before the merge step lies inside the zone. The merge step
-			// meets the alias of the reference document first (fix17 ruling
-			// P50, Ambiguity 37 of the oracle).
+			// meets the alias of the reference document that brings in b
+			// first (fix17 ruling P50, Ambiguity 37 of the oracle).
 			before:   stringtest.LinesLF("a: 1", "<<: [*rm0, *rm1]"),
 			ref:      stringtest.LinesLF("m0: &rm0 {k: 1}", "m1: &rm1 {b: 2}"),
 			fn:       rename("$.b", "c"),
 			refAlias: true,
-			err:      "test.yaml:2:6: $: the edit renames $.b, which goes through <<: [*rm0, *rm1] at 2:1",
+			err:      "test.yaml:2:12: $: the edit renames $.b, which goes through <<: [*rm0, *rm1] at 2:1",
 		},
 		"set through a merge sequence of a local and a reference alias, before an own entry": {
 			before:   stringtest.LinesLF("l: &l {q: 1}", "m:", "  <<: [*l, *rm0]", "  b: 1"),
-			ref:      "m0: &rm0 {y: 1}\n",
+			ref:      "m0: &rm0 {y: 1, new: 2}\n",
 			fn:       set("$.m.new", 1),
 			refAlias: true,
 			err:      "test.yaml:3:12: $.m: the edit sets $.m.new, which goes through <<: [*l, *rm0] at 3:3",
 		},
 		"set through a merge sequence of a local and a reference alias, after an own entry": {
 			before:   stringtest.LinesLF("l: &l {q: 1}", "m:", "  b: 1", "  <<: [*l, *rm0]"),
-			ref:      "m0: &rm0 {y: 1}\n",
+			ref:      "m0: &rm0 {y: 1, new: 2}\n",
 			fn:       set("$.m.new", 1),
 			refAlias: true,
 			err:      "test.yaml:4:12: $.m: the edit sets $.m.new, which goes through <<: [*l, *rm0] at 4:3",
@@ -1580,14 +1580,14 @@ func TestDoc_Apply_Unsupported(t *testing.T) {
 		"set through a merge sequence of a local and a reference alias in a flow mapping": {
 			// The braces of the mapping lie outside the zone of the merge key.
 			before:   stringtest.LinesLF("l: &l {q: 1}", "m: {<<: [*l, *rm0]}"),
-			ref:      "m0: &rm0 {y: 1}\n",
+			ref:      "m0: &rm0 {y: 1, new: 2}\n",
 			fn:       set("$.m.new", 1),
 			refAlias: true,
 			err:      "test.yaml:2:14: $.m: the edit sets $.m.new, which goes through <<: [*l, *rm0] at 2:5",
 		},
 		"set through a merge sequence of one reference alias, before an own entry": {
 			before:   stringtest.LinesLF("m:", "  <<: [*rm0]", "  b: 1"),
-			ref:      "m0: &rm0 {y: 1}\n",
+			ref:      "m0: &rm0 {y: 1, new: 2}\n",
 			fn:       set("$.m.new", 1),
 			refAlias: true,
 			err:      "test.yaml:2:8: $.m: the edit sets $.m.new, which goes through <<: [*rm0] at 2:3",
@@ -1621,7 +1621,7 @@ func TestDoc_Apply_Unsupported(t *testing.T) {
 			// and stops at the alias of the reference document in its source,
 			// and no step before it lies inside the zone.
 			before:   stringtest.LinesLF("l: &l", "  <<: *rm0", "m:", "  a: 1", "  <<: *l"),
-			ref:      "m0: &rm0 {b: 2, a: 3}\n",
+			ref:      "m0: &rm0 {b: 2, a: 3, zz9: 4}\n",
 			fn:       set("$.m.zz9", 7),
 			refAlias: true,
 			err:      "test.yaml:2:7: $.l: the edit sets $.m.zz9, which goes through <<: *rm0 at 2:3",
@@ -1643,7 +1643,7 @@ func TestDoc_Apply_Unsupported(t *testing.T) {
 			// merge key of the mapping that merges the source, so the refused
 			// form of that merge key does not meet the call.
 			before:   stringtest.LinesLF("s: &s", "  <<: *rm0", "  a: 1", "m:", "  <<: *s", "  b: 2"),
-			ref:      "m0: &rm0 {b: 2, a: 3}\n",
+			ref:      "m0: &rm0 {b: 2, a: 3, zz9: 4}\n",
 			fn:       set("$.s.zz9", 7),
 			refAlias: true,
 			err:      "test.yaml:2:7: $.s: the edit sets $.s.zz9, which goes through <<: *rm0 at 2:3",

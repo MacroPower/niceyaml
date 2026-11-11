@@ -63,21 +63,21 @@ func (c *registryConfig) fieldPaths() []paths.Path {
 // document doc. A path that passes through an alias or a `<<` merge key
 // fails at that alias or merge key. The read cannot follow an alias into a
 // reference document, and a rewrite of the field reaches every value that
-// shares the anchor. A path through a key that a later merge key from a
-// reference document might replace fails at that merge key too. The
-// detail of that problem names the first key before the merge key that p
-// or a path of reads passes through. The author thus moves the merge key
-// above every such key at once. A path through a key whose place a decode
-// reads from another key of the mapping fails at that key, such as 0x10
-// for 16. So does a path through a key before a key that does not decode,
-// because the decode might read that key in its place. The keys read as
-// niceyaml's decode of the document reads them, with the anchors of the
-// reference documents of its Source. The field reads as go-yaml's decoder
-// reads its value into a string, under its tags. So "!!null x" reads as a
-// field that the document leaves out, as any null does, and the number 2
-// reads "2". A value that the decoder does not read into a string, such as
-// a mapping or a timestamp, is not text. The read also notes a scalar that
-// the decoder reads as another string than its text, such as 1.10 as "1.1".
+// shares the anchor. A path through a key that a later merge key brings in
+// from a reference document fails at that merge key too. The detail of that
+// problem names the first key before the merge key that p or a path of reads
+// passes through. The author thus moves the merge key above every such key
+// at once. A path through a key whose place a decode reads from another key
+// of the mapping fails at that key, such as 0x10 for 16. So does a path
+// through a key before a key that does not decode, because the decode might
+// read that key in its place. The keys read as niceyaml's decode of the
+// document reads them, with the anchors of the reference documents of its
+// Source. The field reads as go-yaml's decoder reads its value into a
+// string, under its tags. So "!!null x" reads as a field that the document
+// leaves out, as any null does, and the number 2 reads "2". A value that the
+// decoder does not read into a string, such as a mapping or a timestamp, is
+// not text. The read also notes a scalar that the decoder reads as another
+// string than its text, such as 1.10 as "1.1".
 func readField(doc *niceyaml.Node, p paths.Path, reads []paths.Path) fieldRead {
 	res := doc.DocumentResolver()
 	keys := hook.Keys(doc)
@@ -99,11 +99,16 @@ func readField(doc *niceyaml.Node, p paths.Path, reads []paths.Path) fieldRead {
 
 		switch sel.Kind {
 		case paths.SelectorChild:
-			entry, other, read := findEntry(res, keys, content, sel.Name)
+			entry, other, read := findEntry(doc, res, keys, content, sel.Name)
 
 			switch {
 			case read == readsUndecoded:
 				return fieldRead{err: undecodedProblem(p, name, other)}
+
+			case read == readsReference && entry == nil:
+				advice := fmt.Sprintf("write the %s in the document itself, after the merge key", sel.Name)
+
+				return fieldRead{err: unreadProblem(p, name, advice, astnode.KeyToken(other))}
 
 			case read == readsReference:
 				advice := mergeAdvice(res, content, other, selectors[:depth], append([]paths.Path{p}, reads...))
@@ -205,20 +210,29 @@ func misreadProblem(p paths.Path, node ast.Node, own, text string) error {
 // merge entry wins over the merge entries before it. A key that a write
 // of the field creates reads as name, so without the entry, findEntry
 // returns the entry that the decode reads as name. The keys that a decode
-// reads come from keys, a reader of the keys of the document.
+// reads come from keys, a reader of the keys of the document doc.
 //
-// The lookup cannot read the sources of a merge key that reads a reference
-// document. Such a merge key after the entry of the mapping itself might
-// replace that entry, so findEntry returns the merge key with
-// readsReference. It also returns a later key that does not decode, or the
-// merge key that brings it in, with readsUndecoded, because the decode
-// might read that key as the key of the entry. After a merge key that the
-// lookup cannot read for another reason, such as an alias without an
-// anchor, findEntry returns the entry of the mapping itself. It returns nil
-// for both when neither the mapping nor a merge source that it can read
-// holds the key.
+// A merge key after the entry of the mapping itself can bring in the key
+// from a reference document, whose entry then replaces that entry. The
+// decode reads that key by its decoded key, so 0x10 there replaces 16
+// too. The lookup also fails when it cannot read a mapping of a reference
+// document, and that merge key might then replace the entry. Each time,
+// findEntry returns the merge key with readsReference. A later key that
+// does not decode might read as the key of the entry, so the function
+// returns such a key, or the merge key that brings it in, with
+// readsUndecoded. A key of a reference document that does not decode
+// gives readsReference. After a merge key that the lookup cannot read for
+// another reason, such as an alias without an anchor, findEntry returns
+// the entry of the mapping itself. It returns nil for both when neither
+// the mapping nor a merge source that it can read holds the key.
+//
+// A mapping without the entry can have a merge key that brings in 0x10
+// or a key that does not decode from a reference document. The function
+// then returns a nil entry with that merge key and readsReference. A reference
+// document that holds the key under the text of name gives nil for both.
+// A write of the field then fails at that merge key, as the lookup does.
 func findEntry(
-	res *paths.Resolver, keys *mapkey.Keys, node ast.Node, name string,
+	doc *niceyaml.Node, res *paths.Resolver, keys *mapkey.Keys, node ast.Node, name string,
 ) (*ast.MappingValueNode, *ast.MappingValueNode, laterKind) {
 	entries, ok := astnode.Entries(node)
 	if !ok {
@@ -228,7 +242,8 @@ func findEntry(
 	e, err := res.Entry(node, name)
 	if err == nil && slices.Contains(entries, e) {
 		if key, ok := keys.Key(e.Key); ok {
-			later, read := laterRead(res, keys, entries[slices.Index(entries, e)+1:], name, key)
+			search := laterSearch{doc: doc, res: res, keys: keys, name: name, key: key, references: true}
+			later, read := search.laterRead(entries[slices.Index(entries, e)+1:])
 
 			return e, later, read
 		}
@@ -248,14 +263,22 @@ func findEntry(
 			}
 
 			if merge := unreadMerge(res, entries[i+1:]); merge != nil {
-				return nil, merge, readsReference
+				return e, merge, readsReference
 			}
 
 			return e, nil, readsKey
 		}
 	}
 
-	later, read := laterRead(res, keys, entries, name, name)
+	// A lookup that wraps paths.ErrReferenceAlias selects an entry of a
+	// reference document, so a write of the field fails in the same way.
+	// After any other lookup, the search reads the reference documents for
+	// a key that the decode reads as name.
+	search := laterSearch{
+		doc: doc, res: res, keys: keys, name: name, key: name,
+		references: !errors.Is(err, paths.ErrReferenceAlias),
+	}
+	later, read := search.laterRead(entries)
 
 	return nil, later, read
 }
@@ -267,44 +290,70 @@ type laterKind uint8
 const (
 	// The later entry, if any, reads as the key of the field.
 	readsKey laterKind = iota
-	// The later entry is a merge key that reads a reference document.
+	// The later entry is a merge key that brings in the key from a
+	// reference document, or that reads one the lookup cannot read.
 	readsReference
 	// The later entry has a key that does not decode, or is a merge key
 	// that brings in such a key.
 	readsUndecoded
 )
 
-// laterRead returns the last of entries whose key a decode reads as key.
-// That entry is an entry itself or a merge entry. The merge entry brings
-// in an entry that a path through name selects, or one that the decode
-// reads as key, as [mergeHolds] tells. The result is nil when none of
-// entries does. A key that does not decode might read as key, so
-// laterRead returns the last entry with such a key, or the merge entry
-// that brings it in, with readsUndecoded, when no later entry reads as
-// key.
-func laterRead(
-	res *paths.Resolver, keys *mapkey.Keys, entries []*ast.MappingValueNode, name, key string,
-) (*ast.MappingValueNode, laterKind) {
+// laterSearch looks for an entry of a mapping that a decode reads in place
+// of the entry of a field, as [findEntry] describes. A path through name
+// selects the entry of the field, and a decode reads its key as key. The
+// keys that a decode reads come from keys, a reader of the keys of the
+// document doc.
+type laterSearch struct {
+	doc  *niceyaml.Node
+	res  *paths.Resolver
+	keys *mapkey.Keys
+	// The least merge depth at which [laterSearch.mergeHolds] has read each
+	// mapping outside a reference document, and inside one. A mapping that
+	// the merge keys of a document reach on many paths thus costs one read
+	// at each depth at most.
+	seen, seenReference map[ast.Node]int
+	name                string
+	key                 string
+	// Whether the search reads the mappings that a merge key brings in
+	// from a reference document.
+	references bool
+}
+
+// laterRead returns the last of entries whose key a decode reads as the
+// key of the search. That entry is an entry itself or a merge entry. The
+// merge entry brings in an entry that a path through the name of the
+// search selects, or one that the decode reads as the key, as
+// [laterSearch.mergeHolds] tells. The result is nil when none of entries
+// does. A key that does not decode might read as the key, so laterRead
+// returns the last entry with such a key, or the merge entry that brings
+// it in, with readsUndecoded, when no later entry reads as the key. A
+// merge entry that brings in either from a reference document gives
+// readsReference.
+func (s laterSearch) laterRead(entries []*ast.MappingValueNode) (*ast.MappingValueNode, laterKind) {
+	s.seen, s.seenReference = map[ast.Node]int{}, map[ast.Node]int{}
+
 	for _, e := range slices.Backward(entries) {
 		if astnode.IsMergeKey(e.Key) {
-			holds, undecoded := mergeHolds(res, keys, e, name, key, 0)
+			found := s.mergeHolds(e, false, 0)
 
 			switch {
-			case holds:
+			case found.reference && (found.holds || found.undecoded):
+				return e, readsReference
+			case found.holds:
 				return e, readsKey
-			case undecoded:
+			case found.undecoded:
 				return e, readsUndecoded
 			}
 
 			continue
 		}
 
-		decoded, ok := keys.Key(e.Key)
+		decoded, ok := s.keys.Key(e.Key)
 
 		switch {
 		case !ok:
 			return e, readsUndecoded
-		case decoded == key:
+		case decoded == s.key:
 			return e, readsKey
 		}
 	}
@@ -440,12 +489,14 @@ func inSentence(names []string) string {
 func unreadMerge(res *paths.Resolver, entries []*ast.MappingValueNode) *ast.MappingValueNode {
 	var last *ast.MappingValueNode
 
+	seen := map[ast.Node]int{}
+
 	for _, e := range slices.Backward(entries) {
 		if !astnode.IsMergeKey(e.Key) {
 			continue
 		}
 
-		if mergeUnread(res, e, 0) {
+		if mergeUnread(res, e, seen, 0) {
 			return e
 		}
 
@@ -459,8 +510,10 @@ func unreadMerge(res *paths.Resolver, entries []*ast.MappingValueNode) *ast.Mapp
 
 // mergeUnread reports whether a mapping that the merge entry e brings in,
 // itself or through a merge key of its own, comes from a reference
-// document.
-func mergeUnread(res *paths.Resolver, e *ast.MappingValueNode, depth int) bool {
+// document. The map seen holds the least merge depth at which mergeUnread
+// has read each mapping. It skips a mapping that it read at the same or a
+// lesser depth, because that read went at least as deep.
+func mergeUnread(res *paths.Resolver, e *ast.MappingValueNode, seen map[ast.Node]int, depth int) bool {
 	if depth > maxMergeDepth {
 		return false
 	}
@@ -471,13 +524,21 @@ func mergeUnread(res *paths.Resolver, e *ast.MappingValueNode, depth int) bool {
 			return true
 		}
 
-		entries, ok := astnode.Entries(astnode.Content(m))
+		content := astnode.Content(m)
+
+		entries, ok := astnode.Entries(content)
 		if err != nil || !ok {
 			continue
 		}
 
+		if d, ok := seen[content]; ok && d <= depth {
+			continue
+		}
+
+		seen[content] = depth
+
 		for _, inner := range entries {
-			if astnode.IsMergeKey(inner.Key) && mergeUnread(res, inner, depth+1) {
+			if astnode.IsMergeKey(inner.Key) && mergeUnread(res, inner, seen, depth+1) {
 				return true
 			}
 		}
@@ -486,57 +547,96 @@ func mergeUnread(res *paths.Resolver, e *ast.MappingValueNode, depth int) bool {
 	return false
 }
 
-// mergeHolds reports whether a mapping that the merge entry e brings in
-// holds an entry that a path through name selects. It also reports whether
-// the mapping holds an entry that a decode reads as key, itself or through
-// a merge key of its own. Its second result reports whether such a mapping
-// holds a key that does not decode, which might read as key.
-func mergeHolds(
-	res *paths.Resolver, keys *mapkey.Keys, e *ast.MappingValueNode, name, key string, depth int,
-) (bool, bool) {
+// mergeFind is what [laterSearch.mergeHolds] finds in the mappings that a
+// merge entry brings in.
+type mergeFind struct {
+	// Whether a mapping holds an entry that reads as the key of the field.
+	holds bool
+	// Whether a mapping holds a key that does not decode.
+	undecoded bool
+	// Whether the entry that reads as the key, or a key that does not
+	// decode, lies in a reference document.
+	reference bool
+}
+
+// mergeHolds reports whether a mapping that the merge entry e brings in,
+// itself or through a merge key of its own, holds an entry that a path
+// through the name of the search selects, or one that a decode reads as
+// the key of the search. It also reports whether such a mapping holds a
+// key that does not decode, which might read as the key, when none holds
+// such an entry. The reference argument tells whether e lies in a
+// reference document. Without references, mergeHolds skips each mapping
+// of a reference document.
+func (s laterSearch) mergeHolds(e *ast.MappingValueNode, reference bool, depth int) mergeFind {
+	var found mergeFind
+
 	if depth > maxMergeDepth {
-		return false, false
+		return found
 	}
 
-	unread := false
-
 	for _, v := range astnode.MergeValues(e) {
-		m, err := res.Deref(v)
+		inside := reference
+
+		m, err := s.res.Deref(v)
+		if s.references && errors.Is(err, paths.ErrReferenceAlias) {
+			m, err, inside = hook.Content(s.doc, v), nil, true
+		}
+
 		if err != nil {
 			continue
 		}
 
-		entries, ok := astnode.Entries(astnode.Content(m))
+		content := astnode.Content(m)
+
+		entries, ok := astnode.Entries(content)
 		if !ok {
 			continue
 		}
 
+		// An earlier read at the same or a lesser depth went at least as
+		// deep. What it found either ended the search or is part of the
+		// result already.
+		seen := s.seen
+		if inside {
+			seen = s.seenReference
+		}
+
+		if d, ok := seen[content]; ok && d <= depth {
+			continue
+		}
+
+		seen[content] = depth
+
 		for _, inner := range entries {
 			if astnode.IsMergeKey(inner.Key) {
-				holds, undecoded := mergeHolds(res, keys, inner, name, key, depth+1)
-				if holds {
-					return true, false
+				f := s.mergeHolds(inner, inside, depth+1)
+				if f.holds {
+					return f
 				}
 
-				unread = unread || undecoded
+				found.undecoded = found.undecoded || f.undecoded
+				found.reference = found.reference || f.reference
 
 				continue
 			}
 
-			if text, ok := res.KeyName(inner.Key); ok && text == name {
-				return true, false
+			if text, ok := s.res.KeyName(inner.Key); ok && text == s.name {
+				return mergeFind{holds: true, reference: inside}
 			}
 
-			decoded, ok := keys.Key(inner.Key)
-			if ok && decoded == key {
-				return true, false
+			decoded, ok := s.keys.Key(inner.Key)
+			if ok && decoded == s.key {
+				return mergeFind{holds: true, reference: inside}
 			}
 
-			unread = unread || !ok
+			if !ok {
+				found.undecoded = true
+				found.reference = found.reference || inside
+			}
 		}
 	}
 
-	return false, unread
+	return found
 }
 
 // aliasProblem returns the problem of the field name at p, which comes from

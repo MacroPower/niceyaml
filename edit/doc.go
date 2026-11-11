@@ -95,23 +95,32 @@
 // [Node.Decode] at the alias reads the anchor through the reference
 // documents, as a decode of the whole document reads it.
 //
-// The engine reads a reference document only as the paths and the decode
-// of go.jacobcolvin.com/niceyaml read it, so a path does not enter such an
+// The engine reads a reference document only as the paths and the decode of
+// go.jacobcolvin.com/niceyaml read it, so a path does not enter such an
 // alias. A path below the alias fails with an error that matches
 // [go.jacobcolvin.com/niceyaml/paths.ErrReferenceAlias], which binds at the
 // alias, as [go.jacobcolvin.com/niceyaml.Node.At] binds it. Its path is the
 // path of the value that holds the alias in the user's text, as the Errors
-// section describes. A `<<` merge key of such an alias can bring in any
-// name, so the reference document decides which names its mapping reads. A
-// path through a name that the mapping writes before such a merge key fails
-// the same way. So does a path through a name that the mapping does not
-// write after every such merge key. The error of such a path names the
-// merge key and says that the reference document decides which names the
-// mapping reads. A `.*`, `[*]`, `..name`, or `..*` selector fails where a
-// path through a name of a place that it selects or passes by fails. Its
-// error binds at the alias that stops the selector, as
-// [go.jacobcolvin.com/niceyaml.Node.Nodes] binds it, under the path of the
-// value that holds the alias.
+// section describes. A `<<` merge key of such an alias brings in the names
+// of the mapping of its anchor. A path through a name whose entry such a
+// merge key brings in fails the same way, because the value lies in the
+// reference document. A decode compares the keys of a mapping as it decodes
+// them. The entry 0x10 that such a merge key brings in thus replaces an
+// entry 16 written before the merge key. A path through a name that the
+// mapping writes before such a merge key fails too when the merge key
+// brings in a key that a decode reads as that name. So does such a path
+// when the merge key brings in a key that does not decode. A path through
+// any name of a mapping fails when its merge key reads a reference document
+// that the engine cannot read. One such document merges an anchor that no
+// reference document defines. These are the paths that a reference
+// document decides. The error of such a path
+// names the merge key and says that the reference document decides which
+// names the mapping reads. A path through any other name reads the entry
+// that the mapping writes, or a place without a value. A `.*`, `[*]`,
+// `..name`, or `..*` selector fails where a path through a name of a place
+// that it selects or passes by fails. Its error binds at the alias that
+// stops the selector, as [go.jacobcolvin.com/niceyaml.Node.Nodes] binds it,
+// under the path of the value that holds the alias.
 //
 // Each edit through such a path fails. [Node.Decode] there returns
 // the error of the path, and [Node.Exists], [Node.Kind], [Node.Len], and
@@ -271,30 +280,51 @@
 // item of its sequence. A call that changes the names that such a mapping
 // writes then fails with an error that matches
 // [go.jacobcolvin.com/niceyaml/paths.ErrReferenceAlias]. Such a call is a
-// Remove, a SetKey, or a Move of an own entry, a Move into the mapping, or a
-// Set of a name that the mapping does not write. The call fails the same way
-// on a mapping whose names such a mapping reads through its merge keys. The
-// engine does not read which names the reference document holds, so the call
-// fails whatever it holds.
+// Remove, a SetKey, or a Move of an own entry. The call fails the same way
+// on a mapping whose names such a mapping reads through its merge keys.
+// The engine does not check which names the reference document holds for
+// such a call. So the call fails whatever it holds. Other calls add an
+// entry to the mapping: a Move into the mapping, and a Set of a name that
+// the mapping does not write. Such a call fails only when the reference
+// document decides the name at the place of the new entry.
 //
 // A Set of the value of an own entry that the path reaches passes, and so
 // does each edit below that value. The path reaches an own entry that the
-// mapping writes after every such merge key. The error of a call that
-// changes the names of the mapping names the merge key and says that the
-// reference document decides which names the mapping reads. A Remove, a
-// SetKey, or a Move of an own entry out of the mapping binds that error at
-// the entry, with a detail at the merge key. A Set of a name that the
-// mapping does not write looks the name up through the merge key, and so
-// does a Move into the mapping, also one from another of its entries. Their
-// paths thus fail first, at the alias, as the Edits section describes.
+// mapping writes after every such merge key. It also reaches an own entry
+// written before such a merge key, unless the merge key brings in a key
+// that a decode might read as its name. The Edits section describes such
+// keys. The error of a call that changes the names of the mapping names the
+// merge key and says that the reference document decides which names the
+// mapping reads. A Remove, a SetKey, or a Move of an own entry out of the
+// mapping binds that error at the entry. The error has a detail at the
+// merge key. A Set of a name that the mapping does not write looks the
+// name up through the merge key. So does a Move into the mapping, also one
+// from another of its entries. A path that a reference document decides
+// thus fails first, at the alias, as the Edits section describes. The
+// lookup compares keys by their text. It passes when the merge key brings
+// in a key that a decode reads as the name, such as 0x10 for 16. It also
+// passes when the merge key brings in a key that does not decode. The call
+// puts the new entry last by default, after every merge key, so the new
+// entry replaces such a key. A call can put the new entry before such a
+// merge key with [First], with [Before], or with [After] an entry that
+// comes before the merge key. Such a call fails with the error of the path
+// instead, because the entry of the reference document replaces the new
+// entry there.
 //
 // The engine checks the path of a call step by step from the root. The
 // first step that meets a construct that the subset refuses, a problem of
 // the path, or an alias of a reference document decides the error of the
 // call. A step that looks a name up through the merge keys of its mapping
-// stops at the first alias of a reference document that the lookup meets.
-// That alias can be the value of a merge key, an item of its sequence, or
-// the value of a merge key of a mapping that a merge key brings in.
+// reads the mapping of each alias of a reference document that the lookup
+// meets. That alias can be the value of a merge key, an item of its
+// sequence, or the value of a merge key of a mapping that a merge key
+// brings in. The step stops at the alias of the merge key that brings in
+// the name from a reference document. For an entry that the mapping writes
+// before the merge key, the step compares the keys as a decode reads them.
+// For a name that the mapping does not write, it compares the keys by
+// their text. A Set or a Move of such a name then also checks where the
+// new entry goes. The step also stops at the first such alias whose
+// reference document the engine cannot read.
 //
 // A merge key in a refused form thus refuses such a call only when an
 // earlier step lies in its part of the text. "<<: [*a, *ref]" is such a
@@ -1072,11 +1102,20 @@
 // call inside it fails or passes as the Edits and the Supported YAML
 // sections describe.
 //
-// The engine does not read which names the reference document holds, so
-// it does not know which mapping the path reads its name from. The Apply
-// thus protects no other value that the path might read. One is a mapping
-// of the document that the merge key brings in too, as "*a" in
-// "<<: [*a, *ref]" does. Another is an own entry that the mapping writes
-// before the merge key. A call through another path can change either,
-// such as a Set of $.a.name or of an alias of the entry.
+// A path that a reference document decides reads its value from that
+// document when the merge key brings in an entry of its name. That entry
+// replaces each earlier entry of the name. One such entry is an own entry
+// that the mapping writes before the merge key. Another is an entry of a
+// mapping of the document that the merge key brings in before the
+// reference document, as "*a" in "<<: [*a, *ref]" does. The decoder reads
+// neither, so the Apply protects only the value that holds the protected
+// value.
+//
+// A reference document decides a path in two other cases. In one, the
+// merge key brings in a key that does not decode. In the other, the merge
+// key reads a reference document that the engine cannot read. The engine
+// then cannot tell which entry the decoder reads. The Apply thus protects
+// no other value that the path might read, such as an own entry before the
+// merge key or "*a". A call through another path can change either, such
+// as a Set of $.a.name or of an alias of the entry.
 package edit

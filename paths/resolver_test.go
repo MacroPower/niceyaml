@@ -2935,10 +2935,23 @@ func TestWithReferenceAnchors(t *testing.T) {
 	t.Parallel()
 
 	// The reference document defines the anchors shared, key, and chain.
-	// The anchor key holds the key "name", and chain reads key.
+	// The anchor key holds the key "name", and chain reads key. The anchor
+	// base merges shared, broken merges an alias that no reference defines,
+	// and ca and cb merge each other. The anchor real holds a real key with
+	// the text `<<`.
 	refs := make(map[string]*ast.AnchorNode)
 
-	ref := documentOf(t, stringtest.LinesLF("shared: &shared {port: 1}", "&key name: 1", "chain: &chain !t *key"))
+	ref := documentOf(t, stringtest.LinesLF(
+		"shared: &shared {port: 1}",
+		"&key name: 1",
+		"chain: &chain !t *key",
+		"base: &base {<<: *shared, host: h}",
+		"broken: &broken {<<: *nope}",
+		"ca: &ca {<<: *cb, a: 1}",
+		"cb: &cb {<<: *ca, b: 2}",
+		`lt: &lt "<<"`,
+		"real: &real {*lt : x}",
+	))
 	for _, n := range ast.Filter(ast.AnchorType, ref) {
 		anchor := requireAs[*ast.AnchorNode](t, n)
 		refs[anchor.Name.GetToken().Value] = anchor
@@ -3167,6 +3180,42 @@ func TestWithReferenceAnchors(t *testing.T) {
 				path:  "$..port",
 				want:  []string{"$.items[1].port=1"},
 			},
+			"entries of a mapping whose own keys hide the reference": {
+				// The entry after the merge key wins over the one of the
+				// reference, so `.*` does not list an entry of the reference.
+				input: stringtest.LinesLF("<<: *shared", "port: 2", "b: 1"),
+				path:  "$.*",
+				want:  []string{"$.port=2", "$.b=1"},
+			},
+			"name below an entry before a merge key that reads a reference": {
+				// The reference does not hold a, so the entry of the mapping
+				// wins.
+				input: stringtest.LinesLF("a:", "  port: 1", "<<: *shared"),
+				path:  "$..port",
+				want:  []string{"$.a.port=1"},
+			},
+			"every value with an entry before a merge key that reads a reference": {
+				input: stringtest.LinesLF("a: {port: 1}", "<<: *shared"),
+				path:  "$..*",
+				want:  []string{"$.a={port: 1}", "$.a.port=1"},
+			},
+			"entry of a nested mapping before a merge key that reads a reference": {
+				input: stringtest.LinesLF("m:", "  a: {port: 1}", "  <<: *shared", "  c: {port: 2}"),
+				path:  "$..port",
+				want:  []string{"$.m.a.port=1", "$.m.c.port=2"},
+			},
+			"mapping written in the sequence of a merge key that reads a reference": {
+				// The reference does not hold a real `<<` key, so a path
+				// through `<<` selects the merge key.
+				input: "<<: [*shared, {port: 1}]\n",
+				path:  "$..port",
+				want:  []string{"$.<<[1].port=1"},
+			},
+			"merge key that reads a reference under the name of the merge key": {
+				input: stringtest.LinesLF("<<: *shared", "b: 1"),
+				path:  "$..'<<'",
+				want:  []string{"$.<<=*shared"},
+			},
 		}
 
 		for name, tc := range tcs {
@@ -3205,41 +3254,47 @@ func TestWithReferenceAnchors(t *testing.T) {
 				path:  "$.server.*",
 				want:  "resolve $.server.*: alias reads a reference document: *shared",
 			},
+			"entries of a mapping that merges a reference it cannot read": {
+				input: stringtest.LinesLF("<<: *broken", "b: 1"),
+				path:  "$.*",
+				want:  "resolve $.*: alias reads a reference document: *broken",
+			},
 			"name below an entry before a merge key that reads a reference": {
-				// The merge key can bring in a, which then wins over the entry
-				// of the mapping, so the reference decides what $.a selects.
-				input: stringtest.LinesLF("a:", "  port: 1", "<<: *shared"),
+				// The reference brings in port, which then wins over the
+				// entry of the mapping, so $.port selects an entry of the
+				// reference.
+				input: stringtest.LinesLF("port:", "  port: 1", "<<: *shared"),
 				path:  "$..port",
 				want:  "resolve $..port: alias reads a reference document: *shared",
 			},
 			"every value with an entry before a merge key that reads a reference": {
-				input: stringtest.LinesLF("a:", "  port: 1", "<<: *shared"),
+				input: stringtest.LinesLF("port: [1]", "<<: *shared"),
 				path:  "$..*",
 				want:  "resolve $..*: alias reads a reference document: *shared",
 			},
 			"entry of a nested mapping before a merge key that reads a reference": {
-				input: stringtest.LinesLF("m:", "  a: {port: 1}", "  <<: *shared", "  c: {port: 2}"),
+				input: stringtest.LinesLF("m:", "  port: {port: 1}", "  <<: *shared", "  c: {port: 2}"),
 				path:  "$..port",
 				want:  "resolve $..port: alias reads a reference document: *shared",
 			},
 			"scalar entry before a merge key that reads a reference": {
 				// The walk looks below each entry that it visits, so it fails
 				// at the entry before the merge key whatever that entry holds.
-				input: "m: {a: 1, <<: *shared, c: 2}\n",
+				input: "m: {port: 1, <<: *shared, c: 2}\n",
 				path:  "$..c",
 				want:  "resolve $..c: alias reads a reference document: *shared",
 			},
 			"mapping written in the sequence of a merge key that reads a reference": {
-				// The reference can bring in a real `<<` key, which a path
+				// The reference brings in a real `<<` key, which a path
 				// through `<<` then selects in place of the merge key.
-				input: "<<: [*shared, {port: 1}]\n",
+				input: "<<: [*real, {port: 1}]\n",
 				path:  "$..port",
-				want:  "resolve $..port: alias reads a reference document: *shared",
+				want:  "resolve $..port: alias reads a reference document: *real",
 			},
 			"merge key that reads a reference under the name of the merge key": {
-				input: stringtest.LinesLF("<<: *shared", "b: 1"),
+				input: stringtest.LinesLF("<<: *real", "b: 1"),
 				path:  "$..'<<'",
-				want:  "resolve $..<<: alias reads a reference document: *shared",
+				want:  "resolve $..<<: alias reads a reference document: *real",
 			},
 		}
 
@@ -3252,6 +3307,156 @@ func TestWithReferenceAnchors(t *testing.T) {
 				assert.EqualError(t, err, tc.want)
 			})
 		}
+	})
+
+	t.Run("key of a mapping that merges a reference", func(t *testing.T) {
+		t.Parallel()
+
+		// A merge key that reads a reference document brings in the keys of
+		// its mapping. A path through such a key fails at the alias, and a
+		// path through any other key selects what the document holds.
+		tcs := map[string]struct {
+			input string
+			path  string
+			// The text of the node that the path selects, or empty when the
+			// path does not select one.
+			want string
+			// The text of the error that wraps paths.ErrReferenceAlias, or
+			// empty when the path resolves or does not find a node.
+			err string
+		}{
+			"key before the merge key": {
+				input: stringtest.LinesLF("server:", "  name: web", "  <<: *shared"),
+				path:  "$.server.name",
+				want:  "web",
+			},
+			"key after the merge key": {
+				input: stringtest.LinesLF("server:", "  <<: *shared", "  port: 2"),
+				path:  "$.server.port",
+				want:  "2",
+			},
+			"key that no file holds": {
+				input: stringtest.LinesLF("server:", "  <<: *shared", "  name: web"),
+				path:  "$.server.tls",
+			},
+			"key below a key that no file holds": {
+				input: stringtest.LinesLF("server:", "  <<: *shared"),
+				path:  "$.server.tls.cert",
+			},
+			"key that the reference brings in": {
+				input: stringtest.LinesLF("server:", "  port: 2", "  <<: *shared"),
+				path:  "$.server.port",
+				err:   "resolve $.server.port: alias reads a reference document: *shared",
+			},
+			"key below a key that the reference brings in": {
+				input: stringtest.LinesLF("server:", "  <<: *shared"),
+				path:  "$.server.port.x",
+				err:   "resolve $.server.port.x: alias reads a reference document: *shared",
+			},
+			"key that a merge key inside the reference brings in": {
+				input: stringtest.LinesLF("server:", "  port: 2", "  <<: *base"),
+				path:  "$.server.port",
+				err:   "resolve $.server.port: alias reads a reference document: *base",
+			},
+			"key that neither the reference nor its sources hold": {
+				input: stringtest.LinesLF("server:", "  name: web", "  <<: *base"),
+				path:  "$.server.name",
+				want:  "web",
+			},
+			"reference that merges an alias that no reference defines": {
+				input: stringtest.LinesLF("server:", "  name: web", "  <<: *broken"),
+				path:  "$.server.name",
+				err:   "resolve $.server.name: alias reads a reference document: *broken",
+			},
+			"merge keys of the reference that lead back to each other": {
+				input: stringtest.LinesLF("server:", "  name: web", "  <<: *ca"),
+				path:  "$.server.name",
+				want:  "web",
+			},
+			"key that a merge key of the reference leads to": {
+				input: stringtest.LinesLF("server:", "  b: 3", "  <<: *ca"),
+				path:  "$.server.b",
+				err:   "resolve $.server.b: alias reads a reference document: *ca",
+			},
+			"source of the document after a source of the reference": {
+				input: stringtest.LinesLF("server:", "  <<: [*shared, {port: 2, tls: on}]"),
+				path:  "$.server.port",
+				want:  "2",
+			},
+			"source of the reference after a source of the document": {
+				input: stringtest.LinesLF("server:", "  <<: [{port: 2, tls: on}, *shared]"),
+				path:  "$.server.tls",
+				want:  "on",
+			},
+			"alias of the document that leads to the reference": {
+				input: stringtest.LinesLF("x: &x !t *shared", "server:", "  name: web", "  <<: *x"),
+				path:  "$.server.name",
+				want:  "web",
+			},
+			"real key with the text of a merge key": {
+				input: stringtest.LinesLF("server:", "  <<: *real"),
+				path:  "$.server.'<<'",
+				err:   "resolve $.server.<<: alias reads a reference document: *real",
+			},
+			"merge key that the reference does not hide": {
+				input: stringtest.LinesLF("server:", "  <<: *shared"),
+				path:  "$.server.'<<'",
+				want:  "*shared",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				got, err := paths.NewResolver(documentOf(t, tc.input), shared).Node(paths.MustParse(tc.path))
+
+				switch {
+				case tc.err != "":
+					require.ErrorIs(t, err, paths.ErrReferenceAlias)
+					require.EqualError(t, err, tc.err)
+
+				case tc.want == "":
+					require.ErrorIs(t, err, paths.ErrNotFound)
+				default:
+					require.NoError(t, err)
+					assert.Equal(t, tc.want, got.String())
+				}
+			})
+		}
+	})
+
+	t.Run("entry of a mapping that merges a reference", func(t *testing.T) {
+		t.Parallel()
+
+		r := paths.NewResolver(documentOf(t, stringtest.LinesLF("name: web", "<<: *shared")), shared)
+
+		root, err := r.Node(paths.Doc())
+		require.NoError(t, err)
+
+		entry, err := r.Entry(root, "name")
+		require.NoError(t, err)
+		assert.Equal(t, "web", entry.Value.String())
+
+		_, err = r.Entry(root, "tls")
+		require.ErrorIs(t, err, paths.ErrNotFound)
+
+		_, err = r.Entry(root, "port")
+		require.ErrorIs(t, err, paths.ErrReferenceAlias)
+		require.EqualError(t, err, `entry "port": alias reads a reference document: *shared`)
+	})
+
+	t.Run("merge sources of a mapping that merges a reference", func(t *testing.T) {
+		t.Parallel()
+
+		r := paths.NewResolver(documentOf(t, stringtest.LinesLF("name: web", "<<: [{a: 1}, *shared]")), shared)
+
+		root, err := r.Node(paths.Doc())
+		require.NoError(t, err)
+
+		// MergeSources returns mappings of the document alone.
+		_, err = r.MergeSources(root)
+		require.ErrorIs(t, err, paths.ErrReferenceAlias)
 	})
 
 	t.Run("alias key that reads a reference", func(t *testing.T) {

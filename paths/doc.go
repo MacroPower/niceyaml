@@ -196,18 +196,32 @@
 // takes its name from the anchor, so `*k` matches `.name` after `&k name`
 // in a reference document.
 //
-// A `<<` merge key that reads such an alias can bring in any key. The
-// reference document then decides which entry a path through a key of its
-// mapping selects. A path through a key that the mapping writes before
-// such a merge key returns an error that wraps ErrReferenceAlias. So does a
-// path through a key that the mapping does not write after every such
-// merge key. A `.*` selector on the mapping returns that error too, and so
-// does a `..name` or `..*` selector at an entry that the reference
-// document decides. At the last merge key of a mapping, the reference
-// document decides whether a path through `<<` selects the merge key or a
-// real `<<` key. A `..name` or `..*` selector then returns the error when
-// it lists the merge key, or when it reaches an entry or an element in the
-// value of the merge key.
+// A `<<` merge key that reads such an alias brings in the keys of the
+// mapping of the anchor, as a merge key of the document does. The Resolver
+// reads the keys of that mapping, and of the mappings that its own merge
+// keys bring in, through WithReferenceAnchors. A path through a key of the
+// mapping that holds the merge key has one of three outcomes:
+//
+//   - The mapping of the reference document holds the key, and its entry
+//     wins. The path returns an error that wraps ErrReferenceAlias, which
+//     carries the alias of the merge key, because the value lies in the
+//     reference document.
+//   - The mapping of the reference document does not hold the key, and the
+//     document writes an entry of it. The path selects that entry, whether
+//     it comes before or after the merge key.
+//   - Neither holds the key. The path does not select anything, and the
+//     error wraps ErrNotFound.
+//
+// A path also returns an error that wraps ErrReferenceAlias when the
+// Resolver cannot read the keys of the reference document, such as when
+// its mapping merges an alias that no reference document defines. A `.*`
+// selector on the mapping returns that error when it would list an entry
+// of the reference document. So does a `..name` or `..*` selector at an
+// entry that an entry of the reference document hides. At the last merge
+// key of a mapping, a real `<<` key that the reference document brings in
+// wins over the merge key. A `..name` or `..*` selector then returns the
+// error when it lists the merge key, or when it reaches an entry or an
+// element in the value of the merge key.
 //
 // A `.*` selector selects every entry of a mapping, as `[*]` selects every
 // element of a sequence. One path thus reaches each job of a workflow or
@@ -234,8 +248,8 @@
 // with [ErrWildcard]. Use [Resolver.Nodes] to list every match.
 // [ErrNotFound] means that the document does not hold a node at the path.
 // [ErrAlias] means an alias on the path forms a cycle or does not have an
-// anchor of its name before it, and [ErrReferenceAlias] means that such an
-// alias reads a reference document.
+// anchor of its name before it, and [ErrReferenceAlias] means that the
+// value at the path lies in a reference document.
 //
 // When the document does not have content to resolve in, Resolver.Token
 // and Resolver.Node return an error that wraps both [ErrNoDocument] and

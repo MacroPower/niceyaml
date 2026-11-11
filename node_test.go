@@ -7108,18 +7108,19 @@ func TestNode_Nodes(t *testing.T) {
 	t.Run("a descent fails at an entry that a merge of a reference decides", func(t *testing.T) {
 		t.Parallel()
 
-		// The merge key of web can bring in environment, which then wins
-		// over the entry that web writes before it. The descent cannot tell,
-		// so it fails at the alias, as a path through web.environment does.
-		// The second text writes the merge key first, a control in which web
-		// writes its own environment.
+		// The merge key of web brings in environment from the reference,
+		// which then wins over the entry that web writes before it. The
+		// descent fails at the alias, as a path through web.environment
+		// does. The merge key of api does not bring in environment, so api
+		// writes its own. The last text writes the merge key first, a
+		// control in which web writes its own environment.
 		tcs := map[string]struct {
 			input string
 			// The paths of the nodes, or the error.
 			want []string
 			err  string
 		}{
-			"entry before the merge key": {
+			"entry before a merge key that brings in its key": {
 				input: stringtest.LinesLF(
 					"services:",
 					"  web:",
@@ -7128,7 +7129,18 @@ func TestNode_Nodes(t *testing.T) {
 					"  db:",
 					"    environment: {A: 2}",
 				),
-				err: "compose.yaml:4:9: $.services.web: resolve $..environment: alias reads a reference document: *base",
+				err: "compose.yaml:4:9: $.services.web.<<: resolve $..environment: alias reads a reference document: *base",
+			},
+			"entry before a merge key that does not bring in its key": {
+				input: stringtest.LinesLF(
+					"services:",
+					"  api:",
+					"    environment: {A: 1}",
+					"    <<: *image",
+					"  db:",
+					"    environment: {A: 2}",
+				),
+				want: []string{"$.services.api.environment", "$.services.db.environment"},
 			},
 			"entry after the merge key": {
 				input: stringtest.LinesLF(
@@ -7148,7 +7160,10 @@ func TestNode_Nodes(t *testing.T) {
 				t.Parallel()
 
 				doc := yamltest.FirstDocument(t, tc.input, niceyaml.WithName("compose.yaml"),
-					yamltest.References("base: &base {image: app}\n"))
+					yamltest.References(stringtest.LinesLF(
+						"base: &base {image: app, environment: {B: 1}}",
+						"image: &image {image: app}",
+					)))
 
 				nodes, err := doc.Nodes(paths.Current().Recursive("environment"))
 				if tc.err != "" {

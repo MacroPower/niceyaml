@@ -1270,7 +1270,8 @@ func TestNode_Own_FailedCall(t *testing.T) {
 func TestNode_Own_Reference(t *testing.T) {
 	t.Parallel()
 
-	ref := niceyaml.NewSourceFromString("r: &r {x: 1}\n", niceyaml.WithName("ref.yaml"))
+	// The mapping of the reference document holds the names x, k, and j.
+	ref := niceyaml.NewSourceFromString("r: &r {x: 1, k: 2, j: 3}\n", niceyaml.WithName("ref.yaml"))
 
 	// The mapping of x writes the entry k before its merge key of the
 	// reference document, so that document decides the path $.x.k. The
@@ -1299,7 +1300,9 @@ func TestNode_Own_Reference(t *testing.T) {
 	hidden := stringtest.LinesLF("x:", "  k: &m {a: 1}", "  k: 2", "  <<: *r", "c: *m")
 
 	// The mapping of x writes the anchored mapping in the sequence of its
-	// merge key, so it writes no entry of the name a.
+	// merge key, before the alias of the reference document. That document
+	// does not hold the name a, so the path $.x.a selects the entry of the
+	// anchored mapping.
 	listed := stringtest.LinesLF("x: {<<: [&m {a: 1}, *r]}", "c: *m")
 
 	// The mapping of x and the mapping of top both write an entry before
@@ -1378,7 +1381,7 @@ func TestNode_Own_Reference(t *testing.T) {
 			before: hidden, path: "$.c.q", want: "$.c.q", dup: true,
 		},
 		"entry of an anchored mapping written in a merge key of a sequence, below an alias": {
-			before: listed, path: "$.c.a", want: "$.c.a",
+			before: listed, path: "$.c.a", want: "$.x.a",
 		},
 		"entry below an alias of an anchor below two decided mappings": {
 			before: twice, path: "$.c.a", want: "$.top.x.k.a", decided: true,
@@ -1466,7 +1469,8 @@ func TestNode_Own_Shared(t *testing.T) {
 		"  c: {retries: 2, image: busybox}",
 	)
 
-	ref := niceyaml.NewSourceFromString("r: &r {x: 1}\n", niceyaml.WithName("ref.yaml"))
+	// The mapping of the reference document holds the name base.
+	ref := niceyaml.NewSourceFromString("r: &r {x: 1, base: 2}\n", niceyaml.WithName("ref.yaml"))
 
 	// Once returns a Func that runs fn on the node at rel below each node
 	// that it gets, one time for each own path.
@@ -2502,35 +2506,187 @@ func TestNode_At(t *testing.T) {
 	t.Run("path through a merge key of a reference document", func(t *testing.T) {
 		t.Parallel()
 
-		ref := niceyaml.NewSourceFromString("base: &b {other: 4}\n")
+		// The mapping of the reference document holds new, cost, and z.
+		ref := niceyaml.NewSourceFromString("base: &b {other: 4, new: 1, cost: 7, z: 9}\n")
 
 		// Each case sets the value at path to 5, or moves it to move when
-		// move is set.
+		// move is set, with the options opts.
 		merges := map[string]struct {
 			before string
+			ref    string
 			path   paths.Path
 			move   paths.Path
+			opts   []edit.SetOption
 			want   string
 			err    string
 		}{
-			"key that the mapping lacks": {
+			"new key first that the reference document writes as another key": {
+				// The new entry goes before the merge key, which brings in
+				// 0x10. A decode reads 0x10 as 16, so it replaces the new entry.
+				before: stringtest.LinesLF("spec:", "  cost: 3", "  <<: *b"),
+				ref:    "base: &b {0x10: 9}\n",
+				path:   spec.Child("16"),
+				opts:   []edit.SetOption{edit.First()},
+				err: "test.yaml:3:7: $.spec: cafe.jacobcolvin.com/v1 sets $.spec.16, " +
+					"which goes through <<: *b at 3:3, a merge key that reads a reference document, so that document decides which names $.spec reads",
+			},
+			"new key before an entry that the reference document writes as another key": {
+				before: stringtest.LinesLF("spec:", "  cost: 3", "  <<: *b"),
+				ref:    "base: &b {0x10: 9}\n",
+				path:   spec.Child("16"),
+				opts:   []edit.SetOption{edit.Before("cost")},
+				err: "test.yaml:3:7: $.spec: cafe.jacobcolvin.com/v1 sets $.spec.16, " +
+					"which goes through <<: *b at 3:3, a merge key that reads a reference document, so that document decides which names $.spec reads",
+			},
+			"new key after an entry before the merge key that the reference document writes as another key": {
+				// The new entry goes after cost, so before the merge key, which
+				// brings in 0x10.
+				before: stringtest.LinesLF("spec:", "  cost: 3", "  <<: *b"),
+				ref:    "base: &b {0x10: 9}\n",
+				path:   spec.Child("16"),
+				opts:   []edit.SetOption{edit.After("cost")},
+				err: "test.yaml:3:7: $.spec: cafe.jacobcolvin.com/v1 sets $.spec.16, " +
+					"which goes through <<: *b at 3:3, a merge key that reads a reference document, so that document decides which names $.spec reads",
+			},
+			"new key after an entry after the merge key that the reference document writes as another key": {
+				before: stringtest.LinesLF("spec:", "  <<: *b", "  x: 3"),
+				ref:    "base: &b {0x10: 9}\n",
+				path:   spec.Child("16"),
+				opts:   []edit.SetOption{edit.After("x")},
+				want:   stringtest.LinesLF("spec:", "  <<: *b", "  x: 3", "  \"16\": 5"),
+			},
+			"move after an entry before the merge key by a name that the reference document writes as another key": {
+				before: stringtest.LinesLF("spec:", "  cost: 3", "  <<: *b", "\"16\": 1"),
+				ref:    "base: &b {0x10: 9}\n",
+				path:   paths.Doc().Child("16"),
+				move:   spec.Child("16"),
+				opts:   []edit.SetOption{edit.After("cost")},
+				err: "test.yaml:3:7: $.spec: cafe.jacobcolvin.com/v1 moves $.16 to $.spec.16, " +
+					"which goes through <<: *b at 3:3, a merge key that reads a reference document, so that document decides which names $.spec reads",
+			},
+			"reorder of an entry to before the merge key": {
+				// A decode reads 0x10 as 16, so 0x10 replaces the entry at its
+				// new place. A reorder of an own entry fails whatever the
+				// reference document holds.
+				before: stringtest.LinesLF("spec:", "  cost: 3", "  <<: *b", "  16: 1"),
+				ref:    "base: &b {0x10: 9}\n",
+				path:   spec.Child("16"),
+				move:   spec.Child("16"),
+				opts:   []edit.SetOption{edit.After("cost")},
+				err: "test.yaml:4:3: $.spec.16: cafe.jacobcolvin.com/v1 moves $.spec.16 to $.spec.16, " +
+					"but <<: *b at 3:3 reads a reference document, which decides which names $.spec reads",
+			},
+			"new key first with a reference key that does not decode": {
+				before: stringtest.LinesLF("spec:", "  cost: 3", "  <<: *b"),
+				ref:    "base: &b {? !!bool x : 9}\n",
+				path:   spec.Child("16"),
+				opts:   []edit.SetOption{edit.First()},
+				err: "test.yaml:3:7: $.spec: cafe.jacobcolvin.com/v1 sets $.spec.16, " +
+					"which goes through <<: *b at 3:3, a merge key that reads a reference document, so that document decides which names $.spec reads",
+			},
+			"new key last that the reference document writes as another key": {
+				before: stringtest.LinesLF("spec:", "  cost: 3", "  <<: *b"),
+				ref:    "base: &b {0x10: 9}\n",
+				path:   spec.Child("16"),
+				want:   stringtest.LinesLF("spec:", "  cost: 3", "  <<: *b", "  \"16\": 5"),
+			},
+			"new key first that the reference document lacks": {
+				before: stringtest.LinesLF("spec:", "  cost: 3", "  <<: *b"),
+				ref:    "base: &b {0x10: 9}\n",
+				path:   spec.Child("tls"),
+				opts:   []edit.SetOption{edit.First()},
+				want:   stringtest.LinesLF("spec:", "  tls: 5", "  cost: 3", "  <<: *b"),
+			},
+			"new key after the merge key that the reference document writes as another key": {
+				before: stringtest.LinesLF("spec:", "  <<: *b", "  cost: 3"),
+				ref:    "base: &b {0x10: 9}\n",
+				path:   spec.Child("16"),
+				opts:   []edit.SetOption{edit.Before("cost")},
+				want:   stringtest.LinesLF("spec:", "  <<: *b", "  \"16\": 5", "  cost: 3"),
+			},
+			"move first into the mapping by a name that the reference document writes as another key": {
+				before: stringtest.LinesLF("spec:", "  cost: 3", "  <<: *b", "\"16\": 1"),
+				ref:    "base: &b {0x10: 9}\n",
+				path:   paths.Doc().Child("16"),
+				move:   spec.Child("16"),
+				opts:   []edit.SetOption{edit.First()},
+				err: "test.yaml:3:7: $.spec: cafe.jacobcolvin.com/v1 moves $.16 to $.spec.16, " +
+					"which goes through <<: *b at 3:3, a merge key that reads a reference document, so that document decides which names $.spec reads",
+			},
+			"key before a merge of a reference anchor that merges another": {
+				before: stringtest.LinesLF("spec: {16: 3, <<: *b}"),
+				ref:    stringtest.LinesLF("i: &i {0x10: 9}", "base: &b {<<: *i}"),
+				path:   spec.Child("16"),
+				err: "test.yaml:1:19: $.spec: cafe.jacobcolvin.com/v1 sets $.spec.16, " +
+					"which goes through <<: *b at 1:15, a merge key that reads a reference document, so that document decides which names $.spec reads",
+			},
+			"key before a merge of a reference anchor that merges a sequence": {
+				before: stringtest.LinesLF("spec: {16: 3, <<: *b}"),
+				ref:    stringtest.LinesLF("i: &i {0x10: 9}", "j: &j {z: 1}", "base: &b {<<: [*i, *j]}"),
+				path:   spec.Child("16"),
+				err: "test.yaml:1:19: $.spec: cafe.jacobcolvin.com/v1 sets $.spec.16, " +
+					"which goes through <<: *b at 1:15, a merge key that reads a reference document, so that document decides which names $.spec reads",
+			},
+			"key before a merge of a local anchor that merges a reference document": {
+				before: stringtest.LinesLF("l: &l {<<: *b}", "spec: {16: 3, <<: *l}"),
+				ref:    "base: &b {0x10: 9}\n",
+				path:   spec.Child("16"),
+				err: "test.yaml:1:12: $.l: cafe.jacobcolvin.com/v1 sets $.spec.16, " +
+					"which goes through <<: *b at 1:8, a merge key that reads a reference document, so that document decides which names $.l reads",
+			},
+			"key that the merge key brings in": {
 				before: stringtest.LinesLF("spec:", "  <<: *b", "  cost: 3"),
 				path:   spec.Child("new"),
 				err: "test.yaml:2:7: $.spec: cafe.jacobcolvin.com/v1 sets $.spec.new, " +
 					"which goes through <<: *b at 2:3, a merge key that reads a reference document, so that document decides which names $.spec reads",
 			},
+			"key that neither the mapping nor the reference document holds": {
+				before: stringtest.LinesLF("spec:", "  <<: *b", "  cost: 3"),
+				path:   spec.Child("tls"),
+				want:   stringtest.LinesLF("spec:", "  <<: *b", "  cost: 3", "  tls: 5"),
+			},
 			"key before the merge key": {
-				// The merge key can bring in cost, which then wins over the own
-				// entry, so the reference document decides what the path selects.
+				// The merge key brings in cost, which then wins over the own
+				// entry, so the path selects an entry of the reference document.
 				before: stringtest.LinesLF("spec:", "  cost: 3", "  <<: *b"),
 				path:   spec.Child("cost"),
 				err: "test.yaml:3:7: $.spec: cafe.jacobcolvin.com/v1 sets $.spec.cost, " +
 					"which goes through <<: *b at 3:3, a merge key that reads a reference document, so that document decides which names $.spec reads",
 			},
+			"key before the merge key that the reference document lacks": {
+				before: stringtest.LinesLF("spec:", "  seats: 3", "  <<: *b"),
+				path:   spec.Child("seats"),
+				want:   stringtest.LinesLF("spec:", "  seats: 5", "  <<: *b"),
+			},
 			"key after the merge key": {
 				before: stringtest.LinesLF("spec:", "  <<: *b", "  cost: 3"),
 				path:   spec.Child("cost"),
 				want:   stringtest.LinesLF("spec:", "  <<: *b", "  cost: 5"),
+			},
+			"key before the merge key that the reference document writes as another key": {
+				// A decode reads 0x10 as 16, so the entry of the reference
+				// document wins over the own entry, though the text of its key
+				// differs.
+				before: stringtest.LinesLF("spec:", "  16: 3", "  <<: *b"),
+				ref:    "base: &b {0x10: 9}\n",
+				path:   spec.Child("16"),
+				err: "test.yaml:3:7: $.spec: cafe.jacobcolvin.com/v1 sets $.spec.16, " +
+					"which goes through <<: *b at 3:3, a merge key that reads a reference document, so that document decides which names $.spec reads",
+			},
+			"key before the merge key with a reference key that does not decode": {
+				// A decode cannot read the key !!bool x, so it might read it as
+				// 16.
+				before: stringtest.LinesLF("spec:", "  16: 3", "  <<: *b"),
+				ref:    "base: &b {? !!bool x : 9}\n",
+				path:   spec.Child("16"),
+				err: "test.yaml:3:7: $.spec: cafe.jacobcolvin.com/v1 sets $.spec.16, " +
+					"which goes through <<: *b at 3:3, a merge key that reads a reference document, so that document decides which names $.spec reads",
+			},
+			"key after the merge key that the reference document writes as another key": {
+				before: stringtest.LinesLF("spec:", "  <<: *b", "  16: 3"),
+				ref:    "base: &b {0x10: 9}\n",
+				path:   spec.Child("16"),
+				want:   stringtest.LinesLF("spec:", "  <<: *b", "  16: 5"),
 			},
 			"move to a key that the mapping lacks": {
 				before: stringtest.LinesLF("spec:", "  <<: *b", "  cost: 3"),
@@ -2546,24 +2702,35 @@ func TestNode_At(t *testing.T) {
 				err: `test.yaml:2:7: $.spec: cafe.jacobcolvin.com/v1 moves "z" to $.spec.z, ` +
 					"which goes through <<: *b at 2:3, a merge key that reads a reference document, so that document decides which names $.spec reads",
 			},
+			"move into the mapping by a name that the reference document lacks": {
+				before: stringtest.LinesLF("spec:", "  <<: *b", "q: 1"),
+				path:   paths.Doc().Child("q"),
+				move:   spec.Child("q"),
+				want:   stringtest.LinesLF("spec:", "  <<: *b", "  q: 1"),
+			},
 		}
 
 		for name, tc := range merges {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
+				refs := ref
+				if tc.ref != "" {
+					refs = niceyaml.NewSourceFromString(tc.ref)
+				}
+
 				doc := yamltest.FirstDocument(t, tc.before,
-					niceyaml.WithName("test.yaml"), niceyaml.WithReferences(ref))
+					niceyaml.WithName("test.yaml"), niceyaml.WithReferences(refs))
 
 				d, err := edit.New(doc, edit.WithApp("cafe"))
 				require.NoError(t, err)
 
 				err = applyAt(t, d, tc.path, func(ctx context.Context, n *edit.Node) error {
 					if tc.move.IsAbsolute() {
-						return n.Move(tc.move)
+						return n.Move(tc.move, tc.opts...)
 					}
 
-					return n.Set(ctx, 5)
+					return n.Set(ctx, 5, tc.opts...)
 				})
 				if tc.err == "" {
 					require.NoError(t, err)

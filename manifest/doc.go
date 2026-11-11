@@ -283,13 +283,23 @@
 // mapping itself after the entry 16, or without one. A type field before
 // a later key that does not decode, such as "!!bool x", fails the same
 // way. So does one before a merge key that brings in such a key. The
-// decode might read that key in place of the field. A type
-// field before a merge key that reads a reference document fails too.
-// The load cannot tell whether that merge key replaces the field.
+// decode might read that key in place of the field.
 //
-// A migration that writes a type field that a mapping with such a merge
-// key lacks looks the field up through the merge key. So it fails with an
-// error that matches ErrFieldAlias and [paths.ErrReferenceAlias].
+// A type field before a merge key that brings in the field from a
+// reference document fails too, because the decode reads the field from
+// that document. The load reads the keys of that document as a decode
+// reads them. So 0x10 there counts as the field 16, and a key there that
+// does not decode might count as the field. A type field before a merge
+// key whose reference document merges an anchor that no reference
+// document defines fails as well. A document that leaves out a type field
+// fails when such a merge key brings in a key such as 0x10 for 16, or a
+// key that does not decode. The error asks for the field in the document
+// itself, after the merge key.
+//
+// A migration that writes a type field that such a merge key brings in
+// under the name of the field fails with an error that matches
+// ErrFieldAlias and [paths.ErrReferenceAlias]. A migration writes a type
+// field that the reference document does not hold beside the merge key.
 //
 // The error about an unknown kind suggests the closest name. The error
 // about an unknown version lists the versions that the app reads.

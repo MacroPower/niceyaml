@@ -46,9 +46,9 @@ var (
 	// with the mappings above it that the document lacks, after the last
 	// entry of the mapping that takes them.
 	//
-	// SetField fails with a problem of the document when the lookup of path
-	// goes through a `<<` merge key that reads a reference document. The
-	// problem matches [paths.ErrReferenceAlias] and not edit.ErrEngine.
+	// SetField fails with a problem of the document when a `<<` merge key
+	// brings in a name of path from a reference document. The problem
+	// matches [paths.ErrReferenceAlias] and not edit.ErrEngine.
 	// SetField also fails with a problem of the document when the lookup of
 	// path goes through an alias of the document that does not resolve, as
 	// "<<: *x" does without an anchor x. That problem binds at the alias.

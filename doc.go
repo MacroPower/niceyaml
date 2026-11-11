@@ -1531,13 +1531,15 @@
 // path that enters the alias returns it, such as At, Node.Nodes,
 // [Node.DecodeAt], [Node.DecodeIfPresent], and [Node.Ranges].
 //
-// A `<<` merge key that reads such an alias can bring in any name, so the
-// reference document decides which names its mapping reads. A path through
-// a name that the mapping writes before the merge key returns the same
-// error. So does a path through a name that the mapping does not write after
-// every such merge key, as the go.jacobcolvin.com/niceyaml/paths package
-// describes. A decode of the Node of the mapping reads the entries that the
-// merge key brings in.
+// A `<<` merge key that reads such an alias brings in the names of the
+// mapping of its anchor. A path through a name whose entry the merge key
+// brings in returns the same error, because the value lies in the reference
+// document. A path through any other name selects the entry that the
+// document writes, before or after the merge key, or nothing, as the
+// go.jacobcolvin.com/niceyaml/paths package describes. A path also returns
+// the error when the reference document merges an anchor that no reference
+// document defines. A decode of the Node of the mapping reads the entries
+// that the merge key brings in.
 //
 // A validator that reads a value below such an alias decodes the Node it
 // gets, as [Each] hands it, rather than call Node.DecodeAt with a path
@@ -1600,9 +1602,7 @@
 // reports the path of the mapping that holds the merge key, and
 // SourceError.Unresolved returns the error that wraps ErrReferenceAlias, as it
 // does for an alias. An error at any other key binds as it does in a mapping
-// without the merge key. The lookup of those entries reads the merge sources
-// through the aliases of the document, so a document past the alias limit
-// binds such errors as the Alias Limit section describes.
+// without the merge key.
 //
 // The decoder rejects a value of the anchor with a token of the reference
 // document. The decode binds that error at the alias that led the decoder to
@@ -1933,13 +1933,11 @@
 //
 // A path through a mapping whose `<<` merge key reads a reference document
 // finds its entry by reading the merge sources of that mapping, as the
-// References section describes. Those reads follow the aliases of the
-// document, so the count weighs them too. In a document past the limit, an
-// error at such a path binds without reading them. It binds without a
-// position, and [SourceError.Unresolved] returns an error that wraps
-// [go.jacobcolvin.com/niceyaml/paths.ErrReferenceAlias]. That holds for the
-// errors of a [Validator] of a decode as well, which runs before the decode
-// counts the aliases.
+// References section describes. A path reads those sources as it reads the
+// merge sources of the document, so the count does not stop the read. The
+// limit behind [go.jacobcolvin.com/niceyaml/paths.ErrExcessiveMerging]
+// bounds it instead. An error at such a path thus binds in a document past
+// the limit as it binds with the limit off.
 //
 // [WithAliasLimit] set to false turns the limit off for the documents of one
 // Source, for input that the program trusts, such as a file it ships. It also

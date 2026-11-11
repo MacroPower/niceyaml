@@ -114,18 +114,22 @@ type resolverConfig struct {
 // reference documents of the document, such as those of
 // niceyaml.WithReferences. The function anchor returns the value of the
 // anchor of a name that those documents define, under the anchor, and
-// reports false when they do not define one. An alias reads such an
-// anchor only when the document does not define an anchor of its name
-// before the alias. A path that ends at such an alias selects the alias,
-// as [Resolver.Node] describes. A path through it returns an error that
-// wraps [ErrReferenceAlias], as in "alias reads a reference document:
-// *base". An alias key that reads such an anchor takes its name from the
-// value of the anchor, as [Resolver.KeyName] describes. A `<<` merge key
-// that reads such an anchor decides which entries of its mapping a path
-// selects, as the package documentation describes. A path through a key
-// that it decides returns that error too, and so does a `.*`, `..name`, or
-// `..*` selector that reaches such a key. A nil anchor does not change
-// anything.
+// reports false when they do not define one. The value is a node of the
+// reference document, which the Resolver reads as it reads the document.
+// An alias of that document reads the anchor that the function returns for
+// its name.
+//
+// An alias reads such an anchor only when the document does not define an
+// anchor of its name before the alias. A path that ends at such an alias
+// selects the alias, as [Resolver.Node] describes. A path through it
+// returns an error that wraps [ErrReferenceAlias], as in "alias reads a
+// reference document: *base". An alias key that reads such an anchor takes
+// its name from the value of the anchor, as [Resolver.KeyName] describes.
+// A `<<` merge key that reads such an anchor brings in the keys of its
+// mapping, as the package documentation describes. A path through a key
+// whose entry the merge key brings in returns that error too, and so does
+// a `.*`, `..name`, or `..*` selector that reaches such a key. A nil
+// anchor does not change anything.
 func WithReferenceAnchors(anchor func(name string) (ast.Node, bool)) ResolverOption {
 	return func(c *resolverConfig) {
 		c.references = anchor
@@ -171,6 +175,9 @@ func NewResolver(doc *ast.DocumentNode, opts ...ResolverOption) *Resolver {
 // document. A path that ends at such an alias selects the alias, or the
 // tag on it, as a path that ends at a tag selects the tag. A selector that
 // applies below the alias returns an error that wraps [ErrReferenceAlias].
+// So does a `.name` selector whose entry a `<<` merge key brings in from
+// such a document. A `.name` selector of a key that the merge key does not
+// bring in selects the entry of the document, or nothing.
 // Node stops at an alias inside the content of the anchor it refers to in
 // the same way, because the decoder reads such an alias as null. A
 // selector below it returns an error that wraps [ErrAlias].
@@ -574,8 +581,8 @@ func (r *Resolver) matchesOf(p Path, found []match, absolute bool) ([]Match, err
 // value below the node it starts from, so an alias it lists also counts as
 // on the path, unless the alias reads a reference document. A `..name` or
 // `..*` selector looks up the key of each entry that a `<<` merge key after
-// it might override. An alias of a reference document that such a lookup
-// reads thus counts as on the path too. The error is an [*AliasError]
+// it might override. An alias of a reference document whose mapping holds
+// that key thus counts as on the path too. The error is an [*AliasError]
 // that carries the alias, as [Resolver.Node] returns one.
 //
 // Wraps [ErrExcessiveAliasing] when aliases lead a selector to far more
@@ -656,7 +663,9 @@ func (r *Resolver) KeyName(key ast.Node) (string, bool) {
 //
 // Returns an error wrapping [ErrNotFound] when node is not a mapping or
 // name does not select an entry in it. Returns an [*AliasError] wrapping
-// [ErrAlias] when an alias on the way does not resolve. Returns an error
+// [ErrAlias] when an alias on the way does not resolve. The error wraps
+// [ErrReferenceAlias] too when a `<<` merge key brings in the entry from a
+// reference document, as [WithReferenceAnchors] describes. Returns an error
 // wrapping [ErrExcessiveMerging] when the lookup reads far more nodes
 // under `<<` merge keys than the document holds. Each call weighs its own
 // reads against that limit, but the calls of one [EntryFinder] weigh
@@ -707,7 +716,7 @@ func (f *EntryFinder) Entry(node ast.Node, name string) (*ast.MappingValueNode, 
 		return nil, fmt.Errorf("entry %q: %w: not a mapping", name, ErrNotFound)
 	}
 
-	entry, _, ok, err := f.resolver.lookup(mapping, name, nil, &f.reads)
+	entry, _, ok, err := f.resolver.lookup(mapping, name, nil, &f.reads, nil)
 	if err != nil {
 		return nil, fmt.Errorf("entry %q: %w", name, err)
 	}
@@ -761,7 +770,9 @@ func (r *Resolver) Anchor(node ast.Node) (*ast.AnchorNode, error) {
 // sources.
 //
 // Returns nil when node is not a mapping, and an [*AliasError] wrapping
-// [ErrAlias] when an alias on the way does not resolve.
+// [ErrAlias] when an alias on the way does not resolve. MergeSources
+// returns mappings of the document alone, so the error of an alias that
+// reads a reference document wraps [ErrReferenceAlias].
 func (r *Resolver) MergeSources(node ast.Node) ([]*ast.MappingNode, error) {
 	content, err := r.resolver.unwrap(node)
 	if err != nil {
@@ -773,19 +784,24 @@ func (r *Resolver) MergeSources(node ast.Node) ([]*ast.MappingNode, error) {
 		return nil, nil
 	}
 
-	var sources []*ast.MappingNode
+	var (
+		sources []*ast.MappingNode
+		found   []lookupSource
+	)
 
 	for _, entry := range mapping.Values {
 		if entry == nil || !astnode.IsMergeKey(entry.Key) {
 			continue
 		}
 
-		found, _, err := r.resolver.mergeSources(nil, entry.Value)
+		found, _, err = r.resolver.mergeSources(found[:0], entry.Value, nil, false)
 		if err != nil {
 			return nil, fmt.Errorf("merge sources: %w", err)
 		}
 
-		sources = append(sources, found...)
+		for _, src := range found {
+			sources = append(sources, src.mapping)
+		}
 	}
 
 	return sources, nil

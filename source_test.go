@@ -5956,6 +5956,74 @@ func TestWithReferences(t *testing.T) {
 		wg.Wait()
 	})
 
+	t.Run("a path through a key beside a merge of a reference", func(t *testing.T) {
+		t.Parallel()
+
+		// The mapping of base holds host and port. A key that it does not
+		// hold resolves as it does in a mapping without the merge key. The
+		// value of a key that it holds lies in defaults.yaml.
+		defs := niceyaml.NewSourceFromString(stringtest.LinesLF("base: &base", "  host: localhost", "  port: 80"),
+			niceyaml.WithName("defaults.yaml"))
+
+		doc := yamltest.FirstDocument(t,
+			stringtest.LinesLF("version: v1", "<<: *base", "other:", "  name: web", "  <<: *base"),
+			niceyaml.WithName("app.yaml"),
+			niceyaml.WithReferences(defs),
+		)
+
+		var version string
+
+		ok, err := doc.DecodeIfPresent(t.Context(), paths.Doc().Child("version"), &version)
+		require.NoError(t, err)
+		assert.True(t, ok)
+		assert.Equal(t, "v1", version)
+
+		var tls string
+
+		ok, err = doc.DecodeIfPresent(t.Context(), paths.Doc().Child("other", "tls"), &tls)
+		require.NoError(t, err)
+		assert.False(t, ok)
+
+		name := paths.Doc().Child("other", "name")
+
+		ranges, err := doc.Ranges(name)
+		require.NoError(t, err)
+		assert.Equal(t, "3:8-3:11", ranges.String())
+		require.EqualError(
+			t,
+			doc.Bind(niceyaml.NewError("bad", niceyaml.AtPath(name))),
+			"app.yaml:4:9: $.other.name: bad",
+		)
+
+		names, err := doc.Nodes(paths.Doc().Child("other").Recursive("name"))
+		require.NoError(t, err)
+		require.Len(t, names, 1)
+		assert.Equal(t, "$.other.name", names[0].Path().String())
+
+		// The merge key brings in host from defaults.yaml.
+		host := paths.Doc().Child("other", "host")
+
+		_, err = doc.DecodeAt[string](t.Context(), host)
+		require.ErrorIs(t, err, paths.ErrReferenceAlias)
+		require.EqualError(t, err,
+			"app.yaml:5:7: $.other: resolve $.other.host: alias reads a reference document: *base")
+		assert.False(t, niceyaml.IsInvalid(err))
+
+		err = doc.Bind(niceyaml.NewError("bad", niceyaml.AtPath(host)))
+		require.EqualError(t, err, "app.yaml:5:7: $.other.host: bad")
+
+		bound := yamltest.RequireSourceError(t, err)
+		require.ErrorIs(t, bound.Unresolved(), paths.ErrReferenceAlias)
+
+		// A decode of the mapping reads the entries of defaults.yaml.
+		other, err := doc.At(paths.Doc().Child("other"))
+		require.NoError(t, err)
+
+		got, err := other.Decode[map[string]any](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"name": "web", "host": "localhost", "port": uint64(80)}, got)
+	})
+
 	t.Run("a path resolves in the document alone", func(t *testing.T) {
 		t.Parallel()
 
@@ -5975,12 +6043,14 @@ func TestWithReferences(t *testing.T) {
 		alias := paths.Current().Child("server")
 		port := alias.Child("port")
 
-		// The error of each read that enters the alias, and the position of
-		// the alias. Each error binds at the alias, under the path of the
-		// value that reads it.
+		// The error of each read that enters the alias, the position of the
+		// alias, and the path that the error binds under. Each error binds
+		// at the alias, under the path of the value that reads it. A merge
+		// key is that value for a `.*` that lists the keys that it brings in.
 		type read struct {
-			err error
-			at  position.Position
+			err  error
+			at   position.Position
+			path string
 		}
 
 		ifPresent := func(doc *niceyaml.Node) error {
@@ -6012,7 +6082,7 @@ func TestWithReferences(t *testing.T) {
 			"At below a merge of the alias":              {err: atMerge, at: mergeAt},
 			"DecodeAt below a merge of the alias":        {err: decodeMerge, at: mergeAt},
 			"DecodeIfPresent below a merge of the alias": {err: ifPresent(merged), at: mergeAt},
-			"Nodes below a merge of the alias":           {err: nodesMerge, at: mergeAt},
+			"Nodes below a merge of the alias":           {err: nodesMerge, at: mergeAt, path: "$.server.<<"},
 		}
 
 		for name, tc := range tcs {
@@ -6025,9 +6095,14 @@ func TestWithReferences(t *testing.T) {
 				assert.False(t, niceyaml.IsInvalid(tc.err))
 				assert.Len(t, slices.Collect(niceyaml.Problems(tc.err)), 1)
 
+				want := tc.path
+				if want == "" {
+					want = "$.server"
+				}
+
 				bound := yamltest.RequireSourceError(t, tc.err)
 				assert.Equal(t, tc.at, yamltest.PositionOf(t, bound))
-				assert.Equal(t, "$.server", yamltest.PathOf(t, bound).String())
+				assert.Equal(t, want, yamltest.PathOf(t, bound).String())
 			})
 		}
 
@@ -6420,27 +6495,25 @@ func TestWithReferences(t *testing.T) {
 	t.Run("error beside a merge of a reference in a document past the alias limit", func(t *testing.T) {
 		t.Parallel()
 
-		// The lookup of the keys that the merge key brings in reads merge
-		// sources through the aliases of the document. A document past the
-		// alias limit does not read them, so the error binds as the
-		// resolver binds it.
+		// The path reads the mapping of the merge key as a path reads a
+		// merge of the document, which the alias limit does not stop. The
+		// error thus binds as it does with the limit off.
 		const merge = "x:\n  kind: a\n  <<: *base\n"
 
 		tcs := map[string]struct {
 			input string
 			refs  string
-			// The error of the same document with the limit off.
-			trusted string
+			want  string
 		}{
 			"aliases to anchors of the document": {
-				input:   yamltest.AliasLevels(5) + merge,
-				refs:    "base: &base {replicas: 1}\n",
-				trusted: "app.yaml:9:9: $.x.kind: bad",
+				input: yamltest.AliasLevels(5) + merge,
+				refs:  "base: &base {replicas: 1}\n",
+				want:  "app.yaml:9:9: $.x.kind: bad",
 			},
 			"aliases to an anchor of a reference document": {
-				input:   "v: " + yamltest.FlowSequence("*d", 500) + "\n" + merge,
-				refs:    "base: &base {replicas: 1}\nd: &d " + yamltest.FlowSequence("x", 1000) + "\n",
-				trusted: "app.yaml:3:9: $.x.kind: bad",
+				input: "v: " + yamltest.FlowSequence("*d", 500) + "\n" + merge,
+				refs:  "base: &base {replicas: 1}\nd: &d " + yamltest.FlowSequence("x", 1000) + "\n",
+				want:  "app.yaml:3:9: $.x.kind: bad",
 			},
 		}
 
@@ -6457,11 +6530,7 @@ func TestWithReferences(t *testing.T) {
 				require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
 
 				err = doc.Bind(niceyaml.NewError("bad", niceyaml.AtPath(path)))
-				require.EqualError(t, err, "app.yaml: $.x.kind: bad")
-
-				bound := yamltest.RequireSourceError(t, err)
-				require.EqualError(t, bound.Unresolved(), "resolve $.x.kind: alias reads a reference document: *base")
-				require.ErrorIs(t, bound.Unresolved(), paths.ErrReferenceAlias)
+				require.EqualError(t, err, tc.want)
 
 				// A validator binds its error before any decode counts the
 				// aliases, and it binds the same way.
@@ -6470,15 +6539,13 @@ func TestWithReferences(t *testing.T) {
 				err = fresh.Validate(t.Context(), niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
 					return niceyaml.NewError("bad", niceyaml.AtPath(path))
 				}))
-				require.EqualError(t, err, "app.yaml: $.x.kind: bad")
+				require.EqualError(t, err, tc.want)
 
-				// With the limit off, the same document reads the merge
-				// sources.
 				trusted := yamltest.FirstDocument(t, tc.input,
 					niceyaml.WithName("app.yaml"), refs, niceyaml.WithAliasLimit(false))
 
 				err = trusted.Bind(niceyaml.NewError("bad", niceyaml.AtPath(path)))
-				require.EqualError(t, err, tc.trusted)
+				require.EqualError(t, err, tc.want)
 			})
 		}
 	})
@@ -6594,8 +6661,8 @@ func TestWithReferences(t *testing.T) {
 		// reference alone. It names b for a Source that also reads the later
 		// one. The merge key between the two entries of a reads the anchor
 		// m, which only the later reference defines. The first Source thus
-		// cannot read that merge key. It binds a key at the alias only when
-		// the last entry of the key comes after the merge key.
+		// cannot read that merge key, which might bring in any key. It binds
+		// every key at the alias, as the second Source does.
 		later := niceyaml.NewSourceFromString(stringtest.LinesLF("k: &k b", "m: &m {c: 3}"))
 
 		tcs := map[string]struct {
@@ -6617,7 +6684,7 @@ func TestWithReferences(t *testing.T) {
 				}{
 					{
 						refs: []*niceyaml.Source{shared},
-						want: []string{"d.yaml:1:9: $.x.a: bad", "d.yaml: $.x.b: bad", "d.yaml: $.x.c: bad"},
+						want: []string{"d.yaml:1:9: $.x.a: bad", "d.yaml:1:9: $.x.b: bad", "d.yaml:1:9: $.x.c: bad"},
 					},
 					{
 						refs: []*niceyaml.Source{shared, later},
