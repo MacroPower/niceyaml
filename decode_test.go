@@ -8796,7 +8796,7 @@ func TestDocument_Decode_AliasExpansion(t *testing.T) {
 			// bytes.
 			input:  repeated,
 			target: func() any { return new(listed) },
-			opts:   []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			opts:   []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
 			decode: []niceyaml.DecodeOption{customList},
 			err:    "doc.yaml:12:5: aliases repeat more than 1 KiB of text",
 		},
@@ -8804,7 +8804,7 @@ func TestDocument_Decode_AliasExpansion(t *testing.T) {
 			// The fourth alias brings the spaces past 1 KiB.
 			input:  spaced,
 			target: func() any { return new(map[string]aliasValue) },
-			opts:   []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			opts:   []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
 			decode: []niceyaml.DecodeOption{customValue},
 			err:    "doc.yaml:2:17: aliases repeat more than 1 KiB of text",
 		},
@@ -8813,21 +8813,21 @@ func TestDocument_Decode_AliasExpansion(t *testing.T) {
 			// 1 KiB.
 			input:  deep,
 			target: func() any { return new(map[string]aliasValue) },
-			opts:   []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			opts:   []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
 			decode: []niceyaml.DecodeOption{customValue},
 			err:    "doc.yaml:6:5: aliases repeat more than 1 KiB of text",
 		},
-		"custom unmarshaler of the aliased list within a raised byte limit": {
+		"custom unmarshaler of the aliased list within a raised document byte limit": {
 			input:  repeated,
 			target: func() any { return new(listed) },
-			opts:   []niceyaml.SourceOption{niceyaml.WithByteLimit(4096)},
+			opts:   []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(4096)},
 			decode: []niceyaml.DecodeOption{customList},
 		},
 		"custom unmarshaler of the aliased list with the alias limit off": {
 			input:  repeated,
 			target: func() any { return new(listed) },
 			opts: []niceyaml.SourceOption{
-				niceyaml.WithByteLimit(1024),
+				niceyaml.WithDocumentByteLimit(1024),
 				niceyaml.WithAliasLimit(false),
 			},
 			decode: []niceyaml.DecodeOption{customList},
@@ -8837,7 +8837,7 @@ func TestDocument_Decode_AliasExpansion(t *testing.T) {
 			// limit does not bound the aliases.
 			input:  repeated,
 			target: func() any { return new(listed) },
-			opts:   []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			opts:   []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
 		},
 		"text unmarshaler elements": {
 			input: repeated,
@@ -8846,7 +8846,7 @@ func TestDocument_Decode_AliasExpansion(t *testing.T) {
 					L []aliasText `yaml:"l"`
 				})
 			},
-			opts: []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			opts: []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
 			err:  "doc.yaml:12:5: aliases repeat more than 1 KiB of text",
 		},
 		"text field that no alias reaches": {
@@ -8860,16 +8860,16 @@ func TestDocument_Decode_AliasExpansion(t *testing.T) {
 					L []string  `yaml:"l"`
 				})
 			},
-			opts: []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			opts: []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
 			err:  "doc.yaml:12:5: aliases repeat more than 1 KiB of text",
 		},
-		"node with an alias beside the aliases past the byte limit": {
+		"node with an alias beside the aliases past the document byte limit": {
 			// The count covers the whole document, so the error binds at
-			// the alias in l that takes the text past the byte limit.
+			// the alias in l that takes the text past the document byte limit.
 			input:  repeated + "m: [*a]\n",
 			path:   paths.Current().Child("m"),
 			target: func() any { return new([]aliasText) },
-			opts:   []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			opts:   []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
 			err:    "doc.yaml:12:5: aliases repeat more than 1 KiB of text",
 		},
 		"custom unmarshaler of an alias chain": {

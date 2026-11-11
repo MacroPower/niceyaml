@@ -17,8 +17,9 @@ import (
 // load, a plan, or [Plan.Apply] keeps the errors of its own cause:
 //
 //   - A document that does not parse matches [niceyaml.ErrSyntax]. A
-//     document past the depth limit of its Source does not parse either,
-//     but its error matches [niceyaml.ErrLimit] instead.
+//     document past the document byte limit or the depth limit of its
+//     Source does not parse either, but its error matches
+//     [niceyaml.ErrLimit] instead.
 //   - A value that does not decode matches [niceyaml.ErrDecode]. A key that
 //     the Go type does not declare also matches [niceyaml.ErrUnknownField].
 //   - A value that breaks a schema matches [schema.ErrViolation], and

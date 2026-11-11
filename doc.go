@@ -182,8 +182,10 @@
 //
 // A "---" header that directly follows an anchor without a value parses
 // together with the document above it. A syntax error in either document thus
-// fails both, and both return that one error. [Source.File] returns the
-// errors of the documents that did not parse as one error. Each syntax error
+// fails both, and both return that one error. The two documents also share
+// one count of the document byte limit of [WithDocumentByteLimit].
+// [Source.File] returns the errors of the documents that did not parse as one
+// error. Each syntax error
 // matches [ErrSyntax], and each error of a document past a limit of the
 // Source matches [ErrLimit]. A text that is not UTF-8 does not parse at all.
 // The whole text is one document whose error matches [ErrEncoding].
@@ -712,9 +714,9 @@
 //     when any type that a decode into it reaches reads text. Those types
 //     include the types of its fields and elements, and the key and value
 //     types of its maps. For such a target, the decode also fails when the
-//     aliases of the whole document repeat more text than the byte limit of
-//     the [Source] allows. It fails as well when they nest the document past
-//     its depth limit, as the Limits section describes.
+//     aliases of the whole document repeat more text than the document byte
+//     limit of the [Source] allows. It fails as well when they nest the
+//     document past its depth limit, as the Limits section describes.
 //  5. The go-yaml decoder fills the target.
 //  6. Every value in the result that implements [SelfValidator] validates
 //     itself, and each function from [WithValueCheck] checks the values of
@@ -1559,9 +1561,10 @@
 //
 // A reference document brings its anchors and its own reference documents.
 // Its Source parses it once, with its [WithAllowDuplicateKeys],
-// [WithByteLimit], and [WithDepthLimit] options, and every Source that reads
-// it shares the parse. A reference document that does not parse fails every
-// decode of the Source that reads it, with the error of the parse. The
+// [WithByteLimit], [WithDocumentByteLimit], and [WithDepthLimit] options,
+// and every Source that reads it shares the parse. A reference document that
+// does not parse fails every decode of the Source that reads it, with the
+// error of the parse. The
 // unmarshalers and the [WithAliasLimit] option of its Source do not reach any
 // decode of a Source that reads it.
 //
@@ -1860,8 +1863,9 @@
 // anything.
 //
 // [NewSourceFromLayers] expands each alias of a layer in full, so a layer
-// must pass the limit as a decode into a type that reads text does. The byte
-// limit and the depth limit of the Source of each layer bound that text too,
+// must pass the limit as a decode into a type that reads text does. The
+// document byte limit and the depth limit of the Source of each layer bound
+// that text too,
 // as the Limits section describes.
 //
 // # Limits
@@ -1869,10 +1873,17 @@
 // The go-yaml parser takes time and memory that grow faster than the text of
 // one document, so every [Source] bounds what it parses. By default, a Source
 // reads at most 256 KiB from a file or a reader and parses at most 256 KiB of
-// text, and each of its documents nests at most 100 levels. [WithByteLimit]
-// and [WithDepthLimit] set other limits, and [NoLimit] turns the check off.
-// [WithoutLimits] turns both checks off, and a later WithByteLimit or
-// WithDepthLimit sets its limit again.
+// text. Each of its documents holds at most 256 KiB of text and nests at most
+// 100 levels. [WithByteLimit], [WithDocumentByteLimit], and [WithDepthLimit]
+// set other limits, and [NoLimit] turns the check off. [WithoutLimits] turns
+// each check off, and a later option of one limit sets that limit again.
+//
+// The byte limit bounds the whole text, and the document byte limit bounds
+// each document. The cost of a parse grows faster than the text of one
+// document but in proportion to the number of documents. A program that
+// reads a stream of many small documents, such as the output of a Helm
+// render, thus raises the byte limit and keeps the document byte limit. A
+// program that reads one large document raises both.
 //
 // A file or a reader past the byte limit fails as a file that does not read.
 // A Source of a text that the program holds, as [NewSourceFromString] takes
@@ -1883,10 +1894,11 @@
 // holds. A Source of [NewSourceFromTokens] counts the bytes of text that its
 // tokens hold and fails the same way.
 //
-// A document past the depth limit fails as a document that does not parse,
-// at the token that opens its first level past the limit. The other
-// documents of the Source still parse. Each error of a limit matches
-// [ErrLimit] and not [ErrSyntax], and [IsInvalid] reports it.
+// A document past the document byte limit fails as a document that does not
+// parse, at its first token that is not a comment. A document past the depth
+// limit fails the same way, at the token that opens its first level past the
+// limit. The other documents of the Source still parse. Each error of a limit
+// matches [ErrLimit] and not [ErrSyntax], and [IsInvalid] reports it.
 //
 // The go-yaml decoder writes the node of each value that reads text out as
 // text, with each alias in full. Types that read text include those with an
@@ -1898,13 +1910,13 @@
 // deeper than the document, so the limits of the Source bound what the
 // aliases add:
 //
-//   - The text that the aliases of the document repeat stays within the byte
-//     limit. The count weighs the text of each alias in two ways and takes
-//     the longer. One way writes the content of the alias in block style,
-//     with each entry and each element on a line indented to its level in the
-//     document. The other way copies the content as the document spells it,
-//     comments and spaces included, and indents each line to the line of the
-//     alias.
+//   - The text that the aliases of the document repeat stays within the
+//     document byte limit. The count weighs the text of each alias in two
+//     ways and takes the longer. One way writes the content of the alias in
+//     block style, with each entry and each element on a line indented to
+//     its level in the document. The other way copies the content as the
+//     document spells it, comments and spaces included, and indents each
+//     line to the line of the alias.
 //   - Every alias keeps the nesting of the document within the depth limit.
 //     An alias nests the levels around it and the levels that its content
 //     nests, through the aliases there.
@@ -1913,8 +1925,8 @@
 // the text of its anchor there and nests the levels of that anchor. Both
 // counts follow the aliases inside the anchor. Those aliases are not
 // aliases of the document, so their text counts only where an alias of the
-// document repeats the anchor. A document can thus fit the byte limit
-// where one file that also defines the anchors does not.
+// document repeats the anchor. A document can thus fit the document byte
+// limit where one file that also defines the anchors does not.
 //
 // Such a decode or merge of a node that holds an alias checks the whole
 // document before it writes any text. The check does not follow which values
@@ -1930,10 +1942,11 @@
 //
 // A [go.jacobcolvin.com/niceyaml/matcher.Content] matcher that decodes
 // into a type that reads text applies the same bounds. [WithAliasLimit] set
-// to false turns both bounds off with the alias limit. [WithByteLimit] or
-// [WithDepthLimit] set to [NoLimit] turns off the bound that its limit sets.
+// to false turns both bounds off with the alias limit.
+// [WithDocumentByteLimit] or [WithDepthLimit] set to [NoLimit] turns off the
+// bound that its limit sets.
 //
-// The merged text of NewSourceFromLayers skips the byte limit and the depth
+// The merged text of NewSourceFromLayers skips both byte limits and the depth
 // limit. It holds the content of its layers in block style, plus at most what
 // the bounds let their aliases add. The text that a function of
 // CustomUnmarshaler decodes skips the limits too, because it holds at most

@@ -2,10 +2,12 @@ package docparse_test
 
 import (
 	"errors"
+	"math"
 	"strings"
 	"testing"
 
 	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
@@ -276,6 +278,85 @@ func TestFail(t *testing.T) {
 
 			for i, tk := range docs[0].Tokens {
 				assert.Same(t, tks[i], tk, "token %d", i)
+			}
+		})
+	}
+}
+
+func TestParseLimits(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input  string
+		limits docparse.Limits
+		// The message of each failure, in file order.
+		want []string
+		// The line and column of the token each failure binds at.
+		at []position.Position
+	}{
+		"a run past the byte limit": {
+			input:  stringtest.LinesLF("a: 1", "---", "# c", "b: "+strings.Repeat("x", 20), "---", "c: 3"),
+			limits: docparse.Limits{Bytes: 20, Depth: math.MaxInt},
+			want:   []string{"document is larger than 20 bytes"},
+			at:     []position.Position{position.New(1, 0)},
+		},
+		"a run of exactly the byte limit": {
+			// The line break before the header ends the last token of the
+			// first run, so the second run holds "---\nb: 2\n".
+			input:  stringtest.LinesLF("a: 1", "---", "b: 2"),
+			limits: docparse.Limits{Bytes: len("---\nb: 2\n"), Depth: math.MaxInt},
+		},
+		"a run one byte past the byte limit": {
+			input:  stringtest.LinesLF("a: 1", "---", "b: 2"),
+			limits: docparse.Limits{Bytes: len("---\nb: 2\n") - 1, Depth: math.MaxInt},
+			want:   []string{"document is larger than 8 bytes"},
+			at:     []position.Position{position.New(1, 0)},
+		},
+		"the byte limit goes before the depth limit": {
+			input:  "a: [[[" + strings.Repeat("x", 20) + "]]]\n",
+			limits: docparse.Limits{Bytes: 20, Depth: 2},
+			want:   []string{"document is larger than 20 bytes"},
+			at:     []position.Position{position.New(0, 0)},
+		},
+		"a run past the depth limit": {
+			input:  "a: [[[1]]]\n",
+			limits: docparse.Limits{Bytes: math.MaxInt, Depth: 2},
+			want:   []string{"document nests more than 2 levels"},
+			at:     []position.Position{position.New(0, 4)},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			r := docparse.ParseLimits(tokens.Tokenize(tc.input), tc.limits)
+
+			require.Len(t, r.Failures, len(tc.want))
+
+			for i, f := range r.Failures {
+				assert.Equal(t, tc.want[i], f.Err.Error())
+
+				var tk *token.Token
+
+				{
+					var (
+						err  *docparse.SizeError
+						err1 *docparse.DepthError
+					)
+
+					switch {
+					case errors.As(f.Err, &err):
+						tk = err.Token
+					case errors.As(f.Err, &err1):
+						tk = err1.Token
+					default:
+						require.Failf(t, "unexpected failure", "%T", f.Err)
+					}
+				}
+
+				require.NotNil(t, tk)
+				assert.Equal(t, tc.at[i], position.NewFromToken(tk))
 			}
 		})
 	}

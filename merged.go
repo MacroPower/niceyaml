@@ -82,8 +82,8 @@ var (
 //   - A document that goes past the alias limit of [WithAliasLimit].
 //
 // The merge expands each alias in full. A layer fails with an error that
-// matches [ErrLimit] when its aliases repeat more text than the byte
-// limit of its Source allows, or nest the layer past its depth limit. A
+// matches [ErrLimit] when its aliases repeat more text than the document
+// byte limit of its Source allows, or nest the layer past its depth limit. A
 // key that is a sequence or a mapping fails its layer with
 // [ErrUnnamedKey]. The merge returns the error of that layer, bound in
 // its file, and a nil Source. It returns the error of ctx when ctx ends.
@@ -713,7 +713,7 @@ func newMergedSource(from *Source, text string, excerpts bool, merge mergeConfig
 		// The merged text is text niceyaml wrote. It holds the content of
 		// the layers and no more than the bounds of their limits let their
 		// aliases add.
-		c.byteLimit, c.depthLimit = NoLimit, NoLimit
+		c.noLimits()
 	})
 
 	src.parsed.get(src.parse)

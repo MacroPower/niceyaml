@@ -692,17 +692,20 @@
 // refuses that text before its calls run. A program that edits untrusted
 // input should keep the limit on.
 //
-// The text after the last call must also keep the byte limit and the depth
-// limit of the Source of the user's text, which
-// [go.jacobcolvin.com/niceyaml.WithByteLimit] and
+// The text after the last call must also keep the limits of the Source of
+// the user's text, which [go.jacobcolvin.com/niceyaml.WithByteLimit],
+// [go.jacobcolvin.com/niceyaml.WithDocumentByteLimit], and
 // [go.jacobcolvin.com/niceyaml.WithDepthLimit] set. The byte limit counts
-// the bytes of the whole file. The calls read the text without the limits,
-// so a later call can bring the text back within a limit that an earlier
-// call passed. The write of a protected field keeps the limits too.
+// the bytes of the whole file. The document byte limit counts the bytes
+// of the edited document as a load of the file counts them, with the
+// comments below a "..." marker in the document after the marker. The
+// calls read the text without the limits, so a later call can bring the
+// text back within a limit that an earlier call passed. The write of a
+// protected field keeps the limits too.
 //
 // An Apply whose last text breaks a limit fails with the message that the
 // Source gives such a text, as in "file is larger than 256 KiB". The error
-// matches [go.jacobcolvin.com/niceyaml.ErrLimit]. The error of the byte
+// matches [go.jacobcolvin.com/niceyaml.ErrLimit]. The error of either byte
 // limit binds where an error at the path $ binds, as the Errors section
 // describes. The error of the depth limit binds at the token that opens the
 // first level past the limit. The user's text keeps the limits, so

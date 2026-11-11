@@ -39,12 +39,13 @@ type Result struct {
 
 // Failure is a run of tokens that did not parse. The parser rejected the
 // run or panicked on it, or the run failed before the parser read it. A
-// run past the depth limit of [ParseDepth] fails that way, and so does the
+// run past a limit of [ParseLimits] fails that way, and so does the
 // stream of [Fail].
 type Failure struct {
 	// Err is the error of the run, or nil after a panic. It is the error
-	// that the parser returned, the [*DepthError] of a run past the depth
-	// limit, or the error that the caller handed [Fail].
+	// that the parser returned, the [*SizeError] of a run past the byte
+	// limit, the [*DepthError] of a run past the depth limit, or the error
+	// that the caller handed [Fail].
 	Err error
 	// Panic is the value the parser panicked with, or nil.
 	Panic any
@@ -80,16 +81,29 @@ type standIn struct {
 // costs the file only its own documents. [Result.File] holds stand-ins in
 // their place, and [Result.Failures] holds the run.
 func Parse(tks token.Tokens, opts ...parser.Option) *Result {
-	return ParseDepth(tks, math.MaxInt, opts...)
+	return ParseLimits(tks, Limits{Bytes: math.MaxInt, Depth: math.MaxInt}, opts...)
 }
 
-// ParseDepth is [Parse] with a limit on the levels a document can nest. A
-// run that holds a document past the limit fails with a [*DepthError] in
-// place of a parse. The memory of the parser grows with the square of the
-// depth, so the parser never reads such a run. A depth of [math.MaxInt]
-// does not set a limit.
-func ParseDepth(tks token.Tokens, depth int, opts ...parser.Option) *Result {
-	return parse(tks, depth, parser.ParseComments, opts)
+// Limits bounds each run of documents that [ParseLimits] parses. A limit
+// of [math.MaxInt] does not bound anything.
+type Limits struct {
+	// Bytes is the most bytes of text that a run can hold, as [Runs]
+	// counts them.
+	Bytes int
+	// Depth is the most levels that a document can nest, as [TooDeep]
+	// counts them.
+	Depth int
+}
+
+// ParseLimits is [Parse] with limits on each run of documents. A run that
+// holds more bytes than limits allows fails with a [*SizeError] in place
+// of a parse. The time and memory of the parser grow faster than the text
+// of a run, so the parser never reads such a run. A run that holds a
+// document past the depth limit fails with a [*DepthError] in place of a
+// parse. The memory of the parser grows with the square of the depth, so
+// the parser never reads such a run either. The byte limit goes first.
+func ParseLimits(tks token.Tokens, limits Limits, opts ...parser.Option) *Result {
+	return parse(tks, limits, parser.ParseComments, opts)
 }
 
 // ParseWithoutComments is [Parse] without the comments of tks, as
@@ -97,11 +111,11 @@ func ParseDepth(tks token.Tokens, depth int, opts ...parser.Option) *Result {
 // whether it reads the comment tokens, so a stream without a comment
 // parses as Parse parses it.
 func ParseWithoutComments(tks token.Tokens, opts ...parser.Option) *Result {
-	return parse(tks, math.MaxInt, 0, opts)
+	return parse(tks, Limits{Bytes: math.MaxInt, Depth: math.MaxInt}, 0, opts)
 }
 
-// parse parses tks in mode, as [ParseDepth] describes.
-func parse(tks token.Tokens, depth int, mode parser.Mode, opts []parser.Option) *Result {
+// parse parses tks in mode, as [ParseLimits] describes.
+func parse(tks token.Tokens, limits Limits, mode parser.Mode, opts []parser.Option) *Result {
 	copies := tokens.ForParser(tks)
 
 	index := make(map[*token.Token]int, len(copies))
@@ -125,9 +139,19 @@ func parse(tks token.Tokens, depth int, mode parser.Mode, opts []parser.Option) 
 
 	r := &Result{File: &ast.File{Docs: []*ast.DocumentNode{}}, Index: index, Tokens: copies}
 
-	for _, run := range splitDocumentRuns(copies) {
-		if at, deep := TooDeep(run, depth); deep {
-			r.fail(Failure{Err: &DepthError{Token: at, Limit: depth}, Run: run})
+	// ForParser trims the Origin of a copy, so the size counts the tokens
+	// of tks.
+	for _, sized := range sizedRuns(splitDocumentRuns(copies), tks) {
+		run := sized.Tokens
+
+		if sized.Size > limits.Bytes {
+			r.fail(Failure{Err: &SizeError{Token: sizeToken(run), Limit: limits.Bytes}, Run: run})
+
+			continue
+		}
+
+		if at, deep := TooDeep(run, limits.Depth); deep {
+			r.fail(Failure{Err: &DepthError{Token: at, Limit: limits.Depth}, Run: run})
 
 			continue
 		}

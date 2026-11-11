@@ -122,9 +122,9 @@ func CheckDecodeText(n Node) error {
 
 // Budget bounds the text that the aliases of a document write out where
 // the decoder writes a node out as text. It applies in addition to the
-// alias limit. The niceyaml package takes each bound from the byte limit
-// and the depth limit of the source of the document. A bound of zero is
-// off.
+// alias limit. The niceyaml package takes each bound from the document
+// byte limit and the depth limit of the source of the document. A bound
+// of zero is off.
 type Budget struct {
 	// Bytes is the most text that the aliases of the document repeat, as
 	// a writer in block style writes it. Such a writer puts each mapping

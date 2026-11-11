@@ -187,13 +187,14 @@ var (
 	// does not match [ErrDecode].
 	//
 	// A decode into a type that reads text anywhere and [NewSourceFromLayers]
-	// also fail when the aliases of a document repeat more text than the byte
-	// limit of the Source allows. They fail as well when the aliases nest the
-	// document past its depth limit. Either error matches [ErrLimit] too, and
-	// it binds at the alias that takes the text past the bound, as ErrLimit
-	// describes. WithAliasLimit disables those bounds along with the limit.
-	// The alias limit does not have a size, so the error of that limit alone
-	// does not match ErrLimit, as ErrLimit describes.
+	// also fail when the aliases of a document repeat more text than the
+	// document byte limit of the Source allows. They fail as well when the
+	// aliases nest the document past its depth limit. Either error matches
+	// [ErrLimit] too, and it binds at the alias that takes the text past the
+	// bound, as ErrLimit describes. WithAliasLimit disables those bounds
+	// along with the limit. The alias limit does not have a size, so the
+	// error of that limit alone does not match ErrLimit, as ErrLimit
+	// describes.
 	//
 	// [Node.Nodes] returns ErrExcessiveAliasing too, bound to its receiver
 	// with no location, when aliases lead a selector of the path to far more
@@ -211,11 +212,12 @@ var (
 	// reference document from [WithReferences] does not parse, every decode
 	// of a Source that reads it returns the error of that document.
 	//
-	// A document past the depth limit of [WithDepthLimit] does not parse
-	// either, and neither does the one document of a text past the byte limit
-	// of [WithByteLimit]. The errors of both match [ErrLimit] instead. The
-	// one document of a text that is not UTF-8 does not parse either, and
-	// its error matches [ErrEncoding] instead.
+	// A document past the depth limit of [WithDepthLimit] or the byte limit
+	// of [WithDocumentByteLimit] does not parse either. Neither does the one
+	// document of a text past the byte limit of [WithByteLimit]. The errors
+	// of each match [ErrLimit] instead. The one document of a text that is
+	// not UTF-8 does not parse either, and its error matches [ErrEncoding]
+	// instead.
 	//
 	// Each of these calls returns the error bound as a [SourceError] at the
 	// offending token. The error of a file with several such documents is a
@@ -280,8 +282,9 @@ var (
 	// reader that holds more bytes than [WithByteLimit] allows fails as a
 	// file that does not read. A text that the program holds, as
 	// [NewSourceFromString] takes one, fails past that limit as one
-	// document that does not parse. A document that nests more levels than
-	// [WithDepthLimit] allows fails as a document that does not parse too,
+	// document that does not parse. A document that holds more bytes than
+	// [WithDocumentByteLimit] allows, or that nests more levels than
+	// [WithDepthLimit] allows, fails as a document that does not parse too,
 	// as [Node.Err] reports. The error of each such document matches
 	// ErrLimit and not [ErrSyntax]. The document is at fault for each, as
 	// [IsInvalid] describes.
@@ -290,7 +293,7 @@ var (
 	// to, for a decode into a type that reads text anywhere and for
 	// [NewSourceFromLayers]. A node that holds an alias fails such a decode
 	// or merge when the aliases of its document repeat more text than the
-	// byte limit allows. It also fails when they nest the document more
+	// document byte limit allows. It also fails when they nest the document more
 	// levels than the depth limit allows. Either error also matches
 	// [ErrExcessiveAliasing] and binds at the first alias that takes the text
 	// past the bound, as in "aliases repeat more than 256 KiB of text". The

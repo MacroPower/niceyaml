@@ -782,10 +782,11 @@ func headerEnd(src *niceyaml.Source, line int) int {
 // of a path that selects several places grows with the number of places
 // times the size of the text. A rename of each key of a text of 400 keys,
 // 3.7 KiB, took 0.5 s and allocated more than 900 MiB. A program that edits
-// untrusted input should keep the byte limit and the alias limit of its
-// Source on, which [niceyaml.WithByteLimit] and [niceyaml.WithAliasLimit]
-// set. Those limits bound the text that the Apply starts from, so they
-// bound the cost of each call that does not grow the text. The calls read
+// untrusted input should keep the byte limits and the alias limit of its
+// Source on, which [niceyaml.WithByteLimit],
+// [niceyaml.WithDocumentByteLimit], and [niceyaml.WithAliasLimit] set.
+// Those limits bound the text that the Apply starts from, so they bound
+// the cost of each call that does not grow the text. The calls read
 // the text without the limits, and Apply checks the limits again only
 // after the last call. A deadline on ctx bounds the number of calls.
 //
