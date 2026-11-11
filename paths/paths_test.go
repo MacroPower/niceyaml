@@ -3,12 +3,14 @@ package paths_test
 import (
 	"cmp"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"testing"
 	"unicode/utf8"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
@@ -1477,4 +1479,130 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 			"  k: new",
 		), file.String())
 	})
+}
+
+func TestMatch_Token(t *testing.T) {
+	t.Parallel()
+
+	doc := yamltest.FirstDocument(t, stringtest.Input(`
+		base: &b
+		  name: x
+		jobs:
+		  build: {run: 1}
+		  test: *b
+		  mixed:
+		    <<: *b
+		    tagged: !t {k: v}
+		list:
+		  - a
+		  - *b
+		  - [c]
+		  - k: v
+		? explicit
+		: 1
+		inline:
+		  <<: [{ia: 1}, *b]
+	`)).DocumentAST()
+
+	r := paths.NewResolver(doc)
+
+	tcs := map[string]struct {
+		path string
+	}{
+		"every node":       {path: "$..*"},
+		"every key":        {path: "$..*~"},
+		"root":             {path: "$"},
+		"entries":          {path: "$.jobs.*"},
+		"elements":         {path: "$.list[*]"},
+		"through an alias": {path: "$.jobs.test.name"},
+		"through a merge":  {path: "$.jobs.mixed.*"},
+		"inline merge":     {path: "$.inline.*"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			matches, err := r.Matches(paths.MustParse(tc.path))
+			require.NoError(t, err)
+			require.NotEmpty(t, matches)
+
+			for _, m := range matches {
+				want, err := r.Token(m.Path)
+				require.NoError(t, err)
+
+				got := m.Token()
+				require.NotNil(t, got, m.Path.String())
+				assert.Same(t, want, got, m.Path.String())
+			}
+		})
+	}
+}
+
+func TestMatch_Token_Alias(t *testing.T) {
+	t.Parallel()
+
+	doc := yamltest.FirstDocument(t, stringtest.Input(`
+		base: &b {name: x}
+		test: *b
+	`)).DocumentAST()
+
+	matches, err := paths.NewResolver(doc).Matches(paths.MustParse("$.test"))
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+
+	// The node is the content of the anchor, but the token is the alias.
+	assert.IsType(t, &ast.MappingNode{}, matches[0].Node)
+
+	tk := matches[0].Token()
+	require.NotNil(t, tk)
+	assert.Equal(t, token.AliasType, tk.Type)
+	assert.Equal(t, 2, tk.Position.Line)
+}
+
+func TestMatch_Token_MatchesFrom(t *testing.T) {
+	t.Parallel()
+
+	doc := yamltest.FirstDocument(t, stringtest.Input(`
+		spec:
+		  items: [a, b]
+	`)).DocumentAST()
+
+	r := paths.NewResolver(doc)
+
+	spec, err := r.Node(paths.MustParse("$.spec"))
+	require.NoError(t, err)
+
+	// The start node does not have a holder, so the mapping points at its
+	// own first token, the key of its first entry, not at the spec key.
+	start, err := r.MatchesFrom(spec, paths.Current())
+	require.NoError(t, err)
+	require.Len(t, start, 1)
+
+	tk := start[0].Token()
+	require.NotNil(t, tk)
+	assert.Equal(t, "items", tk.Value)
+	assert.Equal(t, 2, tk.Position.Line)
+
+	// Below the start node, a match points where its `$` counterpart does.
+	items, err := r.MatchesFrom(spec, paths.MustParse("@.items[*]"))
+	require.NoError(t, err)
+	require.Len(t, items, 2)
+
+	for i, m := range items {
+		want, err := r.Token(paths.MustParse(fmt.Sprintf("$.spec.items[%d]", i)))
+		require.NoError(t, err)
+
+		got := m.Token()
+		require.NotNil(t, got, m.Path.String())
+		assert.Same(t, want, got, m.Path.String())
+	}
+}
+
+func TestMatch_Token_HandBuilt(t *testing.T) {
+	t.Parallel()
+
+	m := paths.Match{Node: &ast.MappingNode{}, Path: paths.Doc()}
+
+	assert.Nil(t, m.Token())
 }

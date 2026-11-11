@@ -501,7 +501,7 @@ func (n *Node) Nodes(path paths.Path) ([]*Node, error) {
 	nodes := make([]*Node, 0, len(found))
 
 	for _, m := range found {
-		nodes = append(nodes, n.scopedAt(m.Path, m.Node))
+		nodes = append(nodes, n.scopedMatch(m))
 	}
 
 	return nodes, nil
@@ -509,40 +509,79 @@ func (n *Node) Nodes(path paths.Path) ([]*Node, error) {
 
 // scopedAt returns the Node that [Node.At] gives for path, a `$` path that
 // selects node. The root path gives the root of the document, so a
-// document has one Node at `$`. Any other path gives a copy of n that
-// [Node.scoped] scopes to node. A path that ends at an alias gives a copy
-// scoped to the alias, as the document writes it at the path, that reads
-// node.
+// document has one Node at `$`. Any other path gives the Node that
+// [Node.scopedIn] gives for the holder of node.
 func (n *Node) scopedAt(path paths.Path, node ast.Node) *Node {
 	if path.IsRoot() {
 		return n.doc.node
 	}
 
-	written := n.writtenAt(path)
-	if _, ok := astnode.Content(written).(*ast.AliasNode); !ok {
-		return n.scoped(path, node)
+	return n.scopedIn(path, node, datapath.ParentAt(n.doc.pathResolver(), path))
+}
+
+// scopedMatch returns the Node that [Node.Nodes] gives for m, a match of a
+// `$` path. It scopes the node of m as [Node.scopedAt] does, with the
+// holder that m carries.
+func (n *Node) scopedMatch(m paths.Match) *Node {
+	if m.Path.IsRoot() {
+		return n.doc.node
 	}
 
-	c := n.scoped(path, written)
+	return n.scopedIn(m.Path, m.Node, astnode.Parent{Entry: m.Entry, Sequence: m.Sequence, Index: m.Index})
+}
+
+// scopedIn returns a copy of n that [Node.scoped] scopes to node. The path
+// is a `$` path other than the root that selects node, and in holds node.
+// A path that ends at an alias gives a copy scoped to the alias, as the
+// document writes it at the path, that reads node.
+func (n *Node) scopedIn(path paths.Path, node ast.Node, in astnode.Parent) *Node {
+	held := heldIn(in)
+	intro := func() *token.Token { return astnode.PathToken(held, in) }
+
+	written := n.writtenIn(path, in)
+	if _, ok := astnode.Content(written).(*ast.AliasNode); !ok {
+		return n.scopedBy(path, node, intro)
+	}
+
+	c := n.scopedBy(path, written, intro)
 	c.value = node
 
 	return c
 }
 
 // writtenAt returns the node that the document writes at path, a `$` path
-// other than the root, or nil when no entry or element holds it. A path
-// that ends in `~` names the key of its entry.
+// other than the root, as [Node.writtenIn] gives it.
 func (n *Node) writtenAt(path paths.Path) ast.Node {
 	// ParentAt gives no holder for a `~`, which picks the key of an entry.
-	in := datapath.ParentAt(n.doc.pathResolver(), path)
+	return n.writtenIn(path, datapath.ParentAt(n.doc.pathResolver(), path))
+}
 
-	switch last, _ := path.Last(); {
+// writtenIn returns the node that the document writes at path, a `$` path
+// other than the root, where in holds that node. It returns nil when no
+// entry or element holds the node. A path that ends in `~` names the key
+// of its entry, which in does not hold.
+func (n *Node) writtenIn(path paths.Path, in astnode.Parent) ast.Node {
+	if held := heldIn(in); held != nil {
+		return held
+	}
+
+	if last, _ := path.Last(); last.Kind == paths.SelectorKey {
+		return n.entryKey(path)
+	}
+
+	return nil
+}
+
+// heldIn returns the node that in holds, as the document writes it. That
+// node is the value of the entry of in, or the element of its sequence
+// at its index. The zero [astnode.Parent] does not hold a node, so heldIn
+// returns nil for it.
+func heldIn(in astnode.Parent) ast.Node {
+	switch {
 	case in.Entry != nil:
 		return in.Entry.Value
 	case in.Sequence != nil && in.Index < len(in.Sequence.Values):
 		return in.Sequence.Values[in.Index]
-	case last.Kind == paths.SelectorKey:
-		return n.entryKey(path)
 	default:
 		return nil
 	}
@@ -556,16 +595,7 @@ func (n *Node) scoped(path paths.Path, node ast.Node) *Node {
 	return n.scopedBy(path, node, func() *token.Token {
 		in := datapath.ParentAt(n.doc.pathResolver(), path)
 
-		var value ast.Node
-
-		switch {
-		case in.Entry != nil:
-			value = in.Entry.Value
-		case in.Sequence != nil && in.Index < len(in.Sequence.Values):
-			value = in.Sequence.Values[in.Index]
-		}
-
-		return astnode.PathToken(value, in)
+		return astnode.PathToken(heldIn(in), in)
 	})
 }
 
