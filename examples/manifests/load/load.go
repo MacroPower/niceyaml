@@ -193,9 +193,10 @@ func main() {
 	// Check runs the same checks and returns the manifests that pass beside
 	// the problems, so an editor shows both. Checked.Set leaves out each
 	// manifest whose document holds an error. The duplicate name binds in the
-	// second kanelbulle, so the first stays.
+	// second kanelbulle, so the first stays. Check returns the problems as its
+	// error beside the result, so a nil result alone stops the example.
 	checked, err := registry.Check(ctx, broken)
-	if err != nil {
+	if checked == nil {
 		lipgloss.Println(p.PrintError(err))
 
 		return

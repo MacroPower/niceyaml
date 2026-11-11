@@ -111,22 +111,22 @@ func (r *Registry) Load(ctx context.Context, in Input, opts ...LoadOption) (*Set
 		return nil, err
 	}
 
-	if c.err != nil {
-		return nil, c.err
-	}
-
 	return c.set, nil
 }
 
 // Check reads the documents of in and runs the checks of [Registry.Load].
 // It returns the manifests that pass beside the problems of the load. An
 // editor can thus show the problems of each file and still use the
-// manifests that pass. [Checked.Err] returns the error that Load returns
-// for the same input.
+// manifests that pass.
 //
-// Check returns a nil result and an error for a pattern that Load rejects,
-// for an input path that does not exist, and for a ctx that ends. Load
-// fails with the same errors.
+// The error that Check returns is the error that Load returns for the same
+// input. When the documents hold a problem, Check returns a non-nil
+// [*Checked] beside that error, and [Checked.Err] returns the same error.
+// An editor that wants the manifests that pass thus tests the result for
+// nil, not the error. Check returns a nil result only when it cannot
+// finish. One such case is a ctx that ends. The other is an input that
+// fails before Check reads a file, such as a pattern that Load rejects or
+// an input path that does not exist.
 func (r *Registry) Check(ctx context.Context, in Input, opts ...LoadOption) (*Checked, error) {
 	cfg := newLoadConfig(opts)
 
@@ -167,7 +167,7 @@ func (r *Registry) Check(ctx context.Context, in Input, opts ...LoadOption) (*Ch
 	set.warnings = c.warnings
 	c.set = set
 
-	return c, nil
+	return c, c.err
 }
 
 // Checked is the outcome of [Registry.Check]: the manifests that pass,
@@ -208,7 +208,7 @@ func (c *Checked) Set() *Set {
 
 // Err returns the problems of the load as a [*LoadError] that holds the
 // warnings too, or nil when the load did not find an error. It is the
-// error that [Registry.Load] returns.
+// error that [Registry.Check] and [Registry.Load] return.
 func (c *Checked) Err() error {
 	return c.err
 }

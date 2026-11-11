@@ -1562,15 +1562,18 @@ func TestRegistry_Check(t *testing.T) {
 			reg := newCafeRegistry(t, tc.opts...)
 			in := configFS(tc.files)
 
+			// Check returns its result even when the documents fail, and
+			// its error is the one that Checked.Err returns.
 			checked, err := reg.Check(t.Context(), in, tc.load...)
-			require.NoError(t, err)
+			require.NotNil(t, checked)
+			require.Equal(t, checked.Err(), err)
 			assert.Equal(t, tc.want, listObjects(checked.Set()))
 			assert.Equal(t, checked.Warnings(), checked.Set().Warnings())
 
 			set, loadErr := reg.Load(t.Context(), in, tc.load...)
 
 			if tc.err != "" {
-				require.ErrorAs(t, checked.Err(), new(*manifest.LoadError))
+				require.ErrorAs(t, err, new(*manifest.LoadError))
 				assert.Equal(t, tc.err, firstLine(niceyaml.FormatError(checked.Err())))
 				require.NoError(t, checked.Warnings())
 

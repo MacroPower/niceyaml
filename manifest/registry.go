@@ -21,6 +21,17 @@ import (
 // [Registry.Check] returns the manifests that pass beside the problems of
 // a load.
 //
+// A nil error from [Registry.Load] or [Registry.Check] means that the
+// documents pass the checks of a load. A nil error from
+// [Registry.PlanMigration] means that the documents pass the checks of a
+// plan. A plan skips the checks across the set, such as [Singleton]. A
+// program that gates on the whole set thus calls Load or Check.
+//
+// [Registry.Check] and [Registry.PlanMigration] return a non-nil report
+// beside a non-nil error when the documents hold a problem. The report
+// then holds what passed, and its Err method returns the same error. A nil
+// report means that the call did not run to the end.
+//
 // The methods of a Registry are safe for concurrent use.
 //
 // Create instances with [NewRegistry] or [MustNewRegistry].

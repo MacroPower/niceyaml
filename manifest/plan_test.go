@@ -2,6 +2,7 @@ package manifest_test
 
 import (
 	"context"
+	"io/fs"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -17,6 +18,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/manifest"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/printer"
+	"go.jacobcolvin.com/niceyaml/schema/matcher"
 )
 
 // menuV1Doc holds the documents of menuDoc at cafe.jacobcolvin.com/v1.
@@ -50,7 +52,8 @@ func planOf(t *testing.T, opts []manifest.RegistryOption, files map[string]strin
 	reg := manifest.MustNewRegistry(opts...)
 
 	plan, err := reg.PlanMigration(t.Context(), configFS(files), load...)
-	require.NoError(t, err)
+	require.NotNil(t, plan)
+	require.Equal(t, plan.Err(), err)
 	requireReloads(t, reg, plan, nil, load...)
 
 	return plan
@@ -568,7 +571,8 @@ func TestRegistry_PlanMigration(t *testing.T) {
 			reg := manifest.MustNewRegistry(tc.opts...)
 
 			plan, err := reg.PlanMigration(t.Context(), configFS(tc.files, tc.in...), tc.load...)
-			require.NoError(t, err)
+			require.NotNil(t, plan)
+			require.Equal(t, plan.Err(), err)
 			requireReloads(t, reg, plan, tc.in, tc.load...)
 
 			assert.Equal(t, tc.headers, headers(plan))
@@ -764,7 +768,8 @@ func TestRegistry_PlanMigration_Misread(t *testing.T) {
 			)
 
 			plan, err := reg.PlanMigration(t.Context(), configFS(map[string]string{"config.yaml": tc.text}))
-			require.NoError(t, err)
+			require.NotNil(t, plan)
+			require.Equal(t, plan.Err(), err)
 
 			if tc.err != "" {
 				require.ErrorIs(t, plan.Err(), edit.ErrMisread)
@@ -838,7 +843,8 @@ func TestRegistry_PlanMigration_Limits(t *testing.T) {
 			in := configFS(map[string]string{"config.yaml": text}, manifest.WithSourceOptions(tc.limit))
 
 			plan, err := manifest.MustNewRegistry(tc.opts...).PlanMigration(t.Context(), in)
-			require.NoError(t, err)
+			require.NotNil(t, plan)
+			require.Equal(t, plan.Err(), err)
 			assert.Empty(t, plan.Files())
 			assert.Equal(t, []string{"config/config.yaml"}, plan.Blocked())
 			require.ErrorIs(t, plan.Err(), niceyaml.ErrLimit)
@@ -846,6 +852,70 @@ func TestRegistry_PlanMigration_Limits(t *testing.T) {
 			assert.Equal(t, tc.want, plan.Err().Error())
 		})
 	}
+}
+
+func TestRegistry_PlanMigration_Fails(t *testing.T) {
+	t.Parallel()
+
+	files := map[string]string{"cafe.yaml": cafeDoc}
+
+	tcs := map[string]struct {
+		in     manifest.Input
+		err    error
+		cancel bool
+	}{
+		"ended context": {
+			in:     configFS(files),
+			cancel: true,
+			err:    context.Canceled,
+		},
+		"bad pattern": {
+			in:  configFS(files, manifest.WithExclude("[")),
+			err: matcher.ErrInvalidPattern,
+		},
+		"include pattern for a dot entry without WithHidden": {
+			in:  configFS(files, manifest.WithInclude(".cafe.yaml")),
+			err: matcher.ErrInvalidPattern,
+		},
+		"input path that does not exist": {
+			in:  manifest.Path(filepath.Join(t.TempDir(), "confg")),
+			err: fs.ErrNotExist,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx, cancel := context.WithCancel(t.Context())
+			if tc.cancel {
+				cancel()
+			}
+
+			defer cancel()
+
+			plan, err := newCafeRegistry(t).PlanMigration(ctx, tc.in)
+			require.ErrorIs(t, err, tc.err)
+			assert.Nil(t, plan)
+		})
+	}
+}
+
+func TestRegistry_PlanMigration_SetChecks(t *testing.T) {
+	t.Parallel()
+
+	// Two manifests of the Singleton kind Cafe, with the same name, fail
+	// the checks across the set, which a plan skips.
+	reg := newCafeRegistry(t)
+	in := configFS(map[string]string{"a.yaml": cafeDoc, "b.yaml": cafeDoc})
+
+	_, err := reg.Load(t.Context(), in)
+	require.Error(t, err)
+
+	plan, err := reg.PlanMigration(t.Context(), in)
+	require.NoError(t, err)
+	require.NotNil(t, plan)
+	require.NoError(t, plan.Err())
 }
 
 func TestPlan_StepCalls(t *testing.T) {

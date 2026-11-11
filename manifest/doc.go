@@ -119,12 +119,14 @@
 //
 // A rewrite moves each document to the written version of its kind. A
 // user who upgrades thus gets files that the new release reads without
-// steps. [Registry.PlanMigration] runs the checks of a load and computes
-// the new text of each file, but it does not write a file. [Plan.Apply]
-// writes the files that change:
+// steps. [Registry.PlanMigration] runs the checks of a load on each
+// document and computes the new text of each file, but it does not write a
+// file. [Plan.Apply] writes the files that change. When a document holds a
+// problem, PlanMigration returns the plan beside the error, so a program
+// that migrates the other files tests the plan for nil:
 //
 //	plan, err := config.Registry.PlanMigration(ctx, manifest.Path(dir))
-//	if err != nil {
+//	if plan == nil {
 //		return err
 //	}
 //
@@ -464,12 +466,23 @@
 // pass beside the problems, for an editor or a terminal UI that shows both.
 // [Checked.Set] leaves out the manifest of each document that an error
 // binds in, such as the second manifest of a [Singleton] kind.
-// [Checked.Err] returns the error that Load returns, which holds the
-// warnings too. A load that passes returns its warnings from
-// [Checked.Warnings]:
+// Check returns the error that Load returns, which holds the warnings too,
+// and [Checked.Err] returns the same error. A load that passes returns its
+// warnings from [Checked.Warnings].
+//
+// A nil error from Check means that the documents pass the checks of a
+// load. A plan skips the checks across the set, so a nil error from
+// [Registry.PlanMigration] does not cover duplicate names, [Required],
+// [Singleton], or [WithCheck].
+//
+// [Registry.Check] and [Registry.PlanMigration] each return a report beside
+// the error. A non-nil report beside a non-nil error holds what passed. A
+// nil report means that the call did not run to the end, such as for an
+// input path that does not exist. A program that wants what passed thus
+// tests the report for nil, not the error:
 //
 //	checked, err := config.Registry.Check(ctx, manifest.Path(dir))
-//	if err != nil {
+//	if checked == nil {
 //		return err
 //	}
 //
@@ -477,7 +490,7 @@
 //		menu.Add(item.Value)
 //	}
 //
-//	problems := checked.Err()
+//	problems := err
 //	if problems == nil {
 //		problems = checked.Warnings()
 //	}
