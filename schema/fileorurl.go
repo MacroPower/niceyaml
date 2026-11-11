@@ -31,7 +31,8 @@ var ErrNoBaseDir = errors.New("relative schema path has no base directory")
 // Schemes match case-insensitively, and an HTTP or HTTPS reference
 // resolves to a [Ref] whose URL carries the scheme in lower case. The
 // registry fetches such a reference with the client that
-// [WithHTTPClient] gave it. A file:// URL resolves to the local path
+// [WithHTTPClient] gave it, or with the loader of [WithLoader] whose
+// prefix covers the URL. A file:// URL resolves to the local path
 // that it names. A file:// URL with a host other than localhost does not
 // name a local path. FileOrURL treats the whole of such a reference as a
 // relative file path, which then fails to resolve or read.

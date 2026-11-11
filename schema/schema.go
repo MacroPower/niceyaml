@@ -146,11 +146,13 @@ func newCompileConfig(opts []CompileOption) compileConfig {
 //
 //	v, err := schema.Compile(ctx, data, schema.WithJSONSchemaOptions(jsonschema.WithFormats(true)))
 //
-// A [Registry] resolves the $refs of a schema from [File] or [URL] with
-// a resolver of its own. [WithCompileOptions] says when a
-// [jsonschema.WithRefResolver] given here replaces that resolver. A
-// compile does not check which documents such a resolver serves, as
-// [WithRequireRefs] describes.
+// A [Registry] resolves the $refs of a schema from [File], [FileFS], or
+// [URL] with a resolver of its own. A [jsonschema.WithRefResolver] given
+// here does not replace that resolver. Such a ref resolver serves
+// the $refs of [Compile] and of a registry schema from [Embedded] or
+// [Loadable], as [WithCompileOptions] describes. A compile does not
+// check which documents such a resolver serves, as [WithRequireRefs]
+// describes.
 //
 // The option keeps its own copy of opts. A later write to the caller's
 // slice does not change the option, even for a [Registry] that compiles
@@ -190,7 +192,11 @@ func WithJSONSchemaOptions(opts ...jsonschema.ValidateOption) CompileOption {
 // resolver serves. A schema with a $ref to a document that the resolver
 // does not serve compiles under either setting. Each document whose
 // validation reaches that $ref fails with an error wrapping
-// [ErrValidate].
+// [ErrValidate]. Such a resolver serves [Compile] and the schemas of a
+// registry that do not have a location, such as one from [Embedded]. A
+// registry resolves the $refs of a schema from [File], [FileFS], or
+// [URL] itself, so the option holds for such a schema whatever resolver
+// the options give.
 func WithRequireRefs(require bool) CompileOption {
 	return func(cfg *compileConfig) {
 		cfg.requireRefs = require

@@ -2275,35 +2275,23 @@ func TestRegistry_WithRetryAfter(t *testing.T) {
 		t.Parallel()
 
 		synctest.Test(t, func(t *testing.T) {
-			// A compile asks the caller's resolver for the document the
-			// $ref names, so the calls of the resolver count the compiles.
-			// The document holds no subschema at the pointer of the $ref,
-			// so each compile fails.
-			defs, err := jsonschema.ParseSchema([]byte(`{}`))
-			require.NoError(t, err)
-
-			var compiles atomic.Int32
-
-			resolver := jsonschema.RefResolverFunc(func(context.Context, string) (*jsonschema.Schema, error) {
-				compiles.Add(1)
-
-				return defs, nil
+			// The document the $ref names loads, but it holds no subschema
+			// at the pointer of the $ref, so each compile fails. Each
+			// compile follows a fetch of /s.json, so those fetches count
+			// the compiles. The registry keeps the document that loaded,
+			// so it fetches /defs.json once.
+			reg, requests := newRegistry(map[string]string{
+				"/s.json":    `{"$ref": "defs.json#/$defs/missing"}`,
+				"/defs.json": `{}`,
 			})
 
-			reg, requests := newRegistry(
-				map[string]string{"/s.json": `{"$ref": "defs.json#/$defs/missing"}`},
-				schema.WithCompileOptions(schema.WithJSONSchemaOptions(jsonschema.WithRefResolver(resolver))),
-			)
-
 			checkFive(t, reg, schema.ErrCompile)
-			assert.Equal(t, map[string]int{"/s.json": 1}, requests())
-			assert.Equal(t, int32(1), compiles.Load())
+			assert.Equal(t, map[string]int{"/s.json": 1, "/defs.json": 1}, requests())
 
 			time.Sleep(time.Minute)
 
 			checkFive(t, reg, schema.ErrCompile)
-			assert.Equal(t, map[string]int{"/s.json": 2}, requests())
-			assert.Equal(t, int32(2), compiles.Load())
+			assert.Equal(t, map[string]int{"/s.json": 2, "/defs.json": 1}, requests())
 		})
 	})
 
@@ -5206,13 +5194,17 @@ func TestRegistry_Schema_RequireRefs(t *testing.T) {
 			opts: []schema.RegistryOption{requireRefs(false)},
 			ref:  schema.FileFS(bundle, "schemas/root.json"),
 		},
-		// The registry cannot tell which documents a resolver of the
-		// caller's serves, so the validation reports the ref.
+		// A resolver of the caller's does not replace the registry's for
+		// a schema that has a location, so the registry still finds the
+		// missing document.
 		"resolver of the caller's that does not serve the document": {
 			opts: []schema.RegistryOption{schema.WithCompileOptions(schema.WithJSONSchemaOptions(
 				jsonschema.WithRefResolver(jsonschema.SchemaMap{}),
 			))},
-			ref: schema.FileFS(bundle, "schemas/root.json"),
+			ref:   schema.FileFS(bundle, "schemas/root.json"),
+			err:   schema.ErrLoad,
+			cause: fs.ErrNotExist,
+			want:  `load schema: "schemas/root.json": cannot resolve $ref: read schemas/defs.json`,
 		},
 	}
 
@@ -5302,6 +5294,105 @@ func TestRegistry_Schema_RequireRefs(t *testing.T) {
 
 		err = yamltest.FirstDocument(t, "a: 5\n").Validate(t.Context(), s)
 		require.ErrorContains(t, err, `expected "string"`)
+	})
+}
+
+func TestRegistry_Schema_CallerRefResolver(t *testing.T) {
+	t.Parallel()
+
+	const (
+		// The schema names a definition in the document beside it.
+		rootSchema = `{"properties": {"a": {"$ref": "defs.json#/$defs/a"}}}`
+		// The document beside the schema, which requires an integer.
+		defsSchema = `{"$defs": {"a": {"type": "integer"}}}`
+		// The document that the caller's options point to, which requires
+		// a string.
+		elsewhereSchema = `{"$defs": {"a": {"type": "string"}}}`
+	)
+
+	bundle := yamltest.MapFS(map[string]string{
+		"schemas/root.json": rootSchema,
+		"schemas/defs.json": defsSchema,
+	})
+
+	base := serve(t, map[string]string{"/root.json": rootSchema, "/defs.json": defsSchema})
+	elsewhere := serve(t, map[string]string{"/defs.json": elsewhereSchema})
+
+	// The caller's resolver serves every URI with the document that
+	// requires a string.
+	serving := jsonschema.RefResolverFunc(func(context.Context, string) (*jsonschema.Schema, error) {
+		return jsonschema.ParseSchema([]byte(elsewhereSchema))
+	})
+
+	resolverOpts := schema.WithCompileOptions(schema.WithJSONSchemaOptions(jsonschema.WithRefResolver(serving)))
+
+	withBase := func(uri string) schema.RegistryOption {
+		return schema.WithCompileOptions(schema.WithJSONSchemaOptions(jsonschema.WithBaseURI(uri)))
+	}
+
+	// Each set of options takes the URL of the document that the Ref
+	// names. Options that replaced the registry's own resolve the $ref to
+	// the document that requires a string, or point the $ref of a
+	// fragment Ref back at itself.
+	callers := map[string]func(docURL string) schema.RegistryOption{
+		"ref resolver": func(string) schema.RegistryOption { return resolverOpts },
+		"base uri": func(string) schema.RegistryOption {
+			return withBase(elsewhere + "/x.json")
+		},
+		"base uri of document": withBase,
+	}
+
+	// Every Ref that has a location resolves its $ref through the
+	// registry, so the document beside the schema decides.
+	located := map[string]struct {
+		ref    schema.Ref
+		docURL string
+	}{
+		"file system": {
+			ref:    schema.FileFS(bundle, "schemas/root.json"),
+			docURL: "file:///schemas/root.json",
+		},
+		"fragment in file system": {
+			ref:    schema.FileFS(bundle, "schemas/root.json").WithFragment("/properties/a"),
+			docURL: "file:///schemas/root.json",
+		},
+		"url": {
+			ref:    schema.URL(base + "/root.json"),
+			docURL: base + "/root.json",
+		},
+		"fragment of url": {
+			ref:    schema.URL(base + "/root.json").WithFragment("/properties/a"),
+			docURL: base + "/root.json",
+		},
+	}
+
+	for caller, opts := range callers {
+		for name, loc := range located {
+			t.Run(caller+"/"+name, func(t *testing.T) {
+				t.Parallel()
+
+				reg := schema.NewRegistry(opts(loc.docURL), schema.WithResolvers(loc.ref))
+
+				accepted, rejected := "a: 5\n", "a: x\n"
+				if strings.Contains(name, "fragment") {
+					accepted, rejected = "5\n", "x\n"
+				}
+
+				requireAccepts(t, reg, accepted)
+				requireRejects(t, reg, rejected, `expected "integer"`)
+			})
+		}
+	}
+
+	// A schema without a location has no other resolver, so the caller's
+	// serves its $ref.
+	t.Run("embedded", func(t *testing.T) {
+		t.Parallel()
+
+		reg := schema.NewRegistry(resolverOpts, schema.WithResolvers(schema.Embedded([]byte(rootSchema))))
+
+		requireAccepts(t, reg, "a: x\n")
+		requireRejects(t, reg, "a: 5\n", `expected "string"`)
 	})
 }
 

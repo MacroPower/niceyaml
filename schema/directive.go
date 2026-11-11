@@ -188,7 +188,8 @@ type directiveResolver struct{}
 //	key: value
 //
 // The first directive in the preamble wins. The registry fetches the URL
-// that a directive names with the client that [WithHTTPClient] gave it.
+// that a directive names with the client that [WithHTTPClient] gave it,
+// or with the loader of [WithLoader] whose prefix covers the URL.
 //
 // The author of the document picks the file or URL that the directive
 // names. A registry therefore loads the schema of a directive only when
@@ -207,7 +208,8 @@ type directiveResolver struct{}
 // including a path outside the document's directory. It can also name
 // any host that the client can reach. A program whose documents live in
 // a file system passes [NoAccess], which keeps each directive to the
-// files of that file system.
+// files of that file system. A loader of [WithLoader] sits outside the
+// Access, so a directive can still name any URL under its prefix.
 //
 // A program that validates documents from another trust domain gives
 // Directive a registry of its own, and confines that registry with
