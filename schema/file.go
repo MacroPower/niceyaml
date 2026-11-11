@@ -50,6 +50,11 @@ const driveLen = 2
 // loads, once however many documents name it. It reads only regular files
 // within the limit of [WithLoadLimit]. File panics on an empty path.
 //
+// A '#' in path is part of the file name. [Ref.WithFragment] names a
+// subschema of the file:
+//
+//	schema.File("schemas/defs.json").WithFragment("/definitions/Foo")
+//
 // # File Systems
 //
 // A schema shipped in an [embed.FS], or in any other file system, takes
@@ -118,10 +123,12 @@ const driveLen = 2
 //
 // File is for a path written in the program, so it panics on an empty
 // path, as [Loadable] panics on an empty key. A reference read from a
-// directive or a command line might be empty or a URL. Such a reference
-// goes through [FileOrURL], which returns an error instead. File returns
-// a [Ref], the type that a [Resolver] returns. A resolver that builds the
-// path from the document thus returns the Ref beside a nil error:
+// command line might be empty or a URL. Such a reference goes through
+// [FileOrURL], which returns an error instead. A reference that a document
+// holds, such as the one in a directive, goes through [RefBeside]. File
+// returns a [Ref], the type that a [Resolver] returns. A resolver that
+// builds the path from the document thus returns the Ref beside a nil
+// error:
 //
 //	schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Node) (schema.Ref, error) {
 //	    var kind string
@@ -214,6 +221,13 @@ func file(path string) (Ref, error) {
 //	        schema.When(isWidget, schema.FileFS(bundle, "schemas/widget.json")),
 //	    ),
 //	)
+//
+// A '#' in path is part of the file name, as it is for File.
+// [Ref.WithFragment] names a subschema of the file, so one bundle serves
+// each of its definitions. Its doc says how to escape a definition name
+// that the program reads from a document:
+//
+//	schema.FileFS(bundle, "schemas/defs.json").WithFragment("/definitions/Widget")
 //
 // The working directory does not affect the Ref, and the registry reads
 // it only through fsys, never as a path on disk. An absolute path does

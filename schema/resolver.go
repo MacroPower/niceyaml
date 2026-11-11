@@ -5,6 +5,9 @@ import (
 	"errors"
 	"io/fs"
 	"log/slog"
+	"slices"
+	"strings"
+	"weak"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
@@ -103,6 +106,10 @@ var ErrNoMatch = errors.New("no matching schema")
 // not need the option for the other Refs, which the program names. An
 // Access that the registry holds applies to those Refs too.
 //
+// [Ref.WithFragment] names a subschema of the file or URL that a Ref
+// names. [Ref.NamedAt] records where a document names the Ref, so a
+// lookup of that document locates the error of the schema there.
+//
 // Create instances with [Loadable], [Embedded], [File], [FileFS], [URL],
 // [FileOrURL], [RefBeside], or [Schema.Ref]. The zero Ref does not name a
 // schema. Return it beside an error, as a resolver does with
@@ -112,10 +119,10 @@ type Ref struct {
 	// The compiled schema that the Ref carries, from Schema.Ref. The
 	// registry validates with it as it is.
 	schema *Schema
-	// Where the directive that named the Ref stands, or nil for a Ref
-	// that no directive named. A lookup of the document that holds the
-	// directive locates the load or compile error of the schema there.
-	at  *directiveSite
+	// Where a document names the Ref, as NamedAt sets it, or nil. A
+	// lookup of that document locates the load or compile error of the
+	// schema there.
+	at  *site
 	key string
 	// The path of the file, as given to File or FileFS. For a Ref that
 	// names the file in a file system, the registry reads this path from
@@ -216,6 +223,108 @@ func (r Ref) LogValue() slog.Value {
 // it before [Registry.Load], as the registry does.
 func (r Ref) Schema() *Schema {
 	return r.schema
+}
+
+// WithFragment returns the [Ref] of the subschema that fragment selects
+// in the document that r names. The fragment is the text after the '#'
+// of a URL, such as the JSON pointer "/definitions/Foo" or an anchor
+// name. It selects the subschema that a $ref with the same fragment
+// selects. WithFragment replaces any fragment that r already carries,
+// and an empty fragment names the whole document. The Ref keeps the rest
+// of r, so a Ref from [RefBeside] still counts as one that a document
+// names.
+//
+// The registry reads the fragment as a URL writes it. A token of a JSON
+// pointer writes '~' as ~0 and '/' as ~1, and the URL then escapes '%'
+// and the other bytes that it reserves. A program that builds the
+// fragment from a name escapes the name first. Unescaped, a name that
+// holds '/' selects a nested subschema, and a name that holds '%' might
+// not select any.
+//
+// A Ref from [File], [FileFS], [URL], [FileOrURL], or [RefBeside] names
+// a file or a URL, so it takes a fragment. A schema bundle in an
+// [embed.FS] thus serves each of its definitions:
+//
+//	escape := strings.NewReplacer("~", "~0", "/", "~1")
+//	token := url.PathEscape(escape.Replace(kind))
+//
+//	schema.FileFS(bundle, "schemas/defs.json").WithFragment("/definitions/" + token)
+//
+// The registry caches each fragment apart, as [URL] describes, and loads
+// the document once for each fragment that names it.
+//
+// WithFragment panics for a Ref that does not name a file or a URL, such
+// as the zero Ref or one from [Loadable], [Embedded], or [Schema.Ref].
+// The registry compiles the bytes of such a Ref whole.
+func (r Ref) WithFragment(fragment string) Ref {
+	if !r.url && r.file == "" {
+		panic("schema.Ref.WithFragment: the Ref does not name a file or a URL")
+	}
+
+	base, _, _ := strings.Cut(r.key, "#")
+	if fragment != "" {
+		base += "#" + fragment
+	}
+
+	r.key = base
+
+	return r
+}
+
+// NamedAt returns r with the place in the document of doc where that
+// document names the schema. The options locate the place, as they do
+// for [niceyaml.Locate]. A lookup of that document locates there the
+// error of a schema that does not load or compile, as [Registry.Lookup]
+// describes. [Directive] marks each Ref at the comment that holds the
+// directive.
+//
+// A resolver that reads the reference from a field marks the Ref at the
+// field, and locates the error of [RefBeside] there too:
+//
+//	at := niceyaml.AtPath(schemaPath)
+//
+//	ref, err := schema.RefBeside(doc, s)
+//	if err != nil {
+//	    return schema.Ref{}, niceyaml.Locate(err, at)
+//	}
+//
+//	return ref.NamedAt(doc, at), nil
+//
+// The place belongs to the document of doc alone. A program might keep
+// the Ref and check another document with it. A lookup of that document
+// reports the error of the schema without a position. The Ref holds the
+// document through a weak pointer, so a Ref that a program or a cache
+// keeps does not keep the document alive.
+//
+// NamedAt replaces the place that r already carries. NamedAt panics if
+// doc is nil.
+func (r Ref) NamedAt(doc *niceyaml.Node, at ...niceyaml.ErrorOption) Ref {
+	if doc == nil {
+		panic("schema.Ref.NamedAt: doc is nil")
+	}
+
+	r.at = &site{doc: weak.Make(doc.Document()), at: slices.Clone(at)}
+
+	return r
+}
+
+// A site is where a document names a [Ref]. It holds the root of the
+// document and the options that locate the place there.
+type site struct {
+	doc weak.Pointer[niceyaml.Node]
+	at  []niceyaml.ErrorOption
+}
+
+// locate returns err located at the site when the site stands in doc.
+// For a site in another document, and for a nil site, locate returns err
+// as it is. The lookup that calls locate puts the result inside
+// [niceyaml.Unchecked].
+func (s *site) locate(doc *niceyaml.Node, err error) error {
+	if s == nil || s.doc != weak.Make(doc.Document()) {
+		return err
+	}
+
+	return niceyaml.Locate(err, s.at...)
 }
 
 // Resolve implements [Resolver]. It names the Ref's schema for every

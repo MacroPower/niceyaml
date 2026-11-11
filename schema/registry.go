@@ -440,10 +440,11 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 // [niceyaml.Node.Bind], so its message names the file that the document
 // came from. An error about the schema itself, such as [ErrNoMatch] or a
 // schema that does not load, does not carry a position, with one
-// exception. A [Directive] names the schema in the text of the document.
-// When that schema does not load or compile, or the directive cannot
-// name a schema, the error binds at the comment that holds the
-// directive:
+// exception. A [Ref] that [Ref.NamedAt] marks carries the place where the
+// document names the schema. When that schema does not load or compile,
+// the error binds there. A [Directive] marks its Ref at the comment that
+// holds the directive, and binds there the error of a directive that
+// cannot name a schema too:
 //
 //	app.yaml:3:1: load schema: "https://cdn.example.org/menu.json": URL not under an allowed prefix
 //
@@ -521,7 +522,8 @@ func (r *Registry) Lookup(ctx context.Context, n *niceyaml.Node) (*Schema, error
 //
 // Lookup binds its error to the document, but Resolve returns the error
 // unbound, because the registry that asked binds it. An error at a
-// directive carries the position of the directive, so it binds there.
+// directive, or at the place that [Ref.NamedAt] gave the Ref, carries
+// that location, so it binds there.
 // For a document that did not parse, Resolve returns the error that
 // [niceyaml.Node.Err] returns.
 func (r *Registry) Resolve(ctx context.Context, doc *niceyaml.Node) (Ref, error) {
@@ -607,8 +609,7 @@ func (r *Registry) lookupSchema(ctx context.Context, doc *niceyaml.Node) (*Schem
 		v, err := r.loadSchema(ctx, ref)
 		if err != nil {
 			// The cache remembers the failure without a location, so each
-			// document that names the schema locates it at its own
-			// directive.
+			// document that names the schema locates it at its own site.
 			err = ref.at.locate(doc, err)
 		}
 
@@ -831,12 +832,13 @@ func (e reasonError) Unwrap() error {
 // Check binds every error that it returns. It binds the error of the
 // lookup through the root of the document, as [Registry.Lookup] does. An
 // error at a [Directive] of the document thus binds at the comment that
-// holds the directive. An error that a resolver bound in the document
-// keeps its position, and every other error of the lookup binds without
-// one. Check runs the schema through [niceyaml.Node.Validate], which
-// binds each violation. So a direct call returns the error that
-// Node.Validate returns for the registry, as a direct call to
-// [Schema.Check] does for the schema.
+// holds the directive, and the error of a schema that does not load
+// binds where [Ref.NamedAt] marks its Ref. An error that a resolver
+// bound in the document keeps its position, and every other error of the
+// lookup binds without one. Check runs the schema through
+// [niceyaml.Node.Validate], which binds each violation. So a direct call
+// returns the error that Node.Validate returns for the registry, as a
+// direct call to [Schema.Check] does for the schema.
 func (r *Registry) Check(ctx context.Context, n *niceyaml.Node) error {
 	err := n.Err()
 	if err != nil {
@@ -983,7 +985,7 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 
 // loadSchema is [Registry.Schema] without the [niceyaml.Unchecked] around
 // the error. A lookup wraps the error itself, after it locates the error
-// at the directive that named the schema.
+// where the document names the schema.
 func (r *Registry) loadSchema(ctx context.Context, ref Ref) (*Schema, error) {
 	if ref.Schema() != nil {
 		return ref.Schema(), nil
@@ -1802,7 +1804,7 @@ func identify(fsys fs.FS) (fsID, error) {
 // fileFragment returns the fragment of the key of ref, a [Ref] from
 // [File], behind its '#', or "" when the key does not have one.
 // [fileURL] escapes a '#' in a file name, so the first one in the key
-// opens the fragment that [FileOrURL] or [Directive] put there.
+// opens the fragment that [FileOrURL] or [Ref.WithFragment] put there.
 func fileFragment(ref Ref) string {
 	i := strings.IndexByte(ref.key, '#')
 	if i < 0 {

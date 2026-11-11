@@ -332,10 +332,11 @@
 //
 // [Embedded], [File], and [URL] each return a [Ref] that names one
 // schema. [FileOrURL] returns one for a reference that might be either a
-// file or a URL, such as one written in a directive or on a command line.
-// A Ref is a resolver that names its schema for every document and never
-// reports [ErrNoMatch]. A registry whose only resolver is a Ref validates
-// every document against the schema of that Ref:
+// file or a URL, such as one written on a command line. [RefBeside]
+// returns one for a reference that a document holds, such as the one in
+// a directive. A Ref is a resolver that names its schema for every
+// document and never reports [ErrNoMatch]. A registry whose only resolver
+// is a Ref validates every document against the schema of that Ref:
 //
 //	reg := schema.NewRegistry(schema.WithResolvers(schema.Embedded(schemaBytes)))
 //
@@ -418,6 +419,11 @@
 //	schema.File("./schemas/config.json")
 //	schema.URL("https://example.com/schema.json")
 //
+// [Ref.WithFragment] names one subschema of such a file or URL, such as
+// one definition of a bundle that holds many:
+//
+//	schema.File("./schemas/defs.json").WithFragment("/definitions/Config")
+//
 // A schema file lives on disk or in a file system, and each [Ref] says
 // which. [File] names a file on disk, and [FileFS] names one in a file
 // system, such as an [embed.FS]. A reference written beside a document
@@ -444,10 +450,11 @@
 // [ErrAccessNotSet], before it reads or fetches anything.
 //
 // [FileOrURL] routes a reference that might be a file path or a URL, such
-// as one written in a directive or on a command line. It returns an error
-// for an empty reference. The registry fetches every URL with one client, which
-// [WithHTTPClient] sets, so that client's timeout or proxy applies to every
-// resolver that names a URL:
+// as one written on a command line. [RefBeside] routes a reference that a
+// document holds, such as the one in a directive. Each returns an error
+// for an empty reference. The registry fetches every URL with one client,
+// which [WithHTTPClient] sets, so that client's timeout or proxy applies
+// to every resolver that names a URL:
 //
 //	reg := schema.NewRegistry(
 //	    schema.WithAccess(schema.Unrestricted),

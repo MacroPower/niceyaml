@@ -20,8 +20,9 @@ import (
 // system.
 var ErrNoBaseDir = errors.New("relative schema path has no base directory")
 
-// FileOrURL creates a [Ref] for a schema reference as written in a
-// directive or on a command line. For an HTTP or HTTPS reference, it
+// FileOrURL creates a [Ref] for a schema reference as written on a
+// command line. A reference that a document holds, such as the one in a
+// directive, goes through [RefBeside]. For an HTTP or HTTPS reference, it
 // names a URL as [URL] does. For a file path, it names a file as [File]
 // does. Use those functions directly for a reference written in the
 // program, where an empty reference is a mistake rather than input to
@@ -36,9 +37,11 @@ var ErrNoBaseDir = errors.New("relative schema path has no base directory")
 // relative file path, which then fails to resolve or read.
 //
 // A fragment on an HTTP, HTTPS, or file:// URL selects a subschema, as
-// the note on [URL] says. A '#' in a plain path is part of the file name.
-// [Directive] splits a fragment off a plain path before it calls
-// FileOrURL, as yaml-language-server does.
+// the note on [URL] says. A '#' in a plain path is part of the file name,
+// so a command line can name any file. [RefBeside] splits a fragment off
+// a plain path, as yaml-language-server does. A program that reads a
+// fragment on a plain path from its command line splits it off with
+// [strings.Cut] and passes it to [Ref.WithFragment].
 //
 // A relative file path joins baseDir. The path that a file:// URL names,
 // an absolute or rooted path, and an HTTP or HTTPS URL ignore baseDir. On
@@ -127,12 +130,13 @@ func FileOrURL(baseDir, ref string) (Ref, error) {
 // such as one that a field of the document holds or that a resolver
 // derives from its content. It reads the reference as [FileOrURL] does,
 // with the directory of the document's file as the base directory. A
-// relative path thus names a file beside the document. A document
-// without a file path does not have such a directory, and a relative
-// path then reports [ErrNoBaseDir]. Each error of RefBeside comes inside
-// [niceyaml.Unchecked], because the check could not find a schema to
-// run. [niceyaml.IsInvalid] does not report it, even from a check that
-// returns it as it is.
+// relative path thus names a file beside the document. RefBeside also
+// splits a fragment off a plain path, as yaml-language-server does. A
+// document without a file path does not have such a directory, and a
+// relative path then reports [ErrNoBaseDir]. Each error of RefBeside
+// comes inside [niceyaml.Unchecked], because the check could not find a
+// schema to run. [niceyaml.IsInvalid] does not report it, even from a
+// check that returns it as it is.
 //
 // A document with a relative file path and without a file system does
 // not have such a directory either. A relative reference beside it
@@ -167,11 +171,41 @@ func FileOrURL(baseDir, ref string) (Ref, error) {
 // compare, or a map, as FileFS describes. A Ref in a file system of any
 // other type fails to load with [fs.ErrInvalid].
 //
+// A '#' after the first character of a plain path opens a fragment that
+// selects a subschema, as it does in yaml-language-server. The reference
+// "./defs.json#/definitions/Foo" thus names the Foo definition in
+// defs.json, as [Ref.WithFragment] does. A '#' that opens the reference
+// is part of the file name. A fragment on a URL selects a subschema as
+// FileOrURL describes. A file:// URL names a file on disk whose name
+// holds a '#', which the URL spells as %23.
+//
 // [Directive] resolves the reference of a directive this way. A resolver
-// of the program does the same for a reference that it reads itself:
+// of the program does the same for a reference that it reads itself. It
+// can mark the Ref with [Ref.NamedAt], as Directive does, so the error of
+// a schema that does not load binds at the field that names it:
+//
+//	schemaPath := paths.Doc().Child("$schema")
 //
 //	schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Node) (schema.Ref, error) {
-//	    return schema.RefBeside(doc, pickSchema(doc))
+//	    var s string
+//
+//	    found, err := doc.DecodeIfPresent(ctx, schemaPath, &s)
+//	    if err != nil {
+//	        return schema.Ref{}, err
+//	    }
+//
+//	    if !found {
+//	        return schema.Ref{}, fmt.Errorf("%w: document has no $schema", schema.ErrNoMatch)
+//	    }
+//
+//	    at := niceyaml.AtPath(schemaPath)
+//
+//	    ref, err := schema.RefBeside(doc, s)
+//	    if err != nil {
+//	        return schema.Ref{}, niceyaml.Locate(err, at)
+//	    }
+//
+//	    return ref.NamedAt(doc, at), nil
 //	})
 //
 // RefBeside uses the reference as written, so whoever wrote it picks the
@@ -202,20 +236,34 @@ func refBeside(doc *niceyaml.Node, ref string) (Ref, error) {
 	// A relative path on disk names a file only against the working
 	// directory, which the document does not pick, so it gives no base
 	// directory.
-	path := doc.FilePath()
-	relativeOnDisk := path != "" && doc.FS() == nil && !filepath.IsAbs(path)
+	docPath := doc.FilePath()
+	relativeOnDisk := docPath != "" && doc.FS() == nil && !filepath.IsAbs(docPath)
 
-	if path != "" && !relativeOnDisk {
-		baseDir = filepath.Dir(path)
+	if docPath != "" && !relativeOnDisk {
+		baseDir = filepath.Dir(docPath)
 	}
 
-	r, err := FileOrURL(baseDir, ref)
+	// Like yaml-language-server, read a '#' after the first character of a
+	// plain path as the start of a fragment rather than as part of the file
+	// name. FileOrURL keeps the fragment of a URL itself.
+	path, fragment := ref, ""
+	if !httpfetch.IsHTTPURL(ref) && !isFileURL(ref) {
+		if i := strings.IndexByte(ref, '#'); i > 0 {
+			path, fragment = ref[:i], ref[i+1:]
+		}
+	}
+
+	r, err := FileOrURL(baseDir, path)
 	if relativeOnDisk && errors.Is(err, ErrNoBaseDir) {
-		return Ref{}, fmt.Errorf("%w: the document path %q is relative and names no file system", err, path)
+		return Ref{}, fmt.Errorf("%w: the document path %q is relative and names no file system", err, docPath)
 	}
 
 	if err != nil {
 		return Ref{}, err
+	}
+
+	if fragment != "" {
+		r = r.WithFragment(fragment)
 	}
 
 	r = inFS(r, doc.FS())
