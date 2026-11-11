@@ -187,7 +187,7 @@ func (w *fsWalk) link(rel string) {
 		return
 	}
 
-	w.entries = append(w.entries, walkEntry{rel: rel, from: resolved, outside: !inside})
+	w.entries = append(w.entries, walkEntry{rel: rel, from: resolved})
 }
 
 // reported returns the file system as an [fs.ReadLinkFS] when it reports

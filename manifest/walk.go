@@ -17,9 +17,19 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/filepaths"
 )
 
-// defaultInclude holds the patterns that select the files of a directory
-// without [WithInclude].
-var defaultInclude = []string{"*.yaml", "*.yml"}
+var (
+	// The patterns that select the files of a directory without
+	// [WithInclude].
+	defaultInclude = []string{"*.yaml", "*.yml"}
+
+	// The reason of an entry that changed during each try of a directory
+	// walk to read it.
+	errChangedInWalk = errors.New("changed during the load")
+
+	// The reason of a path that runs through a link at a step of a
+	// directory walk that reads no link.
+	errLinkInWalk = errors.New("runs through a link")
+)
 
 // file is one file that a load reads.
 type file struct {
@@ -377,6 +387,13 @@ func (r *reader) readDisk(name, full string, opts []niceyaml.SourceOption, t tar
 		return
 	}
 
+	r.readFile(f, name, full, opts, t)
+}
+
+// readFile adds the open file f unless the load has read it under another
+// path, and closes f. Messages name the file name, and full is its path
+// on disk.
+func (r *reader) readFile(f *os.File, name, full string, opts []niceyaml.SourceOption, t target) {
 	defer f.Close() //nolint:errcheck // A read-only file has nothing to flush.
 
 	info, err := f.Stat()
@@ -513,32 +530,36 @@ type walkEntry struct {
 	err error
 	// The slash path of the entry below the input directory.
 	rel string
-	// The path that the file reads from, which a link resolves.
+	// The path in the [fs.FS] that the file reads from, which a link
+	// resolves. The walk of a directory on disk resolves the path of each
+	// entry when it opens the file, so it leaves the field empty.
 	from string
-	// Whether the entry is a link that leads outside the input directory.
-	outside bool
 }
 
+// walkTries is the number of times that a directory walk resolves and
+// opens one entry at most. The walk tries again when the entry changes
+// between the resolve and the open.
+const walkTries = 4
+
 // walkDisk adds the files that the walk of the directory input p selects.
+// The walk lists each directory and opens each file through an [os.Root]
+// of the input directory, or through a Root of a directory below it that
+// the walk opens from that Root. Only [WithOutsideLinks] thus lets an
+// entry lead the walk outside the input directory, even when the entry
+// changes during the walk.
 func (r *reader) walkDisk(p *prepared) {
-	root := filepath.Clean(p.def.path)
+	dir := filepath.Clean(p.def.path)
 
-	resolved, err := filepath.EvalSymlinks(root)
+	w, err := newDiskWalk(p, dir)
 	if err != nil {
-		r.fail(root, readError(err), target{kind: targetDisk})
+		r.fail(dir, readError(err), target{kind: targetDisk})
 
 		return
 	}
 
-	rootInfo, err := os.Stat(resolved)
-	if err != nil {
-		r.fail(root, readError(err), target{kind: targetDisk})
+	defer w.close()
 
-		return
-	}
-
-	w := &diskWalk{p: p, root: root, rootInfo: rootInfo}
-	w.list("")
+	w.list(w.root, "")
 
 	slices.SortFunc(w.entries, func(a, b walkEntry) int { return strings.Compare(a.rel, b.rel) })
 
@@ -547,8 +568,8 @@ func (r *reader) walkDisk(p *prepared) {
 			return
 		}
 
-		name := filepath.Join(root, filepath.FromSlash(e.rel))
-		t := target{kind: targetDisk, outside: e.outside, root: root, path: e.rel}
+		name := filepath.Join(dir, filepath.FromSlash(e.rel))
+		t := target{kind: targetDisk, root: dir, path: e.rel}
 
 		if e.err != nil {
 			r.fail(name, e.err, t)
@@ -556,41 +577,128 @@ func (r *reader) walkDisk(p *prepared) {
 			continue
 		}
 
-		before := len(r.files)
-		r.readDisk(name, e.from, p.def.cfg.sourceOptions, t)
+		o := w.open(e.rel)
+		t.outside = o.outside
 
-		for _, f := range r.files[before:] {
-			f.dir = root
+		switch {
+		case o.err != nil:
+			w.selected++
+
+			r.fail(name, o.err, t)
+
+		case o.f != nil:
+			w.selected++
+
+			before := len(r.files)
+			r.readFile(o.f, name, name, p.def.cfg.sourceOptions, t)
+
+			for _, f := range r.files[before:] {
+				f.dir = dir
+			}
 		}
 	}
 
 	if w.selected == 0 {
-		r.empty = append(r.empty, fmt.Sprintf("%s holds no file that matches %s", escape.Line(root),
+		r.empty = append(r.empty, fmt.Sprintf("%s holds no file that matches %s", escape.Line(dir),
 			joinOr(p.globs)))
 	}
 }
 
 // diskWalk is the walk of one directory input on disk.
 type diskWalk struct {
-	p        *prepared
-	rootInfo os.FileInfo
-	root     string
-	entries  []walkEntry
+	p *prepared
+	// The input directory, which every listing and every read inside the
+	// directory goes through.
+	root *os.Root
+	// The reason that the Root gives when it refuses a path that leads
+	// outside the input directory.
+	escapes error
+	// The path of the input directory, as messages show it.
+	dir string
+	// The absolute path of the input directory with every link resolved.
+	abs     string
+	entries []walkEntry
+	// The directories on the path that [diskWalk.reach] reached last, from
+	// the input directory down.
+	chain []chainDir
+	// The number of entries that led to a regular file or to a problem.
 	selected int
 }
 
-// list adds the entries of the directory at rel, a slash path below the
-// input directory, and of its subdirectories under [WithRecursive]. It
-// skips each entry whose name starts with "." unless [WithHidden] is set.
-func (w *diskWalk) list(rel string) {
-	dir := filepath.Join(w.root, filepath.FromSlash(rel))
+// chainDir is one directory of [diskWalk.chain].
+type chainDir struct {
+	// The Root of the directory, which [diskWalk.enter] opened.
+	root *os.Root
+	// The name of the directory in the directory above it.
+	name string
+}
 
-	entries, err := os.ReadDir(dir)
+// newDiskWalk returns the walk of the directory input p, whose cleaned
+// path is dir. The caller closes the root of the walk.
+func newDiskWalk(p *prepared, dir string) (*diskWalk, error) {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // The caller names the problem.
+	}
+
+	w := &diskWalk{p: p, root: root, dir: dir, escapes: escapeReason(root)}
+
+	w.abs, err = filepath.Abs(dir)
+	if err == nil {
+		w.abs, err = filepath.EvalSymlinks(w.abs)
+	}
+
+	if err != nil {
+		_ = root.Close() //nolint:errcheck // The problem of the path wins.
+
+		return nil, err //nolint:wrapcheck // The caller names the problem.
+	}
+
+	return w, nil
+}
+
+// close closes the Roots of the walk.
+func (w *diskWalk) close() {
+	w.trim(0)
+
+	_ = w.root.Close() //nolint:errcheck // A directory has nothing to flush.
+}
+
+// escapeReason returns the reason that root gives when it refuses a path
+// that leads outside it. No exported error matches that reason, so
+// escapeReason asks root for the directory above it, which root refuses
+// for the same reason.
+func escapeReason(root *os.Root) error {
+	_, err := root.Lstat("..")
+	if pe, ok := errors.AsType[*fs.PathError](err); ok {
+		return pe.Err
+	}
+
+	return err //nolint:wrapcheck // The walk compares the reason and shows it to no one.
+}
+
+// list adds the entries of the directory at rel, a slash path below the
+// input directory, and of its subdirectories under [WithRecursive]. The
+// directory at rel is the last element of rel in parent, or parent itself
+// when rel is "". The walk lists each directory once, so list holds a Root
+// for each directory above the one that it lists, and no more.
+//
+// It skips each entry whose name starts with "." unless [WithHidden] is
+// set. It adds each link and each regular file that the patterns select,
+// and [diskWalk.open] later decides what the entry leads to.
+func (w *diskWalk) list(parent *os.Root, rel string) {
+	dir, entries, err := w.readDir(parent, path.Base(rel))
 	if err != nil {
 		w.entries = append(w.entries, walkEntry{rel: rel, err: readError(err)})
 
 		return
 	}
+
+	if dir == nil {
+		return
+	}
+
+	defer dir.Close() //nolint:errcheck // A directory has nothing to flush.
 
 	for _, e := range entries {
 		name := e.Name()
@@ -599,23 +707,16 @@ func (w *diskWalk) list(rel string) {
 		}
 
 		sub := path.Join(rel, name)
-		full := filepath.Join(dir, name)
 
 		switch typ := e.Type(); {
 		case typ.IsDir():
 			if w.p.def.cfg.recursive && !matchAny(w.p.exclude, sub, true) {
-				w.list(sub)
+				w.list(dir, sub)
 			}
 
-		case typ&fs.ModeSymlink != 0:
+		case typ&fs.ModeSymlink != 0, typ.IsRegular():
 			if w.selects(sub) {
-				w.link(sub, full)
-			}
-
-		case typ.IsRegular():
-			if w.selects(sub) {
-				w.selected++
-				w.entries = append(w.entries, walkEntry{rel: sub, from: full})
+				w.entries = append(w.entries, walkEntry{rel: sub})
 			}
 		}
 	}
@@ -626,81 +727,435 @@ func (w *diskWalk) selects(rel string) bool {
 	return !matchAny(w.p.exclude, rel, false) && matchAny(w.p.include, rel, false)
 }
 
-// link adds the entry of the link at rel, whose path on disk is full, when
-// it leads to a regular file.
-func (w *diskWalk) link(rel, full string) {
-	info, err := os.Stat(full)
-	if errors.Is(err, fs.ErrNotExist) {
-		w.selected++
-		w.entries = append(w.entries, walkEntry{rel: rel, err: danglingProblem(linkTarget(full), err)})
+// readDir returns a Root of the directory at name in parent, and the
+// entries of that directory. The caller closes the Root.
+//
+// A directory can become a link after the listing that named it. The walk
+// does not enter a link to a directory. So readDir returns no Root and no
+// entry when name is a link.
+//
+// Another directory can also replace the directory between two steps of
+// the system. A path that changes so can fail with a reason that names
+// no link, so readDir tries again after any other problem. It returns
+// the problem of the last try. A directory that changed in every try
+// gets [errChangedInWalk].
+func (w *diskWalk) readDir(parent *os.Root, name string) (*os.Root, []fs.DirEntry, error) {
+	var err error
 
-		return
+	for range walkTries {
+		var (
+			dir     *os.Root
+			entries []fs.DirEntry
+		)
+
+		dir, entries, err = w.listDir(parent, name)
+
+		switch {
+		case err == nil:
+			return dir, entries, nil
+		case errors.Is(err, w.escapes), errors.Is(err, errLinkInWalk):
+			return nil, nil, nil
+		}
 	}
 
+	return nil, nil, err
+}
+
+// listDir returns a Root of the directory at name in parent, and the
+// entries of that directory, in one try of [diskWalk.readDir]. It fails as
+// [diskWalk.enter] does.
+func (w *diskWalk) listDir(parent *os.Root, name string) (*os.Root, []fs.DirEntry, error) {
+	dir, err := w.enter(parent, name)
 	if err != nil {
-		w.selected++
-		w.entries = append(w.entries, walkEntry{rel: rel, err: readError(err)})
-
-		return
+		return nil, nil, err
 	}
 
-	if !info.Mode().IsRegular() {
-		return
-	}
-
-	w.selected++
-
-	resolved, err := filepath.EvalSymlinks(full)
+	entries, err := readRoot(dir)
 	if err != nil {
-		w.entries = append(w.entries, walkEntry{rel: rel, err: readError(err)})
+		_ = dir.Close() //nolint:errcheck // The problem of the listing wins.
 
-		return
+		return nil, nil, err
 	}
 
-	below, inside := w.below(resolved)
+	return dir, entries, nil
+}
+
+// readRoot returns the entries of the directory of root.
+func readRoot(root *os.Root) ([]fs.DirEntry, error) {
+	d, err := root.Open(".")
+	if err != nil {
+		return nil, err //nolint:wrapcheck // The caller names the problem.
+	}
+
+	defer d.Close() //nolint:errcheck // A directory has nothing to flush.
+
+	entries, err := d.ReadDir(-1)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // The caller names the problem.
+	}
+
+	return entries, nil
+}
+
+// enter returns a Root of the directory at name in parent, where name is
+// one element or ".". The caller closes the Root. It returns
+// [errLinkInWalk] when name is a link. It returns [errChangedInWalk] when
+// the directory that it opens is not the one that name named a step
+// before. The Root thus holds a directory that name named through no
+// link.
+func (w *diskWalk) enter(parent *os.Root, name string) (*os.Root, error) {
+	info, err := parent.Lstat(name)
 
 	switch {
-	case !inside && !w.p.def.cfg.outsideLinks:
-		w.entries = append(w.entries, walkEntry{rel: rel, err: outsideProblem(linkTarget(full), w.root)})
-	case inside && !matchAny(w.p.include, below, false):
-		w.entries = append(w.entries, walkEntry{rel: rel, err: unselectedProblem(linkTarget(full), w.p.globs)})
-	default:
-		w.entries = append(w.entries, walkEntry{rel: rel, from: full, outside: !inside})
+	case err != nil:
+		return nil, err //nolint:wrapcheck // The caller names the problem.
+	case info.Mode()&fs.ModeSymlink != 0:
+		return nil, errLinkInWalk
 	}
-}
 
-// below returns the slash path of resolved, a file with every link
-// resolved, below the directory that the input leads to. It also reports
-// whether one of the directories above the file is that directory.
-func (w *diskWalk) below(resolved string) (string, bool) {
-	for dir := filepath.Dir(resolved); ; {
-		info, err := os.Stat(dir)
-		if err == nil && os.SameFile(info, w.rootInfo) {
-			rel, err := filepath.Rel(dir, resolved)
-			if err != nil {
-				return "", false
-			}
-
-			return filepath.ToSlash(rel), true
-		}
-
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", false
-		}
-
-		dir = parent
-	}
-}
-
-// linkTarget returns the target of the link at full as the link writes it.
-func linkTarget(full string) string {
-	t, err := os.Readlink(full)
+	dir, err := parent.OpenRoot(name)
 	if err != nil {
-		return "?"
+		return nil, err //nolint:wrapcheck // The caller names the problem.
 	}
 
-	return t
+	opened, err := dir.Stat(".")
+	if err == nil && !os.SameFile(info, opened) {
+		err = errChangedInWalk
+	}
+
+	if err != nil {
+		_ = dir.Close() //nolint:errcheck // A directory has nothing to flush.
+
+		return nil, err //nolint:wrapcheck // The caller names the problem.
+	}
+
+	return dir, nil
+}
+
+// opened is what [diskWalk.open] found for one entry.
+type opened struct {
+	// The problem of the entry, unbound, or nil.
+	err error
+	// The open file. It is nil for an entry with a problem and for an entry
+	// that the walk skips.
+	f *os.File
+	// Whether the file lies outside the input directory.
+	outside bool
+}
+
+// open opens the file that the entry at rel, a slash path below the input
+// directory, leads to. It returns no file and no problem for an entry
+// that leads to anything but a regular file, which the walk skips.
+//
+// The walk opens entries sorted by path, so the entries of one directory
+// come one after another. The walk thus keeps a Root of each directory on
+// the path that it reached last, in [diskWalk.chain]. Each step of open
+// reads one element of the path through the Root of its directory. So the
+// cost of an entry does not grow with its depth.
+//
+// The entry and each directory above it can change after the listing that
+// named them, and between two steps of open. So open checks each step on
+// the Root of its directory. A directory on the path can become a link or
+// another file. The entry itself can be a link. In each of those cases,
+// open resolves the entry from the input directory, as
+// [diskWalk.resolveOpen] describes.
+func (w *diskWalk) open(rel string) opened {
+	dirRel, base := path.Split(rel)
+
+	dir := w.reach(dirRel)
+	if dir != nil {
+		o, ok := openIn(dir, base)
+		if ok {
+			return o
+		}
+	}
+
+	return w.resolveOpen(rel)
+}
+
+// reach returns the Root of the directory at dir, a slash path below the
+// input directory that is "" or ends with "/". It moves
+// [diskWalk.chain] to that directory. It enters each directory that the
+// chain does not hold as [diskWalk.enter] does. It returns nil when it
+// cannot enter a directory on the path. The chain then ends at the
+// directory above that one.
+func (w *diskWalk) reach(dir string) *os.Root {
+	var names []string
+
+	if dir != "" {
+		names = strings.Split(strings.TrimSuffix(dir, "/"), "/")
+	}
+
+	keep := 0
+	for keep < len(names) && keep < len(w.chain) && w.chain[keep].name == names[keep] {
+		keep++
+	}
+
+	w.trim(keep)
+
+	for _, name := range names[keep:] {
+		parent := w.root
+		if len(w.chain) > 0 {
+			parent = w.chain[len(w.chain)-1].root
+		}
+
+		root, err := w.enter(parent, name)
+		if err != nil {
+			return nil
+		}
+
+		w.chain = append(w.chain, chainDir{root: root, name: name})
+	}
+
+	if len(w.chain) == 0 {
+		return w.root
+	}
+
+	return w.chain[len(w.chain)-1].root
+}
+
+// trim closes the Roots of [diskWalk.chain] past the first n.
+func (w *diskWalk) trim(n int) {
+	for _, d := range w.chain[n:] {
+		_ = d.root.Close() //nolint:errcheck // A directory has nothing to flush.
+	}
+
+	w.chain = w.chain[:n]
+}
+
+// openIn opens the regular file at name, one element, in dir. It reads
+// the element and opens it through dir. Then it checks that the open file
+// is the file that the element named, so the element was no link. It
+// returns no file and no problem for an element that is neither a link
+// nor a regular file, which the walk skips.
+//
+// It reports false for a link, for an element that changed between the
+// steps, and for any problem. Then [diskWalk.open] resolves the entry from
+// the input directory and words the problem.
+func openIn(dir *os.Root, name string) (opened, bool) {
+	info, err := dir.Lstat(name)
+
+	switch {
+	case err != nil, info.Mode()&fs.ModeSymlink != 0:
+		return opened{}, false
+	case !info.Mode().IsRegular():
+		return opened{}, true
+	}
+
+	f, err := dir.Open(name)
+	if err != nil {
+		return opened{}, false
+	}
+
+	got, err := f.Stat()
+	if err != nil || !os.SameFile(info, got) {
+		_ = f.Close() //nolint:errcheck // A file opened to read has nothing to flush.
+
+		return opened{}, false
+	}
+
+	return opened{f: f}, true
+}
+
+// resolveOpen opens the file that the entry at rel, a slash path below the
+// input directory, leads to. It resolves the entry from the input
+// directory, as [diskWalk.try] describes.
+//
+// An entry can change after the listing that named it, and between two
+// steps of resolveOpen. So resolveOpen treats every entry as a possible
+// link, whatever the listing said. It tries again when a step finds a
+// path that an earlier step did not.
+//
+// A path that changes in every try gets the problem of the last try. When
+// that problem is the refusal of the Root, the path led outside the
+// directory, and resolveOpen treats the entry as a link that leads
+// outside.
+func (w *diskWalk) resolveOpen(rel string) opened {
+	name := filepath.FromSlash(rel)
+
+	var o opened
+
+	for range walkTries {
+		var again bool
+
+		o, again = w.try(name)
+		if !again {
+			return o
+		}
+	}
+
+	if errors.Is(o.err, w.escapes) {
+		return w.openOutside(name, filepath.Join(w.dir, name))
+	}
+
+	return o
+}
+
+// try opens the file that the entry at name, a path below the input
+// directory, leads to. It also reports whether the path changed during
+// the try, so that [diskWalk.resolveOpen] tries again.
+//
+// The system follows the entry first. That step reads no file. It words
+// the problem of an entry that the system cannot follow, and it skips an
+// entry that leads to anything but a regular file.
+//
+// Then try resolves the links of the entry to a path below the input
+// directory, checks that path against the include patterns, and opens it
+// through the Root. A chain of links can leave the directory and lead
+// back in, and try reads the file of such a chain through the Root too.
+// The Root refuses a path that leads outside the directory, so a change
+// between the resolve and the open cannot make try read a file outside.
+// After the open, try confirms that the resolved path still names the
+// open file through no link. The file that try returns is thus the file
+// that the include patterns checked. Only [diskWalk.openOutside] reads a
+// file outside the directory.
+func (w *diskWalk) try(name string) (opened, bool) {
+	full := filepath.Join(w.dir, name)
+
+	info, err := os.Stat(full)
+
+	switch {
+	case err != nil:
+		return opened{err: w.followProblem(name, err)}, false
+	case !info.Mode().IsRegular():
+		return opened{}, false
+	}
+
+	resolved, err := resolveIn(w.root, w.abs, name)
+
+	switch {
+	case errors.Is(err, errOutside):
+		return w.openOutside(name, full), false
+
+	case err != nil:
+		// The system followed the entry, so the entry changed after that.
+		return opened{err: readError(err)}, true
+
+	case resolved != name && !matchAny(w.p.include, filepath.ToSlash(resolved), false):
+		written := w.written(name)
+
+		return opened{err: unselectedProblem(written, w.p.globs)}, false
+	}
+
+	f, err := w.root.Open(resolved)
+	if err != nil {
+		// The system refuses the read, or the path changed after the
+		// resolve. The next try names the link of a changed path that the
+		// Root refuses.
+		return opened{err: readError(err)}, true
+	}
+
+	info, err = f.Stat()
+
+	switch {
+	case err != nil:
+		_ = f.Close() //nolint:errcheck // The problem of the stat wins.
+
+		return opened{err: readError(err)}, true
+
+	case !info.Mode().IsRegular():
+		_ = f.Close() //nolint:errcheck // A file opened to read has nothing to flush.
+
+		return opened{}, false
+
+	case !w.identify(resolved, info):
+		_ = f.Close() //nolint:errcheck // A file opened to read has nothing to flush.
+
+		return opened{err: readError(errChangedInWalk)}, true
+	}
+
+	return opened{f: f}, false
+}
+
+// followProblem returns the problem of the entry at name, a path below
+// the input directory, that the system cannot follow for the reason err.
+func (w *diskWalk) followProblem(name string, err error) error {
+	if errors.Is(err, fs.ErrNotExist) {
+		written, linkErr := w.root.Readlink(name)
+		if linkErr == nil {
+			return danglingProblem(written, err)
+		}
+	}
+
+	return readError(err)
+}
+
+// openOutside opens the regular file at full, which the entry at name
+// leads to outside the input directory. The walk reads the file only
+// under [WithOutsideLinks]. The Root cannot reach the file, so
+// openOutside follows the path as the system does.
+func (w *diskWalk) openOutside(name, full string) opened {
+	if !w.p.def.cfg.outsideLinks {
+		written := w.written(name)
+
+		return opened{err: outsideProblem(written, w.dir)}
+	}
+
+	f, err := os.Open(full) //nolint:gosec // WithOutsideLinks lets the links of the directory name the file.
+	if err != nil {
+		return opened{err: readError(err), outside: true}
+	}
+
+	info, err := f.Stat()
+
+	switch {
+	case err != nil:
+		_ = f.Close() //nolint:errcheck // The problem of the stat wins.
+
+		return opened{err: readError(err), outside: true}
+
+	case !info.Mode().IsRegular():
+		_ = f.Close() //nolint:errcheck // A file opened to read has nothing to flush.
+
+		return opened{outside: true}
+	}
+
+	return opened{f: f, outside: true}
+}
+
+// identify reports whether name, a path below the input directory, names
+// the file that info describes through no link. It enters each directory
+// on the path again, as [diskWalk.reach] does, so it checks each one
+// through the Root of the directory above. A check of the whole path by
+// its text would follow a directory that became a link after the check of
+// that directory. The Roots that the walk holds can name directories that
+// have moved since, so identify does not use them.
+func (w *diskWalk) identify(name string, info fs.FileInfo) bool {
+	dirRel, base := path.Split(filepath.ToSlash(name))
+
+	w.trim(0)
+
+	dir := w.reach(dirRel)
+	if dir == nil {
+		return false
+	}
+
+	at, err := dir.Lstat(base)
+
+	// A link at base never names the file that info describes.
+	return err == nil && os.SameFile(at, info)
+}
+
+// written returns the target of the first link on the path name, a path
+// below the input directory, as the link writes it. The target reads "?"
+// when the path holds no link.
+//
+// The entry itself is the link in a directory that stays as the walk
+// listed it. A directory above the entry is a link only when it changed
+// after the walk listed it.
+func (w *diskWalk) written(name string) string {
+	for i := 1; i <= len(name); i++ {
+		if i < len(name) && !os.IsPathSeparator(name[i]) {
+			continue
+		}
+
+		t, err := w.root.Readlink(name[:i])
+		if err == nil {
+			return t
+		}
+	}
+
+	return "?"
 }
 
 // danglingProblem returns the problem of a link whose target, as the

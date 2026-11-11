@@ -218,6 +218,15 @@
 // WithOutsideLinks. A file that one entry and its own path both reach
 // thus loads twice.
 //
+// The walk of a [Path] input lists each directory and opens each file
+// inside it through an [os.Root] of the input directory. Without
+// WithOutsideLinks, the walk thus refuses a link that leads outside even
+// when another process changes the directory during the load. The
+// refusal covers symbolic links only, so the walk reads a file that a
+// hard link names. An [FS] input that reads "." of the FS of an [os.Root]
+// opened on the directory keeps the same refusal. [Plan.Apply] does not
+// rewrite the files of an FS input.
+//
 // A load reads the inputs in order, the files of a directory sorted by
 // path, and the documents of each file in order. Every report and every
 // iteration of a set follows that load order. A load fails each file that

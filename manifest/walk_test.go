@@ -8,8 +8,12 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -24,17 +28,27 @@ import (
 // tree describes the files and the links of a directory for a test.
 type tree struct {
 	files map[string]string
+	// The target of each link. A target can name the directory of the test
+	// as "{dir}".
 	links map[string]string
 	dirs  []string
+	// The files and the directories that the system refuses to read.
+	locked []string
 }
 
-// write creates tr below dir. It skips the test when tr holds a link
-// that the platform refuses to create.
+// write creates tr below dir. It skips the test when the platform refuses
+// to create a link of tr or a directory whose name is not valid UTF-8. It
+// also skips the test when the platform reads a locked path anyway.
 func (tr tree) write(tb testing.TB, dir string) {
 	tb.Helper()
 
 	for _, d := range tr.dirs {
-		require.NoError(tb, os.MkdirAll(filepath.Join(dir, d), 0o750))
+		err := os.MkdirAll(filepath.Join(dir, filepath.FromSlash(d)), 0o750)
+		if err != nil && !utf8.ValidString(d) {
+			tb.Skipf("the file system refuses the name %q: %v", d, err)
+		}
+
+		require.NoError(tb, err)
 	}
 
 	yamltest.WriteFiles(tb, dir, tr.files)
@@ -42,7 +56,20 @@ func (tr tree) write(tb testing.TB, dir string) {
 	for name, target := range tr.links {
 		p := filepath.Join(dir, filepath.FromSlash(name))
 		require.NoError(tb, os.MkdirAll(filepath.Dir(p), 0o750))
-		yamltest.SymlinkOrSkip(tb, target, p)
+		yamltest.SymlinkOrSkip(tb, strings.ReplaceAll(target, "{dir}", dir), p)
+	}
+
+	for _, name := range tr.locked {
+		if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+			tb.Skip("the platform reads a file without the permission to read it")
+		}
+
+		p := filepath.Join(dir, filepath.FromSlash(name))
+		require.NoError(tb, os.Chmod(p, 0))
+
+		// The cleanup of the test cannot remove a directory that it cannot
+		// list.
+		tb.Cleanup(func() { assert.NoError(tb, os.Chmod(p, 0o700)) }) //nolint:gosec // A test directory.
 	}
 }
 
@@ -62,7 +89,18 @@ func loadedNames(set *manifest.Set) []string {
 func notExistReason(t *testing.T) string {
 	t.Helper()
 
-	_, err := os.Stat(filepath.Join(t.TempDir(), "missing"))
+	return openReason(t, filepath.Join(t.TempDir(), "missing"))
+}
+
+// openReason returns the reason that the system gives when it refuses to
+// open the file at name, such as "permission denied".
+func openReason(t *testing.T, name string) string {
+	t.Helper()
+
+	f, err := os.Open(name) //nolint:gosec // A test file.
+	if err == nil {
+		require.NoError(t, f.Close())
+	}
 
 	var pe *fs.PathError
 
@@ -79,8 +117,14 @@ func TestPath(t *testing.T) {
 		opts  []manifest.InputOption
 		input string
 		want  []string
-		err   string
-		is    []error
+		// The text of each file that the load reads, by its path below the
+		// directory of the test, for each file that the test checks.
+		text map[string]string
+		err  string
+		// The path whose open fails with the reason that err names as
+		// "{reason}".
+		reason string
+		is     []error
 	}{
 		"default patterns and order": {
 			tree: tree{files: map[string]string{
@@ -363,6 +407,140 @@ func TestPath(t *testing.T) {
 			opts: []manifest.InputOption{manifest.WithOutsideLinks(true)},
 			want: []string{"config/cafe.yaml", "config/hours.yaml"},
 		},
+		"link through a file link outside the directory that leads back": {
+			tree: tree{
+				files: map[string]string{"config/cafe.yaml": cafeDoc, "config/..data/weekday.yaml": hoursV1Doc},
+				links: map[string]string{
+					"config/hours.yaml": "../shared/hours.yaml",
+					"shared/hours.yaml": "../config/..data/weekday.yaml",
+				},
+			},
+			want: []string{"config/cafe.yaml", "config/hours.yaml"},
+		},
+		"link through a directory link outside the directory that leads back": {
+			tree: tree{
+				files: map[string]string{"config/cafe.yaml": cafeDoc, "config/..data/weekday.yaml": hoursV1Doc},
+				links: map[string]string{
+					"config/hours.yaml": "../shared/data/weekday.yaml",
+					"shared/data":       "../config/..data",
+				},
+			},
+			want: []string{"config/cafe.yaml", "config/hours.yaml"},
+		},
+		"link through a link outside the directory to a file the patterns do not select": {
+			tree: tree{
+				files: map[string]string{"config/cafe.yaml": cafeDoc, "config/.env": "SECRET=1\n"},
+				links: map[string]string{
+					"config/ci.yaml": "../shared/ci.yaml",
+					"shared/ci.yaml": "../config/.env",
+				},
+			},
+			err: "config/ci.yaml: links to ../shared/ci.yaml, which does not match *.yaml or *.yml",
+			is:  []error{manifest.ErrOutsideLink},
+		},
+		"link through a directory link outside the directory and back up": {
+			tree: climbTree("../x/../config/..data/weekday.yaml"),
+			err:  "config/hours.yaml: links to ../x/../config/..data/weekday.yaml, which leads outside",
+			is:   []error{manifest.ErrOutsideLink},
+		},
+		"link through a directory link outside the directory and back up allowed": {
+			tree: climbTree("../x/../config/..data/weekday.yaml"),
+			opts: []manifest.InputOption{manifest.WithOutsideLinks(true)},
+			want: []string{"config/cafe.yaml", "config/hours.yaml"},
+			text: map[string]string{"config/hours.yaml": "# outside\n"},
+		},
+		"absolute link through a directory link and back up": {
+			tree: climbTree("{dir}/x/../config/..data/weekday.yaml"),
+			err:  "config/hours.yaml: links to {dir}/x/../config/..data/weekday.yaml, which leads outside",
+			is:   []error{manifest.ErrOutsideLink},
+		},
+		"absolute link through a directory link and back up allowed": {
+			tree: climbTree("{dir}/x/../config/..data/weekday.yaml"),
+			opts: []manifest.InputOption{manifest.WithOutsideLinks(true)},
+			want: []string{"config/cafe.yaml", "config/hours.yaml"},
+			text: map[string]string{"config/hours.yaml": "# outside\n"},
+		},
+		"link through a file and back up": {
+			tree: tree{
+				files: map[string]string{"config/cafe.yaml": cafeDoc, "config/..data/weekday.yaml": hoursV1Doc},
+				links: map[string]string{"config/hours.yaml": "..data/weekday.yaml/../weekday.yaml"},
+			},
+			err:    "config/hours.yaml: {reason}",
+			reason: "config/hours.yaml",
+		},
+		"absolute link inside the directory": {
+			tree: tree{
+				files: map[string]string{"config/cafe.yaml": cafeDoc, "config/..data/weekday.yaml": hoursV1Doc},
+				links: map[string]string{"config/hours.yaml": "{dir}/config/..data/weekday.yaml"},
+			},
+			want: []string{"config/cafe.yaml", "config/hours.yaml"},
+		},
+		"absolute link outside the directory": {
+			tree: tree{
+				files: map[string]string{"config/cafe.yaml": cafeDoc, "shared/hours.yaml": hoursV1Doc},
+				links: map[string]string{"config/hours.yaml": "{dir}/shared/hours.yaml"},
+			},
+			err: "{dir}/config/hours.yaml: links to {dir}/shared/hours.yaml, which leads outside {dir}/config",
+			is:  []error{manifest.ErrOutsideLink},
+		},
+		"link outside the directory to a directory": {
+			tree: tree{
+				files: map[string]string{"config/cafe.yaml": cafeDoc, "shared/x.yaml": ""},
+				links: map[string]string{"config/shared.yaml": "../shared"},
+			},
+			want: []string{"config/cafe.yaml"},
+		},
+		"link outside the directory to a file the system refuses to read": {
+			tree: tree{
+				files:  map[string]string{"config/cafe.yaml": cafeDoc, "shared/hours.yaml": hoursV1Doc},
+				links:  map[string]string{"config/hours.yaml": "../shared/hours.yaml"},
+				locked: []string{"shared/hours.yaml"},
+			},
+			opts:   []manifest.InputOption{manifest.WithOutsideLinks(true)},
+			err:    "config/hours.yaml: {reason}",
+			reason: "shared/hours.yaml",
+			is:     []error{fs.ErrPermission},
+		},
+		"file the system refuses to read": {
+			tree: tree{
+				files:  map[string]string{"config/cafe.yaml": cafeDoc, "config/hours.yaml": hoursV1Doc},
+				locked: []string{"config/hours.yaml"},
+			},
+			err:    "config/hours.yaml: {reason}",
+			reason: "config/hours.yaml",
+			is:     []error{fs.ErrPermission},
+		},
+		"link to a file the system refuses to read": {
+			tree: tree{
+				files:  map[string]string{"config/cafe.yaml": cafeDoc, "config/..data/weekday.yaml": hoursV1Doc},
+				links:  map[string]string{"config/hours.yaml": "..data/weekday.yaml"},
+				locked: []string{"config/..data/weekday.yaml"},
+			},
+			err:    "config/hours.yaml: {reason}",
+			reason: "config/hours.yaml",
+			is:     []error{fs.ErrPermission},
+		},
+		"directory the system refuses to list": {
+			tree: tree{
+				files:  map[string]string{"config/cafe.yaml": cafeDoc, "config/sub/hours.yaml": hoursV1Doc},
+				locked: []string{"config/sub"},
+			},
+			opts:   []manifest.InputOption{manifest.WithRecursive(true)},
+			err:    "config/sub: {reason}",
+			reason: "config/sub",
+			is:     []error{fs.ErrPermission},
+		},
+		"directory whose name is not valid UTF-8": {
+			tree: tree{
+				dirs: []string{"config/caf\xe9"},
+				files: map[string]string{
+					"config/cafe.yaml":          cafeDoc,
+					"config/caf\xe9/hours.yaml": hoursV1Doc,
+				},
+			},
+			opts: []manifest.InputOption{manifest.WithRecursive(true)},
+			want: []string{"config/cafe.yaml", "config/caf\xe9/hours.yaml"},
+		},
 		"link to a file the patterns do not select": {
 			tree: tree{
 				files: map[string]string{"config/cafe.yaml": cafeDoc, "config/.env": "SECRET=1\n"},
@@ -378,6 +556,38 @@ func TestPath(t *testing.T) {
 			},
 			err: "config/old.yaml: links to archive/old.yaml, which does not exist",
 			is:  []error{fs.ErrNotExist},
+		},
+		"dangling link outside the directory": {
+			tree: tree{
+				files: map[string]string{"config/cafe.yaml": cafeDoc},
+				links: map[string]string{"config/old.yaml": "../archive/old.yaml"},
+			},
+			err: "config/old.yaml: links to ../archive/old.yaml, which does not exist",
+			is:  []error{fs.ErrNotExist},
+		},
+		"dangling link through a directory that does not exist": {
+			tree: tree{
+				files: map[string]string{"config/cafe.yaml": cafeDoc, "config/..data/weekday.yaml": hoursV1Doc},
+				links: map[string]string{"config/hours.yaml": "../archive/../config/..data/weekday.yaml"},
+			},
+			err: "config/hours.yaml: links to ../archive/../config/..data/weekday.yaml, which does not exist",
+			is:  []error{fs.ErrNotExist},
+		},
+		"link to itself": {
+			tree: tree{
+				files: map[string]string{"config/cafe.yaml": cafeDoc},
+				links: map[string]string{"config/hours.yaml": "hours.yaml"},
+			},
+			err:    "config/hours.yaml: {reason}",
+			reason: "config/hours.yaml",
+		},
+		"link through a file": {
+			tree: tree{
+				files: map[string]string{"config/cafe.yaml": cafeDoc, "config/..data/weekday.yaml": hoursV1Doc},
+				links: map[string]string{"config/hours.yaml": "cafe.yaml/../..data/weekday.yaml"},
+			},
+			err:    "config/hours.yaml: {reason}",
+			reason: "config/hours.yaml",
 		},
 		"input that does not exist": {
 			input: "confg",
@@ -428,6 +638,12 @@ func TestPath(t *testing.T) {
 
 				if tc.err != "" {
 					want := strings.ReplaceAll(tc.err, "{dir}", filepath.ToSlash(dir))
+
+					if tc.reason != "" {
+						reason := openReason(t, filepath.Join(dir, filepath.FromSlash(tc.reason)))
+						want = strings.ReplaceAll(want, "{reason}", reason)
+					}
+
 					assert.Contains(t, filepath.ToSlash(niceyaml.FormatError(err)), want)
 				}
 
@@ -443,7 +659,36 @@ func TestPath(t *testing.T) {
 			}
 
 			assert.Equal(t, want, loadedNames(set))
+
+			texts := map[string]string{}
+			for _, src := range set.Sources() {
+				texts[filepath.ToSlash(src.Name())] = src.Text()
+			}
+
+			for name, text := range tc.text {
+				assert.Equal(t, text, texts[filepath.ToSlash(filepath.Join(dir, name))], name)
+			}
 		})
+	}
+}
+
+// climbTree returns a tree whose config/hours.yaml links to target. The
+// target climbs through x, a link to the directory q/r outside config,
+// and back up. The system thus reads q/config/..data/weekday.yaml, which
+// holds "# outside", and not config/..data/weekday.yaml, which holds
+// "# inside".
+func climbTree(target string) tree {
+	return tree{
+		dirs: []string{"q/r"},
+		files: map[string]string{
+			"config/cafe.yaml":             cafeDoc,
+			"config/..data/weekday.yaml":   "# inside\n",
+			"q/config/..data/weekday.yaml": "# outside\n",
+		},
+		links: map[string]string{
+			"config/hours.yaml": target,
+			"x":                 "q/r",
+		},
 	}
 }
 
@@ -454,6 +699,301 @@ var hoursV1Doc = stringtest.LinesLF(
 	"metadata:",
 	"  name: weekday",
 )
+
+// onSourceBuild returns a source option that calls fn each time a load
+// builds a Source with it. A source option takes a value of an unexported
+// type, and the first argument, which onSourceBuild does not call, lets
+// the compiler infer that type.
+func onSourceBuild[C any](_ func(C), fn func()) func(C) {
+	return func(C) { fn() }
+}
+
+func TestPath_ChangedEntry(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		tree tree
+		opts []manifest.InputOption
+		// The target of the link that replaces config/b.yaml after the walk
+		// lists the directory. No link replaces the entry when it is empty.
+		link string
+		// Whether a directory replaces the entry instead. Nothing replaces
+		// the entry when link is empty and dir is unset.
+		dir  bool
+		want []string
+		// The text of config/b.yaml in a load that reads it.
+		text string
+		err  string
+		is   []error
+	}{
+		"link outside the directory": {
+			tree: tree{files: map[string]string{"secret.yaml": hoursV1Doc}},
+			link: "../secret.yaml",
+			err: stringtest.JoinLF(
+				"{dir}/config/b.yaml: links to ../secret.yaml, which leads outside {dir}/config",
+				"`-- copy the file into {dir}/config, or make {dir}/config itself the link",
+			),
+			is: []error{manifest.ErrOutsideLink},
+		},
+		"link outside the directory allowed": {
+			tree: tree{files: map[string]string{"secret.yaml": hoursV1Doc}},
+			opts: []manifest.InputOption{manifest.WithOutsideLinks(true)},
+			link: "../secret.yaml",
+			want: []string{"config/a.yaml", "config/b.yaml"},
+			text: hoursV1Doc,
+		},
+		"link to a file the patterns do not select": {
+			tree: tree{files: map[string]string{"config/hours.txt": hoursV1Doc}},
+			link: "hours.txt",
+			err:  "config/b.yaml: links to hours.txt, which does not match *.yaml or *.yml",
+			is:   []error{manifest.ErrOutsideLink},
+		},
+		"link to a file the patterns select": {
+			tree: tree{files: map[string]string{"config/sub/hours.yaml": hoursV1Doc}},
+			link: "sub/hours.yaml",
+			want: []string{"config/a.yaml", "config/b.yaml"},
+			text: hoursV1Doc,
+		},
+		"dangling link": {
+			link: "archive/b.yaml",
+			err:  "config/b.yaml: links to archive/b.yaml, which does not exist",
+			is:   []error{fs.ErrNotExist},
+		},
+		"link to a directory": {
+			tree: tree{dirs: []string{"config/sub"}},
+			link: "sub",
+			want: []string{"config/a.yaml"},
+		},
+		"link through a link outside the directory that leads back": {
+			tree: tree{
+				files: map[string]string{"config/sub/hours.yaml": hoursV1Doc},
+				links: map[string]string{"shared/hours.yaml": "../config/sub/hours.yaml"},
+			},
+			link: "../shared/hours.yaml",
+			want: []string{"config/a.yaml", "config/b.yaml"},
+			text: hoursV1Doc,
+		},
+		"directory": {
+			dir:  true,
+			want: []string{"config/a.yaml"},
+		},
+		"removed entry": {
+			err: "config/b.yaml: " + notExistReason(t),
+			is:  []error{fs.ErrNotExist},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			tree{files: map[string]string{"config/a.yaml": cafeDoc, "config/b.yaml": ""}}.write(t, dir)
+			tc.tree.write(t, dir)
+
+			entry := filepath.Join(dir, "config", "b.yaml")
+
+			// The walk lists the directory before it reads a file, and it
+			// reads a.yaml first. So the entry changes after its listing
+			// and before its read.
+			var once sync.Once
+
+			change := func() {
+				once.Do(func() {
+					require.NoError(t, os.Remove(entry))
+
+					switch {
+					case tc.link != "":
+						yamltest.SymlinkOrSkip(t, filepath.FromSlash(tc.link), entry)
+					case tc.dir:
+						require.NoError(t, os.Mkdir(entry, 0o750))
+					}
+				})
+			}
+
+			opts := slices.Concat(tc.opts, []manifest.InputOption{
+				manifest.WithSourceOptions(onSourceBuild(niceyaml.WithName(""), change)),
+			})
+
+			reg := newCafeRegistry(t, manifest.WithKinds())
+
+			chk, err := reg.Check(t.Context(), manifest.Path(filepath.Join(dir, "config"), opts...),
+				manifest.WithSetChecks(false))
+			require.NotNil(t, chk)
+
+			texts := map[string]string{}
+			for _, src := range chk.Set().Sources() {
+				texts[src.Name()] = src.Text()
+			}
+
+			if tc.err != "" {
+				require.Error(t, err)
+
+				for _, target := range tc.is {
+					require.ErrorIs(t, err, target)
+				}
+
+				want := strings.ReplaceAll(tc.err, "{dir}", filepath.ToSlash(dir))
+				assert.Contains(t, filepath.ToSlash(niceyaml.FormatError(err)), want)
+				assert.NotContains(t, texts, entry)
+
+				return
+			}
+
+			require.NoError(t, err)
+
+			var want []string
+
+			for _, w := range tc.want {
+				want = append(want, filepath.ToSlash(filepath.Join(dir, w)))
+			}
+
+			assert.Equal(t, want, loadedNames(chk.Set()))
+			assert.Equal(t, tc.text, texts[entry])
+		})
+	}
+}
+
+func TestPath_ChangedDirectory(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		// The tree that replaces config/sub after the walk lists it, below
+		// the directory of the test. A tree with a "sub" link makes
+		// config/sub a link.
+		replace tree
+		want    []string
+		// The text of config/sub/b.yaml in a load that reads it.
+		text string
+		err  string
+		is   []error
+	}{
+		"another directory": {
+			replace: tree{files: map[string]string{"config/sub/b.yaml": cafeDoc}},
+			want:    []string{"config/a.yaml", "config/sub/b.yaml"},
+			text:    cafeDoc,
+		},
+		"link outside the directory": {
+			replace: tree{links: map[string]string{"config/sub": "../outside"}},
+			err: stringtest.JoinLF(
+				"{dir}/config/sub/b.yaml: links to ../outside, which leads outside {dir}/config",
+				"`-- copy the file into {dir}/config, or make {dir}/config itself the link",
+			),
+			is: []error{manifest.ErrOutsideLink},
+		},
+		"removed directory": {
+			err: "config/sub/b.yaml: " + notExistReason(t),
+			is:  []error{fs.ErrNotExist},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			tree{files: map[string]string{
+				"config/a.yaml":     cafeDoc,
+				"config/sub/b.yaml": hoursV1Doc,
+				"outside/b.yaml":    hoursV1Doc,
+			}}.write(t, dir)
+
+			// The walk lists every directory before it reads a file, and it
+			// reads a.yaml first. So config/sub changes after its listing
+			// and before the read of b.yaml.
+			var once sync.Once
+
+			change := func() {
+				once.Do(func() {
+					require.NoError(t, os.RemoveAll(filepath.Join(dir, "config", "sub")))
+					tc.replace.write(t, dir)
+				})
+			}
+
+			reg := newCafeRegistry(t, manifest.WithKinds())
+
+			chk, err := reg.Check(t.Context(),
+				manifest.Path(filepath.Join(dir, "config"), manifest.WithRecursive(true),
+					manifest.WithSourceOptions(onSourceBuild(niceyaml.WithName(""), change))),
+				manifest.WithSetChecks(false))
+			require.NotNil(t, chk)
+
+			entry := filepath.Join(dir, "config", "sub", "b.yaml")
+
+			texts := map[string]string{}
+			for _, src := range chk.Set().Sources() {
+				texts[src.Name()] = src.Text()
+			}
+
+			if tc.err != "" {
+				require.Error(t, err)
+
+				for _, target := range tc.is {
+					require.ErrorIs(t, err, target)
+				}
+
+				want := strings.ReplaceAll(tc.err, "{dir}", filepath.ToSlash(dir))
+				assert.Contains(t, filepath.ToSlash(niceyaml.FormatError(err)), want)
+				assert.NotContains(t, texts, entry)
+
+				return
+			}
+
+			require.NoError(t, err)
+
+			var want []string
+
+			for _, w := range tc.want {
+				want = append(want, filepath.ToSlash(filepath.Join(dir, w)))
+			}
+
+			assert.Equal(t, want, loadedNames(chk.Set()))
+			assert.Equal(t, tc.text, texts[entry])
+		})
+	}
+}
+
+// TestPath_ChangedDirectoryOfLink replaces a directory with a copy after
+// the walk reads a file in it and before the walk reads a link in it. The
+// walk resolves the link from the input directory, so it reads the file
+// that the link leads to in the copy.
+func TestPath_ChangedDirectoryOfLink(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sub := tree{
+		files: map[string]string{"config/sub/a.yaml": cafeDoc, "config/sub/c.yaml": hoursV1Doc},
+		links: map[string]string{"config/sub/b.yaml": "c.yaml"},
+	}
+	sub.write(t, dir)
+
+	// The walk reads a.yaml first, so config/sub changes before the read of
+	// b.yaml.
+	var once sync.Once
+
+	change := func() {
+		once.Do(func() {
+			require.NoError(t, os.Rename(filepath.Join(dir, "config", "sub"), filepath.Join(dir, "old")))
+			sub.write(t, dir)
+		})
+	}
+
+	reg := newCafeRegistry(t, manifest.WithKinds())
+
+	chk, err := reg.Check(t.Context(),
+		manifest.Path(filepath.Join(dir, "config"), manifest.WithRecursive(true),
+			manifest.WithSourceOptions(onSourceBuild(niceyaml.WithName(""), change))),
+		manifest.WithSetChecks(false))
+	require.NoError(t, err)
+
+	texts := map[string]string{}
+	for _, src := range chk.Set().Sources() {
+		texts[src.Name()] = src.Text()
+	}
+
+	entry := filepath.Join(dir, "config", "sub", "b.yaml")
+	assert.Equal(t, hoursV1Doc, texts[entry])
+}
 
 func TestFS(t *testing.T) {
 	t.Parallel()
