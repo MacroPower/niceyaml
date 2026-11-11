@@ -73,8 +73,6 @@ var policies = []dependencyPolicy{
 		// Add to this list too only with a matching change to the
 		// dependency policy in the package documentation.
 		passThrough: []string{
-			// Escape hatch.
-			"yaml.EncodeOption",
 			// The comments Node.YAMLComments returns and
 			// encoder.WithYAMLComments adds. The encoder applies them
 			// itself, since go-yaml's own option for them works only when
@@ -182,11 +180,15 @@ func TestCheckFile_Coverage(t *testing.T) {
 			`),
 		},
 		"pass-through type without the prefix": {
-			src:  `func WithOptions(opts ...yaml.EncodeOption) {}`,
-			want: []string{"WithOptions"},
+			src:  `func WithComments(cm yaml.CommentMap) {}`,
+			want: []string{"WithComments"},
 		},
 		"pass-through type with the prefix": {
-			src: `func WithYAMLOptions(opts ...yaml.EncodeOption) {}`,
+			src: `func WithYAMLComments(cm yaml.CommentMap) {}`,
+		},
+		"go-yaml encoder option": {
+			src:  `func WithYAMLOptions(opts ...yaml.EncodeOption) {}`,
+			want: []string{"WithYAMLOptions"},
 		},
 		"method on receiver with type parameters": {
 			src: stringtest.Input(`

@@ -80,8 +80,8 @@ func literal(s string) string {
 func TestEncoder_Encode_quoting(t *testing.T) {
 	t.Parallel()
 
-	flow := encoder.WithYAMLOptions(yaml.Flow(true))
-	literalStyle := encoder.WithYAMLOptions(yaml.UseLiteralStyleIfMultiline(true))
+	flow := encoder.WithFlow(true)
+	literalStyle := encoder.WithLiteralBlocks(true)
 
 	tcs := map[string]struct {
 		input any
@@ -840,9 +840,9 @@ func TestMarshal(t *testing.T) {
 			},
 			want: stringtest.LinesLF("# head", "k:", "  items:", "    - one"),
 		},
-		"go-yaml option": {
+		"flow style": {
 			input: map[string][]string{"items": {"one", "two"}},
-			opts:  []encoder.Option{encoder.WithYAMLOptions(yaml.Flow(true))},
+			opts:  []encoder.Option{encoder.WithFlow(true)},
 			want:  "{items: [one, two]}\n",
 		},
 		"marshaler that reads the context": {
@@ -1023,7 +1023,7 @@ func TestEncoder_Encode_errors(t *testing.T) {
 		},
 		"comment path past a multiline key go-yaml cannot read": {
 			input:    map[string]int{"\"a\nb": 1, "z": 2},
-			opts:     []encoder.Option{encoder.WithYAMLOptions(yaml.UseLiteralStyleIfMultiline(true))},
+			opts:     []encoder.Option{encoder.WithLiteralBlocks(true)},
 			comments: yaml.CommentMap{"$.z": {yaml.LineComment(" x")}},
 			errs:     []error{encoder.ErrComment},
 			wraps:    strconv.ErrSyntax,
@@ -1031,7 +1031,7 @@ func TestEncoder_Encode_errors(t *testing.T) {
 		},
 		"comment path to a missing key of a mapping with a multiline key go-yaml cannot read": {
 			input:    map[string]int{"\"a\nb": 1},
-			opts:     []encoder.Option{encoder.WithYAMLOptions(yaml.UseLiteralStyleIfMultiline(true))},
+			opts:     []encoder.Option{encoder.WithLiteralBlocks(true)},
 			comments: yaml.CommentMap{"$.missing": {yaml.LineComment(" x")}},
 			errs:     []error{encoder.ErrComment},
 			wraps:    strconv.ErrSyntax,
@@ -1136,14 +1136,14 @@ func TestEncoder_Encode_errors(t *testing.T) {
 		"line comment on an empty sequence in a flow mapping": {
 			input:    map[string][]int{"a": {}},
 			comments: yaml.CommentMap{"$.a": {yaml.LineComment(" x")}},
-			opts:     []encoder.Option{encoder.WithYAMLOptions(yaml.Flow(true))},
+			opts:     []encoder.Option{encoder.WithFlow(true)},
 			errs:     []error{encoder.ErrComment},
 			msg:      `comment does not apply: "$.a": unsupported comment line position for Mapping`,
 		},
 		"line comment on a flow sequence in a flow mapping": {
 			input:    map[string][]int{"a": {1, 2}},
 			comments: yaml.CommentMap{"$.a": {yaml.LineComment(" x")}},
-			opts:     []encoder.Option{encoder.WithYAMLOptions(yaml.Flow(true))},
+			opts:     []encoder.Option{encoder.WithFlow(true)},
 			errs:     []error{encoder.ErrComment},
 			msg:      `comment does not apply: "$.a": unsupported comment line position for Mapping`,
 		},
@@ -1156,7 +1156,7 @@ func TestEncoder_Encode_errors(t *testing.T) {
 		"line comment on a scalar in a flow mapping": {
 			input:    map[string]int{"a": 1, "b": 2},
 			comments: yaml.CommentMap{"$.a": {yaml.LineComment(" x")}},
-			opts:     []encoder.Option{encoder.WithYAMLOptions(yaml.Flow(true))},
+			opts:     []encoder.Option{encoder.WithFlow(true)},
 			errs:     []error{encoder.ErrComment},
 			msg:      `comment does not apply: "$.a": unsupported comment line position for Mapping`,
 		},
@@ -1295,29 +1295,6 @@ func TestEncoder_Encode_marshalerContextError(t *testing.T) {
 	got, err := encoder.Marshal(t.Context(), timeoutMarshaler{})
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	requireOnly(t, err, encoder.ErrEncode)
-	assert.Nil(t, got)
-}
-
-func TestEncoder_Encode_printPanic(t *testing.T) {
-	t.Parallel()
-
-	var buf bytes.Buffer
-
-	opts := []encoder.Option{encoder.WithYAMLOptions(yaml.Indent(-2))}
-	input := map[string]map[string]int{"a": {"b": 1}}
-
-	err := encoder.New(&buf, opts...).Encode(t.Context(), input)
-	require.EqualError(t, err, "printer panicked: strings: negative Repeat count")
-	requireOnly(t, err)
-	assert.Empty(t, buf.String())
-
-	p, ok := errors.AsType[*encoder.PanicError](err)
-	require.True(t, ok, "the error is a *PanicError")
-	assert.Equal(t, "strings: negative Repeat count", p.Value)
-	assert.Contains(t, string(p.Stack), "goroutine", "Stack holds the stack of the panic")
-
-	got, err := encoder.Marshal(t.Context(), input, opts...)
-	require.EqualError(t, err, "printer panicked: strings: negative Repeat count")
 	assert.Nil(t, got)
 }
 
@@ -1474,22 +1451,6 @@ func TestPretty_order(t *testing.T) {
 			opts: []encoder.Option{encoder.WithIndentSequence(false), encoder.Pretty()},
 			want: pretty,
 		},
-		"before a go-yaml indent": {
-			opts: []encoder.Option{encoder.Pretty(), encoder.WithYAMLOptions(yaml.Indent(4))},
-			want: fourSpaces,
-		},
-		"after a go-yaml indent": {
-			opts: []encoder.Option{encoder.WithYAMLOptions(yaml.Indent(4)), encoder.Pretty()},
-			want: pretty,
-		},
-		"before a go-yaml sequence indent": {
-			opts: []encoder.Option{encoder.Pretty(), encoder.WithYAMLOptions(yaml.IndentSequence(false))},
-			want: atParent,
-		},
-		"after a go-yaml sequence indent": {
-			opts: []encoder.Option{encoder.WithYAMLOptions(yaml.IndentSequence(false)), encoder.Pretty()},
-			want: pretty,
-		},
 	}
 
 	for name, tc := range tcs {
@@ -1568,14 +1529,14 @@ func TestPretty_indentOptions(t *testing.T) {
 		"sequences at the parent indent": {
 			opts: []encoder.Option{encoder.WithIndentSequence(false)},
 		},
-		"go-yaml indent 3": {
-			opts: []encoder.Option{encoder.WithYAMLOptions(yaml.Indent(3))},
+		"indent 3": {
+			opts: []encoder.Option{encoder.WithIndent(3)},
 		},
 		"flow style": {
-			opts: []encoder.Option{encoder.WithYAMLOptions(yaml.Flow(true))},
+			opts: []encoder.Option{encoder.WithFlow(true)},
 		},
 		"literal style": {
-			opts: []encoder.Option{encoder.WithYAMLOptions(yaml.UseLiteralStyleIfMultiline(true))},
+			opts: []encoder.Option{encoder.WithLiteralBlocks(true)},
 		},
 		"comments": {
 			opts: []encoder.Option{encoder.WithYAMLComments(yaml.CommentMap{"$": {yaml.HeadComment(" h")}})},
@@ -1584,7 +1545,7 @@ func TestPretty_indentOptions(t *testing.T) {
 			opts: []encoder.Option{
 				encoder.WithIndent(4),
 				encoder.WithIndentSequence(false),
-				encoder.WithYAMLOptions(yaml.Flow(false)),
+				encoder.WithFlow(false),
 			},
 		},
 	}
@@ -1678,6 +1639,229 @@ func TestWithIndentSequence(t *testing.T) {
 	}
 }
 
+func TestWithFlow(t *testing.T) {
+	t.Parallel()
+
+	input := map[string]any{"a": map[string]any{"b": []any{1, 2}}}
+	marshaled := map[string]any{"k": rawYAML("x: [1, 2]\ny:\n  z: 1\n")}
+	jsonMarshaled := map[string]any{"k": jsonText{v: map[string]any{"a": []int{1, 2}, "b": map[string]int{"c": 1}}}}
+	jsonMarshalers := encoder.WithMarshalers(encoder.JSONMarshalers(true))
+
+	tcs := map[string]struct {
+		input any
+		opts  []encoder.Option
+		want  string
+	}{
+		"default": {
+			input: input,
+			want:  stringtest.LinesLF("a:", "  b:", "  - 1", "  - 2"),
+		},
+		"flow": {
+			input: input,
+			opts:  []encoder.Option{encoder.WithFlow(true)},
+			want:  "{a: {b: [1, 2]}}\n",
+		},
+		"block": {
+			input: input,
+			opts:  []encoder.Option{encoder.WithFlow(false)},
+			want:  stringtest.LinesLF("a:", "  b:", "  - 1", "  - 2"),
+		},
+		"block after flow": {
+			input: input,
+			opts:  []encoder.Option{encoder.WithFlow(true), encoder.WithFlow(false)},
+			want:  stringtest.LinesLF("a:", "  b:", "  - 1", "  - 2"),
+		},
+		"marshaler styles under default": {
+			input: marshaled,
+			want:  stringtest.LinesLF("k:", "  x: [1, 2]", "  y:", "    z: 1"),
+		},
+		"marshaler styles under flow": {
+			input: marshaled,
+			opts:  []encoder.Option{encoder.WithFlow(true)},
+			want:  stringtest.LinesLF("{k:", "  x: [1, 2]", "  y:", "    z: 1}"),
+		},
+		"JSON marshaler styles under default": {
+			input: jsonMarshaled,
+			opts:  []encoder.Option{jsonMarshalers},
+			want:  stringtest.LinesLF("k:", "  a:", "  - 1", "  - 2", "  b:", "    c: 1"),
+		},
+		"JSON marshaler styles under flow": {
+			input: jsonMarshaled,
+			opts:  []encoder.Option{jsonMarshalers, encoder.WithFlow(true)},
+			want:  stringtest.LinesLF("{k:", "  a:", "  - 1", "  - 2", "  b:", "    c: 1}"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := mustEncode(t, tc.input, tc.opts...)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestWithLiteralBlocks(t *testing.T) {
+	t.Parallel()
+
+	input := map[string]string{"s": "a: b\nc", "t": "a\nb"}
+
+	tcs := map[string]struct {
+		opts []encoder.Option
+		want string
+	}{
+		"default": {
+			want: stringtest.LinesLF(`s: "a: b\nc"`, "t: |-", "  a", "  b"),
+		},
+		"literal blocks": {
+			opts: []encoder.Option{encoder.WithLiteralBlocks(true)},
+			want: stringtest.LinesLF("s: |-", "  a: b", "  c", "t: |-", "  a", "  b"),
+		},
+		"default after literal blocks": {
+			opts: []encoder.Option{encoder.WithLiteralBlocks(true), encoder.WithLiteralBlocks(false)},
+			want: stringtest.LinesLF(`s: "a: b\nc"`, "t: |-", "  a", "  b"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := mustEncode(t, input, tc.opts...)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// omitted holds a zero number, an empty slice that is not nil, an array
+// of length zero, a zero time, a struct whose fields are all zero, a
+// struct whose only field that is not zero is unexported, and a string,
+// for the tests of the options that leave out fields.
+type omitted struct {
+	T time.Time     `yaml:"t"`
+	N int           `yaml:"num"`
+	L []int         `yaml:"l"`
+	R [0]int        `yaml:"r"`
+	E omittedPart   `yaml:"e"`
+	H omittedHidden `yaml:"h"`
+	S string        `yaml:"s"`
+}
+
+// omittedPart is a struct field of [omitted].
+type omittedPart struct {
+	A int `yaml:"a"`
+}
+
+// omittedHidden is a struct field of [omitted] with an unexported field.
+type omittedHidden struct {
+	A int `yaml:"a"`
+	//nolint:unused // The encoder reads no unexported field, so no code reads b.
+	b int
+}
+
+func TestWithOmitEmpty(t *testing.T) {
+	t.Parallel()
+
+	input := omitted{L: []int{}, H: omittedHidden{b: 1}, S: "x"}
+	all := stringtest.LinesLF(
+		"t: 0001-01-01T00:00:00Z", "num: 0", "l: []", "r: []", "e:", "  a: 0", "h:", "  a: 0", "s: x",
+	)
+
+	tcs := map[string]struct {
+		opts []encoder.Option
+		want string
+	}{
+		"default": {
+			want: all,
+		},
+		"omit empty": {
+			opts: []encoder.Option{encoder.WithOmitEmpty(true)},
+			want: stringtest.LinesLF("t: 0001-01-01T00:00:00Z", "r: []", "e: {}", "h: {}", "s: x"),
+		},
+		"default after omit empty": {
+			opts: []encoder.Option{encoder.WithOmitEmpty(true), encoder.WithOmitEmpty(false)},
+			want: all,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := mustEncode(t, input, tc.opts...)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestWithOmitZero(t *testing.T) {
+	t.Parallel()
+
+	input := omitted{L: []int{}, H: omittedHidden{b: 1}, S: "x"}
+	all := stringtest.LinesLF(
+		"t: 0001-01-01T00:00:00Z", "num: 0", "l: []", "r: []", "e:", "  a: 0", "h:", "  a: 0", "s: x",
+	)
+
+	tcs := map[string]struct {
+		opts []encoder.Option
+		want string
+	}{
+		"default": {
+			want: all,
+		},
+		"omit zero": {
+			opts: []encoder.Option{encoder.WithOmitZero(true)},
+			want: stringtest.LinesLF("l: []", "r: []", "s: x"),
+		},
+		"default after omit zero": {
+			opts: []encoder.Option{encoder.WithOmitZero(true), encoder.WithOmitZero(false)},
+			want: all,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := mustEncode(t, input, tc.opts...)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestWithAutoInt(t *testing.T) {
+	t.Parallel()
+
+	input := map[string]float64{"f": 1, "g": 1.5, "h": 1e6}
+
+	tcs := map[string]struct {
+		opts []encoder.Option
+		want string
+	}{
+		"default": {
+			want: stringtest.LinesLF("f: 1.0", "g: 1.5", "h: 1e+06"),
+		},
+		"auto int": {
+			opts: []encoder.Option{encoder.WithAutoInt(true)},
+			want: stringtest.LinesLF("f: 1", "g: 1.5", "h: 1e+06"),
+		},
+		"default after auto int": {
+			opts: []encoder.Option{encoder.WithAutoInt(true), encoder.WithAutoInt(false)},
+			want: stringtest.LinesLF("f: 1.0", "g: 1.5", "h: 1e+06"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := mustEncode(t, input, tc.opts...)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestWithYAMLComments(t *testing.T) {
 	t.Parallel()
 
@@ -1742,7 +1926,7 @@ func TestWithYAMLComments(t *testing.T) {
 		"line comment on a root flow mapping": {
 			input:    map[string]int{"a": 1},
 			comments: yaml.CommentMap{"$": {yaml.LineComment(" x")}},
-			opts:     []encoder.Option{encoder.WithYAMLOptions(yaml.Flow(true))},
+			opts:     []encoder.Option{encoder.WithFlow(true)},
 			want:     "{a: 1} # x\n",
 		},
 		"line comment on a root scalar": {

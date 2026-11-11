@@ -8,7 +8,6 @@ import (
 	"io"
 	"math"
 	"runtime/debug"
-	"slices"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -63,8 +62,7 @@ var (
 )
 
 // PanicError is the error of a panic that the go-yaml printer raised while
-// it laid out a node, such as one with a negative [yaml.Indent] from
-// [WithYAMLOptions]. Value holds the value the code passed to panic, and
+// it laid out a node. Value holds the value the code passed to panic, and
 // Stack holds the stack of the goroutine at the panic, as [debug.Stack]
 // formats it. The message leaves the stack out.
 //
@@ -158,19 +156,58 @@ type Encoder struct {
 //
 // Available options:
 //   - [Pretty]
+//   - [WithAutoInt]
+//   - [WithFlow]
 //   - [WithIndent]
 //   - [WithIndentSequence]
+//   - [WithLiteralBlocks]
 //   - [WithMarshalers]
+//   - [WithOmitEmpty]
+//   - [WithOmitZero]
 //   - [WithYAMLComments]
-//   - [WithYAMLOptions]
 type Option func(*config)
 
-// config collects the go-yaml options, the marshalers, and the comments
-// that build an [Encoder].
+// config collects the settings, the marshalers, and the comments that
+// build an [Encoder].
 type config struct {
 	comments   yaml.CommentMap
-	opts       []yaml.EncodeOption
 	marshalers marshaler.Options
+	// Holds the spaces per indentation level, or 0 for the default of
+	// go-yaml.
+	indent         int
+	indentSequence bool
+	flow           bool
+	literalBlocks  bool
+	omitEmpty      bool
+	omitZero       bool
+	autoInt        bool
+}
+
+// yamlOptions returns the go-yaml options of the settings of c.
+func (c *config) yamlOptions() []yaml.EncodeOption {
+	opts := []yaml.EncodeOption{
+		yaml.IndentSequence(c.indentSequence),
+		yaml.Flow(c.flow),
+		yaml.UseLiteralStyleIfMultiline(c.literalBlocks),
+	}
+
+	if c.indent > 0 {
+		opts = append(opts, yaml.Indent(c.indent))
+	}
+
+	if c.omitEmpty {
+		opts = append(opts, yaml.OmitEmpty())
+	}
+
+	if c.omitZero {
+		opts = append(opts, yaml.OmitZero())
+	}
+
+	if c.autoInt {
+		opts = append(opts, yaml.AutoInt())
+	}
+
+	return opts
 }
 
 // WithIndent is an [Option] that sets the number of spaces per indentation
@@ -183,7 +220,7 @@ func WithIndent(spaces int) Option {
 	}
 
 	return func(c *config) {
-		c.opts = append(c.opts, yaml.Indent(spaces))
+		c.indent = spaces
 	}
 }
 
@@ -194,7 +231,79 @@ func WithIndent(spaces int) Option {
 // first column either way.
 func WithIndentSequence(indent bool) Option {
 	return func(c *config) {
-		c.opts = append(c.opts, yaml.IndentSequence(indent))
+		c.indentSequence = indent
+	}
+}
+
+// WithFlow is an [Option] that sets whether the encoder writes the
+// mappings and sequences it builds from Go values in flow style, as in
+// {a: [1, 2]}. The default is false, and the encoder then writes those
+// collections in block style. Under the default, the encoder writes an
+// empty collection and a struct field with the flow option in its yaml
+// tag in flow style. A collection in the YAML that a marshaler returns
+// keeps the style it has in that text under either setting. Under
+// [JSONMarshalers], go-yaml converts the JSON of a MarshalJSON method to
+// YAML in block style. A collection in that JSON thus comes out in block
+// style under either setting. Under true, such a block collection sits in
+// block style inside the flow collection, as [Encoder.Encode] describes.
+func WithFlow(flow bool) Option {
+	return func(c *config) {
+		c.flow = flow
+	}
+}
+
+// WithLiteralBlocks is an [Option] that sets whether the encoder writes
+// every string with a line break as a literal block, as in "|-". The
+// default is false, and the encoder then writes most of those strings as
+// literal blocks too. It double-quotes the ones that go-yaml quotes, such
+// as a string that holds ": ". Under true, the encoder writes those
+// strings as literal blocks as well. Under either setting, the encoder
+// double-quotes a string that does not read back from a literal block, as
+// [Encoder.Encode] describes.
+func WithLiteralBlocks(enabled bool) Option {
+	return func(c *config) {
+		c.literalBlocks = enabled
+	}
+}
+
+// WithOmitEmpty is an [Option] that sets whether the encoder leaves out
+// every struct field with an empty value. The default is false. A value
+// is empty when it is an empty string, a nil pointer or interface, a
+// zero number, false, or a slice or map of length zero. Unlike the
+// omitempty option of encoding/json, WithOmitEmpty keeps every array, even
+// one of length zero. The omitempty option in a yaml tag applies a wider
+// rule, and WithOmitEmpty does not follow it. It does not call IsZero, and
+// it keeps every struct value, even one whose fields are all empty.
+func WithOmitEmpty(enabled bool) Option {
+	return func(c *config) {
+		c.omitEmpty = enabled
+	}
+}
+
+// WithOmitZero is an [Option] that sets whether the encoder leaves out
+// every struct field with a zero value, as if each field had the omitzero
+// option in its yaml tag. The default is false. A value is zero when it is
+// a nil pointer or interface, or when its IsZero method reports true. A
+// value of a type without an IsZero method is also zero when it is an
+// empty string, a nil slice or map, a zero number, or false. A struct
+// without an IsZero method is zero when each of its exported fields is
+// zero, even when an unexported field is not. The encoder keeps every
+// array, even one whose elements are all zero. It also keeps a slice or
+// map of length zero that is not nil.
+func WithOmitZero(enabled bool) Option {
+	return func(c *config) {
+		c.omitZero = enabled
+	}
+}
+
+// WithAutoInt is an [Option] that sets whether the encoder writes a whole
+// float with a magnitude of less than one million as an integer, such as
+// 1.0 as 1. The default is false, and 1.0 then writes as 1.0. The encoder
+// writes a whole float with a magnitude of one million or more with an
+// exponent under either setting, such as 1e6 as 1e+06.
+func WithAutoInt(enabled bool) Option {
+	return func(c *config) {
+		c.autoInt = enabled
 	}
 }
 
@@ -231,13 +340,13 @@ func WithIndentSequence(indent bool) Option {
 //   - A comment has a position that go-yaml does not define.
 //   - The selected node cannot hold a comment in that position.
 //   - A line comment selects a node inside a flow mapping or a flow
-//     sequence, such as a value of a mapping that [yaml.Flow] writes.
+//     sequence, such as a value of a mapping that [WithFlow] writes.
 //     The encoder writes a flow collection on one line, and a comment
 //     inside it turns the closing bracket or brace into comment text.
 //   - Go-yaml looks for the mapping key that a path names and cannot
 //     read a key of that mapping. A marshaler's YAML can hold such a
 //     key, for example the single-quoted key `'"x'`. With
-//     [yaml.UseLiteralStyleIfMultiline], a string key that starts with
+//     [WithLiteralBlocks], a string key that starts with
 //     a double quote and holds a line break is such a key too. Go-yaml
 //     reads the keys from the first one, so a path to a later key
 //     fails. A path to a key that the mapping does not have fails too.
@@ -277,24 +386,6 @@ func WithYAMLComments(cm yaml.CommentMap) Option {
 	}
 }
 
-// WithYAMLOptions is an [Option] that passes [yaml.EncodeOption]
-// values straight to go-yaml. It covers the encoder settings that do not
-// have an option of their own. Go-yaml adds the comments from
-// [yaml.WithComment] only when it writes the document itself, so the
-// encoder does not write them. Pass that comment map to [WithYAMLComments]
-// instead.
-//
-// With [yaml.UseSingleQuote], go-yaml writes a tab, a line break, or
-// another unprintable character in a single-quoted string as a Go escape,
-// such as \t for a tab. YAML does not process backslash escapes in single
-// quotes, so the string reads back with the escape's characters. The
-// encoder leaves such a string as go-yaml wrote it.
-func WithYAMLOptions(opts ...yaml.EncodeOption) Option {
-	return func(c *config) {
-		c.opts = append(c.opts, opts...)
-	}
-}
-
 // New creates a new [*Encoder] that writes to w.
 func New(w io.Writer, opts ...Option) *Encoder {
 	var c config
@@ -311,7 +402,7 @@ func New(w io.Writer, opts ...Option) *Encoder {
 
 	// The value that the function of a type returns encodes with the same
 	// options, so the functions of the encoder reach it too.
-	e.opts = append(slices.Clip(c.opts), c.marshalers.YAMLOptions(e.marshalText)...)
+	e.opts = append(c.yamlOptions(), c.marshalers.YAMLOptions(e.marshalText)...)
 
 	return e
 }
@@ -365,12 +456,14 @@ func New(w io.Writer, opts ...Option) *Encoder {
 // single-quoted string with a line break in a marshaler's YAML, because
 // YAML folds a line break in single quotes.
 //
-// A block collection in a marshaler's YAML is the other exception. Go-yaml
-// can leave such a collection at or left of the column of its key, as it
+// A block collection in a marshaler's YAML is the other exception. So is
+// a block collection in the YAML that go-yaml converts from the JSON of a
+// MarshalJSON method under [JSONMarshalers]. Go-yaml can leave such a
+// collection at or left of the column of its key, as it
 // does under [WithIndentSequence] for a key of a mapping in a sequence.
 // Encode moves such a mapping one indent right of its key. It moves such a
 // sequence there when the sequence sits left of its key. In a flow
-// collection, such as one that [yaml.Flow] produces, go-yaml writes the
+// collection, such as one that [WithFlow] produces, go-yaml writes the
 // block collection in block style. YAML forbids block style there, and
 // Encode leaves the collection and the strings in it as go-yaml writes
 // them.
@@ -382,12 +475,10 @@ func New(w io.Writer, opts ...Option) *Encoder {
 // itself, an entry of a sequence in v, or the value of a map key in v.
 // After ctx ended, Encode returns its error as it is. A marshaler can
 // return a context error of its own while ctx lives, and that error
-// matches ErrEncode. Encode returns a
-// [*PanicError] when go-yaml cannot print the node, such as with a
-// negative [yaml.Indent] from [WithYAMLOptions]. A comment from
-// [WithYAMLComments] that the encoder cannot place returns an error that
-// matches [ErrComment]. In every case but a refused write, Encode does
-// not write to the writer.
+// matches ErrEncode. Encode returns a [*PanicError] when go-yaml cannot
+// print the node. A comment from [WithYAMLComments] that the encoder
+// cannot place returns an error that matches [ErrComment]. In every case
+// but a refused write, Encode does not write to the writer.
 func (e *Encoder) Encode(ctx context.Context, v any) error {
 	_, err := e.encode(ctx, v)
 
@@ -560,9 +651,9 @@ func init() {
 }
 
 // render returns the YAML text of node, or a [*PanicError] when the
-// go-yaml printer panics on a node it cannot lay out, such as one with a
-// negative indent. The PrintNode method of that printer formats the node
-// with fmt, which writes the panic into the text instead.
+// go-yaml printer panics on a node it cannot lay out. The PrintNode
+// method of that printer formats the node with fmt, which writes the panic
+// into the text instead.
 func render(node ast.Node) (_ []byte, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -719,8 +810,8 @@ func indentValue(mv *ast.MappingValueNode) {
 		return
 	}
 
-	// An indent below one comes from a go-yaml option that the printer
-	// refuses, so the visitor leaves its layout to the printer.
+	// A key without an indent of its own leaves its layout to the
+	// printer.
 	indent := key.Position.IndentNum
 	if indent < 1 {
 		return

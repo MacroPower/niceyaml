@@ -151,7 +151,7 @@ func setComments(root ast.Node, entries []pathComments) error {
 		// key do not unquote. One is a key from a marshaler's YAML, such
 		// as '"x'. The other is a string key that starts with a double
 		// quote and holds a line break, under
-		// [yaml.UseLiteralStyleIfMultiline]. With that option, go-yaml
+		// [WithLiteralBlocks]. With that option, go-yaml
 		// leaves a string key with a line break unquoted, so the token
 		// value of the key is its raw text. The quoter marks that key as
 		// double-quoted and does not change its value. The path can
