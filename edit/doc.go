@@ -139,6 +139,44 @@
 // Apply. FileText returns the text of the whole file, which go-yaml reads
 // as the edits leave it. The text of the other documents stays as it is.
 //
+// # Empty Documents
+//
+// [New] takes an empty document, as
+// [go.jacobcolvin.com/niceyaml.Node.IsEmpty] reports it, such as a file
+// that does not exist yet or a template of comments alone. Its root holds
+// no value. An Apply of `$` calls its Func once there, and the Func writes
+// the first value with [Node.Set]:
+//
+//	err = d.Apply(ctx, paths.Doc(), func(ctx context.Context, n *edit.Node) error {
+//		return n.At(paths.Doc().Child("server", "port")).Set(ctx, 8080)
+//	})
+//
+// At the root, [Node.Exists] reports false, [Node.Kind] returns
+// [go.jacobcolvin.com/niceyaml.NodeNone], and [Node.Decode] returns the zero
+// value. The root encodes as null in the value of a Set elsewhere. A Set of
+// `$` writes the root. A Set of a path of names writes the mappings that
+// its names give, with the value inside them. A path with an index fails,
+// as in "the edit sets $[0], but the document holds no $". A Set of `$`
+// with a slice writes a root sequence. Remove, SetKey, and Move at the root
+// fail, as they fail at the root of any document. A `$` path of
+// [WithProtected] protects the root, so an Apply of `$` then selects
+// nothing.
+//
+// The first value goes on block lines at the end of the text of the
+// document. Those lines go after its comment lines and before a "..."
+// marker or the "---" header of the next document. They take the line
+// break of the file, or "\n" in a file without one. A text without a final
+// newline ends without one again, as for any line that an edit adds, and
+// an empty text takes the lines with their final newline. So the template
+// "# server:\r\n#   port: 80\r\n" becomes
+// "# server:\r\n#   port: 80\r\nserver:\r\n  port: 8080\r\n".
+//
+// Go-yaml's parser reads no value from a tag at the end of the
+// text, as in "!t", so such a document is empty too. A value after it takes
+// the tag, so a Set there fails, and its message names the tag. After
+// the first value, the Doc edits the document as any other, and a Set of
+// `$` fails because it replaces the root.
+//
 // # Supported YAML
 //
 // The engine edits a subset of YAML 1.2. It reads each plain scalar as
@@ -538,7 +576,8 @@
 //     whose text go-yaml reads as a value of another kind fails, as
 //     [Node.Set] describes. When the place does not hold a value, the Set
 //     creates the values of its path below the nearest value that exists,
-//     where its placement option puts the entry.
+//     where its placement option puts the entry. In an empty document, the
+//     Set replaces the root with the value inside the mappings of its path.
 //   - [Node.Insert] puts the value before the item at its place, or after
 //     the last item of the sequence when the place lies past it.
 //   - [Node.SetKey] gives the entry the key that the call names, as a

@@ -130,6 +130,15 @@ type payload struct {
 // indents its "-" as the first such sequence of the user's document does,
 // or one step when the document has none.
 //
+// A Set of the root fails, because it replaces the root. In an empty
+// document, which holds no value at its root, a Set of `$` or of a path of
+// names writes the first value instead. The value goes inside the mappings
+// that the names give, on block lines at the end of the text, as the Empty
+// Documents section of the package documentation describes. [First] places
+// the one entry of the root. [Before] and [After] fail there, because the
+// root holds no other entry. A Set of `$` places no entry, so it ignores
+// those options.
+//
 // The value takes flow style on one line inside a flow collection, in
 // place of a flow collection that holds an entry or an item, and with the
 // [Flow] option. Inside the value, a `yaml:",flow"` struct tag or the YAML
@@ -441,7 +450,7 @@ func (n *Node) set(ctx context.Context, v any, protected bool, cfg setConfig) (*
 	why := d.protection(p, true)
 
 	switch {
-	case p.root:
+	case p.root && p.exists:
 		return nil, modelPlace{}, d.fail(n, "%s replaces the root of the document", d.subject())
 	case !protected && why != "":
 		return nil, modelPlace{}, d.fail(n, "%s sets %s, which %s", d.subject(), n.path, why)
@@ -464,9 +473,12 @@ func (n *Node) set(ctx context.Context, v any, protected bool, cfg setConfig) (*
 		where modelPlace
 	)
 
-	if p.exists {
+	switch {
+	case p.exists:
 		mv, err = d.setExisting(ctx, n, p, v, cfg.flow)
-	} else {
+	case p.bare:
+		mv, err = d.setFirst(ctx, n, p, v, cfg)
+	default:
 		mv, where, err = d.setCreated(ctx, n, p, v, cfg)
 	}
 
@@ -610,6 +622,12 @@ func (d *Doc) insertHolder(n *Node, p *place, holderPath paths.Path) (*place, *a
 		return holder, seq, "", nil
 	}
 
+	// An empty document holds no sequence, so the Insert fails as a Set
+	// through an index fails there.
+	if p.bare {
+		return p, nil, d.firstProblem(n.path), nil
+	}
+
 	// The place lies past the last item of a sequence, or the document
 	// lacks a value on the way, which fails the Insert as it fails a Set.
 	found := prefixOf(n.path, p.found)
@@ -696,6 +714,153 @@ func (d *Doc) setCreated(ctx context.Context, h *Node, p *place, v any, cfg setC
 	}
 
 	return mv, where, nil
+}
+
+// setFirst writes v as the first value of an empty document, at p, the
+// place of h. That place is the root, or a place below it that a path of
+// names selects, and v then goes inside the mappings that those names give.
+// The value goes on block lines at the end of the text of the document,
+// after its comment lines and before a "..." marker that ends it. It
+// returns the value that the Set writes at the root as the model reads it,
+// as [Node.set] does.
+func (d *Doc) setFirst(ctx context.Context, h *Node, p *place, v any, cfg setConfig) (*edge, error) {
+	named := "sets " + h.path.String()
+	sels := slices.Collect(h.path.Selectors())
+
+	switch why := d.firstProblem(h.path); {
+	case why != "":
+		return nil, d.fail(h, "%s sets %s, but %s", d.subject(), h.path, why)
+
+	case len(sels) > 0 && (cfg.at.kind == placeBefore || cfg.at.kind == placeAfter):
+		return nil, d.fail(h, "%s %s %s %q, but the document holds no %s",
+			d.subject(), named, cfg.at.side(), cfg.at.key, paths.Doc().Child(cfg.at.key))
+	}
+
+	// Go-yaml's parser reads no value from a tag that ends the text, as in
+	// "--- !t". The first value would take the tag, so the Set writes none.
+	if props, ok := d.bareProperties(); ok {
+		return nil, d.fail(h, "%s sets %s, but the document holds %s without a value", d.subject(), h.path, props)
+	}
+
+	wrapped := v
+	for _, sel := range slices.Backward(sels) {
+		wrapped = map[string]any{sel.Name: wrapped}
+	}
+
+	// The mappings above v take block style, so v goes in flow style inside
+	// them.
+	fd := noFlow
+	if cfg.flow {
+		fd = flowDepth(len(sels))
+	}
+
+	step := d.docStep(nil)
+	origin := d.addNote(d.createdNote(p, named))
+
+	pl, err := d.renderPayload(ctx, h, wrapped, fd, step, origin, nil, d.cfg.marshalers)
+	if err != nil {
+		return nil, err
+	}
+
+	brk := d.brk
+	text := appendRun(d.rootLines(pl, step, brk), newRun(brk, origin))
+
+	err = d.applyEdit(h, d.firstEdit(text, brk, pl, origin)...)
+	if err != nil {
+		return nil, err
+	}
+
+	created, err := d.nodePlace(h)
+	if err == nil && created.exists {
+		d.recordEdit(created, named, "")
+	}
+
+	return &edge{val: pl.value, tag: pl.tag}, nil
+}
+
+// firstProblem returns the reason that a Set cannot write the first value
+// of an empty document at path, or "" when it can. The reason reads as the
+// words that a message puts after "but", as [Doc.createProblem] gives them.
+// The Set creates mappings alone above the value, so a path through an
+// index fails at the root, the first value that the document lacks.
+func (d *Doc) firstProblem(path paths.Path) string {
+	for sel := range path.Selectors() {
+		if sel.Kind != paths.SelectorChild {
+			return "the document holds no " + paths.Doc().String()
+		}
+	}
+
+	return ""
+}
+
+// bareProperties returns the text of a tag in the current text of an
+// empty document, which go-yaml's parser reads no value from, as in "!t"
+// or "--- !t". It reports false when the text holds comments, directives,
+// and the "---" and "..." markers alone.
+func (d *Doc) bareProperties() (string, bool) {
+	for line := range d.curLines {
+		text := strings.TrimSpace(d.lineText(line))
+
+		if strings.HasPrefix(text, "%") {
+			continue
+		}
+
+		for _, marker := range []string{headerMarker, "..."} {
+			if rest, ok := strings.CutPrefix(text, marker); ok && (rest == "" || rest[0] == ' ' || rest[0] == '\t') {
+				text = strings.TrimSpace(rest)
+			}
+		}
+
+		if text != "" && !strings.HasPrefix(text, "#") {
+			return strings.Fields(text)[0], true
+		}
+	}
+
+	return "", false
+}
+
+// rootLines returns the lines of pl as the root of a document, joined with
+// brk. The lines of a block collection in pl indent by step below the key
+// or the "-" that holds them, as a sequence does when
+// [Doc.sequenceIndent] tells, and the root starts at the first column.
+func (d *Doc) rootLines(pl payload, step int, brk string) run {
+	col := 0
+	if (pl.inline == nil || pl.collection) && (pl.mapping || d.sequenceIndent()) {
+		col = -step
+	}
+
+	return d.joinValue(pl, col, brk)
+}
+
+// firstEdit returns the edits that write text, the lines of the first
+// value of an empty document with pl that end with the line break brk. The
+// lines go before the "..." marker that ends the document, or else at the
+// end of its text, as [Doc.linesEdit] writes lines there. An empty text
+// takes the lines with their line break.
+func (d *Doc) firstEdit(text run, brk string, pl payload, origin int) []edit {
+	for _, tk := range d.tokens() {
+		if tk.Type != token.DocumentEndType || tk.Position == nil {
+			continue
+		}
+
+		s, ok := d.tokenSpan(tk)
+		if ok && s.start < len(d.cur) {
+			at := d.lineStart(d.lineOf(s.start))
+
+			return []edit{{start: at, end: at, text: text.text, origins: text.origins}}
+		}
+	}
+
+	if d.cur == "" {
+		return []edit{{start: 0, end: 0, text: text.text, origins: text.origins}}
+	}
+
+	line := len(d.curLines)
+	if endsLine(d.cur) {
+		line--
+	}
+
+	return d.linesEdit(line, text, brk, pl, origin)
 }
 
 // renderPayload returns v as a payload for a place whose block collections
@@ -2268,7 +2433,7 @@ func (d *Doc) linesEdit(line int, text run, brk string, pl payload, origin int) 
 	}
 
 	if at == len(d.cur) {
-		bare := !endsLine(d.cur) || d.orig != "" && !endsLine(d.orig)
+		bare := !endsLine(d.cur) || d.userBare()
 		if bare && strings.HasSuffix(text.text, brk) {
 			text = run{text: strings.TrimSuffix(text.text, brk), origins: text.origins[:len(text.origins)-len(brk)]}
 		}
@@ -2514,11 +2679,11 @@ func (d *Doc) blockOpening(holder *place, content ast.Node) (opening, bool) {
 // collection can start a line below its anchor or its tag.
 func (d *Doc) rootOpening(o opening, s span, c int) (opening, bool) {
 	lineStart := d.lineStart(d.lineOf(s.start))
-	header := strings.TrimRight(d.cur[lineStart:o.start], " \t") == "---"
+	header := strings.TrimRight(d.cur[lineStart:o.start], " \t") == headerMarker
 
 	switch {
 	case header:
-		o.start, o.apart = lineStart+len("---"), true
+		o.start, o.apart = lineStart+len(headerMarker), true
 	case o.start != lineStart:
 		return opening{}, false
 	case c >= 0:

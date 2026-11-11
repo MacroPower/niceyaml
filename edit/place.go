@@ -44,6 +44,10 @@ type place struct {
 	found int
 	// Whether the place is the root of the document.
 	root bool
+	// Whether the place lies in an empty document, which holds no value, as
+	// [go.jacobcolvin.com/niceyaml.Node.IsEmpty] reports it. A Set there
+	// writes the first value of the document, as [Doc.setFirst] writes it.
+	bare bool
 	// Whether the place holds a value.
 	exists bool
 	// Whether the path reached the place through an alias or a `<<` merge
@@ -254,6 +258,15 @@ func (d *Doc) walk(
 	visit func(p *place, cur ast.Node) bool,
 ) (*place, error) {
 	p := &place{path: path, root: path.IsRoot(), index: -1}
+
+	// An empty document holds no value, not even at its root, so no place
+	// of it holds one.
+	if d.node.IsEmpty() {
+		p.bare = true
+
+		return p, nil
+	}
+
 	res := d.node.DocumentResolver()
 	finder := res.EntryFinder()
 	cur := d.node.AST()

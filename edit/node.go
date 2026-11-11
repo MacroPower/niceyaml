@@ -168,6 +168,17 @@ type selected struct {
 // Matches leaves out each place that holds no value, and each place that
 // is a protected value or lies inside one, through any alias or merge key.
 func (d *Doc) matches(path paths.Path) ([]*Node, error) {
+	// An empty document holds no value, but its root is a place where a Set
+	// writes the first value. So `$` selects the root, unless a path of
+	// [WithProtected] protects it, and any other path selects nothing.
+	if d.node.IsEmpty() {
+		if path.IsRoot() && !slices.ContainsFunc(d.cfg.protected, paths.Path.IsRoot) {
+			return []*Node{d.newNode(paths.Doc())}, nil
+		}
+
+		return nil, nil
+	}
+
 	s := &selection{
 		path:   path,
 		seen:   make(map[any]bool),
@@ -1217,7 +1228,9 @@ func (n *Node) Text() string {
 // pass the ctx it got, so the warnings of the decode reach the
 // [niceyaml.Warnings] on the context of [Doc.Apply]. Decode fails on a
 // place that does not hold a value, and through a node that lost its place
-// to an earlier edit, as [Node] describes. Such an error belongs to the
+// to an earlier edit, as [Node] describes. The root of an empty document
+// holds no value, and Decode there returns the zero value, as
+// [niceyaml.Node.Decode] does for that document. Such an error belongs to the
 // Func, so the Apply fails with it only when the Func returns it. Decode
 // returns the error of a call of the Apply after which the text differed
 // from the model, as [Node] describes. That error matches [ErrEngine], and
@@ -1282,7 +1295,9 @@ func (n *Node) Decode[T any](ctx context.Context, opts ...niceyaml.DecodeOption)
 // float64.
 //
 // A Set of a node at a place that does not hold a value fails. So does a
-// Set of a node that lost its place to an earlier edit. Set calls each
+// Set of a node that lost its place to an earlier edit. The root of an
+// empty document encodes as null, because its Decode returns the zero
+// value. Set calls each
 // MarshalYAML method twice, so a Set of a node decodes its value twice. A
 // nil Node encodes as null.
 func (n *Node) MarshalYAML(ctx context.Context) (any, error) {
@@ -1335,7 +1350,12 @@ func (n *Node) doc() (*niceyaml.Node, error) {
 		return nil, err
 	}
 
-	if !p.exists {
+	switch {
+	case p.root && p.bare:
+		// The root of an empty document decodes to the zero value, as
+		// [niceyaml.Source.Documents] describes.
+		return n.d.node, nil
+	case !p.exists:
 		return nil, n.d.fail(n, "%s cannot decode %s, which holds no value", n.d.subject(), n.path)
 	}
 

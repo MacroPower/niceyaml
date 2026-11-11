@@ -25,7 +25,8 @@ import (
 // SetKey leaves the text as it is when a decode reads the key as the
 // string key and a path by key selects the entry already. The key then
 // keeps its text. Otherwise it writes key. A place that does not hold a
-// value stays as it is.
+// value stays as it is, but SetKey fails at the root of an empty document,
+// as at any root.
 //
 // Go-yaml's parser compares keys by their text, as a path names them.
 // SetKey fails when the new key has the text of another key of its
@@ -74,8 +75,9 @@ func (n *Node) setKey(c *modelCall, key string) (renaming, error) {
 	}
 
 	// The text lacks the place, so the rename does nothing, unless a step of
-	// the path reaches a zone of the Apply.
-	if !p.exists {
+	// the path reaches a zone of the Apply. The root of an empty document
+	// holds no value either, but the rename of a root fails.
+	if !p.exists && !p.root {
 		return kept, n.stepProblem()
 	}
 
@@ -446,7 +448,9 @@ func WithReason(reason string) RemoveOption {
 // An entry or an item that starts on the line of the "-" of an item leaves
 // the "-" in place. The next entry or item then takes that line, with its
 // comments. When another comment line lies between the two, the "-" ends
-// its line instead. A place that does not hold a value stays as it is.
+// its line instead. A place that does not hold a value stays as it is. A
+// Remove of the root fails, also at the root of an empty document, which
+// holds no value.
 func (n *Node) Remove(opts ...RemoveOption) error {
 	c := n.d.modelStart(n, "removes "+n.path.String(), false)
 	err := n.remove(opts...)
@@ -470,8 +474,9 @@ func (n *Node) remove(opts ...RemoveOption) error {
 	}
 
 	// The text lacks the place, so the removal does nothing, unless a step
-	// of the path reaches a zone of the Apply.
-	if !p.exists {
+	// of the path reaches a zone of the Apply. The root of an empty document
+	// holds no value either, but the removal of a root fails.
+	if !p.exists && !p.root {
 		return n.stepProblem()
 	}
 
@@ -875,13 +880,14 @@ func (d *Doc) removeBlock(p *place) error {
 // lines with their line breaks, and the blank lines next to them that go
 // with them, as [Doc.blankCut] finds them. A cut of the last lines of the
 // text leaves the text ending as the text of the user ends. When that text
-// lacks a final newline, the line before the cut loses its line break. A
+// lacks a final newline, as [Doc.userBare] tells, the line before the cut
+// loses its line break. A
 // block scalar that needs that line break takes one back, as
 // [Doc.keepStrings] writes it.
 func (d *Doc) lineCut(r region) (int, int) {
 	start, end := d.blankCut(r)
 
-	if end == len(d.cur) && !endsLine(d.orig) && start > 0 {
+	if end == len(d.cur) && d.userBare() && start > 0 {
 		start = d.lineEnd(d.lineOf(start - 1))
 	}
 
@@ -1155,7 +1161,7 @@ func (d *Doc) contentBefore(line int) bool {
 // isHeader reports whether text, a line without the spaces around it, is
 // a "---" document header or a directive.
 func isHeader(text string) bool {
-	return text == "---" || strings.HasPrefix(text, "--- ") || strings.HasPrefix(text, "%")
+	return text == headerMarker || strings.HasPrefix(text, headerMarker+" ") || strings.HasPrefix(text, "%")
 }
 
 // isEndMarker reports whether text, a line without the spaces around it,

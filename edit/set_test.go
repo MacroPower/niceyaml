@@ -14,6 +14,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/edit"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -2690,6 +2691,273 @@ func (c countMarshaler) MarshalYAML() (any, error) {
 	}
 
 	return c - 1, nil
+}
+
+func TestNode_Set_Empty(t *testing.T) {
+	t.Parallel()
+
+	port := paths.Doc().Child("server", "port")
+
+	// A Set in an empty document writes its first value at the end of the
+	// text, after its comment lines and before a "..." marker.
+	tcs := map[string]struct {
+		value  any
+		before string
+		path   paths.Path
+		opts   []edit.SetOption
+		want   string
+		err    string
+		// The index of the document among the documents of before.
+		doc int
+	}{
+		"path of names in an empty text": {
+			before: "",
+			path:   port,
+			value:  8080,
+			want:   "server:\n  port: 8080\n",
+		},
+		"path of names after a comment": {
+			before: "# myapp config\n",
+			path:   port,
+			value:  8080,
+			want:   "# myapp config\nserver:\n  port: 8080\n",
+		},
+		"commented template with CRLF line breaks": {
+			before: "# myapp config\r\n# server:\r\n#   port: 80\r\n",
+			path:   port,
+			value:  8080,
+			want:   "# myapp config\r\n# server:\r\n#   port: 80\r\nserver:\r\n  port: 8080\r\n",
+		},
+		"comment without a final newline": {
+			before: "# c",
+			path:   port,
+			value:  8080,
+			want:   "# c\nserver:\n  port: 8080",
+		},
+		"block scalar after a comment without a final newline": {
+			// The scalar keeps the line break that ends its string.
+			before: "# c",
+			path:   paths.Doc(),
+			value:  "a\nb\n",
+			want:   "# c\n|\n  a\n  b\n",
+		},
+		"header": {
+			before: "--- # c\n",
+			path:   port,
+			value:  8080,
+			want:   "--- # c\nserver:\n  port: 8080\n",
+		},
+		"before the end marker": {
+			before: "%YAML 1.2\n---\n...\n",
+			path:   port,
+			value:  8080,
+			want:   "%YAML 1.2\n---\nserver:\n  port: 8080\n...\n",
+		},
+		"before the end marker and the comments after it": {
+			before: "# a\n...\n# b\n",
+			path:   paths.Doc().Child("a"),
+			value:  1,
+			want:   "# a\na: 1\n...\n# b\n",
+		},
+		"document between two documents": {
+			// The comment lines before the next header belong to the document.
+			before: "a: 1\n---\n# c\n---\nb: 2\n",
+			doc:    1,
+			path:   port,
+			value:  8080,
+			want:   "---\n# c\nserver:\n  port: 8080\n",
+		},
+		"scalar at the root": {
+			before: "# c\n",
+			path:   paths.Doc(),
+			value:  8080,
+			want:   "# c\n8080\n",
+		},
+		"mapping at the root": {
+			before: "# c\n",
+			path:   paths.Doc(),
+			value:  map[string]any{"a": []any{1, map[string]any{"b": 2}}},
+			want:   "# c\na:\n  - 1\n  - b: 2\n",
+		},
+		"sequence at the root": {
+			before: "# c\n",
+			path:   paths.Doc(),
+			value:  []any{1, 2},
+			want:   "# c\n- 1\n- 2\n",
+		},
+		"null at the root": {
+			before: "# c\n",
+			path:   paths.Doc(),
+			value:  nil,
+			want:   "# c\nnull\n",
+		},
+		"flow at the root": {
+			before: "# c\n",
+			path:   paths.Doc(),
+			value:  map[string]any{"a": 1},
+			opts:   []edit.SetOption{edit.Flow()},
+			want:   "# c\n{a: 1}\n",
+		},
+		"flow below the mappings of the path": {
+			before: "# c\n",
+			path:   port,
+			value:  map[string]any{"a": 1},
+			opts:   []edit.SetOption{edit.Flow()},
+			want:   "# c\nserver:\n  port: {a: 1}\n",
+		},
+		"first entry": {
+			before: "# c\n",
+			path:   port,
+			value:  1,
+			opts:   []edit.SetOption{edit.First()},
+			want:   "# c\nserver:\n  port: 1\n",
+		},
+		"placement at the root": {
+			// A Set of $ places no entry.
+			before: "# c\n",
+			path:   paths.Doc(),
+			value:  1,
+			opts:   []edit.SetOption{edit.Before("q")},
+			want:   "# c\n1\n",
+		},
+		"entry before a key": {
+			before: "# c\n",
+			path:   port,
+			value:  1,
+			opts:   []edit.SetOption{edit.Before("q")},
+			err:    `test.yaml: $: cafe.jacobcolvin.com/v1 sets $.server.port before "q", but the document holds no $.q`,
+		},
+		"item of a root sequence": {
+			before: "# c\n",
+			path:   paths.Doc().Index(0),
+			value:  1,
+			err:    "test.yaml: $: cafe.jacobcolvin.com/v1 sets $[0], but the document holds no $",
+		},
+		"item below a name": {
+			before: "# c\n",
+			path:   paths.Doc().Child("a").Index(0),
+			value:  1,
+			err:    "test.yaml: $: cafe.jacobcolvin.com/v1 sets $.a[0], but the document holds no $",
+		},
+		"tag alone": {
+			before: "!!str",
+			path:   port,
+			value:  1,
+			err:    "test.yaml: $: cafe.jacobcolvin.com/v1 sets $.server.port, but the document holds !!str without a value",
+		},
+		"tag after a header": {
+			before: "--- !t",
+			path:   paths.Doc(),
+			value:  1,
+			err:    "test.yaml:1:1: $: cafe.jacobcolvin.com/v1 sets $, but the document holds !t without a value",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			src := niceyaml.NewSourceFromString(tc.before, niceyaml.WithName("test.yaml"))
+
+			d, err := edit.New(src.AllDocuments()[tc.doc])
+			require.NoError(t, err)
+
+			err = d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, n *edit.Node) error {
+				return n.At(tc.path).Set(ctx, tc.value, tc.opts...)
+			}, label)
+
+			if tc.err != "" {
+				require.Error(t, err)
+				assert.True(t, niceyaml.IsInvalid(err))
+				require.NotErrorIs(t, err, edit.ErrEngine)
+				assert.Contains(t, niceyaml.FormatError(err), tc.err)
+				assert.Equal(t, tc.before, d.Text())
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, d.Text())
+
+			// The file holds the first value, and New takes it again.
+			text, err := edit.FileText(src, d)
+			require.NoError(t, err)
+
+			_, err = edit.New(niceyaml.NewSourceFromString(text).AllDocuments()[tc.doc])
+			require.NoError(t, err)
+		})
+	}
+
+	t.Run("second set of the root", func(t *testing.T) {
+		t.Parallel()
+
+		d, err := edit.New(yamltest.FirstDocument(t, "# c\n", niceyaml.WithName("test.yaml")))
+		require.NoError(t, err)
+
+		err = d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, n *edit.Node) error {
+			require.NoError(t, n.At(port).Set(ctx, 1))
+			require.NoError(t, n.At(paths.Doc().Child("server", "host")).Set(ctx, "h"))
+
+			return n.Set(ctx, 2)
+		}, label)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "cafe.jacobcolvin.com/v1 replaces the root of the document")
+		assert.Equal(t, "# c\n", d.Text())
+	})
+
+	t.Run("protected path", func(t *testing.T) {
+		t.Parallel()
+
+		d, err := edit.New(yamltest.FirstDocument(t, "# c\n", niceyaml.WithName("test.yaml")),
+			edit.WithProtected(paths.Doc().Child("server")))
+		require.NoError(t, err)
+
+		err = d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, n *edit.Node) error {
+			return n.Set(ctx, map[string]any{"server": 1})
+		}, label)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "cafe.jacobcolvin.com/v1 sets $, which creates the protected value $.server")
+	})
+}
+
+func TestNode_Insert_Empty(t *testing.T) {
+	t.Parallel()
+
+	// An empty document holds no sequence, so an Insert fails at the root.
+	tcs := map[string]struct {
+		call func(ctx context.Context, n *edit.Node) error
+		err  string
+	}{
+		"insert": {
+			call: func(ctx context.Context, n *edit.Node) error {
+				return n.At(paths.Doc().Index(0)).Insert(ctx, 1)
+			},
+			err: "cafe.jacobcolvin.com/v1 inserts $[0], but the document holds no $",
+		},
+		"insert below a name": {
+			call: func(ctx context.Context, n *edit.Node) error {
+				return n.At(paths.Doc().Child("a").Index(0)).Insert(ctx, 1)
+			},
+			err: "cafe.jacobcolvin.com/v1 inserts $.a[0], but the document holds no $",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d, err := edit.New(yamltest.FirstDocument(t, "# c\n"))
+			require.NoError(t, err)
+
+			err = d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, n *edit.Node) error {
+				return tc.call(ctx, n)
+			}, label)
+			require.Error(t, err)
+			assert.True(t, niceyaml.IsInvalid(err))
+			assert.Contains(t, err.Error(), tc.err)
+			assert.Equal(t, "# c\n", d.Text())
+		})
+	}
 }
 
 func TestNode_Set_CreatedPlace(t *testing.T) {

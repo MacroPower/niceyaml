@@ -1739,3 +1739,85 @@ func TestNode_Move_Index(t *testing.T) {
 		})
 	}
 }
+
+func TestNode_Move_Empty(t *testing.T) {
+	t.Parallel()
+
+	// A Move at the root of an empty document fails as at any root, and a
+	// Move below it leaves the text as it is.
+	tcs := map[string]struct {
+		path paths.Path
+		err  string
+	}{
+		"root": {
+			path: paths.Doc(),
+			err:  "cafe.jacobcolvin.com/v1 moves the root of the document",
+		},
+		"place below the root": {
+			path: paths.Doc().Child("a"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d := newDoc(t, "# c\n")
+
+			err := d.Apply(t.Context(), paths.Doc(), func(_ context.Context, n *edit.Node) error {
+				return n.At(tc.path).Move(paths.Doc().Child("x"))
+			}, label)
+
+			requireEdit(t, d, err, tc.err, "# c\n")
+		})
+	}
+}
+
+func TestNode_Move_AfterFirstWrite(t *testing.T) {
+	t.Parallel()
+
+	// The first write gives an empty text a final newline, so a Move that
+	// cuts the last lines after it keeps that line break, as in any text
+	// that ends with one.
+	tcs := map[string]struct {
+		text string
+		want string
+	}{
+		"empty text": {
+			want: "a:\n  x: 1\n  z: 2\n",
+		},
+		"comment": {
+			text: "# c\n",
+			want: "# c\na:\n  x: 1\n  z: 2\n",
+		},
+		"comment without a final newline": {
+			text: "# c",
+			want: "# c\na:\n  x: 1\n  z: 2",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d := newDoc(t, tc.text)
+
+			err := d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, n *edit.Node) error {
+				return n.At(paths.Doc().Child("a", "x")).Set(ctx, 1)
+			}, label)
+			require.NoError(t, err)
+
+			err = d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, n *edit.Node) error {
+				return n.At(paths.Doc().Child("b")).Set(ctx, 2)
+			}, label)
+			require.NoError(t, err)
+
+			err = d.Apply(t.Context(), paths.Doc(), func(_ context.Context, n *edit.Node) error {
+				return n.At(paths.Doc().Child("b")).Move(paths.Doc().Child("a", "z"))
+			}, label)
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.want, d.Text())
+		})
+	}
+}
