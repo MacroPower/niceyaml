@@ -2538,6 +2538,7 @@ func TestNode_Set_Unsupported(t *testing.T) {
 
 			require.ErrorAs(t, err, &u)
 			require.Equal(t, tc.construct, u.Construct)
+			assertFix(t, err, u)
 			require.True(t, u.InValue)
 			require.Empty(t, u.Related)
 			require.False(t, niceyaml.IsInvalid(err))

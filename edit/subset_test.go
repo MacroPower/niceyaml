@@ -1150,6 +1150,7 @@ func TestNew_Unsupported(t *testing.T) {
 			}
 
 			assert.Equal(t, tc.construct, unsupported.Construct)
+			assertFix(t, err, unsupported)
 			assert.False(t, unsupported.InValue)
 			assert.Equal(t, append([]string{}, tc.related...), related)
 			assert.True(t, niceyaml.IsInvalid(err))
@@ -3537,6 +3538,7 @@ func TestDoc_Apply_Unsupported(t *testing.T) {
 			}
 
 			assert.Equal(t, tc.construct, unsupported.Construct)
+			assertFix(t, err, unsupported)
 			assert.Equal(t, tc.inValue, unsupported.InValue)
 			assert.Equal(t, append([]string{}, tc.related...), related)
 			assert.Equal(t, !tc.inValue, niceyaml.IsInvalid(err))
@@ -4018,6 +4020,7 @@ func TestDoc_Apply_Merge(t *testing.T) {
 			}
 
 			assert.Equal(t, tc.construct, unsupported.Construct)
+			assertFix(t, err, unsupported)
 			assert.Equal(t, tc.inValue, unsupported.InValue)
 			assert.Equal(t, tc.related, related)
 			assert.Equal(t, !tc.inValue, niceyaml.IsInvalid(err))
@@ -4275,6 +4278,7 @@ func TestDoc_Apply_AliasCopy(t *testing.T) {
 			}
 
 			assert.Equal(t, edit.ConstructAliasCopy, unsupported.Construct)
+			assertFix(t, err, unsupported)
 			assert.False(t, unsupported.InValue)
 			assert.Equal(t, append([]string{}, tc.related...), related)
 			assert.True(t, niceyaml.IsInvalid(err))
