@@ -3365,6 +3365,12 @@ func TestPrinter_With(t *testing.T) {
 	assert.Equal(t, 40, base.With(printer.WithContainerWidth(40)).ContainerWidth())
 	assert.Equal(t, 0, base.With(printer.WithContainerWidth(-1)).ContainerWidth())
 
+	// A negative tab width draws the picture, and TabWidth reports that
+	// as 0.
+	assert.Equal(t, 0, base.TabWidth())
+	assert.Equal(t, 4, base.With(printer.WithTabWidth(4)).TabWidth())
+	assert.Equal(t, 0, base.With(printer.WithTabWidth(-4)).TabWidth())
+
 	// The receiver still renders on one line.
 	assert.Equal(t, "key: this is a very long value that should wrap", base.Print(source.View()))
 
@@ -3372,6 +3378,157 @@ func TestPrinter_With(t *testing.T) {
 	styled := base.With(printer.WithStyles(yamltest.NewXMLStyles()))
 	assert.Contains(t, styled.Print(source.View()), "<nameTag>key</nameTag>")
 	assert.NotContains(t, base.Print(source.View()), "<nameTag>")
+}
+
+func TestWithTabWidth(t *testing.T) {
+	t.Parallel()
+
+	// The tabs of the Makefile sit at columns 4 and 5 of the last line, so
+	// "echo" starts at column 6.
+	makefile := stringtest.LinesLF(
+		"data:",
+		"  Makefile: |",
+		"    build:",
+		"    \tgo build ./...",
+		"    \t\techo done",
+	)
+
+	echo := line.Annotation{Content: "here", Placement: line.Below, Cols: position.NewSpan(6, 10)}
+
+	tcs := map[string]struct {
+		annotation *line.Annotation
+		input      string
+		overlays   []position.Range
+		want       string
+		tabWidth   int
+		wrap       int
+	}{
+		"default draws the picture": {
+			input:      makefile,
+			annotation: &echo,
+			want: stringtest.JoinLF(
+				"data:",
+				"  Makefile: |",
+				"    build:",
+				"    ␉go build ./...",
+				"    ␉␉echo done",
+				"      ^^^^ here",
+			),
+		},
+		"negative width draws the picture": {
+			input:    "k: \"a\tb\"",
+			tabWidth: -4,
+			want:     "k: \"a␉b\"",
+		},
+		"tabs reach the next stop": {
+			input:      makefile,
+			tabWidth:   4,
+			annotation: &echo,
+			want: stringtest.JoinLF(
+				"data:",
+				"  Makefile: |",
+				"    build:",
+				"        go build ./...",
+				"            echo done",
+				"            ^^^^ here",
+			),
+		},
+		"tab before a stop takes one cell": {
+			input:    "k: \"abc\td\"",
+			tabWidth: 4,
+			want:     "k: \"abc d\"",
+		},
+		"carets cover the cells of a tab": {
+			input:      "k: \"a\tb\"",
+			tabWidth:   4,
+			annotation: &line.Annotation{Content: "tab", Placement: line.Below, Cols: position.NewSpan(5, 6)},
+			want: stringtest.JoinLF(
+				"k: \"a   b\"",
+				"     ^^^ tab",
+			),
+		},
+		"spaces take the colors of the overlay but not its transform": {
+			input:    "k: a\tb",
+			tabWidth: 4,
+			overlays: []position.Range{yamltest.LineRange(0, 3, 6)},
+			want:     "k: [a]    [b]",
+		},
+		"wrapped row keeps the tab cells of the line": {
+			input:      "k: |\n  ab\tcd\tef\tgh\tij\n",
+			tabWidth:   4,
+			wrap:       14,
+			annotation: &line.Annotation{Content: "x", Placement: line.Below, Cols: position.NewSpan(14, 15)},
+			want: stringtest.JoinLF(
+				"k: |",
+				"  ab    cd  ef",
+				"gh  ij",
+				"    ^ x",
+			),
+		},
+		// The tab at the break would take cells 4 through 7 of the line,
+		// but the wrap drops it as it drops a space, so its label gets one
+		// caret. The text wraps to a row of its own.
+		"wrapped row gives a label on a dropped tab a single caret": {
+			input:      "k: |\n  ab\tcdefgh\n",
+			tabWidth:   4,
+			wrap:       6,
+			annotation: &line.Annotation{Content: "x", Placement: line.Below, Cols: position.NewSpan(4, 5)},
+			want: stringtest.JoinLF(
+				"k: |",
+				"  ab",
+				"    ^",
+				"x",
+				"cdefgh",
+			),
+		},
+		"wrapped row measures its tabs from the cell it starts at": {
+			input:      "k: |\n  abcdefghij k\tl\n",
+			tabWidth:   4,
+			wrap:       12,
+			annotation: &line.Annotation{Content: "x", Placement: line.Below, Cols: position.NewSpan(15, 16)},
+			want: stringtest.JoinLF(
+				"k: |",
+				"  abcdefghij",
+				"k  l",
+				"   ^ x",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			view := niceyaml.NewSourceFromString(tc.input).View()
+			view.AddOverlay(testOverlayHighlight, tc.overlays...)
+
+			if tc.annotation != nil {
+				view.AnnotateLine(view.Count()-1, *tc.annotation)
+			}
+
+			p := testPrinter().With(printer.WithTabWidth(tc.tabWidth), printer.WithWrapWidth(tc.wrap))
+
+			assert.Equal(t, tc.want, p.Print(view))
+		})
+	}
+
+	t.Run("spaces take the colors of the overlay", func(t *testing.T) {
+		t.Parallel()
+
+		highlight := lipgloss.NewStyle().Background(lipgloss.Color("#ff00ff")).Bold(true)
+		p := testPrinterWithStyles(
+			style.Set(testOverlayHighlight, highlight.Transform(func(s string) string { return "[" + s + "]" })),
+		).With(printer.WithTabWidth(4))
+
+		view := niceyaml.NewSourceFromString("k: a\tb").View()
+		view.AddOverlay(testOverlayHighlight, yamltest.LineRange(0, 3, 6))
+
+		// The spaces of the tab carry the background and the attribute of
+		// the overlay. The brackets of its transform wrap only the text
+		// around them.
+		want := "k: " + highlight.Render("[a]") + highlight.Render("    ") + highlight.Render("[b]")
+		assert.Equal(t, want, p.Print(view))
+	})
 }
 
 func TestWithFlagBlend(t *testing.T) {
@@ -3910,6 +4067,7 @@ func TestDefaultAnnotation(t *testing.T) {
 		overlays    line.Overlays
 		rowStarts   []int
 		rowEnds     []int
+		tabWidth    int
 		above       bool // The context sits above the line rather than below it.
 		want        []printer.AnnotationRow
 	}{
@@ -4234,6 +4392,43 @@ func TestDefaultAnnotation(t *testing.T) {
 			rowEnds:     []int{-1},
 			want:        []printer.AnnotationRow{{Col: 0, Marker: "^"}},
 		},
+		// The tab takes cells 2 through 3 of the whole line. A tab width
+		// draws it as spaces, which the wrap drops before the row that
+		// starts at column 3, so the first row ends before the tab.
+		"wrapped content without ends drops a tab before a row start": {
+			content:     "ab\tcdef",
+			annotations: line.Annotations{below(1, 4, "x")},
+			rowStarts:   []int{0, 3},
+			tabWidth:    4,
+			want: []printer.AnnotationRow{
+				{Col: 1, Marker: "^ ", Text: "x"},
+				{Col: 3, Marker: "^"},
+			},
+		},
+		"wrapped content without ends keeps a tab picture before a row start": {
+			content:     "ab\tcdef",
+			annotations: line.Annotations{below(1, 4, "x")},
+			rowStarts:   []int{0, 3},
+			want: []printer.AnnotationRow{
+				{Col: 1, Marker: "^^ ", Text: "x"},
+				{Col: 3, Marker: "^"},
+			},
+		},
+		"wrapped content gives a label on a dropped tab a single caret": {
+			content:     "ab\tcdef",
+			annotations: line.Annotations{below(2, 3, "x")},
+			rowStarts:   []int{0, 3},
+			tabWidth:    4,
+			want:        []printer.AnnotationRow{{Col: 2, Marker: "^ ", Text: "x"}},
+		},
+		// The ideographic space takes two cells, but the wrap drops it at
+		// the break, so it takes no cell of the output.
+		"wrapped content gives a label on a dropped wide space a single caret": {
+			content:     "ab　cd",
+			annotations: line.Annotations{below(2, 3, "x")},
+			rowStarts:   []int{0, 3},
+			want:        []printer.AnnotationRow{{Col: 2, Marker: "^ ", Text: "x"}},
+		},
 		"wrapped content clamps negative row starts without ends": {
 			content:     "abc",
 			annotations: line.Annotations{below(0, 3, "")},
@@ -4258,6 +4453,7 @@ func TestDefaultAnnotation(t *testing.T) {
 				RowStarts:   tc.rowStarts,
 				RowEnds:     tc.rowEnds,
 				Placement:   placement,
+				TabWidth:    tc.tabWidth,
 			})
 			assert.Equal(t, tc.want, got)
 		})
@@ -5879,11 +6075,15 @@ func TestAnnotationContext_ColWidth(t *testing.T) {
 	// the end stops at line.MaxColPastEnd columns past it. TestColWidth
 	// covers the columns within that bound.
 	tcs := map[string]struct {
-		content string
-		col     int
-		want    int
+		content  string
+		col      int
+		tabWidth int
+		want     int
 	}{
 		"negative":             {content: "abc", col: -5, want: 0},
+		"negative with tabs":   {content: "\tabc", col: -5, tabWidth: 4, want: 0},
+		"tab picture":          {content: "\t\tx", col: 2, want: 2},
+		"tab width":            {content: "a\t\tx", col: 3, tabWidth: 4, want: 8},
 		"in range":             {content: "k: 日本 x", col: 5, want: 7},
 		"at the bound":         {content: "abc", col: 3 + line.MaxColPastEnd, want: 3 + line.MaxColPastEnd},
 		"past the bound":       {content: "abc", col: 2000, want: 3 + line.MaxColPastEnd},
@@ -5895,7 +6095,8 @@ func TestAnnotationContext_ColWidth(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, printer.AnnotationContext{Content: tc.content}.ColWidth(tc.col))
+			ctx := printer.AnnotationContext{Content: tc.content, TabWidth: tc.tabWidth}
+			assert.Equal(t, tc.want, ctx.ColWidth(tc.col))
 		})
 	}
 }

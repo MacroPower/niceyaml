@@ -19,6 +19,7 @@ func TestRow(t *testing.T) {
 
 	tcs := map[string]struct {
 		content string
+		tabs    cells.Tabs
 		// Zero measures the zero Row in place of NewRow(content).
 		zero      bool
 		col       int
@@ -31,11 +32,43 @@ func TestRow(t *testing.T) {
 		"negative clamps to a wide start": {content: "日本", col: -1, wantStart: 0, wantCells: 2, wantWidth: 0},
 		"control character":               {content: "a\tb", col: 1, wantStart: 1, wantCells: 1, wantWidth: 1},
 		"wide rune":                       {content: "k: 日本", col: 4, wantStart: 4, wantCells: 2, wantWidth: 5},
-		"cluster start":                   {content: zwjRow, col: 3, wantStart: 3, wantCells: 2, wantWidth: 3},
-		"zwj joiner":                      {content: zwjRow, col: 4, wantStart: 3, wantCells: 0, wantWidth: 3},
-		"second zwj emoji":                {content: zwjRow, col: 5, wantStart: 3, wantCells: 0, wantWidth: 3},
-		"after a zwj sequence":            {content: zwjRow, col: 7, wantStart: 7, wantCells: 1, wantWidth: 6},
-		"past the end":                    {content: "a: b", col: 6, wantStart: 6, wantCells: 1, wantWidth: 6},
+		"tab to the next stop": {
+			content: "a\tb", tabs: cells.Tabs{Width: 4}, col: 1,
+			wantStart: 1, wantCells: 3, wantWidth: 1,
+		},
+		"after a tab": {
+			content: "a\tb", tabs: cells.Tabs{Width: 4}, col: 2,
+			wantStart: 2, wantCells: 1, wantWidth: 4,
+		},
+		"tab at a stop takes a full width": {
+			content: "\t\tb", tabs: cells.Tabs{Width: 4}, col: 2,
+			wantStart: 2, wantCells: 1, wantWidth: 8,
+		},
+		"tab before a stop takes one cell": {
+			content: "abc\td", tabs: cells.Tabs{Width: 4}, col: 3,
+			wantStart: 3, wantCells: 1, wantWidth: 3,
+		},
+		"tab after a wide rune": {
+			content: "日\tb", tabs: cells.Tabs{Width: 4}, col: 2,
+			wantStart: 2, wantCells: 1, wantWidth: 4,
+		},
+		"tab stops count from start": {
+			content: "a\tb", tabs: cells.Tabs{Width: 4, Start: 2}, col: 2,
+			wantStart: 2, wantCells: 1, wantWidth: 2,
+		},
+		"negative start counts as zero": {
+			content: "a\tb", tabs: cells.Tabs{Width: 4, Start: -3}, col: 2,
+			wantStart: 2, wantCells: 1, wantWidth: 4,
+		},
+		"negative tab width draws the picture": {
+			content: "a\tb", tabs: cells.Tabs{Width: -1}, col: 2,
+			wantStart: 2, wantCells: 1, wantWidth: 2,
+		},
+		"cluster start":        {content: zwjRow, col: 3, wantStart: 3, wantCells: 2, wantWidth: 3},
+		"zwj joiner":           {content: zwjRow, col: 4, wantStart: 3, wantCells: 0, wantWidth: 3},
+		"second zwj emoji":     {content: zwjRow, col: 5, wantStart: 3, wantCells: 0, wantWidth: 3},
+		"after a zwj sequence": {content: zwjRow, col: 7, wantStart: 7, wantCells: 1, wantWidth: 6},
+		"past the end":         {content: "a: b", col: 6, wantStart: 6, wantCells: 1, wantWidth: 6},
 		"max column after wide runes saturates": {
 			content:   "k: 日本語",
 			col:       math.MaxInt,
@@ -52,7 +85,7 @@ func TestRow(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			row := cells.NewRow(tc.content)
+			row := cells.NewRow(tc.content, tc.tabs)
 			if tc.zero {
 				row = cells.Row{}
 			}
@@ -69,12 +102,15 @@ func TestRowCol(t *testing.T) {
 
 	tcs := map[string]struct {
 		content string
+		tabs    cells.Tabs
 		// Zero maps the cell on the zero Row in place of NewRow(content).
 		zero bool
 		lo   int
 		cell int
 		want int
 	}{
+		"inside a tab":                    {content: "a\tb", tabs: cells.Tabs{Width: 4}, lo: 0, cell: 2, want: 2},
+		"after a tab":                     {content: "a\tb", tabs: cells.Tabs{Width: 4}, lo: 0, cell: 4, want: 2},
 		"ascii":                           {content: "a: b", lo: 0, cell: 2, want: 2},
 		"wide rune start":                 {content: "k: 日本", lo: 0, cell: 3, want: 3},
 		"inside a wide rune":              {content: "k: 日本", lo: 0, cell: 4, want: 4},
@@ -101,7 +137,7 @@ func TestRowCol(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			row := cells.NewRow(tc.content)
+			row := cells.NewRow(tc.content, tc.tabs)
 			if tc.zero {
 				row = cells.Row{}
 			}
@@ -135,7 +171,7 @@ func TestRowNext(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, cells.NewRow(tc.content).Next(tc.col))
+			assert.Equal(t, tc.want, cells.NewRow(tc.content, cells.Tabs{}).Next(tc.col))
 		})
 	}
 }

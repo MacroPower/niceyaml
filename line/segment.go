@@ -24,7 +24,9 @@ type Segment struct {
 	// before any escaping its format needs. The text then cannot move the
 	// cursor of a terminal, and each control character takes the one cell
 	// that [go.jacobcolvin.com/niceyaml/printer.ColWidth] and the caret
-	// rows count for it.
+	// rows count for it. A printer with
+	// [go.jacobcolvin.com/niceyaml/printer.WithTabWidth] draws each tab as
+	// the spaces up to its tab stop instead.
 	Text string
 	// Kind is the kind of the token the text belongs to, as [Line.Kind]
 	// reads it, or [kind.Text] for the whitespace a token carries before
