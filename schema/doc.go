@@ -106,10 +106,11 @@
 // returns for the schema. A validator of the program's own can therefore
 // run the schema on each element of a list and return those errors.
 //
-// [Schema.ValidateValue] checks decoded data that did not come from a
-// document, such as the body of a request. The text of its error names
-// the path of each violation from the value, so a program prints or
-// returns the error as it is:
+// [Schema.ValidateValue] checks a Go value, such as the body of a request
+// or a configuration that the program changed after its decode. It checks
+// a struct as the document that the encoder writes for it. The text of
+// its error names the path of each violation from the value, so a program
+// prints or returns the error as it is:
 //
 //	2 schema violations
 //	$.port: 0 is less than 1

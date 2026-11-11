@@ -3,7 +3,9 @@ package schema
 import (
 	"bytes"
 	"context"
+	"encoding"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -19,18 +21,21 @@ import (
 	"go.jacobcolvin.com/x/jsonschema"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/encoder"
 	"go.jacobcolvin.com/niceyaml/internal/aliaslimit"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/datapath"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 	"go.jacobcolvin.com/niceyaml/internal/mapkey"
+	"go.jacobcolvin.com/niceyaml/internal/taggedscalar"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
 var (
 	// ErrValidate indicates an unexpected, non-validation failure while
-	// validating against a schema, such as a reference resolution problem.
+	// validating against a schema, such as a reference resolution problem
+	// or a Go value that the encoder does not write.
 	// A [Schema] returns each schema constraint violation as a
 	// [*niceyaml.Error] with path information. Such an error matches
 	// [ErrViolation] and does not wrap this sentinel. [niceyaml.IsInvalid]
@@ -51,12 +56,14 @@ var (
 	// validation could not run, does not match ErrViolation.
 	ErrViolation = errors.New("schema violation")
 
-	// ErrExcessiveAliasing indicates a value that shares maps, slices, or
-	// byte slices so heavily that validating it reads far more data than
-	// the value holds. Aliases in a YAML document make a decode share them
-	// that way. ErrExcessiveAliasing also indicates a document whose
-	// aliases make the decoder itself read that much. [Schema.Check] and
-	// [Schema.ValidateValue] return it. A [matcher.Content] or
+	// ErrExcessiveAliasing indicates a value that shares pointers, maps,
+	// slices, or byte slices so heavily that validating it reads far more
+	// data than the value holds. Aliases in a YAML document make a decode
+	// share them that way. ErrExcessiveAliasing also indicates a document
+	// whose aliases make the decoder itself read that much. The text that
+	// the encoder writes for a typed value is such a document when its
+	// aliases expand that far. [Schema.Check] and [Schema.ValidateValue]
+	// return it. A [matcher.Content] or
 	// [matcher.Text] guard refuses such a document with it too, and
 	// [Registry.Lookup] then returns it wrapped together with [ErrResolve].
 	// The document or the value is at fault in every case, so
@@ -81,6 +88,10 @@ var (
 	// matches it through the [*Deprecation] that it wraps. [errors.As]
 	// finds the Deprecation itself, which names each schema.
 	ErrDeprecated = errors.New("deprecated")
+
+	// The error for a value that made the encoder panic wraps
+	// errEncoderPanic.
+	errEncoderPanic = errors.New("encoder panic")
 
 	// AcceptAll is the [*Schema] that passes every document and value without
 	// reading it. For the directive "$schema=none", [Directive] names a
@@ -491,12 +502,15 @@ func FromJSONSchema(v *jsonschema.Validator) *Schema {
 //
 // [Schema.Check] checks a node. The root [niceyaml.Node] of a document
 // stands for the whole document, and a Node from [niceyaml.Node.At]
-// stands for one value inside it. [Schema.ValidateValue] checks decoded
-// data that did not come from a document, such as the body of a request.
-// The text of its error names the path of each violation. A caller that
-// knows where the data stands in a document places that error there with
-// [niceyaml.Rebase] and [niceyaml.Node.Bind]. It places the warnings the
-// same way, as the Placement section of ValidateValue describes.
+// stands for one value inside it. [Schema.ValidateValue] checks a Go
+// value, such as the body of a request or a configuration that the
+// program changed after its decode. It checks a typed value as the
+// document that the encoder writes for it, so each path names a key of
+// that document. [niceyaml.Node.Bind] then places the result. The text of
+// its error names the path of each violation. A caller that knows where
+// the value stands inside a document places that error there with
+// [niceyaml.Rebase] and Node.Bind. It places the warnings the same way,
+// as the Placement section of ValidateValue describes.
 //
 // A Schema is the validator for a program that holds one schema and
 // compiles it itself. It is also a [Resolver] that names itself for every
@@ -860,11 +874,12 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 	return n.Bind(err)
 }
 
-// ValidateValue checks data, the decoded form of a YAML value, against the
-// schema. The value holds the types a decode into any yields: maps with
-// string keys, slices, strings, bools, nil, and numbers, nested as the
-// document nests them. The validator reads the data as JSON does, so it
-// does not accept a Go struct.
+// ValidateValue checks data, a Go value, against the schema. Data that
+// holds only the types a decode into any yields checks as it is. Those
+// types are maps with string keys, slices, strings, bools, nil, and
+// numbers, nested as a document nests them. Any other value passes when
+// the document that [encoder.Marshal] writes for it passes
+// [Schema.Check], as the Typed Values section describes.
 //
 // ValidateValue returns nil when data conforms. For a value that breaks a
 // constraint, it returns a [*niceyaml.SourceError] that is not bound to a
@@ -888,6 +903,41 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 // [niceyaml.WithYAMLOrderedMaps] yields for each mapping becomes a map
 // with the same members. Where two items share a key, the later one wins,
 // as it does in a decode into a map.
+//
+// # Typed Values
+//
+// A struct, a pointer, a typed map or slice, and a named scalar each check
+// as the document that encoder.Marshal writes for them. Such a value can
+// stand at the top of data or anywhere inside a map or slice of the
+// decoded form. ValidateValue decodes that document into any and checks
+// the result in place of the value. Each path then names a key as the
+// document does, by the yaml tag of a field. The document that the value
+// came from thus places each violation:
+//
+//	cfg.Listen.Port = 99999 // from the environment, after the decode
+//
+//	return doc.Bind(s.ValidateValue(ctx, &cfg))
+//
+// The bound error reads "svc.yaml:3:9: $.listen.port: 99999 is greater
+// than 65535".
+//
+// The encoded form is not the document. The encoder drops a field with
+// omitempty or omitzero that holds its zero value, so required reports
+// that field even where the document wrote the zero. A field without
+// either option appears with its zero value, so a keyword such as
+// minLength checks it even where the document left the key out. The
+// encoder writes a []byte inside a typed value as a sequence of integers.
+// Such a []byte thus does not check as the base64 text that a !!binary
+// scalar decodes to, or that a []byte in the decoded form converts to.
+// The encoder writes some floats, such as 1000000.0 and 0.00001, in
+// exponent form without a fraction (1e+06, 1e-05). The decode reads that
+// text as a string, so a type or number keyword reports such a field.
+// Each call costs one encode and one decode for each typed value in data.
+//
+// ValidateValue does not take encoder options. A type that writes its
+// YAML through [encoder.WithMarshalers] thus encodes without that
+// marshaler. A caller that needs the options passes them to
+// encoder.Marshal, decodes the text into any, and checks the result.
 //
 // # Violations
 //
@@ -990,17 +1040,46 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 //
 // # Rejected Data
 //
-// ValidateValue rejects some data before it checks anything. For a map or
-// slice that contains itself, it returns an error wrapping [ErrValidate].
-// YAML aliases make a decode share maps, slices, and byte slices. For a
-// value whose shared parts expand past the alias limit, ValidateValue
-// returns an error matching [ErrExcessiveAliasing]. The value is at fault
-// for that error, so [niceyaml.IsInvalid] reports it, and it does not
-// wrap [ErrValidate].
+// ValidateValue rejects some data before it checks anything. For a map,
+// slice, or pointer that contains itself, it returns an error wrapping
+// [ErrValidate]. For a typed value that the encoder does not write, such
+// as a channel, ValidateValue returns an error wrapping ErrValidate with
+// the error of the encoder in its chain. The encoder panics on some
+// values, such as a struct that embeds an unexported named slice. For
+// such a value, ValidateValue returns an error wrapping ErrValidate with
+// the panic value in its text. It also returns an error
+// wrapping ErrValidate when the text that the encoder writes does not
+// decode, such as the text of a string that is not UTF-8. The text of
+// that error names the problem.
+//
+// YAML aliases make a decode share maps, slices, and byte slices. A typed
+// value can share pointers, maps, slices, and byte slices too, and the
+// encoder writes each use of one in full. For a value whose shared parts
+// expand past the alias limit, ValidateValue returns an error matching
+// [ErrExcessiveAliasing]. The value is at fault for that error, so
+// [niceyaml.IsInvalid] reports it, and it does not wrap [ErrValidate].
+//
+// Both checks follow a typed value as the encoder does, before the
+// encode. They skip each struct field that the encoder does not write.
+// They stop at a value that the encoder writes through a MarshalText
+// method or a MarshalYAML method that returns text. For a MarshalYAML
+// method that returns a value, they call the method and follow what it
+// returns, so the encode calls that method a second time. A chain of more
+// than 1000 such calls, each inside the value that the one before it
+// returned, returns an error wrapping ErrValidate. The checks do not see
+// a function that [yaml.RegisterCustomMarshaler] registers, so they
+// follow the fields of its type as they follow those of any other type.
+//
+// A [*niceyaml.Node] or a [*niceyaml.Source] writes its decoded value.
+// That value shares the value of each anchor among its aliases, so the
+// limit applies to it before the encode. The text that a MarshalYAML
+// method or a registered function writes can hold aliases too. The
+// decode of the encoded text applies the limit to that text, and
+// ValidateValue returns an error matching ErrExcessiveAliasing for text
+// past the limit.
 //
 // The limit follows the rule that gopkg.in/yaml.v3 applies to the share
-// of aliased nodes in a document. A []byte counts as one node per
-// character of its base64 text. The yaml.v3 decoder applies the rule to
+// of aliased nodes in a document. The yaml.v3 decoder applies the rule to
 // each node during its decode, but ValidateValue applies it once to the
 // whole value. It counts each use of an aliased scalar other than a
 // !!binary as an unaliased node, so it accepts some documents that
@@ -1008,10 +1087,20 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 // the limit to every value, even one decoded from a source that
 // [niceyaml.WithAliasLimit] turned the limit off for.
 //
+// The limit counts a []byte as one node per character of its base64
+// text. It counts the bytes of a !!binary in the value of a Node the same
+// way, because the encoder writes them as that text. It counts every
+// other value that the encoder writes through a MarshalText method or a
+// MarshalYAML method that returns text as one node, such as a [net.IP].
+//
 // # Context
 //
 // The context reaches the underlying [jsonschema.Validator], and the
 // resolution of remote references honors its cancellation and deadline.
+// It also reaches the encode and decode of each typed value, and each
+// MarshalYAML method that takes a context. For a typed value checked
+// after the context ended, ValidateValue returns an error wrapping
+// ErrValidate with the error of the context in its chain.
 func (s *Schema) ValidateValue(ctx context.Context, data any) error {
 	warnings, err := s.checkValue(ctx, data)
 
@@ -1035,7 +1124,7 @@ func (s *Schema) checkValue(ctx context.Context, data any) ([]error, error) {
 
 	// Both normalizeJSON and the validator read a shared value again at
 	// every use, so the check runs before either of them.
-	err := checkExpansion(data)
+	err := checkExpansion(ctx, data)
 	if err != nil {
 		return nil, err
 	}
@@ -1068,12 +1157,15 @@ func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) ([]er
 	// key decodes once however many of them lie under its mapping.
 	idx := datapath.NewIndex(resolver, keys)
 	c := converter{root: rootOf(n), idx: idx}
-	instance := withoutFields(normalizeJSON(data, c.root, idx), s.hidden)
 
-	var (
-		records []jsonschema.Deprecation
-		err     error
-	)
+	normalized, err := normalizeJSON(ctx, data, c.root, idx)
+	if err != nil {
+		return nil, err
+	}
+
+	instance := withoutFields(normalized, s.hidden)
+
+	var records []jsonschema.Deprecation
 
 	if s.noDeprecations {
 		err = s.compiled.Validate(ctx, instance)
@@ -1236,11 +1328,12 @@ func sourceRoute(
 //
 // Each [yaml.MapSlice] that a decode with [niceyaml.WithYAMLOrderedMaps]
 // yields becomes a map with the same members. A later item replaces an
-// earlier one with the same key, as a decode into a map does. The walk
-// covers maps, slices, and ordered mappings, so it converts each of these
-// values anywhere in a document. Every other value comes back unchanged,
-// non-finite floats included, because the validator treats those as
-// numbers.
+// earlier one with the same key, as a decode into a map does. Each value
+// that [typed] reports becomes the value that [encodeTree] returns for
+// it, converted the same way. The walk covers maps, slices, and ordered
+// mappings, so it converts each of these values anywhere in a document.
+// Every other value comes back unchanged, non-finite floats included,
+// because the validator treats those as numbers.
 //
 // A map or slice without any of these values comes back as the same
 // container. One that holds such a value comes back as a copy. An ordered
@@ -1248,15 +1341,20 @@ func sourceRoute(
 // writes into the caller's data. Handing the validator the caller's own
 // containers is safe because [jsonschema.Validator.Validate] does not
 // write to its instance or keep a reference to it.
-func normalizeJSON(data any, root ast.Node, idx *datapath.Index) any {
+//
+// The caller runs [checkExpansion] on data first, because the walk does
+// not guard against a value that contains itself. It returns the error of
+// encodeTree for a typed value that does not convert.
+func normalizeJSON(ctx context.Context, data any, root ast.Node, idx *datapath.Index) (any, error) {
 	w := normalizer{
+		ctx:   ctx,
 		idx:   idx,
 		nodes: []ast.Node{idx.Deref(root)},
 	}
 
-	out, _ := w.normalize(data)
+	out, _, err := w.normalize(data)
 
-	return out
+	return out, err
 }
 
 // normalizer walks a value for [normalizeJSON]. It records the path from
@@ -1266,6 +1364,8 @@ func normalizeJSON(data any, root ast.Node, idx *datapath.Index) any {
 // lookups therefore step down root at most once for each value the walk
 // visits. The index reads each mapping at most once.
 type normalizer struct {
+	// The context of the encode of each typed value.
+	ctx context.Context //nolint:containedctx // The walk lives for one call.
 	// The index that finds the members of each mapping the lookups step
 	// through.
 	idx  *datapath.Index
@@ -1278,17 +1378,21 @@ type normalizer struct {
 
 // normalize is [normalizeJSON] that also reports whether the value it
 // returns differs from data.
-func (w *normalizer) normalize(data any) (any, bool) {
+func (w *normalizer) normalize(data any) (any, bool, error) {
 	switch v := data.(type) {
 	case []byte:
-		return base64.StdEncoding.EncodeToString(v), true
+		return base64.StdEncoding.EncodeToString(v), true, nil
 	case time.Time:
-		return timestampText(v, w.node()), true
+		return timestampText(v, w.node()), true, nil
 	case map[string]any:
 		var out map[string]any
 
 		for key, elem := range v {
-			norm, changed := w.child(jsonschema.Segment{Key: key}, elem)
+			norm, changed, err := w.child(jsonschema.Segment{Key: key}, elem)
+			if err != nil {
+				return nil, false, err
+			}
+
 			if !changed {
 				continue
 			}
@@ -1301,16 +1405,20 @@ func (w *normalizer) normalize(data any) (any, bool) {
 		}
 
 		if out == nil {
-			return data, false
+			return data, false, nil
 		}
 
-		return out, true
+		return out, true, nil
 
 	case []any:
 		var out []any
 
 		for i, elem := range v {
-			norm, changed := w.child(jsonschema.Segment{Index: i, IsIndex: true}, elem)
+			norm, changed, err := w.child(jsonschema.Segment{Index: i, IsIndex: true}, elem)
+			if err != nil {
+				return nil, false, err
+			}
+
 			if !changed {
 				continue
 			}
@@ -1323,39 +1431,157 @@ func (w *normalizer) normalize(data any) (any, bool) {
 		}
 
 		if out == nil {
-			return data, false
+			return data, false, nil
 		}
 
-		return out, true
+		return out, true, nil
 
 	case yaml.MapSlice:
 		out := make(map[string]any, len(v))
 
 		for _, item := range v {
 			key := datapath.MemberName(item.Key)
-			norm, _ := w.child(jsonschema.Segment{Key: key}, item.Value)
+
+			norm, _, err := w.child(jsonschema.Segment{Key: key}, item.Value)
+			if err != nil {
+				return nil, false, err
+			}
+
 			out[key] = norm
 		}
 
-		return out, true
+		return out, true, nil
 
 	default:
-		return data, false
+		if !typed(data) {
+			return data, false, nil
+		}
+
+		tree, err := encodeTree(w.ctx, data)
+		if err != nil {
+			return nil, false, err
+		}
+
+		// The decode of the text can yield a timestamp or a !!binary, so
+		// the walk converts the result as it converts any decoded value.
+		out, _, err := w.normalize(tree)
+
+		return out, true, err
 	}
 }
 
 // child normalizes elem, the member or element of the visited value that
 // seg names.
-func (w *normalizer) child(seg jsonschema.Segment, elem any) (any, bool) {
+func (w *normalizer) child(seg jsonschema.Segment, elem any) (any, bool, error) {
 	w.path = append(w.path, seg)
-	norm, changed := w.normalize(elem)
+	norm, changed, err := w.normalize(elem)
 	w.path = w.path[:len(w.path)-1]
 
 	// The walk leaves elem, so it drops the nodes it found for elem and
 	// below it.
 	w.nodes = w.nodes[:min(len(w.nodes), len(w.path)+1)]
 
-	return norm, changed
+	return norm, changed, err
+}
+
+// typed reports whether data is a Go value that neither the validator nor
+// [normalizeJSON] reads as it is. A struct, a pointer, a typed map or
+// slice, and a named scalar are such values. Every other value is one
+// that a decode into any yields, a value of a Go numeric kind, or a
+// [json.Number].
+func typed(data any) bool {
+	switch data.(type) {
+	case nil, bool, string, float32, float64, json.Number,
+		int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, uintptr,
+		map[string]any, []any, yaml.MapSlice, []byte, time.Time:
+		return false
+	default:
+		return true
+	}
+}
+
+// encodeTree returns the value that a decode into any reads from the
+// document that [encoder.Marshal] writes for v. The text comes from the
+// program, so the source of the decode does not apply the byte, document,
+// and depth limits. It applies the alias limit, because the text of a
+// MarshalYAML method that returns text can hold aliases. For text whose
+// aliases expand past the limit, encodeTree returns an error matching
+// [ErrExcessiveAliasing], as [checkExpansion] does. The position of that
+// error lies in the encoded text, which the caller never sees, so the
+// error does not carry it.
+//
+// It returns an error wrapping [ErrValidate] inside [niceyaml.Unchecked]
+// when v does not encode or its text does not decode for any other
+// reason. The error of the encode is in the chain. A panic of the encode
+// returns the same error, with the panic value in its text. The error of
+// the decode declares the encoded text at fault, so it stays out of the
+// chain, and [niceyaml.IsInvalid] does not report the result. Its
+// message is in the text of the result. When the decode fails after ctx
+// ended, the error of ctx is in the chain in place of that message.
+func encodeTree(ctx context.Context, v any) (any, error) {
+	text, err := marshalValue(ctx, v)
+	if err != nil {
+		return nil, err
+	}
+
+	var tree any
+
+	doc, err := niceyaml.NewSourceFromBytes(text, niceyaml.WithoutLimits()).Document()
+	if err == nil {
+		// The tree holds only the YAML built-in types, none of which
+		// validates itself.
+		tree, err = doc.Decode[any](ctx, niceyaml.WithSelfValidation(false))
+	}
+
+	switch {
+	case err == nil:
+		return tree, nil
+	case ctx.Err() != nil:
+		// The text is not at fault when the context ended, so the error
+		// of the context stays in the chain.
+		return nil, niceyaml.Unchecked(fmt.Errorf("%w: decode the encoded %T: %w", ErrValidate, v, ctx.Err()))
+	case errors.Is(err, ErrExcessiveAliasing):
+		return nil, niceyaml.Invalid(ErrExcessiveAliasing)
+	}
+
+	// The position of the bound error lies in the encoded text, so the
+	// result keeps the message alone.
+	msg := err.Error()
+
+	if bound, ok := errors.AsType[*niceyaml.SourceError](err); ok {
+		msg = bound.Message()
+	}
+
+	return nil, niceyaml.Unchecked(fmt.Errorf("%w: read the encoded %T: %s", ErrValidate, v, msg))
+}
+
+// marshalValue returns the text that [encoder.Marshal] writes for v. When
+// v does not encode, it returns an error wrapping [ErrValidate] inside
+// [niceyaml.Unchecked], with the error of the encode in the chain. The
+// encoder panics on some values, such as a struct that embeds an
+// unexported named slice. For such a value, the error holds the panic
+// value in its text.
+func marshalValue(ctx context.Context, v any) ([]byte, error) {
+	var (
+		text []byte
+		err  error
+	)
+
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("%w: %v", errEncoderPanic, r)
+			}
+		}()
+
+		text, err = encoder.Marshal(ctx, v)
+	}()
+
+	if err != nil {
+		return nil, niceyaml.Unchecked(fmt.Errorf("%w: encode %T: %w", ErrValidate, v, err))
+	}
+
+	return text, nil
 }
 
 // node returns the content of the node that a decode read the visited
@@ -1424,13 +1650,14 @@ func stringText(node ast.Node) (string, bool) {
 }
 
 // checkExpansion returns an error wrapping [ErrValidate] inside
-// [niceyaml.Unchecked] when a map or slice in data contains itself. It
-// returns one matching [ErrExcessiveAliasing] when aliases make up too
-// much of the data the validator reads. The data is at fault for that
+// [niceyaml.Unchecked] when a pointer, map, or slice in data contains
+// itself, and when MarshalYAML calls nest more than [maxMarshalerDepth]
+// deep. It returns one matching [ErrExcessiveAliasing] when aliases make
+// up too much of the data the validator reads. The data is at fault for that
 // error, so it comes from [niceyaml.Invalid] and does not wrap
 // ErrValidate.
-func checkExpansion(data any) error {
-	w := expansionWalker{sizes: map[sharedKey]int{}, onPath: map[sharedKey]bool{}}
+func checkExpansion(ctx context.Context, data any) error {
+	w := expansionWalker{ctx: ctx, sizes: map[sharedKey]int{}, onPath: map[sharedKey]bool{}}
 
 	_, err := w.walk(data)
 	if err != nil {
@@ -1457,12 +1684,32 @@ func checkExpansion(data any) error {
 // The walker counts the nodes it visits as distinct, and a later use of
 // a shared value counts as one distinct node. The walker counts the nodes
 // that such a use repeats as aliased.
+//
+// The validator reads a typed value as the decode of the document that
+// [encoder.Marshal] writes for it. The encoder writes every use of a
+// pointer, map, or slice in full. The walker thus counts the nodes of
+// that document, as [expansionWalker.walkTyped] describes. It shares each
+// pointer, map, and slice of a typed value as it shares a map or slice of
+// a decode. The count runs before the encode, so neither a value
+// that contains itself nor one that expands past the limit reaches the
+// encoder.
 type expansionWalker struct {
+	// The context of each MarshalYAML method that the walk calls.
+	ctx      context.Context //nolint:containedctx // The walk lives for one call.
 	sizes    map[sharedKey]int
 	onPath   map[sharedKey]bool
 	distinct int
 	aliased  int
+	// The calls of MarshalYAML methods on the path the walk is walking
+	// down.
+	marshalers int
 }
+
+// maxMarshalerDepth is the most calls of MarshalYAML methods that
+// [expansionWalker.walkTyped] nests, one inside the value that another
+// returns. A method that returns a new value of its own type each time
+// never ends the walk or the encode without such a bound.
+const maxMarshalerDepth = 1000
 
 // sharedKey names a map, slice, or byte slice by type, address, and
 // length, because a slice and a shorter slice of it share an address. The
@@ -1481,24 +1728,23 @@ type sharedKey struct {
 func sharedKeyOf(data any) (sharedKey, bool) {
 	switch data.(type) {
 	case map[string]any, []any, yaml.MapSlice, []byte:
+		return typedKeyOf(reflect.ValueOf(data))
 	default:
 		return sharedKey{}, false
 	}
-
-	rv := reflect.ValueOf(data)
-	if rv.Len() == 0 {
-		return sharedKey{}, false
-	}
-
-	return sharedKey{typ: rv.Type(), ptr: rv.Pointer(), len: rv.Len()}, true
 }
 
 // walk returns the size of data. A scalar has a size of one, and a byte
 // slice has one per character of its base64 text. A map or slice has one
 // plus the size of each key and value in it. For a map or slice that the
 // walk reaches from inside itself, walk returns an error wrapping
-// [ErrValidate].
+// [ErrValidate]. A value that [typed] reports has the size that
+// [expansionWalker.walkTyped] returns for it.
 func (w *expansionWalker) walk(data any) (int, error) {
+	if typed(data) {
+		return w.walkTyped(reflect.ValueOf(data))
+	}
+
 	w.distinct = aliaslimit.AddCapped(w.distinct, 1)
 
 	key, ok := sharedKeyOf(data)
@@ -1573,4 +1819,286 @@ func (w *expansionWalker) walk(data any) (int, error) {
 	w.sizes[key] = size
 
 	return size, nil
+}
+
+// walkTyped returns the size of the document that [encoder.Marshal]
+// writes for v, a value that [typed] reports or a part of one. It
+// follows the encoder through each pointer, interface, map, slice, and
+// array, and through each field of a struct that [encodedField] reports.
+// A part that a decode into any yields goes to [expansionWalker.walk].
+//
+// A value that the encoder writes through a method has the size that
+// [expansionWalker.marshaled] returns for it. Each pointer, and each map
+// and slice that is not empty, counts as a shared value, named as
+// [sharedKey] names it. For one that the walk reaches from inside itself,
+// walkTyped returns an error wrapping [ErrValidate].
+func (w *expansionWalker) walkTyped(v reflect.Value) (int, error) {
+	for v.Kind() == reflect.Interface && !v.IsNil() {
+		v = v.Elem()
+	}
+
+	if v.CanInterface() {
+		data := v.Interface()
+		if !typed(data) {
+			return w.walk(data)
+		}
+	}
+
+	key, ok := typedKeyOf(v)
+	if !ok {
+		w.distinct = aliaslimit.AddCapped(w.distinct, 1)
+
+		return w.typedSize(v)
+	}
+
+	if w.onPath[key] {
+		return 0, fmt.Errorf("%w: value contains itself", ErrValidate)
+	}
+
+	if size, seen := w.sizes[key]; seen {
+		w.distinct = aliaslimit.AddCapped(w.distinct, 1)
+		w.aliased = aliaslimit.AddCapped(w.aliased, size)
+
+		return size, nil
+	}
+
+	// A pointer is not a node of the document. The value it points to
+	// counts as one.
+	if v.Kind() != reflect.Pointer {
+		w.distinct = aliaslimit.AddCapped(w.distinct, 1)
+	}
+
+	w.onPath[key] = true
+	defer delete(w.onPath, key)
+
+	size, err := w.typedSize(v)
+	if err != nil {
+		return 0, err
+	}
+
+	w.sizes[key] = size
+
+	return size, nil
+}
+
+// typedSize returns the size of v for [expansionWalker.walkTyped], which
+// counted the first node of v.
+func (w *expansionWalker) typedSize(v reflect.Value) (int, error) {
+	// The encoder writes a nil pointer as null without a call of its
+	// methods.
+	if (v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface) && v.IsNil() {
+		return 1, nil
+	}
+
+	size, ok, err := w.marshaled(v)
+	if ok {
+		return size, err
+	}
+
+	switch v.Kind() {
+	case reflect.Pointer:
+		return w.walkTyped(v.Elem())
+
+	case reflect.Map:
+		size := 1
+
+		for it := v.MapRange(); it.Next(); {
+			kn, err := w.walkTyped(it.Key())
+			if err != nil {
+				return 0, err
+			}
+
+			n, err := w.walkTyped(it.Value())
+			if err != nil {
+				return 0, err
+			}
+
+			size = aliaslimit.AddCapped(size, aliaslimit.AddCapped(kn, n))
+		}
+
+		return size, nil
+
+	case reflect.Slice, reflect.Array:
+		return w.elemsSize(v)
+
+	case reflect.Struct:
+		size := 1
+		t := v.Type()
+
+		for i := range t.NumField() {
+			if !encodedField(t.Field(i)) {
+				continue
+			}
+
+			// The key is a node of its own.
+			w.distinct = aliaslimit.AddCapped(w.distinct, 1)
+
+			n, err := w.walkTyped(v.Field(i))
+			if err != nil {
+				return 0, err
+			}
+
+			size = aliaslimit.AddCapped(size, aliaslimit.AddCapped(1, n))
+		}
+
+		return size, nil
+
+	default:
+		return 1, nil
+	}
+}
+
+// elemsSize returns the size of v, a slice or an array, for
+// [expansionWalker.typedSize]. An element of a scalar kind whose type
+// the encoder does not write through a method is one node, so the walk
+// counts such elements without a visit to each.
+func (w *expansionWalker) elemsSize(v reflect.Value) (int, error) {
+	n := v.Len()
+	elem := v.Type().Elem()
+
+	switch elem.Kind() {
+	case reflect.Interface, reflect.Pointer, reflect.Map, reflect.Slice, reflect.Array, reflect.Struct:
+	default:
+		if !hasMarshaler(elem) {
+			w.distinct = aliaslimit.AddCapped(w.distinct, n)
+
+			return aliaslimit.AddCapped(1, n), nil
+		}
+	}
+
+	size := 1
+
+	for i := range n {
+		en, err := w.walkTyped(v.Index(i))
+		if err != nil {
+			return 0, err
+		}
+
+		size = aliaslimit.AddCapped(size, en)
+	}
+
+	return size, nil
+}
+
+// marshaled returns the size of v and true when the encoder writes v
+// through a method of its type, and false when it does not. It looks for
+// each method as go-yaml's encoder does, in the same order. A MarshalYAML
+// method that returns text, a MarshalText method, and a [time.Duration]
+// each write one scalar, which has the size that
+// [expansionWalker.scalarSize] gives it. For a MarshalYAML method that
+// returns a value, marshaled calls the method and returns the size of
+// that value. A method that fails counts as one node, because the encode
+// calls it again and returns its error.
+//
+// For a MarshalYAML call nested inside [maxMarshalerDepth] others,
+// marshaled returns an error wrapping [ErrValidate].
+func (w *expansionWalker) marshaled(v reflect.Value) (int, bool, error) {
+	if !v.CanInterface() {
+		return 0, false, nil
+	}
+
+	var call func() (any, error)
+
+	switch m := v.Interface().(type) {
+	case yaml.BytesMarshalerContext, yaml.BytesMarshaler:
+		return w.scalarSize(v), true, nil
+	case yaml.InterfaceMarshalerContext:
+		call = func() (any, error) { return m.MarshalYAML(w.ctx) }
+	case yaml.InterfaceMarshaler:
+		call = m.MarshalYAML
+	case time.Duration, encoding.TextMarshaler:
+		return w.scalarSize(v), true, nil
+	default:
+		return 0, false, nil
+	}
+
+	if w.marshalers >= maxMarshalerDepth {
+		return 0, true, fmt.Errorf("%w: MarshalYAML calls nest more than %d deep", ErrValidate, maxMarshalerDepth)
+	}
+
+	out, err := call()
+	if err != nil {
+		// The encode calls the method again and returns its error.
+		return 1, true, nil
+	}
+
+	w.marshalers++
+	defer func() { w.marshalers-- }()
+
+	size, err := w.walk(out)
+
+	return size, true, err
+}
+
+// scalarSize returns the size of v, a value that the encoder writes as
+// one scalar through a method of its type, for [expansionWalker.marshaled].
+// A [taggedscalar.Binary] has the size that [expansionWalker.walk] gives
+// a []byte, one per character of the base64 text of its bytes. A decode
+// shares the bytes of a !!binary among its aliases, and the value that
+// [niceyaml.Node.MarshalYAML] returns writes those bytes as a Binary. So
+// each use of them adds that size. Every other value has a size of one,
+// because the decode of its text yields one scalar. The caller counted
+// the first node of v as distinct, and scalarSize counts the rest.
+func (w *expansionWalker) scalarSize(v reflect.Value) int {
+	b, ok := reflect.TypeAssert[taggedscalar.Binary](v)
+	if !ok {
+		return 1
+	}
+
+	size := max(1, min(base64.StdEncoding.EncodedLen(len(b)), aliaslimit.CountCap))
+	w.distinct = aliaslimit.AddCapped(w.distinct, size-1)
+
+	return size
+}
+
+// hasMarshaler reports whether go-yaml's encoder writes a value of type t
+// through a method of t, as [expansionWalker.marshaled] describes.
+func hasMarshaler(t reflect.Type) bool {
+	return t == reflect.TypeFor[time.Duration]() ||
+		t.Implements(reflect.TypeFor[yaml.BytesMarshalerContext]()) ||
+		t.Implements(reflect.TypeFor[yaml.BytesMarshaler]()) ||
+		t.Implements(reflect.TypeFor[yaml.InterfaceMarshalerContext]()) ||
+		t.Implements(reflect.TypeFor[yaml.InterfaceMarshaler]()) ||
+		t.Implements(reflect.TypeFor[encoding.TextMarshaler]())
+}
+
+// typedKeyOf returns the key that names v when it is a pointer that is
+// not nil, or a map or slice that is not empty. It returns false for any
+// other value.
+func typedKeyOf(v reflect.Value) (sharedKey, bool) {
+	switch v.Kind() {
+	case reflect.Pointer:
+		if v.IsNil() {
+			return sharedKey{}, false
+		}
+
+		return sharedKey{typ: v.Type(), ptr: v.Pointer()}, true
+
+	case reflect.Map, reflect.Slice:
+		if v.Len() == 0 {
+			return sharedKey{}, false
+		}
+
+		return sharedKey{typ: v.Type(), ptr: v.Pointer(), len: v.Len()}, true
+
+	default:
+		return sharedKey{}, false
+	}
+}
+
+// encodedField reports whether go-yaml's encoder writes f, a field of a
+// struct. It writes an exported field and an embedded one, unless the
+// yaml tag of the field is "-". A field without a yaml tag reads its json
+// tag instead.
+func encodedField(f reflect.StructField) bool {
+	if !f.IsExported() && !f.Anonymous {
+		return false
+	}
+
+	tag := f.Tag.Get("yaml")
+	if tag == "" {
+		tag = f.Tag.Get("json")
+	}
+
+	return tag != "-"
 }

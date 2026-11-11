@@ -42,6 +42,11 @@ import (
 //
 //	return doc.SelfValidate(ctx, &cfg, settings)
 //
+// SelfValidate does not run a schema on v. A program that keeps its
+// constraints in a schema passes v to
+// [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] and binds the
+// result with Node.Bind.
+//
 // On a value that did not change after the decode, SelfValidate returns
 // what the decode with the walk on returns, given the same functions of
 // WithValueCheck. To spell each map key as the document does, the walk
