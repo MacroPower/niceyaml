@@ -3,6 +3,7 @@ package edit_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -38,11 +39,13 @@ func TestNew_Misread(t *testing.T) {
 		text string
 		// The texts of the reference documents of the Source.
 		refs []string
-		// A line of the error of New, which names the site and the misread,
-		// or "" for a text that New takes.
+		// A line of the problem of the misread in the error of New, which
+		// names the site and the misread, or "" for a text that New takes.
 		err string
-		// The detail of that error, which tells what to write.
+		// The detail of that problem, which tells what to write.
 		fix string
+		// The number of problems of the error of New, or 0 for one.
+		problems int
 		// The number of times New runs on the text, each of which must give
 		// the error, or 0 for once.
 		repeat int
@@ -114,13 +117,15 @@ func TestNew_Misread(t *testing.T) {
 		"key that two mappings bring in under an alias key": {
 			// No path names the mapping below the alias key, so the message
 			// names the key alone, and the error binds at the root.
+			problems: 3,
 			text: stringtest.LinesLF("s: &s {a: 1}", "t: &t {a: 2}", "m: &m {z: 1}", "!!str *m :", "  b:",
 				"    <<: [*s, *t]"),
 			err: "test.yaml:6:5: $: go-yaml's decoder reads the key a from the source at 2:8 of the merge key at 6:5, " +
 				"but the merge spec keeps the earlier source at 1:8",
 		},
 		"own key before a merge key under an alias key": {
-			text: stringtest.LinesLF("s: &s {a: 1}", "m: &m {z: 1}", "*m :", "  b:", "    a: 0", "    <<: *s"),
+			problems: 2,
+			text:     stringtest.LinesLF("s: &s {a: 1}", "m: &m {z: 1}", "*m :", "  b:", "    a: 0", "    <<: *s"),
 			err: "test.yaml:5:5: $: go-yaml's decoder reads the key a from the merge key at 6:5, but the merge " +
 				"spec keeps the own entry written before it",
 		},
@@ -154,7 +159,8 @@ func TestNew_Misread(t *testing.T) {
 		"own key before a merge key whose source writes an alias of the key": {
 			// Control: go-yaml's decoder reads the alias key as the key True
 			// that its anchor holds, so the merge key overrides it.
-			text: stringtest.LinesLF("&k True: 1", "<<: {*k : 2}"),
+			problems: 3,
+			text:     stringtest.LinesLF("&k True: 1", "<<: {*k : 2}"),
 			err: "test.yaml:1:1: $.True: go-yaml's decoder reads $.True from the merge key at 2:1, but the merge " +
 				"spec keeps the own entry written before it",
 		},
@@ -208,13 +214,15 @@ func TestNew_Misread(t *testing.T) {
 		"own key before a merge key that brings in the own key of another mapping": {
 			// The mapping k0 merges itself, so both readings keep its own p
 			// there, but k1 reads p of k0 from the merge key.
-			text: stringtest.LinesLF("k0: &a", "  p: 1", "  <<: *a", "k1:", "  p: 2", "  <<: *a"),
+			problems: 2,
+			text:     stringtest.LinesLF("k0: &a", "  p: 1", "  <<: *a", "k1:", "  p: 2", "  <<: *a"),
 			err: "test.yaml:5:3: $.k1.p: go-yaml's decoder reads $.k1.p from the merge key at 6:3, but the merge " +
 				"spec keeps the own entry written before it",
 		},
 		"keys that two sources of a merge key bring in, in the order of the later source": {
-			text: stringtest.LinesLF("a: &a {k: 1, j: 1}", "b: &b {j: 2, k: 2}", "m:", "  <<: [*a, *b]"),
-			err:  "test.yaml:4:3: $.m: go-yaml's decoder reads $.m.j from the source at 2:8 of the merge key at 4:3",
+			problems: 2,
+			text:     stringtest.LinesLF("a: &a {k: 1, j: 1}", "b: &b {j: 2, k: 2}", "m:", "  <<: [*a, *b]"),
+			err:      "test.yaml:4:3: $.m: go-yaml's decoder reads $.m.j from the source at 2:8 of the merge key at 4:3",
 		},
 		"own key before a merge key whose mapping has a tag": {
 			// Go-yaml's decoder merges the mapping under the tag.
@@ -249,17 +257,19 @@ func TestNew_Misread(t *testing.T) {
 				"but the merge spec keeps the earlier source at 2:8",
 		},
 		"own key before a merge key of an anchor that a later anchor reuses": {
-			// Either binding of *x0 gives a source that holds c, so the
-			// misread comes before the reused anchor.
-			text: stringtest.LinesLF("r0: &x0", "  <<: &x0 {c: x}", "r1:", "  c: 1", "  <<: *x0"),
+			// Either binding of *x0 gives a source that holds c, so New
+			// reports the misread beside the reused anchor.
+			problems: 2,
+			text:     stringtest.LinesLF("r0: &x0", "  <<: &x0 {c: x}", "r1:", "  c: 1", "  <<: *x0"),
 			err: "test.yaml:4:3: $.r1.c: go-yaml's decoder reads $.r1.c from the merge key at 5:3, but the merge " +
 				"spec keeps the own entry written before it",
 		},
 		"own key before a merge key of an anchor that the mapping of the anchor defines again": {
 			// Go-yaml binds *k0 to the outer anchor, whose mapping holds b, so
 			// its decoder reads $.b from the merge key. The misread comes before
-			// the reused anchor.
-			text: stringtest.LinesLF("b: &k0 {c: 1, b: &k0 ~}", "<<: *k0"),
+			// the reused anchor, which New reports too.
+			problems: 2,
+			text:     stringtest.LinesLF("b: &k0 {c: 1, b: &k0 ~}", "<<: *k0"),
 			err: "test.yaml:1:1: $.b: go-yaml's decoder reads $.b from the merge key at 2:1, but the merge spec " +
 				"keeps the own entry written before it",
 		},
@@ -267,7 +277,8 @@ func TestNew_Misread(t *testing.T) {
 			// Either binding of *x0 gives a first source that holds c. The
 			// alias reads the mapping of r0, which brings in c through its
 			// merge key at 2:3 (fix19 G2-3).
-			text: stringtest.LinesLF("r0: &x0", "  <<: &x0 {c: x}", "r1:", "  <<: [*x0, {c: 1}]"),
+			problems: 2,
+			text:     stringtest.LinesLF("r0: &x0", "  <<: &x0 {c: x}", "r1:", "  <<: [*x0, {c: 1}]"),
 			err: "test.yaml:4:3: $.r1: go-yaml's decoder reads $.r1.c from the source at 4:14 of the merge key at " +
 				"4:3, but the merge spec keeps the earlier source at 2:3",
 		},
@@ -278,15 +289,17 @@ func TestNew_Misread(t *testing.T) {
 				"the own entry written before it",
 		},
 		"two misreads on two lines": {
-			// Control: the first by its line.
-			text: stringtest.LinesLF("s: &s {k: 1}", "m: {k: 2, <<: *s}", "n: {k: 3, <<: *s}"),
+			// Both misreads, the first by its line first.
+			problems: 2,
+			text:     stringtest.LinesLF("s: &s {k: 1}", "m: {k: 2, <<: *s}", "n: {k: 3, <<: *s}"),
 			err: "test.yaml:2:5: $.m.k: go-yaml's decoder reads $.m.k from the merge key at 2:11, but the merge spec " +
 				"keeps the own entry written before it",
 		},
 		"misread after a construct of the subset": {
-			// Control: the misread comes before the alias inside its own
-			// anchor.
-			text: stringtest.LinesLF("a: &a [*a]", "s: &s {k: 1}", "m: {k: 2, <<: *s}"),
+			// The misread comes after the alias inside its own anchor, which
+			// New reports first.
+			problems: 2,
+			text:     stringtest.LinesLF("a: &a [*a]", "s: &s {k: 1}", "m: {k: 2, <<: *s}"),
 			err: "test.yaml:3:5: $.m.k: go-yaml's decoder reads $.m.k from the merge key at 3:11, but the merge spec " +
 				"keeps the own entry written before it",
 		},
@@ -457,28 +470,35 @@ func TestNew_Misread(t *testing.T) {
 
 			require.ErrorIs(t, err, edit.ErrMisread)
 			require.NotErrorIs(t, err, edit.ErrEngine)
-			require.NotErrorIs(t, err, edit.ErrUnsupported)
-			assert.Contains(t, niceyaml.FormatError(err), tc.err)
 			assert.NotContains(t, niceyaml.FormatError(err), "report this")
 
-			if tc.fix != "" {
-				assert.Contains(t, niceyaml.FormatError(err), "`-- "+tc.fix+"\n")
-			}
-
 			// The user can rewrite the text as the fix says, so the error
-			// and its problem are the fault of the document.
+			// and each of its problems are the fault of the document.
 			assert.True(t, niceyaml.IsInvalid(err))
+
+			var misread error
 
 			problems := 0
 
-			for p := range niceyaml.NewErrorTree(err).Problems() {
+			for p := range niceyaml.Problems(err) {
 				problems++
 
 				assert.True(t, p.IsInvalid())
 				assert.Contains(t, niceyaml.FormatError(err), p.Message())
+
+				if misread == nil && strings.Contains(niceyaml.FormatError(p.Err), tc.err) {
+					misread = p.Err
+				}
 			}
 
-			assert.Equal(t, 1, problems)
+			assert.Equal(t, max(tc.problems, 1), problems)
+			require.Error(t, misread, "no problem of the error holds %q", tc.err)
+			require.ErrorIs(t, misread, edit.ErrMisread)
+			require.NotErrorIs(t, misread, edit.ErrUnsupported)
+
+			if tc.fix != "" {
+				assert.Contains(t, niceyaml.FormatError(misread), "`-- "+tc.fix+"\n")
+			}
 		})
 	}
 }

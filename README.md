@@ -190,6 +190,8 @@ Edits through an alias or a `<<` merge key change the anchored value, so every a
 
 The `edit` package edits a subset of YAML and refuses the rest with `edit.ErrUnsupported`, whose detail says what to write instead. The guards example shows such a refusal for the removal of an anchored value that aliases still read. The engine reads and edits a document as go-yaml reads it, also where go-yaml reads valid YAML otherwise than YAML does. `edit.New` refuses a few such documents with `edit.ErrMisread`, such as one with an own key before a `<<` merge key that brings in the same key. Its detail says what to write so that go-yaml reads the text as YAML does. The Supported YAML section of the [package documentation][niceyaml/edit] lists the subset and those documents.
 
+The error of `edit.New` holds a problem for each instance that it refuses, in the order of the text. The list stops at the first anchor on an empty value under which go-yaml nests the lines after it, inclusive, as go-yaml nests `b: 1` after `a: &x !t`. `edit.New` reports the instances after such an anchor only after the user fixes it. A document with a tag that converts a collection, such as `!!str &x {a: 1}`, gets no `edit.ErrMisread` problems, because YAML refuses such a text. `edit.New` reports its misreads after the user fixes the tag. The tag `!` and the tags `!!set`, `!!omap`, and `!!pairs` leave the `edit.ErrMisread` problems in place.
+
 ### Manifests
 
 - [examples/manifests/load](examples/manifests/load)

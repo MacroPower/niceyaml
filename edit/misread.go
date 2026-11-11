@@ -77,33 +77,29 @@ func (d *Doc) misreads() []misreadFound {
 	return out
 }
 
-// misreadRefusal returns the problem of New for the first misread of the
-// user's text, as [Doc.firstMisread] finds it, or nil. The problem matches
-// [ErrMisread] and binds at the site of the misread. New checks the
-// misreads before the constructs of the subset, as the package
-// documentation lists them.
-func (d *Doc) misreadRefusal() error {
-	m, ok := d.firstMisread()
-	if !ok {
+// misreadRefusals returns each misread of the user's text, as
+// [Doc.misreads] finds them, as a place that [New] refuses. The problem of
+// a misread matches [ErrMisread] and binds at the site of the misread. A
+// text with a tag that converts a collection holds none, because YAML
+// refuses such a text, and New refuses it as [ConstructConvertingTag].
+func (d *Doc) misreadRefusals() []refused {
+	if d.convertsCollection() {
 		return nil
 	}
 
-	return d.user.Bind( //nolint:wrapcheck // The binding is the problem of the document.
-		d.engineMisread(&misreadError{msg: m.msg, fix: m.fix}, niceyaml.AtRange(m.at.at), niceyaml.AtPath(m.at.path)),
-	)
-}
+	misreads := d.misreads()
+	found := make([]refused, 0, len(misreads))
 
-// firstMisread returns the first misread of the current text, as
-// [Doc.misreads] finds it, that New refuses with [ErrMisread]. A text with
-// a tag that converts a collection holds none, because YAML refuses such a
-// text, and New refuses it as [ConstructConvertingTag].
-func (d *Doc) firstMisread() (misreadFound, bool) {
-	found := d.misreads()
-	if len(found) == 0 || d.convertsCollection() {
-		return misreadFound{}, false
+	for _, m := range misreads {
+		found = append(found, refused{at: m.at, problem: func() error {
+			err := d.engineMisread(&misreadError{msg: m.msg, fix: m.fix},
+				niceyaml.AtRange(m.at.at), niceyaml.AtPath(m.at.path))
+
+			return d.user.Bind(err) //nolint:wrapcheck // The binding is the problem of the document.
+		}})
 	}
 
-	return found[0], true
+	return found
 }
 
 // convertsCollection reports whether a tag of the current text converts the

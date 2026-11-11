@@ -240,6 +240,27 @@
 //   - both "\n" and "\r\n" line breaks in the file of the document, or a
 //     "\r" alone
 //
+// The error of New holds a problem for each instance of these and for each
+// byte order mark that New refuses. It also holds a problem for each
+// misread of go-yaml that New refuses with [ErrMisread]. A document with a
+// tag that converts a collection, as in "!!str &x {a: 1}", gets no
+// misread problems, because YAML refuses such a text. New lists its
+// misreads after the user fixes the tag. The tag "!" and the tags !!set,
+// !!omap, and !!pairs leave the misread problems in place.
+//
+// One problem comes alone. Several come under a heading that counts them,
+// as from [go.jacobcolvin.com/niceyaml.NewSummary], and
+// [go.jacobcolvin.com/niceyaml.Problems] yields them in the order of the
+// text. At one site, a byte order mark comes first, then the misreads,
+// then the constructs in the order of their [Construct] constants. The
+// problems stop at the first anchor on an empty value under which go-yaml's
+// parser nests the lines after it, inclusive. For example,
+// the parser nests "b: 1" after "a: &x !t" inside the value of a. The
+// paths of the places after such an anchor name values of another tree.
+// An anchor on an empty value that go-yaml's parser reads as empty, as in
+// "a: &x" before "b: 1", does not stop the problems. [errors.As] finds the
+// first [*UnsupportedError] of the error, which can come after a misread.
+//
 // A call fails with ErrUnsupported when it reaches one of these:
 //
 //   - an entry whose key a decode reads as another value than its text,
@@ -555,21 +576,19 @@
 // [go.jacobcolvin.com/niceyaml.WithReferences]. So a key that a merge key
 // brings in from a reference document counts for neither kind, and a path
 // through an own key before such a merge key fails, as the Edits section
-// describes. The error binds at the first instance by line and column, and
-// at one place by the order of this list.
+// describes. The problem of each instance binds at its site.
 //
-// New checks these before the constructs of the first list. The message of
-// the error names go-yaml and what it reads, and its detail says what to
-// write. An alias of a reference document can come after the sources that
-// hold the key. It can be an item of the sequence of the merge key, or the
-// value of a later merge key. A later mapping of the document that the
-// merge key or a later merge key brings in can read it too, through a merge
-// key of that mapping. The engine does not read that document. So the
-// message then says that go-yaml's decoder reads a later source than the
-// merge spec keeps. It names only the source that the merge spec keeps. So
-// does the message of a key that a later merge key brings in too. Such an
-// alias can also come before the sources that hold the key, and the
-// reference document can hold the key there. The message then names no
+// The message of each such problem names go-yaml and what it reads, and its
+// detail says what to write. An alias of a reference document can come after
+// the sources that hold the key. It can be an item of the sequence of the
+// merge key, or the value of a later merge key. A later mapping of the
+// document that the merge key or a later merge key brings in can read it
+// too, through a merge key of that mapping. The engine does not read that
+// document. So the message then says that go-yaml's decoder reads a later
+// source than the merge spec keeps. It names only the source that the merge
+// spec keeps. So does the message of a key that a later merge key brings in
+// too. Such an alias can also come before the sources that hold the key, and
+// the reference document can hold the key there. The message then names no
 // source that the merge spec keeps.
 //
 // The tokenizer of the Source drops a byte order mark in the prefix of a
@@ -593,10 +612,13 @@
 // of a document, which the tokenizer of the Source drops and YAML does not
 // allow inside a document. The tokenizer drops one mark at the start of a
 // line of the prefix and reads a second mark right after it as text of the
-// document. New refuses such a second mark too. Each of these errors is one
-// that [go.jacobcolvin.com/niceyaml.IsInvalid] reports. The tokenizer keeps
-// a mark at the start of a later line of a document, and the Source and
-// go-yaml both read it as text of the key after it.
+// document. New refuses such a second mark too. Each such mark gives a
+// problem of the error of New that [go.jacobcolvin.com/niceyaml.IsInvalid]
+// reports. That problem matches neither ErrMisread nor ErrUnsupported. A
+// mark inside the document with a second mark right after it gives one
+// problem. The tokenizer keeps a mark at the start of a later line of a
+// document, and the Source and go-yaml both read it as text of the key
+// after it.
 //
 // A call can make an own key before a merge key, or a key that two
 // mappings of one merge key bring in. It can also move a byte order mark of
