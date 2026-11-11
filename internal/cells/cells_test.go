@@ -2,10 +2,16 @@ package cells_test
 
 import (
 	"math"
+	"os"
+	"os/exec"
+	"strconv"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml/internal/cells"
 )
@@ -176,89 +182,6 @@ func TestRowNext(t *testing.T) {
 	}
 }
 
-func TestCut(t *testing.T) {
-	t.Parallel()
-
-	keycap := "ab1\ufe0f\u20e3cd"
-	zwj := "a\U0001F468\u200d\U0001F469b"
-
-	tcs := map[string]struct {
-		input     string
-		left      int
-		right     int
-		want      string
-		wantWidth int
-	}{
-		"ascii":              {input: "abcdef", left: 1, right: 4, want: "bcd", wantWidth: 3},
-		"empty range":        {input: "\x1b[31mabcdef\x1b[0m", left: 2, right: 2, want: "", wantWidth: 0},
-		"range past the end": {input: "ab", left: 1, right: 9, want: "b", wantWidth: 1},
-		// A negative left counts as 0, so the cut starts at the first cell
-		// and a range that ends at or before it is empty.
-		"negative left":           {input: "abcdef", left: -2, right: 3, want: "abc", wantWidth: 3},
-		"negative left to cell 0": {input: "\x1b[31mab\x1b[0m", left: -5, right: 0, want: "", wantWidth: 0},
-		"keycap whole":            {input: keycap, left: 0, right: 4, want: "ab1\ufe0f\u20e3", wantWidth: 4},
-		// A cluster that an edge splits leaves a space on each of its cells
-		// inside the range, so every cell keeps its place.
-		"right edge inside keycap":        {input: keycap, left: 0, right: 3, want: "ab ", wantWidth: 3},
-		"left edge inside keycap":         {input: keycap, left: 3, right: 6, want: " cd", wantWidth: 3},
-		"past a keycap":                   {input: keycap, left: 4, right: 6, want: "cd", wantWidth: 2},
-		"wide rune":                       {input: "a日b", left: 1, right: 3, want: "日", wantWidth: 2},
-		"edges inside a wide rune":        {input: "a日b", left: 2, right: 4, want: " b", wantWidth: 2},
-		"wide rune wider than the window": {input: "a日b", left: 2, right: 3, want: " ", wantWidth: 1},
-		"zwj sequence": {
-			input:     zwj,
-			left:      1,
-			right:     3,
-			want:      "\U0001F468\u200d\U0001F469",
-			wantWidth: 2,
-		},
-		"edge inside zwj sequence":        {input: zwj, left: 0, right: 2, want: "a ", wantWidth: 2},
-		"combining mark":                  {input: "cafe\u0301!", left: 3, right: 4, want: "e\u0301", wantWidth: 1},
-		"zero-width cluster at the right": {input: "ab\u200bc", left: 0, right: 2, want: "ab", wantWidth: 2},
-		"styled keeps escapes": {
-			input:     "\x1b[31m" + keycap + "\x1b[0m",
-			left:      1,
-			right:     3,
-			want:      "\x1b[31mb \x1b[0m",
-			wantWidth: 2,
-		},
-		"filler keeps the style": {
-			input:     "\x1b[41m日\x1b[0m",
-			left:      1,
-			right:     2,
-			want:      "\x1b[41m \x1b[0m",
-			wantWidth: 1,
-		},
-		"styled drops nothing": {
-			input:     "\x1b[31m" + keycap + "\x1b[0m",
-			left:      0,
-			right:     8,
-			want:      "\x1b[31m" + keycap + "\x1b[0m",
-			wantWidth: 6,
-		},
-		"escapes between dropped clusters": {
-			input:     "\x1b[1ma\x1b[0mb\x1b[2mc\x1b[0m",
-			left:      1,
-			right:     2,
-			want:      "\x1b[1m\x1b[0mb\x1b[2m\x1b[0m",
-			wantWidth: 1,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, cells.Cut(tc.input, tc.left, tc.right))
-
-			got, width := cells.CutWidth(tc.input, tc.left, tc.right)
-			assert.Equal(t, tc.want, got)
-			assert.Equal(t, tc.wantWidth, width, "width")
-			assert.Equal(t, ansi.StringWidth(got), width, "width agrees with ansi.StringWidth")
-		})
-	}
-}
-
 func TestTrimLastCluster(t *testing.T) {
 	t.Parallel()
 
@@ -281,6 +204,124 @@ func TestTrimLastCluster(t *testing.T) {
 			t.Parallel()
 
 			assert.Equal(t, tc.want, cells.TrimLastCluster(tc.input))
+		})
+	}
+}
+
+func TestFirst(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input     string
+		want      string
+		wantWidth int
+	}{
+		"empty":          {input: "", want: "", wantWidth: 0},
+		"ascii":          {input: "ab", want: "a", wantWidth: 1},
+		"wide rune":      {input: "日本", want: "日", wantWidth: 2},
+		"combining mark": {input: "e\u0301x", want: "e\u0301", wantWidth: 1},
+		"keycap":         {input: "1\ufe0f\u20e3x", want: "1\ufe0f\u20e3", wantWidth: 2},
+		"zwj sequence": {
+			input:     "\U0001F468\u200d\U0001F469x",
+			want:      "\U0001F468\u200d\U0001F469",
+			wantWidth: 2,
+		},
+		"zero-width space": {input: "\u200bx", want: "\u200b", wantWidth: 0},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, width := cells.First(tc.input)
+			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.wantWidth, width, "width")
+		})
+	}
+}
+
+// rendererHelperEnv makes [TestNewRow_AgreesWithRenderer] measure its
+// corpus in the process it runs in. The value is the width that the helper
+// expects for a rune of ambiguous East Asian width.
+const rendererHelperEnv = "CELLS_TEST_RENDERER_HELPER"
+
+// rendererCorpus holds the text that a [cells.Row] and
+// [ansi.StringWidth] must measure alike.
+var rendererCorpus = []string{
+	"a: b",
+	"k: 日本",
+	"ｱｲｳ Ａ",
+	"한국어",
+	// Runes of ambiguous East Asian width.
+	"± § ° × ÷ → ← ①",
+	"αβγ Ω",
+	"\u2026 \u2010 \u203b \u2606",
+	"1\ufe0f\u20e3 #\ufe0f\u20e3",
+	"a\U0001F468\u200d\U0001F469b",
+	"\U0001F1FA\U0001F1F8",
+	"\U0001F44D\U0001F3FD",
+	"cafe\u0301",
+	"a\u200bb",
+	"\u263a\ufe0f \u263a",
+	"\u2764 \u2764\ufe0f",
+}
+
+// TestNewRow_AgreesWithRenderer checks that a [cells.Row] measures each
+// line of a corpus as [ansi.StringWidth] does. Both read the
+// RUNEWIDTH_EASTASIAN variable when the program starts, so each case runs
+// the test binary again with the variable set to its value.
+func TestNewRow_AgreesWithRenderer(t *testing.T) {
+	t.Parallel()
+
+	if want := os.Getenv(rendererHelperEnv); want != "" {
+		ambiguous, err := strconv.Atoi(want)
+		require.NoError(t, err)
+
+		_, width := cells.First("±")
+		require.Equal(t, ambiguous, width, "width of an ambiguous rune")
+
+		for _, line := range rendererCorpus {
+			row := cells.NewRow(line, cells.Tabs{})
+			assert.Equal(t, ansi.StringWidth(line), row.Width(utf8.RuneCountInString(line)), "%q", line)
+		}
+
+		return
+	}
+
+	tcs := map[string]struct {
+		// Unset runs the helper without the variable.
+		unset         bool
+		eastAsian     string
+		wantAmbiguous int
+	}{
+		"unset":        {unset: true, wantAmbiguous: 1},
+		"east asian":   {eastAsian: "1", wantAmbiguous: 2},
+		"false":        {eastAsian: "0", wantAmbiguous: 1},
+		"not a number": {eastAsian: "wide", wantAmbiguous: 1},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var env []string
+
+			for _, kv := range os.Environ() {
+				if !strings.HasPrefix(kv, "RUNEWIDTH_EASTASIAN=") {
+					env = append(env, kv)
+				}
+			}
+
+			env = append(env, rendererHelperEnv+"="+strconv.Itoa(tc.wantAmbiguous))
+			if !tc.unset {
+				env = append(env, "RUNEWIDTH_EASTASIAN="+tc.eastAsian)
+			}
+
+			cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestNewRow_AgreesWithRenderer$")
+			cmd.Env = env
+
+			out, err := cmd.CombinedOutput()
+			require.NoError(t, err, "%s", out)
 		})
 	}
 }

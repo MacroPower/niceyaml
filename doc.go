@@ -2246,4 +2246,12 @@
 // for the charm libraries they build on, and they expose the types of those
 // libraries. Each is a module of its own, so bubbletea, fang, and cobra stay
 // out of the dependencies of this module.
+//
+// Of the public packages of this module, only
+// [go.jacobcolvin.com/niceyaml/printer],
+// [go.jacobcolvin.com/niceyaml/style], and
+// [go.jacobcolvin.com/niceyaml/style/theme] link lipgloss and the other
+// charm libraries. A program that loads, decodes, or edits YAML without
+// rendering it does not link them. A test of this module fails when
+// another public package starts to link one.
 package niceyaml

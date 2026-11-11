@@ -5,6 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -132,6 +133,56 @@ func TestExportedAPI_DependencyPolicy(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Empty(t, violations, "exported API names third-party types outside the policy")
+}
+
+// TestDependencies_RenderingBoundary checks that each public package of the
+// module outside the rendering packages links none of the charm libraries.
+// A program that only loads YAML then does not link them. The test skips the
+// internal and example packages, because no program can import them.
+func TestDependencies_RenderingBoundary(t *testing.T) {
+	t.Parallel()
+
+	// The packages that render with lipgloss, so they link the charm
+	// libraries.
+	rendering := []string{
+		"go.jacobcolvin.com/niceyaml/printer",
+		"go.jacobcolvin.com/niceyaml/style",
+		"go.jacobcolvin.com/niceyaml/style/theme",
+	}
+
+	// The import path prefixes of the charm libraries and of the modules
+	// that only they bring in.
+	charm := []string{
+		"charm.land/",
+		"github.com/charmbracelet/",
+		"github.com/lucasb-eyer/go-colorful",
+		"github.com/mattn/go-runewidth",
+	}
+
+	cmd := exec.CommandContext(t.Context(), "go", "list", "-f", "{{.ImportPath}} {{join .Deps \" \"}}", "./...")
+
+	out, err := cmd.Output()
+	require.NoError(t, err)
+
+	var violations []string
+
+	for entry := range strings.Lines(string(out)) {
+		pkg, deps, _ := strings.Cut(strings.TrimSpace(entry), " ")
+		if strings.Contains(pkg, "/internal/") || strings.Contains(pkg, "/examples/") ||
+			slices.Contains(rendering, pkg) {
+			continue
+		}
+
+		for dep := range strings.FieldsSeq(deps) {
+			if slices.ContainsFunc(charm, func(prefix string) bool {
+				return strings.HasPrefix(dep, prefix)
+			}) {
+				violations = append(violations, pkg+" links "+dep)
+			}
+		}
+	}
+
+	require.Empty(t, violations, "public packages outside the rendering packages link a charm library")
 }
 
 // TestCheckFile_Coverage checks that checkFile reads the declarations that
