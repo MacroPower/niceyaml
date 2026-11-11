@@ -40,10 +40,15 @@
 //
 //	fmt.Print(text)
 //
-// A Node renames a key, sets or creates a value, inserts an item, moves a
-// value to another path, or removes an entry or an item. Renames, sets,
-// and moves keep the comments of the entry that they change, but a move
-// into a flow collection drops them. Removals delete them with the entry.
+// A Node renames a key, sets or creates a value, inserts or appends an
+// item, moves a value to another path, or removes an entry or an item. A
+// move to an index that holds an item puts the value before that item. A
+// move to the path of its own entry with [First], [Before], or [After]
+// puts the entry where the option places it in the same mapping.
+//
+// Renames, sets, and moves keep the comments of the entry that they
+// change, but a move into a flow collection drops them. Removals delete
+// them with the entry.
 // The comment lines after an entry or an item that the user indented past
 // its key or its "-" belong to it, so a new entry or item goes after them.
 // A new entry goes after the last entry of its mapping, or where [First],
@@ -105,11 +110,11 @@
 // value that holds the alias.
 //
 // Each edit through such a path fails the Apply. [Node.Decode] there returns
-// the error of the path, and [Node.Exists], [Node.Kind], and [Node.Text]
-// answer as at a place that does not hold a value. A Func tells such a
-// place from a place without a value by the error of Decode. It reads the
-// value through the alias, or through the mapping that holds the merge key,
-// whose Decode reads the entries that the merge key brings in. The
+// the error of the path, and [Node.Exists], [Node.Kind], [Node.Len], and
+// [Node.Text] answer as at a place that does not hold a value. A Func tells
+// such a place from a place without a value by the error of Decode. It reads
+// the value through the alias, or through the mapping that holds the merge
+// key, whose Decode reads the entries that the merge key brings in. The
 // References section of the go.jacobcolvin.com/niceyaml package describes
 // both. The root package binds the error of such a path as no fault of the
 // document. The edit package binds it as a problem of the edit, whether a
@@ -487,14 +492,14 @@
 // later read of the Func reads the text before the failed edit. So do
 // [Doc.Text] and [Doc.Removals].
 //
-// [Node.At], [Node.Exists], [Node.Decode], [Node.Text], and [Node.Kind]
-// are reads. A read that cannot answer returns its problem to the Func, or
-// answers as it does for a place that does not hold a value. Such a
-// problem belongs to the Func. The Decode of a place that does not hold a
-// value has one, and so does a read at a path that selects more than one
-// value or a key. So does a read at a path that a reference document
-// decides, as the Edits section describes. The Apply fails with such a
-// problem only when the Func returns it.
+// [Node.At], [Node.Exists], [Node.Decode], [Node.Text], [Node.Kind], and
+// [Node.Len] are reads. A read that cannot answer returns its problem to
+// the Func, or answers as it does for a place that does not hold a value.
+// Such a problem belongs to the Func. The Decode of a place that does not
+// hold a value has one, and so does a read at a path that selects more
+// than one value or a key. So does a read at a path that a reference
+// document decides, as the Edits section describes. The Apply fails with
+// such a problem only when the Func returns it.
 //
 // The calls of an Apply act in order. Each call edits the text that the
 // calls before it left, through any path, alias, or `<<` merge key, and the
@@ -526,7 +531,10 @@
 //     and a path by the new key selects the entry already, the SetKey
 //     leaves the text and the model as they are.
 //   - [Node.Remove] removes the value.
-//   - [Node.Move] takes the value from its place to the target.
+//   - [Node.Move] takes the value from its place to the target. A target
+//     that holds an item takes the value before that item. A target at the
+//     path of the entry puts the entry where its placement option puts it
+//     in the same mapping.
 //   - The write of a protected field creates or replaces the field, first
 //     in its mapping.
 //
@@ -539,7 +547,7 @@
 // gives for a place without a token, without a `~`. No path names a key
 // inside a `<<` merge entry, so such a key shows the path of the mapping
 // that holds the outermost such entry. Other problems about the key that a
-// call writes bind at that key in the same way. A Move to a target that
+// call writes bind at that key in the same way. A Move to a key that
 // exists is such a problem. Only a Source of
 // [go.jacobcolvin.com/niceyaml.WithAllowDuplicateKeys] lets a mapping repeat
 // a key, and a rename to a key that its mapping holds then fails with
@@ -554,8 +562,9 @@
 // misread of go-yaml. The first difference fails the call that made it with
 // an error that matches [ErrEngine], and the call leaves the text as it
 // found it. Each later call and each [Node.Decode] of the Apply then
-// returns that error. [Node.Text], [Node.Kind], and [Node.Exists] answer as
-// they do for a place that does not hold a value, as [Node] describes.
+// returns that error. [Node.Text], [Node.Kind], [Node.Len], and
+// [Node.Exists] answer as they do for a place that does not hold a value,
+// as [Node] describes.
 //
 // The error of a difference binds where the user's text holds the value
 // that differs, as an error at that value does. A value that the call left

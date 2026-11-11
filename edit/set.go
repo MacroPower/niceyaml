@@ -65,6 +65,11 @@ type payload struct {
 	// edit as its writer, as the key that a rename writes keeps the writer
 	// of the old key. A "-" takes the origin of the value.
 	writer *note
+	// The text of the key that held the value, or "". A move that puts an
+	// entry back into its own mapping writes this text, so the key reads
+	// back as it did. Any other key that an edit writes reads back as its
+	// name.
+	key string
 	// The comment lines above the entry or the item.
 	above []line
 	// The lines of a block collection, or of a block scalar after its
@@ -99,7 +104,9 @@ type payload struct {
 // past the last item of a sequence appends an item, and [Node.Insert] puts
 // an item before another. An entry that Set creates goes after the last
 // entry of its mapping, unless an option of opts places it, as [First],
-// [Before], and [After] do. A value that replaces an
+// [Before], and [After] do. A Set that replaces a value ignores those
+// options. A Set that appends an item fails with one of them, because the
+// option places an entry. A value that replaces an
 // empty value takes the place of the spaces and tabs after its ":" or "-",
 // unless a comment follows them. A Set of 3 at a thus turns "{a: , b: 1}"
 // into "{a: 3, b: 1}". A key of a flow mapping without a ":", as in
@@ -263,7 +270,8 @@ func (n *Node) Set(ctx context.Context, v any, opts ...SetOption) error {
 }
 
 // SetOption configures one call of [Node.Set], or the target of one call
-// of [Node.Move].
+// of [Node.Move]. Each option places an entry of a mapping, so a call
+// that creates an item of a sequence fails with one.
 //
 // Options:
 //   - [First]
@@ -308,11 +316,27 @@ func (p placement) side() string {
 	return "before"
 }
 
+// words returns the place of p as a message gives it, as in "first" or
+// `before "b"`.
+func (p placement) words() string {
+	switch p.kind {
+	case placeFirst:
+		return "first"
+	case placeBefore, placeAfter:
+		return fmt.Sprintf("%s %q", p.side(), p.key)
+	case placeLast:
+	}
+
+	return "last"
+}
+
 // First is a [SetOption] that puts the entry that the call creates before
 // the first entry of its mapping. The entry goes after the comment lines
 // at the top of the document, and before the comment lines that belong to
-// the first entry. A call that creates no entry, as a Set that replaces a
-// value or appends an item does, leaves the text where it is. When the
+// the first entry. A [Node.Move] to the path of its own entry puts that
+// entry there, and the entry keeps the text of its key. A Set that replaces a value
+// leaves the value where it is. A call that creates an item of a sequence
+// fails with the option, because the option places an entry. When the
 // call creates mappings above the value too, it places the entry that it
 // creates in the nearest mapping that the text holds, and the new
 // mappings go with it. The last placement option of a call wins.
@@ -325,11 +349,12 @@ func First() SetOption {
 // Before is a [SetOption] that puts the entry that the call creates before
 // the entry of key in its mapping, as [First] places an entry before the
 // first entry. A path names the key by its text, and the key selects the
-// entry that a path of the key selects. The call reads key only when it
-// creates an entry. A call that creates no entry leaves the text where it
-// is, as [First] describes. When the call creates an entry, it fails
-// when the mapping does not write key, also when a `<<` merge key brings
-// key in. The last placement option of a call wins.
+// entry that a path of the key selects. A Set that replaces a value does
+// not read key, and it leaves the value where it is, as [First] describes.
+// A call that creates an item fails, as it does with First. When the call
+// places an entry, it fails when the mapping does not write key, also when
+// a `<<` merge key brings key in. The last placement option of a call
+// wins.
 func Before(key string) SetOption {
 	return func(c *setConfig) {
 		c.at = placement{kind: placeBefore, key: key}
@@ -1626,6 +1651,12 @@ func (d *Doc) createValue(ctx context.Context, h *Node, p *place, v any, at plac
 		}
 
 		return nil, modelPlace{}, d.fail(h, "%s sets %s, but %s", d.subject(), h.path, why)
+	}
+
+	// A placement puts an entry, so it does not apply to an item.
+	if next.Kind == paths.SelectorIndex && at.kind != placeLast {
+		return nil, modelPlace{}, d.fail(h, "%s sets %s %s, but %s holds a sequence",
+			d.subject(), h.path, at.words(), d.describe(holderPath))
 	}
 
 	entries, _ := readEntries(content)
