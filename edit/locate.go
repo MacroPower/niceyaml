@@ -404,10 +404,14 @@ func (d *Doc) placeOf(at niceyaml.Located) (niceyaml.Place, *note) {
 	// so a path that such an alias stops binds at the alias whatever the
 	// reference document holds, as the problem of a read of the path does.
 	// The node at the path gives the path that the user's text spells too.
+	// A sequence element and the root do not have a key, so a path that ends
+	// in a `~` after either does not select a node. The current text still
+	// holds a token for it, so it binds where the root package binds it, with
+	// the node that [pointedNode] gives.
 	var held ast.Node
 
 	if at.HasPath {
-		n, err := d.node.Resolver().Node(at.Path)
+		n, err := pointedNode(d.node.Resolver(), at.Path)
 		if err == nil && !at.Path.IsRoot() && !d.holdsPath(at.Path) {
 			err = paths.ErrNotFound
 		}
@@ -496,6 +500,35 @@ func (d *Doc) placeOf(at niceyaml.Located) (niceyaml.Place, *note) {
 	}
 
 	return place, nil
+}
+
+// pointedNode returns the node that an error at path points at in the
+// document of res. For most paths, that node is the one that path selects,
+// and pointedNode returns what [paths.Resolver.Node] does. A sequence
+// element and the root do not have a key, so a path that ends in a `~`
+// after either does not select a node. An error at such a path still
+// points where the path before the `~` does, as [paths.Resolver.Token]
+// describes, so pointedNode returns the node of that path. Any other path
+// that does not select a node returns the error of Resolver.Node.
+func pointedNode(res *paths.Resolver, path paths.Path) (ast.Node, error) {
+	n, err := res.Node(path)
+	if !errors.Is(err, paths.ErrNotFound) {
+		return n, err //nolint:wrapcheck // The caller reads the error of the Resolver.
+	}
+
+	// A path that points at a token but does not select a node ends in a
+	// `~` without a key to select.
+	_, tokenErr := res.Token(path)
+	if tokenErr != nil {
+		return nil, err //nolint:wrapcheck // The caller reads the error of the Resolver.
+	}
+
+	before := path
+	for last, ok := before.Last(); ok && last.Kind == paths.SelectorKey; last, ok = before.Last() {
+		before, _ = before.Parent()
+	}
+
+	return res.Node(before) //nolint:wrapcheck // The caller reads the error of the Resolver.
 }
 
 // holdsPath reports whether the current text holds a value at path, as the
@@ -843,7 +876,7 @@ func (d *Doc) emptyAfter(at niceyaml.Located, start, end int) (int, bool) {
 		return 0, false
 	}
 
-	n, err := d.node.Resolver().Node(at.Path)
+	n, err := pointedNode(d.node.Resolver(), at.Path)
 	if err != nil || n == nil || !isImplicitNull(n) {
 		return 0, false
 	}
@@ -940,7 +973,7 @@ func (d *Doc) emptyNote(path paths.Path, before int) (note, bool) {
 // returns after, the offset past the ":" or "-" of the value, when the
 // user's text does not hold an empty value at path.
 func (d *Doc) userEmpty(path paths.Path, after int) int {
-	n, err := d.user.Resolver().Node(path)
+	n, err := pointedNode(d.user.Resolver(), path)
 	if err != nil || n == nil || !isImplicitNull(n) {
 		return after
 	}
@@ -1164,7 +1197,7 @@ func (d *Doc) userPos(off int) position.Position {
 func (d *Doc) userPath(path paths.Path, pos position.Position) paths.Path {
 	// The resolver binds no error. A bound error locates itself through d,
 	// which then calls userPath again.
-	n, err := d.node.Resolver().Node(path)
+	n, err := pointedNode(d.node.Resolver(), path)
 	if err != nil {
 		return path
 	}

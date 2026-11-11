@@ -1570,12 +1570,6 @@ func TestNode_Range_Alias(t *testing.T) {
 			path:  paths.Doc().Index(1),
 			want:  yamltest.LineRange(1, 2, 4),
 		},
-		"alias element through a key selector": {
-			// A `~` after an element selects the element itself.
-			input: "- &x {b: 1}\n- *x\n",
-			path:  paths.Doc().Index(1).Key(),
-			want:  yamltest.LineRange(1, 2, 4),
-		},
 		"alias as an element of a flow sequence": {
 			input: "a: &x {b: 1}\nc: [*x]\n",
 			path:  paths.Doc().Child("c").Index(0),
@@ -4849,6 +4843,86 @@ func TestNode_At_NotFound(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, nodes)
 	})
+
+	t.Run("a key selector on a node without a key selects nothing", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			// The path of the Node that resolves path, and the path it gets.
+			scope paths.Path
+			path  paths.Path
+			want  string
+			// The range that Ranges gives for path, which still points at
+			// the node before the `~`. Without one, Ranges fails as At does.
+			ranges position.Ranges
+		}{
+			"the root": {
+				path:   paths.Current().Key(),
+				want:   "c.yaml: resolve $~: not found",
+				ranges: position.Ranges{yamltest.LineRange(1, 0, 4)},
+			},
+			"a scalar element": {
+				path:   itemsPath.Index(0).Key(),
+				want:   "c.yaml: resolve $.items[0]~: not found",
+				ranges: position.Ranges{yamltest.LineRange(5, 4, 5)},
+			},
+			"a mapping element": {
+				path:   itemsPath.Index(1).Key(),
+				want:   "c.yaml: resolve $.items[1]~: not found",
+				ranges: position.Ranges{yamltest.LineRange(6, 2, 3)},
+			},
+			"an element that is the scope": {
+				scope:  itemsPath.Index(1),
+				path:   paths.Current().Key(),
+				want:   "c.yaml: resolve $.items[1]~: not found",
+				ranges: position.Ranges{yamltest.LineRange(6, 2, 3)},
+			},
+			"a selector after the key of an element": {
+				path: itemsPath.Index(1).Key().Child("k"),
+				want: "c.yaml: resolve $.items[1]~.k: not found",
+			},
+			"a selector after the key of the root": {
+				path: paths.Current().Key().Child("name"),
+				want: "c.yaml: resolve $~.name: not found",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				node := yamltest.AtOrSelf(t, doc, tc.scope)
+
+				_, err := node.At(tc.path)
+				require.ErrorIs(t, err, paths.ErrNotFound)
+				require.EqualError(t, err, tc.want)
+
+				nodes, err := node.Nodes(tc.path)
+				require.NoError(t, err)
+				assert.Empty(t, nodes)
+
+				ranges, err := node.Ranges(tc.path)
+				if tc.ranges == nil {
+					require.ErrorIs(t, err, paths.ErrNotFound)
+					require.EqualError(t, err, tc.want)
+
+					return
+				}
+
+				require.NoError(t, err)
+				assert.Equal(t, tc.ranges, ranges)
+			})
+		}
+	})
+
+	t.Run("a key selector on a scoped entry selects its key", func(t *testing.T) {
+		t.Parallel()
+
+		key, err := yamltest.At(t, doc, hoursPath).At(paths.Current().Key())
+		require.NoError(t, err)
+		assert.Equal(t, "$.hours~", key.Path().String())
+		assert.Equal(t, "hours", key.AST().String())
+	})
 }
 
 func TestNode_At_UnresolvedAlias(t *testing.T) {
@@ -6263,6 +6337,61 @@ func TestNode_Nodes(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, keys, 3)
 		assert.Equal(t, "$.jobs.build~", keys[1].Path().String())
+	})
+
+	t.Run("scopes the keys alone through a key selector", func(t *testing.T) {
+		t.Parallel()
+
+		listed := yamltest.FirstDocument(t, stringtest.Input(`
+			name: x
+			tags: [snake_case_value, other]
+			items:
+			  - one
+			  - k: v
+		`))
+
+		tcs := map[string]struct {
+			path paths.Path
+			want []string
+		}{
+			"every key at any depth": {
+				path: paths.Doc().RecursiveAll().Key(),
+				want: []string{"$.name~", "$.tags~", "$.items~", "$.items[1].k~"},
+			},
+			"every key with a name": {
+				path: paths.Doc().Recursive("k").Key(),
+				want: []string{"$.items[1].k~"},
+			},
+			"every element has no key": {
+				path: paths.Doc().Child("items").IndexAll().Key(),
+			},
+			"one element has no key": {
+				path: paths.Doc().Child("items").Index(0).Key(),
+			},
+			"the root has no key": {
+				path: paths.Doc().Key(),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				keys, err := listed.Nodes(tc.path)
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, nodePaths(keys))
+
+				// Each Node is a key, so its own range is its key range.
+				for _, key := range keys {
+					got, ok := key.KeyRange()
+					require.True(t, ok, key.Path().String())
+
+					want, ok := key.Range()
+					require.True(t, ok)
+					assert.Equal(t, want, got)
+				}
+			})
+		}
 	})
 
 	t.Run("a merge key that does not resolve is an error bound to the source", func(t *testing.T) {

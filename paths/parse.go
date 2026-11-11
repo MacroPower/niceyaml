@@ -43,7 +43,10 @@ var (
 //     the key `*`.
 //   - `[n]` selects a sequence element by 0-based index.
 //   - `[*]` selects every sequence element.
-//   - `~` selects the key of the entry the selector before it picked.
+//   - `~` selects the key of the entry the selector before it picked. It
+//     selects nothing after a sequence element and on the root, which do
+//     not have a key. After a `~` that found a key, it selects that key
+//     again.
 //
 // Inside quotes, `\` escapes the next character, so `\'` is a quote and
 // `\\` is a backslash. Parse reads the escapes that [Path.String] writes

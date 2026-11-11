@@ -352,6 +352,12 @@ func (n *Node) AST() ast.Node {
 // $.a.b scopes the alias *x, and the path $.c scopes {b: *x}. A path that
 // enters such an alias returns an error that wraps [paths.ErrAlias].
 //
+// A sequence element and the root do not have a key. A path with the `~`
+// selector of [paths.Path.Key] after either thus does not select a node,
+// and At returns an error wrapping [paths.ErrNotFound] for it.
+// [Node.Ranges] and an [Error] at a path that ends in such a `~` still
+// point at the element or the root.
+//
 // A path that does not select a node returns the error that
 // [paths.Resolver.Node] describes, bound to the source. It wraps
 // [paths.ErrNotFound] when the document does not hold a value at the
@@ -408,6 +414,13 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 // The last selector of that path names an entry by the text that
 // [paths.Resolver.KeyName] gives its key. [paths.Path.Last] gives that
 // selector.
+//
+// The `~` selector of [paths.Path.Key] scopes the key of each entry that
+// the path before it selects. A sequence element and the root do not have
+// a key, so it scopes nothing for them. The path `$..*~` thus scopes the
+// key of each entry that `..*` selects and none of the sequence elements.
+// [paths.Path.RecursiveAll] names the entries that `..*` leaves out, such
+// as the entry of a `<<` merge key.
 //
 // A path that does not select a node returns an empty slice and a nil
 // error. A path with a selector returns the same in a document without
@@ -825,8 +838,7 @@ func (n *Node) entryKey(path paths.Path) ast.Node {
 // writtenAlias returns the node that the document writes at the path of
 // n, and true when that node is an alias. The node keeps the tag written
 // on the alias. [Node.AST] holds the content of the anchor that the alias
-// refers to. A path that ends in `~` names the key of its entry, or the
-// element itself when the `~` follows an element of a sequence.
+// refers to. A path that ends in `~` names the key of its entry.
 func (n *Node) writtenAlias() (ast.Node, bool) {
 	if n.base.IsRoot() {
 		return nil, false
@@ -834,8 +846,7 @@ func (n *Node) writtenAlias() (ast.Node, bool) {
 
 	var written ast.Node
 
-	// ParentAt gives no holder for a `~` that picks the key of an entry, and
-	// the holder of the node itself for any other `~`.
+	// ParentAt gives no holder for a `~`, which picks the key of an entry.
 	in := datapath.ParentAt(n.doc.pathResolver(), n.base)
 
 	switch last, _ := n.base.Last(); {
@@ -926,7 +937,12 @@ func (n *Node) View() *line.View {
 // That token is the key of its entry, the "-" of its element in a block
 // sequence, or else its own "{" or "[". A block mapping or a block
 // sequence at the root covers its first key or element. A path from
-// [paths.Path.Key] covers the key of the entry:
+// [paths.Path.Key] covers the key of the entry.
+//
+// A sequence element and the root do not have a key. A path that ends in
+// a `~` after either covers what the path before the `~` covers.
+//
+// An overlay of the ranges highlights the token in a view:
 //
 //	ranges, err := doc.Ranges(paths.Doc().Child("spec", "replicas"))
 //	if err != nil {

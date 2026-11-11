@@ -4545,6 +4545,114 @@ func TestDoc_Locate_Ranges(t *testing.T) {
 	}
 }
 
+// A sequence element and the root do not have a key. An error at a path
+// that ends in a `~` after either binds where the path before the `~` points.
+func TestDoc_Locate_WithoutKey(t *testing.T) {
+	t.Parallel()
+
+	// The error of err and its range, as "message [line:col-line:col]".
+	located := func(t *testing.T, err error) string {
+		t.Helper()
+
+		var se *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &se)
+
+		rng, ok := se.Range()
+		require.True(t, ok)
+
+		return fmt.Sprintf("%s [%d:%d-%d:%d]", err, rng.Start.Line, rng.Start.Col, rng.End.Line, rng.End.Col)
+	}
+
+	tcs := map[string]struct {
+		// The Func of an Apply at the root, or nil for a Doc without an
+		// edit, which binds the error as the document does.
+		edit   edit.Func
+		before string
+		at     string
+		want   string
+	}{
+		"flow mapping element of a flow sequence": {
+			before: "l: [{a: 1}, x]",
+			at:     "$.l[0]~",
+			want:   "test.yaml:1:5: $.l[0]~: bad [0:4-0:5]",
+		},
+		"flow sequence element of a flow sequence": {
+			before: "l: [x, [p, q]]",
+			at:     "$.l[1]~",
+			want:   "test.yaml:1:8: $.l[1]~: bad [0:7-0:8]",
+		},
+		"alias element": {
+			before: "l: [&anc y, *anc]",
+			at:     "$.l[1]~",
+			want:   "test.yaml:1:13: $.l[1]~: bad [0:12-0:13]",
+		},
+		"block scalar element": {
+			before: stringtest.LinesLF("l:", "  - |", "    block", "    text"),
+			at:     "$.l[0]~",
+			want:   "test.yaml:2:5: $.l[0]~: bad [1:4-1:5]",
+		},
+		"empty element": {
+			before: stringtest.LinesLF("- a", "-", "- b"),
+			at:     "$[1]~",
+			want:   "test.yaml:2:2: $[1]~: bad [1:1-1:1]",
+		},
+		"repeated key selector": {
+			before: "l: [{a: 1}, x]",
+			at:     "$.l[0]~~",
+			want:   "test.yaml:1:5: $.l[0]~~: bad [0:4-0:5]",
+		},
+		"flow mapping root": {
+			before: "{a: [1, {b: 2}]}",
+			at:     "$~",
+			want:   "test.yaml:1:1: $~: bad [0:0-0:1]",
+		},
+		"flow mapping element under a flow mapping root": {
+			before: "{a: [1, {b: 2}]}",
+			at:     "$.a[1]~",
+			want:   "test.yaml:1:9: $.a[1]~: bad [0:8-0:9]",
+		},
+		"flow mapping element after an edit": {
+			before: stringtest.LinesLF("l: [{a: 1}, x]", "z: 1"),
+			edit:   func(ctx context.Context, n *edit.Node) error { return n.At(paths.Doc().Child("z")).Set(ctx, 2) },
+			at:     "$.l[0]~",
+			want:   "test.yaml:1:5: $.l[0]~: bad [0:4-0:5]",
+		},
+		"root after the removal of the element before an empty element": {
+			before: stringtest.LinesLF("- a", "-", "- {k: v}"),
+			edit:   func(_ context.Context, n *edit.Node) error { return n.At(paths.Doc().Index(0)).Remove() },
+			at:     "$~",
+			want:   "test.yaml:2:2: $~: bad [1:1-1:1]",
+		},
+		"empty element after the removal of the element before it": {
+			before: stringtest.LinesLF("- a", "-", "- {k: v}"),
+			edit:   func(_ context.Context, n *edit.Node) error { return n.At(paths.Doc().Index(0)).Remove() },
+			at:     "$[0]~",
+			want:   "test.yaml:2:2: $[0]~: bad [1:1-1:1]",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			bad := niceyaml.NewError("bad", niceyaml.AtPath(paths.MustParse(tc.at)))
+
+			d := newDoc(t, tc.before)
+			if tc.edit != nil {
+				require.NoError(t, d.Apply(t.Context(), paths.Doc(), tc.edit))
+			}
+
+			assert.Equal(t, tc.want, located(t, d.Node().Bind(bad)))
+
+			if tc.edit == nil {
+				doc := yamltest.FirstDocument(t, tc.before, niceyaml.WithName("test.yaml"))
+				assert.Equal(t, tc.want, located(t, doc.Bind(bad)))
+			}
+		})
+	}
+}
+
 func TestDoc_Locate_Root(t *testing.T) {
 	t.Parallel()
 

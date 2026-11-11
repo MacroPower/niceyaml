@@ -1056,6 +1056,7 @@ func TestParentAt(t *testing.T) {
 		"entry below an entry": {path: paths.Doc().Child("a", "k"), entry: "k"},
 		"element":              {path: paths.Doc().Child("l").Index(1), index: 1, seq: true},
 		"key of an entry":      {path: paths.Doc().Child("a").Key()},
+		"key of an element":    {path: paths.Doc().Child("l").Index(1).Key()},
 		"missing entry":        {path: paths.Doc().Child("z")},
 	}
 

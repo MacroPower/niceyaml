@@ -327,11 +327,17 @@ func TestResolver_NodeFrom(t *testing.T) {
 			path:  "@.b~",
 			want:  "b",
 		},
-		"leading key selects the node itself": {
+		"leading key does not find the entry of the node": {
 			input: nested,
 			from:  "$.a.b",
 			path:  "@~",
-			want:  "x",
+			err:   paths.ErrNotFound,
+		},
+		"selector after a leading key": {
+			input: nested,
+			from:  "$.a",
+			path:  "@~.b",
+			err:   paths.ErrNotFound,
 		},
 		"unknown alias": {
 			input: stringtest.LinesLF("a:", "  b: *nope"),
@@ -391,12 +397,6 @@ func TestResolver_NodeFrom(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, node.String())
 
-			// A `~` at the start of the path selects the start node, where
-			// the joined path selects the key of its entry.
-			if strings.HasPrefix(tc.path, "@~") {
-				return
-			}
-
 			joined, err := r.Node(from.Join(path))
 			require.NoError(t, err)
 			assert.Same(t, joined, node)
@@ -419,6 +419,24 @@ func TestResolver_NodeFrom(t *testing.T) {
 		node, err := r.NodeFrom(nil, paths.Doc().Child("a"))
 		require.NoError(t, err)
 		assert.Equal(t, "x", node.String())
+	})
+
+	t.Run("joined path selects the key that a leading key misses", func(t *testing.T) {
+		t.Parallel()
+
+		r := paths.NewResolver(documentOf(t, "a:\n  b: x\n"))
+		from := paths.Doc().Child("a", "b")
+
+		start, err := r.Node(from)
+		require.NoError(t, err)
+
+		// NodeFrom gets the value without its entry.
+		_, err = r.NodeFrom(start, paths.Current().Key())
+		require.ErrorIs(t, err, paths.ErrNotFound)
+
+		key, err := r.Node(from.Join(paths.Current().Key()))
+		require.NoError(t, err)
+		assert.Equal(t, "b", key.String())
 	})
 }
 
@@ -463,6 +481,17 @@ func TestResolver_MatchesFrom(t *testing.T) {
 			from:  "$.m",
 			path:  "@.*",
 			want:  []string{"@.k=x", "@.own=1"},
+		},
+		"leading key selects nothing": {
+			input: "a: {b: 1}\n",
+			from:  "$.a",
+			path:  "@~",
+		},
+		"keys of the entries below": {
+			input: "a: {b: [x], c: {d: 1}}\n",
+			from:  "$.a",
+			path:  "@..*~",
+			want:  []string{"@.b~=b", "@.c~=c", "@.c.d~=d"},
 		},
 		"current path selects the node itself": {
 			input: "a: [x]\n",
@@ -712,6 +741,14 @@ func TestResolver_Nearest(t *testing.T) {
 		"key selector on the missing key": {
 			input: server,
 			path:  "$.server.name~",
+		},
+		"key selector on an element before the missing key": {
+			input: stringtest.LinesLF("servers:", "  - port: 80"),
+			path:  "$.servers[0]~.name",
+		},
+		"key selector on the root before the missing key": {
+			input: server,
+			path:  "$~.name",
 		},
 		"wildcard": {
 			input: stringtest.LinesLF("servers:", "  - port: 80"),
@@ -1758,6 +1795,79 @@ func TestResolver_Token(t *testing.T) {
 			tk := resolveToken(t, doc, tc.path)
 			assert.Equal(t, tc.want, tk.Value)
 			assert.Equal(t, token.StringType, tk.Type)
+		})
+	}
+}
+
+func TestResolver_KeySelector(t *testing.T) {
+	t.Parallel()
+
+	doc := documentOf(t, stringtest.LinesLF(
+		"name: x",
+		"items:",
+		"  - one",
+		"  - k: v",
+	))
+
+	// Node selects the key of an entry or nothing. Token still points at
+	// the element or the root for a path that ends in a `~` without a key.
+	tcs := map[string]struct {
+		path string
+		// The text of the node, or "" when the path selects nothing.
+		node string
+		// The place of the token, or "" when the path points at nothing.
+		token string
+	}{
+		"key of an entry":                          {path: "$.name~", node: "name", token: "name@1:1"},
+		"key of an entry in an element":            {path: "$.items[1].k~", node: "k", token: "k@4:5"},
+		"key of a key":                             {path: "$.name~~", node: "name", token: "name@1:1"},
+		"key of the root":                          {path: "$~", token: "name@1:1"},
+		"key of a scalar element":                  {path: "$.items[0]~", token: "one@3:5"},
+		"key of a mapping element":                 {path: "$.items[1]~", token: "-@4:3"},
+		"key of the key of an element":             {path: "$.items[1]~~", token: "-@4:3"},
+		"child after the key of an element":        {path: "$.items[1]~.k"},
+		"child after the key of the root":          {path: "$~.name"},
+		"child after two keys of the root":         {path: "$~~.name"},
+		"key of a child after the key of the root": {path: "$~.name~"},
+		"index after the key of the root":          {path: "$~.items[0]"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			r := paths.NewResolver(doc)
+			path := paths.MustParse(tc.path)
+
+			node, err := r.Node(path)
+			if tc.node == "" {
+				require.ErrorIs(t, err, paths.ErrNotFound)
+				require.NotErrorIs(t, err, paths.ErrNoDocument)
+				require.EqualError(t, err, "resolve "+tc.path+": not found")
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tc.node, node.String())
+			}
+
+			nodes, err := r.Nodes(path)
+			require.NoError(t, err)
+
+			if tc.node == "" {
+				assert.Empty(t, nodes)
+			} else {
+				require.Len(t, nodes, 1)
+				assert.Same(t, node, nodes[0])
+			}
+
+			tk, err := r.Token(path)
+			if tc.token == "" {
+				require.ErrorIs(t, err, paths.ErrNotFound)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.token, yamltest.TokenPlace(tk))
 		})
 	}
 }
@@ -3645,15 +3755,17 @@ func TestResolver_Token_NotFound(t *testing.T) {
 	doc := documentOf(t, "name: test\nitems: [a, b]\n")
 
 	tcs := map[string]paths.Path{
-		"missing key":              paths.Doc().Child("nope"),
-		"child of scalar":          paths.Doc().Child("name", "x"),
-		"index of mapping":         paths.Doc().Index(0),
-		"index of scalar":          paths.Doc().Child("name").Index(0),
-		"index out of range":       paths.Doc().Child("items").Index(2),
-		"child of sequence":        paths.Doc().Child("items", "a"),
-		"missing key then index":   paths.Doc().Child("nope").Index(0),
-		"missing key then child":   paths.Doc().Child("nope", "deeper"),
-		"index then missing child": paths.Doc().Child("items").Index(0).Child("x"),
+		"missing key":                     paths.Doc().Child("nope"),
+		"child of scalar":                 paths.Doc().Child("name", "x"),
+		"index of mapping":                paths.Doc().Index(0),
+		"index of scalar":                 paths.Doc().Child("name").Index(0),
+		"index out of range":              paths.Doc().Child("items").Index(2),
+		"child of sequence":               paths.Doc().Child("items", "a"),
+		"missing key then index":          paths.Doc().Child("nope").Index(0),
+		"missing key then child":          paths.Doc().Child("nope", "deeper"),
+		"index then missing child":        paths.Doc().Child("items").Index(0).Child("x"),
+		"child after the key of the root": paths.Doc().Key().Child("name"),
+		"index after the key of the root": paths.Doc().Key().Child("items").Index(0),
 	}
 
 	for name, path := range tcs {
@@ -5371,10 +5483,61 @@ func TestResolver_Matches(t *testing.T) {
 			input: "a: 1\n",
 			path:  "$.b..*",
 		},
-		"key of each node": {
+		"key of each entry at any depth": {
 			input: "a: [x]\nb: {c: 1}\n",
 			path:  "$..*~",
-			want:  []string{"$.a~=a", "$.a[0]~=x", "$.b~=b", "$.b.c~=c"},
+			want:  []string{"$.a~=a", "$.b~=b", "$.b.c~=c"},
+		},
+		"key of each entry at any depth leaves out the elements": {
+			input: "a: [x, {k: v}, [y]]\n",
+			path:  "$..*~",
+			want:  []string{"$.a~=a", "$.a[1].k~=k"},
+		},
+		"key of each entry at any depth leaves out a merge key": {
+			// The `..*` selector leaves out the entry of a merge key, so
+			// the `~` does not get an entry there to take the key of.
+			input: "base: &b {k: x}\nm:\n  <<: *b\n  own: 1\nl:\n  - <<: *b\n",
+			path:  "$..*~",
+			want:  []string{"$.base~=base", "$.base.k~=k", "$.m~=m", "$.m.own~=own", "$.l~=l"},
+		},
+		"key of a merge key that the path names": {
+			input: "base: &b {k: x}\nm:\n  <<: *b\n  own: 1\n",
+			path:  "$.m.<<~",
+			want:  []string{"$.m.<<~=<<"},
+		},
+		"key of each entry with a name": {
+			input: "a: {n: 1}\nb: [{n: 2}]\n",
+			path:  "$..n~",
+			want:  []string{"$.a.n~=n", "$.b[0].n~=n"},
+		},
+		"key of each element selects nothing": {
+			input: "a: [x, {k: v}]\n",
+			path:  "$.a[*]~",
+		},
+		"key of one element selects nothing": {
+			input: "a: [x, {k: v}]\n",
+			path:  "$.a[1]~",
+		},
+		"key of the root selects nothing": {
+			input: "a: [x]\n",
+			path:  "$~",
+		},
+		"selector after the key of an element selects nothing": {
+			input: "a: [{k: v}]\n",
+			path:  "$.a[*]~.k",
+		},
+		"recursive selector after the key of the root selects nothing": {
+			input: "a: [{k: v}]\n",
+			path:  "$~..*",
+		},
+		"key after the key of an entry": {
+			input: "a: {b: 1}\n",
+			path:  "$.a.*~~",
+			want:  []string{"$.a.b~~=b"},
+		},
+		"key after the key of an element selects nothing": {
+			input: "a: [x]\n",
+			path:  "$.a[*]~~",
 		},
 		"then a child": {
 			input: "a: {b: 1}\nc: [{b: 2}]\n",
@@ -5643,7 +5806,8 @@ func TestResolver_EmptyDocument(t *testing.T) {
 				require.NoError(t, err)
 				assert.Equal(t, ast.NullType, node.Type())
 
-				// The key of the root is the same null.
+				// The root does not have a key, so a path that ends in `~`
+				// points where the root path does.
 				for _, path := range []paths.Path{paths.Doc(), paths.Doc().Key()} {
 					tk, err := paths.NewResolver(doc).Token(path)
 					require.NoError(t, err)
@@ -5661,11 +5825,31 @@ func TestResolver_EmptyDocument(t *testing.T) {
 
 		doc := emptyDocument(t, "---\n")
 
-		for _, path := range []paths.Path{paths.Doc(), paths.Doc().Key()} {
-			matches, err := paths.NewResolver(doc).Matches(path)
-			require.NoError(t, err)
-			require.Len(t, matches, 1)
-			assert.Equal(t, path.String(), matches[0].Path.String())
+		matches, err := paths.NewResolver(doc).Matches(paths.Doc())
+		require.NoError(t, err)
+		require.Len(t, matches, 1)
+		assert.Equal(t, "$", matches[0].Path.String())
+	})
+
+	t.Run("the key of the root selects nothing", func(t *testing.T) {
+		t.Parallel()
+
+		for name, input := range map[string]string{
+			"header":    "---\n",
+			"no header": "# comment\n",
+		} {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				r := paths.NewResolver(documentOf(t, input))
+
+				matches, err := r.Matches(paths.Doc().Key())
+				require.NoError(t, err)
+				assert.Empty(t, matches)
+
+				_, err = r.Node(paths.Doc().Key())
+				requireNoDocument(t, err)
+			})
 		}
 	})
 
