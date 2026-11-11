@@ -3,16 +3,20 @@ package fangs
 import (
 	"fmt"
 	"io"
+	"os"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 
 	"charm.land/fang/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/x/term"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/printer"
+	"go.jacobcolvin.com/niceyaml/style"
 )
 
 // ErrorHandler is the [fang.ErrorHandler] that [NewErrorHandler] returns
@@ -33,12 +37,16 @@ const Indent = 2
 // Available options:
 //   - [WithPrinter]
 //   - [WithExcerptOptions]
+//   - [WithLightDarkStyles]
 type Option func(*config)
 
 // config holds the settings an [Option] configures.
 type config struct {
 	printer *printer.Printer
-	excerpt []niceyaml.ExcerptOption
+	// The styles for a light and a dark terminal, without their surfaces.
+	// Both are nil until [WithLightDarkStyles] sets them.
+	light, dark style.Styler
+	excerpt     []niceyaml.ExcerptOption
 }
 
 // newConfig applies opts over the defaults: a [printer.Printer] from
@@ -74,12 +82,73 @@ func newConfig(opts []Option) config {
 //
 // The handler indents every line by [Indent] columns and wraps what
 // [printer.Printer.PrintReport] renders to the width less those columns.
-// The output then fits a terminal of that width. To fit a terminal w
-// columns wide, set the width to w, as the [NewErrorHandler] example
-// does.
+// The output then fits a terminal of that width. A printer without a
+// width fits the terminal of the error stream, as [NewErrorHandler]
+// describes.
 func WithPrinter(p *printer.Printer) Option {
 	return func(cfg *config) {
 		cfg.printer = p
+	}
+}
+
+// WithLightDarkStyles is an [Option] that renders errors with the styles
+// of light on a light terminal background and with the styles of dark on a
+// dark one. It mirrors [LightDarkColorSchemeFunc], so help output and
+// error excerpts can use the same pair of themes:
+//
+//	err := fang.Execute(ctx, rootCmd,
+//	    fang.WithErrorHandler(fangs.NewErrorHandler(
+//	        fangs.WithLightDarkStyles(theme.CharmLight, theme.Charm),
+//	    )),
+//	    fang.WithColorSchemeFunc(fangs.LightDarkColorSchemeFunc(theme.CharmLight, theme.Charm)),
+//	)
+//
+// For each error it renders with color, the handler asks the terminal
+// behind the error stream for its background. It asks that stream rather
+// than stdout, so a run with stdout redirected still matches the terminal
+// that shows the error. When the error stream is not a terminal, or the
+// terminal does not report its background, the handler picks dark, as
+// [lipgloss.HasDarkBackground] does. A terminal that does not answer
+// delays the error output until the query times out.
+//
+// The styles replace the styles of the printer that [WithPrinter] sets,
+// and the printer keeps its other settings, such as its gutter and its
+// width. The handler removes the surface of each theme, as
+// [style.WithSurface] does with nil, so the text shows the terminal's own
+// background, as help output does. That removal covers a [style.Styles],
+// a [*style.Styles], and a styler with a Styles method that returns
+// [style.Styles], such as a theme. Any other styler renders as it is. A
+// nil light or dark, or one holding a nil pointer, selects the palette of
+// [style.Default] for that background.
+func WithLightDarkStyles(light, dark style.Styler) Option {
+	if isNil(light) {
+		light = style.Default(false)
+	}
+
+	if isNil(dark) {
+		dark = style.Default(true)
+	}
+
+	light, dark = withoutSurface(light), withoutSurface(dark)
+
+	return func(cfg *config) {
+		cfg.light, cfg.dark = light, dark
+	}
+}
+
+// withoutSurface returns styles without the surface of
+// [style.WithSurface], or styles itself when it does not hold a
+// [style.Styles].
+func withoutSurface(styles style.Styler) style.Styler {
+	switch s := styles.(type) {
+	case style.Styles:
+		return s.With(style.WithSurface(nil))
+	case *style.Styles:
+		return s.With(style.WithSurface(nil))
+	case interface{ Styles() style.Styles }:
+		return s.Styles().With(style.WithSurface(nil))
+	default:
+		return styles
 	}
 }
 
@@ -105,10 +174,9 @@ func WithExcerptOptions(opts ...niceyaml.ExcerptOption) Option {
 // NewErrorHandler creates a new [fang.ErrorHandler] that renders
 // [*go.jacobcolvin.com/niceyaml.SourceError] values with their annotated
 // source. Each option in opts configures one setting of the handler, such
-// as the [printer.Printer] it renders with. To fit the output in a
-// terminal that is width columns wide, give the printer that width:
+// as the [printer.Printer] it renders with:
 //
-//	p := printer.New(printer.WithWrapWidth(width))
+//	p := printer.New(printer.WithGutter(printer.NoGutter))
 //
 //	err := fang.Execute(ctx, rootCmd,
 //	    fang.WithErrorHandler(fangs.NewErrorHandler(fangs.WithPrinter(p))),
@@ -133,13 +201,19 @@ func WithExcerptOptions(opts ...niceyaml.ExcerptOption) Option {
 // that tree alone, without the line breaks that end it. One such line
 // break follows the suggestions that Cobra lists for an unknown command.
 //
+// When the printer has no width and the error stream is a terminal, the
+// handler wraps the output to the width of that terminal at each call. A
+// width from [printer.WithWrapWidth] takes precedence, and output to a
+// stream that is not a terminal does not wrap.
+//
 // Fang hands the handler a [*colorprofile.Writer] that holds the color
-// profile of the error stream. When that profile does not support color,
-// as in a pipe, a file, or a terminal with NO_COLOR set, the handler
-// replaces the PrintReport output. It writes what [niceyaml.FormatError]
-// renders with the same options. The carets of FormatError then mark each
-// range that color marks in a terminal, and its lines do not wrap. A
-// writer of any other type gets the PrintReport output.
+// profile of the error stream and forwards to that stream. When that
+// profile does not support color, as in a pipe, a file, or a terminal
+// with NO_COLOR set, the handler replaces the PrintReport output. It
+// writes what [niceyaml.FormatError] renders with the same options. The
+// carets of FormatError then mark each range that color marks in a
+// terminal, and its lines do not wrap. A writer of any other type gets the
+// PrintReport output.
 //
 // [fang.DefaultErrorHandler] wraps errors in a lipgloss style that breaks
 // multi-line output. This handler styles only the error header and leaves
@@ -198,7 +272,64 @@ func render(w io.Writer, err error, cfg config) string {
 		return niceyaml.FormatError(err, cfg.excerpt...)
 	}
 
-	return cfg.printer.PrintReport(niceyaml.NewErrorReport(err, cfg.excerpt...))
+	return printerFor(w, cfg).PrintReport(niceyaml.NewErrorReport(err, cfg.excerpt...))
+}
+
+// printerFor returns the printer of cfg fitted to the terminal behind w.
+// It picks the styles of [WithLightDarkStyles] for the background of that
+// terminal, and it gives a printer without a width the width of that
+// terminal less [Indent].
+func printerFor(w io.Writer, cfg config) *printer.Printer {
+	p := cfg.printer
+	f, isTerm := terminal(w)
+
+	if cfg.dark != nil {
+		styles := cfg.dark
+		if isTerm && !lipgloss.HasDarkBackground(replyInput(f), f) {
+			styles = cfg.light
+		}
+
+		p = p.With(printer.WithStyles(styles))
+	}
+
+	if isTerm && p.WrapWidth() == 0 {
+		width, _, err := term.GetSize(f.Fd())
+		if err == nil && width > 0 {
+			p = p.With(printer.WithWrapWidth(max(1, width-Indent)))
+		}
+	}
+
+	return p
+}
+
+// replyInput returns the file that [lipgloss.HasDarkBackground] reads the
+// reply of the terminal behind f from. On Unix, the terminal device of f
+// reads as well as it writes, so f serves, even when stdin is a pipe. On
+// Windows, a console reads its replies from its input handle and never
+// from the output handle of f. Stdin is that input handle, and lipgloss
+// opens the console input in its place when stdin is redirected.
+func replyInput(f term.File) term.File {
+	if runtime.GOOS == "windows" {
+		return os.Stdin
+	}
+
+	return f
+}
+
+// terminal returns the terminal that w writes to, and whether w writes to
+// one. It looks through a [*colorprofile.Writer] to the writer it forwards
+// to.
+func terminal(w io.Writer) (term.File, bool) {
+	if cw, ok := w.(*colorprofile.Writer); ok {
+		w = cw.Forward
+	}
+
+	f, ok := w.(term.File)
+	if !ok || !term.IsTerminal(f.Fd()) {
+		return nil, false
+	}
+
+	return f, true
 }
 
 // isBound reports whether the tree of err holds an error bound to a

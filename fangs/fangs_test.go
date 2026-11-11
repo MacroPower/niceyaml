@@ -18,6 +18,9 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/printer"
+	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/kind"
+	"go.jacobcolvin.com/niceyaml/style/theme"
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
@@ -348,6 +351,89 @@ func TestNewErrorHandler_Width(t *testing.T) {
 			assert.Equal(t, tc.width, lipgloss.Width(got))
 		})
 	}
+}
+
+func TestErrorHandler_WidthOffTerminal(t *testing.T) {
+	t.Parallel()
+
+	// A writer that is not a terminal has no width to fit, so the output
+	// of a printer without a width does not wrap.
+	src := niceyaml.NewSourceFromTokens(tokens.Tokenize("name: " + strings.Repeat("x", 300) + "\n"))
+	err := yamltest.Bind(t, src, errAt("invalid name", "$.name"))
+
+	want := report(printer.New().PrintError(err))
+
+	assert.Equal(t, want, handleAs(fangs.ErrorHandler, colorprofile.TrueColor, err))
+}
+
+func TestNewErrorHandler_WithLightDarkStyles(t *testing.T) {
+	t.Parallel()
+
+	err := yamltest.Bind(t, nameValueSource(), errAt("bad name", "$.name~"))
+
+	charm := theme.Charm.Styles()
+	plainCharm := charm.With(style.WithSurface(nil))
+
+	// The light styles tag only errors, so output in them differs from
+	// output in the dark styles.
+	light := yamltest.NewXMLStyles(yamltest.XMLStyleInclude(kind.GenericError))
+	dark := yamltest.NewXMLStyles()
+
+	// A writer that is not a terminal does not report its background, so
+	// the handler takes the dark styles.
+	tcs := map[string]struct {
+		light, dark style.Styler
+		want        style.Styler
+	}{
+		"dark styles off a terminal": {light: light, dark: dark, want: dark},
+		"nil dark selects the default palette": {
+			light: light,
+			want:  style.Default(true),
+		},
+		"nil pointer dark selects the default palette": {
+			light: light,
+			dark:  (*style.Styles)(nil),
+			want:  style.Default(true),
+		},
+		"theme without its surface":          {dark: theme.Charm, want: plainCharm},
+		"styles value without its surface":   {dark: charm, want: plainCharm},
+		"styles pointer without its surface": {dark: &charm, want: plainCharm},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := xmlPrinter()
+			handler := fangs.NewErrorHandler(fangs.WithPrinter(p), fangs.WithLightDarkStyles(tc.light, tc.dark))
+
+			// The printer keeps its own settings, such as its gutter, and
+			// takes the styles.
+			want := report(p.With(printer.WithStyles(tc.want)).PrintError(err))
+
+			assert.Equal(t, want, handleAs(handler, colorprofile.TrueColor, err))
+			assert.Equal(t, want, handle(err, fangs.WithLightDarkStyles(tc.light, tc.dark)))
+		})
+	}
+
+	t.Run("the surface changes the output", func(t *testing.T) {
+		t.Parallel()
+
+		p := xmlPrinter()
+
+		assert.NotEqual(t,
+			p.With(printer.WithStyles(charm)).PrintError(err),
+			p.With(printer.WithStyles(plainCharm)).PrintError(err),
+		)
+	})
+
+	t.Run("plain output without color", func(t *testing.T) {
+		t.Parallel()
+
+		handler := fangs.NewErrorHandler(fangs.WithLightDarkStyles(light, dark))
+
+		assert.Equal(t, report(niceyaml.FormatError(err)), handleAs(handler, colorprofile.ASCII, err))
+	})
 }
 
 func TestErrorHandler_ColorProfile(t *testing.T) {

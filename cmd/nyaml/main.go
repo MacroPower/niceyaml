@@ -8,27 +8,21 @@ import (
 	"syscall"
 
 	"charm.land/fang/v2"
-	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 	"go.jacobcolvin.com/x/cobras/profile"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/fangs"
-	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
 func main() {
 	rootCmd, stopProfiler := newRootCmd()
 
-	// The error printer carries the terminal width so annotated source
-	// excerpts wrap to it.
-	errPrinter := printer.New(printer.WithWrapWidth(terminalWidth()))
-
 	ctx, stop := notifyContext(context.Background())
 
 	err := fang.Execute(ctx, rootCmd,
-		fang.WithErrorHandler(fangs.NewErrorHandler(fangs.WithPrinter(errPrinter))),
+		fang.WithErrorHandler(errorHandler()),
 		fang.WithColorSchemeFunc(helpColorScheme()),
 	)
 
@@ -106,6 +100,14 @@ func helpColorScheme() fang.ColorSchemeFunc {
 	return fangs.LightDarkColorSchemeFunc(theme.CharmLight, theme.Charm)
 }
 
+// errorHandler renders errors with [theme.Charm] on a dark terminal and
+// with [theme.CharmLight] on a light one, as [helpColorScheme] colors help
+// output. The excerpts of an error wrap to the width of the terminal on
+// stderr.
+func errorHandler() fang.ErrorHandler {
+	return fangs.NewErrorHandler(fangs.WithLightDarkStyles(theme.CharmLight, theme.Charm))
+}
+
 // newRootCmd builds the nyaml root command and the function that stops
 // profiling and writes the snapshot profiles. Call the returned function
 // after the command runs, whatever it returned.
@@ -155,21 +157,4 @@ func newRootCmd() (*cobra.Command, func() error) {
 
 		return p.Stop() //nolint:wrapcheck // main reports it as it is.
 	}
-}
-
-// terminalWidth returns the width of the terminal on stderr, or 90 when
-// stderr is not a terminal. Error output with styles fits that width, and
-// the plain output the handler writes to a stream without color does not
-// wrap.
-func terminalWidth() int {
-	width := 90
-
-	if term.IsTerminal(os.Stderr.Fd()) {
-		w, _, err := term.GetSize(os.Stderr.Fd())
-		if err == nil {
-			width = w
-		}
-	}
-
-	return width
 }

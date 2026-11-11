@@ -17,7 +17,21 @@
 //
 // When the error stream does not support color, as in a pipe or under
 // NO_COLOR, the handler prints the plain text of [niceyaml.FormatError]
-// instead. Carets in that text mark each range.
+// instead. Carets in that text mark each range. When the error stream is a
+// terminal, the handler wraps the excerpts to its width.
+//
+// [WithLightDarkStyles] colors the excerpts with one theme on a light
+// terminal and another on a dark one. It reads the background of the
+// terminal behind the error stream. [LightDarkColorSchemeFunc] picks the
+// theme of help output from the background that fang detects, so help
+// and errors can take the same pair of themes:
+//
+//	err := fang.Execute(ctx, rootCmd,
+//	    fang.WithErrorHandler(fangs.NewErrorHandler(
+//	        fangs.WithLightDarkStyles(theme.CharmLight, theme.Charm),
+//	    )),
+//	    fang.WithColorSchemeFunc(fangs.LightDarkColorSchemeFunc(theme.CharmLight, theme.Charm)),
+//	)
 //
 // # Color Schemes
 //
