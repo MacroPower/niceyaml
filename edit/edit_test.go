@@ -9,10 +9,12 @@ import (
 	"io/fs"
 	"net"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+	"weak"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -4908,6 +4910,63 @@ func TestDoc_Apply_MarshalerErrorAs(t *testing.T) {
 		assert.NotSame(t, inner, got)
 		assert.False(t, niceyaml.IsInvalid(err))
 	})
+}
+
+// detachedSet returns a weak pointer to the Source of a new Doc and the
+// detached error of a Set on the Doc. The marshaler of the Set fails with
+// the error of a decode that binds in the Source. Nothing else holds the
+// Source or the Doc.
+func detachedSet(t *testing.T) (weak.Pointer[niceyaml.Source], error) {
+	t.Helper()
+
+	// The helper newSourceDoc keeps the Doc, and so its Source, until the
+	// test ends for the Changes checks. The callers check that the Source
+	// goes away before then, so build the Doc without that helper.
+	doc := yamltest.FirstDocument(t, "a: x\n", niceyaml.WithName("test.yaml"))
+	src := doc.Source()
+
+	d, err := edit.New(doc, edit.WithApp("cafe"), edit.WithProtected(typeFields...))
+	require.NoError(t, err)
+
+	err = d.Apply(t.Context(), paths.Doc().Child("a"), func(ctx context.Context, n *edit.Node) error {
+		_, err := n.Decode[int](ctx)
+		require.Error(t, err)
+
+		return n.Set(ctx, errorMarshaler{err: err})
+	}, label)
+	require.Error(t, err)
+
+	return weak.Make(src), niceyaml.Detach(err)
+}
+
+func TestDoc_Apply_Detach(t *testing.T) {
+	t.Parallel()
+
+	w, detached := detachedSet(t)
+	require.Error(t, detached)
+
+	var bound int
+
+	for node := range niceyaml.NewErrorTree(detached).All() {
+		if node.Bound != nil {
+			bound++
+
+			assert.Nil(t, node.Source(), node.Message())
+		}
+	}
+
+	assert.Positive(t, bound)
+
+	// The cause of the error of the Set holds the error of the decode,
+	// which binds in the Source of the Doc. Detach reaches it, so the
+	// Source goes away.
+	assert.Eventually(t, func() bool {
+		runtime.GC()
+
+		return w.Value() == nil
+	}, 5*time.Second, 10*time.Millisecond)
+
+	runtime.KeepAlive(detached)
 }
 
 func TestDoc_Apply_Nested(t *testing.T) {

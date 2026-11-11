@@ -195,6 +195,20 @@ func (e *problemError) Unwrap() error {
 	return e.err
 }
 
+// DetachErrors returns a copy of e with the error that it wraps and each
+// of its marks detached by detach. [niceyaml.Detach] calls it.
+func (e *problemError) DetachErrors(detach func(error) error) error {
+	c := *e
+	c.err = detach(e.err)
+
+	c.marks = make([]error, len(e.marks))
+	for i, m := range e.marks {
+		c.marks[i] = detach(m)
+	}
+
+	return &c
+}
+
 // newProblem returns the problem msg, which matches mark, at the location
 // of opts. The document is at fault for it.
 func newProblem(mark error, msg string, opts ...niceyaml.ErrorOption) error {
@@ -279,6 +293,15 @@ func (p *Problem) Unwrap() error {
 	return p.Err
 }
 
+// DetachErrors returns a copy of p with Err detached by detach. The copy
+// keeps the other fields of p. [niceyaml.Detach] calls it.
+func (p *Problem) DetachErrors(detach func(error) error) error {
+	c := *p
+	c.Err = detach(p.Err)
+
+	return &c
+}
+
 // LoadError is the error of a load, a plan, or Apply that reports one
 // problem or more. It holds every error and every warning in load order,
 // under one heading that counts them, as in "config: 2 errors, 1 warning".
@@ -325,6 +348,19 @@ func (e *LoadError) AsErrors() error {
 	return &LoadError{err: niceyaml.AsErrors(e.err)}
 }
 
+// DetachErrors returns a LoadError over the problems of e, with each
+// binding detached by detach. Detach also reaches the [*Problem] of each
+// row and each binding below it that it can rebuild. Such a binding can
+// be a detail in another document, or the error that a check or a step
+// panicked with.
+// [niceyaml.Detach] keeps each error that it cannot rebuild as it is, such
+// as an error type of the program without a DetachErrors method. Such an
+// error keeps the Source of each binding below it in the result.
+// [niceyaml.Detach] calls it.
+func (e *LoadError) DetachErrors(detach func(error) error) error {
+	return &LoadError{err: detach(e.err)}
+}
+
 // panicError is the error of a panic in a function of the app, such as a
 // step, with a message such as "check panicked: boom".
 type panicError struct {
@@ -341,4 +377,16 @@ func (e *panicError) Error() string {
 // Unwrap returns the [niceyaml.PanicError] of the panic.
 func (e *panicError) Unwrap() error {
 	return e.p
+}
+
+// DetachErrors returns a copy of e with the [niceyaml.PanicError] of the
+// panic detached by detach. When the app panicked with an error, the copy
+// holds that error detached. [niceyaml.Detach] calls it.
+func (e *panicError) DetachErrors(detach func(error) error) error {
+	c := *e
+	if p, ok := detach(e.p).(*niceyaml.PanicError); ok { //nolint:errorlint // The copy of e.p, not a chain search.
+		c.p = p
+	}
+
+	return &c
 }

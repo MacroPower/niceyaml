@@ -446,6 +446,15 @@ func TestDetach_Nothing(t *testing.T) {
 		"unbound error": {err: niceyaml.NewError("unbound", niceyaml.AtPath(paths.Doc().Child("a")))},
 		"join":          {err: errors.Join(plain, errors.New("other"))},
 		"wrapper":       {err: fmt.Errorf("x: %w", plain)},
+		"nil panic in a join": {
+			err: errors.Join(plain, (*niceyaml.PanicError)(nil)),
+		},
+		"nil panic below a wrapper": {
+			err: fmt.Errorf("x: %w", (*niceyaml.PanicError)(nil)),
+		},
+		"nil wrapper that rebuilds itself in a join": {
+			err: errors.Join(plain, (*fileError)(nil)),
+		},
 	}
 
 	for name, tc := range tcs {
@@ -553,6 +562,149 @@ func TestDetach_Detached(t *testing.T) {
 	})
 }
 
+// fileError wraps an error with a type that rebuilds itself for
+// [niceyaml.Detach].
+type fileError struct {
+	err  error
+	path string
+}
+
+func (e *fileError) Error() string { return e.path + ": " + e.err.Error() }
+func (e *fileError) Unwrap() error { return e.err }
+
+func (e *fileError) DetachErrors(detach func(error) error) error {
+	return &fileError{path: e.path, err: detach(e.err)}
+}
+
+func TestDetach_DetachErrors(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("ab.yaml"))
+	doc := yamltest.Document(t, source)
+
+	tcs := map[string]struct {
+		err func() error
+	}{
+		"wrapper": {
+			err: func() error {
+				return &fileError{path: "ab.yaml", err: doc.Bind(yamltest.ErrorAt("bad a", "a"))}
+			},
+		},
+		"wrapper below a wrapper of fmt.Errorf": {
+			err: func() error {
+				return fmt.Errorf(
+					"check: %w",
+					&fileError{path: "ab.yaml", err: doc.Bind(yamltest.ErrorAt("bad a", "a"))},
+				)
+			},
+		},
+		"wrappers of one source in a join": {
+			err: func() error {
+				return errors.Join(
+					&fileError{path: "ab.yaml", err: doc.Bind(yamltest.ErrorAt("bad a", "a"))},
+					&fileError{path: "ab.yaml", err: doc.Bind(yamltest.ErrorAt("bad b", "b"))},
+				)
+			},
+		},
+		"wrapper that a validation splits": {
+			err: func() error {
+				v := niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
+					return &fileError{path: "ab.yaml", err: errors.Join(
+						niceyaml.NewWarning("old a", niceyaml.AtPath(paths.Doc().Child("a"))),
+						n.Bind(yamltest.ErrorAt("bad b", "b")),
+					)}
+				})
+
+				return source.ValidateDocuments(t.Context(), v)
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tc.err()
+			require.Error(t, err)
+
+			live, ok := errors.AsType[*fileError](err)
+			require.True(t, ok)
+
+			got := requireDetaches(t, err)
+
+			found, ok := errors.AsType[*fileError](got)
+			require.True(t, ok)
+			assert.NotSame(t, live, found)
+			assert.Equal(t, "ab.yaml", found.path)
+
+			for bound := range niceyaml.Bindings(found) {
+				assert.Nil(t, bound.Source(), bound.Error())
+			}
+		})
+	}
+
+	t.Run("wrapper without a binding comes back as it is", func(t *testing.T) {
+		t.Parallel()
+
+		wrapped := &fileError{path: "ab.yaml", err: errors.New("plain")}
+		assert.Same(t, wrapped, niceyaml.Detach(wrapped))
+	})
+
+	t.Run("wrapper reached twice has one copy", func(t *testing.T) {
+		t.Parallel()
+
+		wrapped := &fileError{path: "ab.yaml", err: doc.Bind(yamltest.ErrorAt("bad a", "a"))}
+		got := niceyaml.Detach(errors.Join(wrapped, fmt.Errorf("again: %w", wrapped)))
+
+		var copies []*fileError
+
+		joined, ok := got.(interface{ Unwrap() []error }) //nolint:errorlint // The join itself.
+		require.True(t, ok)
+
+		for _, branch := range joined.Unwrap() {
+			found, ok := errors.AsType[*fileError](branch)
+			require.True(t, ok)
+
+			copies = append(copies, found)
+		}
+
+		require.Len(t, copies, 2)
+		assert.NotSame(t, wrapped, copies[0])
+		assert.Same(t, copies[0], copies[1])
+	})
+}
+
+func TestDetach_PanicError(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("a.yaml"))
+	doc := yamltest.Document(t, source)
+
+	t.Run("value that binds an error", func(t *testing.T) {
+		t.Parallel()
+
+		live := &niceyaml.PanicError{Value: doc.Bind(yamltest.ErrorAt("bad a", "a")), Stack: []byte("stack")}
+		got := requireDetaches(t, fmt.Errorf("check: %w", live))
+
+		found, ok := errors.AsType[*niceyaml.PanicError](got)
+		require.True(t, ok)
+		assert.NotSame(t, live, found)
+		assert.Equal(t, live.Stack, found.Stack)
+		assert.Equal(t, live.Error(), found.Error())
+
+		for bound := range niceyaml.Bindings(found) {
+			assert.Nil(t, bound.Source(), bound.Error())
+		}
+	})
+
+	t.Run("value that is not an error", func(t *testing.T) {
+		t.Parallel()
+
+		live := &niceyaml.PanicError{Value: "boom"}
+		assert.Same(t, live, niceyaml.Detach(live))
+	})
+}
+
 // detachedFrom returns a weak pointer to a new source of input and the
 // detached error that check returns for it. Nothing else holds the
 // source.
@@ -630,6 +782,18 @@ func TestDetach_ReleasesSource(t *testing.T) {
 					"check: %w",
 					documentOf(source).Bind(niceyaml.NewWarning("old", niceyaml.AtPath(paths.Doc().Child("a")))),
 				)
+			},
+		},
+		"wrapper that rebuilds itself": {
+			input: "a: 1\n",
+			check: func(_ context.Context, source *niceyaml.Source) error {
+				return &fileError{path: "check.yaml", err: documentOf(source).Bind(yamltest.ErrorAt("bad", "a"))}
+			},
+		},
+		"panic with a binding": {
+			input: "a: 1\n",
+			check: func(_ context.Context, source *niceyaml.Source) error {
+				return &niceyaml.PanicError{Value: documentOf(source).Bind(yamltest.ErrorAt("bad", "a"))}
 			},
 		},
 		"validator that wraps a warning and an error": {

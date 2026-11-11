@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -16,6 +17,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"testing/fstest"
+	"time"
+	"weak"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -4166,7 +4169,192 @@ func TestLoadError(t *testing.T) {
 	assert.Equal(t, "config: 3 errors", firstLine(strict.Error()))
 	assert.True(t, niceyaml.IsInvalid(err))
 
-	assert.ErrorAs(t, strict, new(*manifest.Problem))
+	require.ErrorAs(t, strict, new(*manifest.Problem))
+
+	// Detach rebuilds the LoadError around detached bindings, so the result
+	// keeps its type and renders as err does, but holds no Source.
+	detached := niceyaml.Detach(err)
+
+	assert.NotSame(t, err, detached)
+	require.ErrorAs(t, detached, new(*manifest.LoadError))
+	require.ErrorAs(t, detached, new(*manifest.Problem))
+	assert.Equal(t, err.Error(), detached.Error())
+	assert.Equal(t, niceyaml.FormatError(err), niceyaml.FormatError(detached))
+
+	bindings := slices.Collect(niceyaml.Bindings(detached))
+	require.NotEmpty(t, bindings)
+
+	for _, b := range bindings {
+		assert.Nil(t, b.Source(), b.Error())
+	}
+
+	assert.Same(t, detached, niceyaml.Detach(detached))
+}
+
+// detachedLoad loads files with a registry of opts. It returns weak
+// pointers to the Sources of the files and the detached LoadError of the
+// load. Nothing else holds the Sources.
+func detachedLoad(
+	t *testing.T,
+	opts []manifest.RegistryOption,
+	files map[string]string,
+) ([]weak.Pointer[niceyaml.Source], error) {
+	t.Helper()
+
+	reg, err := manifest.NewRegistry(opts...)
+	require.NoError(t, err)
+
+	sources := make([]*niceyaml.Source, 0, len(files))
+	for _, name := range slices.Sorted(maps.Keys(files)) {
+		sources = append(sources, niceyaml.NewSourceFromString(files[name], niceyaml.WithName(name)))
+	}
+
+	_, err = reg.Load(t.Context(), input.Sources(sources...))
+	require.Error(t, err)
+
+	weaks := make([]weak.Pointer[niceyaml.Source], 0, len(sources))
+	for _, src := range sources {
+		weaks = append(weaks, weak.Make(src))
+	}
+
+	detached := niceyaml.Detach(err)
+	assert.Equal(t, niceyaml.FormatError(err), niceyaml.FormatError(detached))
+
+	return weaks, detached //nolint:wrapcheck // The test reads the error that Detach returns.
+}
+
+// errMarshaler is a value whose MarshalYAML method fails with err.
+type errMarshaler struct{ err error }
+
+// MarshalYAML returns the error of m.
+func (m errMarshaler) MarshalYAML() (any, error) {
+	return nil, m.err
+}
+
+func TestLoadError_Detach(t *testing.T) {
+	t.Parallel()
+
+	// The options of the café registry with check.
+	checked := func(t *testing.T, check func(t *testing.T, set *manifest.Set) error) []manifest.RegistryOption {
+		t.Helper()
+
+		return cafeOptions(manifest.WithCheck(func(_ context.Context, set *manifest.Set) error {
+			return check(t, set)
+		}))
+	}
+
+	// The options of a registry whose Hours v1 runs step on the opens field.
+	stepped := func(step func(ctx context.Context, n *edit.Node) error) []manifest.RegistryOption {
+		return withKinds(manifest.NewKind[Hours]("Hours", manifest.NameField(meta.Child("name")),
+			manifest.Version("cafe.jacobcolvin.com/v1alpha1"),
+			manifest.Version("cafe.jacobcolvin.com/v1", manifest.Migrate(spec.Child("opens"), step)),
+		))
+	}
+
+	cafeFiles := map[string]string{"cafe.yaml": cafeDoc, "menu.yaml": menuDoc}
+	hoursFiles := map[string]string{"hours.yaml": hoursDoc}
+
+	tcs := map[string]struct {
+		opts  func(t *testing.T) []manifest.RegistryOption
+		files map[string]string
+		want  string
+	}{
+		// The Problem of the row wraps the error of the check, and the
+		// detail of that error binds in another document.
+		"detail in another document": {
+			opts: func(t *testing.T) []manifest.RegistryOption {
+				t.Helper()
+
+				return checked(t, func(t *testing.T, set *manifest.Set) error {
+					t.Helper()
+
+					cafe, ok := set.Get[Cafe]("yamull")
+					require.True(t, ok)
+
+					semla, ok := set.Get[MenuItem]("semla")
+					require.True(t, ok)
+
+					return cafe.Bind(niceyaml.NewError("too few seats",
+						niceyaml.AtPath(spec.Child("seats")),
+						niceyaml.WithDetails(semla.Bind(niceyaml.NewError("semla sells out",
+							niceyaml.AtPath(spec.Child("price"))))),
+					))
+				})
+			},
+			files: cafeFiles,
+			want:  "semla sells out",
+		},
+		// The load wraps the panic in an error of its own around the bound
+		// value of the panic.
+		"check that panics with a binding": {
+			opts: func(t *testing.T) []manifest.RegistryOption {
+				t.Helper()
+
+				return checked(t, func(t *testing.T, set *manifest.Set) error {
+					t.Helper()
+
+					cafe, ok := set.Get[Cafe]("yamull")
+					require.True(t, ok)
+
+					panic(cafe.Bind(niceyaml.NewError("too few seats", niceyaml.AtPath(spec.Child("seats")))))
+				})
+			},
+			files: cafeFiles,
+			want:  "check panicked: ",
+		},
+		// The error of the step comes from the edit package, which keeps the
+		// error of the marshaler as its cause. That error binds in the
+		// loaded document.
+		"step whose marshaler fails with a binding": {
+			opts: func(t *testing.T) []manifest.RegistryOption {
+				t.Helper()
+
+				return stepped(func(ctx context.Context, n *edit.Node) error {
+					_, err := n.Decode[int](ctx)
+					require.Error(t, err)
+
+					return n.Set(ctx, errMarshaler{err: err})
+				})
+			},
+			files: hoursFiles,
+			want:  "cannot write the value of $.spec.opens",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			weaks, detached := detachedLoad(t, tc.opts(t), tc.files)
+
+			require.ErrorAs(t, detached, new(*manifest.LoadError))
+
+			var bound int
+
+			for row := range niceyaml.Problems(detached) {
+				for node := range niceyaml.NewErrorTree(row.Err).All() {
+					if node.Bound != nil {
+						bound++
+
+						assert.Nil(t, node.Source(), node.Message())
+					}
+				}
+			}
+
+			assert.Positive(t, bound)
+
+			for _, w := range weaks {
+				assert.Eventually(t, func() bool {
+					runtime.GC()
+
+					return w.Value() == nil
+				}, 5*time.Second, 10*time.Millisecond)
+			}
+
+			assert.Contains(t, niceyaml.FormatError(detached), tc.want)
+			runtime.KeepAlive(detached)
+		})
+	}
 }
 
 func TestRegistry_Load_Problems(t *testing.T) {

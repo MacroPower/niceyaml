@@ -263,6 +263,18 @@ func (e *sentinelError) Unwrap() error {
 	return e.err
 }
 
+// DetachErrors returns a copy of e with the error behind e and the cause
+// of e detached by detach. A cause that binds in the user's document, such
+// as the error of a decode that a marshaler returns, thus does not keep
+// the Source of that document. [niceyaml.Detach] calls it.
+func (e *sentinelError) DetachErrors(detach func(error) error) error {
+	c := *e
+	c.err = detach(e.err)
+	c.cause = detach(e.cause)
+
+	return &c
+}
+
 // Func edits a document through n, a node on one place that the path of
 // [Doc.Apply] selects. An error fails the Apply, and an error without a
 // location binds at the value of n.
