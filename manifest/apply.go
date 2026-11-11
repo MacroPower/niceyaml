@@ -200,7 +200,14 @@ func (r *Result) check(ctx context.Context) {
 			l.checkFile(ctx, i, nf)
 
 		case r.failed[i].err != nil:
-			l.add(&row{err: r.failed[i].err, file: i, index: -1, unplaced: true})
+			// A reason that binds in a document, such as the merge of
+			// layers, takes the kind and the version of that document.
+			reason := &row{err: r.failed[i].err, file: i, index: -1, unplaced: true}
+			if idx, ok := niceyaml.NewErrorTree(reason.err).DocumentIndex(); ok {
+				reason.doc = p.l.docAt(i, idx)
+			}
+
+			l.add(reason)
 		}
 	}
 

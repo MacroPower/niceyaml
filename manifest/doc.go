@@ -462,6 +462,23 @@
 // [schema.ErrViolation]. [niceyaml.IsInvalid] reports each problem that the
 // files of the user cause.
 //
+// Each problem of the [*LoadError] that a load returns wraps a [*Problem],
+// which names the file, the kind, the version, and the path. A tool that
+// reports by kind, such as a CI annotator, finds it with [errors.As] in
+// each row that [niceyaml.Problems] yields:
+//
+//	for row := range niceyaml.Problems(err) {
+//		if p, ok := errors.AsType[*manifest.Problem](row.Err); ok {
+//			annotate(p.File, p.Kind, p.Version, p.Path, row.Message())
+//		}
+//	}
+//
+// The kind is the registered name of the kind that the document routed to,
+// so it stays the same for a document that writes an old name from
+// [KindName] or a layout without a kind field. It is empty for a document
+// that did not route, such as one with an unknown kind or a syntax error,
+// and for a problem of a whole file or of the whole set.
+//
 // [Registry.Check] runs the checks of a load and returns the manifests that
 // pass beside the problems, for an editor or a terminal UI that shows both.
 // [Checked.Set] leaves out the manifest of each document that an error
@@ -500,12 +517,11 @@
 // # Warnings
 //
 // [Deprecated] marks a version deprecated, and a load warns about each
-// document that declares it. Each warning that a load reports wraps a
-// [*Warning], which names the file, the kind, the version, and the path.
-// [WithWarningFilter] decides which warnings a load keeps, so a team can
-// accept one deprecation for a while. [WithWarningsAsErrors] turns each
-// warning that the load keeps into an error, so a strict load in CI fails
-// on a deprecated file:
+// document that declares it. [WithWarningFilter] decides which warnings a
+// load keeps, so a team can accept one deprecation for a while. Its
+// function gets the [*Problem] of each warning. [WithWarningsAsErrors]
+// turns each warning that the load keeps into an error, so a strict load
+// in CI fails on a deprecated file:
 //
 //	set, err := config.Registry.Load(ctx, manifest.Path(dir),
 //		manifest.WithWarningsAsErrors(strict))
@@ -534,7 +550,7 @@
 // might drop one of its marks and keep the field.
 //
 // The warning about such a value wraps a [*schema.Deprecation] beside its
-// [*Warning]. The Deprecation holds the schema path of each schema that
+// [*Problem]. The Deprecation holds the schema path of each schema that
 // marks the value, so a filter accepts one rule of a schema by that path.
 // The warning about a deprecated version or kind does not wrap one.
 //

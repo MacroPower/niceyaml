@@ -24,7 +24,7 @@ type LoadOption func(*loadConfig)
 // loadConfig holds the settings that each [LoadOption] configures.
 type loadConfig struct {
 	// The functions of WithWarningFilter, in the order given.
-	filters     []func(*Warning) bool
+	filters     []func(*Problem) bool
 	strict      bool
 	noSetChecks bool
 	// Whether the checks run for a plan. A plan migrates a document at a
@@ -62,13 +62,13 @@ func WithWarningsAsErrors(strict bool) LoadOption {
 //
 // The functions run in the order given. Each gets the warnings that the
 // functions before it keep, one at a time in load order, each as a
-// [*Warning]. It returns false to drop a warning. The functions run before
+// [*Problem]. It returns false to drop a warning. The functions run before
 // [WithWarningsAsErrors] applies, so a dropped warning never fails a
 // strict load. A filter that accepts a deprecated version for a while
 // matches [ErrDeprecatedVersion] with the Kind and Version of the warning.
 // A filter that accepts a deprecated field or value reads the schema path
 // from the [*schema.Deprecation] that [errors.As] finds in the warning.
-func WithWarningFilter(keep func(*Warning) bool) LoadOption {
+func WithWarningFilter(keep func(*Problem) bool) LoadOption {
 	return func(c *loadConfig) {
 		c.filters = append(c.filters, keep)
 	}
@@ -418,8 +418,8 @@ func (l *loader) docOf(r *row) *docState {
 	return r.doc
 }
 
-// finishRows returns rows in load order, and wraps each warning in a
-// [*Warning]. It applies the functions of [WithWarningFilter] and the
+// finishRows returns rows in load order, and wraps each row in a
+// [*Problem]. It applies the functions of [WithWarningFilter] and the
 // strict mode of [WithWarningsAsErrors] to the warnings.
 func (l *loader) finishRows(rows []*row) []*row {
 	slices.SortStableFunc(rows, compareRows)
@@ -427,32 +427,31 @@ func (l *loader) finishRows(rows []*row) []*row {
 	out := make([]*row, 0, len(rows))
 
 	for _, r := range rows {
-		if !niceyaml.HasErrors(r.err) {
-			w := l.warningOf(r)
-			wrapped := wrapIn(r.err, w)
+		p := l.problemOf(r)
+		wrapped := wrapIn(r.err, p)
 
-			if !l.keeps(w) {
+		if !niceyaml.HasErrors(r.err) {
+			if !l.keeps(p) {
 				continue
 			}
 
-			r.err = wrapped
-
 			if l.cfg.strict && !r.lenient {
-				r.err = niceyaml.AsErrors(r.err)
+				wrapped = niceyaml.AsErrors(wrapped)
 			}
 		}
 
+		r.err = wrapped
 		out = append(out, r)
 	}
 
 	return out
 }
 
-// keeps reports whether every function of [WithWarningFilter] keeps w.
-// The functions run in order, and the first that drops w ends the check.
-func (l *loader) keeps(w *Warning) bool {
+// keeps reports whether every function of [WithWarningFilter] keeps p.
+// The functions run in order, and the first that drops p ends the check.
+func (l *loader) keeps(p *Problem) bool {
 	for _, keep := range l.cfg.filters {
-		if keep != nil && !keep(w) {
+		if keep != nil && !keep(p) {
 			return false
 		}
 	}
@@ -460,20 +459,20 @@ func (l *loader) keeps(w *Warning) bool {
 	return true
 }
 
-// wrapWarning returns the warning of r wrapped in a [*Warning]. It does
-// not apply the filters or the strict mode.
-func (l *loader) wrapWarning(r *row) error {
-	return wrapIn(r.err, l.warningOf(r))
+// wrapProblem returns the error of r wrapped in a [*Problem]. It does not
+// apply the filters or the strict mode.
+func (l *loader) wrapProblem(r *row) error {
+	return wrapIn(r.err, l.problemOf(r))
 }
 
-// wrapIn returns err, a bound warning, with w around the error that it
+// wrapIn returns err, a bound problem, with p around the error that it
 // binds.
-func wrapIn(err error, w *Warning) error {
-	//nolint:wrapcheck // The wrapper is the warning of the row.
+func wrapIn(err error, p *Problem) error {
+	//nolint:wrapcheck // The wrapper is the problem of the row.
 	return hook.Rewrap(err, func(inner error) error {
-		w.Err = inner
+		p.Err = inner
 
-		return w
+		return p
 	})
 }
 
@@ -517,34 +516,37 @@ func compareBool(a, b bool) int {
 	}
 }
 
-// warningOf returns the [*Warning] that describes the row r.
-func (l *loader) warningOf(r *row) *Warning {
-	w := &Warning{Path: paths.Doc()}
+// problemOf returns the [*Problem] that describes the row r. A plan gives
+// the version that a document declares after Apply. Apply leaves a file
+// that it does not write as it was, so the check after Apply gives the
+// version that the file declares.
+func (l *loader) problemOf(r *row) *Problem {
+	p := &Problem{Path: paths.Doc()}
 
 	tree := niceyaml.NewErrorTree(r.err)
-	if p, ok := tree.Path(); ok {
-		w.Path = p
+	if path, ok := tree.Path(); ok {
+		p.Path = path
 	}
 
 	if src := tree.Source(); src != nil && r.file < len(l.files) {
-		w.File = src.Name()
+		p.File = src.Name()
 	}
 
 	d := l.docOf(r)
 	if d != nil && d.route.kind != nil {
-		w.Kind = d.route.kind.kind.name
+		p.Kind = d.route.kind.kind.name
 
 		v := d.route.version
-		if d.rewritten {
+		if d.rewritten && l.cfg.plan {
 			v = d.route.kind.written
 		}
 
 		if v != nil && !v.cfg.unversioned {
-			w.Version = v.cfg.name
+			p.Version = v.cfg.name
 		}
 	}
 
-	return w
+	return p
 }
 
 // docAt returns the document at index of the file at file, or nil.

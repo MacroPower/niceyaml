@@ -209,33 +209,45 @@ func newWarning(marks []error, msg string, opts ...niceyaml.ErrorOption) error {
 	return hook.MarkWarning(problem) //nolint:wrapcheck // The mark adds no text.
 }
 
-// Warning describes one warning of a load. Each warning that a load
-// reports wraps one. [errors.As] thus finds it in each row that
-// [niceyaml.Problems] yields, in strict mode too. A filter from
-// [WithWarningFilter] receives it to decide whether the load keeps the
-// warning.
+// Problem describes one row of a [*LoadError] that a load, a plan, or
+// Apply returns. Each error and each warning of the LoadError wraps one,
+// so [errors.As] finds it in each row that [niceyaml.Problems] yields. A
+// reporter reads the kind and the version that a document routed to from
+// it, for an error as for a warning. A filter from [WithWarningFilter]
+// receives the Problem of each warning to decide whether the load keeps
+// the warning.
 //
-// The message of a Warning is the message of Err. Warning does not add a
+// The message of a Problem is the message of Err. Problem does not hold a
 // severity of its own, so a warning stays a warning inside it.
-type Warning struct { //nolint:errname // A Warning is no error, though it wraps one.
-	// Err holds the warning that the check produced, with its message
+// [niceyaml.ErrorTree.Warning] and [niceyaml.HasErrors] tell the two
+// apart. In strict mode, the row of a warning is an error, but its Problem
+// still wraps the warning. [niceyaml.HasErrors] on the row, not on the
+// Problem, thus tells whether the row fails the load.
+type Problem struct { //nolint:errname // A Problem describes a row, and wraps the error of the row.
+	// Err holds the problem that the check produced, with its message
 	// unchanged. [errors.Is] finds a sentinel such as [ErrDeprecatedVersion]
-	// or [ErrRemoved] through it.
+	// or [ErrUnknownKind] through it.
 	Err error
 	// File is the name of the file that messages show, such as
-	// "config/menu.yaml". It is empty for a warning that does not bind in a
+	// "config/menu.yaml". It is empty for a row that does not bind in a
 	// file.
 	File string
-	// Kind is the registered name of the kind, as [Object.Kind] holds it,
-	// also for a document that writes an old name from [KindName].
+	// Kind is the registered name of the kind that the document routed to,
+	// as [Object.Kind] holds it, also for a document that writes an old
+	// name from [KindName]. It is empty for a document that did not route
+	// to a kind, such as one with an unknown kind or a syntax error, and
+	// for a row of a whole file or of the whole set.
 	Kind string
 	// Version is the version that the document declares, as
-	// [Object.Version] holds it, and empty for an unversioned document. In
-	// a plan, it is the version that the document declares after Apply.
+	// [Object.Version] holds it. It is empty for an unversioned document,
+	// for a document that did not route to a version, and wherever Kind is
+	// empty. In a plan, it is the version that the document declares after
+	// Apply. In the result of Apply, it is the version that the file
+	// holds. A file that Apply did not write keeps its old version.
 	Version string
 	// Path is the path that the message shows, such as
-	// `$.spec.legacyPricing~`, or `$` for a warning without a path. A `~` at
-	// its end marks a warning about a key. The warning of a decode or a
+	// `$.spec.legacyPricing~`, or `$` for a row without a path. A `~` at
+	// its end marks a problem about a key. The warning of a decode or a
 	// schema names the value by its path in the current version, in a load
 	// and in a plan. The warning of a value that a step removes names the
 	// value as the text that the load or the plan read spells it. A step
@@ -245,17 +257,17 @@ type Warning struct { //nolint:errname // A Warning is no error, though it wraps
 }
 
 // Error returns the message of Err, or an empty string for a nil Err.
-func (w *Warning) Error() string {
-	if w.Err == nil {
+func (p *Problem) Error() string {
+	if p.Err == nil {
 		return ""
 	}
 
-	return w.Err.Error()
+	return p.Err.Error()
 }
 
 // Unwrap returns Err.
-func (w *Warning) Unwrap() error {
-	return w.Err
+func (p *Problem) Unwrap() error {
+	return p.Err
 }
 
 // LoadError is the error of a load, a plan, or Apply that reports one
@@ -269,7 +281,8 @@ func (w *Warning) Unwrap() error {
 // [niceyaml.ErrorListLimit] lines at most and a last line that counts the
 // rest. Every renderer of niceyaml shows the heading above the problems, each
 // with its details and its excerpt. [errors.Is], [errors.As], and
-// [niceyaml.Problems] reach each problem.
+// [niceyaml.Problems] reach each problem, and each problem wraps a
+// [*Problem].
 type LoadError struct {
 	// The one problem, or the heading bound over all of them.
 	err error
