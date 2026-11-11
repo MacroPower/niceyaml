@@ -785,13 +785,24 @@
 // `~`. The error for a value of the wrong kind matches [ErrWrongKind], the
 // error for a number out of range matches [ErrOverflow], and the error for an
 // unknown field matches [ErrUnknownField]. Each of them also matches
-// ErrDecode. The path names where the document writes the value, so a value
-// that an alias brings in reports the path of its anchor. A value of a
-// reference document reports its path below the alias that reads it, as the
-// References section describes. A value below one that a [CustomUnmarshaler]
-// function decodes reports its path below that value, even through an
-// alias. The function reads the value with each alias and each `<<` merge
-// key written out.
+// ErrDecode.
+//
+// The path names the way that the decode read the value, and the position
+// names where the document writes it, as for a schema error. A value inside
+// an anchor that an alias or a `<<` merge key brings in thus reports the path
+// through that alias or merge key, at the position of the anchor:
+//
+//	config.yaml:1:21: $.hours.open: expected integer, got string
+//
+// The decode of the anchor itself reports the path of the anchor. Where the
+// path of a use selects another value, such as a later entry of the same
+// key, the error reports the path where the document writes the value. So
+// do the rejection of a map key and every rejection that the decode cannot
+// tie to a use. A value of a reference document reports its path below the
+// alias that reads it, as the References section describes. A value below
+// one that a [CustomUnmarshaler] function decodes reports its path below
+// that value, even through an alias. The function reads the value with
+// each alias and each `<<` merge key written out.
 //
 // A `<<` merge key can write its source in place, as a mapping or a sequence
 // of mappings. The path of a value there names the entry in the mapping that
@@ -818,7 +829,9 @@
 //
 // The error is a summary from [NewSummary] that heads one error per problem,
 // and [ErrorTree.Problems] yields those errors. For a document with one
-// problem, the decode returns that problem alone. The search adds values of
+// problem, the decode returns that problem alone. A value that several
+// aliases or `<<` merge keys read gives one problem for each use that the
+// decoder rejects, each with the path of that use. The search adds values of
 // the wrong kind, numbers out of range, durations that do not parse, scalars
 // that an UnmarshalText method rejects, and unknown fields under
 // [UnknownFieldsReject]. The decoder confirms each one.
@@ -1181,11 +1194,15 @@
 // check only a whole document, such as a
 // [go.jacobcolvin.com/niceyaml/schema.Registry], refuses a scoped Node. A
 // caller thus validates at the root and decodes the nodes below it without
-// that validator. A value that an alias of the document brings in reports the
-// path where its anchor defines it. So does a value that a `<<` merge key
-// brings in through such an alias. That path can lie outside the scope. A
-// value of a reference document reports its path below the alias that reads
-// it, as the References section describes. That path lies inside the scope
+// that validator. A decode of a scoped Node reports the path of each use
+// inside the scope, as the Decoding section describes. A value that an alias
+// or a `<<` merge key of the document brings in from an anchor outside the
+// scope thus reports a path inside the scope, at the position of the anchor.
+// The Decoding section lists the rejections that keep the path where the
+// document writes the value, such as the rejection of a map key. Such a
+// rejection can report a path outside the scope. A value of a reference
+// document reports its path below the alias that reads it, as the References
+// section describes. That path lies inside the scope
 // when the alias does. An alias inside an anchor of the document puts the
 // path at the place where that anchor defines it, which can lie outside the
 // scope. A value below one that a [CustomUnmarshaler] function decodes
@@ -1422,8 +1439,10 @@
 // it. The path does not name the merge key or an index of a sequence there, so
 // `services: {<<: {q: *img}}` gives `$.services.q.port`. A merge key that reads
 // an anchor of the document brings in the entries where the anchor defines
-// them. The path then names the place of the anchor, as it does for any value
-// of that anchor. The error binds as an error at its path binds.
+// them. The error then binds at the alias of the reference document inside the
+// anchor, so `base: &b {q: *img}` with `services: {<<: *b}` gives
+// `$.base.q.port`. Its path names the place of that alias in the anchor, as
+// the Scoped Nodes section describes for an alias inside an anchor.
 //
 // A later entry of the key can take the path through the merge. Such an entry
 // lies in the mapping that holds the merge key, or in a later source of the

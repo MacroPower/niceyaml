@@ -24,7 +24,7 @@ func unknownKeys(tb testing.TB, doc *niceyaml.Node, t reflect.Type) []string {
 	var keys []string
 
 	for _, field := range decodewalk.UnknownFields(tb.Context(), r, t, doc.AST()) {
-		keys = append(keys, yamltest.TokenPlace(field.Token))
+		keys = append(keys, yamltest.TokenPlace(field.Err.Token))
 	}
 
 	return keys
@@ -187,7 +187,8 @@ func TestUnknownFields_Aliases(t *testing.T) {
 	t.Parallel()
 
 	// The search decodes the content of the anchor once for all its
-	// aliases, as it reads the keys below it once.
+	// aliases, and confirms each candidate once for all of them. It
+	// reports a key once for each use, with the path of that use.
 	tcs := map[string]struct {
 		input string
 		want  []string
@@ -202,8 +203,13 @@ func TestUnknownFields_Aliases(t *testing.T) {
 		"an anchor with an unknown key": {
 			// The decode of the whole struct, and one decode to confirm
 			// each candidate: in, x, and q.
-			input:   stringtest.LinesLF("self: &s {in: {q: 1}, x: 1}", "list: [*s, *s, *s]"),
-			want:    []string{"q@1:16"},
+			input: stringtest.LinesLF("self: &s {in: {q: 1}, x: 1}", "list: [*s, *s, *s]"),
+			want: []string{
+				"q@1:16 @.self.in.q~",
+				"q@1:16 @.list[0].in.q~",
+				"q@1:16 @.list[1].in.q~",
+				"q@1:16 @.list[2].in.q~",
+			},
 			decodes: 4,
 		},
 	}
@@ -225,13 +231,60 @@ func TestUnknownFields_Aliases(t *testing.T) {
 			var keys []string
 
 			for _, field := range decodewalk.UnknownFields(t.Context(), r, reflect.TypeFor[selfListHolder](), doc.AST()) {
-				keys = append(keys, yamltest.TokenPlace(field.Token))
+				keys = append(keys, yamltest.TokenPlace(field.Err.Token)+" "+field.Path.String())
 			}
 
 			assert.Equal(t, tc.want, keys)
 			assert.Equal(t, tc.decodes, decodes)
 		})
 	}
+}
+
+// lenientSpec returns a struct type named spec that holds every key in
+// an inline map.
+func lenientSpec() reflect.Type {
+	type spec struct {
+		Rest map[string]int `yaml:",inline"`
+	}
+
+	return reflect.TypeFor[spec]()
+}
+
+// strictSpec returns a struct type named spec, like the type of
+// [lenientSpec], with the one field y.
+func strictSpec() reflect.Type {
+	type spec struct {
+		Y int `yaml:"y"`
+	}
+
+	return reflect.TypeFor[spec]()
+}
+
+func TestUnknownFields_TypesOfOneName(t *testing.T) {
+	t.Parallel()
+
+	// Two distinct types that print the same name read one anchor. The
+	// search confirms the key for each type, so the type that holds every
+	// key does not hide the unknown field of the other.
+	lenient, strict := lenientSpec(), strictSpec()
+	assert.Equal(t, lenient.String(), strict.String())
+
+	holder := reflect.StructOf([]reflect.StructField{
+		{Name: "D", Type: reflect.TypeFor[any](), Tag: `yaml:"d"`},
+		{Name: "A", Type: lenient, Tag: `yaml:"a"`},
+		{Name: "B", Type: strict, Tag: `yaml:"b"`},
+	})
+
+	doc := yamltest.FirstDocument(t, stringtest.LinesLF("d: &d {x: 1}", "a: *d", "b: *d"))
+	r := rules(t, doc, yaml.DisallowUnknownField())
+
+	var keys []string
+
+	for _, field := range decodewalk.UnknownFields(t.Context(), r, holder, doc.AST()) {
+		keys = append(keys, yamltest.TokenPlace(field.Err.Token)+" "+field.Path.String())
+	}
+
+	assert.Equal(t, []string{"x@1:8 @.b.x~"}, keys)
 }
 
 func TestUnknownFields_Merges(t *testing.T) {
@@ -287,7 +340,7 @@ func TestUnknownFields_Merges(t *testing.T) {
 			var got []string
 
 			for _, field := range decodewalk.UnknownFields(t.Context(), r, reflect.TypeFor[holder](), doc.AST()) {
-				got = append(got, yamltest.TokenPlace(field.Token))
+				got = append(got, yamltest.TokenPlace(field.Err.Token))
 			}
 
 			assert.Equal(t, tc.want, got)

@@ -10,6 +10,11 @@
 // value that the decoder does not read anything for, such as a null. It
 // reads below a mapping only when the decoder decodes a field from it.
 //
+// [Walk] goes below a node once for each type it reads the node as, so it
+// reads a node that several aliases reach once. [WalkUses] goes below it
+// once for each use instead, so each [Value] carries the path of the alias
+// or `<<` merge key that read it.
+//
 // The visit function of a walk decides, at each [Value], whether the
 // walk goes below it. [UnknownFields] walks a type that way to find every
 // unknown field. A decoder that rejects unknown fields reports them one
