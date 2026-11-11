@@ -1,6 +1,8 @@
 package manifest_test
 
 import (
+	"errors"
+	"slices"
 	"testing"
 	"testing/fstest"
 
@@ -47,7 +49,47 @@ func TestRegistry_Verify(t *testing.T) {
 
 			require.ErrorIs(t, err, schema.ErrCompile)
 			assert.Contains(t, err.Error(), tc.err)
+			requireVerifyRows(t, err, []error{schema.ErrCompile})
 		})
+	}
+}
+
+// verifyMarks holds the sentinels that the rows of [manifest.Registry.Verify]
+// match.
+var verifyMarks = []error{
+	schema.ErrLoad,
+	schema.ErrCompile,
+	manifest.ErrSchemaTypeField,
+	manifest.ErrUndeclaredTypeField,
+	manifest.ErrUnfollowableDeprecation,
+	manifest.ErrUnusedDefault,
+}
+
+// requireVerifyRows requires that err, an error of
+// [manifest.Registry.Verify], holds one row per sentinel of want, in
+// order. Each row matches its sentinel and none of the other sentinels of
+// verifyMarks, and [niceyaml.IsInvalid] reports false for it.
+func requireVerifyRows(t *testing.T, err error, want []error) {
+	t.Helper()
+
+	var rows []error
+
+	for p := range niceyaml.Problems(err) {
+		rows = append(rows, p.Err)
+	}
+
+	require.Len(t, rows, len(want))
+
+	for i, row := range rows {
+		assert.False(t, niceyaml.IsInvalid(row), "IsInvalid(%v)", row)
+
+		for _, mark := range verifyMarks {
+			if errors.Is(want[i], mark) {
+				require.ErrorIs(t, row, mark)
+			} else {
+				require.NotErrorIs(t, row, mark)
+			}
+		}
 	}
 }
 
@@ -108,8 +150,9 @@ func TestRegistry_Verify_TypeFields(t *testing.T) {
 		// The schema belongs to the unversioned layout, and v1 has none.
 		unversioned bool
 		want        string
-		// The error that the error of Verify must match, or nil.
-		matches error
+		// The sentinel that each row of the error of Verify matches, in
+		// order.
+		matches []error
 	}{
 		"declared and required": {
 			schema: brewSchema("v1", "MenuItem"),
@@ -120,26 +163,31 @@ func TestRegistry_Verify_TypeFields(t *testing.T) {
   "properties": {"kind": {"type": "string"}}}}}`,
 		},
 		"required and not declared": {
-			schema: `{"required": ["kind"], "properties": {"metadata": {"type": "object"}}}`,
-			want:   required("$.kind"),
+			schema:  `{"required": ["kind"], "properties": {"metadata": {"type": "object"}}}`,
+			want:    required("$.kind"),
+			matches: []error{manifest.ErrUndeclaredTypeField},
 		},
 		"required behind allOf and not declared": {
-			schema: `{"allOf": [{"required": ["apiVersion"]}]}`,
-			want:   required("$.apiVersion"),
+			schema:  `{"allOf": [{"required": ["apiVersion"]}]}`,
+			want:    required("$.apiVersion"),
+			matches: []error{manifest.ErrUndeclaredTypeField},
 		},
 		"one of the type fields declared": {
-			schema: `{"required": ["apiVersion", "kind"], "properties": {"apiVersion": {"type": "string"}}}`,
-			want:   required("$.kind"),
+			schema:  `{"required": ["apiVersion", "kind"], "properties": {"apiVersion": {"type": "string"}}}`,
+			want:    required("$.kind"),
+			matches: []error{manifest.ErrUndeclaredTypeField},
 		},
 		"type field below the root": {
-			opts:   []manifest.RegistryOption{manifest.WithKindField(meta.Child("kind"))},
-			schema: `{"properties": {"metadata": {"required": ["kind"]}}}`,
-			want:   required("$.metadata.kind"),
+			opts:    []manifest.RegistryOption{manifest.WithKindField(meta.Child("kind"))},
+			schema:  `{"properties": {"metadata": {"required": ["kind"]}}}`,
+			want:    required("$.metadata.kind"),
+			matches: []error{manifest.ErrUndeclaredTypeField},
 		},
 		"type field below an index": {
-			opts:   []manifest.RegistryOption{manifest.WithKindField(tags)},
-			schema: `{"properties": {"tags": {"items": {"required": ["kind"]}}}}`,
-			want:   required("$.tags[1].kind"),
+			opts:    []manifest.RegistryOption{manifest.WithKindField(tags)},
+			schema:  `{"properties": {"tags": {"items": {"required": ["kind"]}}}}`,
+			want:    required("$.tags[1].kind"),
+			matches: []error{manifest.ErrUndeclaredTypeField},
 		},
 		"type field declared by prefixItems": {
 			opts: []manifest.RegistryOption{manifest.WithKindField(tags)},
@@ -151,17 +199,18 @@ func TestRegistry_Verify_TypeFields(t *testing.T) {
 			opts: []manifest.RegistryOption{manifest.WithKindField(tags)},
 			schema: `{"$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {"tags": {"items": [{}], "additionalItems": {"required": ["kind"]}}}}`,
-			want: required("$.tags[1].kind"),
+			want:    required("$.tags[1].kind"),
+			matches: []error{manifest.ErrUndeclaredTypeField},
 		},
 		"required in a branch": {
 			schema:  `{"oneOf": [{"required": ["kind"]}, {"required": ["metadata"]}]}`,
 			want:    unsure("$.kind"),
-			matches: manifest.ErrSchemaTypeField,
+			matches: []error{manifest.ErrSchemaTypeField},
 		},
 		"declared in a branch": {
 			schema:  branch,
 			want:    unsure("$.kind"),
-			matches: manifest.ErrSchemaTypeField,
+			matches: []error{manifest.ErrSchemaTypeField},
 		},
 		"declared outside the branch that reads it": {
 			schema: `{"properties": {"kind": {"type": "string"}},
@@ -176,7 +225,7 @@ func TestRegistry_Verify_TypeFields(t *testing.T) {
 			schema:  outside,
 			files:   defs,
 			want:    unsure("$.kind"),
-			matches: manifest.ErrSchemaTypeField,
+			matches: []error{manifest.ErrSchemaTypeField},
 		},
 		"declared with a $ref to another document": {
 			schema: `{"required": ["kind"], "properties": {"kind": {"$ref": "defs.json#/definitions/kind"}}}`,
@@ -192,7 +241,7 @@ func TestRegistry_Verify_TypeFields(t *testing.T) {
   "oneOf": [{"properties": {"kind": {"$ref": "defs.json#/definitions/kind"}}}]}`,
 			files:   defs7,
 			want:    unsure("$.kind"),
-			matches: manifest.ErrSchemaTypeField,
+			matches: []error{manifest.ErrSchemaTypeField},
 		},
 		"type field below a $ref to another document under Draft-07": {
 			opts: []manifest.RegistryOption{manifest.WithKindField(meta.Child("kind"))},
@@ -200,13 +249,13 @@ func TestRegistry_Verify_TypeFields(t *testing.T) {
   "properties": {"metadata": {"$ref": "defs.json#/definitions/meta"}}}`,
 			files:   defs7,
 			want:    unsure("$.metadata.kind"),
-			matches: manifest.ErrSchemaTypeField,
+			matches: []error{manifest.ErrSchemaTypeField},
 		},
 		"required outside the branches that declare it": {
 			schema: `{"required": ["kind"], "properties": {"apiVersion": {"type": "string"}},
   "oneOf": [{"properties": {"kind": {"const": "MenuItem"}}}, {"properties": {"kind": {"const": "Tag"}}}]}`,
 			want:    unsure("$.kind"),
-			matches: manifest.ErrSchemaTypeField,
+			matches: []error{manifest.ErrSchemaTypeField},
 		},
 		"required outside the branches that declare it with visible type fields": {
 			schema: `{"required": ["kind"], "properties": {"apiVersion": {"type": "string"}},
@@ -218,7 +267,7 @@ func TestRegistry_Verify_TypeFields(t *testing.T) {
   "properties": {"apiVersion": {"type": "string"}}}`,
 			files:   defs,
 			want:    unsure("$.kind"),
-			matches: manifest.ErrSchemaTypeField,
+			matches: []error{manifest.ErrSchemaTypeField},
 		},
 		"required and not declared beside a type field that a branch declares": {
 			schema: `{"required": ["apiVersion"], "oneOf": [{"properties": {"kind": {"const": "MenuItem"}}}]}`,
@@ -229,7 +278,7 @@ func TestRegistry_Verify_TypeFields(t *testing.T) {
 				"    `-- declare $.kind under properties outside every branch and every such $ref, "+
 					"or pass manifest.SchemaTypeFields",
 			),
-			matches: manifest.ErrSchemaTypeField,
+			matches: []error{manifest.ErrUndeclaredTypeField, manifest.ErrSchemaTypeField},
 		},
 		"declared in a branch with visible type fields": {
 			schema:  branch,
@@ -257,6 +306,7 @@ func TestRegistry_Verify_TypeFields(t *testing.T) {
 			schema:  `{"required": ["kind"], "properties": {"metadata": {"type": "object"}}}`,
 			version: hiding,
 			want:    hidden("$.kind"),
+			matches: []error{manifest.ErrUndeclaredTypeField},
 		},
 		"declared and required with hidden type fields": {
 			schema:  brewSchema("v1", "MenuItem"),
@@ -267,6 +317,7 @@ func TestRegistry_Verify_TypeFields(t *testing.T) {
 				"`-- MenuItem v1: $.kind: required, but manifest.SchemaTypeFields(false) hides it",
 				"    `-- remove $.kind from required, or pass manifest.SchemaTypeFields(true)",
 			),
+			matches: []error{manifest.ErrUndeclaredTypeField, manifest.ErrUndeclaredTypeField},
 		},
 		"required and not declared on the unversioned layout": {
 			// A document of the layout might write the kind field, which
@@ -277,6 +328,7 @@ func TestRegistry_Verify_TypeFields(t *testing.T) {
 				"MenuItem the unversioned layout: $.kind: required, but no properties keyword declares it",
 				"`-- declare $.kind under properties, or remove it from required",
 			),
+			matches: []error{manifest.ErrUndeclaredTypeField},
 		},
 		"declared and required on the unversioned layout": {
 			schema:      `{"required": ["kind"], "properties": {"kind": {"const": "MenuItem"}}}`,
@@ -301,7 +353,7 @@ func TestRegistry_Verify_TypeFields(t *testing.T) {
 				"`-- declare $.kind under properties outside every branch and every such $ref, "+
 					"or pass manifest.SchemaTypeFields",
 			),
-			matches: manifest.ErrSchemaTypeField,
+			matches: []error{manifest.ErrSchemaTypeField},
 		},
 		"branch on the unversioned layout with visible type fields": {
 			schema:      branch,
@@ -321,6 +373,7 @@ func TestRegistry_Verify_TypeFields(t *testing.T) {
 				"MenuItem the unversioned layout: $.kind: required, but manifest.SchemaTypeFields(false) hides it",
 				"`-- remove $.kind from required, or pass manifest.SchemaTypeFields(true)",
 			),
+			matches: []error{manifest.ErrUndeclaredTypeField},
 		},
 	}
 
@@ -355,12 +408,7 @@ func TestRegistry_Verify_TypeFields(t *testing.T) {
 			require.Error(t, err)
 			assert.Equal(t, tc.want, niceyaml.FormatError(err))
 			assert.False(t, niceyaml.IsInvalid(err))
-
-			if tc.matches != nil {
-				require.ErrorIs(t, err, tc.matches)
-			} else {
-				require.NotErrorIs(t, err, manifest.ErrSchemaTypeField)
-			}
+			requireVerifyRows(t, err, tc.matches)
 		})
 	}
 }
@@ -468,6 +516,9 @@ func TestRegistry_Verify_Deprecations(t *testing.T) {
 			require.Error(t, err)
 			assert.Equal(t, tc.want, niceyaml.FormatError(err))
 			assert.False(t, niceyaml.IsInvalid(err))
+
+			n := len(slices.Collect(niceyaml.Problems(err)))
+			requireVerifyRows(t, err, slices.Repeat([]error{manifest.ErrUnfollowableDeprecation}, n))
 		})
 	}
 }
@@ -577,6 +628,7 @@ func TestRegistry_Verify_Defaults(t *testing.T) {
 			}
 
 			assert.Equal(t, tc.want, stringtest.JoinLF(rows...))
+			requireVerifyRows(t, err, slices.Repeat([]error{manifest.ErrUnusedDefault}, len(rows)))
 		})
 	}
 }

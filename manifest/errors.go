@@ -56,6 +56,21 @@ import (
 //
 // [niceyaml.IsInvalid] reports each problem that the files of the user
 // cause.
+//
+// Each row of [Registry.Verify] matches one sentinel too, and
+// [niceyaml.IsInvalid] does not report any of them:
+//
+//   - A schema that does not load or compile matches [schema.ErrLoad] or
+//     [schema.ErrCompile].
+//   - A type field that a branch or a $ref to another document might read
+//     matches [ErrSchemaTypeField].
+//   - A type field that a schema requires and does not let its check see
+//     matches [ErrUndeclaredTypeField].
+//   - A deprecation that a user cannot follow matches
+//     [ErrUnfollowableDeprecation].
+//   - A default that never applies matches [ErrUnusedDefault].
+//
+// A test can thus accept the rows of one rule and still fail on the others.
 var (
 	// ErrEncoding indicates a text that is not UTF-8, such as a file with a
 	// byte that UTF-8 does not allow or one in UTF-16. It is
@@ -99,6 +114,28 @@ var (
 	// document of that layout still fails at a later version with such a
 	// schema.
 	ErrSchemaTypeField = errors.New("schema might read a type field")
+
+	// ErrUndeclaredTypeField indicates a type field that the schema of a
+	// version requires and that the check of the schema does not see. No
+	// properties keyword of the schema declares the field, or
+	// [SchemaTypeFields] with false hides it. Such a schema fails every
+	// document. Only [Registry.Verify] reports the problem, as its Type
+	// Fields section describes.
+	ErrUndeclaredTypeField = errors.New("schema requires a type field that it does not see")
+
+	// ErrUnfollowableDeprecation indicates a deprecated keyword in the
+	// schema of the current version whose warning a user cannot follow,
+	// such as one on a property that the schema also requires. Only
+	// [Registry.Verify] reports the problem, as its Deprecations section
+	// describes.
+	ErrUnfollowableDeprecation = errors.New("deprecation that a user cannot follow")
+
+	// ErrUnusedDefault indicates a property that the schema of the current
+	// version requires, and whose default from [niceyaml.WithDefaults] is
+	// not zero. Every file must write such a property, so the default never
+	// applies. Only [Registry.Verify] reports the problem, as its Defaults
+	// section describes.
+	ErrUnusedDefault = errors.New("default that never applies")
 
 	// ErrUnknownKind indicates a kind that the registry does not hold.
 	ErrUnknownKind = errors.New("unknown kind")

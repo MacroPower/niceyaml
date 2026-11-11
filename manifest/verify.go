@@ -43,6 +43,20 @@ import (
 //	require.NoError(t, schema.CheckFields[config.Cafe]())
 //	require.NoError(t, config.Registry.Verify(t.Context()))
 //
+// [niceyaml.Problems] yields each row of the error, and each row matches
+// one sentinel. A row of a schema that fails matches [schema.ErrLoad] or
+// [schema.ErrCompile]. Each section of this documentation names the
+// sentinel of the rows that it describes. [niceyaml.IsInvalid] reports
+// false for each row. A test that accepts the rows of one rule thus skips
+// them by sentinel and fails on every other row:
+//
+//	for p := range niceyaml.Problems(config.Registry.Verify(t.Context())) {
+//		// The registry requires some fields with a default on purpose.
+//		if !errors.Is(p.Err, manifest.ErrUnusedDefault) {
+//			t.Error(p.Err)
+//		}
+//	}
+//
 // # Type Fields
 //
 // Verify also reports each type field that the schema of a version
@@ -51,6 +65,8 @@ import (
 // fails every document:
 //
 //	MenuItem v1: $.kind: required, but no properties keyword declares it
+//
+// The report matches [ErrUndeclaredTypeField].
 //
 // The check follows the chains of schemas that the Deprecations section
 // describes. It does not look inside a branch or behind a $ref to another
@@ -73,6 +89,8 @@ import (
 // field that the schema requires:
 //
 //	MenuItem v1: $.kind: required, but manifest.SchemaTypeFields(false) hides it
+//
+// That report matches [ErrUndeclaredTypeField] too.
 //
 // For the layout that [Unversioned] adds, Verify gives these reports
 // about the kind field alone. A document of that layout might write the
@@ -102,6 +120,8 @@ import (
 //
 //     Hours v1: $: the root schema is deprecated
 //
+// Each of these reports matches [ErrUnfollowableDeprecation].
+//
 // A chain of $ref, $dynamicRef, and allOf without a branch on the way
 // joins schemas. So does the anyOf that gen writes around the schema of a
 // pointer, whose other branch admits only null. A property schema marks
@@ -121,6 +141,8 @@ import (
 // never applies:
 //
 //	Cafe v1: $.spec.seats: required, so its default 20 never applies
+//
+// The report matches [ErrUnusedDefault].
 //
 // The defaults come from the [niceyaml.WithDefaults] options among the
 // decode options of the registry and the kind. A document replaces every
@@ -193,7 +215,7 @@ func (r *Registry) verifyTypeFields(entry *kindEntry, compiled map[*versionEntry
 
 			switch {
 			case slices.ContainsFunc(fields.unsure, p.Equal):
-				errs = append(errs, markedAuthorError(ErrSchemaTypeField,
+				errs = append(errs, authorError(ErrSchemaTypeField,
 					fmt.Sprintf("%s: %s: %s", name, p, unsureWhy), unsureRemedy(p)))
 
 			case !slices.ContainsFunc(fields.hidden, p.Equal) || !doc.field(p).required:
@@ -201,13 +223,13 @@ func (r *Registry) verifyTypeFields(entry *kindEntry, compiled map[*versionEntry
 				// it.
 
 			case v.cfg.hasTypeFields:
-				errs = append(errs, authorError(
+				errs = append(errs, authorError(ErrUndeclaredTypeField,
 					fmt.Sprintf("%s: %s: required, but manifest.SchemaTypeFields(false) hides it", name, p),
 					fmt.Sprintf("remove %s from required, or pass manifest.SchemaTypeFields(true)", p),
 				))
 
 			default:
-				errs = append(errs, authorError(
+				errs = append(errs, authorError(ErrUndeclaredTypeField,
 					fmt.Sprintf("%s: %s: required, but no properties keyword declares it", name, p),
 					fmt.Sprintf("declare %s under properties, or remove it from required", p),
 				))
@@ -236,14 +258,15 @@ func verifyDeprecations(entry *kindEntry, compiled map[*versionEntry]*jsonschema
 	var errs []error
 
 	if doc.marked(cv.Schema()) {
-		errs = append(errs, authorError(name+": $: the root schema is deprecated",
+		errs = append(errs, authorError(ErrUnfollowableDeprecation, name+": $: the root schema is deprecated",
 			"use manifest.DeprecatedKind instead"))
 	}
 
 	props := doc.properties()
 	for _, p := range props {
 		if p.required && p.deprecated {
-			errs = append(errs, authorError(fmt.Sprintf("%s: %s: required and deprecated", name, p.path)))
+			errs = append(errs, authorError(ErrUnfollowableDeprecation,
+				fmt.Sprintf("%s: %s: required and deprecated", name, p.path)))
 		}
 	}
 
@@ -261,7 +284,7 @@ func verifyDeprecations(entry *kindEntry, compiled map[*versionEntry]*jsonschema
 
 	for _, p := range props {
 		if p.deprecated && required[p.path.String()] {
-			errs = append(errs, authorError(
+			errs = append(errs, authorError(ErrUnfollowableDeprecation,
 				fmt.Sprintf("%s: %s: deprecated, but %s requires it", name, p.path, written.label()),
 				fmt.Sprintf("tag the field jsonschema:%q until manifest.Written leaves %s",
 					"deprecated=false", written.label()),
@@ -272,17 +295,10 @@ func verifyDeprecations(entry *kindEntry, compiled map[*versionEntry]*jsonschema
 	return errs
 }
 
-// authorError returns the problem msg of a registry, with each of details
-// as a detail. The author of the registry is at fault for it rather than a
-// document.
-func authorError(msg string, details ...string) error {
-	//nolint:wrapcheck // The error is the problem itself.
-	return niceyaml.Unchecked(errors.New(msg), niceyaml.WithDetails(detailsOf(details)...))
-}
-
-// markedAuthorError returns the problem msg of a registry, as
-// [authorError] does, so that it matches mark.
-func markedAuthorError(mark error, msg string, details ...string) error {
+// authorError returns the problem msg of a registry, which matches mark,
+// with each of details as a detail. The author of the registry is at fault
+// for it rather than a document.
+func authorError(mark error, msg string, details ...string) error {
 	//nolint:wrapcheck // The error is the problem itself.
 	return niceyaml.Unchecked(
 		&problemError{msg: msg, marks: []error{mark}},
@@ -811,13 +827,17 @@ func (w *defaultsWalk) defaultProblem(path paths.Path, f structField) error {
 
 	own := w.defaults(f.owner).FieldByIndex(f.index)
 	if reflect.DeepEqual(own.Interface(), f.value.Interface()) {
-		return authorError(msg)
+		return authorError(ErrUnusedDefault, msg)
 	}
 
 	text := valueText(own)
 
-	return authorError(msg, fmt.Sprintf("%s defaults %s to %s on its own, so omitzero makes %s optional with %s at "+
-		"its other places", f.owner.Name(), f.name, text, f.name, text))
+	return authorError(
+		ErrUnusedDefault,
+		msg,
+		fmt.Sprintf("%s defaults %s to %s on its own, so omitzero makes %s optional with %s at "+
+			"its other places", f.owner.Name(), f.name, text, f.name, text),
+	)
 }
 
 // structField is a field that a decode of a struct reads, with its

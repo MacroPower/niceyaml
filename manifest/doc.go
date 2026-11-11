@@ -401,7 +401,8 @@
 // under oneOf, counts. Such a declaration counts whatever its property
 // schema holds, even a $ref to another document. [Registry.Verify] reports
 // each schema that requires a type field and does not declare it, because
-// such a schema fails every document.
+// such a schema fails every document. The report matches
+// [ErrUndeclaredTypeField].
 //
 // The load removes each other type field that the document writes in
 // place from the value that the schema reads, as
