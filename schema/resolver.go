@@ -83,9 +83,10 @@ var ErrNoMatch = errors.New("no matching schema")
 // The registry checks its cache by [Ref.Key] first, and loads and compiles
 // the schema only on a cache miss. After a schema compiles, the registry
 // serves it to every later document that names it without loading it
-// again. The registry remembers a failed load or compile for the interval
-// that [WithRetryAfter] sets. The first document that names the Key after
-// the interval loads it again.
+// again. With [WithRefreshAfter], the registry loads a schema that
+// reached a URL again after an interval. The registry remembers a failed
+// load or compile for the interval that [WithRetryAfter] sets. The first
+// document that names the Key after the interval loads it again.
 //
 // The registry caches a Ref from [FileFS] by its file system and its path
 // together, so one path in two file systems is two schemas. It caches a

@@ -118,13 +118,16 @@ type CatalogEntry struct {
 // each failed fetch. Lookups report that error only before any catalog
 // has loaded.
 //
-// The TTL covers only the catalog. The registry keeps each schema that it
-// fetched for an entry, even after a refresh of the catalog. To fetch the
-// schema of an entry again, pass the URL of the entry to
-// [go.jacobcolvin.com/niceyaml/schema.Registry.Invalidate]. The documents
-// that the $refs of that schema name stay in the cache. To fetch those
-// documents again too, call
-// [go.jacobcolvin.com/niceyaml/schema.Registry.Purge].
+// The TTL covers only the catalog. By default the registry keeps each
+// schema that it fetched for an entry, even after a refresh of the
+// catalog. A long-running program gives the registry
+// [go.jacobcolvin.com/niceyaml/schema.WithRefreshAfter]. The registry
+// then fetches each schema again after that interval, with the documents
+// that its $refs name. When the fetch fails, the registry serves the copy
+// that it holds, as the store serves the previous catalog. A client with
+// a caching Transport, from
+// [go.jacobcolvin.com/niceyaml/schema.WithHTTPClient], turns each such
+// fetch into a conditional request.
 //
 // Concurrent lookups share a single fetch. A lookup that arrives while a
 // refresh is running uses the previous catalog without waiting. The lookup

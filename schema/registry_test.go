@@ -2455,6 +2455,514 @@ func TestRegistry_WithRetryAfter(t *testing.T) {
 	})
 }
 
+func TestRegistry_WithRefreshAfter(t *testing.T) {
+	t.Parallel()
+
+	const (
+		// The schema each registry of these subtests resolves every
+		// document to. The host resolves nowhere, and a client answers for
+		// it from memory.
+		rootURL = "http://schemas.test/root.json"
+
+		// A schema whose $ref names the document /defs.json beside it.
+		rootSchema = `{"properties": {"a": {"$ref": "defs.json#/$defs/a"}}}`
+
+		// Two versions of /defs.json. The first accepts "a: 1" and the
+		// second rejects it.
+		defsInteger = `{"$defs": {"a": {"type": "integer"}}}`
+		defsString  = `{"$defs": {"a": {"type": "string"}}}`
+	)
+
+	// A host serves the files that it holds from memory and counts the
+	// requests by path. A test swaps its files to change a schema, or
+	// empties them to take the host down.
+	type host struct {
+		requests func() map[string]int
+		files    atomic.Pointer[map[string]string]
+		client   *http.Client
+	}
+
+	newHost := func(files map[string]string) *host {
+		h := &host{}
+		h.files.Store(&files)
+
+		var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			schemaHandler(*h.files.Load()).ServeHTTP(w, r)
+		})
+
+		handler, h.requests = countingHandler(handler)
+		h.client = handlerTransport(handler).Client()
+
+		return h
+	}
+
+	// The registry of each subtest fetches through h and resolves every
+	// document to ref, with opts applied after.
+	newRegistry := func(h *host, ref schema.Ref, opts ...schema.RegistryOption) *schema.Registry {
+		return schema.NewRegistry(append([]schema.RegistryOption{
+			schema.WithHTTPClient(h.client),
+			schema.WithResolvers(ref),
+		}, opts...)...)
+	}
+
+	// A subtest that waits out an interval runs in a synctest bubble, so a
+	// sleep moves the clock without waiting in real time.
+	t.Run("fetches a URL schema and its $ref documents again", func(t *testing.T) {
+		t.Parallel()
+
+		synctest.Test(t, func(t *testing.T) {
+			h := newHost(map[string]string{"/root.json": rootSchema, "/defs.json": defsInteger})
+			reg := newRegistry(h, schema.URL(rootURL), schema.WithRefreshAfter(time.Hour))
+
+			requireAccepts(t, reg, "a: 1\n")
+			assert.Equal(t, map[string]int{"/root.json": 1, "/defs.json": 1}, h.requests())
+
+			h.files.Store(&map[string]string{"/root.json": rootSchema, "/defs.json": defsString})
+
+			// The interval has a nanosecond left.
+			time.Sleep(time.Hour - time.Nanosecond)
+
+			requireAccepts(t, reg, "a: 1\n")
+			assert.Equal(t, map[string]int{"/root.json": 1, "/defs.json": 1}, h.requests())
+
+			time.Sleep(time.Nanosecond)
+
+			requireRejects(t, reg, "a: 1\n", "string")
+			requireAccepts(t, reg, "a: x\n")
+			assert.Equal(t, map[string]int{"/root.json": 2, "/defs.json": 2}, h.requests())
+		})
+	})
+
+	t.Run("a file schema reads a new copy of the URL its $ref names", func(t *testing.T) {
+		t.Parallel()
+
+		synctest.Test(t, func(t *testing.T) {
+			h := newHost(map[string]string{"/defs.json": defsInteger})
+			fsys := &openCountingFS{files: yamltest.MapFS(map[string]string{
+				"root.json": `{"properties": {"a": {"$ref": "http://schemas.test/defs.json#/$defs/a"}}}`,
+			})}
+			reg := newRegistry(h, schema.FileFS(fsys, "root.json"), schema.WithRefreshAfter(time.Hour))
+
+			requireAccepts(t, reg, "a: 1\n")
+			assert.Equal(t, map[string]int{"/defs.json": 1}, h.requests())
+
+			opens := fsys.opens.Load()
+
+			h.files.Store(&map[string]string{"/defs.json": defsString})
+			time.Sleep(time.Hour)
+
+			// The schema reached the URL, so it compiles again, and the
+			// compile reads the file again.
+			requireRejects(t, reg, "a: 1\n", "string")
+			assert.Equal(t, map[string]int{"/defs.json": 2}, h.requests())
+			assert.Greater(t, fsys.opens.Load(), opens)
+		})
+	})
+
+	t.Run("serves the held copy when the fetch fails", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			// The files the host holds while the fetch fails.
+			down map[string]string
+			// The requests by path after the first failed refresh, and
+			// after the second, one retry interval later.
+			first  map[string]int
+			second map[string]int
+		}{
+			"schema": {
+				first:  map[string]int{"/root.json": 2, "/defs.json": 1},
+				second: map[string]int{"/root.json": 3, "/defs.json": 1},
+			},
+			// The schema compiles again with the copy of the document
+			// that the registry holds, and falls due with that document.
+			"document a $ref names": {
+				down:   map[string]string{"/root.json": rootSchema},
+				first:  map[string]int{"/root.json": 2, "/defs.json": 2},
+				second: map[string]int{"/root.json": 3, "/defs.json": 3},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				synctest.Test(t, func(t *testing.T) {
+					up := map[string]string{"/root.json": rootSchema, "/defs.json": defsInteger}
+					h := newHost(up)
+					reg := newRegistry(h, schema.URL(rootURL),
+						schema.WithRefreshAfter(time.Hour),
+						schema.WithRetryAfter(time.Minute),
+					)
+
+					requireAccepts(t, reg, "a: 1\n")
+
+					h.files.Store(&tc.down)
+					time.Sleep(time.Hour)
+
+					for range 5 {
+						requireAccepts(t, reg, "a: 1\n")
+					}
+
+					assert.Equal(t, tc.first, h.requests())
+
+					time.Sleep(time.Minute)
+
+					requireAccepts(t, reg, "a: 1\n")
+					assert.Equal(t, tc.second, h.requests())
+
+					// The host comes back with a new version of the
+					// document, and the next retry fetches it.
+					h.files.Store(&map[string]string{"/root.json": rootSchema, "/defs.json": defsString})
+					time.Sleep(time.Minute)
+
+					requireRejects(t, reg, "a: 1\n", "string")
+				})
+			})
+		}
+	})
+
+	t.Run("never by default", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			opts []schema.RegistryOption
+		}{
+			"no option":         {},
+			"zero interval":     {opts: []schema.RegistryOption{schema.WithRefreshAfter(0)}},
+			"negative interval": {opts: []schema.RegistryOption{schema.WithRefreshAfter(-time.Hour)}},
+			"later zero interval": {
+				opts: []schema.RegistryOption{schema.WithRefreshAfter(time.Hour), schema.WithRefreshAfter(0)},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				synctest.Test(t, func(t *testing.T) {
+					h := newHost(map[string]string{"/root.json": rootSchema, "/defs.json": defsInteger})
+					reg := newRegistry(h, schema.URL(rootURL), tc.opts...)
+
+					requireAccepts(t, reg, "a: 1\n")
+
+					h.files.Store(&map[string]string{"/root.json": rootSchema, "/defs.json": defsString})
+					time.Sleep(1000 * time.Hour)
+
+					requireAccepts(t, reg, "a: 1\n")
+					assert.Equal(t, map[string]int{"/root.json": 1, "/defs.json": 1}, h.requests())
+				})
+			})
+		}
+	})
+
+	t.Run("a schema falls due with a URL document it took from the cache", func(t *testing.T) {
+		t.Parallel()
+
+		synctest.Test(t, func(t *testing.T) {
+			h := newHost(map[string]string{"/root.json": rootSchema, "/defs.json": defsInteger})
+			file := schema.FileFS(yamltest.MapFS(map[string]string{
+				"root.json": `{"properties": {"a": {"$ref": "http://schemas.test/defs.json#/$defs/a"}}}`,
+			}), "root.json")
+			reg := schema.NewRegistry(schema.WithHTTPClient(h.client), schema.WithRefreshAfter(time.Hour))
+
+			// The URL schema loads /defs.json, and the file schema takes it
+			// from the cache half an hour later.
+			loadAll(t, reg, schema.URL(rootURL))
+			time.Sleep(30 * time.Minute)
+
+			first, err := reg.Schema(t.Context(), file)
+			require.NoError(t, err)
+			assert.Equal(t, map[string]int{"/root.json": 1, "/defs.json": 1}, h.requests())
+
+			h.files.Store(&map[string]string{"/root.json": rootSchema, "/defs.json": defsString})
+			time.Sleep(31 * time.Minute)
+
+			// /defs.json fell due an hour after the URL schema loaded it,
+			// and the file schema fell due with it.
+			again, err := reg.Schema(t.Context(), file)
+			require.NoError(t, err)
+			assert.NotSame(t, first, again)
+			require.ErrorContains(t, yamltest.FirstDocument(t, "a: 1\n").Validate(t.Context(), again), "string")
+			assert.Equal(t, map[string]int{"/root.json": 1, "/defs.json": 2}, h.requests())
+		})
+	})
+
+	t.Run("a schema falls due with a URL document a validation loaded", func(t *testing.T) {
+		t.Parallel()
+
+		synctest.Test(t, func(t *testing.T) {
+			// The host does not serve /defs.json until the schema compiled,
+			// and each fetch takes ten seconds.
+			const fetch = 10 * time.Second
+
+			h := newHost(map[string]string{})
+			client := yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
+				time.Sleep(fetch)
+
+				return h.client.Transport.RoundTrip(r)
+			}).Client()
+			file := schema.FileFS(yamltest.MapFS(map[string]string{
+				"root.json": `{"properties": {"a": {"$ref": "http://schemas.test/defs.json#/$defs/a"}}}`,
+			}), "root.json")
+			reg := schema.NewRegistry(
+				schema.WithHTTPClient(client),
+				schema.WithRefreshAfter(time.Hour),
+				schema.WithRetryAfter(time.Nanosecond),
+				requireRefs(false),
+			)
+
+			first, err := reg.Schema(t.Context(), file)
+			require.NoError(t, err)
+
+			// The registry drops the failure of /defs.json after a
+			// nanosecond, so the validation loads it.
+			h.files.Store(&map[string]string{"/defs.json": defsInteger})
+			time.Sleep(time.Nanosecond)
+			require.NoError(t, yamltest.FirstDocument(t, "a: 1\n").Validate(t.Context(), first))
+			assert.Equal(t, map[string]int{"/defs.json": 2}, h.requests())
+
+			// The interval started when the load started, so it has a
+			// nanosecond left.
+			time.Sleep(time.Hour - fetch - time.Nanosecond)
+
+			again, err := reg.Schema(t.Context(), file)
+			require.NoError(t, err)
+			require.Same(t, first, again)
+
+			time.Sleep(time.Nanosecond)
+
+			again, err = reg.Schema(t.Context(), file)
+			require.NoError(t, err)
+			assert.NotSame(t, first, again)
+		})
+	})
+
+	t.Run("serves the held copy while the host does not answer", func(t *testing.T) {
+		t.Parallel()
+
+		synctest.Test(t, func(t *testing.T) {
+			h := newHost(map[string]string{"/root.json": rootSchema, "/defs.json": defsInteger})
+
+			// While the host hangs, the client waits for each request until
+			// its Timeout or the context of the request ends. The request
+			// then fails a second later. So a caller whose deadline ends
+			// the request it started stops waiting before the load fails.
+			var hung atomic.Bool
+
+			client := &http.Client{
+				Timeout: 30 * time.Second,
+				Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
+					if hung.Load() {
+						<-r.Context().Done()
+						time.Sleep(time.Second)
+
+						return nil, r.Context().Err()
+					}
+
+					return h.client.Transport.RoundTrip(r)
+				}),
+			}
+
+			ref := schema.URL(rootURL)
+			file := schema.FileFS(yamltest.MapFS(map[string]string{
+				"root.json": `{"properties": {"a": {"$ref": "http://schemas.test/defs.json#/$defs/a"}}}`,
+			}), "root.json")
+			reg := schema.NewRegistry(
+				schema.WithHTTPClient(client),
+				schema.WithResolvers(ref),
+				schema.WithRefreshAfter(time.Hour),
+				schema.WithRetryAfter(time.Minute),
+			)
+
+			held, err := reg.Schema(t.Context(), ref)
+			require.NoError(t, err)
+
+			hung.Store(true)
+			time.Sleep(time.Hour)
+
+			// The function returns what reg returns for ref to a caller
+			// that waits for d at most, and how long the caller waited.
+			schemaWithin := func(ref schema.Ref, d time.Duration) (*schema.Schema, time.Duration, error) {
+				ctx, cancel := context.WithTimeout(t.Context(), d)
+				defer cancel()
+
+				start := time.Now()
+				s, err := reg.Schema(ctx, ref)
+
+				return s, time.Since(start), err
+			}
+
+			// The first request starts a refresh, waits for it until its
+			// own deadline, and gets the held copy.
+			got, waited, err := schemaWithin(ref, 5*time.Second)
+			require.NoError(t, err)
+			assert.Same(t, held, got)
+			assert.Equal(t, 5*time.Second, waited)
+
+			// A request that arrives while the refresh runs does not wait.
+			got, waited, err = schemaWithin(ref, time.Hour)
+			require.NoError(t, err)
+			assert.Same(t, held, got)
+			assert.Zero(t, waited)
+
+			// The registry does not hold a schema for the file, so the
+			// first request for it fails when its deadline ends. The
+			// compile that it started reaches the held copy of /defs.json
+			// and keeps the schema, which falls due with that copy. So the
+			// next request starts a refresh and gets that schema.
+			_, waited, err = schemaWithin(file, 5*time.Second)
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+			assert.Equal(t, 5*time.Second, waited)
+
+			// Let the compile finish. Its fetch of /defs.json fails a
+			// second after the deadline, and the compile goes on with the
+			// held copy.
+			time.Sleep(time.Second)
+			synctest.Wait()
+
+			got, waited, err = schemaWithin(file, 5*time.Second)
+			require.NoError(t, err)
+			require.ErrorContains(t, yamltest.FirstDocument(t, "a: x\n").Validate(t.Context(), got), "integer")
+			assert.Equal(t, 5*time.Second, waited)
+
+			// The client ends the refresh of ref at its Timeout, and the
+			// refresh fails a second later. The failure dates the held copy
+			// again for the retry interval, so the requests inside it do
+			// not start a refresh.
+			time.Sleep(30 * time.Second)
+
+			for range 5 {
+				got, waited, err = schemaWithin(ref, time.Hour)
+				require.NoError(t, err)
+				assert.Same(t, held, got)
+				assert.Zero(t, waited)
+			}
+
+			requireAccepts(t, reg, "a: 1\n")
+
+			// The host comes back with a new version of the document, and
+			// the first request after the retry interval fetches it.
+			hung.Store(false)
+			h.files.Store(&map[string]string{"/root.json": rootSchema, "/defs.json": defsString})
+			time.Sleep(time.Minute)
+
+			requireRejects(t, reg, "a: 1\n", "string")
+		})
+	})
+
+	t.Run("serves the held copy when a release runs during a failed refresh", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			// The path whose fetch the host holds and then fails.
+			held string
+			// Whether the request that starts the refresh gets the schema
+			// that the registry held. A refresh whose $ref fetch fails
+			// compiles again with the held copy of the document instead.
+			same bool
+		}{
+			"schema":                {held: "/root.json", same: true},
+			"document a $ref names": {held: "/defs.json"},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				synctest.Test(t, func(t *testing.T) {
+					h := newHost(map[string]string{"/root.json": rootSchema, "/defs.json": defsInteger})
+
+					var down atomic.Bool
+
+					gate := make(chan struct{})
+
+					// While the host is down, the transport holds each fetch
+					// of the path until gate closes, and then fails it.
+					client := yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
+						if down.Load() && r.URL.Path == tc.held {
+							<-gate
+
+							return nil, errors.New("host down")
+						}
+
+						return h.client.Transport.RoundTrip(r)
+					}).Client()
+
+					ref := schema.URL(rootURL)
+					reg := schema.NewRegistry(
+						schema.WithHTTPClient(client),
+						schema.WithResolvers(ref),
+						schema.WithRefreshAfter(time.Hour),
+						schema.WithRetryAfter(time.Minute),
+					)
+
+					held, err := reg.Schema(t.Context(), ref)
+					require.NoError(t, err)
+
+					down.Store(true)
+					time.Sleep(time.Hour)
+
+					var (
+						wg  sync.WaitGroup
+						got *schema.Schema
+					)
+
+					wg.Go(func() {
+						got, err = reg.Schema(t.Context(), ref)
+					})
+
+					// The refresh waits on gate. An editor drops a file that
+					// the schema did not reach, which starts a new generation
+					// of the cache.
+					synctest.Wait()
+					reg.Invalidate(schema.File("/tmp/unrelated.json"))
+
+					// A request after the release gets the held copy without
+					// waiting for the refresh.
+					ctx, cancel := context.WithTimeout(t.Context(), time.Hour)
+					defer cancel()
+
+					start := time.Now()
+					again, againErr := reg.Schema(ctx, ref)
+					require.NoError(t, againErr)
+					assert.Same(t, held, again)
+					assert.Zero(t, time.Since(start))
+
+					close(gate)
+					wg.Wait()
+
+					require.NoError(t, err)
+					require.NoError(t, yamltest.FirstDocument(t, "a: 1\n").Validate(t.Context(), got))
+
+					if tc.same {
+						assert.Same(t, held, got)
+					} else {
+						assert.NotSame(t, held, got)
+					}
+
+					requireAccepts(t, reg, "a: 1\n")
+				})
+			})
+		}
+	})
+
+	t.Run("does not reload a Loadable ref", func(t *testing.T) {
+		t.Parallel()
+
+		synctest.Test(t, func(t *testing.T) {
+			ref, loads := countingLoader(rootURL, []byte(`{"type": "object"}`))
+			reg := schema.NewRegistry(schema.WithRefreshAfter(time.Hour))
+
+			loadAll(t, reg, ref)
+			time.Sleep(2 * time.Hour)
+			loadAll(t, reg, ref)
+
+			assert.Equal(t, int32(1), loads.Load())
+		})
+	})
+}
+
 func TestRegistry_FileFS(t *testing.T) {
 	t.Parallel()
 
