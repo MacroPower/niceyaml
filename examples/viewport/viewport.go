@@ -57,13 +57,14 @@ func main() {
 
 	fmt.Println("\nCount the rows of a wrapped view:")
 
-	// A layout wraps and styles each line as Print does, without
-	// assembling the output. A long line takes a row for each piece it
-	// wraps into, and an annotation takes a row of its own. Rows count
-	// from 0. The output numbers lines and columns from 1, as the gutter
-	// numbers lines.
-	wrapped := p.With(printer.WithWrapWidth(width), printer.WithContainerWidth(width))
-	layout := wrapped.Layout(view)
+	// Render returns the rows of the view with the layout that measures
+	// them, from one pass over the view. A long line takes a row for each
+	// piece it wraps into, and an annotation takes a row of its own. Rows
+	// count from 0. The output numbers lines and columns from 1, as the
+	// gutter numbers lines.
+	wrapped := p.With(printer.WithWrapWidth(width))
+	rendered := wrapped.Render(view)
+	layout := rendered.Layout()
 	fmt.Printf("%d lines take %d rows at a width of %d cells.\n", layout.Count(), layout.Rows(), width)
 
 	for i := range view.All() {
@@ -79,13 +80,19 @@ func main() {
 	// match and keeps the window inside the rows the view takes.
 	top := clamp(layout.RowOf(dish.Start)-height/2, layout.Rows()-height)
 
-	// These printers draw no frame around the content, so row n of the
-	// layout is row n of the output of Print. The doc of Layout maps the
-	// rows under a frame. The container width pads every row to the window
-	// in kind.Text, so the surface of the theme fills the window. A view
-	// that takes fewer rows than the window fills only the top of it.
-	rows := strings.Split(wrapped.Print(view), "\n")
-	frame(rows[top:min(top+height, len(rows))])
+	// The rendered rows leave out the container of the printer, so row n
+	// of the rows is row n of the layout. Each row is as wide as its
+	// content. Pad fills the rest of the window in kind.Text, so the
+	// surface of the theme fills the window. A view that takes fewer rows
+	// than the window fills only the top of it.
+	rows := rendered.Rows()
+	rows = rows[top:min(top+height, len(rows))]
+
+	for i, row := range rows {
+		rows[i] = p.Pad(row, width)
+	}
+
+	frame(rows)
 
 	// LineAt maps a row back to its line, as a status bar needs. A row of
 	// a wrapped piece or an annotation belongs to the line it sits beside.
@@ -102,14 +109,15 @@ func main() {
 	// CellOf counts cells from the end of the gutter. The offset that puts
 	// the end of the match at the right edge is that cell less the room
 	// beside the gutter.
-	layout = p.Layout(view)
+	rendered = p.Render(view)
+	layout = rendered.Layout()
 	gutter := layout.GutterWidth()
 	room := width - gutter
 	left := clamp(layout.CellOf(lemon.End)-room, layout.Width()-gutter-room)
 	top = clamp(layout.RowOf(lemon.Start)-height/2, layout.Rows()-height)
 
 	from, to := gutter+left, gutter+left+room
-	rows = strings.Split(p.Print(view), "\n")
+	rows = rendered.Rows()
 	rows = rows[top:min(top+height, len(rows))]
 
 	for i, row := range rows {
@@ -117,7 +125,7 @@ func main() {
 		// window keeps the color of a token that starts before it. It keeps
 		// every cell in place too, so each rune of the window takes the cell
 		// that the layout gives it. Pad fills the rest of a short row with
-		// the surface of the theme, as the container width does.
+		// the surface of the theme.
 		rows[i] = printer.Cut(row, 0, gutter) + p.Pad(printer.Cut(row, from, to), room)
 	}
 

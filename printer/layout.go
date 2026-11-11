@@ -28,6 +28,11 @@ import (
 // not assemble output, so one Layout replaces a render for every question
 // about rows. It stays valid until the view or the printer changes.
 //
+// A viewer that draws the rows too takes them with their layout from
+// [Printer.Render]. Both then come from one pass over the view, and row n
+// of [Rendered.Rows] is row n of the layout. [Printer.RenderSideBySide]
+// returns the same for two panes beside each other.
+//
 // The layout speaks in the coordinates of the view. [Layout.LineRows],
 // [Layout.LineWidth], [Layout.LineStart], and [Layout.LineAt] take and
 // return the index of a line in the content of the view. Every
@@ -46,26 +51,33 @@ import (
 // container style out. An empty view takes zero rows, but [Printer.Print]
 // draws one empty row for it to carry the container.
 //
-// Row r of the layout is thus row r+top of what [Printer.Print] returns.
-// The count top holds the rows that the container style draws above the
-// content: its top margin, border, and padding. A cell of the layout
-// likewise leaves out the left frame of the container:
+// The rows and cells of the layout are thus those of [Rendered.Rows],
+// which leave the container out too:
 //
-//	frame := p.ContainerStyle()
-//	top := frame.GetMarginTop() + frame.GetBorderTopSize() + frame.GetPaddingTop()
-//	left := frame.GetMarginLeft() + frame.GetBorderLeftSize() + frame.GetPaddingLeft()
-//	rows := strings.Split(p.Print(view), "\n")
-//	row := rows[top+layout.RowOf(pos)]
-//	cell := left + layout.GutterWidth() + layout.CellOf(pos)
+//	r := p.Render(view)
+//	layout := r.Layout()
+//	row := r.Rows()[layout.RowOf(pos)]
+//	cell := layout.GutterWidth() + layout.CellOf(pos)
 //
-// The box of [WithBox] adds only right padding, so its rows and cells
-// match the layout. The mapping holds when the container style does not
-// set a width, a height, or a vertical alignment of its own. A width
-// narrower than the rows wraps them, and a height that aligns the rows
-// other than at the top moves them down. [WithContainerWidth] pins the
-// width without wrapping.
+// [Printer.Print] draws the frame of the container style around those
+// rows. A top margin, border, or padding of the frame puts rows before
+// the first row, and a left one puts cells before each row. The printed
+// rows and cells then sit that far past the rows and cells of the layout.
+// A frame that has neither leaves them in place. The box of [WithBox]
+// adds only right padding, so its printed rows and cells match the
+// layout.
 //
-// Create instances with [Printer.Layout].
+// Those offsets hold when the container style does not set a width, a
+// height, or an alignment of its own. A width narrower than the rows
+// wraps them, so one row of the layout prints as several. A height
+// taller than the rows with a vertical alignment other than top puts
+// empty rows before the first row. A horizontal alignment other than
+// left moves each row narrower than the container to the right.
+// [WithContainerWidth] pins the width without wrapping the rows.
+// [Rendered.Rows] returns rows that match the layout under every
+// container style.
+//
+// Create instances with [Printer.Layout] or [Printer.Render].
 type Layout struct {
 	lines       []lineLayout
 	indices     []int // indices[k] is the index in the view's content of the k-th line, ascending.
@@ -117,37 +129,84 @@ type shownLine struct {
 	contentLen int
 }
 
-// Layout computes the [Layout] of view as [Printer.Print] renders it.
+// Layout computes the [Layout] of view as [Printer.Print] renders it. It
+// measures the rows and does not assemble them. [Printer.Render] returns
+// the same layout with the rows it measures.
 func (p *Printer) Layout(view *line.View) Layout {
-	maxNumber := p.MaxNumber(view)
-	gutterWidth := p.gutterWidth(maxNumber)
-	l := Layout{
-		lines:       make([]lineLayout, 0, view.Count()),
-		indices:     make([]int, 0, view.Count()),
-		starts:      make([]int, 1, view.Count()+1),
-		gutterWidth: gutterWidth,
-	}
+	gutterWidth := p.gutterWidth(p.MaxNumber(view))
+	l := newLayout(view.Count(), gutterWidth)
 
 	for idx, ln := range view.All() {
-		ll := p.layoutLine(view, idx, ln, gutterWidth)
-
-		l.width = max(l.width, ll.width)
-		l.lines = append(l.lines, ll)
-		l.indices = append(l.indices, idx)
-		l.starts = append(l.starts, l.starts[len(l.starts)-1]+ll.rows)
+		l = l.withLine(idx, p.layLine(newViewLine(view, idx, ln), gutterWidth, true).layout)
 	}
 
 	return l
 }
 
-// layoutLine computes the row structure of ln, line idx of view, as
-// [Printer.renderLine] writes its rows.
-func (p *Printer) layoutLine(view *line.View, idx int, ln *line.Line, gutterWidth int) lineLayout {
-	vl := newViewLine(view, idx, ln)
+// newLayout creates a new [Layout] with room for count lines behind a
+// gutter gutterWidth cells wide.
+func newLayout(count, gutterWidth int) Layout {
+	return Layout{
+		lines:       make([]lineLayout, 0, count),
+		indices:     make([]int, 0, count),
+		starts:      make([]int, 1, count+1),
+		gutterWidth: gutterWidth,
+	}
+}
 
-	w := p.wrapLine(vl, gutterWidth)
-	above := p.annotationRows(vl, gutterWidth, line.Above, w)
-	below := p.annotationRows(vl, gutterWidth, line.Below, w)
+// withLine returns l with ll, the row structure of line idx of the
+// content, after the lines it holds. The lines come in ascending order.
+func (l Layout) withLine(idx int, ll lineLayout) Layout {
+	l.width = max(l.width, ll.width)
+	l.lines = append(l.lines, ll)
+	l.indices = append(l.indices, idx)
+	l.starts = append(l.starts, l.starts[len(l.starts)-1]+ll.rows)
+
+	return l
+}
+
+// laidLine is one line as the printer lays it out behind the gutter. It
+// holds the wrapped rows of the content and the blocks of annotation rows
+// above and below each of them, as [Printer.annotationRows] returns them.
+// Its layout is the row structure those rows give the line. A line that
+// [Printer.layLine] lays out without its measures has the zero layout.
+type laidLine struct {
+	pieces []string
+	above  [][]string
+	below  [][]string
+	layout lineLayout
+}
+
+// layLine renders the content of vl, wraps it to the printer width, and
+// renders its annotation rows. With measure set, it also computes the row
+// structure of the line from those rows. [Printer.Layout] keeps the
+// structure, and [Printer.renderLine] writes the rows, so both count the
+// same rows.
+//
+// The measures do not change a row. Without measure, layLine thus skips
+// the work that only the row structure reads.
+func (p *Printer) layLine(vl viewLine, gutterWidth int, measure bool) laidLine {
+	// The content wraps as the rendered line does, styles included,
+	// because the transform of a style can change the shown text. The
+	// wrap is ANSI-aware and measures the shown cells.
+	rendered, runs := p.renderRuns(vl)
+	w := wrappedLine{pieces: p.wrapContent(rendered, gutterWidth)}
+
+	// The annotations and the row structure read the columns each row
+	// shows. A line with neither leaves its rows unmapped.
+	if measure || len(vl.row.Annotations) > 0 {
+		w = mapRows(vl.row.Width, rendered, runs, w.pieces)
+	}
+
+	laid := laidLine{
+		pieces: w.pieces,
+		above:  p.annotationRows(vl, gutterWidth, line.Above, w),
+		below:  p.annotationRows(vl, gutterWidth, line.Below, w),
+	}
+
+	if !measure {
+		return laid
+	}
 
 	ll := lineLayout{
 		clip:    vl.clip,
@@ -157,19 +216,21 @@ func (p *Printer) layoutLine(view *line.View, idx int, ln *line.Line, gutterWidt
 	}
 
 	for j, piece := range w.pieces {
-		ll.rows += len(rowsAt(above, j))
+		ll.rows += len(rowsAt(laid.above, j))
 		ll.offsets[j] = ll.rows
-		ll.rows += 1 + len(rowsAt(below, j))
+		ll.rows += 1 + len(rowsAt(laid.below, j))
 		ll.width = max(ll.width, gutterWidth+lipgloss.Width(piece))
 	}
 
-	for _, block := range slices.Concat(above, below) {
+	for _, block := range slices.Concat(laid.above, laid.below) {
 		for _, row := range block {
 			ll.width = max(ll.width, gutterWidth+lipgloss.Width(row))
 		}
 	}
 
-	return ll
+	laid.layout = ll
+
+	return laid
 }
 
 // wrappedLine is the content of one line wrapped to the printer width.
@@ -178,17 +239,6 @@ type wrappedLine struct {
 	starts []int     // The column of the content at which each piece begins.
 	ends   []int     // The column of the content after the last rune each piece shows.
 	shown  shownLine // The shown text of the line.
-}
-
-// wrapLine renders the content of vl, wraps it to the printer width, and
-// returns the pieces with the columns of the content each one shows.
-func (p *Printer) wrapLine(vl viewLine, gutterWidth int) wrappedLine {
-	// The content wraps as the rendered line does, styles included, since
-	// a style's transform may change the shown text. The wrap is
-	// ANSI-aware and measures the shown cells.
-	rendered, runs := p.renderRuns(vl)
-
-	return mapRows(vl.row.Width, rendered, runs, p.wrapContent(rendered, gutterWidth))
 }
 
 // mapRows returns pieces with the columns of the content each piece
@@ -513,6 +563,19 @@ func (l Layout) LineStart(i int) int {
 	}
 
 	return l.starts[k]
+}
+
+// LineLead returns the number of rows line i of the content takes above
+// its first content row, such as the rows of the annotations above it.
+// The first content row of the line is thus row [Layout.LineStart] plus
+// LineLead. A line the layout does not hold has a lead of 0.
+func (l Layout) LineLead(i int) int {
+	k, ok := l.position(i)
+	if !ok {
+		return 0
+	}
+
+	return l.lines[k].offsets[0]
 }
 
 // LineAt returns the index in the content of the line that holds row. A

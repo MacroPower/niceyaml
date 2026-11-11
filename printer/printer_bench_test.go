@@ -242,6 +242,43 @@ func BenchmarkPrinterWithWrapping(b *testing.B) {
 	}
 }
 
+func BenchmarkPrinterPrintSideBySide(b *testing.B) {
+	// PrintSideBySide returns only the string, so it does not pay for the
+	// layouts that RenderSideBySide computes for the panes.
+	yaml := yamltest.GenerateYAML(500)
+	view := niceyaml.NewSourceFromString(yaml).View()
+
+	widths := []struct {
+		name  string
+		width int
+	}{
+		{"no_wrap", 0},
+		{"wrap_60", 60},
+	}
+
+	for _, w := range widths {
+		p := printer.New(printer.WithWrapWidth(w.width))
+
+		b.Run(w.name+"/print", func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(yaml)))
+
+			for b.Loop() {
+				_ = p.PrintSideBySide(view, view)
+			}
+		})
+
+		b.Run(w.name+"/render", func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(yaml)))
+
+			for b.Loop() {
+				_ = p.RenderSideBySide(view, view).String()
+			}
+		})
+	}
+}
+
 func BenchmarkPrinterLayout_LongTransformedValue(b *testing.B) {
 	// A transform that adds runes around a long value makes the shown text
 	// of its run longer than the content, and the value wraps into many

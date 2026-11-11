@@ -163,14 +163,25 @@
 // viewer that takes a pointer finds the position a cell of a row shows
 // with [Layout.PositionAt].
 //
-// A viewer that scrolls horizontally shows a window of each printed row.
-// [Layout.CellOf] gives the cell of a column, and [Cut] cuts a printed row
-// to a range of those cells with its styles intact. [Printer.Pad] pads a
-// short row to the window. The rows and cells of the layout leave out the
-// frame of the container, as the [Layout] doc describes. Without a frame,
-// row n of the layout is row n of the output:
+// [Printer.Render] returns the rows of a view with their layout, both
+// from one pass over the view. The rows leave out the container, so row n
+// of the rows is row n of the layout whatever frame the container draws.
+// A viewer draws a window of those rows. [Printer.Print] joins the same
+// rows inside the container as one string.
 //
-//	rows := strings.Split(p.Print(view), "\n")
-//	row := rows[layout.RowOf(pos)]
+// A viewer that scrolls horizontally shows a window of each row.
+// [Layout.CellOf] gives the cell of a column, and [Cut] cuts a row to a
+// range of those cells with its styles intact. [Printer.Pad] pads a short
+// row to the window:
+//
+//	r := p.Render(view)
+//	layout := r.Layout()
+//	row := r.Rows()[layout.RowOf(pos)]
 //	window := p.Pad(printer.Cut(row, offset, offset+width), width)
+//
+// [Printer.RenderSideBySide] renders two views as panes beside each
+// other. Its [*SideBySide] holds the zipped rows, the rows of each pane,
+// and the layout of each pane. It maps a line to its zipped rows and a
+// zipped row to the row of a pane. A viewer thus scrolls the panes and
+// maps a pointer to them without zipping the panes itself.
 package printer
