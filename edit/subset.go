@@ -116,14 +116,15 @@ func (d *Doc) find(edited bool) []instance {
 // write, as the finder finds it in the current text, the YAML of a Set
 // value as [encodedDoc] reads it (C17). An anchor and an alias give
 // [ConstructValueAlias], a << merge key gives [ConstructMergeForm], and an
-// explicit key gives [ConstructExplicitKey]. So do the instances of
-// [Doc.find], and the comments and the pairs without braces of the flow
-// collections, which give [ConstructFlowLayout]. The instances come in the
-// order of the text, and at one place an anchor, an alias, or a key comes
-// first, then an instance of find, then one of a flow collection. Each
-// instance holds the words of a Set that writes it. Its fix names typ, the
-// type of the marshaler that wrote the YAML, or the value for "", the text
-// of the encode.
+// explicit key gives [ConstructExplicitKey]. The instances of [Doc.find]
+// count too, and so does each key that reads as another value than its
+// text, which gives [ConstructKeyText]. The comments and the pairs without
+// braces of the flow collections give [ConstructFlowLayout]. The instances
+// come in the order of the text. At one place an anchor, an alias, or a key
+// comes first, then an instance of find or of a key text, then one of a
+// flow collection. Each instance holds the words of a Set that writes it.
+// Its fix names typ, the type of the marshaler that wrote the YAML, or the
+// value for "", the text of the encode.
 func (d *Doc) valueInstances(typ string) []instance {
 	type found struct {
 		in   instance
@@ -194,7 +195,7 @@ func (d *Doc) valueInstances(typ string) []instance {
 
 	// The fix of such an instance tells what to write in YAML, which the
 	// program writes only through a marshaler.
-	news := d.find(false)
+	news := append(d.find(false), d.keyTexts()...)
 	for i := range news {
 		in := news[i]
 		in.inValue, in.reach, in.object = true, strings.TrimPrefix(in.what, "a document with "), "such YAML"
@@ -356,8 +357,7 @@ func scanBreaks(text string) breakScan {
 // of the user's text that [New] refuses. Those are each property on an
 // alias, each tag that converts a collection, and each tag that
 // [ConstructTagKind] names. They are also each key with properties, each
-// alias key, each key that reads as another value than its text, and each
-// anchor on an empty value.
+// alias key, and each anchor on an empty value.
 func (d *Doc) propertyInstances() []instance {
 	var found []instance
 
@@ -606,9 +606,9 @@ func (d *Doc) tagInstance(tag *ast.TagNode) (instance, bool) {
 }
 
 // keyInstance returns the instance of key, the key of an entry of the
-// user's text without its "?". It finds one when key is an alias, has an
-// anchor or a tag, or reads as another value than its text. The tag
-// !!merge on a << merge key stays a merge key, which a call checks.
+// user's text without its "?". It finds one when key is an alias or has an
+// anchor or a tag. The tag !!merge on a << merge key stays a merge key,
+// which a call checks.
 func (d *Doc) keyInstance(key ast.Node) (instance, bool) {
 	switch k := key.(type) {
 	case *ast.AliasNode:
@@ -633,11 +633,8 @@ func (d *Doc) keyInstance(key ast.Node) (instance, bool) {
 	case *ast.AnchorNode:
 		return d.keyProperties(k), true
 
-	case nil, *ast.MappingNode, *ast.SequenceNode, *ast.MergeKeyNode:
-		return instance{}, false
-
 	default:
-		return d.keyText(key)
+		return instance{}, false
 	}
 }
 
@@ -683,57 +680,169 @@ func (d *Doc) keyFix(held []string) string {
 	return fix
 }
 
-// keyText returns the instance of [ConstructKeyText] of key, a scalar key
-// without properties, when go-yaml's decoder reads it as a value that does
-// not print as the text of the key. The decoder reads a mapping of the key
-// alone into a map[any]any, as a decode into any reads each key of a
-// mapping. A key that the decoder does not read passes. The null value is
-// no string, so the edits do not take a key that reads as it, though a
-// decode into a map names the key null by its text, as
-// [datapath.MemberName] tells. The message names such a key as one that
-// reads as the null value.
-func (d *Doc) keyText(key ast.Node) (instance, bool) {
+// plainKey returns the key of e, an entry of the current text, without its
+// "?". It returns nil for a key that [Doc.oddKey] does not read. Such keys
+// are an alias, a key under an anchor or a tag, a collection, a << merge
+// key, and the key that an entry lacks.
+func plainKey(e *ast.MappingValueNode) ast.Node {
+	var key ast.Node = e.Key
+
+	if explicit, ok := key.(*ast.MappingKeyNode); ok {
+		key = explicit.Value
+	}
+
+	switch key.(type) {
+	case nil, *ast.AliasNode, *ast.TagNode, *ast.AnchorNode, *ast.MappingNode, *ast.SequenceNode, *ast.MergeKeyNode:
+		return nil
+	default:
+		return key
+	}
+}
+
+// keyTexts returns the instance of [ConstructKeyText] of each key of the
+// current text that has one, as [Doc.keyText] finds it, in the order of the
+// text. [Doc.valueInstances] reads them in the YAML of a Set value. In the
+// user's text such a key is a construct that a call reaches, whose zone
+// [Doc.keyTextZones] gives.
+func (d *Doc) keyTexts() []instance {
+	var found []instance
+
+	d.inspect(func(n ast.Node) bool {
+		if e, ok := n.(*ast.MappingValueNode); ok {
+			if in, ok := d.keyText(plainKey(e)); ok {
+				found = append(found, in)
+			}
+		}
+
+		return true
+	})
+
+	return found
+}
+
+// oddKey is a key that go-yaml's decoder reads as a value that does not
+// print as the text of the key, as [Doc.oddKey] reads it.
+type oddKey struct {
+	// The value that the decoder reads, which is nil for the null value.
+	read any
+	// The text of the key.
+	text string
+}
+
+// shown returns the words that show the reading of k in a message, such as
+// "16" or "the null value". The reading takes the word for its type where
+// it shows as the text does, as [shownApart] shows two values.
+func (k oddKey) shown() string {
+	if k.read == nil {
+		return "the null value"
+	}
+
+	shown := shownCut(k.read)
+	if shown == cut(k.text) {
+		shown = typeWord(k.read) + shown
+	}
+
+	return shown
+}
+
+// null reports whether k reads as the null value and has the text that a
+// decode into a map names such a key by, as [datapath.MemberName] tells.
+func (k oddKey) null() bool {
+	return k.read == nil && datapath.MemberName(k.read) == k.text
+}
+
+// label returns the words that name k in a message: its text, or the
+// words for a key without text.
+func (k oddKey) label() string {
+	if k.text == "" {
+		return "an empty key"
+	}
+
+	return cut(k.text)
+}
+
+// reading returns the words that tell how a decode reads k in the message
+// of a call, such as "a key that reads as 16 rather than as its text".
+// Then tells that a decode reads k so only in the text that the call
+// leaves.
+func (k oddKey) reading(then bool) string {
+	reads := "reads"
+	if then {
+		reads = "then reads"
+	}
+
+	if k.null() {
+		return fmt.Sprintf("a key that %s as the null value", reads)
+	}
+
+	return fmt.Sprintf("a key that %s as %s rather than as its text", reads, k.shown())
+}
+
+// reread returns the words of the message of a call that changes how a
+// decode reads k, with the reading of k as [oddKey.reading] tells it.
+func (k oddKey) reread(then bool) string {
+	return fmt.Sprintf("changes how a decode reads %s, %s", k.label(), k.reading(then))
+}
+
+// fix returns the fix of k, which asks for the key in quotes.
+func (k oddKey) fix() string {
+	return "quote the key, as in " + cut(strconv.Quote(k.text))
+}
+
+// oddKey returns the reading of key, a key that [plainKey] returns, when
+// go-yaml's decoder reads it as a value that does not print as the text of
+// the key. The decoder reads a mapping of the key alone into a
+// map[any]any, as a decode into any reads each key of a mapping. A key that
+// the decoder does not read passes. The null value is no string, so the
+// edits do not take a key that reads as it, though a decode into a map
+// names the key null by its text.
+func (d *Doc) oddKey(key ast.Node) (oddKey, bool) {
+	if key == nil {
+		return oddKey{}, false
+	}
+
 	// An empty key has no text, and a decode reads it as null.
 	text, _ := astnode.ScalarText(key)
 
 	r := d.readKey(key, text)
 	if !r.ok || r.shows {
-		return instance{}, false
+		return oddKey{}, false
 	}
 
-	read := r.key
+	return oddKey{read: r.key, text: text}, true
+}
 
-	// The reading takes the word for its type where it shows as the text
-	// does, as [shownApart] shows two values.
-	shown := "the null value"
-	if read != nil {
-		shown = shownCut(read)
-		if shown == cut(text) {
-			shown = typeWord(read) + shown
-		}
+// keyText returns the instance of [ConstructKeyText] of key, a key that
+// [plainKey] returns, when [Doc.oddKey] reads it as another value than its
+// text. The message names a key that reads as the null value under its own
+// name as such a key.
+func (d *Doc) keyText(key ast.Node) (instance, bool) {
+	k, ok := d.oddKey(key)
+	if !ok {
+		return instance{}, false
 	}
 
 	what := fmt.Sprintf(
 		"a key that reads as another value than its text, such as %s, which reads as %s",
-		cut(text),
-		shown,
+		cut(k.text),
+		k.shown(),
 	)
 
-	if read == nil && datapath.MemberName(read) == text {
-		what = "a key that reads as the null value, such as " + cut(text)
+	if k.null() {
+		what = "a key that reads as the null value, such as " + cut(k.text)
 	}
 
 	return instance{
 		construct: ConstructKeyText,
 		at:        d.nodeSite(key, true),
 		what:      what,
-		fix:       "quote the key, as in " + cut(strconv.Quote(text)),
-		valueFix:  "make the key a Go string, as in " + cut(strconv.Quote(text)),
+		fix:       k.fix(),
+		valueFix:  "make the key a Go string, as in " + cut(strconv.Quote(k.text)),
 	}, true
 }
 
 // readKey returns what go-yaml's decoder reads from key, whose text
-// [astnode.ScalarText] reads as text, as [Doc.keyText] reads it. The Doc
+// [astnode.ScalarText] reads as text, as [Doc.oddKey] reads it. The Doc
 // keeps each reading by the token and the string of the key, so a call
 // reads each such key once.
 func (d *Doc) readKey(key ast.Node, text string) keyReading {
@@ -785,7 +894,7 @@ type keyRead [4]string
 
 // keyReading is what go-yaml's decoder reads from a key, as
 // [Doc.readKey] returns it, and whether a value other than null reads
-// and prints as the text of the key, as [Doc.keyText] tells.
+// and prints as the text of the key, as [Doc.oddKey] tells.
 type keyReading struct {
 	key       any
 	ok, shows bool
@@ -1394,6 +1503,9 @@ type zone struct {
 	parts []zonePart
 	// The key sets that the zone holds.
 	keys []zoneKeys
+	// The reading of the key of a zone of [ConstructKeyText], for the words
+	// of a call that changes how a decode reads the key.
+	odd oddKey
 	// The instance of the construct.
 	in instance
 	// The offset of the site in the text that the Apply found, which orders
@@ -1411,11 +1523,16 @@ type zonePart struct {
 // zoneKeys is a key set that a zone holds: the key texts of a mapping, or
 // every key of the mapping when keys is nil. The mapping is the origin of
 // its first byte. A Set writes every byte of its value with one origin, so
-// the origin names no mapping inside such a value. [Doc.liveZone] finds
-// the zone of a << merge key again in each parse. That zone names each
-// mapping by the offset of its first byte in the parse instead, as live
-// tells.
+// the origin names no mapping inside such a value. A call can also take
+// away the first entry of a mapping, and the origin then names the mapping
+// no more. [Doc.liveZone] finds the zone of a << merge key again in each
+// parse. It also finds the mapping of a key that reads as another value
+// than its text. Such a zone names each mapping by the offset of its first
+// byte in the parse instead, as live tells. It keeps the mapping of that
+// parse in node, so [Doc.mappingSpan] reads the bytes of the mapping without
+// a walk of the tree.
 type zoneKeys struct {
+	node    ast.Node
 	keys    []string
 	mapping int
 	start   int
@@ -1482,9 +1599,10 @@ func (d *Doc) keyChange(m ast.Node, key string) keyChange {
 }
 
 // liveKeys returns the key set of every key of m, a mapping of the current
-// text, for the zone of a << merge key, which names m by its offset.
+// text, for a zone that [Doc.liveZone] finds again in each parse. The key
+// set names m by its offset.
 func (d *Doc) liveKeys(m ast.Node) zoneKeys {
-	return zoneKeys{mapping: d.firstOrigin(m), start: d.offsetOf(m), live: true}
+	return zoneKeys{node: m, mapping: d.firstOrigin(m), start: d.offsetOf(m), live: true}
 }
 
 // firstOrigin returns the origin of the first byte of node in the current
@@ -1754,7 +1872,7 @@ func (d *Doc) zoneStep(z *zone, w *callWalk) int {
 	at := len(w.steps)
 
 	for i, n := range w.steps {
-		if d.nodeIn(n, spans) {
+		if d.inZone(z, n, spans) {
 			at = i
 
 			break
@@ -1919,6 +2037,28 @@ func (d *Doc) nodeIn(node ast.Node, spans []span) bool {
 	return false
 }
 
+// inZone reports whether node, a value or a key on the way of a call, lies
+// inside one of spans, the parts of z as the text holds them, as
+// [Doc.nodeIn] tells. The zone of a key that reads as another value than
+// its text holds entries of one mapping, and that mapping lies outside the
+// zone. The mapping starts where its first entry starts, so its bytes are
+// those of a part when the part is all that it holds. No key and no value
+// of an entry starts where a part starts and holds entries itself.
+func (d *Doc) inZone(z *zone, node ast.Node, spans []span) bool {
+	if z.in.construct == ConstructKeyText {
+		content := astnode.Content(node)
+
+		if _, ok := readEntries(content); ok {
+			s, _ := d.valueSpan(content)
+			if slices.ContainsFunc(spans, func(part span) bool { return part.start == s.start }) {
+				return false
+			}
+		}
+	}
+
+	return d.nodeIn(node, spans)
+}
+
 // keyChange is a key text of a mapping that a call creates, removes,
 // renames, or moves. The mapping is the origin of its first byte, at the
 // offset start of the current text. Step is the step of the path of the
@@ -2016,6 +2156,10 @@ func (d *Doc) keyChanges(c reachCall, w, tw *callWalk, skipMerge bool) []keyChan
 // reach it. A call reaches the key sets of a zone when it creates,
 // removes, renames, or moves an entry of the mapping with such a key, or
 // when its walk looks such a key up through a << merge key of the mapping.
+// The key set of a key that reads as another value than its text holds in
+// each mapping that brings its mapping in through << merge keys too. A
+// Remove that takes the zone of such a key whole does not reach its key
+// set, unless a merge key of the mapping brings in an entry of such a key.
 // Reaches tells how in a [reach], and it reports false for a call that does
 // not reach z.
 func (d *Doc) reaches(z *zone, c reachCall, w, tw *callWalk) (reach, bool) {
@@ -2057,7 +2201,7 @@ func (d *Doc) reaches(z *zone, c reachCall, w, tw *callWalk) (reach, bool) {
 	}
 
 	if len(spans) > 0 {
-		step, onPath, target := d.spansStep(spans, c, w, tw, taken, takes, whole)
+		step, onPath, target := d.spansStep(z, spans, c, w, tw, taken, takes, whole)
 		if onPath {
 			at(step)
 		}
@@ -2066,6 +2210,7 @@ func (d *Doc) reaches(z *zone, c reachCall, w, tw *callWalk) (reach, bool) {
 	}
 
 	changes := d.keyChanges(c, w, tw, z.in.construct == ConstructMergeForm)
+	odd := z.in.construct == ConstructKeyText
 
 	for _, k := range z.keys {
 		if whole && c.kind != callMove {
@@ -2087,7 +2232,23 @@ func (d *Doc) reaches(z *zone, c reachCall, w, tw *callWalk) (reach, bool) {
 		}
 
 		for _, ch := range changes {
-			if !k.names(ch.mapping, ch.start) || k.keys != nil && !slices.Contains(k.keys, ch.key) {
+			if k.keys != nil && !slices.Contains(k.keys, ch.key) {
+				continue
+			}
+
+			own := k.names(ch.mapping, ch.start)
+
+			// A Remove that takes the zone of a key that reads as another
+			// value than its text whole takes its one entry. A merge key of
+			// the mapping can bring in an entry that a decode reads under
+			// the name of that entry, which the Remove then reveals.
+			if own && odd && whole && c.kind == callRemove && !d.mergesKey(ch.node, k.keys) {
+				continue
+			}
+
+			// A mapping that brings in the mapping of such a key reads the
+			// entry of the key too, under each name of the zone.
+			if !own && (!odd || !d.mergesMapping(ch.node, k)) {
 				continue
 			}
 
@@ -2134,11 +2295,13 @@ func (d *Doc) looksUp(k zoneKeys, merges []mergeStep) bool {
 }
 
 // spansStep returns the first step of the path of c that reaches spans,
-// the parts of a zone as the text holds them, by rule 1 of the Reaches
+// the parts of z as the text holds them, by rule 1 of the Reaches
 // rules, as [Doc.reaches] describes. It reports whether the path reaches
 // them, and whether the target of a Move does. Taken is the value that c
 // takes, when takes is true, and whole tells that it holds every part.
-func (d *Doc) spansStep(spans []span, c reachCall, w, tw *callWalk, taken span, takes, whole bool) (int, bool, bool) {
+func (d *Doc) spansStep(
+	z *zone, spans []span, c reachCall, w, tw *callWalk, taken span, takes, whole bool,
+) (int, bool, bool) {
 	step, onPath := w.stepOf(len(w.steps)), false
 
 	// The Move writes the value again at its target, so it reaches the zone
@@ -2147,13 +2310,13 @@ func (d *Doc) spansStep(spans []span, c reachCall, w, tw *callWalk, taken span, 
 		step, onPath = w.stepOf(len(w.steps)-1), true
 	}
 
-	if at, ok := d.walksIn(spans, w, c.kind == callKey); !whole && ok {
+	if at, ok := d.walksIn(z, spans, w, c.kind == callKey); !whole && ok {
 		step, onPath = min(step, at), true
 	}
 
 	target := false
 	if tw != nil {
-		_, target = d.walksIn(spans, tw, false)
+		_, target = d.walksIn(z, spans, tw, false)
 	}
 
 	return step, onPath, target
@@ -2161,19 +2324,20 @@ func (d *Doc) spansStep(spans []span, c reachCall, w, tw *callWalk, taken span, 
 
 // walksIn returns the step of the first node on the way of w, its place,
 // or the value that holds a place that the text lacks, that lies inside one
-// of spans, the parts of a zone, and reports whether one does. A walk of a
-// SetKey, as key tells, leaves out the value of the entry at its place.
-func (d *Doc) walksIn(spans []span, w *callWalk, key bool) (int, bool) {
+// of spans, the parts of z, as [Doc.inZone] tells, and reports whether one
+// does. A walk of a SetKey, as key tells, leaves out the value of the entry
+// at its place.
+func (d *Doc) walksIn(z *zone, spans []span, w *callWalk, key bool) (int, bool) {
 	steps := w.steps
 	if key && len(steps) > 0 && w.p.exists && steps[len(steps)-1] == w.p.value {
 		steps = steps[:len(steps)-1]
 	}
 
-	if i := slices.IndexFunc(steps, func(n ast.Node) bool { return d.nodeIn(n, spans) }); i >= 0 {
+	if i := slices.IndexFunc(steps, func(n ast.Node) bool { return d.inZone(z, n, spans) }); i >= 0 {
 		return w.stepOf(i), true
 	}
 
-	if w.p.exists || !d.nodeIn(d.walkHolder(w), spans) {
+	if w.p.exists || !d.inZone(z, d.walkHolder(w), spans) {
 		return 0, false
 	}
 
@@ -2181,9 +2345,16 @@ func (d *Doc) walksIn(spans []span, w *callWalk, key bool) (int, bool) {
 }
 
 // mappingSpan returns the bytes of the mapping of the current text that k
-// names, as [Doc.keysMapping] finds it.
+// names. A key set that names its mapping by an offset keeps the mapping,
+// so mappingSpan reads its bytes without a walk of the tree. A document can
+// hold one such key set for each of its mappings. A key set that names its
+// mapping by an origin takes the walk of [Doc.keysMapping].
 func (d *Doc) mappingSpan(k zoneKeys) (span, bool) {
-	m := d.keysMapping(k)
+	m := k.node
+	if !k.live {
+		m = d.keysMapping(k)
+	}
+
 	if m == nil {
 		return span{}, false
 	}
@@ -2191,8 +2362,8 @@ func (d *Doc) mappingSpan(k zoneKeys) (span, bool) {
 	return d.nodeSpan(m)
 }
 
-// keysMapping returns the mapping of the current text that k names, as
-// [zoneKeys.names] tells, or nil.
+// keysMapping returns the mapping of the current text that k names by the
+// origin of its first byte, as [zoneKeys.names] tells, or nil.
 func (d *Doc) keysMapping(k zoneKeys) ast.Node {
 	var found ast.Node
 
@@ -2355,7 +2526,7 @@ func (d *Doc) stepProblem(c reachCall) error {
 		// as any anchor or tag of a step does.
 		spans := d.zoneSpans(live)
 		at := d.zoneStep(live, w)
-		holds := w.lookup != nil && d.nodeIn(w.lookup, spans)
+		holds := w.lookup != nil && d.inZone(live, w.lookup, spans)
 
 		if at == len(w.steps) && !holds &&
 			!slices.ContainsFunc(merges, func(e *ast.MappingValueNode) bool { return d.nodeIn(e, spans) }) {
@@ -2383,9 +2554,15 @@ func (d *Doc) stepProblem(c reachCall) error {
 // engine edits, as a Set of a source that drops its own merge key does. So
 // liveZone finds the zone of a merge key again at its entry, which the zone
 // holds whole, in the text that the call finds, once for each parse. The
-// zones of the other constructs keep their parts.
+// zone of a key that reads as another value than its text comes as
+// [Doc.liveKeyText] finds it. The zones of the other constructs keep their
+// parts.
 func (d *Doc) liveZone(z *zone) (*zone, bool) {
-	if z.in.construct != ConstructMergeForm {
+	switch z.in.construct {
+	case ConstructMergeForm:
+	case ConstructKeyText:
+		return d.liveKeyText(z)
+	default:
 		return z, true
 	}
 
@@ -2436,6 +2613,84 @@ func (d *Doc) findZone(z *zone) *zone {
 	live.at = z.at
 
 	return live
+}
+
+// liveKeyText returns z as the current text holds it. Z is the zone of a
+// key that reads as another value than its text. The keys of z hold only
+// as long as the text holds an entry of z, so liveKeyText reports false
+// for a text without one. An earlier call of the Apply can take the
+// entries away, as a Remove of the one entry does. The zone that
+// liveKeyText returns names its mapping by the offset of the mapping in the
+// current text. That mapping holds the first entry of z that the text still
+// holds. The origin of the first byte of the mapping names it only in the
+// text that the Apply found. An earlier call can remove, move, or rename
+// the first entry of the mapping, and another origin then starts it.
+func (d *Doc) liveKeyText(z *zone) (*zone, bool) {
+	spans := d.zoneSpans(z)
+	if len(spans) == 0 {
+		return nil, false
+	}
+
+	m := d.entryMappings()[spans[0].start]
+	if m == nil {
+		return z, true
+	}
+
+	live := *z
+	live.keys = make([]zoneKeys, len(z.keys))
+
+	for i, k := range z.keys {
+		live.keys[i] = d.liveKeys(m)
+		live.keys[i].keys = k.keys
+	}
+
+	return &live, true
+}
+
+// entryMappings returns the mapping of each entry of the current text, by
+// the offset of the first byte of the entry, as [Doc.liveKeyText] looks
+// them up. A block mapping of one entry is the entry itself. The index of
+// the parse keeps them.
+func (d *Doc) entryMappings() map[int]ast.Node {
+	t := d.parseIndex()
+	if t.entryMaps != nil {
+		return t.entryMaps
+	}
+
+	out := map[int]ast.Node{}
+	t.entryMaps = out
+
+	// An entry inside the key of another entry can start where that entry
+	// starts. The walk visits the outer entry first, and it is the one that
+	// a path selects.
+	add := func(e *ast.MappingValueNode, m ast.Node) {
+		s, ok := d.nodeSpan(e)
+		if !ok {
+			return
+		}
+
+		if _, seen := out[s.start]; !seen {
+			out[s.start] = m
+		}
+	}
+
+	w := d.walked()
+
+	for i, n := range w.nodes {
+		switch x := n.(type) {
+		case *ast.MappingNode:
+			for _, e := range x.Values {
+				add(e, x)
+			}
+
+		case *ast.MappingValueNode:
+			if _, ok := w.parentAt(i).(*ast.MappingNode); !ok {
+				add(x, x)
+			}
+		}
+	}
+
+	return out
 }
 
 // mergeKeyStarts returns each entry of the current text whose key YAML
@@ -2597,10 +2852,11 @@ func (d *Doc) markRefusal() error {
 // constructZones returns the zones of the constructs of the current text
 // that a call reaches: each << merge key in another form than one alias of
 // an anchored mapping of the document, each key that a mapping repeats,
-// each explicit key, each flow collection with a comment inside it, and
-// each pair without braces in a flow sequence. With heads, the zone of a
-// merge key holds only the entry of the merge key and the keys of its
-// mapping, as [Doc.mergeZone] tells.
+// each explicit key, each key that reads as another value than its text,
+// each flow collection with a comment inside it, and each pair without
+// braces in a flow sequence. With heads, the zone of a merge key holds only
+// the entry of the merge key and the keys of its mapping, as
+// [Doc.mergeZone] tells.
 func (d *Doc) constructZones(heads bool) []*zone {
 	var out []*zone
 
@@ -2643,15 +2899,16 @@ func (d *Doc) constructZones(heads bool) []*zone {
 	return out
 }
 
-// mappingZones returns the zones of the merge keys, the repeated keys, and
-// the explicit keys of m, a mapping of the current text with entries. The
-// walk w of the parse holds m at idx, and groups finds the repeated keys. A
-// mapping with more than one << merge key holds merge keys of a refused
-// form, whose zones hold the whole mapping, so its merge keys count as
-// no repeated key. A merge key of one alias of a reference document has no
-// zone, so where no merge key of m has one, m repeats the key << instead.
-// Heads tells what the zone of a merge key holds, as [Doc.mergeZone] reads
-// it.
+// mappingZones returns the zones of m, a mapping of the current text with
+// entries. Those are the zones of its merge keys, its repeated keys, its
+// explicit keys, and its keys that read as another value than their text.
+// The walk w of the parse holds m at idx, and groups finds the repeated
+// keys. A mapping with more than one << merge key holds merge keys of a
+// refused form, whose zones hold the whole mapping, so its merge keys count
+// as no repeated key. A merge key of one alias of a reference document has
+// no zone, so where no merge key of m has one, m repeats the key <<
+// instead. Heads tells what the zone of a merge key holds, as
+// [Doc.mergeZone] reads it.
 func (d *Doc) mappingZones(
 	w *nodeWalk, idx int, entries []*ast.MappingValueNode, groups *keyGroups, heads bool,
 ) []*zone {
@@ -2683,6 +2940,8 @@ func (d *Doc) mappingZones(
 	groups.repeated(func(name string, entries []*ast.MappingValueNode) {
 		out = append(out, d.repeatZone(m, name, entries))
 	})
+
+	out = append(out, d.keyTextZones(m, entries)...)
 
 	if mm, ok := m.(*ast.MappingNode); ok && mm.IsFlowStyle {
 		if z, ok := d.commentZone(w, idx); ok {
@@ -2829,6 +3088,228 @@ func (d *Doc) repeatZone(m ast.Node, name string, entries []*ast.MappingValueNod
 	}
 
 	return z
+}
+
+// keyTextZones returns the zone of each key of entries, the entries of m, a
+// mapping of the current text, that reads as another value than its text,
+// as [Doc.oddKey] reads it. The entries of m that a decode into a map reads
+// under one name share one zone, as [Doc.keyTextZone] holds them. The zones
+// come in the order of the first such key of each.
+func (d *Doc) keyTextZones(m ast.Node, entries []*ast.MappingValueNode) []*zone {
+	var odd map[*ast.MappingValueNode]oddKey
+
+	for _, e := range entries {
+		k, ok := d.oddKey(plainKey(e))
+		if !ok {
+			continue
+		}
+
+		if odd == nil {
+			odd = make(map[*ast.MappingValueNode]oddKey)
+		}
+
+		odd[e] = k
+	}
+
+	if len(odd) == 0 {
+		return nil
+	}
+
+	// One pass groups the entries by the name that a decode reads each
+	// under, so a mapping of many such keys reads each entry once.
+	var (
+		names  = d.decodedKeys()
+		groups = make(map[string]*keyTextGroup, len(odd))
+		order  []*keyTextGroup
+	)
+
+	for _, e := range entries {
+		if astnode.IsMergeKey(e.Key) {
+			continue
+		}
+
+		k, isOdd := odd[e]
+
+		name, ok := names(e.Key)
+		if !ok {
+			if !isOdd {
+				continue
+			}
+
+			name = datapath.MemberName(k.read)
+		}
+
+		g := groups[name]
+		if g == nil {
+			g = &keyTextGroup{name: name}
+			groups[name] = g
+		}
+
+		g.entries = append(g.entries, e)
+
+		if isOdd && g.first == nil {
+			g.first, g.odd = e, k
+			order = append(order, g)
+		}
+	}
+
+	out := make([]*zone, 0, len(order))
+	for _, g := range order {
+		out = append(out, d.keyTextZone(m, g))
+	}
+
+	return out
+}
+
+// keyTextGroup is the entries of one mapping that a decode into a map reads
+// under name, in the order of the text, as [Doc.keyTextZones] groups them.
+// First is the first of them whose key reads as another value than its
+// text, as odd tells, or nil for a group without such a key.
+type keyTextGroup struct {
+	first   *ast.MappingValueNode
+	name    string
+	odd     oddKey
+	entries []*ast.MappingValueNode
+}
+
+// keyTextZone returns the zone of g, a group of the entries of m with a key
+// that reads as another value than its text. The zone holds each entry of
+// g whole, because a decode into a map reads them under one name and keeps
+// one of them. It holds that name and the text of the key of each of its
+// entries in the keys of m. A call that writes a key of such a name in m
+// thus reaches it. The zone binds at the key of the first entry of g with
+// such a key, and each other entry is a related site.
+func (d *Doc) keyTextZone(m ast.Node, g *keyTextGroup) *zone {
+	odd := g.odd
+	shown, reading := odd.label(), odd.reading(false)
+
+	z := &zone{
+		odd: odd,
+		in: instance{
+			construct: ConstructKeyText,
+			at:        d.nodeSite(plainKey(g.first), false),
+			reach:     fmt.Sprintf("reaches %s, %s", shown, reading),
+			object:    "edit the entry of such a key other than by removing it",
+			fix:       odd.fix(),
+		},
+	}
+
+	res := d.node.Resolver()
+	held := []string{g.name}
+
+	hold := func(text string, ok bool) {
+		if ok && !slices.Contains(held, text) {
+			held = append(held, text)
+		}
+	}
+
+	for _, e := range g.entries {
+		es, _ := d.nodeSpan(e)
+		if len(z.parts) == 0 {
+			z.at = es.start
+		}
+
+		z.parts = append(z.parts, d.zonePart(es))
+
+		text, ok := astnode.ScalarText(e.Key)
+		hold(text, ok)
+		hold(res.KeyName(e.Key))
+
+		if e != g.first {
+			z.in.related = append(z.in.related, relatedSite{
+				site: d.entrySite(e),
+				note: fmt.Sprintf("a decode reads the key %s under the same name here", cut(text)),
+			})
+		}
+	}
+
+	// The origin names m in the text that the Apply found, and
+	// [Doc.liveKeyText] names it in the text of each call.
+	z.keys = []zoneKeys{{mapping: d.firstOrigin(m), keys: held}}
+
+	// A Remove of one entry of several leaves the others under the name.
+	if len(z.parts) > 1 {
+		z.in.object = "edit the entries that a decode reads under the name of such a key"
+	}
+
+	// A call that changes a key of the zone without a step into an entry of
+	// the zone writes or takes away a key beside the keys of g.
+	keyed := z.in
+	keyed.reach = fmt.Sprintf("changes the keys that read as %s does, %s", shown, reading)
+	keyed.object = "change the keys that read as such a key"
+	z.keyed = &keyed
+
+	return z
+}
+
+// mergedMappings returns each mapping that m, a mapping of the current
+// text, brings in through its << merge keys, and through the merge keys of
+// those mappings, each once.
+func (d *Doc) mergedMappings(m ast.Node) []ast.Node {
+	var out []ast.Node
+
+	seen := map[ast.Node]bool{}
+	stack := []ast.Node{astnode.Content(m)}
+
+	for len(stack) > 0 {
+		entries, _ := readEntries(stack[len(stack)-1])
+		stack = stack[:len(stack)-1]
+
+		for _, e := range entries {
+			if !astnode.IsMergeKey(e.Key) {
+				continue
+			}
+
+			for _, src := range d.mergeSources(e) {
+				content := astnode.Content(src)
+				if _, ok := readEntries(content); !ok || seen[content] {
+					continue
+				}
+
+				seen[content] = true
+				out, stack = append(out, content), append(stack, content)
+			}
+		}
+	}
+
+	return out
+}
+
+// mergesMapping reports whether m, a mapping of the current text, brings
+// in the mapping that k names through its << merge keys, as
+// [Doc.mergedMappings] reads them.
+func (d *Doc) mergesMapping(m ast.Node, k zoneKeys) bool {
+	return slices.ContainsFunc(d.mergedMappings(m), func(s ast.Node) bool {
+		return k.names(d.firstOrigin(s), d.offsetOf(s))
+	})
+}
+
+// mergesKey reports whether m, a mapping of the current text, brings in an
+// entry whose key has one of names through its << merge keys, as
+// [Doc.mergedMappings] reads them. A key has a name by its text, and by the
+// name that a decode into a map gives it.
+func (d *Doc) mergesKey(m ast.Node, names []string) bool {
+	decoded, res := d.decodedKeys(), d.node.Resolver()
+
+	for _, s := range d.mergedMappings(m) {
+		entries, _ := readEntries(s)
+
+		for _, e := range entries {
+			if astnode.IsMergeKey(e.Key) {
+				continue
+			}
+
+			if name, ok := res.KeyName(e.Key); ok && slices.Contains(names, name) {
+				return true
+			}
+
+			if name, ok := decoded(e.Key); ok && slices.Contains(names, name) {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // commentZone returns the zone of flow, a flow collection of the current
@@ -4935,6 +5416,14 @@ func (d *Doc) readCommentOrigins() []int {
 // [ErrEngine]. Any other construct lies in
 // the bytes of the user, which the call kept or moved, so its problem
 // matches [ErrUnsupported].
+//
+// A call can also change how a decode reads a key that it does not reach.
+// A decode can read such a key as its text after the call, as
+// [Doc.rereadKey] finds. A decode can also read a key as another value than
+// its text only after the call. The text then holds a zone of the key that
+// the Apply does not hold. The problem of each such call matches
+// ErrUnsupported, and [ConstructKeyText] names it. Its words tell that the
+// call changes how a decode reads the key.
 func (d *Doc) madeProblem(h *Node, named string) error {
 	if found := d.find(true); len(found) > 0 {
 		in := firstInText(found)
@@ -4946,16 +5435,77 @@ func (d *Doc) madeProblem(h *Node, named string) error {
 	zones := d.constructZones(true)
 	slices.SortStableFunc(zones, func(a, b *zone) int { return cmp.Compare(a.at, b.at) })
 
-	for _, z := range zones {
-		if !d.heldZone(z) && !d.heldComment(z) {
-			in := z.in
-			in.reach = "makes " + strings.TrimPrefix(strings.TrimPrefix(in.reach, "goes through "), "reaches ")
+	const reread = "change how a decode reads a key"
 
-			return d.madeRefusal(h, &in, named)
+	if z, ok := d.rereadKey(zones); ok {
+		in := z.in
+		in.reach, in.object = z.odd.reread(false), reread
+
+		return d.recordRefusal(&in, named)
+	}
+
+	for _, z := range zones {
+		if d.heldZone(z) || d.heldComment(z) {
+			continue
 		}
+
+		in := z.in
+		in.reach = "makes " + strings.TrimPrefix(strings.TrimPrefix(in.reach, "goes through "), "reaches ")
+
+		// The text that the Apply found holds the key of such a zone, which
+		// a decode read as its text there. The call does not reach the
+		// entry of the key, so the words of z.in do not tell what it does.
+		if in.construct == ConstructKeyText {
+			in.reach, in.object = z.odd.reread(true), reread
+		}
+
+		return d.madeRefusal(h, &in, named)
 	}
 
 	return nil
+}
+
+// rereadKey returns the first zone of the Apply whose key a decode reads
+// another way in the current text, and reports whether it found one. It
+// reads only the zones of the keys that read as another value than their
+// text. Zones holds the zones of the current text. The text holds an entry
+// of the zone that rereadKey returns as the Apply found it, and no zone of
+// zones holds that entry. Each call that reaches the entry fails, so the
+// text of the entry is the same. Only the place of the entry changes its
+// reading.
+//
+// Go-yaml's scanner reads the plain scalar right after a tag as a string.
+// It does not do so after a tag that YAML defines, such as !!map. The first
+// key of a block mapping under a tag such as !t is such a scalar. A call
+// can take away each entry before the key 0x10 of such a mapping. A decode
+// then reads that key as its text, though the call reaches no entry of the
+// key.
+func (d *Doc) rereadKey(zones []*zone) (*zone, bool) {
+	held := make(map[int]bool)
+
+	for _, z := range zones {
+		if z.in.construct != ConstructKeyText {
+			continue
+		}
+
+		for _, s := range d.zoneSpans(z) {
+			held[s.start] = true
+		}
+	}
+
+	for _, z := range d.zones {
+		if z.in.construct != ConstructKeyText {
+			continue
+		}
+
+		for _, s := range d.zoneSpans(z) {
+			if !held[s.start] {
+				return z, true
+			}
+		}
+	}
+
+	return nil, false
 }
 
 // heldZone reports whether z, a zone of the current text, is a zone of the

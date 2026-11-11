@@ -22,10 +22,10 @@ import (
 // as it writes "0x10" for a rename to 0x10. SetKey fails on a sequence item
 // and on the root of the document, because neither has a key.
 //
-// SetKey leaves the text as it is when a decode reads the key as key and a
-// path by key selects the entry already. The key then keeps its text.
-// Otherwise it writes key. A place that does not hold a value stays as it
-// is.
+// SetKey leaves the text as it is when a decode reads the key as the
+// string key and a path by key selects the entry already. The key then
+// keeps its text. Otherwise it writes key. A place that does not hold a
+// value stays as it is.
 //
 // Go-yaml's parser compares keys by their text, as a path names them.
 // SetKey fails when the new key has the text of another key of its
@@ -33,12 +33,25 @@ import (
 // package documentation places an error at a renamed key. It does not
 // match [ErrEngine], and a detail binds at the other key. Under
 // [niceyaml.WithAllowDuplicateKeys], such a rename fails with
-// [ErrUnsupported], as [ConstructRepeatedKey] names it. A rename in a
-// mapping with a `<<` merge key that hides or reveals a merged entry fails
-// with ErrUnsupported too, as the package documentation describes. A
-// reference document of [niceyaml.WithReferences] that a merge key of the
-// mapping reads decides which names the mapping reads. A rename there fails
-// with a problem that matches [paths.ErrReferenceAlias].
+// [ErrUnsupported], as [ConstructRepeatedKey] names it.
+//
+// A key of the mapping that a decode reads as another value than its text,
+// such as 3.10, changes these failures. A rename of that key fails with
+// ErrUnsupported, as [ConstructKeyText] names it, also a rename to its own
+// text. A rename of another key to the text of that key fails the same
+// way, with or without WithAllowDuplicateKeys. The problem binds at that
+// key, and not at the key that the call renames. A decode gives the key
+// 3.10 the name 3.1. Under WithAllowDuplicateKeys, a rename to that name
+// fails as ConstructKeyText names it too. Without the option, it fails as
+// a rename to the text of another key does. A decode into a map names the
+// key null by its text. A rename to null beside that key fails as
+// ConstructKeyText names it, with or without the option.
+//
+// A rename in a mapping with a `<<` merge key that hides or reveals a
+// merged entry fails with ErrUnsupported too, as the package documentation
+// describes. A reference document of [niceyaml.WithReferences] that a merge
+// key of the mapping reads decides which names the mapping reads. A rename
+// there fails with a problem that matches [paths.ErrReferenceAlias].
 func (n *Node) SetKey(key string) error {
 	c := n.d.modelStart(n, fmt.Sprintf("renames %s to %q", n.path, key), false)
 	r, err := n.setKey(c, key)
@@ -107,15 +120,14 @@ func (n *Node) setKey(c *modelCall, key string) (renaming, error) {
 		rep, repeats = c.x.repeat(c.renames(&r))
 	}
 
+	named := fmt.Sprintf("renames %s to %q", n.path, key)
+	reach := reachCall{kind: callKey, path: n.path, hidden: n.hidden, key: key, named: named, repeats: repeats}
+
 	if repeats && !d.user.Source().AllowsDuplicateKeys() {
-		return kept, d.repeatProblem(c.x, rep, *d.lastEdit, n.path)
+		return kept, d.parsedRepeat(c.x, rep, reach, p.container, n.path)
 	}
 
-	named := fmt.Sprintf("renames %s to %q", n.path, key)
-
-	err = d.reachProblem(reachCall{
-		kind: callKey, path: n.path, hidden: n.hidden, key: key, named: named, repeats: repeats,
-	})
+	err = d.reachProblem(reach)
 	if err != nil {
 		return kept, err
 	}
@@ -165,9 +177,12 @@ func (n *Node) setKey(c *modelCall, key string) (renaming, error) {
 
 // keeps reports whether a rename of p, an entry, to key leaves the text as
 // it is. It does so when a decode reads the key of p as key and a path by
-// key selects p, as p reads it with [Doc.resolveFrom].
+// key selects p, as p reads it with [Doc.resolveFrom]. A decode into a map
+// names the key null by its text, though it reads the key as the null
+// value. That value is no string, so a rename never keeps a key that
+// [Doc.oddKey] reads as another value than its text.
 func (d *Doc) keeps(p *place, key string) bool {
-	if keyOf(p.entry.Key, d.keyReader()) != key {
+	if _, odd := d.oddKey(plainKey(p.entry)); odd || keyOf(p.entry.Key, d.keyReader()) != key {
 		return false
 	}
 
@@ -245,6 +260,32 @@ func (d *Doc) ownRepeat(h *Node, v *value, origin int) error {
 	d.record(err)
 
 	return err //nolint:wrapcheck // The binding is the problem of the call.
+}
+
+// parsedRepeat returns the problem of c, a rename in the mapping m to a key
+// that r.other, another entry of m in the model of x, reads already. The
+// parse of the Source refuses a mapping that repeats a key, so the rename
+// fails as [Doc.repeatProblem] tells, at the path at. A rename to the text
+// of a key of m that reads as another value than its text reaches the zone
+// of that key first, as [Doc.reachProblem] tells. The model reads such a
+// rename as a repeat only when a decode into a map names the key by its
+// text, as it names the key null.
+func (d *Doc) parsedRepeat(x *model, r repeated, c reachCall, m ast.Node, at paths.Path) error {
+	entries, _ := readEntries(m)
+
+	odd := slices.ContainsFunc(entries, func(e *ast.MappingValueNode) bool {
+		k, ok := d.oddKey(plainKey(e))
+
+		return ok && k.text == c.key
+	})
+	if odd {
+		err := d.reachProblem(c)
+		if err != nil {
+			return err
+		}
+	}
+
+	return d.repeatProblem(x, r, *d.lastEdit, at)
 }
 
 // repeatProblem returns the problem of the call of rec, as [model.repeat]

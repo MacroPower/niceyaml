@@ -2469,6 +2469,14 @@ func TestNode_Set_Unsupported(t *testing.T) {
 			err:       "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 sets $.b to a value whose YAML holds a key that reads as another value than its text, such as 0x10, which reads as 16, and cafe does not write such YAML",
 			construct: edit.ConstructKeyText,
 		},
+		"key that reads as the null value in the YAML of a marshaler": {
+			// A decode into a map names the key null by its text.
+			value: yamlMarshaler("null: 1\n"),
+			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 sets $.b to a value whose YAML holds a key that reads " +
+				"as the null value, such as null, and cafe does not write such YAML\n" +
+				"|-- quote the key, as in \"null\"",
+			construct: edit.ConstructKeyText,
+		},
 		"anchor before a tagged alias in the YAML of a marshaler": {
 			// The anchor comes before the properties of the alias.
 			value:     yamlMarshaler("[&x 1, !t *x]\n"),

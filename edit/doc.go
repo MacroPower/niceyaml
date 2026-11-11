@@ -145,19 +145,15 @@
 //   - an anchor on an empty value or an empty item, as in "a: &x", also
 //     where go-yaml's parser nests the lines after it in the value, as it
 //     nests "b: 1" after "a: &x !t"
-//   - a key that a decode reads as another value than its text, such as
-//     0x10, True, or ~, which read as 16, true, and null, and a key that
-//     reads as the null value, such as null
 //   - both "\n" and "\r\n" line breaks in the file of the document, or a
 //     "\r" alone
 //
-// A key whose decode prints as its text stays, such as 200, true, on, or
-// 0.5. The text of each key is thus its identity, in a path and in the
-// mapping that holds it. The null value is no string, so a key that reads
-// as it does not stay, though the key null prints as its text.
-//
 // A call fails with ErrUnsupported when it reaches one of these:
 //
+//   - an entry whose key a decode reads as another value than its text,
+//     such as 0x10, 3.10, True, ~, or null, except a Remove of the entry
+//   - a change after which a decode reads such a key as its text, or reads
+//     another key of the user's text as such a key
 //   - a `<<` merge key in another form than one alias of a mapping of the
 //     document without a merge key, such as "<<: [*a, *b]", "<<: {a: 1}",
 //     "<<: 1", "!!merge <<", or "!<tag:yaml.org,2002:merge> <<"
@@ -182,8 +178,32 @@
 //   - a block scalar of the user's text whose string the call changes
 //   - an anchor, an alias, a merge key, or an explicit key in the YAML of a
 //     value that a Set writes
-//   - a construct of the first list, a comment inside a flow collection, or
-//     a pair without braces in a flow sequence in the YAML of such a value
+//   - a construct of the first list, or a key that reads as another value
+//     than its text, in the YAML of such a value
+//   - a comment inside a flow collection, or a pair without braces in a
+//     flow sequence, in the YAML of such a value
+//
+// A decode reads the key 0x10 as 16, 3.10 as 3.1, True as true, and ~ as
+// the null value, so each is a key of the first item. A key whose decode
+// prints as its text is not one, such as 200, true, on, or 0.5. The null
+// value is no string, so the key null is one, though it prints as its
+// text.
+//
+// [New] takes a document with such a key. Each read passes, and so does
+// each call that does not reach the entry of the key. A path selects the
+// entry by the text of its key, as in $.python.'3.10'. The detail of the
+// error says to quote the key, which makes the key a string that a call
+// edits.
+//
+// The place of a key can decide how a decode reads it. Go-yaml reads the
+// first key of a block mapping under a tag as a string, unless YAML defines
+// the tag, as it defines !!map. So the key 0x10 reads as its text right
+// after "a: !t", and a call edits its entry there. It reads as 16 after
+// another key of that mapping. A call that changes which of the two a
+// decode reads fails with ErrUnsupported, as [ConstructKeyText] names it.
+// Such a call does not reach the entry of the key. A Remove or a Move of
+// the one entry before the key is such a call. So is a Set with [First]
+// that writes an entry before the key.
 //
 // A `<<` merge key whose value is one alias of a reference document is not a
 // refused form, so a call that reaches it does not fail with ErrUnsupported.
@@ -291,9 +311,10 @@
 // string. A decode into a type with such keys, such as map[int]string,
 // keeps them.
 //
-// A merge key in a refused form, a repeated key, an explicit key, a comment
-// inside a flow collection, and a pair without braces each hold a part of
-// the text. A call reaches such a construct when its place lies in that
+// A merge key in a refused form, a repeated key, and an explicit key each
+// hold a part of the text. So do a key that reads as another value than
+// its text, a comment inside a flow collection, and a pair without braces.
+// A call reaches such a construct when its place lies in that
 // part. So does a call whose path steps through the part, and a call whose
 // place the text lacks, where the deepest value on its path lies in the
 // part. A SetKey reaches only the key
@@ -306,6 +327,35 @@
 // its path looks a key up through the merge key. A Set of the value of an
 // existing key there passes. A read never reaches a refused construct, so a
 // read of such a part passes.
+//
+// The part of a key that reads as another value than its text is its
+// entry. A decode into a map names each entry by the value of its key. It
+// reads the keys 3.10 and 3.1 of one mapping under one name, and it keeps
+// one of the entries. The part holds each entry of the mapping that such a
+// decode reads under the name of the key. The mapping itself lies outside
+// the part, so a Set of another key of the mapping passes.
+//
+// The part also holds that name and the text of each of its keys in the
+// keys of the mapping. A call reaches the part when it creates an entry of
+// such a name in the mapping, as a Set of $.python.'3.1' beside the key
+// 3.10 does. So does a Move of an entry to the name that a decode gives
+// the key, and a SetKey of an entry to the text of the key. A SetKey to
+// the name that a decode gives the key reaches the part only under
+// [go.jacobcolvin.com/niceyaml.WithAllowDuplicateKeys]. Without the
+// option, it fails as a SetKey to the text of another key of the mapping
+// does, with an error that does not match ErrUnsupported. A decode into a
+// map names the key null by its text. So a SetKey to null beside that key
+// reaches the part with or without the option. A Move onto the entry of
+// the key fails as a Move onto any other entry does, and its error does
+// not match ErrUnsupported either.
+//
+// A mapping that brings the mapping in through its merge keys reads the
+// entry too. So a call that creates, removes, renames, or moves an entry of
+// such a name in that mapping reaches the part. So does a call whose path
+// looks such a name up through a merge key of the mapping of the part. A
+// Remove of the one entry of a part passes. It fails when a merge key of
+// the mapping brings in an entry of such a name, because a decode then
+// reads that entry in its place.
 //
 // A call that reaches more than one such construct fails with the one that
 // the first step of its path reaches. Among the constructs of one step, the

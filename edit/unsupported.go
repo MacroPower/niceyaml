@@ -52,7 +52,11 @@ const (
 	ConstructLineBreaks
 	// ConstructKeyText is a key that a decode reads as another value than
 	// its text, as 0x10 reads as 16, or that reads as the null value, as
-	// null and ~ do.
+	// null and ~ do. A call that reaches the entry of such a key fails with
+	// it, other than a Remove of the entry. So does a call that changes how
+	// a decode reads a key, as the first key under a tag such as !t reads as
+	// a string. Such a key in the YAML of a value that a Set writes is one
+	// as well, and its problem has InValue set.
 	ConstructKeyText
 	// ConstructMergeForm is a << merge key in another form than one alias
 	// of an anchored mapping of the document without a merge key of its

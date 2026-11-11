@@ -656,103 +656,17 @@ func TestNew_Unsupported(t *testing.T) {
 			// Control.
 			before: stringtest.LinesLF("a: &x {b: &y 1, c: *y}"),
 		},
-		"hex key": {
-			before:    "0x10: a\n",
-			construct: edit.ConstructKeyText,
-			err: stringtest.JoinLF(
-				"test.yaml:1:1: $: this program does not edit a key that reads as another value than its text, such as 0x10, which reads as 16",
-				"`-- quote the key, as in \"0x10\"",
+		"keys that read as another value than their text": {
+			// Control: New takes the document, and a call that reaches such a
+			// key fails.
+			before: stringtest.LinesLF(
+				"0x10: a", "010: b", "18_24: c", "True: d", "1.0: e", "~: f", ".inf: g", "+1: h",
+				"m: {0b101: 2}", "l:", "- null: i",
 			),
 		},
-		"octal key": {
-			before:    "010: a\n",
-			construct: edit.ConstructKeyText,
-			err: stringtest.JoinLF(
-				"test.yaml:1:1: $: this program does not edit a key that reads as another value than its text, such as 010, which reads as 8",
-				"`-- quote the key, as in \"010\"",
-			),
-		},
-		"key with an underscore": {
-			before:    "18_24: a\n",
-			construct: edit.ConstructKeyText,
-			err: stringtest.JoinLF(
-				"test.yaml:1:1: $: this program does not edit a key that reads as another value than its text, such as 18_24, which reads as 1824",
-				"`-- quote the key, as in \"18_24\"",
-			),
-		},
-		"capitalized boolean key": {
-			before:    "True: a\n",
-			construct: edit.ConstructKeyText,
-			err: stringtest.JoinLF(
-				"test.yaml:1:1: $: this program does not edit a key that reads as another value than its text, such as True, which reads as true",
-				"`-- quote the key, as in \"True\"",
-			),
-		},
-		"float key with a zero fraction": {
-			before:    "1.0: a\n",
-			construct: edit.ConstructKeyText,
-			err: stringtest.JoinLF(
-				"test.yaml:1:1: $: this program does not edit a key that reads as another value than its text, such as 1.0, which reads as 1",
-				"`-- quote the key, as in \"1.0\"",
-			),
-		},
-		"tilde key": {
-			before:    "~: a\n",
-			construct: edit.ConstructKeyText,
-			err: stringtest.JoinLF(
-				"test.yaml:1:1: $: this program does not edit a key that reads as another value than its text, such as ~, which reads as the null value",
-				"`-- quote the key, as in \"~\"",
-			),
-		},
-		// The key null reads as the null value, which the Supported YAML
-		// section of the package documentation lists apart (fix21 G1-5).
-		"null key": {
-			before:    "null: a\n",
-			construct: edit.ConstructKeyText,
-			err: stringtest.JoinLF(
-				"test.yaml:1:1: $: this program does not edit a key that reads as the null value, such as null",
-				"`-- quote the key, as in \"null\"",
-			),
-		},
-		"infinity key": {
-			before:    ".inf: a\n",
-			construct: edit.ConstructKeyText,
-			err: stringtest.JoinLF(
-				"test.yaml:1:1: $: this program does not edit a key that reads as another value than its text, such as .inf, which reads as the float .inf",
-				"`-- quote the key, as in \".inf\"",
-			),
-		},
-		"key with a plus sign": {
-			before:    "+1: a\n",
-			construct: edit.ConstructKeyText,
-			err: stringtest.JoinLF(
-				"test.yaml:1:1: $: this program does not edit a key that reads as another value than its text, such as +1, which reads as 1",
-				"`-- quote the key, as in \"+1\"",
-			),
-		},
-		"key of a nested mapping": {
-			before:    stringtest.LinesLF("properties:", "  18_24: x"),
-			construct: edit.ConstructKeyText,
-			err: stringtest.JoinLF(
-				"test.yaml:2:3: $.properties: this program does not edit a key that reads as another value than its text, such as 18_24, which reads as 1824",
-				"`-- quote the key, as in \"18_24\"",
-			),
-		},
-		"hex key of a flow mapping": {
-			before:    stringtest.LinesLF("m: {0x10: a}"),
-			construct: edit.ConstructKeyText,
-			err: stringtest.JoinLF(
-				"test.yaml:1:5: $.m: this program does not edit a key that reads as another value than its text, such as 0x10, which reads as 16",
-				"`-- quote the key, as in \"0x10\"",
-			),
-		},
-		"binary key of a flow mapping in a sequence": {
-			before:    stringtest.LinesLF("l:", "- {a: 1, 0b101: 2}"),
-			construct: edit.ConstructKeyText,
-			err: stringtest.JoinLF(
-				"test.yaml:2:10: $.l[0]: this program does not edit a key that reads as another value than its text, such as 0b101, which reads as 5",
-				"`-- quote the key, as in \"0b101\"",
-			),
+		"keys that read as one value": {
+			// Control.
+			before: stringtest.LinesLF("python:", "  3.10: cp310", "  3.1: cp31"),
 		},
 		"integer key": {
 			// Control.
@@ -1191,77 +1105,12 @@ func TestNew_Unsupported(t *testing.T) {
 				"`-- write each line break as \"\\n\", or each one as \"\\r\\n\"",
 			),
 		},
-		"key that a decode reads as a boolean key of the mapping": {
-			before:    stringtest.LinesLF("m:", "  True: a"),
-			construct: edit.ConstructKeyText,
-			err: stringtest.JoinLF(
-				"test.yaml:2:3: $.m: this program does not edit a key that reads as another value than its text, such as True, which reads as true",
-				"`-- quote the key, as in \"True\"",
-			),
-		},
-		"key that a decode reads as a hex key of a flow mapping": {
-			before:    stringtest.LinesLF("m: {0x10: a}"),
-			construct: edit.ConstructKeyText,
-			err: stringtest.JoinLF(
-				"test.yaml:1:5: $.m: this program does not edit a key that reads as another value than its text, such as 0x10, which reads as 16",
-				"`-- quote the key, as in \"0x10\"",
-			),
-		},
-		"key that a decode reads as a hex key of the mapping": {
-			before:    stringtest.LinesLF("m:", "  0x10: a"),
-			construct: edit.ConstructKeyText,
-			err: stringtest.JoinLF(
-				"test.yaml:2:3: $.m: this program does not edit a key that reads as another value than its text, such as 0x10, which reads as 16",
-				"`-- quote the key, as in \"0x10\"",
-			),
-		},
-		"key that a decode reads as a null key of the mapping": {
-			before:    stringtest.LinesLF("m:", "  ~: a"),
-			construct: edit.ConstructKeyText,
-			err: stringtest.JoinLF(
-				"test.yaml:2:3: $.m: this program does not edit a key that reads as another value than its text, such as ~, which reads as the null value",
-				"`-- quote the key, as in \"~\"",
-			),
-		},
-		"removal of a key at the root that hides a key of its decoded key, then of the first key": {
-			before:    stringtest.LinesLF("r0: x", "1.0: a", "1: b"),
-			construct: edit.ConstructKeyText,
-			err: stringtest.JoinLF(
-				"test.yaml:2:1: $: this program does not edit a key that reads as another value than its text, such as 1.0, which reads as 1",
-				"`-- quote the key, as in \"1.0\"",
-			),
-		},
-		"rename to the text of a float key of a flow mapping, with duplicate keys": {
-			before:    stringtest.LinesLF("m: {1.0: a, c: b}"),
-			dup:       true,
-			construct: edit.ConstructKeyText,
-			err: stringtest.JoinLF(
-				"test.yaml:1:5: $.m: this program does not edit a key that reads as another value than its text, such as 1.0, which reads as 1",
-				"`-- quote the key, as in \"1.0\"",
-			),
-		},
-		"set of a key that a merge key brings in, then a move of it": {
-			before:    stringtest.LinesLF("<<: {0o20: 2}", "a: 1"),
-			construct: edit.ConstructKeyText,
-			err: stringtest.JoinLF(
-				"test.yaml:1:6: $: this program does not edit a key that reads as another value than its text, such as 0o20, which reads as 16",
-				"`-- quote the key, as in \"0o20\"",
-			),
-		},
-		"value at a bool entry that a merge key brings in, which an own key hides": {
-			before:    stringtest.LinesLF("<<: {TRUE: 2, b: q}", "True: a b"),
-			construct: edit.ConstructKeyText,
-			err: stringtest.JoinLF(
-				"test.yaml:1:6: $: this program does not edit a key that reads as another value than its text, such as TRUE, which reads as true",
-				"`-- quote the key, as in \"TRUE\"",
-			),
-		},
-		"value at a null entry that a merge key brings in, which an own key hides": {
+		"tagged null key beside a merge key that brings in a key that reads as the null value": {
 			before:    stringtest.LinesLF("<<: {k: 2, Null: q}", "!!null null: {}"),
-			construct: edit.ConstructKeyText,
+			construct: edit.ConstructKeyProperties,
 			err: stringtest.JoinLF(
-				"test.yaml:1:12: $: this program does not edit a key that reads as another value than its text, such as Null, which reads as the null value",
-				"`-- quote the key, as in \"Null\"",
+				"test.yaml:2:1: $: this program does not edit a document with a tag or an anchor on a mapping key, such as !!null",
+				"`-- remove !!null from the key",
 			),
 		},
 	}
@@ -1502,6 +1351,34 @@ func TestDoc_Apply_Unsupported(t *testing.T) {
 		explicit = stringtest.LinesLF("spec:", "  ? b", "  : x", "c: 1")
 		comment  = stringtest.LinesLF("f: [1, # c", "  2]", "z: 1")
 		bare     = stringtest.LinesLF("f: [0, a: 1]", "g: [5]")
+		// The key 3.10 reads as 3.1, and the key 3.9 prints as its text.
+		versions = stringtest.LinesLF("python:", "  3.10: cp310", "  3.9: cp39", "name: x")
+		// The mapping at $.job reads the key 0x10 of $.base through its merge
+		// key.
+		mergedHex = stringtest.LinesLF("base: &b", "  0x10: a", "job:", "  <<: *b", "  k: 1")
+		// The key 0x10 of $.job hides the key 16 that its merge key brings in.
+		ownHex = stringtest.LinesLF("base: &b", "  16: a", "job:", "  <<: *b", "  0x10: z")
+		// The key 0x10 comes after the first key of its mapping, so a call
+		// can take that first key away.
+		laterHex = stringtest.LinesLF("m:", "  b: null", "  a: 1", "  0x10: null")
+		// As mergedHex, with the key z before the key 0x10 of $.base.
+		mergedLaterHex = stringtest.LinesLF("base: &b", "  z: 1", "  0x10: a", "job:", "  <<: *b", "  k: 1", "tail: 1")
+		// As ownHex, with the key z before the merge key of $.job.
+		ownLaterHex = stringtest.LinesLF("base: &b", "  16: a", "job:", "  z: 1", "  <<: *b", "  0x10: v")
+		// The entry of the key 3.10 is all that the mapping at $.python
+		// holds.
+		onlyVersion = stringtest.LinesLF("python:", "  3.10: cp310")
+		// Go-yaml reads the first key of a block mapping under a tag such as
+		// !t as a string, so only the place of the key 0x10 makes it read as
+		// 16.
+		taggedHex = stringtest.LinesLF("a: !t", "  z: 0", "  0x10: 1", "  k: 2")
+		// As taggedHex, with the key 0x10 first, which reads as its text.
+		taggedFirstHex = stringtest.LinesLF("a: !t", "  0x10: 1", "  0o20: 2", "  k: 1")
+		// A decode into a map names the key null by its text, though it
+		// reads the key as the null value.
+		nullKey = stringtest.LinesLF("m:", "  null: a", "  b: 1")
+		// The mapping at $.m repeats the key a.
+		repeatedBelow = stringtest.LinesLF("m:", "  a: 1", "  a: 2", "n: 1")
 	)
 
 	tcs := map[string]struct {
@@ -2490,6 +2367,900 @@ func TestDoc_Apply_Unsupported(t *testing.T) {
 			before: stringtest.LinesLF("a: 1", "b: 2"),
 			fn:     rename("$.b", "a"),
 			err:    `test.yaml:2:1: $.b~: the edit renames "b" to "a", which already exists`,
+		},
+		"set beside a key that reads as another value than its text": {
+			// Control: New takes the document, and the call does not reach the
+			// key.
+			before: versions,
+			fn:     set("$.name", 5),
+			want:   stringtest.LinesLF("python:", "  3.10: cp310", "  3.9: cp39", "name: 5"),
+		},
+		"set of another key of a mapping with a key that reads as another value": {
+			// Control.
+			before: versions,
+			fn:     set("$.python.'3.9'", "cp39d"),
+			want:   stringtest.LinesLF("python:", "  3.10: cp310", "  3.9: cp39d", "name: x"),
+		},
+		"new key in a mapping with a key that reads as another value": {
+			// Control.
+			before: versions,
+			fn:     set("$.python.new", 5),
+			want:   stringtest.LinesLF("python:", "  3.10: cp310", "  3.9: cp39", "  new: 5", "name: x"),
+		},
+		"new key in a mapping whose only key reads as another value": {
+			// Control: the mapping lies outside the part of the key, though
+			// the entry of the key is all that it holds.
+			before: stringtest.LinesLF("python:", "  3.10: cp310"),
+			fn:     set("$.python.'3.11'", "cp311"),
+			want:   stringtest.LinesLF("python:", "  3.10: cp310", `  "3.11": cp311`),
+		},
+		"new key at the root, whose only key reads as another value": {
+			// Control.
+			before: "3.10: cp310\n",
+			fn:     set("$.k", 5),
+			want:   "3.10: cp310\nk: 5\n",
+		},
+		"new key in a flow mapping with a hex key": {
+			// Control.
+			before: "m: {0x10: a}\n",
+			fn:     set("$.m.k", 5),
+			want:   "m: {0x10: a, k: 5}\n",
+		},
+		"read of a key that reads as another value": {
+			// Control: a read records nothing.
+			before: versions,
+			fn:     read("$.python.'3.10'", set("$.name", 5)),
+			want:   stringtest.LinesLF("python:", "  3.10: cp310", "  3.9: cp39", "name: 5"),
+		},
+		"set of a key that reads as another value": {
+			before:    versions,
+			fn:        set("$.python.'3.10'", 5),
+			construct: edit.ConstructKeyText,
+			err: stringtest.JoinLF(
+				"test.yaml:2:3: $.python.'3.10': the edit sets $.python.'3.10', which reaches 3.10, a key that "+
+					"reads as 3.1 rather than as its text, and this program does not edit the entry of such a key "+
+					"other than by removing it",
+				`|-- quote the key, as in "3.10"`,
+				"`-- the edit sets $.python.'3.10'",
+			),
+		},
+		"set below a key that reads as another value": {
+			before:    stringtest.LinesLF("m:", "  0x10: {a: 1}"),
+			fn:        set("$.m.0x10.a", 2),
+			construct: edit.ConstructKeyText,
+			err: "test.yaml:2:3: $.m.0x10: the edit sets $.m.0x10.a, which reaches 0x10, a key that reads as 16 " +
+				"rather than as its text, and this program does not edit the entry of such a key other than by " +
+				"removing it",
+		},
+		"set of a place that the text lacks below a key that reads as another value": {
+			before:    stringtest.LinesLF("m:", "  0x10: {a: 1}"),
+			fn:        set("$.m.0x10.b.c", 2),
+			construct: edit.ConstructKeyText,
+			err: "test.yaml:2:3: $.m.0x10: the edit sets $.m.0x10.b.c, which reaches 0x10, a key that reads as " +
+				"16 rather than as its text",
+		},
+		"set of a hex key of a flow mapping": {
+			before:    "m: {0x10: a}\n",
+			fn:        set("$.m.0x10", 5),
+			construct: edit.ConstructKeyText,
+			err: stringtest.JoinLF(
+				"test.yaml:1:5: $.m.0x10: the edit sets $.m.0x10, which reaches 0x10, a key that reads as 16 "+
+					"rather than as its text, and this program does not edit the entry of such a key other than "+
+					"by removing it",
+				`|-- quote the key, as in "0x10"`,
+			),
+		},
+		"set of a tilde key": {
+			before:    stringtest.LinesLF("m:", "  ~: 4"),
+			fn:        set("$.m.'~'", 5),
+			construct: edit.ConstructKeyText,
+			err: stringtest.JoinLF(
+				"test.yaml:2:3: $.m.'~': the edit sets $.m.'~', which reaches ~, a key that reads as the null "+
+					"value rather than as its text, and this program does not edit the entry of such a key other "+
+					"than by removing it",
+				`|-- quote the key, as in "~"`,
+			),
+		},
+		"set of a null key": {
+			// The key null reads as the null value, though a decode into a
+			// map names it by its text.
+			before:    stringtest.LinesLF("m:", "  null: 4"),
+			fn:        set("$.m.null", 5),
+			construct: edit.ConstructKeyText,
+			err: stringtest.JoinLF(
+				"test.yaml:2:3: $.m.null: the edit sets $.m.null, which reaches null, a key that reads as the "+
+					"null value, and this program does not edit the entry of such a key other than by removing it",
+				`|-- quote the key, as in "null"`,
+			),
+		},
+		"set of the name that a decode gives a tilde key": {
+			before:    stringtest.LinesLF("m:", "  ~: 4"),
+			fn:        set("$.m.null", 5),
+			construct: edit.ConstructKeyText,
+			err: "test.yaml:2:3: $.m.'~': the edit sets $.m.null, which changes the keys that read as ~ does, a " +
+				"key that reads as the null value rather than as its text, and this program does not change the " +
+				"keys that read as such a key",
+		},
+		"rename of a key that reads as another value": {
+			before:    versions,
+			fn:        rename("$.python.'3.10'", "q"),
+			construct: edit.ConstructKeyText,
+			err: `test.yaml:2:3: $.python.'3.10': the edit renames $.python.'3.10' to "q", which reaches 3.10, ` +
+				"a key that reads as 3.1 rather than as its text",
+		},
+		"set of the name that a decode gives a key that reads as another value": {
+			// A decode into a map reads the keys 3.10 and "3.1" under one
+			// name.
+			before:    versions,
+			fn:        set("$.python.'3.1'", 5),
+			construct: edit.ConstructKeyText,
+			err: stringtest.JoinLF(
+				"test.yaml:2:3: $.python.'3.10': the edit sets $.python.'3.1', which changes the keys that read "+
+					"as 3.10 does, a key that reads as 3.1 rather than as its text, and this program does not "+
+					"change the keys that read as such a key",
+				`|-- quote the key, as in "3.10"`,
+				"`-- the edit sets $.python.'3.1'",
+			),
+		},
+		"rename to the name that a decode gives a key that reads as another value": {
+			// A Source that refuses duplicate keys gives the ordinary error,
+			// which names the key that a decode reads under the name.
+			before: versions,
+			fn:     rename("$.python.'3.9'", "3.1"),
+			err: stringtest.JoinLF(
+				`test.yaml:3:3: $.python.'3.9'~: the edit renames "3.9" to "3.1", which already exists`,
+				`|-- 2:3: $.python.'3.10'~: "3.1" is defined here`,
+			),
+		},
+		"rename to the name that a decode gives a key that reads as another value, with duplicate keys": {
+			before:    versions,
+			dup:       true,
+			fn:        rename("$.python.'3.9'", "3.1"),
+			construct: edit.ConstructKeyText,
+			err: `test.yaml:2:3: $.python.'3.10': the edit renames $.python.'3.9' to "3.1", which changes the ` +
+				"keys that read as 3.10 does, a key that reads as 3.1 rather than as its text",
+		},
+		"rename to the text of a float key of a flow mapping, with duplicate keys": {
+			before:    stringtest.LinesLF("m: {1.0: a, c: b}"),
+			dup:       true,
+			fn:        rename("$.m.c", "1.0"),
+			construct: edit.ConstructKeyText,
+			err: `test.yaml:1:5: $.m.'1.0': the edit renames $.m.c to "1.0", which changes the keys that read ` +
+				"as 1.0 does, a key that reads as 1 rather than as its text",
+		},
+		"rename to the text of a null key": {
+			// The text of the key is also the name that a decode gives it, so
+			// the rename repeats that name. The key refuses the rename first.
+			before:    nullKey,
+			fn:        rename("$.m.b", "null"),
+			construct: edit.ConstructKeyText,
+			err: stringtest.JoinLF(
+				`test.yaml:2:3: $.m.null: the edit renames $.m.b to "null", which changes the keys that read as `+
+					"null does, a key that reads as the null value, and this program does not change the keys "+
+					"that read as such a key",
+				`|-- quote the key, as in "null"`,
+				"`-- the edit renames $.m.b to \"null\"",
+			),
+		},
+		"rename to the text of a null key, with duplicate keys": {
+			before:    nullKey,
+			dup:       true,
+			fn:        rename("$.m.b", "null"),
+			construct: edit.ConstructKeyText,
+			err: `test.yaml:2:3: $.m.null: the edit renames $.m.b to "null", which changes the keys that read as ` +
+				"null does, a key that reads as the null value, and this program does not change the keys that " +
+				"read as such a key",
+		},
+		"rename to the text of a null key after a tilde key": {
+			// A decode reads both keys under the name null, and the problem
+			// binds at the first of them.
+			before:    stringtest.LinesLF("m:", "  ~: a", "  null: c", "  b: 1"),
+			fn:        rename("$.m.b", "null"),
+			construct: edit.ConstructKeyText,
+			related:   []string{"$.m.null"},
+			err: `test.yaml:2:3: $.m.'~': the edit renames $.m.b to "null", which changes the keys that read as ` +
+				"~ does, a key that reads as the null value rather than as its text",
+		},
+		"rename to the text of a null key that a merge key brings in": {
+			// The rename writes the key in the mapping of the key null.
+			before:    stringtest.LinesLF("base: &b", "  null: a", "  k: 1", "job:", "  <<: *b"),
+			fn:        rename("$.job.k", "null"),
+			construct: edit.ConstructKeyText,
+			err: `test.yaml:2:3: $.base.null: the edit renames $.job.k to "null", which changes the keys that ` +
+				"read as null does, a key that reads as the null value",
+		},
+		"rename to the name that a decode gives a tilde key": {
+			// Control: null is not the text of the key ~, so a Source that
+			// refuses duplicate keys gives the ordinary error.
+			before: stringtest.LinesLF("m:", "  ~: a", "  b: 1"),
+			fn:     rename("$.m.b", "null"),
+			err: stringtest.JoinLF(
+				`test.yaml:3:3: $.m.b~: the edit renames "b" to "null", which already exists`,
+				`|-- 2:3: $.m.'~'~: "null" is defined here`,
+			),
+		},
+		"rename of a null key to its text": {
+			// A decode does not read the key as the string null, so the
+			// rename does not keep the text.
+			before:    nullKey,
+			fn:        rename("$.m.null", "null"),
+			construct: edit.ConstructKeyText,
+			err: stringtest.JoinLF(
+				`test.yaml:2:3: $.m.null: the edit renames $.m.null to "null", which reaches null, a key that `+
+					"reads as the null value, and this program does not edit the entry of such a key other than "+
+					"by removing it",
+				`|-- quote the key, as in "null"`,
+				"`-- the edit renames $.m.null to \"null\"",
+			),
+		},
+		"rename of a null key to its text, with duplicate keys": {
+			before:    nullKey,
+			dup:       true,
+			fn:        rename("$.m.null", "null"),
+			construct: edit.ConstructKeyText,
+			err: `test.yaml:2:3: $.m.null: the edit renames $.m.null to "null", which reaches null, a key that ` +
+				"reads as the null value",
+		},
+		"rename of a quoted null key to its text": {
+			// Control: a decode reads the key as the string null, so the
+			// rename keeps the text.
+			before: stringtest.LinesLF("m:", `  "null": a`, "  b: 1"),
+			fn:     rename("$.m.null", "null"),
+			want:   stringtest.LinesLF("m:", `  "null": a`, "  b: 1"),
+		},
+		"move of an entry whose key reads as another value": {
+			before:    versions,
+			fn:        move("$.python.'3.10'", "$.other"),
+			construct: edit.ConstructKeyText,
+			err: "test.yaml:2:3: $.python.'3.10': the edit moves $.python.'3.10' to $.other, which reaches " +
+				"3.10, a key that reads as 3.1 rather than as its text",
+		},
+		"move of a mapping that holds a key that reads as another value": {
+			// The Move writes the mapping again at its target.
+			before:    versions,
+			fn:        move("$.python", "$.other"),
+			construct: edit.ConstructKeyText,
+			err: "test.yaml:2:3: $.python.'3.10': the edit moves $.python to $.other, which reaches 3.10, a " +
+				"key that reads as 3.1 rather than as its text",
+		},
+		"move to the name that a decode gives a key that reads as another value": {
+			before:    versions,
+			fn:        move("$.name", "$.python.'3.1'"),
+			construct: edit.ConstructKeyText,
+			err: "test.yaml:2:3: $.python.'3.10': the edit moves $.name to $.python.'3.1', which changes the " +
+				"keys that read as 3.10 does, a key that reads as 3.1 rather than as its text",
+		},
+		"move onto the entry of a key that reads as another value": {
+			// The Move fails as a Move onto any other entry does.
+			before: versions,
+			fn:     move("$.name", "$.python.'3.10'"),
+			err:    `test.yaml:4:1: $.name~: the edit moves "name" to $.python.'3.10', which already exists`,
+		},
+		"removal of an entry whose key reads as another value": {
+			// Control.
+			before: versions,
+			fn:     remove("$.python.'3.10'"),
+			want:   stringtest.LinesLF("python:", "  3.9: cp39", "name: x"),
+		},
+		"removal of an entry with an explicit key that reads as another value": {
+			// Control.
+			before: stringtest.LinesLF("a:", "  ? 0x10", "  : v", "  k: 1"),
+			fn:     remove("$.a.0x10"),
+			want:   stringtest.LinesLF("a:", "  k: 1"),
+		},
+		"removal of an entry whose key reads as another value, then a set of its name": {
+			// Control: the text holds no entry of the key when the Set runs,
+			// and the Set writes the name as a string.
+			before: versions,
+			fn:     both(remove("$.python.'3.10'"), set("$.python.'3.10'", "cp310")),
+			want:   stringtest.LinesLF("python:", "  3.9: cp39", `  "3.10": cp310`, "name: x"),
+		},
+		"removal of an entry whose key reads as another value, then a set of the name that a decode gave it": {
+			// Control.
+			before: stringtest.LinesLF("python:", "  3.9: cp39", "  3.10: cp310", "name: x"),
+			fn:     both(remove("$.python.'3.10'"), set("$.python.'3.1'", "cp31")),
+			want:   stringtest.LinesLF("python:", "  3.9: cp39", `  "3.1": cp31`, "name: x"),
+		},
+		"set of a mapping that holds a key that reads as another value": {
+			// Control: the Set takes the whole part.
+			before: versions,
+			fn:     set("$.python", 5),
+			want:   stringtest.LinesLF("python: 5", "name: x"),
+		},
+		"removal of a mapping that holds a key that reads as another value": {
+			// Control.
+			before: versions,
+			fn:     remove("$.python"),
+			want:   stringtest.LinesLF("name: x"),
+		},
+		"set of a mapping that repeats a key": {
+			// Control: the Set takes each entry of the repeated key.
+			before: repeatedBelow,
+			dup:    true,
+			fn:     set("$.m", 5),
+			want:   stringtest.LinesLF("m: 5", "n: 1"),
+		},
+		"removal of a mapping that repeats a key": {
+			// Control.
+			before: repeatedBelow,
+			dup:    true,
+			fn:     remove("$.m"),
+			want:   stringtest.LinesLF("n: 1"),
+		},
+		"removal of the first entry of a mapping that repeats a key, then of the mapping": {
+			// Control: the mapping starts at another entry when the second
+			// Remove runs.
+			before: stringtest.LinesLF("m:", "  x: 0", "  a: 1", "  a: 2", "n: 1"),
+			dup:    true,
+			fn:     both(remove("$.m.x"), remove("$.m")),
+			want:   stringtest.LinesLF("n: 1"),
+		},
+		"set of a key that a decode reads under the name of another key": {
+			// The key true prints as its text, and a decode into a map reads
+			// it under the name of the key True.
+			before:    stringtest.LinesLF("m:", "  True: 2", "  k: 1", "  true: 3"),
+			fn:        set("$.m.true", 5),
+			construct: edit.ConstructKeyText,
+			related:   []string{"$.m.true"},
+			err: stringtest.JoinLF(
+				"test.yaml:2:3: $.m.True: the edit sets $.m.true, which reaches True, a key that reads as true "+
+					"rather than as its text, and this program does not edit the entries that a decode reads "+
+					"under the name of such a key",
+				"|-- 4:3: $.m.true: a decode reads the key true under the same name here",
+				`|-- quote the key, as in "True"`,
+				"`-- the edit sets $.m.true",
+			),
+		},
+		"removal of a key at the root that hides a key of its decoded key": {
+			// The Remove leaves the entry of 1.0 under the name.
+			before:    stringtest.LinesLF("r0: x", "1.0: a", "1: b"),
+			fn:        remove("$.1"),
+			construct: edit.ConstructKeyText,
+			related:   []string{"$.1"},
+			err: stringtest.JoinLF(
+				"test.yaml:2:1: $.'1.0': the edit removes $.1, which reaches 1.0, a key that reads as 1 rather "+
+					"than as its text, and this program does not edit the entries that a decode reads under the "+
+					"name of such a key",
+				"|-- 3:1: $.1: a decode reads the key 1 under the same name here",
+				`|-- quote the key, as in "1.0"`,
+				"`-- the edit removes $.1",
+			),
+		},
+		"set of a quoted key that a decode reads under the name of two other keys": {
+			before:    stringtest.LinesLF("m:", "  0x10: 1", "  0o20: 2", `  "16": 3`, "  k: 4"),
+			fn:        set("$.m.16", 5),
+			construct: edit.ConstructKeyText,
+			related:   []string{"$.m.0o20", "$.m.16"},
+			err: stringtest.JoinLF(
+				"test.yaml:2:3: $.m.0x10: the edit sets $.m.16, which reaches 0x10, a key that reads as 16 "+
+					"rather than as its text, and this program does not edit the entries that a decode reads "+
+					"under the name of such a key",
+				"|-- 3:3: $.m.0o20: a decode reads the key 0o20 under the same name here",
+				"|-- 4:3: $.m.16: a decode reads the key 16 under the same name here",
+				`|-- quote the key, as in "0x10"`,
+				"`-- the edit sets $.m.16",
+			),
+		},
+		"set of a key that a decode reads under the name of the second of two such keys": {
+			// The keys 0x10 and "16" share one name, and the keys 01 and 1
+			// share another.
+			before:    stringtest.LinesLF("m:", "  0x10: 1", "  01: 2", `  "16": 3`, "  1: 4"),
+			fn:        set("$.m.1", 5),
+			construct: edit.ConstructKeyText,
+			related:   []string{"$.m.1"},
+			err: stringtest.JoinLF(
+				"test.yaml:3:3: $.m.01: the edit sets $.m.1, which reaches 01, a key that reads as 1 rather "+
+					"than as its text, and this program does not edit the entries that a decode reads under the "+
+					"name of such a key",
+				"|-- 5:3: $.m.1: a decode reads the key 1 under the same name here",
+				`|-- quote the key, as in "01"`,
+				"`-- the edit sets $.m.1",
+			),
+		},
+		"set of another key beside keys that a decode reads under one name": {
+			// Control.
+			before: stringtest.LinesLF("m:", "  0x10: 1", "  0o20: 2", `  "16": 3`, "  k: 4"),
+			fn:     set("$.m.k", 5),
+			want:   stringtest.LinesLF("m:", "  0x10: 1", "  0o20: 2", `  "16": 3`, "  k: 5"),
+		},
+		"set through a merge key of a key that reads as another value": {
+			before:    mergedHex,
+			fn:        set("$.job.0x10", 5),
+			construct: edit.ConstructKeyText,
+			err: "test.yaml:2:3: $.base.0x10: the edit sets $.job.0x10, which reaches 0x10, a key that reads as " +
+				"16 rather than as its text, and this program does not edit the entry of such a key other than " +
+				"by removing it",
+		},
+		"set of the name that a decode gives a key that a merge key brings in": {
+			// The new key of $.job hides the entry of 0x10 in a decode.
+			before:    mergedHex,
+			fn:        set("$.job.16", 5),
+			construct: edit.ConstructKeyText,
+			err: "test.yaml:2:3: $.base.0x10: the edit sets $.job.16, which changes the keys that read as 0x10 " +
+				"does, a key that reads as 16 rather than as its text, and this program does not change the " +
+				"keys that read as such a key",
+		},
+		"rename to the name that a decode gives a key that a merge key brings in": {
+			before:    mergedHex,
+			fn:        rename("$.job.k", "16"),
+			construct: edit.ConstructKeyText,
+			err: `test.yaml:2:3: $.base.0x10: the edit renames $.job.k to "16", which changes the keys that ` +
+				"read as 0x10 does, a key that reads as 16 rather than as its text",
+		},
+		"removal of a quoted key that hides a key that a merge key brings in": {
+			// A decode reads the entry of 0x10 under the name after the
+			// Remove.
+			before:    stringtest.LinesLF("base: &b", "  0x10: a", "job:", "  <<: *b", `  "16": 1`),
+			fn:        remove("$.job.16"),
+			construct: edit.ConstructKeyText,
+			err: "test.yaml:2:3: $.base.0x10: the edit removes $.job.16, which changes the keys that read as " +
+				"0x10 does, a key that reads as 16 rather than as its text",
+		},
+		"removal through a merge key of a key that reads as another value": {
+			// Control.
+			before: mergedHex,
+			fn:     remove("$.job.0x10"),
+			want:   stringtest.LinesLF("base: &b {}", "job:", "  <<: *b", "  k: 1"),
+		},
+		"set of another key of a mapping whose merge key brings in a key that reads as another value": {
+			// Control.
+			before: mergedHex,
+			fn:     set("$.job.k", 5),
+			want:   stringtest.LinesLF("base: &b", "  0x10: a", "job:", "  <<: *b", "  k: 5"),
+		},
+		"new key in a mapping whose only key reads as another value, which a merge key reads": {
+			// Control.
+			before: mergedHex,
+			fn:     set("$.base.c", 5),
+			want:   stringtest.LinesLF("base: &b", "  0x10: a", "  c: 5", "job:", "  <<: *b", "  k: 1"),
+		},
+		"removal of a key that hides an entry of its decoded key that a merge key brings in": {
+			// A decode reads the entry of 16 under the name after the Remove.
+			before:    ownHex,
+			fn:        remove("$.job.0x10"),
+			construct: edit.ConstructKeyText,
+			err: stringtest.JoinLF(
+				"test.yaml:5:3: $.job.0x10: the edit removes $.job.0x10, which changes the keys that read as "+
+					"0x10 does, a key that reads as 16 rather than as its text, and this program does not change "+
+					"the keys that read as such a key",
+				`|-- quote the key, as in "0x10"`,
+				"`-- the edit removes $.job.0x10",
+			),
+		},
+		"removal of a key that reads as another value beside a merge key that brings in other keys": {
+			// Control.
+			before: stringtest.LinesLF("base: &b", "  a: 1", "job:", "  <<: *b", "  0x10: z"),
+			fn:     remove("$.job.0x10"),
+			want:   stringtest.LinesLF("base: &b", "  a: 1", "job:", "  <<: *b"),
+		},
+		"removal of a key that reads as another value beside a merge key that names one alias twice": {
+			// The merge key in a refused form comes first in the text.
+			before:    stringtest.LinesLF("a: &a", "  x: 1", "job:", "  <<: [*a, *a]", "  0x10: z"),
+			fn:        remove("$.job.0x10"),
+			construct: edit.ConstructMergeForm,
+			related:   []string{"$.a"},
+			err: "test.yaml:4:3: $.job: the edit removes $.job.0x10, which changes the keys of a merge through a " +
+				"merge key that merges a sequence of aliases, and this program does not change the keys of such " +
+				"a merge",
+		},
+		"removal of a key that reads as another value beside a merge key of a scalar": {
+			before:    stringtest.LinesLF("job:", "  <<: 1", "  0x10: z"),
+			fn:        remove("$.job.0x10"),
+			construct: edit.ConstructMergeForm,
+			err: "test.yaml:2:3: $.job: the edit removes $.job.0x10, which changes the keys of a merge through a " +
+				"merge key whose value is a scalar, and this program does not change the keys of such a merge",
+		},
+		"removal of a key that reads as another value beside a merge key whose source holds a merge key": {
+			before: stringtest.LinesLF(
+				"c: &c", "  y: 1", "b: &b", "  <<: *c", "  x: 1", "job:", "  <<: *b", "  0x10: z",
+			),
+			fn:        remove("$.job.0x10"),
+			construct: edit.ConstructMergeForm,
+			related:   []string{"$.b"},
+			err: "test.yaml:7:3: $.job: the edit removes $.job.0x10, which changes the keys of a merge through a " +
+				"merge key that merges a mapping with a merge key of its own, and this program does not change " +
+				"the keys of such a merge",
+		},
+		"set of the name of a key that the merge key of a source brings in": {
+			// The mapping at $.job reads the key 0x10 of $.c through the
+			// merge key of $.b, and the key comes first in the text.
+			before: stringtest.LinesLF(
+				"c: &c", "  0x10: a", "b: &b", "  <<: *c", "  x: 1", "job:", "  <<: *b", "  k: 1",
+			),
+			fn:        set("$.job.16", 1),
+			construct: edit.ConstructKeyText,
+			err: "test.yaml:2:3: $.c.0x10: the edit sets $.job.16, which changes the keys that read as 0x10 does, " +
+				"a key that reads as 16 rather than as its text",
+		},
+		"set of another key beside a merge key whose source brings in a key that reads as another value": {
+			// The call does not change a key of the name, so only the merge
+			// key in a refused form refuses it.
+			before: stringtest.LinesLF(
+				"c: &c", "  0x10: a", "b: &b", "  <<: *c", "  x: 1", "job:", "  <<: *b", "  k: 1",
+			),
+			fn:        set("$.job.q", 1),
+			construct: edit.ConstructMergeForm,
+			related:   []string{"$.b"},
+			err: "test.yaml:7:3: $.job: the edit sets $.job.q, which changes the keys of a merge through a merge " +
+				"key that merges a mapping with a merge key of its own",
+		},
+		"set of the name of a key that a merge key that names one alias twice brings in": {
+			before:    stringtest.LinesLF("a: &a", "  0x10: 1", "job:", "  <<: [*a, *a]", "  k: z"),
+			fn:        set("$.job.16", 1),
+			construct: edit.ConstructKeyText,
+			err: "test.yaml:2:3: $.a.0x10: the edit sets $.job.16, which changes the keys that read as 0x10 does, " +
+				"a key that reads as 16 rather than as its text",
+		},
+		"set of the name of a key that a merge key brings in beside an alias of a scalar": {
+			before:    stringtest.LinesLF("a: &a", "  0x10: 1", "s: &s 1", "job:", "  <<: [*s, *a]", "  k: z"),
+			fn:        set("$.job.16", 1),
+			construct: edit.ConstructKeyText,
+			err: "test.yaml:2:3: $.a.0x10: the edit sets $.job.16, which changes the keys that read as 0x10 does, " +
+				"a key that reads as 16 rather than as its text",
+		},
+		"set through a merge key of the name that a decode gives an own key": {
+			// The path looks 16 up through the merge key of $.job, and a
+			// decode reads the own key 0x10 under that name.
+			before:    ownHex,
+			fn:        set("$.job.16", 5),
+			construct: edit.ConstructKeyText,
+			err: "test.yaml:5:3: $.job.0x10: the edit sets $.job.16, which reaches 0x10, a key that reads as 16 " +
+				"rather than as its text",
+		},
+		"set in a merged mapping of a key that an own key of its decoded key hides": {
+			// Control.
+			before: ownHex,
+			fn:     set("$.base.16", 5),
+			want:   stringtest.LinesLF("base: &b", "  16: 5", "job:", "  <<: *b", "  0x10: z"),
+		},
+		"set of a key that a merge key written in place brings in": {
+			// The merge key in a refused form comes first on the path.
+			before:    stringtest.LinesLF("<<: {0o20: 2}", "a: 1"),
+			fn:        set("$.0o20", 5),
+			construct: edit.ConstructMergeForm,
+			err: "test.yaml:1:1: $: the edit sets $.0o20, which goes through a merge key that merges a mapping " +
+				"written in place, and this program does not edit through such a merge key",
+		},
+		"value at a bool entry that a merge key brings in, which an own key hides": {
+			before:    stringtest.LinesLF("<<: {TRUE: 2, b: q}", "True: a b"),
+			fn:        set("$.True", 5),
+			construct: edit.ConstructKeyText,
+			err: "test.yaml:2:1: $.True: the edit sets $.True, which reaches True, a key that reads as true " +
+				"rather than as its text",
+		},
+		"rename to the text of a key that reads as another value": {
+			// The error binds at the key 0x10 and not at the renamed key.
+			before:    laterHex,
+			fn:        rename("$.m.a", "0x10"),
+			construct: edit.ConstructKeyText,
+			err: stringtest.JoinLF(
+				`test.yaml:4:3: $.m.0x10: the edit renames $.m.a to "0x10", which changes the keys that read as `+
+					"0x10 does, a key that reads as 16 rather than as its text, and this program does not change "+
+					"the keys that read as such a key",
+				`|-- quote the key, as in "0x10"`,
+				"`-- the edit renames $.m.a to \"0x10\"",
+			),
+		},
+		"removal of the first entry of a mapping, then a rename to the text of a key that reads as another value": {
+			// The mapping starts at another entry when the SetKey runs.
+			before:    laterHex,
+			fn:        both(remove("$.m.b"), rename("$.m.a", "0x10")),
+			construct: edit.ConstructKeyText,
+			err: `test.yaml:4:3: $.m.0x10: the edit renames $.m.a to "0x10", which changes the keys that read as ` +
+				"0x10 does, a key that reads as 16 rather than as its text",
+		},
+		"move of the first entry of a mapping, then a rename to the text of a key that reads as another value": {
+			before:    laterHex,
+			fn:        both(move("$.m.b", "$.z"), rename("$.m.a", "0x10")),
+			construct: edit.ConstructKeyText,
+			err: `test.yaml:4:3: $.m.0x10: the edit renames $.m.a to "0x10", which changes the keys that read as ` +
+				"0x10 does, a key that reads as 16 rather than as its text",
+		},
+		"rename of the first entry of a mapping, then a rename to the text of a key that reads as another value": {
+			before:    laterHex,
+			fn:        both(rename("$.m.b", "zz"), rename("$.m.a", "0x10")),
+			construct: edit.ConstructKeyText,
+			err: `test.yaml:4:3: $.m.0x10: the edit renames $.m.a to "0x10", which changes the keys that read as ` +
+				"0x10 does, a key that reads as 16 rather than as its text",
+		},
+		"removal of the first entry of a mapping, then a rename to the text of such a key, with duplicate keys": {
+			before:    laterHex,
+			dup:       true,
+			fn:        both(remove("$.m.b"), rename("$.m.a", "0x10")),
+			construct: edit.ConstructKeyText,
+			err: `test.yaml:4:3: $.m.0x10: the edit renames $.m.a to "0x10", which changes the keys that read as ` +
+				"0x10 does, a key that reads as 16 rather than as its text",
+		},
+		"removal of the first entry of a mapping, then a rename to the name of such a key, with duplicate keys": {
+			before:    laterHex,
+			dup:       true,
+			fn:        both(remove("$.m.b"), rename("$.m.a", "16")),
+			construct: edit.ConstructKeyText,
+			err: `test.yaml:4:3: $.m.0x10: the edit renames $.m.a to "16", which changes the keys that read as ` +
+				"0x10 does, a key that reads as 16 rather than as its text",
+		},
+		"removal of the first entry of the root, then a rename to the text of a bool key": {
+			before:    stringtest.LinesLF("b: null", "a: 1", "TRUE: null"),
+			fn:        both(remove("$.b"), rename("$.a", "TRUE")),
+			construct: edit.ConstructKeyText,
+			err: `test.yaml:3:1: $.TRUE: the edit renames $.a to "TRUE", which changes the keys that read as TRUE ` +
+				"does, a key that reads as true rather than as its text",
+		},
+		"removal of the first entry of a mapping, then a set of the name that a decode gives a later key": {
+			before:    laterHex,
+			fn:        both(remove("$.m.b"), set("$.m.16", 1)),
+			construct: edit.ConstructKeyText,
+			err: "test.yaml:4:3: $.m.0x10: the edit sets $.m.16, which changes the keys that read as 0x10 does, a " +
+				"key that reads as 16 rather than as its text",
+		},
+		"removal of the first entry of a mapping, then a move to the name that a decode gives a later key": {
+			before:    laterHex,
+			fn:        both(remove("$.m.b"), move("$.m.a", "$.m.16")),
+			construct: edit.ConstructKeyText,
+			err: "test.yaml:4:3: $.m.0x10: the edit moves $.m.a to $.m.16, which changes the keys that read as " +
+				"0x10 does, a key that reads as 16 rather than as its text",
+		},
+		"removal of the first entry of a mapping, then a set of another key beside a key that reads as another value": {
+			// Control.
+			before: laterHex,
+			fn:     both(remove("$.m.b"), set("$.m.a", 2)),
+			want:   stringtest.LinesLF("m:", "  a: 2", "  0x10: null"),
+		},
+		"removal of the first entry of a mapping and of a key that reads as another value, then a rename to its text": {
+			// Control: the text holds no entry of the key when the SetKey
+			// runs, and the SetKey writes the key as a string.
+			before: laterHex,
+			fn:     both(both(remove("$.m.b"), remove("$.m.0x10")), rename("$.m.a", "0x10")),
+			want:   stringtest.LinesLF("m:", `  "0x10": 1`),
+		},
+		"removal of the first entry of a merged mapping, then a set of the name of a key that the merge brings in": {
+			// The new key of $.job hides the entry of 0x10 in a decode.
+			before:    mergedLaterHex,
+			fn:        both(remove("$.base.z"), set("$.job.16", "v")),
+			construct: edit.ConstructKeyText,
+			err: "test.yaml:3:3: $.base.0x10: the edit sets $.job.16, which changes the keys that read as 0x10 " +
+				"does, a key that reads as 16 rather than as its text",
+		},
+		"removal of the first entry of a merged mapping, then a rename to the name of a key that the merge brings in": {
+			before:    mergedLaterHex,
+			fn:        both(remove("$.base.z"), rename("$.job.k", "16")),
+			construct: edit.ConstructKeyText,
+			err: `test.yaml:3:3: $.base.0x10: the edit renames $.job.k to "16", which changes the keys that read ` +
+				"as 0x10 does, a key that reads as 16 rather than as its text",
+		},
+		"removal of the first entry of a merged mapping, then a move to the name of a key that the merge brings in": {
+			before:    mergedLaterHex,
+			fn:        both(remove("$.base.z"), move("$.tail", "$.job.16")),
+			construct: edit.ConstructKeyText,
+			err: "test.yaml:3:3: $.base.0x10: the edit moves $.tail to $.job.16, which changes the keys that read " +
+				"as 0x10 does, a key that reads as 16 rather than as its text",
+		},
+		"removal of the first entry of a mapping, then a set through its merge key of the name of an own key": {
+			// The Set writes $.base.16, and a decode of $.job reads the own
+			// key 0x10 under that name.
+			before:    ownLaterHex,
+			fn:        both(remove("$.job.z"), set("$.job.16", 5)),
+			construct: edit.ConstructKeyText,
+			err: "test.yaml:6:3: $.job.0x10: the edit sets $.job.16, which reaches 0x10, a key that reads as 16 " +
+				"rather than as its text",
+		},
+		"removal of the first entry of a mapping, then a set below the name of an own key through its merge key": {
+			// The path meets the scalar at $.base.16.
+			before:    ownLaterHex,
+			fn:        both(remove("$.job.z"), set("$.job.16.x", 5)),
+			construct: edit.ConstructKeyText,
+			err: "test.yaml:6:3: $.job.0x10: the edit sets $.job.16.x, which reaches 0x10, a key that reads as 16 " +
+				"rather than as its text",
+		},
+		"removal of the first entry of a mapping, then of a key that hides a key that its merge key brings in": {
+			// A decode reads the entry of 16 under the name after the second
+			// Remove.
+			before:    ownLaterHex,
+			fn:        both(remove("$.job.z"), remove("$.job.0x10")),
+			construct: edit.ConstructKeyText,
+			err: "test.yaml:6:3: $.job.0x10: the edit removes $.job.0x10, which changes the keys that read as " +
+				"0x10 does, a key that reads as 16 rather than as its text",
+		},
+		"rename of a place that a mapping whose only key reads as another value lacks": {
+			// Control: the mapping lies outside the part of the key, so the
+			// lookup in it reaches no part.
+			before: onlyVersion,
+			fn:     rename("$.python.zzz", "q"),
+			want:   onlyVersion,
+		},
+		"removal below a place that a mapping whose only key reads as another value lacks": {
+			// Control.
+			before: onlyVersion,
+			fn:     remove("$.python.zzz.y"),
+			want:   onlyVersion,
+		},
+		"move from below a place that a mapping whose only key reads as another value lacks": {
+			// Control.
+			before: onlyVersion,
+			fn:     move("$.python.zzz.y", "$.k"),
+			want:   onlyVersion,
+		},
+		"set of an item of a mapping whose only key reads as another value": {
+			// The problem of the path comes first, because the mapping lies
+			// outside the part of the key.
+			before: onlyVersion,
+			fn:     set("$.python[0]", 1),
+			err:    "test.yaml:1:1: $.python: the edit sets $.python[0], but python holds a mapping",
+		},
+		"move to a place below the name of an own key, through a merge key": {
+			// The target looks 16 up through the merge key of $.job, and a
+			// decode reads the own key 0x10 under that name.
+			before:    stringtest.LinesLF("base: &b", "  16: {}", "job:", "  <<: *b", "  0x10: z", "x: 1"),
+			fn:        move("$.x", "$.job.16.x"),
+			construct: edit.ConstructKeyText,
+			err: "test.yaml:5:3: $.job.0x10: the edit moves $.x to $.job.16.x, which reaches 0x10, a key that " +
+				"reads as 16 rather than as its text",
+		},
+		"removal of a key that hides a key of another text that a merge key brings in": {
+			// A decode reads the keys 0x10 and 0o20 under one name, so it
+			// reads the entry of 0o20 under the name after the Remove.
+			before:    stringtest.LinesLF("base: &b", "  0o20: a", "job:", "  <<: *b", "  0x10: z"),
+			fn:        remove("$.job.0x10"),
+			construct: edit.ConstructKeyText,
+			err: "test.yaml:5:3: $.job.0x10: the edit removes $.job.0x10, which changes the keys that read as " +
+				"0x10 does, a key that reads as 16 rather than as its text",
+		},
+		"set of an infinity key": {
+			// The reading shows as the text does, so it takes the word for its
+			// type.
+			before:    stringtest.LinesLF(".inf: g", "k: 1"),
+			fn:        set("$.'.inf'", 1),
+			construct: edit.ConstructKeyText,
+			err: stringtest.JoinLF(
+				"test.yaml:1:1: $.'.inf': the edit sets $.'.inf', which reaches .inf, a key that reads as the "+
+					"float .inf rather than as its text, and this program does not edit the entry of such a key "+
+					"other than by removing it",
+				`|-- quote the key, as in ".inf"`,
+			),
+		},
+		"set of the name that a decode gives an explicit key": {
+			// The problem binds at the key, after its "?".
+			before:    stringtest.LinesLF("a:", "  ? 0x10", "  : v", "  k: 1"),
+			fn:        set("$.a.16", 1),
+			construct: edit.ConstructKeyText,
+			err: "test.yaml:2:5: $.a.0x10: the edit sets $.a.16, which changes the keys that read as 0x10 does, a " +
+				"key that reads as 16 rather than as its text",
+		},
+		"removal of the entry before a hex key of a block mapping under a tag": {
+			// The key 0x10 then comes first under the tag, where it reads as
+			// its text.
+			before:    taggedHex,
+			fn:        remove("$.a.z"),
+			construct: edit.ConstructKeyText,
+			err: stringtest.JoinLF(
+				"test.yaml:3:3: $.a.0x10: the edit removes $.a.z, which changes how a decode reads 0x10, a key "+
+					"that reads as 16 rather than as its text, and this program does not change how a decode "+
+					"reads a key",
+				`|-- quote the key, as in "0x10"`,
+				"`-- the edit removes $.a.z",
+			),
+		},
+		"move of the entry before a hex key of a block mapping under a tag": {
+			before:    taggedHex,
+			fn:        move("$.a.z", "$.z"),
+			construct: edit.ConstructKeyText,
+			err: "test.yaml:3:3: $.a.0x10: the edit moves $.a.z to $.z, which changes how a decode reads 0x10, a " +
+				"key that reads as 16 rather than as its text, and this program does not change how a decode " +
+				"reads a key",
+		},
+		"removal of the entry before a hex key of a root under a tag": {
+			before:    stringtest.LinesLF("!t", "z: 0", "0x10: 1", "k: 2"),
+			fn:        remove("$.z"),
+			construct: edit.ConstructKeyText,
+			err: "test.yaml:3:1: $.0x10: the edit removes $.z, which changes how a decode reads 0x10, a key that " +
+				"reads as 16 rather than as its text",
+		},
+		"removal through a merge key of the entry before a hex key of a block mapping under a tag": {
+			before:    stringtest.LinesLF("a: &x !t", "  z: 1", "  0x10: 2", "b:", "  <<: *x"),
+			fn:        remove("$.b.z"),
+			construct: edit.ConstructKeyText,
+			err: "test.yaml:3:3: $.a.0x10: the edit removes $.b.z, which changes how a decode reads 0x10, a key " +
+				"that reads as 16 rather than as its text",
+		},
+		"removal of a first hex key under a tag before a key that reads as another value": {
+			// The key 0x10 comes first under the tag, so it reads as its text.
+			// The key 0o20 takes its place after the Remove.
+			before:    taggedFirstHex,
+			fn:        remove("$.a.0x10"),
+			construct: edit.ConstructKeyText,
+			err: "test.yaml:3:3: $.a.0o20: the edit removes $.a.0x10, which changes how a decode reads 0o20, a " +
+				"key that reads as 16 rather than as its text",
+		},
+		"removal of the entry before two keys that a decode reads under one name, under a tag": {
+			// The key 0x10 leaves the part, and the key 16 stays.
+			before:    stringtest.LinesLF("a: !t", "  z: 0", "  0x10: 1", "  16: 2"),
+			fn:        remove("$.a.z"),
+			construct: edit.ConstructKeyText,
+			related:   []string{"$.a.16"},
+			err: stringtest.JoinLF(
+				"test.yaml:3:3: $.a.0x10: the edit removes $.a.z, which changes how a decode reads 0x10, a key "+
+					"that reads as 16 rather than as its text, and this program does not change how a decode "+
+					"reads a key",
+				"|-- 4:3: $.a.16: a decode reads the key 16 under the same name here",
+			),
+		},
+		"new first key before a first hex key of a block mapping under a tag": {
+			// The key 0x10 then comes second, where it reads as 16.
+			before: taggedFirstHex,
+			fn: func(ctx context.Context, root *edit.Node) error {
+				return root.At(paths.MustParse("$.a.j")).Set(ctx, 3, edit.First())
+			},
+			construct: edit.ConstructKeyText,
+			related:   []string{"$.a.0o20"},
+			err: stringtest.JoinLF(
+				"test.yaml:2:3: $.a.0x10: the edit sets $.a.j, which changes how a decode reads 0x10, a key that "+
+					"then reads as 16 rather than as its text, and this program does not change how a decode "+
+					"reads a key",
+				"|-- 3:3: $.a.0o20: a decode reads the key 0o20 under the same name here",
+				`|-- quote the key, as in "0x10"`,
+				"`-- the edit sets $.a.j",
+			),
+		},
+		"move with First to before a first hex key of a block mapping under a tag": {
+			before: stringtest.LinesLF("a: !t", "  0x10: 1", "  k: 2", "b: 1"),
+			fn: func(_ context.Context, root *edit.Node) error {
+				return root.At(paths.MustParse("$.b")).Move(paths.MustParse("$.a.b"), edit.First())
+			},
+			construct: edit.ConstructKeyText,
+			err: stringtest.JoinLF(
+				"test.yaml:2:3: $.a.0x10: the edit moves $.b to $.a.b, which changes how a decode reads 0x10, a "+
+					"key that then reads as 16 rather than as its text, and this program does not change how a "+
+					"decode reads a key",
+				`|-- quote the key, as in "0x10"`,
+				"`-- the edit moves $.b to $.a.b",
+			),
+		},
+		"new first key before a first null key of a block mapping under a tag": {
+			// The key null then comes second, where it reads as the null
+			// value.
+			before: stringtest.LinesLF("a: !t", "  null: 1", "  k: 2"),
+			fn: func(ctx context.Context, root *edit.Node) error {
+				return root.At(paths.MustParse("$.a.j")).Set(ctx, 3, edit.First())
+			},
+			construct: edit.ConstructKeyText,
+			err: stringtest.JoinLF(
+				"test.yaml:2:3: $.a.null: the edit sets $.a.j, which changes how a decode reads null, a key that "+
+					"then reads as the null value, and this program does not change how a decode reads a key",
+				`|-- quote the key, as in "null"`,
+				"`-- the edit sets $.a.j",
+			),
+		},
+		"set of a first hex key of a block mapping under a tag": {
+			// Control: the key reads as its text.
+			before: taggedFirstHex,
+			fn:     set("$.a.0x10", 3),
+			want:   stringtest.LinesLF("a: !t", "  0x10: 3", "  0o20: 2", "  k: 1"),
+		},
+		"set of another key of a block mapping under a tag with a hex key": {
+			// Control.
+			before: taggedHex,
+			fn:     set("$.a.k", 3),
+			want:   stringtest.LinesLF("a: !t", "  z: 0", "  0x10: 1", "  k: 3"),
+		},
+		"removal of a hex key and then of the entry before it, in a block mapping under a tag": {
+			// Control: the text holds no entry of the key when the second
+			// Remove runs.
+			before: taggedHex,
+			fn:     both(remove("$.a.0x10"), remove("$.a.z")),
+			want:   stringtest.LinesLF("a: !t", "  k: 2"),
+		},
+		"removal of the entry before a hex key of a block mapping under the tag of a mapping": {
+			// Control: the key reads as 16 at each place under a tag that
+			// YAML defines.
+			before: stringtest.LinesLF("a: !!map", "  z: 0", "  0x10: 1", "  k: 2"),
+			fn:     remove("$.a.z"),
+			want:   stringtest.LinesLF("a: !!map", "  0x10: 1", "  k: 2"),
+		},
+		"removal of the entry before a hex key of a flow mapping under a tag": {
+			// Control: the "{" comes right after the tag.
+			before: "a: !t {z: 0, 0x10: 1}\n",
+			fn:     remove("$.a.z"),
+			want:   "a: !t {0x10: 1}\n",
 		},
 		"set of an entry with an explicit key": {
 			before:    explicit,
