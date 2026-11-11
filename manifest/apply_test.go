@@ -562,6 +562,47 @@ func TestResult_Summary(t *testing.T) {
 	}
 }
 
+func TestResult_Summary_ControlCharacters(t *testing.T) {
+	t.Parallel()
+
+	reg := manifest.MustNewRegistry(drinkOptions(false)...)
+
+	// A directory walk takes names from disk, so the name of a file can
+	// hold control characters.
+	plan, err := reg.PlanMigration(t.Context(), configFS(map[string]string{
+		"a\x1b[2J\n.yaml": drinkDoc + "  size: XL\n",
+		"b\x1b[2J\n.yaml": drinkDoc + stringtest.LinesLF(
+			"  size: S",
+			"  color: red",
+			"---",
+			"apiVersion: cafe.jacobcolvin.com/v9",
+			"kind: Drink",
+		),
+		"c\x1b[2J\n.yaml": drinkDoc + "  size: S\n",
+	}))
+	require.NotNil(t, plan)
+	require.Error(t, err)
+
+	write := func(_ context.Context, f *manifest.PlanFile) error {
+		if strings.HasPrefix(f.Source().Name(), "config/c") {
+			return errors.New("store \x1b[31moffline\nretry later")
+		}
+
+		return nil
+	}
+
+	res, err := plan.Apply(t.Context(), manifest.WithWriter(write))
+	require.Error(t, err)
+	assert.Equal(t, stringtest.JoinLF(
+		"config/a␛[2J␊.yaml: not migrated, 1 error",
+		"config/b␛[2J␊.yaml: migrated document 1: Drink to cafe.jacobcolvin.com/v1",
+		"  removed $.spec.color",
+		"config/b␛[2J␊.yaml: 1 document not migrated",
+		"config/c␛[2J␊.yaml: not written, store ␛[31moffline",
+		"1 file migrated, 1 document not migrated, 1 file not migrated, 1 not written",
+	), res.Summary())
+}
+
 // lastLine returns the last line of s.
 func lastLine(s string) string {
 	lines := strings.Split(s, "\n")

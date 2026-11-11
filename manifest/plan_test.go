@@ -1101,6 +1101,48 @@ func TestPlanFile_Removals(t *testing.T) {
 	assert.NoError(t, planOf(t, cafeOptions(), map[string]string{"hours.yaml": hoursDoc}).Files()[0].Removals())
 }
 
+func TestPlanFile_Header(t *testing.T) {
+	t.Parallel()
+
+	remove := func(_ context.Context, n *edit.Node) error {
+		return n.Remove(edit.WithReason("notes moved\n\x1b[1mto the menu"))
+	}
+
+	// A directory walk takes names from disk, so the name of a file can
+	// hold control characters.
+	plan := planOf(t, []manifest.RegistryOption{
+		manifest.WithAppName("cafe"),
+		manifest.WithKinds(manifest.NewKind[map[string]any]("Drink",
+			manifest.Version("v1"),
+			manifest.Version("v2", manifest.Migrate(spec.Child("note"), remove)),
+		)),
+	}, map[string]string{
+		"a\x1b[2J\nb\t.yaml": stringtest.LinesLF(
+			"apiVersion: v1",
+			"kind: Drink",
+			"spec:",
+			"  note: hot",
+			"---",
+			"apiVersion: v9",
+			"kind: Drink",
+		),
+		"c\x1b[1m\rz.yaml": "spec: [\n",
+	})
+
+	require.Len(t, plan.Files(), 1)
+	assert.Equal(t, stringtest.JoinLF(
+		"config/a␛[2J␊b    .yaml: document 1: Drink from v1 to v2",
+		"  removes $.spec.note: notes moved␊␛[1mto the menu",
+		"config/a␛[2J␊b    .yaml: 1 document not migrated",
+	), plan.Files()[0].Header())
+	assert.Equal(t, "config/a\x1b[2J\nb\t.yaml", plan.Files()[0].Source().Name())
+
+	// Blocked keeps each name as the input gives it.
+	assert.Equal(t, []string{"config/c\x1b[1m\rz.yaml"}, plan.Blocked())
+	require.Len(t, plan.Sources(), 2)
+	assert.Equal(t, plan.Blocked()[0], plan.Sources()[1].Name())
+}
+
 func TestPlanFile_After(t *testing.T) {
 	t.Parallel()
 
