@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"net"
 	"net/netip"
 	"reflect"
@@ -4787,6 +4788,19 @@ func (r *rawText) UnmarshalYAML(data []byte) error {
 	return nil
 }
 
+// nodeText is a value that decodes itself from the node go-yaml hands it,
+// and keeps that node and its text.
+type nodeText struct {
+	node ast.Node
+	text string
+}
+
+func (n *nodeText) UnmarshalYAML(node ast.Node) error {
+	n.node, n.text = node, node.String()
+
+	return nil
+}
+
 // echoingUnmarshaler reports errUnmarshal with the text go-yaml hands it,
 // so the message of the decode quotes that text.
 type echoingUnmarshaler struct{}
@@ -5276,13 +5290,14 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 	})
 
 	// The new name of a renamed anchor skips each count the document or a
-	// reference document spells.
-	t.Run("node spells an alias to a renamed anchor with its new name", func(t *testing.T) {
+	// reference document spells. An UnmarshalYAML method gets the node of
+	// the decoder, which spells that name.
+	t.Run("unmarshaler node spells an alias to a renamed anchor with its new name", func(t *testing.T) {
 		t.Parallel()
 
 		type wrapper struct {
-			C ast.Node `yaml:"c"`
-			D ast.Node `yaml:"d"`
+			C *nodeText `yaml:"c"`
+			D *nodeText `yaml:"d"`
 		}
 
 		// The one anchor named x gets a new name when the source has a
@@ -5379,11 +5394,11 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 				got, err := dd.Decode[wrapper](t.Context())
 				require.NoError(t, err)
 				require.NotNil(t, got.C)
-				assert.Equal(t, tc.want, got.C.String())
+				assert.Equal(t, tc.want, got.C.text)
 
 				if tc.wantD != "" {
 					require.NotNil(t, got.D)
-					assert.Equal(t, tc.wantD, got.D.String())
+					assert.Equal(t, tc.wantD, got.D.text)
 				}
 			})
 		}
@@ -5480,6 +5495,311 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 		require.ErrorIs(t, err, niceyaml.ErrDecode)
 
 		assert.Equal(t, 2, yamltest.RangeOf(t, yamltest.RequireSourceError(t, err)).Start.Line)
+	})
+}
+
+func TestDocument_Decode_SyntaxNodes(t *testing.T) {
+	t.Parallel()
+
+	type job struct {
+		With ast.Node            `yaml:"with"`
+		Map  *ast.MappingNode    `yaml:"map"`
+		List []ast.Node          `yaml:"list"`
+		By   map[string]ast.Node `yaml:"by"`
+	}
+
+	tcs := map[string]struct {
+		input      string
+		references []string
+		// The text of each node of the result, by its path.
+		want map[string]string
+	}{
+		"alias in the node": {
+			input: "env: &env {region: eu}\nwith: {env: *env}\n",
+			want:  map[string]string{"with": "{env: *env}"},
+		},
+		"alias with a reference document": {
+			input:      "env: &env {region: eu}\nwith: {env: *env}\n",
+			references: []string{"retry: &retry {max: 3}\n"},
+			want:       map[string]string{"with": "{env: *env}"},
+		},
+		"anchor name used twice elsewhere": {
+			input: stringtest.LinesLF(
+				"a: &x 1",
+				"b: &x 2",
+				"with: {plain: true}",
+				"map: {c: *x}",
+			),
+			want: map[string]string{"with": "{plain: true}", "map": "{c: *x}"},
+		},
+		"integer tag": {
+			input: "with: {a: !!int 7, b: 1}\n",
+			want:  map[string]string{"with": "{a: !!int 7, b: 1}"},
+		},
+		"alias inside its anchor": {
+			input: "w: &w {self: *w}\nwith: {a: *w}\nlist: [{b: *w}]\n",
+			want:  map[string]string{"with": "{a: *w}", "list[0]": "{b: *w}"},
+		},
+		"elements and entries": {
+			input: stringtest.LinesLF(
+				"a: &x 1",
+				"b: &x 2",
+				"list: [{p: *x}, 3]",
+				"by: {k: {q: *x}}",
+			),
+			want: map[string]string{"list[0]": "{p: *x}", "list[1]": "3", "by.k": "{q: *x}"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input, yamltest.References(tc.references...))
+
+			got, err := doc.Decode[job](t.Context())
+			require.NoError(t, err)
+
+			results := map[string]ast.Node{"with": got.With, "by.k": got.By["k"]}
+			if got.Map != nil {
+				results["map"] = got.Map
+			}
+
+			for i, node := range got.List {
+				results["list["+strconv.Itoa(i)+"]"] = node
+			}
+
+			for at, want := range tc.want {
+				node := results[at]
+				require.NotNil(t, node, at)
+				assert.Equal(t, want, node.String(), at)
+
+				path := paths.MustParse("$." + at)
+				assert.Same(t, yamltest.At(t, doc, path).AST(), node, at)
+
+				// The resolver of the document finds the node's own place.
+				resolved, err := doc.DocumentResolver().NodeFrom(node, paths.MustParse("@"))
+				require.NoError(t, err, at)
+				assert.Same(t, node, resolved, at)
+			}
+		})
+	}
+
+	t.Run("resolver follows an alias in the node", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t,
+			"env: &env {region: eu}\nwith: {env: *env}\n",
+			yamltest.References("retry: &retry {max: 3}\n"))
+
+		got, err := doc.Decode[job](t.Context())
+		require.NoError(t, err)
+
+		region, err := doc.DocumentResolver().NodeFrom(got.With, paths.MustParse("@.env.region"))
+		require.NoError(t, err)
+		assert.Equal(t, "eu", region.String())
+	})
+
+	t.Run("node at an alias is the content of its anchor", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"a: &x 1",
+			"env: &x {region: eu}",
+			"with: *x",
+		))
+
+		got, err := doc.Decode[job](t.Context())
+		require.NoError(t, err)
+
+		assert.Equal(t, "{region: eu}", got.With.String())
+		assert.Same(t, yamltest.At(t, doc, paths.MustParse("$.env")).AST(), got.With)
+	})
+
+	t.Run("node of a scoped decode", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"a: &x 1",
+			"b: &x 2",
+			"c: {d: [*x]}",
+		))
+		path := paths.MustParse("$.c.d")
+
+		got, err := doc.DecodeAt[ast.Node](t.Context(), path)
+		require.NoError(t, err)
+		assert.Equal(t, "[*x]", got.String())
+		assert.Same(t, yamltest.At(t, doc, path).AST(), got)
+	})
+
+	t.Run("unmarshaler keeps the node of the decoder", func(t *testing.T) {
+		t.Parallel()
+
+		type wrapper struct {
+			C nodeText `yaml:"c"`
+		}
+
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"a: &x 1",
+			"b: &x 2",
+			"c: [*x]",
+		))
+
+		got, err := doc.Decode[wrapper](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, "[*x [2]]", got.C.text)
+		assert.NotSame(t, yamltest.At(t, doc, paths.MustParse("$.c")).AST(), got.C.node)
+	})
+
+	// The decoder sets a node held by value to a copy that shares its
+	// slices with the tree it reads. The swap must not write below it.
+	t.Run("node held by value", func(t *testing.T) {
+		t.Parallel()
+
+		type valued struct {
+			M ast.MappingNode `yaml:"m"`
+		}
+
+		type counts struct {
+			M map[string]int `yaml:"m"`
+		}
+
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"a: &x 1",
+			"b: &x 2",
+			"m: {k: *x}",
+		))
+		path := paths.MustParse("$.m")
+
+		got, err := doc.Decode[valued](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, "{k: *x}", got.M.String())
+		assert.Equal(t, yamltest.At(t, doc, path).AST(), &got.M)
+
+		// Each later decode of the document reads the tree as it was.
+		for range 2 {
+			c, err := doc.Decode[counts](t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, map[string]int{"k": 2}, c.M)
+		}
+
+		m, err := doc.DecodeAt[*ast.MappingNode](t.Context(), path)
+		require.NoError(t, err)
+		assert.Same(t, yamltest.At(t, doc, path).AST(), m)
+	})
+
+	t.Run("map with a NaN key", func(t *testing.T) {
+		t.Parallel()
+
+		type nanKeys struct {
+			M map[float64]ast.Node `yaml:"m"`
+		}
+
+		tcs := map[string]struct {
+			input  string
+			anchor string
+		}{
+			"anchor name used twice": {
+				input:  "a: &x 1\nb: &x 2\nm: {.nan: {k: *x}, 1.5: 3}\n",
+				anchor: "x",
+			},
+			"one anchor": {
+				input:  "e: &e 1\nm: {.nan: {k: *e}, 1.5: 3}\n",
+				anchor: "e",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input)
+
+				got, err := doc.Decode[nanKeys](t.Context())
+				require.NoError(t, err)
+				require.Len(t, got.M, 2)
+
+				for key, node := range got.M {
+					if math.IsNaN(key) {
+						assert.Equal(t, "{k: *"+tc.anchor+"}", node.String())
+					} else {
+						assert.Equal(t, "3", node.String())
+					}
+				}
+			})
+		}
+	})
+
+	t.Run("map key", func(t *testing.T) {
+		t.Parallel()
+
+		type nodeKeys struct {
+			M map[ast.Node]int `yaml:"m"`
+		}
+
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"a: &x 1",
+			"b: &x 2",
+			"m: {k: *x}",
+		))
+
+		got, err := doc.Decode[nodeKeys](t.Context())
+		require.NoError(t, err)
+		require.Len(t, got.M, 1)
+
+		m, ok := yamltest.At(t, doc, paths.MustParse("$.m")).AST().(*ast.MappingNode)
+		require.True(t, ok)
+
+		for key, value := range got.M {
+			assert.Same(t, m.Values[0].Key, key)
+			assert.Equal(t, 2, value)
+		}
+	})
+
+	t.Run("array", func(t *testing.T) {
+		t.Parallel()
+
+		type pair struct {
+			Pair [2]ast.Node `yaml:"pair"`
+		}
+
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"a: &x 1",
+			"b: &x 2",
+			"pair: [{p: *x}, 3]",
+		))
+
+		got, err := doc.Decode[pair](t.Context())
+		require.NoError(t, err)
+
+		for i, want := range []string{"{p: *x}", "3"} {
+			path := paths.MustParse("$.pair[" + strconv.Itoa(i) + "]")
+			assert.Equal(t, want, got.Pair[i].String())
+			assert.Same(t, yamltest.At(t, doc, path).AST(), got.Pair[i])
+		}
+	})
+
+	t.Run("value that points to itself", func(t *testing.T) {
+		t.Parallel()
+
+		type loop struct {
+			With ast.Node `yaml:"with"`
+			Self *loop    `yaml:"self"`
+		}
+
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"a: &x 1",
+			"b: &x 2",
+			"with: {p: *x}",
+		))
+
+		got := &loop{}
+		got.Self = got
+
+		require.NoError(t, doc.DecodeInto(t.Context(), got))
+		assert.Same(t, got, got.Self)
+		assert.Equal(t, "{p: *x}", got.With.String())
+		assert.Same(t, yamltest.At(t, doc, paths.MustParse("$.with")).AST(), got.With)
 	})
 }
 

@@ -339,3 +339,70 @@ func TestTree_Anchor(t *testing.T) {
 		})
 	}
 }
+
+func TestTree_Original(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		steps []any
+		// The text of the node of the tree that stands for the node at
+		// steps.
+		view string
+	}{
+		"alias in a copy": {
+			input: stringtest.LinesLF("a: &x 1", "c: {d: *x}"),
+			steps: []any{"c"},
+			view:  "{d: *x}",
+		},
+		"alias to a renamed anchor": {
+			input: stringtest.LinesLF("a: &x 1", "b: &x 2", "c: [*x]"),
+			steps: []any{"c"},
+			view:  "[*x [2]]",
+		},
+		"node beside a renamed anchor": {
+			input: stringtest.LinesLF("a: &x 1", "b: &x 2", "c: {d: 3}"),
+			steps: []any{"c"},
+			view:  "{d: 3}",
+		},
+		"integer tag": {
+			input: "c: !!int 7\n",
+			steps: []any{"c"},
+			view:  "!<tag:yaml.org,2002:int> 7",
+		},
+		"alias inside its anchor": {
+			input: "a: &x {b: *x}\n",
+			steps: []any{"a", "b"},
+			view:  "null",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tree, doc := newTree(t, tc.input)
+			node := at(t, doc, tc.steps...)
+
+			view := tree.View(node)
+			assert.Equal(t, tc.view, view.String())
+
+			got, ok := tree.Original(view)
+			require.True(t, ok)
+			assert.Same(t, node, got)
+		})
+	}
+
+	t.Run("node the document does not hold", func(t *testing.T) {
+		t.Parallel()
+
+		tree, _ := newTree(t, "a: 1\n")
+		_, other := newTree(t, "a: 1\n")
+
+		_, ok := tree.Original(at(t, other, "a"))
+		assert.False(t, ok)
+
+		_, ok = tree.Original(nil)
+		assert.False(t, ok)
+	})
+}
