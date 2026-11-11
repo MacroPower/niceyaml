@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -185,11 +186,11 @@ type sourceConfig struct {
 	unmarshalers []Unmarshaler
 	// The bounds on the text that aliases write out for a Source whose
 	// text holds the aliases of another document, such as a Source of
-	// [NewSourceFromDerived]. They apply under noLimits, and in place of
-	// each limit of the Source that reads as 0.
+	// [NewSourceFromDerived]. Each applies in place of a limit of the
+	// Source that is NoLimit.
 	aliasBudget aliasing.Budget
-	// The limits from WithByteLimit and WithDepthLimit, each when its
-	// option set it. A zero limit turns the check off.
+	// The limits from WithByteLimit and WithDepthLimit, or 0 when no
+	// option set them. NoLimit turns the check off.
 	depthLimit int
 	byteLimit  int
 	// Whether errors must not show the text. Excerpts then do not hold any
@@ -197,13 +198,6 @@ type sourceConfig struct {
 	noExcerpts bool
 	// Turns off the alias limit for every reader of the documents.
 	skipAliasLimit bool
-	// Whether WithByteLimit and WithDepthLimit set their limits.
-	byteLimitSet  bool
-	depthLimitSet bool
-	// Says the Source holds text that niceyaml wrote itself, such as the
-	// merged text of layers. Such a Source skips the byte limit and the
-	// depth limit, and the bounds they put on aliases.
-	noLimits bool
 	// Whether a reference Source, or a Source that it reads, has excerpts
 	// off. Excerpts then do not hold any line of the text of a reference
 	// document. The lines of the Source do not hold that text, but the
@@ -224,46 +218,49 @@ const (
 	DefaultDepthLimit = 100
 )
 
-// bytes returns the byte limit of c, or zero when the check is off.
+// NoLimit is the limit that turns a check off. Every integer limit option
+// of the module accepts it, such as [WithByteLimit], [WithDepthLimit], and
+// [go.jacobcolvin.com/niceyaml/schema.WithLoadLimit]. A limit of zero or
+// less keeps the limit as it is, so only NoLimit turns a check off:
+//
+//	src := niceyaml.NewSourceFromBytes(shipped, niceyaml.WithByteLimit(niceyaml.NoLimit))
+//
+// A method that reports a limit, such as [Source.ByteLimit], returns
+// NoLimit when the check is off. A comparison of a size against the limit
+// thus does not need a special case for the check that is off.
+const NoLimit = math.MaxInt
+
+// bytes returns the byte limit of c, or [NoLimit] when the check is off.
 func (c *sourceConfig) bytes() int {
-	switch {
-	case c.noLimits:
-		return 0
-	case c.byteLimitSet:
+	if c.byteLimit > 0 {
 		return c.byteLimit
-	default:
-		return DefaultByteLimit
 	}
+
+	return DefaultByteLimit
 }
 
-// depth returns the depth limit of c, or zero when the check is off.
+// depth returns the depth limit of c, or [NoLimit] when the check is off.
 func (c *sourceConfig) depth() int {
-	switch {
-	case c.noLimits:
-		return 0
-	case c.depthLimitSet:
+	if c.depthLimit > 0 {
 		return c.depthLimit
-	default:
-		return DefaultDepthLimit
 	}
+
+	return DefaultDepthLimit
 }
 
 // budget returns the bounds that the limits of c put on the text that
 // the aliases of a document write out, as [aliasing.Budget] describes.
-// A limit that reads as 0 takes its bound from aliasBudget, which is
-// zero unless the text holds the aliases of another document.
+// A limit that is [NoLimit] takes its bound from aliasBudget, which is
+// zero, and thus off, unless the text holds the aliases of another
+// document.
 func (c *sourceConfig) budget() aliasing.Budget {
-	if c.noLimits {
-		return c.aliasBudget
-	}
-
 	b := aliasing.Budget{Bytes: c.bytes(), Depth: c.depth()}
 
-	if b.Bytes == 0 {
+	if b.Bytes == NoLimit {
 		b.Bytes = c.aliasBudget.Bytes
 	}
 
-	if b.Depth == 0 {
+	if b.Depth == NoLimit {
 		b.Depth = c.aliasBudget.Depth
 	}
 
@@ -272,8 +269,10 @@ func (c *sourceConfig) budget() aliasing.Budget {
 
 // WithByteLimit is a [SourceOption] that sets the most bytes a [Source]
 // reads from a file or a reader, and the most it parses. Without the
-// option, the limit is [DefaultByteLimit]. A limit of 0 turns the check
-// off, and a negative limit counts as 0.
+// option, the limit is [DefaultByteLimit]. [NoLimit] turns the check off.
+// A limit of zero or less keeps the limit as it is. An unset field of a
+// configuration thus keeps the default. Given more than once, the last
+// option with a positive limit wins.
 //
 // The go-yaml parser takes time and memory that grow faster than the text
 // of one document. The limit thus bounds the slowest file that a program
@@ -316,14 +315,17 @@ func (c *sourceConfig) budget() aliasing.Budget {
 // lets their aliases repeat.
 func WithByteLimit(n int) SourceOption {
 	return func(c *sourceConfig) {
-		c.byteLimit, c.byteLimitSet = max(0, n), true
+		if n > 0 {
+			c.byteLimit = n
+		}
 	}
 }
 
 // WithDepthLimit is a [SourceOption] that sets the most levels a document
 // of the [Source] nests. Without the option, the limit is
-// [DefaultDepthLimit]. A limit of 0 turns the check off, and a negative
-// limit counts as 0.
+// [DefaultDepthLimit]. [NoLimit] turns the check off. A limit of zero or
+// less keeps the limit as it is, as [WithByteLimit] describes. Given more
+// than once, the last option with a positive limit wins.
 //
 // The depth counts each mapping and each sequence on the way from the root
 // of the document to its deepest value. A flow collection opens a level
@@ -349,20 +351,23 @@ func WithByteLimit(n int) SourceOption {
 // limit, because each layer passed it with its aliases written out.
 func WithDepthLimit(n int) SourceOption {
 	return func(c *sourceConfig) {
-		c.depthLimit, c.depthLimitSet = max(0, n), true
+		if n > 0 {
+			c.depthLimit = n
+		}
 	}
 }
 
 // WithoutLimits is a [SourceOption] that turns off the byte limit and
-// the depth limit of the [Source], whatever [WithByteLimit] and
-// [WithDepthLimit] set before or after it. The option fits a text that
-// passed the limits already, such as a copy of a document that keeps each
-// of its lines. It also turns off the bounds that the limits put on the
-// aliases of the documents, except in a Source of [NewSourceFromDerived],
-// which keeps the bounds of its home document.
+// the depth limit of the [Source], as [WithByteLimit] and
+// [WithDepthLimit] given [NoLimit] do. The options apply in order, so a
+// later WithByteLimit or WithDepthLimit sets its limit again. The option
+// fits a text that passed the limits already, such as a copy of a
+// document that keeps each of its lines. It also turns off the bounds
+// that the limits put on the aliases of the documents. A Source of
+// [NewSourceFromDerived] keeps the alias bounds of its home document.
 func WithoutLimits() SourceOption {
 	return func(c *sourceConfig) {
-		c.noLimits = true
+		c.byteLimit, c.depthLimit = NoLimit, NoLimit
 	}
 }
 
@@ -377,16 +382,10 @@ func newSourceConfig(opts []SourceOption) sourceConfig {
 	return c
 }
 
-// pinned returns the settings of c for a Source of another text. It
-// clears noLimits. It sets the byte limit and the depth limit to those
-// that c applies, as [Source.ByteLimit] and [Source.DepthLimit] report
-// them. A Source that skips the limits thus gives one that skips them
-// too, because both its limits read as 0 and a limit of 0 turns the
-// check off.
-//
-// The result keeps aliasBudget when c sets noLimits, and clears it
-// otherwise. A copy of a Source of [NewSourceFromDerived] under
-// [WithoutLimits] thus keeps the alias bounds of its home document.
+// pinned returns the settings of c for a Source of another text. The
+// result keeps the limits of c and its aliasBudget. A copy of a Source of
+// [NewSourceFromDerived] thus keeps the alias bounds of its home document
+// wherever a limit of the copy is [NoLimit].
 //
 // The references of the result have no room past their length. A
 // [WithReferences] applied over the result thus appends to a slice of its
@@ -394,13 +393,6 @@ func newSourceConfig(opts []SourceOption) sourceConfig {
 func (c *sourceConfig) pinned() sourceConfig {
 	out := *c
 	out.references = slices.Clip(c.references)
-	out.byteLimit, out.byteLimitSet = c.bytes(), true
-	out.depthLimit, out.depthLimitSet = c.depth(), true
-	out.noLimits = false
-
-	if !c.noLimits {
-		out.aliasBudget = aliasing.Budget{}
-	}
 
 	return out
 }
@@ -412,7 +404,7 @@ func limitError(n int) error {
 }
 
 // readLimited reads r to its end, or to one byte past limit when limit is
-// greater than zero. It returns the error of [limitError] for a text past
+// less than [NoLimit]. It returns the error of [limitError] for a text past
 // the limit.
 func readLimited(r io.Reader, limit int) ([]byte, error) {
 	data, err := limitread.ReadAll(r, limit)
@@ -420,7 +412,7 @@ func readLimited(r io.Reader, limit int) ([]byte, error) {
 		return nil, err //nolint:wrapcheck // The caller wraps the error.
 	}
 
-	if limit > 0 && len(data) > limit {
+	if len(data) > limit {
 		return nil, limitError(limit)
 	}
 
@@ -906,7 +898,7 @@ func limitSourceError(cfg sourceConfig, err error) error {
 }
 
 // readFile reads the file at path from disk, to one byte past limit when
-// limit is greater than zero, as [readLimited] reads it.
+// limit is less than [NoLimit], as [readLimited] reads it.
 func readFile(path string, limit int) ([]byte, error) {
 	f, err := os.Open(path) //nolint:gosec // User-provided file paths are intentional.
 	if err != nil {
@@ -1187,14 +1179,18 @@ func (s *Source) ShowsExcerpts() bool {
 
 // ByteLimit returns the most bytes the [Source] reads from a file or a
 // reader, and the most it parses, as [WithByteLimit] sets it, or
-// [DefaultByteLimit] without the option. It returns 0 when the check is
-// off, for a Source whose text niceyaml wrote, such as one of
+// [DefaultByteLimit] without the option. It returns [NoLimit] when the
+// check is off, as for a Source whose text niceyaml wrote, such as one of
 // [NewSourceFromLayers], and for a nil Source. A program that rewrites the
 // file of the Source checks the new text against it before the write, so
-// the next read of the file passes.
+// the next read of the file passes:
+//
+//	if len(next) > src.ByteLimit() {
+//		return errTooLarge
+//	}
 func (s *Source) ByteLimit() int {
 	if s == nil {
-		return 0
+		return NoLimit
 	}
 
 	return s.bytes()
@@ -1202,12 +1198,12 @@ func (s *Source) ByteLimit() int {
 
 // DepthLimit returns the most levels a document of the [Source] nests,
 // as [WithDepthLimit] sets it, or [DefaultDepthLimit] without the
-// option. It returns 0 when the check is off, for a Source whose text
-// niceyaml wrote, such as one of [NewSourceFromLayers], and for a nil
-// Source.
+// option. It returns [NoLimit] when the check is off, as for a Source
+// whose text niceyaml wrote, such as one of [NewSourceFromLayers], and for
+// a nil Source.
 func (s *Source) DepthLimit() int {
 	if s == nil {
-		return 0
+		return NoLimit
 	}
 
 	return s.depth()
@@ -1786,7 +1782,7 @@ func (s *Source) parse() *parsedFile {
 // then holds one document, which carries that error and every token of
 // tks. The limit goes first, so the encoding check reads a bounded text.
 func (s *Source) parseTokens(tks token.Tokens) *docparse.Result {
-	if limit := s.bytes(); limit > 0 && s.size() > limit {
+	if limit := s.bytes(); s.size() > limit {
 		return docparse.Fail(tks, limitError(limit))
 	}
 

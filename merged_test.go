@@ -1332,7 +1332,12 @@ func TestNewSourceFromLayers_Decode_SourceSettings(t *testing.T) {
 		// With the byte limit off, the aliases still make up too much of
 		// the text. Every alias repeats the same text, so the error binds
 		// at the first.
-		unbounded := yamltest.FirstDocument(t, input, niceyaml.WithName("prod.yaml"), niceyaml.WithByteLimit(0))
+		unbounded := yamltest.FirstDocument(
+			t,
+			input,
+			niceyaml.WithName("prod.yaml"),
+			niceyaml.WithByteLimit(niceyaml.NoLimit),
+		)
 
 		_, err = niceyaml.NewSourceFromLayers(t.Context(), []*niceyaml.Node{unbounded})
 		require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
@@ -6604,7 +6609,7 @@ func TestNewSourceFromLayers_AliasExpansion(t *testing.T) {
 		},
 		"aliases with the byte limit off": {
 			input: repeated,
-			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(0)},
+			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(niceyaml.NoLimit)},
 		},
 		"aliases with the alias limit off": {
 			input: repeated,
@@ -6628,7 +6633,7 @@ func TestNewSourceFromLayers_AliasExpansion(t *testing.T) {
 		},
 		"alias chain with the depth limit off": {
 			input: yamltest.AliasChain(150),
-			opts:  []niceyaml.SourceOption{niceyaml.WithDepthLimit(0)},
+			opts:  []niceyaml.SourceOption{niceyaml.WithDepthLimit(niceyaml.NoLimit)},
 		},
 	}
 

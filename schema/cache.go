@@ -50,12 +50,14 @@ import (
 // a limit, as the Untrusted Documents section of the package
 // documentation describes.
 //
-// By default the registry keeps every entry. A limit of 0 removes a
-// limit, and a negative limit counts as 0. Given more than once, the last
-// option wins.
+// By default the registry keeps every entry, as [niceyaml.NoLimit]
+// sets. A limit of zero or less keeps the limit as it is. Given more than
+// once, the last option with a positive limit wins.
 func WithCacheLimit(n int) RegistryOption {
 	return func(c *registryConfig) {
-		c.cacheLimit = max(n, 0)
+		if n > 0 {
+			c.cacheLimit = n
+		}
 	}
 }
 
@@ -86,7 +88,7 @@ type cache struct {
 }
 
 // newCache creates a new [cache] that keeps at most limit schemas and at
-// most limit documents, or any number for a limit of 0. The cache drops
+// most limit documents, or any number for [niceyaml.NoLimit]. The cache drops
 // a failure retryAfter after it happened.
 func newCache(limit int, retryAfter time.Duration) *cache {
 	c := &cache{
@@ -366,7 +368,7 @@ type lru[K comparable, V any] struct {
 	recent     list.List  // the item of each key, most recently used first
 	failures   list.List  // the items that record a failure, oldest first
 	retryAfter time.Duration
-	limit      int // the most items the lru keeps, or 0 for no limit
+	limit      int // the most items the lru keeps, or niceyaml.NoLimit for no limit
 }
 
 // An lruItem is a value that an [lru] keeps, with its key and its place
@@ -382,7 +384,7 @@ type lruItem[K comparable, V any] struct {
 }
 
 // newLRU creates a new [lru] that keeps at most limit values, or any
-// number for a limit of 0. The lru drops a failure retryAfter after it
+// number for [niceyaml.NoLimit]. The lru drops a failure retryAfter after it
 // happened, and it calls release with each value that it drops.
 func newLRU[K comparable, V any](limit int, retryAfter time.Duration, release func(K, V)) *lru[K, V] {
 	return &lru[K, V]{
@@ -448,7 +450,7 @@ func (c *lru[K, V]) keep(key K, v V, failedAt time.Time) V {
 
 	c.items[key] = item
 
-	for c.limit > 0 && len(c.items) > c.limit {
+	for len(c.items) > c.limit {
 		c.remove(itemOf[K, V](c.recent.Back()))
 	}
 

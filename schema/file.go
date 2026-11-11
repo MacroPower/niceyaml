@@ -697,7 +697,7 @@ func (f rootFiles) Stat(name string) (fs.FileInfo, error) {
 // path can change after the check of the caller, so readBounded checks
 // again that f is a regular file. It refuses a file of more than limit
 // bytes, the same limit that a schema fetched from a URL has, and a limit
-// of 0 or less reads a file of any size. Each error is a [*FetchError]
+// of [math.MaxInt] reads a file of any size. Each error is a [*FetchError]
 // that names the file by name.
 func readBounded(f fs.File, name string, limit int) ([]byte, error) {
 	info, err := f.Stat()
@@ -714,7 +714,7 @@ func readBounded(f fs.File, name string, limit int) ([]byte, error) {
 		return nil, readError(name, err)
 	}
 
-	if limit > 0 && len(data) > limit {
+	if len(data) > limit {
 		return nil, readError(name, httpfetch.TooLarge("file", limit))
 	}
 

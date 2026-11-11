@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
@@ -118,12 +119,16 @@ func TestWithCacheLimit(t *testing.T) {
 				opts: []schema.RegistryOption{schema.WithCacheLimit(3)},
 				want: 3,
 			},
-			"zero after a positive limit removes it": {
+			"zero after a positive limit keeps it": {
 				opts: []schema.RegistryOption{schema.WithCacheLimit(3), schema.WithCacheLimit(0)},
-				want: 8,
+				want: 3,
 			},
-			"negative after a positive limit removes it": {
+			"negative after a positive limit keeps it": {
 				opts: []schema.RegistryOption{schema.WithCacheLimit(3), schema.WithCacheLimit(-1)},
+				want: 3,
+			},
+			"NoLimit after a positive limit removes it": {
+				opts: []schema.RegistryOption{schema.WithCacheLimit(3), schema.WithCacheLimit(niceyaml.NoLimit)},
 				want: 8,
 			},
 			"last limit wins": {

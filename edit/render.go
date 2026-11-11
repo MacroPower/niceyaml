@@ -873,7 +873,7 @@ func cut(s string) string {
 // first document of text with content, as go-yaml's encoder reads the
 // YAML of a marshaler.
 func encodedDoc(text string) (*Doc, error) {
-	src := niceyaml.NewSourceFromString(text, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0),
+	src := niceyaml.NewSourceFromString(text, niceyaml.WithoutLimits(),
 		niceyaml.WithAliasLimit(false), niceyaml.WithAllowDuplicateKeys(true))
 
 	var node *niceyaml.Node

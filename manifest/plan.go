@@ -430,7 +430,7 @@ func newText(text string, docs []*docState) string {
 // [niceyaml.IsInvalid] does not report the problem.
 func checkLimits(src *niceyaml.Source, after string) error {
 	bytes := src.ByteLimit()
-	if bytes <= 0 || len(after) <= bytes {
+	if len(after) <= bytes {
 		return nil
 	}
 

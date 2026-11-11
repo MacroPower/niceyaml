@@ -89,6 +89,11 @@ func validateCmd(storeOpts ...schemastore.Option) *cobra.Command {
 			"are invalid too.",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			sourceOpts, err := limits.options()
+			if err != nil {
+				return err
+			}
+
 			// Expand glob patterns.
 			yamlPaths, err := expandPaths(args...)
 			if err != nil {
@@ -156,7 +161,7 @@ func validateCmd(storeOpts ...schemastore.Option) *cobra.Command {
 				// default excerpt options, which Detach keeps. In strict
 				// mode, the report of a file that passes with warnings
 				// fails it too.
-				err := validateFile(warnings.Context(cmd.Context()), yamlPath, reg, limits.options()...)
+				err := validateFile(warnings.Context(cmd.Context()), yamlPath, reg, sourceOpts...)
 				if err != nil || strict {
 					err = warnings.Report(err)
 				}

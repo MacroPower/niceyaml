@@ -363,8 +363,8 @@ func TestNewSourceFromDerived(t *testing.T) {
 
 		work := niceyaml.NewSourceFromDerived("a: {b: {c: 123456}}\n", doc, nil, niceyaml.WithoutLimits())
 
-		assert.Equal(t, 0, work.ByteLimit())
-		assert.Equal(t, 0, work.DepthLimit())
+		assert.Equal(t, niceyaml.NoLimit, work.ByteLimit())
+		assert.Equal(t, niceyaml.NoLimit, work.DepthLimit())
 
 		got, err := work.Decode[map[string]any](t.Context())
 		require.NoError(t, err)

@@ -3124,7 +3124,7 @@ func TestCustomUnmarshaler(t *testing.T) {
 		)
 
 		deep := strings.Repeat("[", 150) + strings.Repeat("]", 150)
-		doc := yamltest.FirstDocument(t, "deep: "+deep+"\n", niceyaml.WithDepthLimit(0))
+		doc := yamltest.FirstDocument(t, "deep: "+deep+"\n", niceyaml.WithDepthLimit(niceyaml.NoLimit))
 
 		got, err := doc.Decode[map[string]nested](t.Context(), values)
 		require.NoError(t, err)
@@ -7804,7 +7804,7 @@ func TestErrDecode(t *testing.T) {
 			},
 			"depth limit": {
 				input:  "a: " + strings.Repeat("[", 10005) + strings.Repeat("]", 10005) + "\n",
-				source: []niceyaml.SourceOption{niceyaml.WithDepthLimit(0)},
+				source: []niceyaml.SourceOption{niceyaml.WithDepthLimit(niceyaml.NoLimit)},
 				line:   0,
 				msg:    "exceeded max depth",
 			},
@@ -8713,7 +8713,7 @@ func TestDocument_Decode_AliasExpansion(t *testing.T) {
 		"custom unmarshaler of an alias chain with the depth limit off": {
 			input:  yamltest.AliasChain(150),
 			target: func() any { return new(map[string]aliasValue) },
-			opts:   []niceyaml.SourceOption{niceyaml.WithDepthLimit(0)},
+			opts:   []niceyaml.SourceOption{niceyaml.WithDepthLimit(niceyaml.NoLimit)},
 			decode: []niceyaml.DecodeOption{customValue},
 		},
 		"alias chain without a custom unmarshaler": {
@@ -11831,7 +11831,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 		// takes no longer for it.
 		const depth = 4000
 
-		_, err := yamltest.FirstDocument(t, deepDocument(depth), niceyaml.WithDepthLimit(0)).Decode[problemDeep](
+		_, err := yamltest.FirstDocument(t, deepDocument(depth), niceyaml.WithDepthLimit(niceyaml.NoLimit)).Decode[problemDeep](
 			t.Context(),
 		)
 		require.ErrorIs(t, err, niceyaml.ErrDecode)

@@ -169,8 +169,8 @@ type registryConfig struct {
 	compileOpts []CompileOption
 	access      accessConfig  // the files on disk that the registry reads and the URLs that it fetches
 	retryAfter  time.Duration // how long the registry remembers a failure
-	cacheLimit  int           // the most entries that each cache keeps, or 0 for unlimited
-	loadLimit   int           // the most bytes of each schema document that the registry reads, or 0 for unlimited
+	cacheLimit  int           // the most entries that each cache keeps, or niceyaml.NoLimit
+	loadLimit   int           // the most bytes of each schema document that the registry reads, or niceyaml.NoLimit
 	// Makes Check report ErrNoMatch when every resolver declines.
 	requireSchema bool
 	// Whether WithAccess gave the registry its access. A registry without
@@ -362,6 +362,7 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 		client:        defaultHTTPClient,
 		access:        accessConfig{anyFile: true, anyURL: true},
 		retryAfter:    defaultRetryAfter,
+		cacheLimit:    niceyaml.NoLimit,
 		loadLimit:     DefaultLoadLimit,
 		requireSchema: true,
 	}

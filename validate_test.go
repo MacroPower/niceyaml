@@ -2131,7 +2131,11 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				dd := yamltest.AtOrSelf(t, yamltest.FirstDocument(t, tc.input, niceyaml.WithDepthLimit(0)), tc.at)
+				dd := yamltest.AtOrSelf(
+					t,
+					yamltest.FirstDocument(t, tc.input, niceyaml.WithDepthLimit(niceyaml.NoLimit)),
+					tc.at,
+				)
 
 				err := dd.DecodeInto(t.Context(), tc.target)
 

@@ -984,7 +984,7 @@ func (n *Node) decodeValue(ctx context.Context, text []byte, dst any, cfg decode
 		// The decoder wrote the text from a node that passed the limits of
 		// its own Source. The decode checked the aliases of that node
 		// against the bounds of those limits before the decoder wrote it.
-		c.noLimits = true
+		c.byteLimit, c.depthLimit = NoLimit, NoLimit
 	})
 
 	doc, err := source.Document()

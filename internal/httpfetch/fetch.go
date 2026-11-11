@@ -63,7 +63,7 @@ func (e sizeError) Is(target error) bool {
 // Get performs an HTTP GET for rawURL with client and returns the body. It
 // rejects any status other than 200 OK and any body of more than limit
 // bytes. The error of a body past the limit wraps the error of
-// [TooLarge]. A limit of 0 or less reads a body of any size.
+// [TooLarge]. A limit of [math.MaxInt] reads a body of any size.
 //
 // Get refuses a URL that does not parse, an http or https URL with an
 // empty host, and a URL whose host ends in a colon before an "@". It
@@ -156,7 +156,7 @@ func Get(ctx context.Context, client *http.Client, rawURL string, limit int) ([]
 		return nil, &Error{URL: name, StatusCode: resp.StatusCode, Err: fmt.Errorf("read response: %w", err)}
 	}
 
-	if limit > 0 && len(data) > limit {
+	if len(data) > limit {
 		return nil, &Error{URL: name, StatusCode: resp.StatusCode, Err: TooLarge("response", limit)}
 	}
 

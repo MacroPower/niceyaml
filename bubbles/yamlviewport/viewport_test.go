@@ -650,7 +650,10 @@ func setRevision(m *yamlviewport.Model, doc string) {
 func addRevisions(m *yamlviewport.Model, docs ...string) {
 	for _, doc := range docs {
 		name := fmt.Sprintf("v%d", m.RevisionCount()+1)
-		addRevision(m, niceyaml.NewSourceFromString(doc, niceyaml.WithName(name), niceyaml.WithByteLimit(0)))
+		addRevision(
+			m,
+			niceyaml.NewSourceFromString(doc, niceyaml.WithName(name), niceyaml.WithByteLimit(niceyaml.NoLimit)),
+		)
 	}
 }
 
@@ -3813,7 +3816,7 @@ func TestViewport_SameDiffBaseKeepsPosition(t *testing.T) {
 // notedRevision returns a revision named name over doc. Each line in notes
 // carries an annotation above it that reads "note" and takes one row.
 func notedRevision(name, doc string, notes ...int) yamlviewport.Revision {
-	view := niceyaml.NewSourceFromString(doc, niceyaml.WithName(name), niceyaml.WithByteLimit(0)).View()
+	view := niceyaml.NewSourceFromString(doc, niceyaml.WithName(name), niceyaml.WithByteLimit(niceyaml.NoLimit)).View()
 
 	for _, i := range notes {
 		view.AnnotateLine(i, line.Annotation{Content: "note", Placement: line.Above})

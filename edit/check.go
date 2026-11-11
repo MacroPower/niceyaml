@@ -1054,7 +1054,7 @@ func (d *Doc) limitProblem(start string) error {
 
 	var problem error
 
-	if size := len(src.Text()) - (d.end - d.start) + len(d.cur); bytes > 0 && size > bytes {
+	if size := len(src.Text()) - (d.end - d.start) + len(d.cur); size > bytes {
 		problem = d.bindOwn(niceyaml.Unchecked(&limitError{msg: "file is larger than " + quantity.Bytes(bytes)},
 			niceyaml.AtPath(paths.Doc())))
 	} else if tk, deep := docparse.TooDeep(d.src.Tokens(), depth); deep && tk.Position != nil {

@@ -1,6 +1,7 @@
 package docparse
 
 import (
+	"math"
 	"strconv"
 
 	"github.com/goccy/go-yaml/token"
@@ -31,7 +32,7 @@ type blockLevel struct {
 
 // TooDeep returns the first token of run that opens a level past limit,
 // and true, or nil and false when the documents of run do not nest that
-// deep. A limit of zero or less disables the check. [ParseDepth] runs the
+// deep. A limit of [math.MaxInt] disables the check. [ParseDepth] runs the
 // check on each run of documents.
 //
 // A flow collection opens a level at its "[" or "{". A block collection
@@ -42,7 +43,7 @@ type blockLevel struct {
 // expands them, so an alias does not open a level. Each document counts
 // from zero.
 func TooDeep(run token.Tokens, limit int) (*token.Token, bool) {
-	if limit <= 0 {
+	if limit == math.MaxInt {
 		return nil, false
 	}
 

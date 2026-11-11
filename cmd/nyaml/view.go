@@ -22,12 +22,17 @@ func viewCmd() *cobra.Command {
 		Short: "View YAML files with syntax highlighting",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			sourceOpts, err := limits.options()
+			if err != nil {
+				return err
+			}
+
 			paths, err := expandPaths(args...)
 			if err != nil {
 				return err
 			}
 
-			sources, err := loadSources(paths, limits.options()...)
+			sources, err := loadSources(paths, sourceOpts...)
 			if err != nil {
 				return err
 			}

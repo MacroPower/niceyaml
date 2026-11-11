@@ -153,15 +153,14 @@ func References(inputs ...string) niceyaml.SourceOption {
 	return niceyaml.WithReferences(refs...)
 }
 
-// NoSizeLimits returns [niceyaml.WithByteLimit] and
-// [niceyaml.WithDepthLimit] with a limit of 0, followed by opts. Those
-// options turn off the byte limit and the depth limit of a
+// NoSizeLimits returns [niceyaml.WithoutLimits], followed by opts. The
+// option turns off the byte limit and the depth limit of a
 // [*niceyaml.Source]. A test or a benchmark that reads a large or deeply
-// nested document passes them:
+// nested document passes it:
 //
 //	doc := yamltest.FirstDocument(b, input, yamltest.NoSizeLimits()...)
 //
 // The alias limit stays on.
 func NoSizeLimits(opts ...niceyaml.SourceOption) []niceyaml.SourceOption {
-	return append([]niceyaml.SourceOption{niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0)}, opts...)
+	return append([]niceyaml.SourceOption{niceyaml.WithoutLimits()}, opts...)
 }

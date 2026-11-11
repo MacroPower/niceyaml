@@ -183,7 +183,7 @@ func TestReferenceWeights(t *testing.T) {
 		"text of many aliases to a scalar": {
 			refs:    []string{"s: &s " + strings.Repeat("x", 2000) + "\n"},
 			input:   "v: " + yamltest.FlowSequence("*s", 500) + "\n",
-			opts:    []niceyaml.SourceOption{niceyaml.WithByteLimit(0)},
+			opts:    []niceyaml.SourceOption{niceyaml.WithByteLimit(niceyaml.NoLimit)},
 			text:    true,
 			want:    "1:5: " + ratio,
 			oneFile: true,
@@ -194,7 +194,7 @@ func TestReferenceWeights(t *testing.T) {
 			// 150 aliases then repeat too large a share of that text.
 			refs:    []string{wide},
 			input:   "v: " + yamltest.FlowSequence("*d", 150) + "\n",
-			opts:    []niceyaml.SourceOption{niceyaml.WithByteLimit(0)},
+			opts:    []niceyaml.SourceOption{niceyaml.WithByteLimit(niceyaml.NoLimit)},
 			text:    true,
 			want:    "1:5: " + ratio,
 			oneFile: true,
@@ -443,9 +443,12 @@ func TestReferenceWeights(t *testing.T) {
 		"text of an alias to a loop of names without the byte and depth limits": {
 			refs:  []string{loop},
 			input: "v: *x\n",
-			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0)},
-			text:  true,
-			want:  "1:4: " + ratio,
+			opts: []niceyaml.SourceOption{
+				niceyaml.WithByteLimit(niceyaml.NoLimit),
+				niceyaml.WithDepthLimit(niceyaml.NoLimit),
+			},
+			text: true,
+			want: "1:4: " + ratio,
 		},
 		"loop of names through an anchor inside another anchor": {
 			// A decode that reads o registers the anchor x inside it, and
@@ -550,7 +553,7 @@ func TestReferenceWeights(t *testing.T) {
 			// the alias does, so the alias repeats half of the read.
 			refs:    []string{"d: &d " + yamltest.FlowSequence(strings.Repeat("x", 200), 10) + "\n"},
 			input:   "v: *d\n",
-			opts:    []niceyaml.SourceOption{niceyaml.WithByteLimit(0)},
+			opts:    []niceyaml.SourceOption{niceyaml.WithByteLimit(niceyaml.NoLimit)},
 			text:    true,
 			oneFile: true,
 		},
@@ -616,7 +619,7 @@ func TestReferenceWeights(t *testing.T) {
 			// of each alias copies them.
 			refs:    []string{"a: &a {b: &b " + yamltest.FlowSequence(strings.Repeat("x", 200), 10) + "}\n"},
 			input:   "v: " + yamltest.FlowSequence("*a", 500) + "\n",
-			opts:    []niceyaml.SourceOption{niceyaml.WithByteLimit(0)},
+			opts:    []niceyaml.SourceOption{niceyaml.WithByteLimit(niceyaml.NoLimit)},
 			text:    true,
 			want:    "1:5: " + ratio,
 			oneFile: true,

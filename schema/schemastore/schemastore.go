@@ -252,12 +252,15 @@ func WithRetryAfter(interval time.Duration) Option {
 // The limit covers only the catalog. The registry reads each schema that
 // the catalog names within the limit of [schema.WithLoadLimit].
 //
-// The default is [schema.DefaultLoadLimit]. A limit of 0 removes it, so
-// the store reads a catalog of any size, and a negative limit counts as
-// 0. Given more than once, the last option wins.
+// The default is [schema.DefaultLoadLimit]. [niceyaml.NoLimit] removes
+// it, so the store reads a catalog of any size. A limit of zero or less
+// keeps the limit as it is, as [WithRetryAfter] keeps its interval. Given
+// more than once, the last option with a positive limit wins.
 func WithLoadLimit(n int) Option {
 	return func(c *config) {
-		c.loadLimit = max(n, 0)
+		if n > 0 {
+			c.loadLimit = n
+		}
 	}
 }
 

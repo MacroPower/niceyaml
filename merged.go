@@ -710,7 +710,7 @@ func newMergedSource(from *Source, text string, excerpts bool, merge mergeConfig
 		// The merged text is text niceyaml wrote. It holds the content of
 		// the layers and no more than the bounds of their limits let their
 		// aliases add.
-		c.noLimits = true
+		c.byteLimit, c.depthLimit = NoLimit, NoLimit
 	})
 
 	src.parsed.get(src.parse)
