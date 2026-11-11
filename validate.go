@@ -26,13 +26,14 @@ import (
 // It walks v and calls Validate on every value in it that implements
 // [SelfValidator]. It calls ValidateContext with ctx on every value that
 // implements [SelfValidatorContext]. It also runs each function of
-// [WithValueCheck] in opts on the values of its type. It binds what they
-// report as [Node.Bind] binds an error, with each `@` path under the path of
-// its value in the node. It returns nil when every check passes. It runs the
-// walk whatever [WithSelfValidation] says, and it does not run a [Validator].
-// A program that fills v after the decode, such as from its environment, calls
-// SelfValidate after v is complete, as the Validation section of the package
-// documentation describes:
+// [WithValueCheck] and [WithNodeCheck] in opts on the values of its type. Each
+// function of WithNodeCheck gets the Node of its value below this Node, as
+// WithNodeCheck describes. It binds what they report as [Node.Bind] binds an
+// error, with each `@` path under the path of its value in the node. It returns
+// nil when every check passes. It runs the walk whatever [WithSelfValidation]
+// says, and it does not run a [Validator]. A program that fills v after the
+// decode, such as from its environment, calls SelfValidate after v is complete,
+// as the Validation section of the package documentation describes:
 //
 //	if err := doc.DecodeInto(ctx, &cfg, settings, niceyaml.WithSelfValidation(false)); err != nil {
 //		return err
@@ -47,11 +48,11 @@ import (
 // [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] and binds the
 // result with Node.Bind.
 //
-// On a value that did not change after the decode, SelfValidate returns
-// what the decode with the walk on returns, given the same functions of
-// WithValueCheck. To spell each map key as the document does, the walk
-// decodes the keys with the settings of the [Source], the unmarshalers of
-// [WithUnmarshalers] among them. A program that gives its unmarshalers to
+// On a value that did not change after the decode, SelfValidate returns what
+// the decode with the walk on returns, given the same functions of
+// WithValueCheck and WithNodeCheck. To spell each map key as the document does,
+// the walk decodes the keys with the settings of the [Source], the unmarshalers
+// of [WithUnmarshalers] among them. A program that gives its unmarshalers to
 // the Source thus does not pass them here. The decodes of the keys drop the
 // warnings that every unmarshaler they run hands to its context.
 //
@@ -107,7 +108,9 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error 
 //
 // SelfValidateValue runs each function of [WithValueCheck] in opts on the
 // values of its type, as Node.SelfValidate does. A server thus checks the
-// body of a request with the functions it gives a decode. SelfValidateValue
+// body of a request with the functions it gives a decode. Each function of
+// [WithNodeCheck] gets a nil Node, because the value does not have a
+// document. SelfValidateValue
 // recognizes a type that decodes itself through its own unmarshaler
 // method or through an unmarshaler of [WithUnmarshaler] in opts. It does
 // not read any other option. The value does not have a [Source], so the
@@ -167,12 +170,12 @@ func SelfValidateValue(ctx context.Context, v any, opts ...DecodeOption) error {
 
 // walkSelfValidators runs the method of every [SelfValidator] and
 // [SelfValidatorContext] in v, which is a non-nil pointer or a value that is
-// not a pointer. It also runs the functions of cfg from [WithValueCheck] on
-// the values of their types. It joins the errors under the path of each value
-// in the document of n, and it returns the failures and then the warnings. A
-// nil n stands for a value outside any document. The warnings are those that
-// each check returns and those that each check hands to its context,
-// whether the check passes or fails.
+// not a pointer. It also runs the functions of cfg from [WithValueCheck] and
+// [WithNodeCheck] on the values of their types. It joins the errors under the
+// path of each value in the document of n, and it returns the failures and then
+// the warnings. A nil n stands for a value outside any document. The warnings
+// are those that each check returns and those that each check hands to its
+// context, whether the check passes or fails.
 func walkSelfValidators(ctx context.Context, v any, n *Node, cfg decodeConfig) (error, error) {
 	w := selfWalker{
 		ctx:      ctx,
@@ -195,10 +198,10 @@ func walkSelfValidators(ctx context.Context, v any, n *Node, cfg decodeConfig) (
 
 // selfWalker collects the errors of the [SelfValidator] and
 // [SelfValidatorContext] values in a decoded value, and of the functions from
-// [WithValueCheck]. It runs every check on every value it reaches, whatever
-// the other checks return. It walks each pointer, map, and slice once. A value
-// that two paths share thus reports its errors under the first path, and the
-// walk does not follow a back edge of a cycle.
+// [WithValueCheck] and [WithNodeCheck]. It runs every check on every value it
+// reaches, whatever the other checks return. It walks each pointer, map, and
+// slice once. A value that two paths share thus reports its errors under the
+// first path, and the walk does not follow a back edge of a cycle.
 type selfWalker struct {
 	ctx context.Context
 	// The context of the decodes that spell the map keys, which drops
@@ -233,7 +236,8 @@ type selfWalker struct {
 	// node of its own value, after [selfWalker.nodeOf] resolves it.
 	start step
 	// The settings of the decode, which name the types its options give
-	// an unmarshaler and hold the functions from [WithValueCheck].
+	// an unmarshaler and hold the functions from [WithValueCheck] and
+	// [WithNodeCheck].
 	cfg decodeConfig
 	// Whether the walk is below a map entry whose path names the entries
 	// of several keys, as [selfWalker.walkEntries] finds one. The path of
@@ -525,12 +529,13 @@ var (
 	noCheckedTypes = &checkedTypes{}
 )
 
-// checkedTypes is a set of types that functions from [WithValueCheck] check,
-// with the answers about each type that the walk prunes by. A validator of the
-// walk is a value that implements [SelfValidator] or [SelfValidatorContext],
-// or whose type the set holds. [checkedTypesOf] returns one instance for each
-// set, so every walk with the same set shares the answers. The walks without a
-// function share the answers of [noCheckedTypes].
+// checkedTypes is a set of types that functions from [WithValueCheck] and
+// [WithNodeCheck] check, with the answers about each type that the walk
+// prunes by. A validator of the walk is a value that implements
+// [SelfValidator] or [SelfValidatorContext], or whose type the set holds.
+// [checkedTypesOf] returns one instance for each set, so every walk with the
+// same set shares the answers. The walks without a function share the
+// answers of [noCheckedTypes].
 type checkedTypes struct {
 	// Maps each type t that sorts after types to the set that holds types
 	// and t.
@@ -1021,15 +1026,15 @@ func selfCheckOf(t reflect.Type) selfCheck {
 	})
 }
 
-// validate runs the method of v that [selfCheckOf] names, through a copy
-// when v is not addressable. It runs ValidateContext as it runs a function
-// of [WithValueCheck]. It then runs each function of the walk from
-// WithValueCheck for the type of v, in order. Every check runs and reports
-// its own failure, whatever the checks before it return. Rebasing the
-// error of the method or of a function under at presumes every problem
-// invalid, unless an Error from [Unchecked] sits on its cause chain. Each
-// such problem matches [errInvalid] whether it has a location or not.
-// [selfWalker.report] describes the errors that the presumption skips.
+// validate runs the method of v that [selfCheckOf] names, through a copy when v
+// is not addressable. It runs ValidateContext as it runs a function of
+// [WithValueCheck]. It then runs each function of the walk from WithValueCheck
+// and [WithNodeCheck] for the type of v, in order. Every check runs and reports
+// its own failure, whatever the checks before it return. Rebasing the error of
+// the method or of a function under at presumes every problem invalid, unless
+// an Error from [Unchecked] sits on its cause chain. Each such problem matches
+// [errInvalid] whether it has a location or not. [selfWalker.report] describes
+// the errors that the presumption skips.
 func (w *selfWalker) validate(v reflect.Value, at place) {
 	if !w.checked.validates(v.Type()) || w.stopped() {
 		return
@@ -1055,6 +1060,11 @@ func (w *selfWalker) validate(v reflect.Value, at place) {
 	case noSelfCheck:
 	}
 
+	var (
+		node  *Node
+		built bool
+	)
+
 	for _, check := range w.cfg.checks {
 		if check.typ != v.Type() {
 			continue
@@ -1064,11 +1074,45 @@ func (w *selfWalker) validate(v reflect.Value, at place) {
 			return
 		}
 
+		if check.node && !built {
+			node, built = w.nodeAt(at), true
+		}
+
 		failure, warnings := runHook(w.ctx, func(ctx context.Context) error {
-			return check.run(ctx, v.Addr())
+			return check.run(ctx, node, v.Addr())
 		})
 		w.report(failure, warnings, at, presumed)
 	}
+}
+
+// nodeAt returns the [*Node] that a function of [WithNodeCheck] gets for
+// the value at the place at, or nil in each case that WithNodeCheck lists.
+// It scopes the Node as [Node.At] scopes the path of that place, from the
+// node that [selfWalker.nodeOf] resolved.
+func (w *selfWalker) nodeAt(at place) *Node {
+	switch {
+	case w.node == nil, w.node.doc.err != nil, w.ambiguous:
+		return nil
+	case len(w.within) > 0 && w.within[0] != at:
+		// The value lies below a value that decodes itself, so its path
+		// does not have to name where it sits in the document.
+		return nil
+	case at.last == nil:
+		// A document with no content does not hold the value at the start
+		// of the walk.
+		if w.nodeOf(nil) == nil {
+			return nil
+		}
+
+		return w.node
+	}
+
+	node := w.nodeOf(at.last)
+	if node == nil {
+		return nil
+	}
+
+	return w.node.scopedAt(w.node.base.Join(at.path()), node)
 }
 
 // report records the errors and the warnings of a check of one value. It

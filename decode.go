@@ -37,13 +37,14 @@ import (
 // [Source.DecodeInto], which decode the one document of a Source.
 // [Node.SelfValidate], [Source.SelfValidate], and [SelfValidateValue]
 // take them too. They read only the functions of [WithValueCheck] and
-// the options that say how a value decodes, as Node.SelfValidate lists
-// them.
+// [WithNodeCheck] and the options that say how a value decodes, as
+// Node.SelfValidate lists them.
 //
 // Available options:
 //   - [WithValidator]
 //   - [WithSelfValidation]
 //   - [WithValueCheck]
+//   - [WithNodeCheck]
 //   - [WithUnknownFields]
 //   - [WithAllowedFieldPrefixes]
 //   - [WithUnmarshaler]
@@ -67,7 +68,8 @@ type decodeConfig struct {
 	defaults             defaultFuncs
 	validators           []Validator
 	allowedFieldPrefixes []string
-	// The functions from [WithValueCheck], in the order given.
+	// The functions from [WithValueCheck] and [WithNodeCheck], in the
+	// order given.
 	checks []valueCheck
 	// The paths of the keys that [hook.KnownKeys] admits.
 	knownKeys []paths.Path
@@ -79,11 +81,14 @@ type decodeConfig struct {
 	orderedMaps        bool
 }
 
-// valueCheck is a function from [WithValueCheck] for the values of one
-// type. Its run function takes a pointer to the value.
+// valueCheck is a function from [WithValueCheck] or [WithNodeCheck] for
+// the values of one type. Its run function takes the [*Node] of the value
+// and a pointer to the value. A function from WithValueCheck does not read
+// the Node, so node is false for it, and the walk passes it nil.
 type valueCheck struct {
-	typ reflect.Type
-	run func(ctx context.Context, v reflect.Value) error
+	typ  reflect.Type
+	run  func(ctx context.Context, n *Node, v reflect.Value) error
+	node bool
 }
 
 // newDecodeConfig returns the settings of a decode of a document of s.
@@ -146,16 +151,15 @@ func WithValidator(dv Validator) DecodeOption {
 	}
 }
 
-// WithSelfValidation is a [DecodeOption] that sets whether the decode
-// runs the self-validation walk on the decoded value. The walk calls the
-// Validate method of each [SelfValidator] in the value, the
-// ValidateContext method of each [SelfValidatorContext], and the
-// functions from [WithValueCheck]. The default is true. Validators given with
-// [WithValidator] run either way. [Node.SelfValidate] and
-// [Source.SelfValidate] run the walk whatever the option says, so a
-// caller that turns it off for the decode validates the value later. That
-// later call runs only the functions of WithValueCheck it gets, so the
-// caller passes them again.
+// WithSelfValidation is a [DecodeOption] that sets whether the decode runs the
+// self-validation walk on the decoded value. The walk calls the Validate method
+// of each [SelfValidator] in the value, the ValidateContext method of each
+// [SelfValidatorContext], and the functions from [WithValueCheck] and
+// [WithNodeCheck]. The default is true. Validators given with [WithValidator]
+// run either way. [Node.SelfValidate] and [Source.SelfValidate] run the walk
+// whatever the option says, so a caller that turns it off for the decode
+// validates the value later. That later call runs only the functions of
+// WithValueCheck and WithNodeCheck it gets, so the caller passes them again.
 func WithSelfValidation(enabled bool) DecodeOption {
 	return func(c *decodeConfig) {
 		c.skipSelfValidation = !enabled
@@ -240,21 +244,121 @@ func WithSelfValidation(enabled bool) DecodeOption {
 // WithValueCheck panics for a pointer or interface T, because the walk
 // never checks a value of such a type. It also panics if fn is nil.
 func WithValueCheck[T any](fn func(ctx context.Context, v *T) error) DecodeOption {
+	if fn == nil {
+		return addCheck[T]("WithValueCheck", false, nil)
+	}
+
+	return addCheck("WithValueCheck", false, func(ctx context.Context, _ *Node, v *T) error {
+		return fn(ctx, v)
+	})
+}
+
+// WithNodeCheck is a [DecodeOption] that checks every value of type T in
+// the decoded value with fn, as [WithValueCheck] does. It hands fn the
+// [*Node] of the value beside the value. A check that needs to know which
+// file or which layer set a value reads it from n. For example, a path
+// that resolves beside the file that sets it reads the directory from the
+// origin of its Node. Each value of a merged [Source] then resolves in
+// the directory of its own layer. The origin names a file in its
+// [Node.FS] when it has a file system, and a file on disk when it does
+// not. The check skips a value that a reference document sets, because
+// that value does not have a layer:
+//
+//	exists := niceyaml.WithNodeCheck(func(ctx context.Context, n *niceyaml.Node, f *File) error {
+//		if n == nil || *f == "" {
+//			return nil
+//		}
+//
+//		origin, err := n.Origin()
+//		if errors.Is(err, paths.ErrAlias) {
+//			return nil
+//		}
+//
+//		if err != nil {
+//			return err
+//		}
+//
+//		if fsys := origin.FS(); fsys != nil {
+//			_, err = fs.Stat(fsys, path.Join(path.Dir(origin.FilePath()), string(*f)))
+//		} else {
+//			_, err = os.Stat(filepath.Join(filepath.Dir(origin.FilePath()), string(*f)))
+//		}
+//
+//		if err != nil {
+//			return niceyaml.Unchecked(err)
+//		}
+//
+//		return nil
+//	})
+//
+// The functions of WithNodeCheck and WithValueCheck share one list. The
+// walk runs every function for the type of a value in the order given,
+// whichever option added it. Everything else that WithValueCheck
+// describes holds for fn too. For example, T matches by its exact type,
+// and the walk places the errors and the warnings of fn under the path of
+// the value. The package documents rules for the order, the type match,
+// the errors, and the warnings of the functions of WithValueCheck. Each
+// of those rules covers the functions of WithNodeCheck too.
+//
+// The Node n is the one that [Node.At] gives for the path of the value
+// below the Node that the walk validates. A map key gets the Node at the
+// path of its entry with a `~` after it. On a merged Source, n reads the
+// merged document, so fn calls [Node.Origin] to learn the layer that set
+// the value.
+//
+// A layer can read a value through an alias to a reference document of
+// [WithReferences], or bring one in with a `<<` merge key from such a
+// document. The merged document holds that value, so fn gets a Node for
+// it. The value does not come from the file of any layer, so Origin
+// returns an error that wraps
+// [go.jacobcolvin.com/niceyaml/paths.ErrAlias] for it. A function that
+// returns that error fails the decode of a valid document. A function
+// that does not need a layer for such a value returns nil for it, as the
+// example does.
+//
+// The walk passes a nil n when the document does not hold the value at its
+// path, so fn must handle a nil n. The walk passes a nil n in these cases:
+//
+//   - The walk runs under [SelfValidateValue], which does not have a
+//     document.
+//   - The value is a struct field that the document leaves out, such as
+//     one that a function of [WithDefaults] fills.
+//   - The value lies below a value that decodes itself, through its own
+//     unmarshaler method or an unmarshaler of [WithUnmarshaler] or
+//     [WithUnmarshalers]. The value that decodes itself gets its Node.
+//   - The value lies below a map entry whose path names the entries of
+//     several keys, as [ErrAmbiguousPath] describes.
+//   - Node.At fails for the path of the value, such as a path below an
+//     alias to a reference document in a Source that is not merged, or
+//     the document did not parse.
+//
+// WithNodeCheck panics for a pointer or interface T, because the walk
+// never checks a value of such a type. It also panics if fn is nil.
+func WithNodeCheck[T any](fn func(ctx context.Context, n *Node, v *T) error) DecodeOption {
+	return addCheck("WithNodeCheck", true, fn)
+}
+
+// addCheck returns the [DecodeOption] that the function name returns for
+// fn, which reads its [*Node] when node is true. It panics for a pointer
+// or interface T and for a nil fn.
+func addCheck[T any](name string, node bool, fn func(ctx context.Context, n *Node, v *T) error) DecodeOption {
 	t := reflect.TypeFor[T]()
 	if t.Kind() == reflect.Pointer || t.Kind() == reflect.Interface {
-		panic(fmt.Sprintf("niceyaml.WithValueCheck: %v is a pointer or interface type, which the walk never checks", t))
+		panic(fmt.Sprintf("niceyaml.%s: %v is a pointer or interface type, which the walk never checks", name, t))
 	}
 
 	if fn == nil {
-		panic("niceyaml.WithValueCheck: fn is nil")
+		panic(fmt.Sprintf("niceyaml.%s: fn is nil", name))
 	}
 
 	return func(c *decodeConfig) {
-		c.checks = append(c.checks, valueCheck{typ: t, run: func(ctx context.Context, p reflect.Value) error {
+		run := func(ctx context.Context, n *Node, p reflect.Value) error {
 			v, _ := reflect.TypeAssert[*T](p)
 
-			return fn(ctx, v)
-		}})
+			return fn(ctx, n, v)
+		}
+
+		c.checks = append(c.checks, valueCheck{typ: t, node: node, run: run})
 	}
 }
 
@@ -726,9 +830,10 @@ func WithYAMLOrderedMaps(enabled bool) DecodeOption {
 // decode that a bundle does not reach, such as one inside a [Validator],
 // then applies them too.
 //
-// [WithValidator], [WithValueCheck], and [WithAllowedFieldPrefixes] add to
-// what the options before them gave, and [WithUnmarshaler] applies its
-// unmarshalers over the earlier ones, as [Unmarshaler] describes. Every
+// [WithValidator], [WithValueCheck], [WithNodeCheck], and
+// [WithAllowedFieldPrefixes] add to what the options before them gave,
+// and [WithUnmarshaler] applies its unmarshalers over the earlier ones,
+// as [Unmarshaler] describes. Every
 // other option replaces what an earlier one of its kind set. A call that
 // gets the same DecodeOptions twice thus runs each of its validators and
 // each of its value checks twice.

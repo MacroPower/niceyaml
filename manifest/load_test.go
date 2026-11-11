@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/fstest"
@@ -3685,6 +3686,163 @@ func TestRegistry_Load_Defaults(t *testing.T) {
 	cafe, ok := set.Get[Cafe]("yamull")
 	require.True(t, ok)
 	assert.Equal(t, CafeSpec{Seats: 40, Currency: "EUR"}, cafe.Value.Spec)
+}
+
+func TestRegistry_Load_NodeCheck(t *testing.T) {
+	t.Parallel()
+
+	fsys := mapFS(map[string]string{
+		"cafe.yaml":  cafeDoc,
+		"hours.yaml": hoursDoc,
+	})
+
+	var (
+		mu  sync.Mutex
+		got []string
+	)
+
+	// Each string that the document holds gets its Node. The string
+	// fields that the document leaves out get a nil Node.
+	reg := newCafeRegistry(t,
+		manifest.WithDecodeOptions(
+			niceyaml.WithNodeCheck(func(_ context.Context, n *niceyaml.Node, _ *string) error {
+				if n == nil {
+					return nil
+				}
+
+				// The Node names the file system of the user.
+				assert.Equal(t, fs.FS(fsys), n.FS())
+
+				mu.Lock()
+				defer mu.Unlock()
+
+				got = append(got, n.FilePath()+" "+n.Path().String())
+
+				return nil
+			}),
+		),
+	)
+
+	_, err := reg.Load(t.Context(), input.FS(fsys, "config"))
+	require.NoError(t, err)
+
+	// The Node names the file of the user. Its path follows the layout
+	// of the current version, so the migrated document of hours.yaml
+	// writes open and close where the file writes opens and closes.
+	assert.ElementsMatch(t, []string{
+		"config/cafe.yaml $.metadata.name",
+		"config/hours.yaml $.metadata.name",
+		"config/hours.yaml $.spec.open",
+		"config/hours.yaml $.spec.close",
+	}, got)
+}
+
+func TestRegistry_Load_NodeCheckLayers(t *testing.T) {
+	t.Parallel()
+
+	// Each case merges the top layer, config/prod/doc.yaml, over the base
+	// layer, config/base/doc.yaml, and reads the Node of the string that
+	// the top layer sets.
+	item := stringtest.LinesLF(
+		"apiVersion: cafe.jacobcolvin.com/v1",
+		"kind: MenuItem",
+		"metadata:",
+		"  name: semla",
+		"spec:",
+		"  price: 3",
+	)
+
+	tcs := map[string]struct {
+		base string
+		top  string
+		path string
+		// The file path of the Node.
+		file string
+		// The file path of the origin of the Node.
+		origin string
+		opts   []manifest.RegistryOption
+	}{
+		"document of the current version": {
+			base: item,
+			top:  stringtest.LinesLF("metadata:", "  name: top"),
+			path: "$.metadata.name",
+			// The decode reads the merged Source, whose file path is that
+			// of the lowest layer. The origin names the top layer.
+			file:   "config/base/doc.yaml",
+			origin: "config/prod/doc.yaml",
+		},
+		"document of the current version under registry unmarshalers": {
+			base: item,
+			top:  stringtest.LinesLF("metadata:", "  name: top"),
+			path: "$.metadata.name",
+			opts: []manifest.RegistryOption{
+				manifest.WithUnmarshalers(niceyaml.CustomUnmarshaler(decodeAlarmLevel)),
+			},
+			// The decode reads a copy that holds the unmarshalers of the
+			// registry. The copy is not merged, so its origin is the Node
+			// itself, with the file path of the lowest layer.
+			file:   "config/base/doc.yaml",
+			origin: "config/base/doc.yaml",
+		},
+		"migrated document": {
+			base: stringtest.LinesLF(
+				"apiVersion: cafe.jacobcolvin.com/v1alpha1",
+				"kind: Hours",
+				"metadata:",
+				"  name: weekday",
+			),
+			top:  stringtest.LinesLF("spec:", `  opens: "08:00"`),
+			path: "$.spec.open",
+			// The decode reads a copy of the merged Source, which is not
+			// itself merged. Its origin is the Node itself, with the file
+			// path of the lowest layer.
+			file:   "config/base/doc.yaml",
+			origin: "config/base/doc.yaml",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var (
+				mu   sync.Mutex
+				file string
+				orig string
+			)
+
+			check := manifest.WithDecodeOptions(
+				niceyaml.WithNodeCheck(func(_ context.Context, n *niceyaml.Node, _ *string) error {
+					if n == nil || n.Path().String() != tc.path {
+						return nil
+					}
+
+					origin, err := n.Origin()
+					if err != nil {
+						return fmt.Errorf("origin: %w", err)
+					}
+
+					mu.Lock()
+					defer mu.Unlock()
+
+					file, orig = n.FilePath(), origin.FilePath()
+
+					return nil
+				}),
+			)
+			reg := newCafeRegistry(t, append(tc.opts, check)...)
+
+			base := niceyaml.NewSourceFromString(tc.base, niceyaml.WithFilePath("config/base/doc.yaml"))
+			top := niceyaml.NewSourceFromString(tc.top, niceyaml.WithFilePath("config/prod/doc.yaml"))
+			merged := yamltest.Layers(t, base, top)
+
+			_, err := reg.Load(t.Context(), input.Sources(merged), manifest.WithSetChecks(false))
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.file, file)
+			assert.Equal(t, tc.origin, orig)
+		})
+	}
 }
 
 func TestRegistry_Load_UnknownFieldsWarn(t *testing.T) {

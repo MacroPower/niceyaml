@@ -297,9 +297,9 @@ type Layer interface {
 // layer of a Source that [NewSourceFromLayers] builds. For a Node of any
 // other document, it returns n itself. A Node of a merged Source reads
 // the merged text. It has the [Node.FilePath] and [Node.FS] of the layer
-// that [MergeAs] names, or else of the lowest layer. A [Validator] that
-// resolves a file beside a value thus reads the directory from the origin
-// of that value:
+// that [MergeAs] names, or else of the lowest layer. A [Validator] or a
+// function of [WithNodeCheck] that resolves a file beside a value thus
+// reads the directory from the origin of that value:
 //
 //	origin, err := license.Origin()
 //	if err != nil {
