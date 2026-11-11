@@ -2165,6 +2165,10 @@ func TestNode_MarshalYAML(t *testing.T) {
 			if tc.err != "" {
 				assert.Contains(t, niceyaml.FormatError(err), "cannot decode "+tc.from+", which holds no value")
 				assert.Equal(t, tc.before, d.Text())
+				// The node reads the document, so the document is at fault, as
+				// for the error of the decode that it holds.
+				require.NotErrorIs(t, err, edit.ErrValue)
+				assert.True(t, niceyaml.IsInvalid(err))
 			}
 		})
 	}

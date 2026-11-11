@@ -14,6 +14,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/encoder"
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/bom"
+	"go.jacobcolvin.com/niceyaml/internal/fault"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/internal/mapkey"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -54,16 +55,25 @@ var (
 	//
 	// The user can fix the text, so [go.jacobcolvin.com/niceyaml.IsInvalid]
 	// reports true for the error. It reports true for a document that holds
-	// YAML outside the subset that the engine edits too. A server thus
-	// classifies the errors of the package with IsInvalid alone:
+	// YAML outside the subset that the engine edits too. It reports false
+	// for a refusal that the program decides, such as one that matches
+	// [ErrUsage], [ErrValue], or [ErrProtected]. A program can write the
+	// paths and the values of its calls itself. Its server then classifies
+	// the errors of the package with IsInvalid alone:
 	//
 	//	switch {
 	//	case err == nil:
 	//	case niceyaml.IsInvalid(err):
 	//		status = 422 // the user rewrites the text as the detail says
 	//	default:
-	//		status = 500 // a bug in the engine, among other faults
+	//		status = 500 // a bug in the program or the engine, among other faults
 	//	}
+	//
+	// A server that passes a path or a value of the request to a call lets
+	// the request decide more refusals. Such a server tests for ErrUsage,
+	// ErrValue, and ErrProtected before the default case. It also tests for
+	// an [*UnsupportedError] whose InValue field is true, which a value of
+	// the request with an anchor or a tag fails with.
 	//
 	// A call that writes such a text fails with an error that matches
 	// [ErrEngine] and not ErrMisread, because the engine wrote that text. So
@@ -72,15 +82,77 @@ var (
 	ErrMisread = errors.New("go-yaml misreads the document")
 
 	// ErrUsage indicates a call with an argument that the package does not
-	// take. [New] fails so with a nil Node, a Node below the root of its
-	// document, or a path of [WithProtected] that is not a `$` path of names
-	// and indexes. [Doc.Apply] fails so with a path that does not start at
-	// `$` or that holds a `~`. [FileText] fails so with a Doc of another
-	// Source, or with two Docs of one document. The program is at fault, so
-	// [go.jacobcolvin.com/niceyaml.IsInvalid] reports false for the error,
-	// and the error binds nowhere. The message says what the call takes, as
-	// in "Apply takes a $ path without ~, not @.spec".
+	// take, whatever the document holds. [New] fails so with a nil Node, a
+	// Node below the root of its document, or a path of [WithProtected] that
+	// is not a `$` path of names and indexes. [Doc.Apply] fails so with a
+	// path that does not start at `$` or that holds a `~`. [FileText] fails
+	// so with a Doc of another Source, or with two Docs of one document.
+	// Those errors bind nowhere, and the message says what the call takes,
+	// as in "Apply takes a $ path without ~, not @.spec".
+	//
+	// A method of [Node] fails so too, and the error binds at the place of
+	// the call, as the Errors section of the package documentation
+	// describes. The methods fail so with:
+	//
+	//   - a path of [Node.At] that selects more than one value or holds a
+	//     `~`, at each method that edits or decodes
+	//   - a Set of the root of a document that holds a value
+	//   - a SetKey, a Move, or a Remove of the root
+	//   - a SetKey of an item of a sequence
+	//   - an Insert at a path that does not end in an index
+	//   - a Move to a target that is no `$` path of names and indexes, to
+	//     `$`, or to a path inside the value that moves
+	//   - a [Before] or an [After] of a Move to a target in the mapping of
+	//     the entry that moves, when it names the key of that entry
+	//
+	// The program is at fault for each, so
+	// [go.jacobcolvin.com/niceyaml.IsInvalid] reports false for the error.
+	// Each fails at a place that does not hold a value too, where the call
+	// does nothing otherwise, except a Set of the root. A Before or an After
+	// that names the entry that moves through an alias of the document fails
+	// without ErrUsage, because the document decides it.
 	ErrUsage = errors.New("the program passes an argument that the package does not take")
+
+	// ErrValue indicates a Go value of [Node.Set] or [Node.Insert] that the
+	// engine cannot write, whatever the document holds. A Set fails so with
+	// a value of a type that go-yaml's encoder does not encode, such as a
+	// channel or a function, and with a value that holds one. It fails so
+	// with a value that holds itself or that holds two keys that a decode
+	// reads as one. So does YAML of a marshaler that holds more than one
+	// document or that repeats a key, and a chain of more than 1,000
+	// marshalers. The error binds at the place of the call. The program
+	// wrote the value, so [go.jacobcolvin.com/niceyaml.IsInvalid] reports
+	// false for the error. A value that go-yaml's encoder cannot write so
+	// that go-yaml reads it back fails with [ErrEngine] instead, as
+	// [Node.Set] describes.
+	//
+	// A Set also fails so with a marshaler that returns an error, and
+	// [errors.Is] and [errors.As] find the error of the marshaler through
+	// the error of the Set. But [errors.Is] does not find a sentinel of the
+	// package, such as ErrEngine, through it. The error of the Set binds at
+	// the place of the call, and IsInvalid reports false for it, whatever
+	// the error of the marshaler declares. So a marshaler that returns a
+	// problem of another document does not blame the user's document. The
+	// error of the Set keeps its own binding and fault, so [errors.As] does
+	// not find a [*niceyaml.Error], a [*niceyaml.SourceError], or a
+	// [*niceyaml.PanicError] of the marshaler. A marshaler that returns the
+	// error of a context binds nowhere, because a binding of niceyaml gives
+	// the error of a context no place in the text.
+	//
+	// A marshaler that returns a problem of the user's document, such as the
+	// error of a [Node] of the same Doc whose place holds no value, fails the
+	// Set without ErrValue. The values of the document decide that problem,
+	// so the error of the Set keeps the fault and the sentinels of the
+	// problem. The error of the Set still binds at the place of the call.
+	ErrValue = errors.New("the value cannot be written")
+
+	// ErrProtected indicates an edit of a protected value of [WithProtected],
+	// of a value inside one, or of a value that holds one. It also indicates a
+	// call that changes or creates a protected value through another place,
+	// such as an alias. The error binds at the place of the call. The program
+	// declares the protected values and writes the edits, so
+	// [go.jacobcolvin.com/niceyaml.IsInvalid] reports false for the error.
+	ErrProtected = errors.New("the edit changes a protected value")
 
 	// ErrNested indicates an Apply that a [Func] of the same Doc calls. The
 	// nested Apply fails with the error and calls its Func zero times. The
@@ -117,9 +189,18 @@ var (
 // package such as [ErrEngine]. It has the message of err, the error behind
 // it. A report that lists the problems of the error thus reads the problem
 // once, rather than once for the sentinel and once for err.
+//
+// The error of a call can also have a cause, such as the error of a
+// marshaler. [errors.Is] and [errors.As] find the cause, but Unwrap does
+// not return it. The Is method does not match the mark of a fault through
+// the cause, and the As method does not find a binding, a located error,
+// or a recovered panic in it. A binding thus reads the place and the fault
+// of the error, not those of the cause. The sentinel is nil for a problem
+// that only keeps a cause.
 type sentinelError struct {
 	sentinel error
 	err      error
+	cause    error
 }
 
 // usage returns the problem of a call that msg describes, which matches
@@ -133,9 +214,47 @@ func (e *sentinelError) Error() string {
 	return e.err.Error()
 }
 
-// Is reports whether target is the sentinel of e.
+// Is reports whether target is the sentinel of e or matches the cause of
+// e. It reports false for [fault.ErrInvalid], so a fault that the cause
+// declares does not reach e. When the sentinel of e is [ErrValue], it also
+// reports false for the other sentinels of the package. The cause of such
+// a problem comes from the program, so a sentinel in it says nothing of
+// the call.
 func (e *sentinelError) Is(target error) bool {
-	return target == e.sentinel
+	if e.sentinel != nil && target == e.sentinel {
+		return true
+	}
+
+	if e.cause == nil || target == fault.ErrInvalid {
+		return false
+	}
+
+	if e.sentinel == ErrValue {
+		switch target {
+		case ErrEngine, ErrMisread, ErrUnsupported, ErrUsage, ErrProtected, ErrNested, ErrEnded:
+			return false
+		}
+	}
+
+	return errors.Is(e.cause, target)
+}
+
+// As reports whether the cause of e holds an error that target points to,
+// and sets target to the first such error, as [errors.As] does. It reports
+// false for a target of a [*niceyaml.SourceError], a [*niceyaml.Error], or
+// a [*niceyaml.PanicError], so the binding, the location, and a panic of
+// the cause do not reach e.
+func (e *sentinelError) As(target any) bool {
+	if e.cause == nil {
+		return false
+	}
+
+	switch target.(type) {
+	case **niceyaml.SourceError, **niceyaml.Error, **niceyaml.PanicError:
+		return false
+	}
+
+	return errors.As(e.cause, target)
 }
 
 // Unwrap returns the error behind e.

@@ -124,7 +124,7 @@
 // document. The edit package binds it as a problem of the edit, whether a
 // read, the path of an Apply, or a call meets it.
 // [go.jacobcolvin.com/niceyaml.IsInvalid] thus reports true for it, as for
-// a Set of the root.
+// a Set below a scalar.
 //
 // After the edits, a program reads the text of the document with
 // [Doc.Text], the text of the whole file with [FileText], or a document to
@@ -446,12 +446,23 @@
 // its mapping. The error then binds at the place of the call, its InValue
 // field is true, and IsInvalid reports false.
 //
-// IsInvalid reports true for every other problem of a call that binds in
-// the user's text and matches neither [ErrEngine] nor
-// [go.jacobcolvin.com/niceyaml.ErrLimit]. Such problems include a Set of
-// the root and a Set value that repeats a key or holds itself. So do a
-// marshaler that fails, one whose YAML holds more than one document, and a
-// chain of more than 1,000 marshalers. A call through a node whose Apply
+// Every other refusal of a call follows one rule. The program is at fault
+// for a refusal that its arguments decide, whatever the document holds, so
+// IsInvalid reports false for it. Such a refusal matches [ErrUsage] for an
+// argument that the method does not take, such as a Remove of the root. It
+// matches [ErrValue] for a Go value that the engine cannot write, such as a
+// value that holds itself or a marshaler that fails. It matches
+// [ErrProtected] for an edit of a value of [WithProtected]. The document is
+// at fault for a refusal that its current values decide, so IsInvalid
+// reports true for it. Such refusals include a Set below a scalar and a
+// rename to a key that exists already. A Set of a [Node] of the Doc at a
+// place that holds no value is one too. Each refusal of either kind binds
+// at the place of the call, as the Errors section describes. The refusal
+// of a marshaler that returns the error of a context is the exception. It
+// binds nowhere, as ErrValue describes.
+//
+// IsInvalid reports false for a problem that matches [ErrEngine] or
+// [go.jacobcolvin.com/niceyaml.ErrLimit]. A call through a node whose Apply
 // returned fails with an error that binds nowhere, and IsInvalid reports
 // false for it. An error that matches ErrUnsupported never matches
 // ErrEngine.
@@ -1025,7 +1036,9 @@
 // set, a move, or a removal of a value that holds a protected value fails
 // too, because it takes the protected value out of its place. A rename of
 // such a value passes, and the protected value keeps its text under the new
-// path.
+// path. The error of such a call matches [ErrProtected], and
+// [go.jacobcolvin.com/niceyaml.IsInvalid] reports false for it, because
+// the program declares the protected values and writes the calls.
 //
 // A call that sets, renames, or removes an alias or a merge key that only
 // reads a protected value leaves the value in the text, so it passes. Each
