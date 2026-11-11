@@ -89,11 +89,15 @@ func Version(name string, opts ...VersionOption) KindOption {
 }
 
 // Unversioned is a [KindOption] that adds the unversioned layout of the
-// kind. The layout reads the documents without type fields, as the Routing
-// section of the package documentation describes. It takes the place of
-// the oldest version, so it must come first among the versions. It takes
-// the options of [Version] except [KindName], [Migrate], and
-// [SchemaTypeFields].
+// kind. The layout reads the documents of the kind without a version
+// field, with or without a kind field, as the Routing section of the
+// package documentation describes. A format that does not version its
+// kinds lists Unversioned alone on each kind.
+//
+// The layout takes the place of the oldest version, so it must come first
+// among the versions. Unversioned takes the options of [Version] except
+// [KindName] and [Migrate]. A document of the layout that writes the kind
+// field thus writes the name of the kind.
 func Unversioned(opts ...VersionOption) KindOption {
 	return func(c *kindConfig) {
 		v := &versionConfig{unversioned: true}
@@ -199,9 +203,10 @@ func Schema(ref schema.Ref) VersionOption {
 // a $ref to another document. It also suits a schema that the author
 // cannot edit.
 //
-// [NewRegistry] rejects the option on a version without [Schema]. It also
-// rejects the option on the layout of [Unversioned], whose documents do
-// not hold type fields.
+// On the layout of [Unversioned], the option states the answer for the
+// kind field of each document that writes one.
+//
+// [NewRegistry] rejects the option on a version without [Schema].
 func SchemaTypeFields(visible bool) VersionOption {
 	return func(c *versionConfig) {
 		c.hasTypeFields, c.typeFieldsVisible = true, visible

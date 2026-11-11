@@ -277,9 +277,64 @@
 // The error about an unknown kind suggests the closest name. The error
 // about an unknown version lists the versions that the app reads.
 //
-// A kind that [Unversioned] gives a layout without type fields reads plain
-// documents, so an app that already reads plain YAML can adopt manifests.
-// [Claim] picks the kind of a document without a kind field.
+// A load picks the kind and the version of a document separately. The
+// kind field names the kind. For a document without a kind field, the load
+// asks each [Claim] in turn, and the first kind whose claim accepts the
+// document takes it.
+//
+// The version field names the version. A document without a version field
+// declares the layout that [Unversioned] gives its kind, and that layout
+// takes the name of the kind. A load fails such a document in these cases,
+// and the first case that applies gives the error:
+//
+//   - The kind lists Unversioned, and the document writes a name from
+//     [KindName]. The error matches [ErrKindMismatch].
+//   - [WithRemoved] names that layout of the kind, whether or not the
+//     registry holds the kind. The error matches [ErrRemovedVersion], and
+//     it sits at the kind field of a document that writes the field.
+//   - The kind does not list Unversioned. The error matches
+//     [ErrMissingTypeField].
+//
+// A document without type fields that no claim accepts goes to the kind
+// that lists Unversioned without a Claim. An app that already reads plain
+// YAML can thus adopt manifests. When several kinds list Unversioned
+// without a Claim, the load cannot pick one of them. The document then
+// fails with an error that matches ErrMissingTypeField and lists those
+// kinds. A kind without a Claim whose unversioned layout WithRemoved names
+// counts among the kinds that the load cannot pick between, whether or not
+// it lists Unversioned. The error leaves such a kind out of its list,
+// because a document that names the kind fails as a removed version.
+//
+// A format that names its kinds and does not version them lists
+// Unversioned alone on each kind:
+//
+//	manifest.WithKindField(paths.Doc().Child("type")),
+//	manifest.WithKinds(
+//		manifest.NewKind[Source]("source", manifest.Unversioned()),
+//		manifest.NewKind[Sink]("sink", manifest.Unversioned()),
+//	),
+//
+// The messages of such a registry name the kind field alone, as in
+// "missing type". They name the version field too when a kind of the
+// registry lists a [Version]. The format gains versions when a kind lists
+// a Version after Unversioned, and the files that leave the version out
+// still load.
+//
+// The format retires a kind when the registry drops the kind and
+// WithRemoved names it with an empty version. A document that names the
+// kind then fails at its kind field, with the details of that WithRemoved:
+//
+//	pipeline/pipe.yaml:2:7: $.type: removed kind "legacy"
+//	`-- pipectl 2 removed legacy, write a source
+//
+// When a kind of the registry lists a Version, the error reads "removed
+// unversioned layout of legacy".
+//
+// A document might name a kind that lists a Version and leave its version
+// field out. Such a document might have lost the field by mistake, so its
+// first error carries a detail that says how the load read it:
+//
+//	the document has no apiVersion, so cafe reads it as an unversioned Cafe
 //
 // # Checks
 //
@@ -313,14 +368,18 @@
 // document that declares the version or passes through it, with an error
 // that matches [ErrSchemaTypeField], and Verify reports the schema.
 //
-// The documents of the layout of [Unversioned] do not hold type fields.
-// The check of the schema of that layout thus sees such a field blank
-// instead. A document of that layout still fails at a later version with
+// The schema of the layout of [Unversioned] fails that way only the
+// documents that write the field. The check of every other document sees
+// the same lines whether or not the schema reads the field. A document of
+// that layout does not write the version field, so only its kind field
+// fails it that way. Verify thus reports the kind field alone. The schema
+// of a plain file that an app adopts checks each document without a kind
+// field. A document of that layout still fails at a later version with
 // such a schema.
 //
-// [SchemaTypeFields] on a version states the answer for every type field.
-// With true, the check sees each type field as the document writes it.
-// With false, the check sees each type field blank.
+// [SchemaTypeFields] on a version or on Unversioned states the answer for
+// every type field. With true, the check sees each type field as the
+// document writes it. With false, the check sees each type field blank.
 //
 // The decode admits the type fields, and by default rejects every other key
 // that the Go type does not declare. A [niceyaml.WithUnknownFields] among

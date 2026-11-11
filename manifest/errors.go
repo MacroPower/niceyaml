@@ -59,10 +59,12 @@ var (
 	// does not report the link, as [FS] describes.
 	ErrOutsideLink = errors.New("link leads outside the input directory")
 
-	// ErrMissingTypeField indicates a document without one of the type
-	// fields, or without both. It also indicates a type field that is not
-	// text, or a scalar that go-yaml's decoder reads as another string than
-	// the text that the document writes, such as 1.10 as "1.1".
+	// ErrMissingTypeField indicates a document without a type field that
+	// the load reads to pick its kind or its version, as the Routing
+	// section of the package documentation describes. It also indicates a
+	// type field that is not text, or a scalar that go-yaml's decoder reads
+	// as another string than the text that the document writes, such as
+	// 1.10 as "1.1".
 	ErrMissingTypeField = errors.New("missing type field")
 
 	// ErrFieldAlias indicates a type field or a name whose path passes
@@ -87,10 +89,11 @@ var (
 	// the current version. The author of the registry is at fault for the
 	// problem, and [Registry.Verify] reports it too.
 	//
-	// The documents of the layout of [Unversioned] do not hold type fields.
-	// The schema of that layout thus does not fail a document with this
-	// error. A document of that layout still fails at a later version with
-	// such a schema.
+	// The schema of the layout of [Unversioned] fails only the documents
+	// that write the field with this error. A document of that layout does
+	// not write the version field, so only its kind field fails it. A
+	// document of that layout still fails at a later version with such a
+	// schema.
 	ErrSchemaTypeField = errors.New("schema might read a type field")
 
 	// ErrUnknownKind indicates a kind that the registry does not hold.
@@ -100,10 +103,14 @@ var (
 	ErrUnknownVersion = errors.New("unknown version")
 
 	// ErrKindMismatch indicates a document that pairs a version with a
-	// kind name that the version does not give.
+	// kind name that the version does not give. It also indicates a
+	// document without a version field that writes a name from [KindName]
+	// for a kind that lists [Unversioned]. Such a document declares the
+	// layout of Unversioned, which takes the name of the kind.
 	ErrKindMismatch = errors.New("version has no such kind name")
 
-	// ErrRemovedVersion indicates a version that [WithRemoved] names.
+	// ErrRemovedVersion indicates a version or an unversioned layout that
+	// [WithRemoved] names.
 	ErrRemovedVersion = errors.New("removed version")
 
 	// ErrMissingName indicates a manifest without a name that is a

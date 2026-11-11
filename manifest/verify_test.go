@@ -268,9 +268,59 @@ func TestRegistry_Verify_TypeFields(t *testing.T) {
 				"    `-- remove $.kind from required, or pass manifest.SchemaTypeFields(true)",
 			),
 		},
-		"unversioned layout": {
+		"required and not declared on the unversioned layout": {
+			// A document of the layout might write the kind field, which
+			// the check then sees blank.
 			schema:      `{"required": ["kind"]}`,
 			unversioned: true,
+			want: stringtest.JoinLF(
+				"MenuItem the unversioned layout: $.kind: required, but no properties keyword declares it",
+				"`-- declare $.kind under properties, or remove it from required",
+			),
+		},
+		"declared and required on the unversioned layout": {
+			schema:      `{"required": ["kind"], "properties": {"kind": {"const": "MenuItem"}}}`,
+			unversioned: true,
+		},
+		"version field on the unversioned layout": {
+			// A document of the layout does not write the version field.
+			schema:      `{"required": ["apiVersion"]}`,
+			unversioned: true,
+		},
+		"version field in a branch on the unversioned layout": {
+			schema:      `{"oneOf": [{"required": ["apiVersion"]}, {"required": ["metadata"]}]}`,
+			unversioned: true,
+		},
+		"branch on the unversioned layout": {
+			// A document of the layout might write the kind field, and a
+			// load cannot tell whether the check sees it.
+			schema:      branch,
+			unversioned: true,
+			want: stringtest.JoinLF(
+				"MenuItem the unversioned layout: $.kind: a branch or a $ref to another document might read it",
+				"`-- declare $.kind under properties outside every branch and every such $ref, "+
+					"or pass manifest.SchemaTypeFields",
+			),
+			matches: manifest.ErrSchemaTypeField,
+		},
+		"branch on the unversioned layout with visible type fields": {
+			schema:      branch,
+			version:     visible,
+			unversioned: true,
+		},
+		"branch on the unversioned layout with blank type fields": {
+			schema:      branch,
+			version:     blank,
+			unversioned: true,
+		},
+		"required and not declared on the unversioned layout with blank type fields": {
+			schema:      `{"required": ["kind"], "properties": {"metadata": {"type": "object"}}}`,
+			version:     blank,
+			unversioned: true,
+			want: stringtest.JoinLF(
+				"MenuItem the unversioned layout: $.kind: required, but manifest.SchemaTypeFields(false) blanks it",
+				"`-- remove $.kind from required, or pass manifest.SchemaTypeFields(true)",
+			),
 		},
 	}
 
