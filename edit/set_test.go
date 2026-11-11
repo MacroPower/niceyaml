@@ -489,7 +489,7 @@ func TestNode_Set(t *testing.T) {
 			before: stringtest.LinesLF("a: 1", "b: 2"),
 			path:   paths.Doc().Child("b"),
 			value:  countMarshaler(-1),
-			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 cannot write the value of $.b: the MarshalYAML methods of " +
+			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 cannot write the value of $.b: the marshalers of " +
 				"edit_test.countMarshaler return values with marshalers more than 1,000 levels deep",
 		},
 		"chain of 1,000 marshalers": {
@@ -504,7 +504,7 @@ func TestNode_Set(t *testing.T) {
 			before: stringtest.LinesLF("a: 1", "b: 2"),
 			path:   paths.Doc().Child("b"),
 			value:  countMarshaler(1000),
-			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 cannot write the value of $.b: the MarshalYAML methods of " +
+			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 cannot write the value of $.b: the marshalers of " +
 				"edit_test.countMarshaler return values with marshalers more than 1,000 levels deep",
 		},
 		"marshalers that return values to an end": {
@@ -667,16 +667,12 @@ func TestNode_Set(t *testing.T) {
 			engine: true,
 		},
 		"YAML marshaler that writes a block scalar with keep chomping at its end": {
-			// Go-yaml's encoder drops the blank line that the string holds, and
-			// the message names the scalar at its place in the YAML of the
-			// marshaler.
+			// Go-yaml's printer drops the blank line that the string holds, so
+			// the encoder writes the string in double quotes.
 			before: stringtest.LinesLF("a: 1", "b: 2"),
 			path:   paths.Doc().Child("b"),
 			value:  yamlMarshaler("a: |+\n  x\n\n"),
-			err: "2:4: $.b: go-yaml reads the block scalar of \"x\\n\\n\" at 1:4 of the YAML that a marshaler " +
-				"of the value returns, but go-yaml's encoder writes that scalar as \"|+\\n  x\", which go-yaml's " +
-				"decoder reads as \"x\\n\"",
-			engine: true,
+			want:   stringtest.LinesLF("a: 1", `b: {a: "x\n\n"}`),
 		},
 		"YAML marshaler that writes a tagged flow sequence": {
 			before: stringtest.LinesLF("a: 1", "b: 2"),

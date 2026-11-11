@@ -338,6 +338,70 @@ func TestEncoder_Encode_quoting(t *testing.T) {
 			input: map[string]literalBlock{"k": "x\ny"},
 			want:  stringtest.LinesLF("k: |-", "  x", "  y"),
 		},
+		"marshaled literal block under nested key": {
+			input: map[string]map[string]literalBlock{"a": {"k": "x\ny"}},
+			want:  stringtest.LinesLF("a:", `  k: "x\ny"`),
+		},
+		"marshaled literal block with tag under nested key": {
+			input: map[string]map[string]taggedLiteralBlock{"a": {"k": "x\ny"}},
+			want:  stringtest.LinesLF("a:", `  k: !!str "x\ny"`),
+		},
+		"marshaled literal block with anchor under nested key": {
+			input: map[string]map[string]anchoredLiteralBlock{"a": {"k": "x\ny"}},
+			want:  stringtest.LinesLF("a:", `  k: &k "x\ny"`),
+		},
+		"marshaled literal block in marshaled mapping under key": {
+			input:   map[string]rawYAML{"k": "a: |\n  x\n  y\n"},
+			decoded: map[string]map[string]string{"k": {"a": "x\ny\n"}},
+			want:    stringtest.LinesLF("k:", `  a: "x\ny\n"`),
+		},
+		"marshaled literal block in marshaled sequence under key": {
+			input:   map[string]rawYAML{"k": "- |\n  x\n  y\n"},
+			decoded: map[string][]string{"k": {"x\ny\n"}},
+			want:    stringtest.LinesLF("k:", "- |", "  x", "  y"),
+		},
+		"marshaled literal block of uneven lines in nested sequence": {
+			input:   map[string]map[string][]rawYAML{"a": {"b": {"|-\n  x\n    y\n"}}},
+			decoded: map[string]map[string][]string{"a": {"b": {"x\n  y"}}},
+			want:    stringtest.LinesLF("a:", "  b:", `  - "x\n  y"`),
+		},
+		"marshaled literal block of uneven lines in sequence under Pretty": {
+			input:   []rawYAML{"|-\n  x\n    y\n  z\n"},
+			decoded: []string{"x\n  y\nz"},
+			opts:    []encoder.Option{encoder.Pretty()},
+			want:    stringtest.LinesLF(`- "x\n  y\nz"`),
+		},
+		"marshaled literal block of uneven lines in sequence of sequence": {
+			input:   [][]rawYAML{{"|-\n x\n  y\n"}},
+			decoded: [][]string{{"x\n y"}},
+			want:    stringtest.LinesLF(`- - "x\n y"`),
+		},
+		"marshaled literal block of uneven lines with tag in nested sequence": {
+			input:   map[string]map[string][]rawYAML{"a": {"b": {"!!str |-\n  x\n    y\n"}}},
+			decoded: map[string]map[string][]string{"a": {"b": {"x\n  y"}}},
+			want:    stringtest.LinesLF("a:", "  b:", `  - !!str "x\n  y"`),
+		},
+		"marshaled literal block of even lines in nested sequence": {
+			input:   map[string]map[string][]rawYAML{"a": {"b": {"|-\n  x\n  y\n"}}},
+			decoded: map[string]map[string][]string{"a": {"b": {"x\ny"}}},
+			want:    stringtest.LinesLF("a:", "  b:", "  - |-", "      x", "      y"),
+		},
+		"marshaled literal block with indentation indicator in sequence under Pretty": {
+			input:   []rawYAML{"|2-\n   x\n"},
+			decoded: []string{" x"},
+			opts:    []encoder.Option{encoder.Pretty()},
+			want:    stringtest.LinesLF(`- " x"`),
+		},
+		"marshaled folded block under nested key": {
+			input:   map[string]map[string]rawYAML{"a": {"k": ">\n  x\n  y\n"}},
+			decoded: map[string]map[string]string{"a": {"k": "x y\n"}},
+			want:    stringtest.LinesLF("a:", `  k: "x y\n"`),
+		},
+		"marshaled literal block with indentation indicator": {
+			input:   map[string]rawYAML{"k": "|2\n   x\n"},
+			decoded: map[string]string{"k": " x\n"},
+			want:    stringtest.LinesLF(`k: " x\n"`),
+		},
 		"plain string": {
 			input: map[string]string{"k": "a-b ?c"},
 			want:  "k: a-b ?c\n",
@@ -1309,7 +1373,7 @@ func TestPretty(t *testing.T) {
 		},
 		"root sequence that holds YAML a marshaler returned": {
 			input: []rawYAML{"- a\n- b\n"},
-			want:  stringtest.LinesLF("  - - a", "    - b"),
+			want:  stringtest.LinesLF("- - a", "  - b"),
 		},
 	}
 

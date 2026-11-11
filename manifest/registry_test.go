@@ -9,7 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
 
+	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/edit"
+	"go.jacobcolvin.com/niceyaml/encoder"
 	"go.jacobcolvin.com/niceyaml/manifest"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/schema"
@@ -917,4 +919,77 @@ func TestWithSchemaRegistry(t *testing.T) {
 		_, err := reg.Load(t.Context(), configFS(map[string]string{"menu.yaml": menu}))
 		require.ErrorIs(t, err, schema.ErrViolation)
 	})
+}
+
+func TestWithMarshalers(t *testing.T) {
+	t.Parallel()
+
+	levelText := encoder.CustomMarshaler(func(_ context.Context, l AlarmLevel) (any, error) {
+		return map[AlarmLevel]string{alarmLow: "low", alarmHigh: "high"}[l], nil
+	})
+
+	tcs := map[string]struct {
+		err  error
+		want string
+		opts []manifest.RegistryOption
+	}{
+		"a step writes the level by name": {
+			opts: []manifest.RegistryOption{manifest.WithMarshalers(levelText)},
+			want: "high",
+		},
+		"without marshalers a step writes the level as a number": {
+			// The load then cannot read the level that the step wrote.
+			err: errUnknownAlarmLevel,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			level := spec.Child("level")
+			reg := manifest.MustNewRegistry(append([]manifest.RegistryOption{
+				manifest.WithNameField(meta.Child("name")),
+				manifest.WithUnmarshalers(niceyaml.CustomUnmarshaler(decodeAlarmLevel)),
+				manifest.WithKinds(manifest.NewKind[Alarm]("Alarm",
+					manifest.Version("alarm.jacobcolvin.com/v1"),
+					manifest.Version("alarm.jacobcolvin.com/v2",
+						// The step decodes the level through the unmarshalers of
+						// the registry and writes it back one level higher.
+						manifest.Migrate(level, func(ctx context.Context, n *edit.Node) error {
+							l, err := n.Decode[AlarmLevel](ctx)
+							if err != nil {
+								return err
+							}
+
+							return n.Set(ctx, l+1)
+						}),
+					),
+				)),
+			}, tc.opts...)...)
+
+			set, err := reg.Load(t.Context(), manifest.Sources(niceyaml.NewSourceFromString(stringtest.LinesLF(
+				"apiVersion: alarm.jacobcolvin.com/v1",
+				"kind: Alarm",
+				"metadata:",
+				"  name: smoke",
+				"spec:",
+				"  level: low",
+			))))
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+
+			alarm, ok := set.Get[Alarm]("smoke")
+			require.True(t, ok)
+
+			got, err := alarm.Current.DecodeAt[string](t.Context(), level)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
 }

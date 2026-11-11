@@ -8,11 +8,13 @@ import (
 	"io"
 	"math"
 	"runtime/debug"
+	"slices"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 
 	"go.jacobcolvin.com/niceyaml/internal/hook"
+	"go.jacobcolvin.com/niceyaml/internal/marshaler"
 )
 
 var (
@@ -21,8 +23,9 @@ var (
 	//
 	//   - A value of a type that go-yaml does not encode, such as a channel
 	//     or a function.
-	//   - The error that a value's own MarshalYAML or MarshalText method
-	//     returns. That error stays in the chain.
+	//   - The error that a value's own MarshalYAML, MarshalText, or
+	//     MarshalJSON method returns, or a function of [CustomMarshaler].
+	//     That error stays in the chain.
 	//   - A value that encodes to no YAML node, which [ErrNoNode] labels.
 	//
 	// The error of the context of the call does not match after that
@@ -142,7 +145,11 @@ type Encoder struct {
 	err error
 	// Holds the comments for every document, keyed by YAML path.
 	comments yaml.CommentMap
-	opts     []yaml.EncodeOption
+	// Holds the go-yaml options of each encode, the options that register
+	// the marshalers last.
+	opts []yaml.EncodeOption
+	// Holds the marshalers of [WithMarshalers].
+	marshalers marshaler.Options
 	// Reports whether a document has reached w.
 	written bool
 }
@@ -153,15 +160,17 @@ type Encoder struct {
 //   - [Pretty]
 //   - [WithIndent]
 //   - [WithIndentSequence]
+//   - [WithMarshalers]
 //   - [WithYAMLComments]
 //   - [WithYAMLOptions]
 type Option func(*config)
 
-// config collects the go-yaml options and the comments that build an
-// [Encoder].
+// config collects the go-yaml options, the marshalers, and the comments
+// that build an [Encoder].
 type config struct {
-	comments yaml.CommentMap
-	opts     []yaml.EncodeOption
+	comments   yaml.CommentMap
+	opts       []yaml.EncodeOption
+	marshalers marshaler.Options
 }
 
 // WithIndent is an [Option] that sets the number of spaces per indentation
@@ -182,10 +191,7 @@ func WithIndent(spaces int) Option {
 // sequence entries one level below their parent key. The default is false,
 // and entries then sit at the indent of their parent key. A sequence at
 // the root of a document does not have a parent key, so it starts at the
-// first column either way. The exception is a root sequence that holds
-// YAML a marshaler returned. Go-yaml leaves that YAML at the columns it had
-// in the marshaler's text, so the encoder keeps such a sequence one level
-// in, where go-yaml puts it.
+// first column either way.
 func WithIndentSequence(indent bool) Option {
 	return func(c *config) {
 		c.opts = append(c.opts, yaml.IndentSequence(indent))
@@ -285,11 +291,17 @@ func New(w io.Writer, opts ...Option) *Encoder {
 		opt(&c)
 	}
 
-	return &Encoder{
-		w:        w,
-		opts:     c.opts,
-		comments: c.comments,
+	e := &Encoder{
+		w:          w,
+		comments:   c.comments,
+		marshalers: c.marshalers,
 	}
+
+	// The value that the function of a type returns encodes with the same
+	// options, so the functions of the encoder reach it too.
+	e.opts = append(slices.Clip(c.opts), c.marshalers.YAMLOptions(e.marshalText)...)
+
+	return e
 }
 
 // Encode encodes v as YAML and writes it to the underlying writer as one
@@ -302,8 +314,9 @@ func New(w io.Writer, opts ...Option) *Encoder {
 // When the writer refuses a write, Encode returns an error that matches
 // [ErrWrite], and every later call returns that same error without
 // encoding v. The encoder passes ctx to every marshaler that accepts one,
-// such as a [yaml.InterfaceMarshalerContext] or a marshaler registered
-// with [yaml.RegisterCustomMarshalerContext].
+// such as a [yaml.InterfaceMarshalerContext], a function of
+// [CustomMarshaler], or a marshaler registered with
+// [yaml.RegisterCustomMarshalerContext].
 //
 // A [go.jacobcolvin.com/niceyaml.Node], a
 // [go.jacobcolvin.com/niceyaml.Source], and a
@@ -323,17 +336,30 @@ func New(w io.Writer, opts ...Option) *Encoder {
 // marshaler returns decides how a reader reads the scalar, so Encode leaves
 // such a scalar unquoted.
 //
-// A literal block in the YAML that a marshaler returns is the exception.
-// Encode writes such a block with the indentation it had in that YAML, so
-// the block might fail to parse in a nested collection. Encode
-// double-quotes it only where YAML forbids a literal block: as a key or in
-// a flow collection. Encode also double-quotes a single-quoted string with
-// a line break in a marshaler's YAML, because YAML folds a line break in
-// single quotes.
+// A literal or folded block in the YAML that a marshaler returns is the
+// exception. Encode writes such a block with the indentation it had in
+// that YAML, as the block of a string with a line break in the JSON of a
+// MarshalJSON method. Encode double-quotes the block where it does not
+// read back: as a key, in a flow collection, or under a key whose column
+// that indentation does not pass. Go-yaml moves the lines of a block in a
+// block sequence right by their indentation, so it can misalign them.
+// Encode thus double-quotes such a block when its lines do not all share
+// one indentation. The indentation indicator of a block counts from the
+// indentation of its key or entry. Encode double-quotes a block with an
+// indicator under a key and in a block sequence too. The go-yaml printer
+// drops the empty lines at the end of a block. Encode thus double-quotes
+// a block with the keep indicator "+" whose string ends in more than one
+// line break, wherever the block sits. Encode also double-quotes a
+// single-quoted string with a line break in a marshaler's YAML, because
+// YAML folds a line break in single quotes.
 //
-// A block collection in a marshaler's YAML is the other exception. In a
-// flow collection, such as one that [yaml.Flow] produces, go-yaml writes
-// the block collection in block style. YAML forbids block style there, and
+// A block collection in a marshaler's YAML is the other exception. Go-yaml
+// can leave such a collection at or left of the column of its key, as it
+// does under [WithIndentSequence] for a key of a mapping in a sequence.
+// Encode moves such a mapping one indent right of its key. It moves such a
+// sequence there when the sequence sits left of its key. In a flow
+// collection, such as one that [yaml.Flow] produces, go-yaml writes the
+// block collection in block style. YAML forbids block style there, and
 // Encode leaves the collection and the strings in it as go-yaml writes
 // them.
 //
@@ -376,38 +402,20 @@ func (e *Encoder) encode(ctx context.Context, v any) (ast.Node, error) {
 		return nil, err
 	}
 
-	// A go-yaml encoder keeps every anchor it has seen, even from a call
-	// that failed, so each call marshals with a fresh one.
-	node, err := yaml.NewEncoder(io.Discard, e.opts...).EncodeToNodeContext(ctx, v)
+	node, err := e.node(ctx, v)
 	if err != nil {
 		// The value is not at fault when its context ended, so that error
-		// comes back as it is.
-		if contextEnded(ctx, err) {
-			return nil, err //nolint:wrapcheck // Return the original error.
+		// comes back as it is. So does a panic of the printer in the encode
+		// of the value of a marshaler function, and an error that already
+		// names its cause, such as one of that encode.
+		var panicked *PanicError
+
+		if contextEnded(ctx, err) || errors.As(err, &panicked) || errors.Is(err, ErrEncode) {
+			return nil, err
 		}
 
 		return nil, fmt.Errorf("%w: %w", ErrEncode, err)
 	}
-
-	// The go-yaml encoder leaves a nil node where a value encodes to no
-	// node. Its printer writes a nil root as "<nil>" and drops a nil
-	// sequence entry, so Encode refuses the whole tree.
-	var holes holeFinder
-
-	ast.Walk(&holes, node)
-
-	if holes.found {
-		return nil, &labeled{label: ErrNoNode}
-	}
-
-	// The go-yaml encoder leaves some strings unquoted in a form that
-	// reads back as a different value, so Encode quotes them before it
-	// prints the node.
-	ast.Walk(quoter{}, node)
-
-	// Prettier starts a sequence at the root of a document in the first
-	// column, where go-yaml indents it under IndentSequence.
-	outdentRoot(node)
 
 	// The comments go on after the quoting, which can replace a node.
 	err = setComments(node, comments)
@@ -434,6 +442,62 @@ func (e *Encoder) encode(ctx context.Context, v any) (ast.Node, error) {
 	e.written = true
 
 	return node, nil
+}
+
+// node returns the node of v that the encoder prints, quoted and laid out
+// as [Encoder.Encode] describes. It returns the error of go-yaml's encoder
+// as it is, and an error that matches [ErrNoNode] for a value that
+// encodes to no node.
+func (e *Encoder) node(ctx context.Context, v any) (ast.Node, error) {
+	// A go-yaml encoder keeps every anchor it has seen, even from a call
+	// that failed, so each call marshals with a fresh one.
+	node, err := yaml.NewEncoder(io.Discard, e.opts...).EncodeToNodeContext(ctx, v)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // The caller names the cause.
+	}
+
+	// The go-yaml encoder leaves a nil node where a value encodes to no
+	// node. Its printer writes a nil root as "<nil>" and drops a nil
+	// sequence entry, so Encode refuses the whole tree.
+	var holes holeFinder
+
+	ast.Walk(&holes, node)
+
+	if holes.found {
+		return nil, &labeled{label: ErrNoNode}
+	}
+
+	// The go-yaml encoder can leave a collection of a marshaler's YAML at
+	// or left of the column of its key. The quoter reads the columns that
+	// the visitor sets.
+	ast.Walk(valueIndenter{}, node)
+
+	// The go-yaml encoder leaves some strings unquoted in a form that
+	// reads back as a different value, so Encode quotes them before it
+	// prints the node.
+	ast.Walk(quoter{}, node)
+
+	// The go-yaml printer drops the trailing line breaks of a block that
+	// keeps them, so Encode quotes such a block at the root too.
+	node = keptSafe(node)
+
+	// Prettier starts a sequence at the root of a document in the first
+	// column, where go-yaml indents it under IndentSequence.
+	outdentRoot(node)
+
+	return node, nil
+}
+
+// marshalText returns the YAML text of v, the value that the function of
+// a [CustomMarshaler] returns, as the encoder prints it without comments.
+// Go-yaml's encoder reads that text as the YAML of a marshaler.
+func (e *Encoder) marshalText(ctx context.Context, v any) ([]byte, error) {
+	node, err := e.node(ctx, v)
+	if err != nil {
+		return nil, err
+	}
+
+	return render(node)
 }
 
 // Marshal returns v as one YAML document that ends in a line break. The
@@ -468,6 +532,19 @@ func init() {
 
 		return buf.Bytes(), node, nil
 	}
+
+	hook.EncodeNode = func(ctx context.Context, v, opts any) (ast.Node, error) {
+		o, _ := opts.([]Option) //nolint:errcheck // The hook takes the options of Marshal.
+
+		//nolint:wrapcheck // The hook returns the error of go-yaml.
+		return yaml.NewEncoder(io.Discard, New(io.Discard, o...).opts...).EncodeToNodeContext(ctx, v)
+	}
+
+	hook.Marshalers = func(opts any) marshaler.Options {
+		o, _ := opts.([]Option) //nolint:errcheck // The hook takes the options of Marshal.
+
+		return New(io.Discard, o...).marshalers
+	}
 }
 
 // render returns the YAML text of node, or a [*PanicError] when the
@@ -484,13 +561,19 @@ func render(node ast.Node) (_ []byte, err error) {
 	return []byte(node.String() + "\n"), nil
 }
 
-// outdentRoot moves a block sequence at the root of a document, with
-// every node in it, to the first column. Under [yaml.IndentSequence],
-// go-yaml indents every sequence one level, including the root sequence,
-// which does not have a parent key to indent below. Go-yaml leaves the
-// YAML a marshaler returns at the columns it had in that text, left of the
-// sequence that holds it. Moving such a sequence puts that YAML left of the
-// first column, so outdentRoot leaves the sequence where go-yaml put it.
+// outdentRoot moves a block sequence at the root of a document to the
+// first column. Under [yaml.IndentSequence], go-yaml indents every
+// sequence one level, including the root sequence, which does not have a
+// parent key to indent below.
+//
+// The printer writes each entry relative to the first line of the entry,
+// so the function can move the sequence without its entries. Go-yaml
+// prints a multi-line string at the column of its node, though. The
+// function thus moves an entry with the sequence when every node of the
+// entry stays right of the first column. Go-yaml leaves the YAML a
+// marshaler returns at the columns it had in that text, left of the
+// sequence that holds it. An entry that holds such YAML thus stays where
+// go-yaml put it.
 func outdentRoot(node ast.Node) {
 	seq, ok := node.(*ast.SequenceNode)
 	if !ok || seq.IsFlowStyle {
@@ -502,12 +585,17 @@ func outdentRoot(node ast.Node) {
 		return
 	}
 
-	lowest := lowestColumn{column: math.MaxInt}
+	seq.Start.AddColumn(-shift)
+	seq.End.AddColumn(-shift)
 
-	ast.Walk(&lowest, seq)
+	for _, entry := range seq.Values {
+		lowest := lowestColumn{column: math.MaxInt}
 
-	if lowest.column > shift {
-		seq.AddColumn(-shift)
+		ast.Walk(&lowest, entry)
+
+		if lowest.column > shift {
+			entry.AddColumn(-shift)
+		}
 	}
 }
 
@@ -528,6 +616,105 @@ func (l *lowestColumn) Visit(node ast.Node) ast.Visitor {
 	}
 
 	return l
+}
+
+// valueIndenter is an [ast.Visitor] that moves a block collection right
+// of its key. It checks the value of each key in a block mapping. Go-yaml
+// places the YAML that a marshaler returns at the columns it had in that
+// text. It then indents that YAML by the levels of the mappings that hold
+// it. Under [yaml.IndentSequence], go-yaml also indents the keys of a
+// mapping in a sequence by the levels of the sequences. Such YAML can
+// thus sit at or left of its key. The printer then writes the collection
+// as entries of the mapping of the key, or as text that does not parse.
+//
+// The visitor moves a mapping to one indent right of its key, where
+// go-yaml places a mapping of its own. It moves a sequence there when the
+// sequence sits left of its key. A sequence at the column of its key
+// reads back, so it stays there. The visitor looks through the tags and
+// anchors that a marshaler's YAML can put on the collection. It leaves a
+// flow collection and everything in it as it is.
+type valueIndenter struct {
+	// Reports whether the visited node sits in a flow collection.
+	flow bool
+}
+
+// Visit implements [ast.Visitor].
+func (v valueIndenter) Visit(node ast.Node) ast.Visitor {
+	switch n := node.(type) {
+	case *ast.MappingNode:
+		return valueIndenter{flow: v.flow || n.IsFlowStyle}
+	case *ast.SequenceNode:
+		return valueIndenter{flow: v.flow || n.IsFlowStyle}
+	case *ast.MappingValueNode:
+		if !v.flow && !n.IsFlowStyle {
+			indentValue(n)
+		}
+	}
+
+	return v
+}
+
+// indentValue moves the value of mv right of its key, as [valueIndenter]
+// describes. Each key that go-yaml's encoder makes holds the indent of the
+// encode.
+func indentValue(mv *ast.MappingValueNode) {
+	key := mv.Key.GetToken()
+	if key == nil || key.Position == nil {
+		return
+	}
+
+	inner := mv.Value
+	for {
+		switch n := inner.(type) {
+		case *ast.TagNode:
+			inner = n.Value
+
+			continue
+
+		case *ast.AnchorNode:
+			inner = n.Value
+
+			continue
+		}
+
+		break
+	}
+
+	var col int
+
+	switch c := inner.(type) {
+	case *ast.MappingNode:
+		if c.IsFlowStyle || len(c.Values) == 0 {
+			return
+		}
+
+		col = c.Values[0].Key.GetToken().Position.Column
+		if col > key.Position.Column {
+			return
+		}
+
+	case *ast.SequenceNode:
+		if c.IsFlowStyle || len(c.Values) == 0 {
+			return
+		}
+
+		col = c.Start.Position.Column
+		if col >= key.Position.Column {
+			return
+		}
+
+	default:
+		return
+	}
+
+	// An indent below one comes from a go-yaml option that the printer
+	// refuses, so the visitor leaves its layout to the printer.
+	indent := key.Position.IndentNum
+	if indent < 1 {
+		return
+	}
+
+	mv.Value.AddColumn(key.Position.Column + indent - col)
 }
 
 // holeFinder is an [ast.Visitor] that reports whether a tree holds a nil

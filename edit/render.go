@@ -3,13 +3,14 @@ package edit
 import (
 	"context"
 	"encoding"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"reflect"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -23,6 +24,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/internal/mapkey"
+	"go.jacobcolvin.com/niceyaml/internal/marshaler"
 )
 
 // rendered is the text of a value that an edit writes.
@@ -73,31 +75,32 @@ type renderedHeader struct {
 	line, col, size int
 }
 
-// render returns the text of v, from one encode of v. A block collection
-// indents by step, and a block sequence under a key indents its "-" by step
-// when seqIndent is true. The flow text and the value of the model come
-// from the same encode. Each Go string of the flow text takes the text that
-// go-yaml's flow encoder writes for that string alone, as [Doc.flowRun]
-// describes. Each other scalar keeps the text of the encode, such as the
-// plain timestamp of a [time.Time]. The model holds the value that
-// go-yaml's encoder meant, as the node of the encode holds it, and the text
-// holds what go-yaml's parse of the encoded text reads. When the two
-// differ, as for a float that the encoder writes as 1e+06 and the decoder
-// reads as a string, render returns an error that matches errEncoder. So
-// does a panic of go-yaml's encoder, and a refusal of go-yaml's parser of
-// the encoded text. So does a byte order mark there, as [Doc.valueMisread]
-// finds it. So do line breaks of both kinds in the encoded text where the
-// YAML of no marshaler of v holds both. The encoder wrote them then, as it
-// writes the header of a block scalar of "\r\n" lines with a "\n".
-// After those checks, the finder reads the text, and the
+// render returns the text of v, from one encode of v under the marshalers
+// ms. A block collection indents by step, and a block sequence under a key
+// indents its "-" by step when seqIndent is true. The flow text and the
+// value of the model come from the same encode. Each Go string of the flow
+// text takes the text that go-yaml's flow encoder writes for that string
+// alone, as [Doc.flowRun] describes. Each other scalar keeps the text of
+// the encode, such as the plain timestamp of a [time.Time]. The model holds
+// the value that go-yaml's encoder meant, as the node of the encode holds
+// it, and the text holds what go-yaml's parse of the encoded text reads.
+// When the two differ, as for a float that the encoder writes as 1e+06 and
+// the decoder reads as a string, render returns an error that matches
+// errEncoder. So does a panic of go-yaml's encoder, and a refusal of
+// go-yaml's parser of the encoded text. So does a byte order mark there, as
+// [Doc.valueMisread] finds it. So do line breaks of both kinds in the
+// encoded text where the YAML of no marshaler of v holds both. The encoder
+// wrote them then, as it writes the header of a block scalar of "\r\n"
+// lines with a "\n". After those checks, the finder reads the text, and the
 // rendered value holds the instances that it finds. A failed check leaves
 // the instances that the finder found in the YAML of the marshalers of v,
 // because a construct there can make go-yaml fail on the text, as an alias
 // whose anchor the YAML lacks does.
 //
 //nolint:contextcheck // The flow text encodes the strings of the encode, which reads no state that a context carries.
-func render(ctx context.Context, v any, step int, seqIndent bool) (rendered, error) {
-	data, meant, refused, err := encode(ctx, v, encoder.WithIndent(step), encoder.WithIndentSequence(seqIndent))
+func render(ctx context.Context, v any, step int, seqIndent bool, ms []encoder.Marshaler) (rendered, error) {
+	data, meant, refused, err := encode(ctx, v,
+		encoder.WithIndent(step), encoder.WithIndentSequence(seqIndent), encoder.WithMarshalers(ms...))
 	if err != nil {
 		return rendered{refused: refused}, err
 	}
@@ -230,8 +233,9 @@ const maxMarshalersText = "1,000"
 
 // encode returns the text of v that encoder.Marshal writes under opts, and
 // the node that go-yaml's encoder made for v. Before the encoder runs, the
-// check of [checkValue] reads v. Its problem comes back as it is, and the
-// instances that it finds come back with the result of the encode. A panic
+// check of [checkValue] reads v under the marshalers of opts. Its problem
+// comes back as it is, and the instances that it finds come back with the
+// result of the encode. A panic
 // of a marshaler of v that the check calls goes on as it is. A panic of
 // go-yaml's encoder, as on a map key that is nil, returns an error that
 // matches errEncoder. Any other error of the encode comes back as the
@@ -239,7 +243,7 @@ const maxMarshalersText = "1,000"
 // encoder package that names its cause, except the error of a context
 // that ended, which comes back bare.
 func encode(ctx context.Context, v any, opts ...encoder.Option) ([]byte, ast.Node, []instance, error) {
-	refused, err := checkValue(ctx, v)
+	refused, err := checkValue(ctx, v, opts)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -275,16 +279,26 @@ type valueCheck struct {
 	// The instances of the constructs that a Set does not write, which the
 	// finder finds in the YAML of each marshaler, in the order of the walk.
 	refused []instance
+	// The options of the encode, with which the walk asks for the node of
+	// a key of a map.
+	opts []encoder.Option
+	// The marshalers of the encode, which the walk calls as go-yaml's
+	// encoder calls them.
+	marshalers marshaler.Options
 }
 
 // checkValue returns the problem of v, a value of a Set, before go-yaml's
 // encoder writes it. The check reads the values of v that the encoder
 // reads. It reads each field of a struct that the encoder writes: an
 // exported or an embedded field whose tag does not name "-". At a value
-// that a MarshalYAML method of its own marshals, the check calls that
-// method, as the encoder calls it, and reads what the method returns
-// instead. The encoder calls the method again, so each such method runs
-// twice. The encoder alone calls a MarshalText method.
+// that a MarshalYAML method of its own or a function of the marshalers of
+// opts marshals, the check calls that method or function, as the encoder
+// calls it, and reads what it returns instead. The encoder calls it again,
+// so each such method or function runs twice. The encoder alone calls a
+// MarshalText method. Under the JSON marshalers of opts, the check calls
+// the MarshalJSON method of a value and reads the YAML of that JSON, as
+// it reads the YAML of a MarshalYAML method. That YAML must read as the
+// value of the JSON, as [convertedJSON] checks.
 //
 // A value that holds itself through a map, a slice, or a pointer returns
 // errSelfReference. Go-yaml's encoder writes the value of each reference
@@ -303,8 +317,8 @@ type valueCheck struct {
 // [yaml.BytesMarshaler] does, must be a value of YAML that go-yaml reads,
 // as [marshaledYAML] checks. The check returns the instances that the
 // finder finds in that YAML, as marshaledYAML finds them.
-func checkValue(ctx context.Context, v any) ([]instance, error) {
-	c := &valueCheck{ctx: ctx, open: make(map[[3]any]bool)}
+func checkValue(ctx context.Context, v any, opts []encoder.Option) ([]instance, error) {
+	c := &valueCheck{ctx: ctx, marshalers: hook.Marshalers(opts), opts: opts, open: make(map[[3]any]bool)}
 
 	err := c.walk(reflect.ValueOf(v))
 
@@ -400,7 +414,8 @@ func (c *valueCheck) walk(v reflect.Value) error {
 }
 
 // key returns the problem of k, a key of a map of the value, when
-// go-yaml's encoder does not write k as a key of YAML. It then writes the
+// go-yaml's encoder does not write k as a key of YAML, under the
+// marshalers of the encode. It then writes the
 // string that fmt prints for k, as for an array or a struct, so the text
 // does not read back as k. The check asks the encoder for the node of k
 // alone, as the encoder asks for it before it writes the string, and the
@@ -422,7 +437,7 @@ func (c *valueCheck) key(k reflect.Value) (err error) {
 
 	key := k.Interface()
 
-	node, err := yaml.NewEncoder(io.Discard).EncodeToNodeContext(c.ctx, key)
+	node, err := hook.EncodeNode(c.ctx, key, c.opts)
 	if err != nil {
 		return fmt.Errorf("encode a key of type %s: %w", reflect.TypeOf(key), err)
 	}
@@ -435,27 +450,36 @@ func (c *valueCheck) key(k reflect.Value) (err error) {
 		errScalarKind, reflect.TypeOf(key), shownCut(fmt.Sprint(key)))
 }
 
-// marshal calls the MarshalYAML method of v that go-yaml's encoder calls
-// to marshal it, and returns the problem of what the method returns. It
-// reports whether v has a method that the encoder calls to marshal it. A
-// method that fails returns no problem, because the encode then fails with
-// its error. The encoder writes the text of MarshalText as a string, so the
-// check does not call that method.
+// marshal calls the marshaler of v that go-yaml's encoder calls to marshal
+// it, and returns the problem of what the marshaler returns. It reports
+// whether v has a marshaler that the encoder calls. The encoder looks up
+// the function of the marshalers of the encode by the type of v first,
+// and then the methods of v, in the order of go-yaml's encoder. For a
+// value inside an interface, the type of v is that of the interface, so
+// a method of the value inside, or a [time.Duration] there, applies ahead
+// of the function for its type. A marshaler that fails returns no
+// problem, because the encode then fails with its error. The encoder
+// writes a duration and the text of MarshalText as strings, so the check
+// does not call a marshaler for them.
 func (c *valueCheck) marshal(v reflect.Value) (bool, error) {
 	if !v.CanInterface() {
 		return false, nil
+	}
+
+	if fn, ok := c.marshalers.Lookup(v.Type()); ok {
+		return true, c.marshaled(v, func() (any, error) { return fn(c.ctx, v.Interface()) })
 	}
 
 	switch m := v.Interface().(type) {
 	case yaml.BytesMarshalerContext:
 		doc, err := m.MarshalYAML(c.ctx)
 
-		return true, c.marshaledYAML(v, doc, err)
+		return true, c.marshaledYAML(v, "MarshalYAML", doc, err)
 
 	case yaml.BytesMarshaler:
 		doc, err := m.MarshalYAML()
 
-		return true, c.marshaledYAML(v, doc, err)
+		return true, c.marshaledYAML(v, "MarshalYAML", doc, err)
 
 	case yaml.InterfaceMarshalerContext:
 		return true, c.marshaled(v, func() (any, error) { return m.MarshalYAML(c.ctx) })
@@ -463,19 +487,49 @@ func (c *valueCheck) marshal(v reflect.Value) (bool, error) {
 	case yaml.InterfaceMarshaler:
 		return true, c.marshaled(v, m.MarshalYAML)
 
+	case time.Duration:
+		// The encoder writes a duration as its text, ahead of a function
+		// for the type of a duration inside an interface.
+		return true, nil
+
 	case encoding.TextMarshaler:
 		return true, nil
+
+	case json.Marshaler:
+		if !c.marshalers.JSON {
+			return false, nil
+		}
+
+		// Go-yaml's encoder converts the JSON of the method to YAML, and it
+		// reads that YAML as it reads the YAML of a MarshalYAML method. The
+		// encode fails with the error of the method or of the conversion.
+		js, err := m.MarshalJSON()
+		if err != nil {
+			return true, nil //nolint:nilerr // The encode fails with the error of the method.
+		}
+
+		doc, err := yaml.JSONToYAML(js)
+		if err != nil {
+			return true, nil //nolint:nilerr // The encode fails with the error of the conversion.
+		}
+
+		err = c.marshaledYAML(v, "MarshalJSON", doc, nil)
+		if err != nil {
+			return true, err
+		}
+
+		return true, convertedJSON(v, js, doc)
 
 	default:
 		return false, nil
 	}
 }
 
-// marshaledYAML returns the problem of doc, the YAML that the marshaler of
-// v writes, as [marshaledYAML] gives it, with the error of the marshaler.
-// The walk keeps the instances that the finder finds in doc.
-func (c *valueCheck) marshaledYAML(v reflect.Value, doc []byte, err error) error {
-	refused, err := marshaledYAML(v, doc, err)
+// marshaledYAML returns the problem of doc, the YAML that the method of v
+// named method writes, as [marshaledYAML] gives it, with the error of the
+// method. The walk keeps the instances that the finder finds in doc.
+func (c *valueCheck) marshaledYAML(v reflect.Value, method string, doc []byte, err error) error {
+	refused, err := marshaledYAML(v, method, doc, err)
 	c.refused = append(c.refused, refused...)
 
 	return err
@@ -485,7 +539,7 @@ func (c *valueCheck) marshaledYAML(v reflect.Value, doc []byte, err error) error
 // of v, returns, as [checkValue] describes.
 func (c *valueCheck) marshaled(v reflect.Value, marshal func() (any, error)) error {
 	if len(c.marshaling) >= maxMarshalers {
-		return fmt.Errorf("the MarshalYAML methods of %s return values with marshalers more than %s levels deep",
+		return fmt.Errorf("the marshalers of %s return values with marshalers more than %s levels deep",
 			c.marshaling[0].Type(), maxMarshalersText)
 	}
 
@@ -1015,7 +1069,7 @@ func fieldText(ctx context.Context, text string, old *token.Token, flow bool) (s
 		return text, nil
 	}
 
-	r, err := render(ctx, text, 2, false)
+	r, err := render(ctx, text, 2, false, nil)
 	if err != nil {
 		return "", err
 	}

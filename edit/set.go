@@ -11,6 +11,7 @@ import (
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/encoder"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -116,6 +117,12 @@ type payload struct {
 // or the block and flow styles of that value. Of its tags, the copy holds
 // only !!binary and !!timestamp.
 //
+// A value of a type writes by the MarshalYAML or MarshalText method of the
+// type, or by the marshalers that [WithMarshalers] gives the Doc, and
+// otherwise field by field. A type with a MarshalJSON method alone thus
+// writes its exported fields, unless the marshalers turn on
+// [go.jacobcolvin.com/niceyaml/encoder.JSONMarshalers].
+//
 // A reference document of [go.jacobcolvin.com/niceyaml.WithReferences]
 // that a `<<` merge key reads decides which names the mapping of the merge
 // key reads. A Set of a name that such a mapping does not write after the
@@ -166,18 +173,23 @@ type payload struct {
 // each MarshalYAML method of v that the encoder calls, and reads what the
 // method returns. Those are the methods of [yaml.BytesMarshaler],
 // [yaml.BytesMarshalerContext], [yaml.InterfaceMarshaler], and
-// [yaml.InterfaceMarshalerContext], and each such method runs twice. The
-// encoder alone calls the MarshalText method of an
-// [encoding.TextMarshaler], so that method runs once. Set also asks the
-// encoder for the node of each key of a map of v alone, so each method of a
-// key runs once more. A value that holds itself through a map, a slice, or
-// a pointer fails the Set before the encoder runs, because the encoder
+// [yaml.InterfaceMarshalerContext], and each such method runs twice. Set
+// also calls each function of the marshalers of the Doc that the encoder
+// calls, and reads the value that it returns. Each such function thus
+// runs twice too. Under JSON marshalers, Set calls each MarshalJSON method
+// that the encoder calls. It reads the YAML of that method as the YAML of
+// a MarshalYAML method, so the method runs twice as well. The encoder
+// alone calls the MarshalText method of an [encoding.TextMarshaler], so
+// that method runs once. Set also asks the encoder for the node of each key
+// of a map of v alone, under the same marshalers. Each method or function
+// of a key thus runs once more. A value that holds itself through a map, a
+// slice, or a pointer fails the Set before the encoder runs, because the encoder
 // writes such a value without end. So does a value whose marshaler returns
 // a value that holds it, or a value equal to one that a marshaler on the
-// way marshals. A chain of MarshalYAML methods, in which each method
-// returns the value that the next marshals, holds at most 1,000 methods. A
-// longer chain fails the Set too, and its message names the type of the
-// first.
+// way marshals. A chain of MarshalYAML methods and marshaler functions, in
+// which each returns the value that the next marshals, holds at most 1,000
+// marshalers. A longer chain fails the Set too, and its message names the
+// type of the first.
 //
 // The YAML text that a MarshalYAML method returns must be YAML of one
 // node, so text of more than one document fails the Set. So does a mapping
@@ -195,7 +207,13 @@ type payload struct {
 // though go-yaml reads that text as the value after the directive. The
 // message names go-yaml and the problem, with its place in that text. For
 // a directive, the detail tells the author of the program to return the
-// YAML without directives.
+// YAML without directives. Go-yaml converts the JSON of a MarshalJSON
+// method to YAML, and that YAML must read as the value of the JSON. Some
+// JSON converts to YAML that reads as another value, and such JSON fails
+// the Set with ErrEngine. A string of one line break reads as "". A number
+// in exponent form without a decimal point, such as 1e-07, reads as a
+// string, and so does an integer outside the range of 64 bits. An object
+// key "<<" reads as a merge key.
 //
 // The text is text of the program, and the Set writes it as go-yaml reads
 // it, indented for its place. Go-yaml's encoder writes each scalar of the
@@ -600,7 +618,7 @@ func (d *Doc) setCreated(ctx context.Context, h *Node, p *place, v any, at place
 }
 
 // renderPayload returns v as a payload for a place whose block collections
-// indent by step. The text that the payload writes takes
+// indent by step, encoded under the marshalers ms. The text that the payload writes takes
 // origin. A Go string keeps the quotes of old, the token of the scalar
 // that it replaces, or nil, as [scalarStyle] writes it. A mapping of v that
 // holds two keys that a decode reads as one fails the call of h before it
@@ -613,11 +631,11 @@ func (d *Doc) setCreated(ctx context.Context, h *Node, p *place, v any, at place
 // those checks of go-yaml. The problem of such a character binds as
 // [Doc.valueBug] binds it, and so does each problem that matches errEncoder.
 func (d *Doc) renderPayload(
-	ctx context.Context, h *Node, v any, step, origin int, old *token.Token,
+	ctx context.Context, h *Node, v any, step, origin int, old *token.Token, ms []encoder.Marshaler,
 ) (payload, error) {
 	seqIndent := d.sequenceIndent()
 
-	r, err := render(ctx, v, step, seqIndent)
+	r, err := render(ctx, v, step, seqIndent, ms)
 
 	// A construct in the YAML of a marshaler of the value can make go-yaml
 	// fail on the text of the encode, as an alias whose anchor the YAML
@@ -939,7 +957,7 @@ func (d *Doc) replaceValue(ctx context.Context, h *Node, p *place, v any) (*edge
 	origin := d.addNote(inside)
 	step := d.stepOf(p, h.path)
 
-	pl, err := d.renderPayload(ctx, h, v, step, origin, scalarToken(p.value))
+	pl, err := d.renderPayload(ctx, h, v, step, origin, scalarToken(p.value), d.cfg.marshalers)
 	if err != nil {
 		return nil, err
 	}
@@ -1819,7 +1837,7 @@ func (d *Doc) insertEntry(
 	keyText := renderKey(ctx, key, nil, flow)
 	step := d.stepOf(holder, holderPath)
 
-	pl, err := d.renderPayload(ctx, h, value, step, origin, nil)
+	pl, err := d.renderPayload(ctx, h, value, step, origin, nil, d.cfg.marshalers)
 	if err != nil {
 		return nil, err
 	}
@@ -2300,7 +2318,7 @@ func (d *Doc) insertItem(
 ) (*edge, error) {
 	step := d.stepOf(holder, holderPath)
 
-	pl, err := d.renderPayload(ctx, h, value, step, origin, nil)
+	pl, err := d.renderPayload(ctx, h, value, step, origin, nil, d.cfg.marshalers)
 	if err != nil {
 		return nil, err
 	}

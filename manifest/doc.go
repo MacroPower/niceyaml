@@ -249,6 +249,11 @@
 // [Object.Original] from a Source that [Sources] reads keeps the
 // unmarshalers of that Source alone.
 //
+// [WithMarshalers] sets how the Go types of the kinds write YAML. Each
+// migration step writes its values through them, so a step that decodes a
+// value through the unmarshalers and sets it back writes the text that
+// the unmarshalers read.
+//
 // # Routing
 //
 // A load reads the type fields of each document and picks the kind and the

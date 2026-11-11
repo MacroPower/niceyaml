@@ -48,6 +48,7 @@ func (d *docState) migrate(ctx context.Context) bool {
 		edit.WithApp(reg.app()),
 		edit.WithProtected(reg.typeFields()...),
 		edit.WithUnmarshalers(reg.cfg.unmarshalers...),
+		edit.WithMarshalers(reg.cfg.marshalers...),
 	)
 	if err != nil {
 		d.fail(err)

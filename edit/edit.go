@@ -11,6 +11,7 @@ import (
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/encoder"
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/bom"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
@@ -154,6 +155,7 @@ type Func func(ctx context.Context, n *Node) error
 //
 // Options:
 //   - [WithApp]
+//   - [WithMarshalers]
 //   - [WithProtected]
 //   - [WithUnmarshalers]
 type Option func(*config)
@@ -167,6 +169,8 @@ type config struct {
 	// The unmarshalers that each decode applies ahead of those of the
 	// Source of the document.
 	unmarshalers []niceyaml.Unmarshaler
+	// The marshalers that each Set and Insert encodes its value with.
+	marshalers []encoder.Marshaler
 }
 
 // WithApp is an [Option] that names the app in the messages of the
@@ -208,6 +212,27 @@ func WithProtected(ps ...paths.Path) Option {
 func WithUnmarshalers(us ...niceyaml.Unmarshaler) Option {
 	return func(c *config) {
 		c.unmarshalers = append(c.unmarshalers, us...)
+	}
+}
+
+// WithMarshalers is an [Option] that sets how the Go types of the program
+// write YAML. [Node.Set] and [Node.Insert] encode each value under the
+// marshalers ms, as [encoder.Marshal] does under
+// [encoder.WithMarshalers]. A [Func] that reads a value with
+// [Node.Decode] through the unmarshalers of the program thus writes it
+// back the way the document holds it:
+//
+//	cidr := encoder.CustomMarshaler(func(ctx context.Context, n net.IPNet) (any, error) {
+//		return n.String(), nil
+//	})
+//
+//	d, err := edit.New(doc, edit.WithMarshalers(cidr, encoder.JSONMarshalers(true)))
+//
+// Each WithMarshalers adds to the ones before it, so a later function for
+// a type replaces an earlier one.
+func WithMarshalers(ms ...encoder.Marshaler) Option {
+	return func(c *config) {
+		c.marshalers = append(c.marshalers, ms...)
 	}
 }
 
