@@ -44,16 +44,18 @@
 //
 //	styles := theme.Charm.Styles().With(italic)
 //
-// A custom kind, such as one a program names for its own overlay, does not
-// have a parent of its own, so it inherits from [kind.Text]. [Inherit]
-// places it under a predefined kind, and it then takes that kind's style
-// under any theme, without a color of its own.
+// A custom kind, such as one a program names for its own overlay, inherits
+// from the parent that [kind.Parent] gives it. A program names the kind
+// below a predefined kind with [kind.Kind.Child], and the kind then takes
+// that kind's style under any theme, without a color of its own:
 //
-//	const match kind.Kind = "match"
+//	const match = kind.GenericHighlight + ".match"
 //
-//	styles := theme.Charm.Styles().With(style.Inherit(match, kind.GenericHighlight))
+//	p := printer.New(printer.WithStyles(theme.Charm))
 //
-// A [Set] on the custom kind still wins over the inherited style.
+// A [Set] or an [Update] on the custom kind still wins over the inherited
+// style. A custom kind without a '.' in its name, such as
+// kind.Kind("match"), inherits from [kind.Text].
 //
 // # Surface
 //

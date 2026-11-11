@@ -55,11 +55,14 @@
 //		catalog := theme.Builtin().With(t.With(italic))
 //	}
 //
-// A program that names a kind of its own, such as one for an overlay, gives
-// it a parent with [style.Inherit]. The kind then takes the parent's style
-// under every theme in the catalog:
+// A program that names a kind of its own, such as one for an overlay, names
+// it below a predefined kind with [kind.Kind.Child]. The kind then takes
+// the style of that predefined kind under every theme in the catalog, and
+// the theme goes to the printer as it is:
 //
-//	styles := t.Styles().With(style.Inherit(match, kind.GenericHighlight))
+//	const match = kind.GenericHighlight + ".match"
+//
+//	p := printer.New(printer.WithStyles(t))
 //
 // [Catalog.All] returns every theme in the catalog, with the name and
 // [Mode] alongside the styles for building a picker. [Catalog.Mode] keeps
@@ -154,10 +157,11 @@
 // at that field.
 //
 // Theme reports what a decode cannot. It rejects an empty name, an unset
-// mode, and a token for a kind that [kind.IsPredefined] rejects, such as a
-// misspelled name. These errors name the field or the kind and not a
-// place in the file. A program that wants a place for one of them adds a
-// validator for it to the decode.
+// mode, and a token for a kind that neither [kind.IsPredefined] nor
+// [kind.IsBelowPredefined] accepts, such as a misspelled name. These
+// errors name the field or the kind and not a place in the file. A program
+// that wants a place for one of them adds a validator for it to the
+// decode.
 //
 // A decode does not report an unquoted color. YAML reads the color in
 // bg: #2b1d14 as a comment, so the key holds null, and a null leaves the
@@ -167,9 +171,14 @@
 //
 // A Hex names an RGB color, so a Palette cannot hold a color of the
 // terminal's own palette. A program that wants one sets it in a [Colors]
-// value and calls FromColors. A program whose theme file styles kinds of
-// its own also calls FromColors, with the colors that [Palette.Colors]
-// returns.
+// value and calls FromColors.
+//
+// A theme file styles a kind of the program's own under a key below a
+// predefined kind, such as genericHighlight.match. The token for such a
+// kind layers over the style of the predefined kind, so a token of "bold"
+// keeps the highlight. A program whose theme file styles a custom kind
+// without a predefined parent calls FromColors, with the colors that
+// [Palette.Colors] returns.
 //
 // # Theme Structure
 //

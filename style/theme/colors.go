@@ -122,10 +122,14 @@ func (t *Token) UnmarshalText(text []byte) error {
 // by a decoder that does not call UnmarshalText, such as mapstructure
 // without its TextUnmarshallerHookFunc.
 //
-// A token for a kind outside the hierarchy, such as a custom kind or a
-// misspelled name, styles that kind alone. Only a renderer or an overlay
-// that names the kind draws it. [Palette.Theme] rejects such a token, for
-// a theme file that must not style kinds of its own.
+// A token for a custom kind layers over the style of its parent, as a
+// token for a predefined kind does. For a kind below a predefined one,
+// such as kind.GenericHighlight.Child("match"), that parent is the
+// predefined kind, so a token of "bold" keeps the highlight. A custom
+// kind without a '.' in its name, or a misspelled name, has [kind.Text]
+// as its parent, so its token layers over the body text. Only a renderer
+// or an overlay that names the kind draws it. [Palette.Theme] accepts a
+// token for a custom kind only below a predefined one.
 func FromColors(name string, c Colors, tokens map[kind.Kind]Token) (Theme, error) {
 	err := check(c.Mode, tokens)
 	if err != nil {
@@ -536,8 +540,9 @@ func byDepth(kinds []kind.Kind) []kind.Kind {
 }
 
 // depth returns how many steps separate st from [kind.Text], the root of
-// the hierarchy. A custom kind counts as one step, because [kind.Parent]
-// reports [kind.Text] for it.
+// the hierarchy through [kind.Parent]. A custom kind below a predefined
+// one counts one step more than its parent, and a custom kind without a
+// '.' in its name counts as one step.
 func depth(st kind.Kind) int {
 	n := 0
 	for current := st; current != kind.Text; current = kind.Parent(current) {

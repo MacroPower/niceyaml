@@ -10,13 +10,13 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/finder"
 	"go.jacobcolvin.com/niceyaml/printer"
-	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/kind"
 	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
-// highlightKind is a custom kind.Kind constant for search highlights.
-const highlightKind kind.Kind = "highlightCustom"
+// highlightKind is a custom kind.Kind for search highlights. It sits below
+// kind.GenericHighlight, so it takes the highlight color of any theme.
+const highlightKind = kind.GenericHighlight + ".match"
 
 //go:embed demo.yaml
 var example string
@@ -24,13 +24,10 @@ var example string
 func main() {
 	source := niceyaml.NewSourceFromString(example)
 
-	// Create a printer whose styles place the highlight kind under the
-	// theme's own highlight kind, so it takes that color under any theme.
-	// The box fills the rectangle behind the rows with the theme's surface.
+	// Create a printer with a theme as it is. The box fills the rectangle
+	// behind the rows with the theme's surface.
 	p := printer.New(
-		printer.WithStyles(theme.Charm.Styles().With(
-			style.Inherit(highlightKind, kind.GenericHighlight),
-		)),
+		printer.WithStyles(theme.Charm),
 		printer.WithBox(true),
 	)
 
