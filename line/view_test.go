@@ -1823,6 +1823,27 @@ func TestView_Hunks(t *testing.T) {
 		assert.Equal(t, []int{6}, separators(hunks), "narrowing leaves the hunks as they were")
 	})
 
+	t.Run("drops a hunk header above a line", func(t *testing.T) {
+		t.Parallel()
+
+		// A diff view of hunks carries a header above the first line of
+		// each hunk, here a context line. The header does not mark the
+		// line, and its counts do not match a narrower hunk.
+		view := newView(input)
+		header := line.Annotation{Content: "@@ -2,4 +2,4 @@", Kind: kind.UIHunkHeader, Placement: line.Above}
+		view.AnnotateLine(1, header)
+		view.AnnotateLine(3, line.Annotation{Content: "one", Placement: line.Below})
+
+		want := stringtest.JoinLF(
+			"   4 | d: 4",
+			"     | ^ one",
+		)
+
+		assert.Equal(t, want, view.Hunks(0).String())
+		assert.Equal(t, []string{"c: 3", "d: 4", "e: 5"}, contentsOf(view.Hunks(1).All()))
+		assert.Empty(t, view.Hunks(2).Annotations(1), "the header stays out at a context that holds its line")
+	})
+
 	t.Run("keeps a separator below a line", func(t *testing.T) {
 		t.Parallel()
 

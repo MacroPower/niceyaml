@@ -531,21 +531,24 @@ func (v *View) Slice(spans ...position.Span) *View {
 // with context lines of unchanged content on either side of each one. A
 // caller that marks a document thus shows the marked parts alone. A
 // decorated line carries a [Flag] other than [FlagDefault], an [Overlay],
-// or an [Annotation] of a kind other than [kind.UISeparator]. Decorated
-// lines whose context windows overlap or touch share a hunk, and distant
-// ones become separate hunks. A negative context shows the decorated lines
-// alone, as 0 does. A View without decorated lines yields an empty View,
-// as a nil View does.
+// or an [Annotation] that [Annotation.Marks]. Decorated lines whose
+// context windows overlap or touch share a hunk, and distant ones become
+// separate hunks. A negative context shows the decorated lines alone, as 0
+// does. A View without decorated lines yields an empty View, as a nil View
+// does.
 //
 // A "..." annotation of kind [kind.UISeparator] sits above the first line
 // after each gap between two lines the result holds. The separator
 // therefore marks the gap between two hunks and any gap the View itself
 // skips inside one. The lines that the result skips before the first hunk
-// do not get a separator. The result drops every separator that the View
-// carries above a line before it adds its own. The hunks of hunks therefore
-// match the hunks of the original View at the same or a smaller context. A
-// separator below a line labels that line and not a gap, so the result
-// keeps it.
+// do not get a separator. The result drops every annotation above a line
+// that does not mark, such as a separator or a diff hunk header, before it
+// adds its own separators. The hunks of hunks therefore match the hunks of
+// the original View at the same or a smaller context. Hunks cannot
+// recompute the header of a diff hunk, so the result does not have one.
+// [go.jacobcolvin.com/niceyaml/diff.Result.HunksOf] returns hunks of a
+// diff with a header above each. A separator below a line labels that line
+// and not a gap, so the result keeps it.
 //
 // The result is a [View.Slice]. Its lines keep their indices, a range from
 // the content applies to it, and decoration that a caller adds later lands
@@ -576,12 +579,13 @@ func (v *View) Hunks(context int) *View {
 	hunks := v.Slice(position.ContextSpans(marked, context, v.lines.Len())...)
 
 	// A View that is itself hunks carries the separators of its own gaps,
-	// which need not match the gaps of the result, so the result drops
-	// them and adds its own. The slice owns its annotations, so the
-	// deletion reaches nothing in the View.
+	// and a diff view carries the headers of its own hunks. Neither need
+	// match the result, so the result drops them and adds its own
+	// separators. The slice owns its annotations, so the deletion reaches
+	// nothing in the View.
 	for i, anns := range hunks.annotations {
 		kept := slices.DeleteFunc(anns, func(a Annotation) bool {
-			return isSeparator(a) && a.Placement == Above
+			return !a.Marks() && a.Placement == Above
 		})
 		if len(kept) == 0 {
 			delete(hunks.annotations, i)
@@ -623,25 +627,10 @@ func (v *View) Hunks(context int) *View {
 }
 
 // decorated reports whether line i carries a flag, an overlay, or an
-// annotation of a kind other than [kind.UISeparator], the kind of the
-// separators that [View.Hunks] adds.
+// annotation that [Annotation.Marks].
 func (v *View) decorated(i int) bool {
 	return v.Flag(i) != FlagDefault || len(v.Overlays(i)) > 0 ||
-		slices.ContainsFunc(v.Annotations(i), func(a Annotation) bool { return !isSeparator(a) })
-}
-
-// isSeparator reports whether a is an annotation of kind
-// [kind.UISeparator], such as the one [View.Hunks] adds above a gap.
-func isSeparator(a Annotation) bool {
-	return a.Kind == kind.UISeparator
-}
-
-// marksColumns reports whether a marks the columns of its [Annotation.Cols].
-// [View.Windows] centers a window on such a mark, and a renderer draws
-// carets under it below a line. Separators and the hunk headers of a diff
-// label the line they sit beside, not a column of it.
-func marksColumns(a Annotation) bool {
-	return a.Kind != kind.UISeparator && a.Kind != kind.UIHunkHeader
+		slices.ContainsFunc(v.Annotations(i), Annotation.Marks)
 }
 
 // Clip returns a copy of the [View] that shows part of each line longer
@@ -654,11 +643,10 @@ func marksColumns(a Annotation) bool {
 // window for each mark that lies apart from the others.
 //
 // A mark is the first column of an [Overlay], or of the [Annotation.Cols]
-// of an annotation of a kind other than [kind.UISeparator] or
-// [kind.UIHunkHeader]. A line without a mark keeps its first cols columns.
-// A window centers on its mark and moves to stay inside the line. An
-// overlay longer than its window therefore shows the columns from its
-// start that the window holds.
+// of an annotation that [Annotation.Marks]. A line without a mark keeps
+// its first cols columns. A window centers on its mark and moves to stay
+// inside the line. An overlay longer than its window therefore shows the
+// columns from its start that the window holds.
 //
 // The "..." marker takes three columns, so windows that overlap or lie
 // three columns or fewer apart join into one. For the same reason, a
@@ -731,7 +719,7 @@ func (v *View) Windows(i int) position.Spans {
 	}
 
 	for _, a := range v.annotations[i] {
-		if marksColumns(a) {
+		if a.Marks() {
 			marks = append(marks, a.Cols.Start)
 		}
 	}
@@ -899,7 +887,7 @@ func (v *View) String() string {
 		for _, group := range anns.Groups(Below) {
 			// A group that labels the line gets one row of text from the
 			// first column, without carets.
-			if !marksColumns(group[0]) {
+			if !group[0].Marks() {
 				if kept := group.WithContent(); len(kept) > 0 {
 					rows = append(rows, blank+escape.Control(strings.Join(kept.Contents(), "; ")))
 				}
