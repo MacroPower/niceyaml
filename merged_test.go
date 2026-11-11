@@ -2751,11 +2751,11 @@ func TestMergeAs(t *testing.T) {
 			"another Source": func(ctx context.Context) (*niceyaml.Source, error) {
 				return niceyaml.NewSourceFromLayers(ctx, sources, niceyaml.MergeAs(stranger))
 			},
-			"the Source of a Node layer": func(ctx context.Context) (*niceyaml.Source, error) {
-				return niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Node{base}, niceyaml.MergeAs(defaults))
+			"the Source of a Node layer below its document": func(ctx context.Context) (*niceyaml.Source, error) {
+				return niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Node{scoped}, niceyaml.MergeAs(defaults))
 			},
-			"the Node of a Source layer": func(ctx context.Context) (*niceyaml.Source, error) {
-				return niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{defaults}, niceyaml.MergeAs(base))
+			"a Node below the document of a Source layer": func(ctx context.Context) (*niceyaml.Source, error) {
+				return niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{defaults}, niceyaml.MergeAs(scoped))
 			},
 			"a Node another call of At returns": func(ctx context.Context) (*niceyaml.Source, error) {
 				return niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Node{scoped}, niceyaml.MergeAs(again))
@@ -2812,6 +2812,16 @@ func TestMergeAs(t *testing.T) {
 				layers := []niceyaml.Layer{nil, (*niceyaml.Source)(nil), defaults, docs[1], (*niceyaml.Node)(nil), env}
 
 				return niceyaml.NewSourceFromLayers(ctx, layers, niceyaml.MergeAs(docs[1]))
+			},
+			"the document of a Source layer": func(ctx context.Context) (*niceyaml.Source, error) {
+				layers := []*niceyaml.Source{defaults, user, env}
+
+				return niceyaml.NewSourceFromLayers(ctx, layers, niceyaml.MergeAs(docs[1]))
+			},
+			"the Source of a document layer": func(ctx context.Context) (*niceyaml.Source, error) {
+				layers := []*niceyaml.Node{docs[0], docs[1], docs[2]}
+
+				return niceyaml.NewSourceFromLayers(ctx, layers, niceyaml.MergeAs(user))
 			},
 		}
 

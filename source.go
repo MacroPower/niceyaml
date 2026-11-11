@@ -1228,6 +1228,25 @@ func (s *Source) References() []*Source {
 	return slices.Clone(s.references)
 }
 
+// Unmarshalers returns the unmarshalers that every decode of the
+// documents of the [Source] applies, those of each [WithUnmarshalers], in
+// the order given. A Source of [NewSourceFromLayers] returns those that
+// its merge takes. A program that derives a Source from this one, through
+// [Source.WithText] or [NewSourceFromDerived], puts defaults of its own
+// under these by passing both lists in that order:
+//
+//	niceyaml.WithUnmarshalers(slices.Concat(defaults, src.Unmarshalers())...)
+//
+// Each call returns a new slice, and Unmarshalers returns nil for a
+// Source without unmarshalers and for a nil Source.
+func (s *Source) Unmarshalers() []Unmarshaler {
+	if s == nil {
+		return nil
+	}
+
+	return slices.Clone(s.unmarshalers)
+}
+
 // Text returns the text the [Source] read, byte for byte. It keeps the
 // bytes that the lines of the Source drop or rewrite. Those are a byte
 // order mark, the "\r" of a CRLF line ending, the final line ending, and

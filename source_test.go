@@ -8842,6 +8842,81 @@ func TestSource_References(t *testing.T) {
 	})
 }
 
+func TestSource_Unmarshalers(t *testing.T) {
+	t.Parallel()
+
+	type level int
+
+	unmarshalerOf := func(want level) niceyaml.Unmarshaler {
+		return niceyaml.CustomUnmarshaler(func(_ context.Context, v *level, _ func(any) error) error {
+			*v = want
+
+			return nil
+		})
+	}
+
+	t.Run("in the order given", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("a: x\n",
+			niceyaml.WithUnmarshalers(unmarshalerOf(1)),
+			niceyaml.WithUnmarshalers(unmarshalerOf(2)),
+		)
+
+		us := source.Unmarshalers()
+		require.Len(t, us, 2)
+
+		// Each function decodes as the Source gives it, and the later one
+		// applies.
+		for i, want := range []level{1, 2} {
+			got, err := niceyaml.NewSourceFromString("a: x\n", niceyaml.WithUnmarshalers(us[i])).
+				Decode[map[string]level](t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, map[string]level{"a": want}, got)
+		}
+
+		got, err := niceyaml.NewSourceFromString("a: x\n", niceyaml.WithUnmarshalers(us...)).
+			Decode[map[string]level](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]level{"a": 2}, got)
+	})
+
+	t.Run("a copy", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("a: x\n", niceyaml.WithUnmarshalers(unmarshalerOf(1)))
+
+		us := source.Unmarshalers()
+		us[0] = unmarshalerOf(2)
+
+		got, err := source.Decode[map[string]level](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]level{"a": 1}, got)
+		assert.Len(t, source.Unmarshalers(), 1)
+	})
+
+	t.Run("the unmarshalers of a merge", func(t *testing.T) {
+		t.Parallel()
+
+		layer := niceyaml.NewSourceFromString("a: x\n", niceyaml.WithUnmarshalers(unmarshalerOf(1)))
+
+		merged, err := niceyaml.NewSourceFromLayers(t.Context(), []*niceyaml.Source{layer},
+			niceyaml.MergeUnmarshalers(unmarshalerOf(2), unmarshalerOf(3)))
+		require.NoError(t, err)
+		assert.Len(t, merged.Unmarshalers(), 2)
+	})
+
+	t.Run("none", func(t *testing.T) {
+		t.Parallel()
+
+		var nilSource *niceyaml.Source
+
+		assert.Nil(t, niceyaml.NewSourceFromString("a: 1\n").Unmarshalers())
+		assert.Nil(t, (&niceyaml.Source{}).Unmarshalers())
+		assert.Nil(t, nilSource.Unmarshalers())
+	})
+}
+
 func TestSource_WithoutLimits(t *testing.T) {
 	t.Parallel()
 

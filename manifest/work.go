@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"fmt"
+	"slices"
 
 	"go.jacobcolvin.com/x/jsonschema"
 
@@ -14,13 +15,14 @@ import (
 // migrated copy of it. Every line and column of the copy matches doc, so
 // locate moves a location of the copy, as doc places it, into the
 // document. A nil locate leaves the location as it is, for doc itself.
-// The copy takes the unmarshalers of the registry ahead of those of the
-// Source of doc. It adds the problem of a copy that does not parse, or
-// that holds nothing, and reports false.
+// The copy takes the unmarshalers of the registry under those of the
+// Source of the document. It adds the problem of a copy that does not
+// parse, or that holds nothing, and reports false.
 func (d *docState) prepareWork(doc *niceyaml.Node, locate func(niceyaml.Located) niceyaml.Place) bool {
 	src := doc.Source()
 	span := doc.Span()
 	start, end := textBounds(doc)
+	us := slices.Concat(d.l.reg.cfg.unmarshalers, d.doc.Source().Unmarshalers())
 
 	working := niceyaml.NewSourceFromDerived(src.Text()[start:end], d.doc, func(at niceyaml.Located) niceyaml.Place {
 		if at.HasRange {
@@ -33,7 +35,7 @@ func (d *docState) prepareWork(doc *niceyaml.Node, locate func(niceyaml.Located)
 		}
 
 		return niceyaml.Place{Path: at.Path, HasPath: at.HasPath, Range: at.Range, HasRange: at.HasRange}
-	}, niceyaml.WithUnmarshalers(d.l.reg.cfg.unmarshalers...), niceyaml.WithoutLimits())
+	}, niceyaml.WithUnmarshalers(us...), niceyaml.WithoutLimits())
 
 	for _, n := range working.AllDocuments() {
 		if n.Err() != nil {

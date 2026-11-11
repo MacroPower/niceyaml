@@ -9993,24 +9993,51 @@ func TestWithUnmarshalers(t *testing.T) {
 		return nil
 	})
 
-	doc := yamltest.FirstDocument(t, "alarm: loud!!\n")
+	fixed := niceyaml.CustomUnmarshaler(func(_ context.Context, l *level, _ func(any) error) error {
+		*l = 7
 
-	d, err := edit.New(doc, edit.WithUnmarshalers(names))
-	require.NoError(t, err)
+		return nil
+	})
 
-	var got level
+	tcs := map[string]struct {
+		opts []niceyaml.SourceOption
+		want level
+	}{
+		"the unmarshalers read a type the Source does not": {
+			want: 2,
+		},
+		"the unmarshalers of the Source apply over them": {
+			opts: []niceyaml.SourceOption{niceyaml.WithUnmarshalers(fixed)},
+			want: 7,
+		},
+	}
 
-	require.NoError(t, d.Apply(t.Context(), paths.Doc().Child("alarm"), func(ctx context.Context, n *edit.Node) error {
-		got, err = n.Decode[level](ctx)
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		return err
-	}))
+			doc := yamltest.FirstDocument(t, "alarm: loud!!\n", tc.opts...)
 
-	assert.Equal(t, level(2), got)
+			d, err := edit.New(doc, edit.WithUnmarshalers(names))
+			require.NoError(t, err)
 
-	read, err := d.Node().Decode[map[string]level](t.Context())
-	require.NoError(t, err)
-	assert.Equal(t, map[string]level{"alarm": 2}, read)
+			var got level
+
+			decode := func(ctx context.Context, n *edit.Node) error {
+				got, err = n.Decode[level](ctx)
+
+				return err
+			}
+
+			require.NoError(t, d.Apply(t.Context(), paths.Doc().Child("alarm"), decode))
+
+			assert.Equal(t, tc.want, got)
+
+			read, err := d.Node().Decode[map[string]level](t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, map[string]level{"alarm": tc.want}, read)
+		})
+	}
 }
 
 // milli is a quantity that writes JSON alone, such as a Kubernetes
