@@ -305,6 +305,14 @@ func New(w io.Writer, opts ...Option) *Encoder {
 // such as a [yaml.InterfaceMarshalerContext] or a marshaler registered
 // with [yaml.RegisterCustomMarshalerContext].
 //
+// A [go.jacobcolvin.com/niceyaml.Node], a
+// [go.jacobcolvin.com/niceyaml.Source], and a
+// [go.jacobcolvin.com/niceyaml/edit.Node] each encode as the value that
+// they decode to, as [go.jacobcolvin.com/niceyaml.Node.MarshalYAML]
+// describes. The encode does not write the comments, the quotes, or the
+// block and flow styles of their text. Of the tags of their text, it
+// writes only !!binary and !!timestamp.
+//
 // Encode double-quotes each string that go-yaml otherwise writes unquoted
 // or as a literal block in a form that reads back as a different value or
 // does not parse. Such strings include ".inf", a one-line string with a

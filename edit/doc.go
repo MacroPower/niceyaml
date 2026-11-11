@@ -51,6 +51,16 @@
 // indent step of the mapping that holds it. Go strings keep the quotes of
 // the scalars that they replace.
 //
+// The value of a Set can be a Node. A Node encodes as the value that it
+// decodes to, so a Func copies the value of one place to another:
+//
+//	return root.At(to).Set(ctx, root.At(from))
+//
+// The copy is the decoded value, so it leaves the comments, the quotes,
+// and the style of the value behind. It also leaves every tag behind
+// except !!binary and !!timestamp, as [Node.MarshalYAML] describes.
+// [Node.Set] lists the values that a Set refuses.
+//
 // A path selects each node of the text once. A wildcard or a recursive
 // descent selects a node at its first path in the order of the text. Each
 // path that reaches the node through an alias or a `<<` merge key selects

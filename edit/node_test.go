@@ -12,6 +12,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/edit"
+	"go.jacobcolvin.com/niceyaml/encoder"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/schema"
@@ -1078,6 +1079,257 @@ func TestNode_Decode_Renamed(t *testing.T) {
 			requireEdit(t, d, err, tc.want, "")
 		})
 	}
+}
+
+func TestNode_MarshalYAML(t *testing.T) {
+	t.Parallel()
+
+	// Each case sets the place at to with the node at from as the value.
+	tcs := map[string]struct {
+		before string
+		from   string
+		to     string
+		want   string
+		err    string
+	}{
+		"mapping keeps the order of its keys": {
+			before: stringtest.LinesLF("src: {k: 1, j: 2}", "dst: old"),
+			from:   "$.src",
+			to:     "$.dst",
+			want:   stringtest.LinesLF("src: {k: 1, j: 2}", "dst: {k: 1, j: 2}"),
+		},
+		"block mapping into a new entry": {
+			before: stringtest.LinesLF("src:", "  k: 1 # one", "  j: [a, b]"),
+			from:   "$.src",
+			to:     "$.dst",
+			want: stringtest.LinesLF(
+				"src:", "  k: 1 # one", "  j: [a, b]",
+				"dst:", "  k: 1", "  j:", "    - a", "    - b",
+			),
+		},
+		"scalar": {
+			before: stringtest.LinesLF("src: 'x' # note", "dst: old"),
+			from:   "$.src",
+			to:     "$.dst",
+			want:   stringtest.LinesLF("src: 'x' # note", "dst: x"),
+		},
+		"alias and merge key write their content": {
+			before: stringtest.LinesLF("base: &base {x: 1}", "src: {k: *base, <<: *base}", "dst: old"),
+			from:   "$.src",
+			to:     "$.dst",
+			want: stringtest.LinesLF(
+				"base: &base {x: 1}", "src: {k: *base, <<: *base}", "dst: {k: {x: 1}, x: 1}",
+			),
+		},
+		"key after the merge key that holds it": {
+			before: stringtest.LinesLF("base: &base {x: 1, w: 2}", "src: {<<: *base, x: 9}", "dst: old"),
+			from:   "$.src",
+			to:     "$.dst",
+			want: stringtest.LinesLF(
+				"base: &base {x: 1, w: 2}", "src: {<<: *base, x: 9}", "dst: {x: 9, w: 2}",
+			),
+		},
+		"block mapping with a key after its merge key": {
+			before: stringtest.LinesLF("base: &base", "  x: 1", "  w: 2", "src:", "  <<: *base", "  x: 9"),
+			from:   "$.src",
+			to:     "$.dst",
+			want: stringtest.LinesLF(
+				"base: &base", "  x: 1", "  w: 2", "src:", "  <<: *base", "  x: 9",
+				"dst:", "  x: 9", "  w: 2",
+			),
+		},
+		"binary scalar keeps its tag": {
+			before: stringtest.LinesLF("src: {a: !!binary aGk=}", "dst: old"),
+			from:   "$.src",
+			to:     "$.dst",
+			want:   stringtest.LinesLF("src: {a: !!binary aGk=}", `dst: {a: !!binary "aGk="}`),
+		},
+		"timestamp scalar keeps its tag": {
+			before: stringtest.LinesLF("src: !!timestamp 2001-12-14", "dst: old"),
+			from:   "$.src",
+			to:     "$.dst",
+			want:   stringtest.LinesLF("src: !!timestamp 2001-12-14", `dst: !!timestamp "2001-12-14T00:00:00Z"`),
+		},
+		"block mapping with a timestamp entry over a scalar": {
+			before: stringtest.LinesLF("meta:", "  created: !!timestamp 2001-12-14", "  name: x", "backup: old"),
+			from:   "$.meta",
+			to:     "$.backup",
+			want: stringtest.LinesLF(
+				"meta:", "  created: !!timestamp 2001-12-14", "  name: x",
+				`backup: {created: !!timestamp "2001-12-14T00:00:00Z", name: x}`,
+			),
+		},
+		"flow mapping with a timestamp entry": {
+			before: stringtest.LinesLF("src: {a: !!timestamp 2001-12-14}", "dst: old"),
+			from:   "$.src",
+			to:     "$.dst",
+			want: stringtest.LinesLF(
+				"src: {a: !!timestamp 2001-12-14}", `dst: {a: !!timestamp "2001-12-14T00:00:00Z"}`,
+			),
+		},
+		"timestamp scalar over an entry of a flow mapping": {
+			before: stringtest.LinesLF("src: !!timestamp 2001-12-14t21:59:43.5-05:00", "dst: {k: old}"),
+			from:   "$.src",
+			to:     "$.dst.k",
+			want: stringtest.LinesLF(
+				"src: !!timestamp 2001-12-14t21:59:43.5-05:00",
+				`dst: {k: !!timestamp "2001-12-14T21:59:43.5-05:00"}`,
+			),
+		},
+		"timestamp scalar into a new entry of a flow mapping": {
+			before: stringtest.LinesLF("src: !!timestamp 2001-12-14", "dst: {k: old}"),
+			from:   "$.src",
+			to:     "$.dst.new",
+			want: stringtest.LinesLF(
+				"src: !!timestamp 2001-12-14", `dst: {k: old, new: !!timestamp "2001-12-14T00:00:00Z"}`,
+			),
+		},
+		"timestamp scalar over an item of a flow sequence": {
+			before: stringtest.LinesLF("src: !!timestamp 2001-12-14", "dst: [old]"),
+			from:   "$.src",
+			to:     "$.dst[0]",
+			want: stringtest.LinesLF(
+				"src: !!timestamp 2001-12-14", `dst: [!!timestamp "2001-12-14T00:00:00Z"]`,
+			),
+		},
+		"value into a place inside it": {
+			before: "src: {a: 1}\n",
+			from:   "$.src",
+			to:     "$.src.b",
+			want:   "src: {a: 1, b: {a: 1}}\n",
+		},
+		"place that holds no value": {
+			before: stringtest.LinesLF("src: 1", "dst: old"),
+			from:   "$.missing",
+			to:     "$.dst",
+			err: "test.yaml:2:6: $.dst: cafe.jacobcolvin.com/v1 cannot write the value of $.dst: " +
+				"value does not encode: ",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d := newDoc(t, tc.before)
+
+			err := d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, root *edit.Node) error {
+				return root.At(paths.MustParse(tc.to)).Set(ctx, root.At(paths.MustParse(tc.from)))
+			}, label)
+
+			requireEdit(t, d, err, tc.err, tc.want)
+
+			if tc.err != "" {
+				assert.Contains(t, niceyaml.FormatError(err), "cannot decode "+tc.from+", which holds no value")
+				assert.Equal(t, tc.before, d.Text())
+			}
+		})
+	}
+
+	t.Run("value that an earlier call of the Func wrote", func(t *testing.T) {
+		t.Parallel()
+
+		d := newDoc(t, stringtest.LinesLF("src: 1", "dst: old"))
+
+		err := d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, root *edit.Node) error {
+			from := root.At(paths.Doc().Child("src"))
+
+			err := from.Set(ctx, []string{"a", "b"})
+			if err != nil {
+				return err
+			}
+
+			return root.At(paths.Doc().Child("dst")).Set(ctx, from)
+		}, label)
+
+		requireEdit(t, d, err, "", stringtest.LinesLF("src: [a, b]", "dst: [a, b]"))
+	})
+
+	t.Run("node that lost its place to an earlier edit", func(t *testing.T) {
+		t.Parallel()
+
+		before := stringtest.LinesLF("src: 1", "dst: old")
+		d := newDoc(t, before)
+
+		err := d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, root *edit.Node) error {
+			from := root.At(paths.Doc().Child("src"))
+
+			err := from.Remove()
+			if err != nil {
+				return err
+			}
+
+			return root.At(paths.Doc().Child("dst")).Set(ctx, from)
+		}, label)
+
+		requireEdit(t, d, err, "reads $.src through a node that lost its place to an earlier edit", "")
+		assert.Equal(t, before, d.Text())
+	})
+
+	t.Run("float that the encoder writes without a fraction", func(t *testing.T) {
+		t.Parallel()
+
+		before := stringtest.LinesLF("src: {lr: 0.00001}", "dst: old")
+		d := newDoc(t, before)
+
+		err := d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, root *edit.Node) error {
+			return root.At(paths.Doc().Child("dst")).Set(ctx, root.At(paths.Doc().Child("src")))
+		}, label)
+
+		requireEdit(t, d, err,
+			`test.yaml:2:6: $.dst: go-yaml's encoder writes the float 1e-05 as text that `+
+				`go-yaml's decoder reads as "1e-05"`, "")
+		require.ErrorIs(t, err, edit.ErrEngine)
+		assert.Equal(t, before, d.Text())
+	})
+
+	t.Run("item that a Func inserts", func(t *testing.T) {
+		t.Parallel()
+
+		d := newDoc(t, stringtest.LinesLF("src: {k: 1}", "items:", "  - a"))
+
+		err := d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, root *edit.Node) error {
+			return root.At(paths.Doc().Child("items").Index(0)).Insert(ctx, root.At(paths.Doc().Child("src")))
+		}, label)
+
+		requireEdit(t, d, err, "", stringtest.LinesLF("src: {k: 1}", "items:", "  - k: 1", "  - a"))
+	})
+
+	t.Run("value that holds nodes", func(t *testing.T) {
+		t.Parallel()
+
+		d := newDoc(t, stringtest.LinesLF("a: 1", "b: [x]", "dst: old"))
+
+		err := d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, root *edit.Node) error {
+			var none *edit.Node
+
+			return root.At(paths.Doc().Child("dst")).Set(ctx, []any{
+				root.At(paths.Doc().Child("a")),
+				root.At(paths.Doc().Child("b")),
+				none,
+			})
+		}, label)
+
+		requireEdit(t, d, err, "", stringtest.LinesLF("a: 1", "b: [x]", "dst: [1, [x], null]"))
+	})
+
+	t.Run("encode outside a Set", func(t *testing.T) {
+		t.Parallel()
+
+		d := newDoc(t, stringtest.LinesLF("src: {k: 1, j: 2}"))
+
+		var got []byte
+
+		err := applyAt(t, d, paths.Doc().Child("src"), func(ctx context.Context, n *edit.Node) error {
+			var err error
+
+			got, err = encoder.Marshal(ctx, n)
+
+			return err //nolint:wrapcheck // The test reads the error of the encode.
+		})
+		require.NoError(t, err)
+		assert.Equal(t, stringtest.LinesLF("k: 1", "j: 2"), string(got))
+	})
 }
 
 func TestNode_At(t *testing.T) {

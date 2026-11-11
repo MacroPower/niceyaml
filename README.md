@@ -168,7 +168,7 @@ The resolvers of a registry run in order, and the first one that does not declin
 
 - [examples/encoder](examples/encoder)
 
-[`encoder.Marshal`][niceyaml/encoder] writes a Go value as YAML. `encoder.Pretty` gives it the layout prettier writes, and `encoder.WithYAMLComments` puts a comment at each YAML path you name. A `Source` reads the result as it reads any document, so the printer highlights it.
+[`encoder.Marshal`][niceyaml/encoder] writes a Go value as YAML. `encoder.Pretty` gives it the layout prettier writes, and `encoder.WithYAMLComments` puts a comment at each YAML path you name. A `Source` reads the result as it reads any document, so the printer highlights it. A `Node` encodes as the value that it decodes to, so `encoder.Marshal(ctx, nodes)` prints the nodes that a path selects, and `to.Set(ctx, from)` copies a value inside an edit.
 
 ### Layers
 

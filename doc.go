@@ -1108,6 +1108,10 @@
 //
 //	h, err := hours.Decode[Hours](ctx, niceyaml.WithValidator(hoursSchema))
 //
+// A Node encodes as the value that it decodes to, so
+// [go.jacobcolvin.com/niceyaml/encoder.Marshal] prints the nodes that a path
+// selects. [Node.MarshalYAML] describes what the encode keeps of the node.
+//
 // [Node.Bind] binds the result of a check that the caller runs on the value,
 // and it reads the `@` paths of that result from the node. A scoped Node
 // binds a problem without a location at its value, as it binds an error with

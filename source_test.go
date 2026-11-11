@@ -31,6 +31,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/diff"
+	"go.jacobcolvin.com/niceyaml/encoder"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -4065,6 +4066,77 @@ func TestSource_ValidateDocuments_Context(t *testing.T) {
 		require.NotErrorIs(t, err, context.Canceled)
 		assert.Equal(t, int32(4), calls.Load())
 		assert.Len(t, bindingMessages(err), 4)
+	})
+}
+
+func TestSource_MarshalYAML(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		err   error
+		input string
+		want  string
+		opts  []niceyaml.SourceOption
+	}{
+		"one document": {
+			input: "b: 1\na: [x]\n",
+			want:  stringtest.LinesLF("b: 1", "a:", "- x"),
+		},
+		"key that the document repeats": {
+			input: "a: 1\nb: 2\na: 3\n",
+			opts:  []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
+			want:  stringtest.LinesLF("a: 3", "b: 2"),
+		},
+		"empty source": {
+			input: "",
+			want:  "null\n",
+		},
+		"more than one document": {
+			input: "a: 1\n---\nb: 2\n",
+			err:   niceyaml.ErrMultipleDocuments,
+		},
+		"document that does not parse": {
+			input: "a: [\n",
+			err:   niceyaml.ErrSyntax,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input, tc.opts...)
+
+			got, err := encoder.Marshal(t.Context(), source)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+				require.ErrorIs(t, err, encoder.ErrEncode)
+
+				// The error is the one that Document returns.
+				_, want := source.Document()
+				_, err = source.MarshalYAML(t.Context())
+				assert.Equal(t, want, err)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, string(got))
+		})
+	}
+
+	t.Run("nil source encodes as null", func(t *testing.T) {
+		t.Parallel()
+
+		var source *niceyaml.Source
+
+		v, err := source.MarshalYAML(t.Context())
+		require.NoError(t, err)
+		assert.Nil(t, v)
+
+		got, err := encoder.Marshal(t.Context(), map[string]any{"a": source})
+		require.NoError(t, err)
+		assert.Equal(t, "a: null\n", string(got))
 	})
 }
 

@@ -3997,6 +3997,220 @@ func TestWithYAMLOrderedMaps(t *testing.T) {
 	})
 }
 
+func TestNode_MarshalYAML(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		path  paths.Path
+		want  string
+		opts  []niceyaml.SourceOption
+		enc   []encoder.Option
+	}{
+		"mapping keeps the order of its keys": {
+			input: "b: 1\na: {d: 2, c: 3}\n",
+			want:  stringtest.LinesLF("b: 1", "a:", "  d: 2", "  c: 3"),
+		},
+		"node below the root": {
+			input: "b: 1\na: {d: 2, c: 3}\n",
+			path:  paths.Doc().Child("a"),
+			want:  stringtest.LinesLF("d: 2", "c: 3"),
+		},
+		"scalar": {
+			input: "a: [x, 2]\n",
+			path:  paths.Doc().Child("a").Index(1),
+			want:  "2\n",
+		},
+		"alias and merge key write their content": {
+			input: stringtest.LinesLF("base: &base {x: 1}", "item: {k: *base, <<: *base, z: 2}"),
+			path:  paths.Doc().Child("item"),
+			want:  stringtest.LinesLF("k:", "  x: 1", "x: 1", "z: 2"),
+		},
+		"key after the merge key that holds it": {
+			input: stringtest.LinesLF("base: &base {x: 1, w: 2}", "item: {<<: *base, x: 9}"),
+			path:  paths.Doc().Child("item"),
+			want:  stringtest.LinesLF("x: 9", "w: 2"),
+		},
+		"key before the merge key that holds it": {
+			input: stringtest.LinesLF("base: &base {x: 1, w: 2}", "item: {x: 9, <<: *base}"),
+			path:  paths.Doc().Child("item"),
+			want:  stringtest.LinesLF("x: 1", "w: 2"),
+		},
+		"merge key of two mappings that share a key": {
+			input: stringtest.LinesLF("a: &a {x: 1}", "b: &b {x: 2, w: 3}", "item: {<<: [*a, *b], z: 1}"),
+			path:  paths.Doc().Child("item"),
+			want:  stringtest.LinesLF("x: 2", "w: 3", "z: 1"),
+		},
+		"merged key in a mapping of a sequence": {
+			input: stringtest.LinesLF("defaults: &d", "  cpu: 1", "  mem: 2", "jobs:", "  - <<: *d", "    cpu: 4"),
+			path:  paths.Doc().Child("jobs"),
+			want:  stringtest.LinesLF("- cpu: 4", "  mem: 2"),
+		},
+		"key that a source with duplicate keys repeats": {
+			input: stringtest.LinesLF("a: 1", "b: {c: 1, c: 2}", "a: 3"),
+			opts:  []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
+			want:  stringtest.LinesLF("a: 3", "b:", "  c: 2"),
+		},
+		"comment, quotes, tag, and flow style do not reach the encode": {
+			input: stringtest.LinesLF("# top", "a: !custom 'x' # note", "b: [1, 2]"),
+			want:  stringtest.LinesLF("a: x", "b:", "- 1", "- 2"),
+		},
+		"string that reads as another value takes quotes": {
+			input: "a: '1'\n",
+			want:  "a: \"1\"\n",
+		},
+		"key that is not a string encodes as a string": {
+			input: "1: a\ntrue: b\n",
+			want:  stringtest.LinesLF(`"1": a`, `"true": b`),
+		},
+		"binary scalar keeps its tag": {
+			input: "!!binary aGk=\n",
+			want:  "!!binary \"aGk=\"\n",
+		},
+		"binary scalars inside collections": {
+			input: "a: [!!binary aGk=]\nb: !!binary ''\n",
+			want:  stringtest.LinesLF("a:", `- !!binary "aGk="`, `b: !!binary ""`),
+		},
+		"timestamp scalar keeps its tag": {
+			input: "a: !!timestamp 2001-12-14\nb: [!!timestamp 2001-12-14t21:59:43.10Z]\n",
+			want: stringtest.LinesLF(
+				`a: !!timestamp "2001-12-14T00:00:00Z"`, "b:", `- !!timestamp "2001-12-14T21:59:43.1Z"`,
+			),
+		},
+		"timestamp scalar keeps its zone": {
+			input: "a: !!timestamp 2001-12-14t21:59:43.5-05:00\n",
+			want:  "a: !!timestamp \"2001-12-14T21:59:43.5-05:00\"\n",
+		},
+		"timestamp scalar in a flow mapping": {
+			input: "a: !!timestamp 2001-12-14\n",
+			enc:   []encoder.Option{encoder.WithYAMLOptions(yaml.Flow(true))},
+			want:  "{a: !!timestamp \"2001-12-14T00:00:00Z\"}\n",
+		},
+		"timestamp scalar before another key of a flow mapping": {
+			input: "created: !!timestamp 2001-12-14\nname: x\n",
+			enc:   []encoder.Option{encoder.WithYAMLOptions(yaml.Flow(true))},
+			want:  "{created: !!timestamp \"2001-12-14T00:00:00Z\", name: x}\n",
+		},
+		"timestamp scalar in a flow sequence of a flow mapping": {
+			input: "a: [!!timestamp 2001-12-14]\n",
+			enc:   []encoder.Option{encoder.WithYAMLOptions(yaml.Flow(true))},
+			want:  "{a: [!!timestamp \"2001-12-14T00:00:00Z\"]}\n",
+		},
+		"binary scalar in a flow mapping": {
+			input: "a: !!binary aGk=\nname: x\n",
+			enc:   []encoder.Option{encoder.WithYAMLOptions(yaml.Flow(true))},
+			want:  "{a: !!binary \"aGk=\", name: x}\n",
+		},
+		"empty document": {
+			input: "",
+			want:  "null\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			n := yamltest.AtOrSelf(t, yamltest.FirstDocument(t, tc.input, tc.opts...), tc.path)
+
+			got, err := encoder.Marshal(t.Context(), n, tc.enc...)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, string(got))
+
+			// The encode decodes to the value that the node decodes to.
+			want, err := n.Decode[any](t.Context())
+			require.NoError(t, err)
+
+			back, err := yamltest.FirstDocument(t, string(got)).Decode[any](t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, want, back)
+		})
+	}
+
+	t.Run("float that the encoder writes without a fraction", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, "a: 1000000.0\nb: 0.00001\nc: 1234567.0\n")
+
+		want, err := doc.Decode[any](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"a": 1e+06, "b": 1e-05, "c": 1.234567e+06}, want)
+
+		got, err := encoder.Marshal(t.Context(), doc)
+		require.NoError(t, err)
+		assert.Equal(t, stringtest.LinesLF("a: 1e+06", "b: 1e-05", "c: 1.234567e+06"), string(got))
+
+		// Go-yaml reads an exponent without a fraction as a string.
+		back, err := yamltest.FirstDocument(t, string(got)).Decode[any](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"a": "1e+06", "b": "1e-05", "c": 1.234567e+06}, back)
+	})
+
+	t.Run("mappings and sequences of the value", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, "base: &base {x: 1}\nitems: [{<<: *base, x: 2}]\n")
+
+		v, err := doc.MarshalYAML(t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, yaml.MapSlice{
+			{Key: "base", Value: yaml.MapSlice{{Key: "x", Value: uint64(1)}}},
+			{Key: "items", Value: []any{yaml.MapSlice{{Key: "x", Value: uint64(2)}}}},
+		}, v)
+	})
+
+	t.Run("nodes that a path selects", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, "items: [{name: a}, {name: b}]\n")
+
+		nodes, err := doc.Nodes(paths.MustParse("$.items[*]"))
+		require.NoError(t, err)
+
+		got, err := encoder.Marshal(t.Context(), nodes)
+		require.NoError(t, err)
+		assert.Equal(t, stringtest.LinesLF("- name: a", "- name: b"), string(got))
+	})
+
+	t.Run("nil node encodes as null", func(t *testing.T) {
+		t.Parallel()
+
+		var n *niceyaml.Node
+
+		v, err := n.MarshalYAML(t.Context())
+		require.NoError(t, err)
+		assert.Nil(t, v)
+
+		got, err := encoder.Marshal(t.Context(), map[string]any{"a": n})
+		require.NoError(t, err)
+		assert.Equal(t, "a: null\n", string(got))
+	})
+
+	t.Run("document that did not parse", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.UnparsedDocument(t, "a: [\n")
+
+		_, err := doc.MarshalYAML(t.Context())
+		require.ErrorIs(t, err, niceyaml.ErrSyntax)
+		assert.Equal(t, doc.Err(), err)
+
+		_, err = encoder.Marshal(t.Context(), doc)
+		require.ErrorIs(t, err, encoder.ErrEncode)
+		require.ErrorIs(t, err, niceyaml.ErrSyntax)
+	})
+
+	t.Run("value that does not decode", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, "a: *missing\n")
+
+		_, err := encoder.Marshal(t.Context(), doc)
+		require.ErrorIs(t, err, encoder.ErrEncode)
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+	})
+}
+
 func TestNode_YAMLComments(t *testing.T) {
 	t.Parallel()
 

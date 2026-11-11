@@ -19,6 +19,16 @@
 // Each call writes one whole document to the writer, so an [Encoder] does
 // not hold output to flush and does not have a Close method.
 //
+// A [go.jacobcolvin.com/niceyaml.Node] encodes as the value that it
+// decodes to, so [Marshal] prints the nodes that a path selects:
+//
+//	nodes, err := doc.Nodes(paths.MustParse("$.items[*]"))
+//	if err != nil {
+//		return err
+//	}
+//
+//	data, err := encoder.Marshal(ctx, nodes)
+//
 // [Marshal] and [New] take the same options, which name the go-yaml
 // encoder settings this package supports. [Pretty] selects the layout that
 // prettier writes. That layout indents by two spaces, indents each sequence

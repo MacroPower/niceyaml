@@ -1627,6 +1627,26 @@ func (s *Source) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, er
 	return doc.Decode[T](ctx, opts...)
 }
 
+// MarshalYAML returns the value that go-yaml's encoder writes for the
+// [Source]. That value is the value of its one document, as
+// [Node.MarshalYAML] returns it for the root Node [Source.Document]
+// returns. [go.jacobcolvin.com/niceyaml/encoder.Marshal] thus writes a
+// Source as the value of its document. For a Source that holds more than
+// one document, or a document that does not parse, MarshalYAML returns the
+// error that Source.Document returns. A nil Source encodes as null.
+func (s *Source) MarshalYAML(ctx context.Context) (any, error) {
+	if s == nil {
+		return nil, nil //nolint:nilnil // A nil pointer encodes as null.
+	}
+
+	doc, err := s.Document()
+	if err != nil {
+		return nil, err
+	}
+
+	return doc.MarshalYAML(ctx)
+}
+
 // single returns the one document [Source.Documents] returns. For a
 // syntax error, it returns the error that [Source.File] returns, which the
 // parse bound already. For more than one document, it returns an unbound

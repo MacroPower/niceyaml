@@ -221,10 +221,10 @@ func (n *Node) DocumentAST() *ast.DocumentNode {
 //	}
 //
 // [Node.Decode], [Node.DecodeInto], [Node.DecodeAt],
-// [Node.DecodeIfPresent], [Node.Validate], [Node.At], [Node.Nodes], and
-// [Node.Ranges] return the error that Err returns, and they do not run a
-// [Validator]. [Node.AST] and [Node.DocumentAST] return nil, and
-// [Node.PathAt] reports false for every position.
+// [Node.DecodeIfPresent], [Node.MarshalYAML], [Node.Validate], [Node.At],
+// [Node.Nodes], and [Node.Ranges] return the error that Err returns, and
+// they do not run a [Validator]. [Node.AST] and [Node.DocumentAST] return
+// nil, and [Node.PathAt] reports false for every position.
 //
 // A panic in the parser fails the documents it was reading the same way.
 // Err then returns an error that holds a [PanicError] and does not match

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -1452,6 +1454,140 @@ func (n *Node) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, erro
 	}
 
 	return v, nil
+}
+
+// MarshalYAML returns the value that go-yaml's encoder writes for the
+// Node. That value holds what [Node.Decode] reads into an any, with the
+// keys of each mapping in the order of the document.
+// [go.jacobcolvin.com/niceyaml/encoder.Marshal] thus writes a Node, or a
+// value that holds Nodes, as the values of the nodes:
+//
+//	items, err := doc.Nodes(paths.MustParse("$.items[*]"))
+//	if err != nil {
+//		return err
+//	}
+//
+//	out, err := encoder.Marshal(ctx, items)
+//
+// The encode writes the content of each alias and the entries of each
+// `<<` merge key in their place. It writes each key of a mapping once,
+// with the value that a decode into a map reads for the key, at the place
+// of the first entry that holds the key. A mapping can set a key that its
+// `<<` merge key also holds, as in "{<<: *base, x: 9}". A mapping of a
+// [Source] under [WithAllowDuplicateKeys] can repeat a key. Each such key
+// encodes once.
+//
+// The decoded value does not hold the comments, the quotes, or the block
+// and flow styles of the node. So the encode does not write them. Of the
+// tags of the node, it writes only !!binary and !!timestamp. A !!binary
+// scalar encodes as that tag and its bytes in base64. A !!timestamp
+// scalar encodes as that tag and its time in the layout of
+// [time.RFC3339Nano]. The encode writes each of the two scalars in double
+// quotes, as in `!!timestamp "2001-12-14T21:59:43Z"`. Each thus decodes
+// to the same bytes or the same time in block style and in flow style. A
+// decode reads each key as a string, so the encode writes a key such as 1
+// or true in quotes.
+//
+// Go-yaml's encoder writes some floats in exponent form without a
+// fraction, such as 1e-05 for 0.00001 and 1e+06 for 1000000.0. Go-yaml
+// reads that text as a string, so the encode of a Node that holds such a
+// float decodes to a string in its place.
+//
+// MarshalYAML returns each mapping as a [yaml.MapSlice] and each sequence
+// as a []any. It returns the value of a !!binary or a !!timestamp scalar
+// as a value of an unexported type that marshals to the tagged scalar.
+//
+// MarshalYAML returns the error of the decode, such as the error that
+// [Node.Err] returns for a document that did not parse. A nil Node
+// encodes as null.
+func (n *Node) MarshalYAML(ctx context.Context) (any, error) {
+	if n == nil {
+		return nil, nil //nolint:nilnil // A nil pointer encodes as null.
+	}
+
+	v, err := n.Decode[any](ctx, WithYAMLOrderedMaps(true))
+	if err != nil {
+		return nil, err
+	}
+
+	return encodable(v), nil
+}
+
+// encodable returns v, a value that a decode read into an any under
+// [WithYAMLOrderedMaps], as the value that [Node.MarshalYAML] returns for
+// it. The decoder appends the entries of a `<<` merge key and each entry
+// of a repeated key to the [yaml.MapSlice] of their mapping, so a
+// MapSlice can hold a key more than once. In the result, each MapSlice
+// holds each key once, at the place of its first item, with the value of
+// its last item. That value is the one that a decode into a map reads.
+//
+// A []byte becomes a [binaryScalar], because go-yaml's encoder writes a
+// []byte as a sequence of integers. A [time.Time] becomes a
+// [timestampScalar], because the encoder writes a time as a string. The
+// result holds a new MapSlice for each MapSlice of v and a new []any for
+// each []any.
+func encodable(v any) any {
+	switch x := v.(type) {
+	case yaml.MapSlice:
+		out := make(yaml.MapSlice, 0, len(x))
+		at := make(map[string]int, len(x))
+
+		for _, item := range x {
+			name := datapath.MemberName(item.Key)
+			value := encodable(item.Value)
+
+			if i, ok := at[name]; ok {
+				out[i].Value = value
+
+				continue
+			}
+
+			at[name] = len(out)
+			out = append(out, yaml.MapItem{Key: item.Key, Value: value})
+		}
+
+		return out
+
+	case []any:
+		out := make([]any, len(x))
+		for i, e := range x {
+			out[i] = encodable(e)
+		}
+
+		return out
+
+	case []byte:
+		return binaryScalar(x)
+
+	case time.Time:
+		return timestampScalar(x)
+
+	default:
+		return v
+	}
+}
+
+// binaryScalar is the value of a !!binary scalar in the value that
+// [Node.MarshalYAML] returns.
+type binaryScalar []byte
+
+// MarshalYAML returns the bytes as a !!binary scalar, in base64 and in
+// double quotes, which also hold the empty text of no bytes.
+func (b binaryScalar) MarshalYAML() ([]byte, error) {
+	return []byte(`!!binary "` + base64.StdEncoding.EncodeToString(b) + `"`), nil
+}
+
+// timestampScalar is the value of a !!timestamp scalar in the value that
+// [Node.MarshalYAML] returns.
+type timestampScalar time.Time
+
+// MarshalYAML returns the time as a !!timestamp scalar, in the layout of
+// [time.RFC3339Nano] and in double quotes. Inside a flow mapping,
+// go-yaml's parser does not read a plain scalar that follows a tag and
+// holds a colon as one scalar. It reads the scalar in double quotes as the
+// time.
+func (t timestampScalar) MarshalYAML() ([]byte, error) {
+	return []byte(`!!timestamp "` + time.Time(t).Format(time.RFC3339Nano) + `"`), nil
 }
 
 // YAMLComments returns the comments of the node in a new map, each under

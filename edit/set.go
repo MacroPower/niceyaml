@@ -110,6 +110,12 @@ type payload struct {
 // The blank lines after an old block scalar with a keep indicator, as in
 // "|+", belong to its text, so they go with it.
 //
+// A [Node] as v, or inside v, encodes as the value that it decodes to in
+// the current text, as [Node.MarshalYAML] describes. A Set thus copies the
+// value of another place. The copy does not hold the comments, the quotes,
+// or the block and flow styles of that value. Of its tags, the copy holds
+// only !!binary and !!timestamp.
+//
 // A reference document of [go.jacobcolvin.com/niceyaml.WithReferences]
 // that a `<<` merge key reads decides which names the mapping of the merge
 // key reads. A Set of a name that such a mapping does not write after the

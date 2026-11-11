@@ -1022,8 +1022,75 @@ func (n *Node) Text() string {
 // holds the `<<` merge key, whose Decode reads the entries that the merge
 // key brings in.
 func (n *Node) Decode[T any](ctx context.Context, opts ...niceyaml.DecodeOption) (T, error) {
-	var zero T
+	var v T
 
+	err := n.withValue(func(doc *niceyaml.Node) error {
+		var err error
+
+		v, err = doc.Decode[T](ctx, opts...)
+
+		return err
+	})
+
+	return v, err
+}
+
+// MarshalYAML returns the value that go-yaml's encoder writes for the
+// node. It is the value that [niceyaml.Node.MarshalYAML] returns for the
+// value of the place in the current text, and it fails as [Node.Decode]
+// fails. A [Func] thus copies a value with a Set of the node that holds
+// it:
+//
+//	from := root.At(paths.MustParse("$.defaults.resources"))
+//	to := root.At(paths.MustParse("$.spec.resources"))
+//
+//	return to.Set(ctx, from)
+//
+// The copy holds what a decode of the value reads, with the keys of each
+// mapping in the order of the text. It holds the content of each alias
+// and the entries of each `<<` merge key in their place. It holds each key
+// of a mapping once, with the value that a decode into a map reads for the
+// key. So a copy of "{<<: *base, x: 9}", where the anchor base holds x and
+// y, writes x once, as 9.
+//
+// The copy does not hold the comments, the quotes, or the block and flow
+// styles of the value. Of its tags, the copy holds only !!binary and
+// !!timestamp. A scalar with one of those tags thus decodes to the same
+// bytes or the same time in the copy.
+//
+// Go-yaml's encoder writes some floats in exponent form without a
+// fraction, such as 1e-05 for 0.00001 and 1e+06 for 1000000.0. Go-yaml
+// reads that text as a string. A Set of a node whose value holds such a
+// float thus fails with [ErrEngine], as [Node.Set] describes for a
+// float64.
+//
+// A Set of a node at a place that does not hold a value fails. So does a
+// Set of a node that lost its place to an earlier edit. Set calls each
+// MarshalYAML method twice, so a Set of a node decodes its value twice. A
+// nil Node encodes as null.
+func (n *Node) MarshalYAML(ctx context.Context) (any, error) {
+	if n == nil {
+		return nil, nil //nolint:nilnil // A nil pointer encodes as null.
+	}
+
+	var v any
+
+	err := n.withValue(func(doc *niceyaml.Node) error {
+		var err error
+
+		v, err = doc.MarshalYAML(ctx)
+
+		return err //nolint:wrapcheck // The Node binds the error.
+	})
+
+	return v, err
+}
+
+// withValue calls fn with the value of the place as a [*niceyaml.Node] of
+// the current text, and returns the error of fn. For a node that cannot
+// decode, it does not call fn, and it returns the error that [Node.doc]
+// returns.
+func (n *Node) withValue(fn func(doc *niceyaml.Node) error) error {
 	recorded := n.d.callErr
 
 	// A read is a call, so each problem of the read names it, as
@@ -1043,10 +1110,10 @@ func (n *Node) Decode[T any](ctx context.Context, opts ...niceyaml.DecodeOption)
 			n.d.callErr = recorded
 		}
 
-		return zero, err
+		return err
 	}
 
-	return doc.Decode[T](ctx, opts...)
+	return fn(doc)
 }
 
 // doc returns the value of the place as a [*niceyaml.Node] of the current
