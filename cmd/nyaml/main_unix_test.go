@@ -6,9 +6,11 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -114,6 +116,174 @@ func waitForLine(t *testing.T, lines *bufio.Scanner, want string) {
 	}
 
 	t.Fatalf("helper output ended before %q: %v", want, lines.Err())
+}
+
+// mainArgsEnv holds, as a JSON array, the arguments that a test binary
+// started by [startOnTerminal] runs main with in place of its test.
+const mainArgsEnv = "NYAML_MAIN_ARGS"
+
+// terminalTimeout bounds each wait of a test for a process that
+// [startOnTerminal] started.
+const terminalTimeout = 30 * time.Second
+
+// runMainHelper runs main with the arguments in [mainArgsEnv] and reports
+// whether the variable was set. A test that [startOnTerminal] names
+// returns when runMainHelper reports true.
+func runMainHelper(t *testing.T) bool {
+	t.Helper()
+
+	raw := os.Getenv(mainArgsEnv)
+	if raw == "" {
+		return false
+	}
+
+	var args []string
+
+	require.NoError(t, json.Unmarshal([]byte(raw), &args))
+
+	os.Args = append([]string{"nyaml"}, args...)
+
+	main()
+
+	return true
+}
+
+// terminalRun is a run of nyaml on a pseudo-terminal that
+// [startOnTerminal] starts.
+type terminalRun struct {
+	// The controlling side of the terminal. A write types into the
+	// terminal, and the process reads what it writes.
+	ptmx *os.File
+	// Each chunk that the process writes to the terminal, closed when the
+	// terminal ends.
+	chunks chan []byte
+	// The result of the wait for the process.
+	done chan error
+	// Everything that the process wrote to the terminal so far, as the
+	// reads of the test collect it.
+	output []byte
+}
+
+// startOnTerminal starts the test binary on an 80 by 24 pseudo-terminal,
+// where it runs main with args in place of the test named test. The test
+// must call [runMainHelper] first. The process gets the environment of
+// the test with TERM=xterm-256color and the variables of env, but without
+// the variables that pick a color profile.
+func startOnTerminal(t *testing.T, test string, env []string, args ...string) *terminalRun {
+	t.Helper()
+
+	raw, err := json.Marshal(args)
+	require.NoError(t, err)
+
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^"+test+"$")
+
+	for _, kv := range os.Environ() {
+		switch name, _, _ := strings.Cut(kv, "="); name {
+		case "NO_COLOR", "COLORTERM", "CLICOLOR", "CLICOLOR_FORCE":
+		default:
+			cmd.Env = append(cmd.Env, kv)
+		}
+	}
+
+	cmd.Env = append(cmd.Env, "TERM=xterm-256color", mainArgsEnv+"="+string(raw))
+	cmd.Env = append(cmd.Env, env...)
+
+	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 24, Cols: 80})
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		_ = ptmx.Close() //nolint:errcheck // Best effort.
+	})
+
+	run := &terminalRun{
+		ptmx:   ptmx,
+		chunks: make(chan []byte, 64),
+		done:   make(chan error, 1),
+	}
+
+	// The process blocks when the terminal buffer fills, so a goroutine
+	// reads everything it writes. The read ends with an error when the
+	// process closes the terminal.
+	go func() {
+		defer close(run.chunks)
+
+		for {
+			buf := make([]byte, 4096)
+
+			n, err := ptmx.Read(buf)
+			if n > 0 {
+				run.chunks <- buf[:n]
+			}
+
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	go func() {
+		run.done <- cmd.Wait()
+	}()
+
+	return run
+}
+
+// readUntil reads the terminal until match reports true for everything
+// that the process wrote to it so far.
+func (r *terminalRun) readUntil(t *testing.T, match func(output string) bool) {
+	t.Helper()
+
+	timeout := time.After(terminalTimeout)
+
+	for !match(string(r.output)) {
+		select {
+		case chunk, ok := <-r.chunks:
+			if !ok {
+				t.Fatalf("the terminal ended before the expected output: %q", r.output)
+			}
+
+			r.output = append(r.output, chunk...)
+
+		case <-timeout:
+			t.Fatalf("the expected output did not appear: %q", r.output)
+		}
+	}
+}
+
+// wait reads the terminal until it ends, waits for the process to exit,
+// and returns everything that the process wrote to the terminal and the
+// result of the wait.
+func (r *terminalRun) wait(t *testing.T) (string, error) {
+	t.Helper()
+
+	timeout := time.After(terminalTimeout)
+
+	for {
+		select {
+		case chunk, ok := <-r.chunks:
+			if !ok {
+				r.chunks = nil
+
+				continue
+			}
+
+			r.output = append(r.output, chunk...)
+
+		case err := <-r.done:
+			// The process has exited, so the reader goroutine reads the
+			// rest of the output and then closes chunks.
+			if r.chunks != nil {
+				for chunk := range r.chunks {
+					r.output = append(r.output, chunk...)
+				}
+			}
+
+			return string(r.output), err
+
+		case <-timeout:
+			t.Fatalf("the process did not exit: %q", r.output)
+		}
+	}
 }
 
 // viewHelperEnv names the file that the test binary views with nyaml view

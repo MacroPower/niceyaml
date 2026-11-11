@@ -10,7 +10,7 @@ Set Rows 30
 
 Hide
   Type `alias nyaml=./dist/nyaml`  Enter
-  Type `nyaml view testdata/revisions/*.yaml` Enter
+  Type `nyaml diff testdata/revisions/*.yaml` Enter
   Sleep 500ms
 Show
 
