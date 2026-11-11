@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"math"
 	"reflect"
 	"runtime/debug"
 	"slices"
@@ -891,7 +892,8 @@ func (n *Node) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) erro
 }
 
 // decodeInto is [Node.DecodeInto] with its settings resolved. It also
-// collects the comments of the node in comments, unless comments is nil.
+// collects the comments of the node in comments, unless comments is nil,
+// each keyed by a path from the node, as [Node.YAMLComments] describes.
 func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig, comments yaml.CommentMap) error {
 	err := checkDecode(ctx, v, cfg)
 	if err != nil {
@@ -920,7 +922,21 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig, comments
 
 	// The decoder step reports each problem as an error, whatever it wraps,
 	// because the decoder stops at the first and reads no value past it.
-	err = n.bindOwn(AsErrors(n.decodeUnbound(ctx, n.valueNode(), v, cfg, comments)))
+	node := n.valueNode()
+
+	err = n.bindOwn(AsErrors(n.decodeUnbound(ctx, node, v, cfg, comments)))
+
+	// A decode of an anchor files the comments of the anchor as well as
+	// those of its value. A decode of an alias files only those of the
+	// content it reads.
+	read, alias := n.readContent(node)
+
+	filer := node
+	if alias != nil {
+		filer = read
+	}
+
+	rebaseComments(comments, read, filer)
 
 	if cfg.unknownFields == UnknownFieldsWarn {
 		n.warnUnknownFields(ctx, reflect.TypeOf(v).Elem(), cfg, err)
@@ -1403,6 +1419,182 @@ func (n *Node) decodeValue(ctx context.Context, text []byte, dst any, cfg decode
 	return valueError(doc.decodeUnbound(ctx, doc.AST(), dst, cfg, nil))
 }
 
+// readContent returns the node that a decode of node reads, and the alias
+// that node holds, if any. For an anchor, the decode reads the anchor's
+// value. For an alias, it reads the content of the anchor that the alias
+// names.
+func (n *Node) readContent(node ast.Node) (ast.Node, *ast.AliasNode) {
+	value := node
+	if anchor, ok := node.(*ast.AnchorNode); ok {
+		value = anchor.Value
+	}
+
+	alias, ok := value.(*ast.AliasNode)
+	if !ok {
+		return value, nil
+	}
+
+	held, err := n.doc.aliasContent(alias)
+	if err == nil {
+		value = held
+	}
+
+	return value, alias
+}
+
+// rebaseComments keys each comment of comments from read, the node that
+// a decode read, so `$` names the decoded value. The go-yaml decoder keys
+// each comment by the path from the root of the document of its node.
+//
+// The node filer is the one whose own comments the decode files. For a
+// decode of an anchor, filer is the anchor. Otherwise filer and read are
+// the same node. A comment stays in
+// the map only when filer or a node below it files a comment of its kind
+// under its key. The comments that leave belong to an anchor outside
+// filer that an alias or a merge key in filer names.
+//
+// Every key that filer files extends the path of read at `.`, `[`, or
+// the end of the key. The kinds filter thus keeps only keys under the
+// prefix, and the boundary test guards against a key that no input
+// produces.
+func rebaseComments(comments yaml.CommentMap, read, filer ast.Node) {
+	if len(comments) == 0 {
+		return
+	}
+
+	prefix := ""
+	if !astnode.IsNil(read) {
+		prefix = read.GetPath()
+	}
+
+	own := commentKinds(filer)
+	rebased := make(yaml.CommentMap, len(comments))
+
+	for key, cs := range comments {
+		rest, ok := strings.CutPrefix(key, prefix)
+		if !ok || prefix == "" || (rest != "" && rest[0] != '.' && rest[0] != '[') {
+			continue
+		}
+
+		var kept []*yaml.Comment
+
+		for _, c := range cs {
+			if own[key][c.Position] {
+				kept = append(kept, c)
+			}
+		}
+
+		if len(kept) != 0 {
+			rebased["$"+rest] = kept
+		}
+	}
+
+	clear(comments)
+	maps.Copy(comments, rebased)
+}
+
+// commentKinds returns the keys and kinds under which the go-yaml decoder
+// files the comments of node and of the nodes below it. Like the decoder,
+// it takes a comment group above the token of its node as a head comment,
+// and one on the line of that token as a line comment. It does not
+// follow an alias, so it leaves out the comments of the anchors that
+// aliases name.
+func commentKinds(node ast.Node) map[string]map[yaml.CommentPosition]bool {
+	kinds := map[string]map[yaml.CommentPosition]bool{}
+	add := func(path string, kind yaml.CommentPosition) {
+		if kinds[path] == nil {
+			kinds[path] = map[yaml.CommentPosition]bool{}
+		}
+
+		kinds[path][kind] = true
+	}
+
+	astnode.Inspect(node, func(n ast.Node) bool {
+		if n.Type() == ast.CommentType {
+			return false
+		}
+
+		var foot *ast.CommentGroupNode
+
+		switch n := n.(type) {
+		case *ast.SequenceNode:
+			for i, head := range n.ValueHeadComments {
+				if hasComments(head) && i < len(n.Values) {
+					add(n.Values[i].GetPath(), yaml.CommentHeadPosition)
+				}
+			}
+
+			if hasComments(n.GetComment()) && len(n.Values) != 0 {
+				add(n.Values[0].GetPath(), yaml.CommentHeadPosition)
+			}
+
+			if hasComments(n.FootComment) {
+				add(n.FootComment.GetPath(), yaml.CommentFootPosition)
+			}
+
+			return true
+
+		case *ast.MappingNode:
+			foot = n.FootComment
+
+		case *ast.MappingValueNode:
+			foot = n.FootComment
+		}
+
+		if path, kind, ok := headOrLineKind(n); ok {
+			add(path, kind)
+		}
+
+		if hasComments(foot) {
+			add(foot.GetPath(), yaml.CommentFootPosition)
+		}
+
+		return true
+	})
+
+	return kinds
+}
+
+// headOrLineKind returns the key and kind under which the go-yaml decoder
+// files the comment of node, which is not a sequence. It reports false
+// when node holds no comment.
+func headOrLineKind(n ast.Node) (string, yaml.CommentPosition, bool) {
+	group := n.GetComment()
+	tok := n.GetToken()
+
+	if !hasComments(group) || tok == nil {
+		return "", 0, false
+	}
+
+	first := math.MaxInt
+	for _, c := range group.Comments {
+		first = min(first, c.Token.Position.Line)
+	}
+
+	if first >= tok.Position.Line {
+		return n.GetPath(), yaml.CommentLinePosition, true
+	}
+
+	path := n.GetPath()
+
+	switch n := n.(type) {
+	case *ast.MappingNode:
+		if len(n.Values) != 0 {
+			path = n.Values[0].Key.GetPath()
+		}
+
+	case *ast.MappingValueNode:
+		path = n.Key.GetPath()
+	}
+
+	return path, yaml.CommentHeadPosition, true
+}
+
+// hasComments reports whether group holds a comment.
+func hasComments(group *ast.CommentGroupNode) bool {
+	return group != nil && len(group.Comments) != 0
+}
+
 // decodeUnbound decodes node into v with cfg and returns the error for
 // the Node to bind. A node without content or a null leaves v as it is,
 // so defaults survive, but an untagged null clears a pointer or interface.
@@ -1419,22 +1611,12 @@ func (n *Node) decodeUnbound(
 		return err //nolint:wrapcheck // The caller binds the error.
 	}
 
-	value := node
-	if anchor, ok := node.(*ast.AnchorNode); ok {
-		value = anchor.Value
-	}
+	value, alias := n.readContent(node)
+	isAlias := alias != nil
 
 	// A document body or a Node at an alias that reads a reference document
-	// holds the alias. The decode reads the value of its anchor there, so
-	// the tests for a null read that value, with any tag on it.
-	alias, isAlias := value.(*ast.AliasNode)
-	if isAlias {
-		held, err := n.doc.aliasContent(alias)
-		if err == nil {
-			value = held
-		}
-	}
-
+	// holds the alias. The decode reads the content of its anchor there, so
+	// the tests for a null read that content, with any tag on it.
 	null := astnode.IsNil(value) || value.Type() == ast.NullType
 	kind := reflect.TypeOf(v).Elem().Kind()
 
@@ -2076,9 +2258,9 @@ func (c *encodableConverter) convertSlice(x []any) []any {
 	return out
 }
 
-// YAMLComments returns the comments of the node in a new map, each under
-// the YAML path of the value it belongs to, as go-yaml's
-// [yaml.CommentToMap] option collects them.
+// YAMLComments returns the comments of the node in a new map of the type
+// that go-yaml's [yaml.CommentToMap] option fills. Each comment sits
+// under the path of its value from the node.
 // [go.jacobcolvin.com/niceyaml/encoder.WithYAMLComments] writes such a
 // map back, so a program that decodes a document, changes the value, and
 // encodes it again keeps the comments:
@@ -2111,14 +2293,36 @@ func (c *encodableConverter) convertSlice(x []any) []any {
 // parse, returns its error and a nil map. For a node that does not hold
 // a value, YAMLComments returns an empty map.
 //
-// Each key is a path from the root of the document, whatever node the
-// call reads. The map of a whole document thus pairs with an encode of
-// its value. The map of a Node from [Node.At] does not pair with an
-// encode of that node alone.
+// Each key is a path from the node, so `$` names the value that a decode
+// of the same Node returns. The map thus pairs with an encode of that
+// value. For a Node from [Node.At] at `$.spec`, the comment of
+// `$.spec.replicas` in the document has the key `$.replicas`. A Node at
+// an alias keys its comments from the content of the anchor that the
+// alias reads. For keys from the root of the document, call YAMLComments
+// on the Node that [Node.Document] returns.
+//
+// The map leaves out the comments of each anchor outside the node that an
+// alias or a `<<` merge key in the node reads. It also leaves out the
+// comments that belong to the mapping or sequence that holds the node.
+// The map of the document files some of them at the path of the node.
+// They are the head and line comments of the key that holds the node and
+// the head comment of the item that holds it. They also include the foot
+// comment that follows the node as the last value of that mapping or
+// sequence.
+//
+// The decoder keeps one comment of each kind, head, line, or foot, under
+// a path. A merge key can read a mapping of a reference document whose
+// paths continue the path of the node. That mapping can hold a comment at
+// a path where the node holds a comment of the same kind. When the
+// decoder reads the merge key first, the map holds the comment of the
+// reference document in place of the comment of the node.
 //
 // Each key is in the path syntax of go-yaml, which prints a name with
 // whitespace or `:` without quotes, as in `$.my key`. [paths.Parse]
-// rejects such an unquoted name, so it does not read every key.
+// rejects such an unquoted name, so it does not read every key. To look
+// up the key of a [paths.Path], convert the path with
+// [paths.Path.YAMLPath] and use the String of the result, not the String
+// of the [paths.Path].
 func (n *Node) YAMLComments(ctx context.Context) (yaml.CommentMap, error) {
 	var value any
 
