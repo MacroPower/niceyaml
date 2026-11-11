@@ -149,6 +149,11 @@ func (e *sentinelError) Unwrap() error {
 // Func edits a document through n, a node on one place that the path of
 // [Doc.Apply] selects. An error fails the Apply, and an error without a
 // location binds at the value of n.
+//
+// Each edit through a [Node] parses and checks the whole text, as
+// [Doc.Apply] describes. Apply checks ctx between calls, not inside one. A
+// Func that makes many edits in one call should check ctx between them and
+// return its error.
 type Func func(ctx context.Context, n *Node) error
 
 // Option configures a [Doc].
@@ -767,10 +772,19 @@ func headerEnd(src *niceyaml.Source, line int) int {
 // Each call parses and checks the whole text that it leaves. So the cost
 // of a path that selects several places grows with the number of places
 // times the size of the text. A rename of each key of a text of 400 keys,
-// 3.7 KiB, took 0.5 s and allocated over 900 MiB. A program that edits
+// 3.7 KiB, took 0.5 s and allocated more than 900 MiB. A program that edits
 // untrusted input should keep the byte limit and the alias limit of its
 // Source on, which [niceyaml.WithByteLimit] and [niceyaml.WithAliasLimit]
-// set.
+// set. Those limits bound the text that the Apply starts from, so they
+// bound the cost of each call that does not grow the text. The calls read
+// the text without the limits, and Apply checks the limits again only
+// after the last call. A deadline on ctx bounds the number of calls.
+//
+// Apply checks ctx before each call of fn. When ctx has ended, Apply
+// returns its error, bound to the user's Source, and the Doc drops the
+// edits of the calls so far. So fn runs zero times on a context that ended
+// before the Apply. To let an Apply finish after its context ends, pass
+// it the context that [context.WithoutCancel] returns.
 //
 // Apply returns the first problem, bound in the user's text, and stops
 // there. A failed Apply leaves the Doc as it found it, so the Doc drops
@@ -847,7 +861,14 @@ func (d *Doc) run(ctx context.Context, path paths.Path, fn Func, label string) e
 			continue
 		}
 
-		err := d.endCall(n, fn(ctx, n))
+		// Each call parses and checks the whole text, so the context bounds
+		// the number of calls.
+		err := ctx.Err()
+		if err != nil {
+			return d.user.Bind(err) //nolint:wrapcheck // The error binds in the user's text.
+		}
+
+		err = d.endCall(n, fn(ctx, n))
 		if err != nil {
 			return err
 		}

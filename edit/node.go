@@ -55,6 +55,11 @@ import (
 // returns [ErrEnded]. Exists, Kind, and Text then answer as they do for a
 // place that does not hold a value, and [Node.Err] tells the two apart.
 //
+// The methods that run code of the caller take a context. Set and Insert
+// run marshalers, and Decode runs unmarshalers, so each takes one. SetKey,
+// Move, and Remove do not run code of the caller, so they do not take a
+// context. [Doc.Apply] checks its context between calls of the [Func].
+//
 // Receive instances as the argument of a [Func], or from [Node.At].
 type Node struct {
 	d *Doc
