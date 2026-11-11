@@ -120,7 +120,11 @@ func TestLimitFlags(t *testing.T) {
 
 			out := &bytes.Buffer{}
 
-			err := quietValidateCmd(out, io.Discard, append(tc.args, path)...).Execute()
+			// The files do not have a $schema comment, so
+			// --schemastore=false keeps them from SchemaStore.
+			args := append([]string{"--schemastore=false"}, tc.args...)
+
+			err := quietValidateCmd(out, io.Discard, append(args, path)...).Execute()
 			if tc.err == nil {
 				require.NoError(t, err)
 				assert.Contains(t, out.String(), "test.yaml: valid")
