@@ -214,25 +214,21 @@ func (c GutterContext) styler() style.Styler {
 //
 // Because the printer pads text that falls short, a gutter that shows a
 // marker on some rows and nothing on others declares the width of the
-// marker and renders what it likes:
+// marker and renders what it likes. [FixedGutter] builds such a gutter
+// from a width and a function:
 //
-//	type markerGutter struct{}
-//
-//	func (markerGutter) Width(printer.GutterContext) int { return 2 }
-//
-//	func (markerGutter) Render(ctx printer.GutterContext) string {
+//	marker := printer.FixedGutter(2, func(ctx printer.GutterContext) string {
 //		if ctx.Flag == line.FlagInserted {
 //			return "+ "
 //		}
 //
 //		return ""
-//	}
-//
-//	p := printer.New(printer.WithGutter(markerGutter{}))
+//	})
+//	p := printer.New(printer.WithGutter(marker))
 //
 // [DefaultGutter], [DiffGutter], [LineNumberGutter], and [NoGutter] are
-// ready-made gutters, and [GutterFunc] adapts a function. [WithGutter]
-// sets the gutter a printer uses.
+// ready-made gutters. [FixedGutter] and [GutterFunc] adapt a function.
+// [WithGutter] sets the gutter a printer uses.
 type Gutter interface {
 	// Width returns the width in cells of the gutter on every row of a
 	// view. The context holds the styles the gutter renders with. Both
@@ -246,15 +242,18 @@ type Gutter interface {
 	Render(ctx GutterContext) string
 }
 
-// GutterFunc adapts a function to the [Gutter] interface. Its width is
-// the width of what the function renders for the context [Gutter.Width]
-// receives. A function whose width depends on the line number alone, as
-// the built-in gutters do, measures as it renders. For a function whose
-// width varies with the flag or the row, the printer pads or cuts every
-// row to the width of what the function renders for that context:
+// GutterFunc adapts a function to the [Gutter] interface. It fits a
+// function whose width follows the largest line number and the styles
+// alone, such as a custom line number format. Its width is the width of
+// what the function renders for the context [Gutter.Width] receives. That
+// context holds the default flag and index, with Soft and Annotation
+// false. The printer pads or cuts every row to that width, so a function
+// that renders a marker only for some flags, indexes, or rows loses the
+// marker. Use [FixedGutter] for a function whose text varies with the
+// flag, the index, Soft, or Annotation.
 //
 //	p := printer.New(printer.WithGutter(printer.GutterFunc(func(ctx printer.GutterContext) string {
-//		return fmt.Sprintf("%3d ", ctx.Number)
+//		return fmt.Sprintf("%*d ", len(strconv.Itoa(ctx.MaxNumber)), ctx.Number)
 //	})))
 type GutterFunc func(GutterContext) string
 
@@ -266,6 +265,38 @@ func (f GutterFunc) Width(ctx GutterContext) int {
 // Render implements [Gutter].
 func (f GutterFunc) Render(ctx GutterContext) string {
 	return f(ctx)
+}
+
+// FixedGutter returns a [Gutter] that takes width cells on every row and
+// renders fn for each row. The printer pads or cuts what fn renders to
+// width, so fn can render a marker on some rows and nothing on others. A
+// negative width counts as zero. A nil fn renders nothing, so the gutter
+// is a blank column of width cells.
+//
+// A gutter that shows line numbers takes [GutterFunc] instead, because
+// the width of the largest number depends on the view.
+func FixedGutter(width int, fn func(GutterContext) string) Gutter {
+	return fixedGutter{width: max(0, width), fn: fn}
+}
+
+// fixedGutter is the [Gutter] behind [FixedGutter].
+type fixedGutter struct {
+	fn    func(GutterContext) string
+	width int
+}
+
+// Width implements [Gutter].
+func (g fixedGutter) Width(GutterContext) int {
+	return g.width
+}
+
+// Render implements [Gutter].
+func (g fixedGutter) Render(ctx GutterContext) string {
+	if g.fn == nil {
+		return ""
+	}
+
+	return g.fn(ctx)
 }
 
 // AnnotationContext is what the printer passes to an [AnnotationFunc] for
@@ -843,8 +874,10 @@ func WithStyles(s style.Styler) Option {
 
 // WithGutter is an [Option] that sets the [Gutter] the printer renders with.
 // By default, [DefaultGutter] renders line numbers and diff markers. A nil
-// g, or one holding a nil func or pointer such as a nil [GutterFunc],
-// selects that same default. [NoGutter] turns the gutter off.
+// g, or a g that is itself a nil func or nil pointer such as a nil
+// [GutterFunc], selects that same default. A [FixedGutter] with a nil
+// function keeps its blank column of the width it declares instead.
+// [NoGutter] turns the gutter off.
 func WithGutter(g Gutter) Option {
 	return func(c *config) {
 		if nilness.IsNil(g) {
