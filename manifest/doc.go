@@ -29,6 +29,18 @@
 // a test catches a broken schema before a user meets it. It also catches a
 // deprecated field that the user cannot remove.
 //
+// [Registry.Kinds] lists the kinds and versions that a registry reads, and
+// [Registry.VersionField] and [Registry.KindField] give the paths of the
+// type fields. A test, a command that lists the kinds, or a generator of
+// docs thus reads the declaration of the registry and does not keep a
+// copy of it:
+//
+//	for _, k := range Registry.Kinds() {
+//		for _, v := range k.Versions {
+//			fmt.Println(k.Name, v.Name, v.Deprecated)
+//		}
+//	}
+//
 // # Versions
 //
 // Each version except the oldest can hold steps that bring a document from
