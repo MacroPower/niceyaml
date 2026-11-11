@@ -175,6 +175,55 @@ func TestRevisionLabel(t *testing.T) {
 	}
 }
 
+func TestNewModelOpening(t *testing.T) {
+	t.Parallel()
+
+	tab := tea.KeyPressMsg{Code: tea.KeyTab}
+
+	// The view command opens on the first file without a diff, and tab
+	// steps to the next file. The diff command opens on the diff of the
+	// last two files.
+	tcs := map[string]struct {
+		keys     []tea.Msg
+		want     string
+		wantDiff bool
+		diff     bool
+	}{
+		"view opens on the first file": {
+			want: "rev 1/3",
+		},
+		"view steps to the next file": {
+			keys: []tea.Msg{tab},
+			want: "rev 2/3 none",
+		},
+		"view turns the diff on": {
+			keys:     []tea.Msg{tab, press('m')},
+			want:     "diff 2/3",
+			wantDiff: true,
+		},
+		"diff opens on the last diff": {
+			diff:     true,
+			want:     "diff 3/3",
+			wantDiff: true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := newModel(&modelOptions{
+				sources: sourcesOf("a: 1\n", "a: 2\n", "a: 3\n"),
+				diff:    tc.diff,
+			})
+
+			got := update(t, m, tc.keys...)
+			assert.Equal(t, tc.want, got.revisionLabel())
+			assert.Equal(t, tc.wantDiff, got.viewport.ShowingDiff())
+		})
+	}
+}
+
 func TestRevisionLabels(t *testing.T) {
 	t.Parallel()
 
@@ -421,10 +470,12 @@ func TestBaseViewNoColumns(t *testing.T) {
 
 			const height = 10
 
-			m := newModel(&modelOptions{sources: sourcesOf("a: 1\n", "a: 2\n")})
+			// The diff puts two panes side by side.
+			m := newModel(&modelOptions{sources: sourcesOf("a: 1\n", "a: 2\n"), diff: true})
 			m.viewport.SetViewMode(tc.mode)
 
 			got := update(t, m, tea.WindowSizeMsg{Width: tc.width, Height: height})
+			require.True(t, got.viewport.ShowingDiff())
 
 			rows := strings.Split(got.baseView(), "\n")
 			require.Len(t, rows, height)
@@ -510,6 +561,8 @@ func TestTitleLinePosition(t *testing.T) {
 		mode yamlviewport.ViewMode
 		// The line count the title shows beside the bracket.
 		lines int
+		// Opens on the diff of the last two sources.
+		diff bool
 	}{
 		"top": {
 			srcs:  wrapped,
@@ -533,6 +586,7 @@ func TestTitleLinePosition(t *testing.T) {
 		"hunks of identical revisions": {
 			srcs:  []string{"a: 1\n", "a: 1\n"},
 			mode:  yamlviewport.ViewModeHunks,
+			diff:  true,
 			lines: 0,
 			want:  " [0] ",
 		},
@@ -542,7 +596,7 @@ func TestTitleLinePosition(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := newModel(&modelOptions{sources: sourcesOf(tc.srcs...)})
+			m := newModel(&modelOptions{sources: sourcesOf(tc.srcs...), diff: tc.diff})
 			m.viewport.SetViewMode(tc.mode)
 
 			got := update(t, update(t, m, tea.WindowSizeMsg{Width: 60, Height: 8}), tc.keys...)

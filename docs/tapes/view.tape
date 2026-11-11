@@ -73,7 +73,7 @@ Show
 
 Sleep 500ms
 
-Type `nyaml view testdata/full.yaml testdata/full-modified.yaml`  Sleep 500ms Enter
+Type `nyaml diff testdata/full.yaml testdata/full-modified.yaml`  Sleep 500ms Enter
 
 Sleep 2
 

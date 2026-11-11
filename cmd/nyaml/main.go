@@ -146,6 +146,7 @@ func newRootCmd() (*cobra.Command, func() error) {
 	cfg.MustRegisterCompletions(rootCmd)
 
 	rootCmd.AddCommand(viewCmd())
+	rootCmd.AddCommand(diffCmd())
 	rootCmd.AddCommand(validateCmd())
 
 	return rootCmd, func() error {

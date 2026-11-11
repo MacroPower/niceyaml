@@ -30,6 +30,10 @@ type modelOptions struct {
 	search      string
 	sources     []*niceyaml.Source
 	lineNumbers bool
+	// Opens the viewer on the diff of the last two sources, as the diff
+	// command does. Without it the viewer opens on the first source and
+	// shows no diff, as the view command does.
+	diff bool
 }
 
 type model struct {
@@ -70,7 +74,18 @@ func newModel(opts *modelOptions) model {
 		revisions[i] = source
 	}
 
+	// The viewport opens on the last revision, so the view command turns
+	// the diff off and moves to the first file.
+	if !opts.diff {
+		m.viewport.SetDiffMode(yamlviewport.DiffModeNone)
+	}
+
 	m.viewport.SetRevisions(revisions...)
+
+	if !opts.diff {
+		m.viewport.GotoRevision(0)
+	}
+
 	m.viewport.SetSearchTerm(opts.search)
 
 	return m
