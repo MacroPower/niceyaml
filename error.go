@@ -1557,9 +1557,14 @@ type SourceError struct {
 	leadOnce sync.Once
 	// Makes texts set built once.
 	builtOnce sync.Once
+	// Makes marksWarning set marked once.
+	markedOnce sync.Once
 	// The error wraps a binding, whose location, source, and children this
 	// one adopted, and whose position its message carries already.
 	adopted bool
+	// Whether the error or a child carries the mark of a warning, which
+	// marksWarning finds the first time a caller asks.
+	marked bool
 }
 
 // boundChild is a child of a [SourceError]. A located child is a new

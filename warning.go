@@ -117,15 +117,7 @@ func marksWarning(err error) bool {
 		return false
 
 	case *SourceError:
-		if x == nil {
-			return false
-		}
-
-		if marksWarning(x.err) {
-			return true
-		}
-
-		return slices.ContainsFunc(x.below, func(c boundChild) bool { return marksWarning(c.bound) })
+		return x.marksWarning()
 
 	case *Error:
 		if x == nil {
@@ -147,6 +139,25 @@ func marksWarning(err error) bool {
 	default:
 		return false
 	}
+}
+
+// marksWarning reports whether e, the error it binds, or a child of e
+// carries the mark of a warning, as [marksWarning] reports it. It returns
+// false for a nil e. It finds the answer a single time, because the error
+// that e binds can hold a binding that is a child of e as well. A search
+// per call walks such a binding twice, so its time doubles with each
+// level of a nest of them.
+func (e *SourceError) marksWarning() bool {
+	if e == nil {
+		return false
+	}
+
+	e.markedOnce.Do(func() {
+		e.marked = marksWarning(e.err) ||
+			slices.ContainsFunc(e.below, func(c boundChild) bool { return c.bound.marksWarning() })
+	})
+
+	return e.marked
 }
 
 // HasErrors reports whether err holds an error, as opposed to warnings

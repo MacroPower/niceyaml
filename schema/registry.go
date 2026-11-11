@@ -809,8 +809,8 @@ func (e reasonError) Unwrap() error {
 // keeps its position, and every other error of the lookup binds without
 // one. Check runs the schema through [niceyaml.Node.Validate], which
 // binds each violation. So a direct call returns the error that
-// Node.Validate returns for the registry, but [Schema.Check] returns its
-// violations as it wrote them.
+// Node.Validate returns for the registry, as a direct call to
+// [Schema.Check] does for the schema.
 func (r *Registry) Check(ctx context.Context, n *niceyaml.Node) error {
 	err := n.Err()
 	if err != nil {

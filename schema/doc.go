@@ -101,10 +101,10 @@
 // the path of the missing member, such as $.server.name. The error binds
 // at the key of the mapping that lacks the member.
 //
-// [Schema.Check] is the raw step. It returns its violations as it wrote
-// them, without a source or a position. A validator of the program's own
-// can therefore run the schema on a node it picks through
-// [go.jacobcolvin.com/niceyaml.Node.Validate] and return that error.
+// [Schema.Check] binds its violations at the node it gets, so a direct
+// call returns the error that [go.jacobcolvin.com/niceyaml.Node.Validate]
+// returns for the schema. A validator of the program's own can therefore
+// run the schema on each element of a list and return those errors.
 //
 // [Schema.ValidateValue] checks decoded data that did not come from a
 // document, such as the body of a request. The text of its error names

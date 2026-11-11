@@ -955,11 +955,15 @@
 // A validator writes its errors from the Node it gets, so an `@` path reads
 // from that Node. The decode or the Node.Validate call that runs the
 // validator binds the result as [Node.Bind] binds an error. It leaves an
-// error that the validator bound itself as it is. A direct call of
-// [Validator.Check] returns the error as the validator wrote it. A validator
-// that calls Check on an element and returns the result thus reports it at
-// the wrong value. A validator that runs another validator on a Node that it
-// picks calls Validate on that Node, so the error binds there.
+// error that the validator bound itself as it is.
+//
+// The validators of niceyaml bind their errors in [Validator.Check] the same
+// way, at the Node that Check got. A validator can thus call Check of one of
+// them on an element and return the result, and the error names the element.
+// A type that the program writes can return its errors from Check unbound. A
+// validator that returns such a result for an element reports it at the wrong
+// value. A validator that runs a validator it did not write on a Node that it
+// picks thus calls Validate on that Node, so the error binds there.
 //
 // [Each] runs a validator on every Node that a path selects, such as each
 // element of a list. It binds each failure at the Node that its validator

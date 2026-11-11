@@ -5911,9 +5911,8 @@ func TestNode_Bind_Scope(t *testing.T) {
 
 		fn := rejectingValidator(plain)
 
-		// A direct call returns the error as the function wrote it, and
-		// the Node binds it at the scope.
-		require.Same(t, plain, fn.Check(t.Context(), hours))
+		// A direct call binds the error at the scope, as the Node does.
+		require.EqualError(t, fn.Check(t.Context(), hours), want)
 		require.EqualError(t, hours.Validate(t.Context(), fn), want)
 
 		// Validate binds the error a validator leaves unbound.

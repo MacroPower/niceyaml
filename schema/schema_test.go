@@ -2523,18 +2523,36 @@ func TestSchema_AliasExpansion(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				doc := yamltest.FirstDocument(t, tc.input, refs, niceyaml.WithName("app.yaml"))
-				doc = yamltest.AtOrSelf(t, doc, tc.path)
+				root := yamltest.FirstDocument(t, tc.input, refs, niceyaml.WithName("app.yaml"))
+				doc := yamltest.AtOrSelf(t, root, tc.path)
+
+				// A rule of the root that returns the Check result of the
+				// node as its own.
+				rule := niceyaml.ValidatorFunc(func(ctx context.Context, _ *niceyaml.Node) error {
+					return v.Check(ctx, doc)
+				})
 
 				_, err := doc.Decode[any](t.Context(), niceyaml.WithValidator(v))
 				if tc.want == "" {
 					require.NoError(t, err)
+					require.NoError(t, v.Check(t.Context(), doc))
+					require.NoError(t, root.Validate(t.Context(), rule))
 
 					return
 				}
 
 				require.EqualError(t, err, tc.want)
 				requireExcessiveAliasing(t, err)
+
+				// A direct call to Check binds the refusal at the node, as
+				// Validate does, so the rule reports it at the node too.
+				require.EqualError(t, doc.Validate(t.Context(), v), tc.want)
+
+				direct := v.Check(t.Context(), doc)
+				require.EqualError(t, direct, tc.want)
+				requireExcessiveAliasing(t, direct)
+
+				require.EqualError(t, root.Validate(t.Context(), rule), tc.want)
 
 				// With the alias limit off, the schema reads every use of
 				// the mapping and the document conforms.
@@ -3113,50 +3131,105 @@ func TestSchema_Check_Bound(t *testing.T) {
 		})
 	}
 
-	t.Run("a direct call returns a violation as the schema wrote it", func(t *testing.T) {
+	t.Run("a direct call returns a violation bound at the node", func(t *testing.T) {
 		t.Parallel()
 
-		item := yamltest.At(t, yamltest.FirstDocumentWithPath(t, menu, "menu.yaml"), itemPath)
+		doc := yamltest.FirstDocumentWithPath(t, menu, "menu.yaml")
+		item := yamltest.At(t, doc, itemPath)
+		want := "menu.yaml:4:12: $.items[1].price: -2 is less than 0"
 
 		err := v.Check(t.Context(), item)
-		require.EqualError(t, err, "-2 is less than 0")
+		require.EqualError(t, err, want)
+		assert.Equal(t, "minimum", requireViolation(t, err).Keyword)
 
-		var bound *niceyaml.SourceError
+		// The path of the violation reads from the node the schema got,
+		// and the binding carries it from the root.
+		bound := yamltest.RequireSourceError(t, err)
+		assert.Same(t, item, yamltest.BoundNode(t, bound))
+		assert.Equal(t, "$.items[1].price", yamltest.PathOf(t, bound).String())
 
-		require.NotErrorAs(t, err, &bound)
+		// The result is bound, so another Node returns it as it is.
+		assert.Same(t, err, doc.Bind(err))
 
-		// The path reads from the node the schema got, and the node
-		// resolves it when it binds the error.
-		assert.Equal(t, "@.price", yamltest.PathOf(t, yamltest.RequireError(t, err)).String())
+		require.EqualError(t, item.Validate(t.Context(), v), want)
+	})
 
-		require.EqualError(t, item.Validate(t.Context(), v), "menu.yaml:4:12: $.items[1].price: -2 is less than 0")
+	t.Run("a direct call names every violation in its text", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`
+			items:
+			  - price: -1
+			    name: 5
+		`), "menu.yaml")
+		item := yamltest.At(t, doc, paths.Doc().Child("items").Index(0))
+
+		named := compileSchema(t, `{
+			"type": "object",
+			"properties": {
+				"price": {"type": "integer", "minimum": 0},
+				"name": {"type": "string"}
+			}
+		}`)
+
+		err := named.Check(t.Context(), item)
+		require.Error(t, err)
+
+		// A wrapper prints the text of the result, so each violation
+		// stays in a log line that holds only the wrapper.
+		assert.Equal(t, stringtest.JoinLF(
+			"item: menu.yaml: 2 schema violations",
+			"menu.yaml:2:12: $.items[0].price: -1 is less than 0",
+			`menu.yaml:3:11: $.items[0].name: expected "string", got "integer"`,
+		), fmt.Errorf("item: %w", err).Error())
 	})
 
 	t.Run("a validator that runs the schema on each element reports the element", func(t *testing.T) {
 		t.Parallel()
 
-		each := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
-			items, err := n.Nodes(paths.Current().Child("items").IndexAll())
-			if err != nil {
-				return err //nolint:wrapcheck // The test inspects the error as it is.
-			}
+		tcs := map[string]struct {
+			// Runs the schema on one element.
+			run func(ctx context.Context, item *niceyaml.Node) error
+		}{
+			"through the Validate method of the element": {
+				run: func(ctx context.Context, item *niceyaml.Node) error {
+					return item.Validate(ctx, v)
+				},
+			},
+			"through a direct call to Check": {
+				run: v.Check,
+			},
+		}
 
-			for _, item := range items {
-				err := item.Validate(ctx, v)
-				if err != nil {
-					return err //nolint:wrapcheck // The test inspects the error as it is.
-				}
-			}
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-			return nil
-		})
+				each := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+					items, err := n.Nodes(paths.Current().Child("items").IndexAll())
+					if err != nil {
+						return err //nolint:wrapcheck // The test inspects the error as it is.
+					}
 
-		doc := yamltest.FirstDocumentWithPath(t, menu, "menu.yaml")
+					var errs []error
 
-		err := doc.Validate(t.Context(), each)
-		require.EqualError(t, err, "menu.yaml:4:12: $.items[1].price: -2 is less than 0")
+					for _, item := range items {
+						errs = append(errs, tc.run(ctx, item))
+					}
 
-		assert.Equal(t, "minimum", requireViolation(t, err).Keyword)
+					return errors.Join(errs...)
+				})
+
+				// The document holds a valid price of its own, which an
+				// `@` path read from the root would select.
+				doc := yamltest.FirstDocumentWithPath(t, menu, "menu.yaml")
+
+				err := doc.Validate(t.Context(), each)
+				require.EqualError(t, err, "menu.yaml:4:12: $.items[1].price: -2 is less than 0")
+
+				assert.Equal(t, "minimum", requireViolation(t, err).Keyword)
+			})
+		}
 	})
 
 	t.Run("a validator that checks another document names that document", func(t *testing.T) {
@@ -3888,8 +3961,11 @@ func TestSchema_RefToRejectingSchema(t *testing.T) {
 			err := v.Check(t.Context(), yamltest.FirstDocument(t, "a: 1\n"))
 			require.NotErrorIs(t, err, schema.ErrValidate)
 
-			// Check writes the path from the node it got.
-			assert.Equal(t, "@.a", yamltest.PathOf(t, yamltest.RequireError(t, err)).String())
+			// Check binds the violation at the value the reference applies
+			// to.
+			bound := yamltest.RequireSourceError(t, err)
+			assert.Equal(t, "$.a", yamltest.PathOf(t, bound).String())
+			assert.Equal(t, position.New(0, 3), yamltest.PositionOf(t, bound))
 		})
 	}
 }

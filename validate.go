@@ -1488,12 +1488,7 @@ type SelfValidator interface {
 
 // Validator validates a [*Node] before it decodes, as a JSON schema does.
 // Pass one to a decode with [WithValidator], or run one on its own with
-// [Node.Validate]. A validator that runs another validator on a different
-// Node, such as each element of a list, passes the other validator to [Each]
-// or to the Validate method of that Node. A call to Check returns errors
-// whose `@` paths read from the Node that Check got. A validator of the root
-// that returns the Check result of `$.items[1]` as its own thus reports
-// `@.name` at `$.name` rather than at `$.items[1].name`.
+// [Node.Validate].
 //
 // See [ValidatorFunc], [MultiValidator], [ChainValidator], [SkipEmpty],
 // [Each], [go.jacobcolvin.com/niceyaml/schema.Schema], and
@@ -1502,14 +1497,42 @@ type SelfValidator interface {
 // caller that does not have a check to run.
 //
 // Check gets the Node that runs it, the root of a document or a Node from
-// [Node.At] or [Node.Nodes]. It returns its errors as it wrote them from
+// [Node.At] or [Node.Nodes]. An `@` path in an error of Check reads from
 // that Node. An error about a key the document lacks carries the path of
 // the key. Node.Validate and a decode bind what Check returns as
-// [Node.Bind] binds an error, and bind each warning that Check hands to
-// its context the same way. The validators of this module return their
-// errors unbound, apart from schema.Registry and Each. A schema.Registry
-// binds every error it returns, and Each binds each failure at the Node
-// that its validator checked.
+// [Node.Bind] binds an error. They bind each warning that Check hands to
+// its context the same way.
+//
+// The validators of this module bind in Check itself. They return their
+// errors bound at the Node that Check got, and nil when they have only
+// warnings. A direct call to Check of one of them thus returns what
+// Node.Validate returns for it. A rule that checks each element of a list
+// can return those results as its own, and each error names its element:
+//
+//	for _, item := range items {
+//		errs = append(errs, portSchema.Check(ctx, item))
+//	}
+//
+// A type that the program writes can return its errors from Check as it
+// wrote them, because the Node that runs the type binds them. A validator
+// of the root that returns such a result for `$.items[1]` as its own
+// reports `@.name` at `$.name` rather than at `$.items[1].name`. A type
+// whose Check binds its result places its errors as the validators of
+// this module place them:
+//
+//	func (r priceRule) Check(ctx context.Context, n *niceyaml.Node) error {
+//		return n.Bind(r.check(ctx, n))
+//	}
+//
+// Node.Bind keeps each warning of that result in the error it returns. A
+// type that reports warnings thus hands them to [Node.Warn], or runs its
+// body in a [ValidatorFunc]. [ValidatorFunc.Check] hands the warnings
+// that the body returns to the collector of its context.
+//
+// A validator that runs a validator it did not write on a different Node
+// passes that validator to [Each] or to the Validate method of that Node.
+// Each and Node.Validate bind at that Node every error that Check left
+// unbound.
 //
 // A validator that needs the whole document reaches it through
 // [Node.Document]. The context carries cancellation and deadlines to a
@@ -1528,8 +1551,9 @@ type Validator interface {
 
 // ValidatorFunc adapts a function to the [Validator] interface. The
 // function writes its errors from the Node it gets, as Validator
-// describes. [ValidatorFunc.Check] returns what the function returns, so
-// the same body works as the Check method of a type:
+// describes, and [ValidatorFunc.Check] binds them at that Node. The same
+// body works as the Check method of a type, where the Node that runs the
+// type binds them:
 //
 //	known := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
 //		kind, err := n.DecodeAt[string](ctx, kindPath)
@@ -1553,19 +1577,21 @@ type Validator interface {
 type ValidatorFunc func(ctx context.Context, n *Node) error
 
 // Check implements [Validator]. It returns the errors of what f returns,
-// and nil when f returns warnings alone or a nil [*Error] or [*SourceError]
-// pointer. The [Warnings] collector of ctx gets the warnings that f
-// returns and the warnings that f hands to its context, bound as
-// [Node.Bind] binds an error. A failure that does not hold a warning comes
-// back as f wrote it. The Warnings section of the package documentation
-// describes a failure that holds both. For a document that did not parse,
-// Check returns the error that [Node.Err] returns without calling f.
+// bound at n as [Node.Bind] binds an error, so it returns what
+// [Node.Validate] returns for f. It returns nil when f returns warnings
+// alone or a nil [*Error] or [*SourceError] pointer. The [Warnings]
+// collector of ctx gets the warnings that f returns and the warnings that
+// f hands to its context, bound the same way. An error that f bound
+// itself comes back as it is, unless it also holds a warning. The
+// Warnings section of the package documentation describes a failure that
+// holds both. For a document that did not parse, Check returns the error
+// that [Node.Err] returns without calling f.
 func (f ValidatorFunc) Check(ctx context.Context, n *Node) error {
 	if n.doc.err != nil {
 		return n.doc.err
 	}
 
-	return n.checkWith(ctx, f)
+	return n.Bind(n.checkWith(ctx, f))
 }
 
 // noValidator is the [Validator] behind [NoValidator].
@@ -1604,11 +1630,14 @@ func mustValidators(fn string, validators []Validator) {
 //
 // Each validator sees the node whatever the ones before it reported.
 // When every validator passes, the run returns nil. A lone failure comes
-// back as its validator wrote it, unless it also holds a warning, as the
-// Warnings section of the package documentation describes. Two or more
-// failures come back joined in the order given, so [errors.Is] matches
-// any one of them. The Node that runs the MultiValidator binds each at
-// its own location, as [Node.Bind] describes:
+// back as the Node binds the failure of its validator alone. A failure
+// that its validator bound itself comes back as it is, unless it also
+// holds a warning, as the Warnings section of the package documentation
+// describes. Two or more failures come back as one error, and
+// [errors.Is] matches any one of them. Each failure binds at its own
+// location in the Node that the MultiValidator got, as [Node.Bind]
+// describes. The message lists the failures in the order of their
+// positions, whatever the order of their validators:
 //
 //	svc.yaml:1:7: $.name: reserved name
 //	svc.yaml:2:7: $.port: 0 is less than 1
@@ -1632,7 +1661,7 @@ func MultiValidator(validators ...Validator) Validator {
 		for _, dv := range validators {
 			err := ctx.Err()
 			if err != nil {
-				return err //nolint:wrapcheck // The context names the reason, and the Node that runs the validator binds it.
+				return err //nolint:wrapcheck // The context names the reason, and [ValidatorFunc.Check] binds it.
 			}
 
 			// A typed nil pointer is no failure, as [Node.Bind] reads it, and
@@ -1667,10 +1696,10 @@ func MultiValidator(validators ...Validator) Validator {
 // every Node. A decode runs the validators of repeated [WithValidator]
 // options the same way.
 //
-// The failure comes back as the validator wrote it, unless it also holds
-// a warning. The Node that runs the ChainValidator thus binds it as it
-// binds the failure of that validator alone. The Warnings section of the
-// package documentation describes a failure that holds a warning.
+// The failure comes back as the Node binds the failure of that validator
+// alone. A failure that its validator bound itself comes back as it is,
+// unless it also holds a warning. The Warnings section of the package
+// documentation describes a failure that holds a warning.
 // ChainValidator copies the validators it gets, so a caller that edits
 // the slice it passed does not change the Validator.
 //
@@ -1700,9 +1729,10 @@ func ChainValidator(validators ...Validator) Validator {
 // document, so v runs on it. A document that did not parse returns the
 // error of its parse.
 //
-// SkipEmpty returns the errors of v as [ValidatorFunc.Check] returns the
-// errors of its function. SkipEmpty takes one validator, so it wraps the
-// one that [MultiValidator] or [ChainValidator] makes of several.
+// SkipEmpty returns the errors of v bound at the Node, as
+// [ValidatorFunc.Check] returns the errors of its function. SkipEmpty
+// takes one validator, so it wraps the one that [MultiValidator] or
+// [ChainValidator] makes of several.
 //
 // SkipEmpty panics if v is nil, including a v that holds a nil pointer or
 // func.
@@ -1714,7 +1744,7 @@ func SkipEmpty(v Validator) Validator {
 			return nil
 		}
 
-		//nolint:wrapcheck // The validator's own error, which the Node that runs the validator binds.
+		//nolint:wrapcheck // The validator's own error, which [ValidatorFunc.Check] binds.
 		return v.Check(ctx, n)
 	})
 }
@@ -1766,7 +1796,7 @@ func Each(path paths.Path, v Validator) Validator {
 		for _, node := range nodes {
 			err = ctx.Err()
 			if err != nil {
-				return err //nolint:wrapcheck // The context names the reason, and the Node that runs the validator binds it.
+				return err //nolint:wrapcheck // The context names the reason, and [ValidatorFunc.Check] binds it.
 			}
 
 			err = node.Validate(ctx, v)
@@ -1804,9 +1834,11 @@ func Each(path paths.Path, v Validator) Validator {
 //
 // A Node from [Node.At] or [Node.Nodes] points an error without a
 // location at its own value. A validator that runs another on a Node of
-// its choosing calls Validate on that Node, because a call to Check
-// returns the error as the validator wrote it. [Each] runs a validator
-// that way on every Node a path selects, such as each element of a list.
+// its choosing calls Validate on that Node, so the error binds there even
+// when the Check method of the other validator leaves it unbound. [Each]
+// runs a validator that way on every Node a path selects, such as each
+// element of a list. The validators of this module also bind in Check, as
+// [Validator] describes.
 //
 // A document that did not parse returns the error that [Node.Err] returns
 // before v runs. A validator that returns a nil [*Error] or [*SourceError]

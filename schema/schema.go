@@ -577,11 +577,13 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // before a decode, and [niceyaml.Node.Validate] runs it on its own. A
 // Node from [niceyaml.Node.At] decodes to the node it selects, so the
 // schema checks that node and a violation's `@` path reads from it.
-// Check returns each violation as it wrote it, and Node.Validate binds
-// it through n, as [niceyaml.Validator] describes. For a document past
-// the alias limit, Check returns an error matching
-// [ErrExcessiveAliasing]. [Schema.ValidateValue] checks data for a caller
-// that reports the errors somewhere else.
+// Check binds each violation at n, as [niceyaml.Node.Bind] binds an
+// error, so a direct call returns the error that Node.Validate returns
+// for the schema. A validator that runs the schema on a node it picks,
+// such as each element of a list, thus returns the result of Check as
+// its own. For a document past the alias limit, Check returns an error
+// matching [ErrExcessiveAliasing]. [Schema.ValidateValue] checks data
+// for a caller that places the violations itself.
 //
 // # Deprecations
 //
@@ -693,10 +695,10 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // the limit where its document passes.
 //
 // The error of the check on the result matches ErrExcessiveAliasing as
-// well, and IsInvalid reports it. It does not carry a location, so the
-// Node that runs the schema binds it as it binds any such error. A node
-// below the root binds it at the node, under its path, and a root binds
-// it without a position.
+// well, and IsInvalid reports it. It does not carry a location, so Check
+// binds it as a Node binds any such error. A node below the root binds
+// it at the node, under its path, and a root binds it without a
+// position.
 //
 // [niceyaml.WithAliasLimit] on the source of n turns the limit off for
 // the decode and for the result. Check then reads every use of every
@@ -731,7 +733,8 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 	if aliasing.Limited(n) && aliasing.HoldsReferenceAlias(n) {
 		err = checkExpansion(data)
 		if err != nil {
-			return err
+			//nolint:wrapcheck // Binding places the refusal, and the error keeps its own context.
+			return n.Bind(err)
 		}
 	}
 
@@ -741,7 +744,8 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 		n.Warn(ctx, w)
 	}
 
-	return err
+	//nolint:wrapcheck // Binding places each violation, and the error keeps its own context.
+	return n.Bind(err)
 }
 
 // ValidateValue checks data, the decoded form of a YAML value, against the
