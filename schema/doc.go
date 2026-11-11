@@ -362,8 +362,9 @@
 // bytes the registry loads through [Registry.Load]. [Embedded] holds a
 // copy of the bytes. The registry reads a file from the file system its
 // Ref names, or from disk. The [Access] of the registry decides which
-// files on disk the registry reads. The registry fetches a URL with the client
-// [WithHTTPClient] gave it.
+// files on disk the registry reads. The registry fetches a URL with the
+// client [WithHTTPClient] gave it, or with the loader of [WithLoader]
+// whose prefix covers the URL.
 //
 // [Registry.Schema] checks its cache by key before it loads and compiles
 // those bytes. After a schema compiles, the registry serves it to every
@@ -433,6 +434,39 @@
 // one that [go.jacobcolvin.com/niceyaml.NewSourceFromFile] opened. One
 // registry thus serves bundled documents and documents on disk.
 //
+// A store that is not a disk, such as an object store, a container
+// registry, or a git tree, serves its schemas through an [fs.FS] of the
+// program's own. [FileFS] names a schema in it, and the registry reads
+// each file that a relative $ref names from the same file system. So the
+// schemas of the store reference each other as files on disk do. The
+// file system must be a value that Go can compare, such as a pointer, or
+// a map, as FileFS describes.
+//
+// A schema resolves each relative $ref against its $id when it has one,
+// and against its own location otherwise. A schema whose $id is the URL
+// where its author publishes it thus names its siblings at that URL,
+// even when the registry reads the schema from a file. [WithLoader]
+// serves the URLs under a prefix from bytes that the program holds, such
+// as a bundle in the binary. The registry then loads those siblings
+// without the network, and keeps, limits, and releases them as it does
+// a fetched document:
+//
+//	reg := schema.NewRegistry(
+//	    schema.WithAccess(schema.NoAccess),
+//	    schema.WithLoader("https://schemas.example.com/v1/",
+//	        func(_ context.Context, uri string) ([]byte, error) {
+//	            return bundle.ReadFile("schemas/" + path.Base(uri))
+//	        }),
+//	)
+//
+// The loader serves the $refs of a schema from [File], [FileFS], or
+// [URL]. The registry does not resolve the $refs of a schema from
+// [Embedded] or [Loadable], as [Registry.Schema] describes. So a program
+// names the root schema of a bundle with FileFS, not with Embedded.
+//
+// [WithCompileOptions] does not change where the registry loads the
+// $refs of a schema from a file or a URL, as it describes.
+//
 // An [Access] from [WithAccess] decides which files a registry reads
 // from disk and which URLs it fetches. [AllowRoot] confines the reads to
 // the directory of an [os.Root], and a program can give it once for each
@@ -452,9 +486,10 @@
 // [FileOrURL] routes a reference that might be a file path or a URL, such
 // as one written on a command line. [RefBeside] routes a reference that a
 // document holds, such as the one in a directive. Each returns an error
-// for an empty reference. The registry fetches every URL with one client,
-// which [WithHTTPClient] sets, so that client's timeout or proxy applies
-// to every resolver that names a URL:
+// for an empty reference. The registry fetches every URL outside the
+// prefixes of [WithLoader] with one client, which [WithHTTPClient] sets.
+// So that client's timeout or proxy applies to every resolver that names
+// such a URL:
 //
 //	reg := schema.NewRegistry(
 //	    schema.WithAccess(schema.Unrestricted),
@@ -513,7 +548,9 @@
 // A program that validates those gives Directive a registry of its own.
 // It confines that registry with [WithAccess], [WithCacheLimit], and
 // [WithLoadLimit]. The Access acts on every load that registry performs:
-// the schema a [Ref] names, each $ref, and each redirect.
+// the schema a [Ref] names, each $ref, and each redirect. The loaders of
+// [WithLoader] are code of the program, so the Access does not apply to
+// the URLs under their prefixes.
 //
 // A second registry, without those limits, holds the program's schemas,
 // the catalog, and the confined registry as its first resolver. The

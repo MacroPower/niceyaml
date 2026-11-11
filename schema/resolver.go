@@ -96,7 +96,8 @@ var ErrNoMatch = errors.New("no matching schema")
 // [Registry.Load] reads a file from the file system that its Ref names,
 // or from disk. On disk, the [Access] of the registry decides which
 // files it reads. Load fetches a URL with the client that
-// [WithHTTPClient] gave the registry. A Ref that carries a compiled
+// [WithHTTPClient] gave the registry, or with the loader of [WithLoader]
+// whose prefix covers the URL. A Ref that carries a compiled
 // schema does not have anything to load, and the registry validates with
 // the schema as it is.
 //

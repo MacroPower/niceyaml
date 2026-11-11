@@ -36,6 +36,9 @@ var ErrURLNotAllowed = errors.New("URL not under an allowed prefix")
 //   - Each hop of a redirect.
 //
 // A refused URL fails to load with an error wrapping [ErrURLNotAllowed].
+// A loader from [WithLoader] serves the URLs under its prefix without a
+// fetch, so the prefixes do not have to cover those URLs.
+//
 // The registry fetches with a copy of the client that [WithHTTPClient]
 // gave it. The copy keeps the Timeout, Transport, and Jar of that client.
 // Its CheckRedirect refuses a hop outside the prefixes before it calls

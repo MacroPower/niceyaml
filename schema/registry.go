@@ -152,6 +152,7 @@ type Registry struct {
 //   - [WithAccess]
 //   - [WithCacheLimit]
 //   - [WithLoadLimit]
+//   - [WithLoader]
 type RegistryOption func(*registryConfig)
 
 // registryConfig holds the settings that a [RegistryOption] configures.
@@ -160,6 +161,7 @@ type RegistryOption func(*registryConfig)
 type registryConfig struct {
 	client      *http.Client // fetches the schemas that URL refs name
 	resolvers   []Resolver
+	loaders     []urlLoader // serve the URLs under their prefixes in place of client
 	compileOpts []CompileOption
 	access      accessConfig  // the files on disk that the registry reads and the URLs that it fetches
 	retryAfter  time.Duration // how long the registry remembers a failure
@@ -194,7 +196,8 @@ type registryConfig struct {
 //
 // An [Access] from [WithAccess] can limit the URLs that the registry
 // fetches with the client. The registry then fetches with a copy of the
-// client and leaves the client itself unchanged.
+// client and leaves the client itself unchanged. A loader from
+// [WithLoader] serves the URLs under its prefix in place of the client.
 func WithHTTPClient(client *http.Client) RegistryOption {
 	return func(c *registryConfig) {
 		if client != nil {
@@ -327,16 +330,19 @@ func WithRequireSchema(require bool) RegistryOption {
 // compiles a schema whose $ref names a document that does not load, as
 // [Registry.Schema] describes.
 //
-// A [jsonschema.WithRefResolver] among these options replaces the
-// registry's own resolution of the $refs in a whole schema from [File]
-// or [URL]. A relative $ref there then resolves only when that resolver
-// serves it. The registry cannot tell whether it does, so such a schema
-// compiles whatever [WithRequireRefs] sets. A [Ref] that names a
-// subschema by a fragment, such as
-// "https://example.com/defs.json#/$defs/a", always resolves its $refs
-// through the registry, because only the registry holds the document
-// that the fragment points into. A resolver among these options does not
-// apply to it.
+// The registry resolves each $ref of a schema from [File], [FileFS], or
+// [URL] itself, against the location of the schema. It does so whether
+// the [Ref] names the whole document or a subschema by a fragment. A
+// [jsonschema.WithRefResolver] or [jsonschema.WithBaseURI] among these
+// options does not apply to such a schema. So [WithRequireRefs] holds
+// for it, and a $ref that the registry cannot load fails the schema with
+// [ErrLoad]. A program that serves some URLs from elsewhere, such as
+// from a bundle in the binary, gives the registry [WithLoader] instead.
+//
+// A schema from [Embedded] or [Loadable] does not have a location. A ref
+// resolver among these options is the only resolver of such a schema,
+// and it serves each $ref there. The registry cannot tell which
+// documents that resolver serves, as WithRequireRefs describes.
 //
 // The option keeps its own copy of opts, so a later write to the
 // caller's slice does not change the option, even for a registry built
@@ -1071,9 +1077,10 @@ func (r *Registry) loadSchema(ctx context.Context, ref Ref) (*Schema, error) {
 // decides which files Load reads. For a Ref from [FileFS], it reads the
 // file from the file system of the Ref. For a Ref from [URL], it fetches
 // the URL with the client that [WithHTTPClient] gave the registry. It
-// refuses a URL that the Access does not allow. For a Ref from
-// [Loadable], it returns the bytes that the load function of the Ref
-// returns.
+// refuses a URL that the Access does not allow. A loader from
+// [WithLoader] whose prefix covers the URL serves it instead, whatever
+// the Access allows. For a Ref from [Loadable], it returns the bytes
+// that the load function of the Ref returns.
 //
 // Load reads the bytes on every call. It does not cache anything, and it
 // reads again after a failure without waiting for the interval of
@@ -1287,7 +1294,7 @@ func (r *Registry) load(ctx context.Context, ref Ref) ([]byte, error) {
 
 		// The caller names the URL beside the error, so the refusal
 		// does not repeat it.
-		if !r.access.allowsURL(ref.key) {
+		if r.loaderFor(ref.key) == nil && !r.access.allowsURL(ref.key) {
 			return nil, ErrURLNotAllowed
 		}
 
@@ -1312,11 +1319,16 @@ func (r *Registry) load(ctx context.Context, ref Ref) ([]byte, error) {
 	}
 }
 
-// fetch returns the body of rawURL, an HTTP or HTTPS URL, which the
-// registry fetches with its client within its load limit. A fetch that
-// fails after the URL passes the checks of [httpfetch.Get] returns a
-// [*FetchError].
+// fetch returns the body of rawURL, an HTTP or HTTPS URL, within the
+// load limit of the registry. A loader from [WithLoader] whose prefix
+// covers rawURL returns the body. For any other URL, the registry fetches
+// it with its client. A fetch that fails after the URL passes the checks
+// of [httpfetch.Get] returns a [*FetchError].
 func (r *Registry) fetch(ctx context.Context, rawURL string) ([]byte, error) {
+	if load := r.loaderFor(rawURL); load != nil {
+		return r.loadURL(ctx, load, rawURL)
+	}
+
 	data, err := httpfetch.Get(ctx, r.client, rawURL, r.loadLimit)
 	if fetchErr, ok := errors.AsType[*httpfetch.Error](err); ok {
 		return nil, &FetchError{URL: fetchErr.URL, StatusCode: fetchErr.StatusCode, Err: fetchErr.Err}
@@ -1537,9 +1549,9 @@ func loadRefDoc(ctx context.Context, uri string, load func() ([]byte, error), li
 // another way, such as with an upper-case host, then still resolves to
 // doc. A nil doc means that ref names a whole document.
 //
-// For a whole document, the options from [WithCompileOptions] come after
-// the registry's own, so they win. For a fragment, they come first, and
-// the registry's resolver wins, because only it can serve doc.
+// The options from [WithCompileOptions] come first and the registry's
+// own come last. So the registry's base URI and resolver win for every
+// ref that names a file or a URL.
 func (r *Registry) refOptions(
 	ref Ref, base string, user keyUserinfo, doc *jsonschema.Schema, rec *refRecorder, rc *reach,
 ) []CompileOption {
@@ -1572,8 +1584,9 @@ func (r *Registry) refOptions(
 		switch {
 		case httpfetch.IsHTTPURL(uri):
 			// The access judges the URL as the schema names it, before
-			// the registry adds the userinfo of the key.
-			err := r.access.checkURL(uri)
+			// the registry adds the userinfo of the key. A loader serves
+			// the URLs under its prefix whatever the access allows.
+			err := r.checkFetch(uri)
 			if err != nil {
 				return nil, err
 			}
@@ -1630,9 +1643,10 @@ func (r *Registry) refOptions(
 		jsonschema.WithRefResolver(recorded),
 	}
 
-	// The schema that names the fragment takes no base URI, because a base
-	// equal to the document's URL would point its $ref at itself. The
-	// document takes its URL as its base, as a whole document does.
+	// The schema that names the fragment takes the empty base URI, so it
+	// has no base, even when the caller's options set one. A base equal
+	// to the document's URL points its $ref at itself. The document takes
+	// its URL as its base, as a whole document does.
 	if doc != nil {
 		docURL := canonicalURL(base)
 
@@ -1645,24 +1659,17 @@ func (r *Registry) refOptions(
 		})
 
 		refOpts = []jsonschema.ValidateOption{
+			jsonschema.WithBaseURI(""),
 			jsonschema.WithRefResolver(jsonschema.ChainResolvers(preload, recorded)),
 		}
 	}
 
+	// The registry's base and resolver come last, so a base or a resolver
+	// among the caller's options does not replace them.
 	opts := make([]CompileOption, 0, len(r.compileOpts)+1)
+	opts = append(opts, r.compileOpts...)
 
-	// Only the registry holds the document the fragment names, so its
-	// resolver comes last there, where a resolver of the caller cannot
-	// replace it.
-	if doc != nil {
-		opts = append(opts, r.compileOpts...)
-
-		return append(opts, WithJSONSchemaOptions(refOpts...))
-	}
-
-	opts = append(opts, WithJSONSchemaOptions(refOpts...))
-
-	return append(opts, r.compileOpts...)
+	return append(opts, WithJSONSchemaOptions(refOpts...))
 }
 
 // A cacheKey names an entry that the registry keeps: a schema, or a

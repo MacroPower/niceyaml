@@ -113,7 +113,8 @@ var (
 // [niceyaml.WithFS], read from that file system. The Access never sees
 // those reads, even an Access that allows no file. The URLs that such a
 // document names still go through the Access. A Ref from [Embedded] or
-// [Loadable] loads its own bytes.
+// [Loadable] loads its own bytes. A loader from [WithLoader] serves the
+// URLs under its prefix, and the Access never sees those loads either.
 //
 // For a document in a file system, the file system is the confinement of
 // its files. A directive that names a path reads what the file system
@@ -342,10 +343,10 @@ func AllowAnyFile() AccessOption {
 }
 
 // AllowAnyURL is an [AccessOption] that allows every HTTP and HTTPS URL.
-// The registry fetches each one with the client that [WithHTTPClient]
-// gave it, and follows the redirects that the client follows. A program that must keep
-// the fetches off its own network checks each address in the Dialer of
-// that client.
+// The registry fetches each one outside the prefixes of [WithLoader] with
+// the client that [WithHTTPClient] gave it, and follows the redirects
+// that the client follows. A program that must keep the fetches off its
+// own network checks each address in the Dialer of that client.
 //
 // [NewAccess] returns an error for AllowAnyURL beside
 // [AllowURLPrefixes], because the prefixes do not confine the registry

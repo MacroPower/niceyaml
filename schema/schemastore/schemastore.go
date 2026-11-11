@@ -96,9 +96,11 @@ type CatalogEntry struct {
 
 // Store matches documents to SchemaStore.org catalog entries.
 //
-// The store names a matched schema by the URL of the entry, and the
-// registry fetches it with the client that
-// [go.jacobcolvin.com/niceyaml/schema.WithHTTPClient] gave the registry.
+// The store names a matched schema by the URL of the entry. The registry
+// fetches that URL with the client that
+// [go.jacobcolvin.com/niceyaml/schema.WithHTTPClient] gave the registry,
+// or with the loader of [go.jacobcolvin.com/niceyaml/schema.WithLoader]
+// whose prefix covers the URL.
 // The store's own client, refresh timeout, and load limit apply only to
 // the catalog.
 //

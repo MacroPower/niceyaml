@@ -6,8 +6,9 @@ import (
 
 // URL creates a [Ref] that names a schema by its HTTP or HTTPS URL. The
 // Ref is a [Resolver] that names the URL for every document. A [Registry]
-// fetches the URL once with the client that [WithHTTPClient] gave it, and
-// reuses the compiled schema for every document that names it.
+// fetches the URL once with the client that [WithHTTPClient] gave it, or
+// with the loader of [WithLoader] whose prefix covers the URL. It reuses
+// the compiled schema for every document that names it.
 //
 // URL lowercases the scheme of schemaURL and leaves the rest of it as
 // written. A registry thus fetches and compiles a schema once, whatever
@@ -34,13 +35,16 @@ import (
 // fragment names the whole document, so URL drops a trailing '#'.
 //
 // A $ref in the schema resolves against the URL. The registry fetches
-// each HTTP or HTTPS URL that a reference names with the same client. A
-// reference to a file:// URL does not resolve, so a remote schema cannot
-// read the local disk. A schema with a reference that does not resolve
-// fails to load, as [Registry.Schema] describes. The registry sends the
-// userinfo of the URL, such as a password, with each fetch of a URL that
-// a reference names at the same scheme and host. It keeps the password
-// out of its errors.
+// each HTTP or HTTPS URL that a reference names with the same client or
+// loader. A reference to a file:// URL does not resolve, so a remote
+// schema cannot read the local disk. A schema with a reference that does
+// not resolve fails to load, as [Registry.Schema] describes.
+//
+// The registry sends the userinfo of the URL, such as a password, with
+// each fetch of a URL that a reference names at the same scheme and host.
+// It keeps the password out of the URLs that its errors name. A loader
+// receives the userinfo too, and the registry quotes the error of a
+// loader as it is, as [WithLoader] describes.
 //
 // A registry rejects a response body of more than the limit of
 // [WithLoadLimit], [DefaultLoadLimit] by default, and a response with any
