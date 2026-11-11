@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"path/filepath"
@@ -12,12 +13,17 @@ import (
 
 	"charm.land/fang/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
 
+	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/fangs"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml/printer"
+	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
@@ -303,6 +309,29 @@ func TestRootCmdStopWithoutStart(t *testing.T) {
 	_, stopProfiler := newRootCmd()
 
 	require.NoError(t, stopProfiler())
+}
+
+func TestErrorHandler(t *testing.T) {
+	t.Parallel()
+
+	src := niceyaml.NewSourceFromString("name: a\n")
+	err := yamltest.Bind(t, src, niceyaml.NewError("bad name", niceyaml.AtPath(paths.MustParse("$.name"))))
+
+	// A writer that is not a terminal does not report its background, so
+	// the excerpt takes the dark theme, drawn on the terminal's own
+	// background.
+	plainCharm := theme.Charm.Styles().With(style.WithSurface(nil))
+	want := fangs.NewErrorHandler(fangs.WithPrinter(printer.New(printer.WithStyles(plainCharm))))
+
+	render := func(handler fang.ErrorHandler) string {
+		var buf bytes.Buffer
+
+		handler(&colorprofile.Writer{Forward: &buf, Profile: colorprofile.TrueColor}, fang.Styles{}, err)
+
+		return buf.String()
+	}
+
+	assert.Equal(t, render(want), render(errorHandler()))
 }
 
 func TestHelpColorScheme(t *testing.T) {

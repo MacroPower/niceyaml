@@ -6,6 +6,9 @@
 *.dylib
 dist/
 
+# Binary that `go build` writes in the nyaml directory
+/cmd/nyaml/nyaml
+
 # Test binary, built with `go test -c`
 *.test
 
