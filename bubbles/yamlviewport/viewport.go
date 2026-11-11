@@ -33,8 +33,7 @@ const defaultHorizontalStep = 6
 // Load the first time it searches for a term after its content changes. It
 // runs every term through the Index it gets back until the content changes
 // again. A side-by-side diff has two panes, and the viewport calls Load
-// once for each of them. Without a diff, side-by-side mode shows the same
-// revision in both panes, so Load runs once.
+// once for each of them.
 //
 // Load receives the view as a [line.Sequence], which yields the lines the
 // view holds, each with its index in the content of the view. The ranges
@@ -182,7 +181,10 @@ func (d DiffMode) String() string {
 	}
 }
 
-// ViewMode specifies how the viewport renders diff content.
+// ViewMode specifies how the viewport renders diff content. A view mode
+// is a presentation of a diff. Without a diff every mode renders the
+// revision as [ViewModeFull] does, and the mode takes effect when a diff
+// shows.
 //
 // Use [Model.SetViewMode] to change the mode, or [Model.ToggleViewMode] to
 // cycle through modes.
@@ -437,7 +439,7 @@ type Model struct {
 	// In ViewModeFull: the unified diff, or the view of the revision.
 	// In ViewModeHunks with diff: the hunks of the diff with their headers.
 	// In ViewModeSideBySide with diff: the Before and After views.
-	// In ViewModeSideBySide without diff: the view of the revision on the
+	// Without a diff, every mode shows the view of the revision on the
 	// left and nil on the right.
 	//
 	// A base is the model's own copy of the view the Revision hands out, or
@@ -1120,12 +1122,10 @@ func (m *Model) ViewMode() ViewMode {
 }
 
 // SetViewMode sets the view mode and rebuilds the view when the viewport
-// shows a diff. Without a diff every mode shows the same lines, so the
-// change counts as a layout change and keeps the top line. Only
-// [ViewModeSideBySide] changes the width lines wrap to. Without a diff, a
-// switch between [ViewModeFull] and [ViewModeHunks] therefore leaves the
-// view where it is, as does the mode already set. An undefined mode counts
-// as [ViewModeFull], the default.
+// shows a diff. Without a diff every mode renders the revision as
+// [ViewModeFull] does, so the call only stores the mode and the view stays
+// where it is. The mode takes effect when a diff shows. An undefined mode
+// counts as [ViewModeFull], the default.
 //
 // A rebuild moves the view back to the top, because each mode of a diff
 // shows other rows. To keep its place, a caller takes a [Hit] from
@@ -1140,38 +1140,12 @@ func (m *Model) SetViewMode(mode ViewMode) {
 		return
 	}
 
-	if !m.ShowingDiff() {
-		prev := m.viewMode
-		old := m.paneWidth()
-
-		m.viewMode = mode
-
-		// Row counts depend on the mode only through the pane width, which
-		// side-by-side mode halves, so an unchanged pane width keeps the
-		// cache, as in SetWidth.
-		if m.paneWidth() == old {
-			return
-		}
-
-		// The rows reflow as they do for a new width. The old mode set the
-		// width the old rows wrap to, so anchorTop reads the top line under
-		// the old mode.
-		m.viewMode = prev
-		m.relayout()
-
-		m.viewMode = mode
-
-		// As in SetWidth, a pane width that gives the content area room
-		// runs a scroll that waits for it.
-		if m.pending != nil {
-			m.ensureRows()
-		}
-
-		return
-	}
-
 	m.viewMode = mode
-	m.rebuildViews()
+
+	// Without a diff every mode shows the same rows at the same width.
+	if m.ShowingDiff() {
+		m.rebuildViews()
+	}
 }
 
 // ToggleViewMode cycles through the view modes in the order [ViewModeFull],
@@ -1340,15 +1314,13 @@ func (m *Model) loadViews() {
 	m.baseRight = nil
 	m.searcherStale = true
 
-	needsDiff := m.ShowingDiff()
-
 	switch {
-	case m.viewMode == ViewModeSideBySide && needsDiff:
+	case m.sideBySide():
 		result := m.getDiffResult()
 		m.baseLeft = m.carryMarks(result.Before())
 		m.baseRight = m.carryMarks(result.After())
 
-	case m.viewMode == ViewModeHunks && needsDiff:
+	case m.viewMode == ViewModeHunks && m.ShowingDiff():
 		// Hunks holds no lines when the diff has no changes, which leaves
 		// the view empty. The diff picks the hunks from its changes alone,
 		// so a marked line outside every hunk stays out of the view.
@@ -1374,7 +1346,7 @@ func (m *Model) refreshSearch() {
 	case m.baseLeft == nil, m.searcher == nil, m.searchTerm == "":
 		m.clearMatches()
 
-	case m.viewMode == ViewModeSideBySide && m.baseRight != nil:
+	case m.sideBySide():
 		m.updateSideBySideSearchState()
 
 	default:
@@ -1500,7 +1472,7 @@ func (m *Model) selectedMatch(right bool) func(k int) bool {
 		return func(int) bool { return false }
 	}
 
-	if m.viewMode != ViewModeSideBySide || m.baseRight == nil {
+	if !m.sideBySide() {
 		index := m.searchIndex
 
 		return func(k int) bool { return k == index }
@@ -1749,10 +1721,16 @@ func (m *Model) carryMarks(view *line.View) *line.View {
 	return view
 }
 
-// paneWidth returns the width lines wrap to: the content width, or in
-// side-by-side mode the width of one pane.
+// sideBySide reports whether the viewport shows a side-by-side diff, the
+// only view that splits the content area into two panes.
+func (m *Model) sideBySide() bool {
+	return m.viewMode == ViewModeSideBySide && m.ShowingDiff()
+}
+
+// paneWidth returns the width lines wrap to: the content width, or for a
+// side-by-side diff the width of one pane.
 func (m *Model) paneWidth() int {
-	if m.viewMode == ViewModeSideBySide {
+	if m.sideBySide() {
 		return max(0, (m.maxWidth()-ansi.StringWidth(sideBySideSeparator))/2)
 	}
 
@@ -1990,7 +1968,7 @@ func (m *Model) fillRows() {
 
 	if m.baseLeft != nil && m.printer != nil {
 		c.maxNumber = m.printer.MaxNumber(m.baseLeft)
-		if m.viewMode == ViewModeSideBySide && m.baseRight != nil {
+		if m.sideBySide() {
 			c.maxNumber = max(c.maxNumber, m.printer.MaxNumber(m.baseRight))
 		}
 
@@ -1999,7 +1977,7 @@ func (m *Model) fillRows() {
 		left := m.highlight(false, m.baseLeft.Clone())
 		c.indices, c.left, c.leftWidths, c.leftAbove = layoutRows(p.Layout(left), left)
 
-		if m.viewMode == ViewModeSideBySide && m.baseRight != nil {
+		if m.sideBySide() {
 			right := m.highlight(true, m.baseRight.Clone())
 			_, c.right, c.rightWidths, c.rightAbove = layoutRows(p.Layout(right), right)
 		}
@@ -2547,8 +2525,7 @@ func (m *Model) VisibleRowCount() int {
 // line of the left pane of [ViewModeSideBySide], that is the revision the
 // diff compares with, at [Model.DiffBaseIndex]. For any other line it is
 // the current revision. The position counts in the content of that
-// revision, whatever the diff shows around the line. Without a diff both
-// panes of ViewModeSideBySide show the current revision.
+// revision, whatever the diff shows around the line.
 //
 // HitAt reports false for a cell that does not show content of a revision.
 // Such a cell lies in the frame of either container style, in the gutter,
@@ -2592,7 +2569,7 @@ func (m *Model) HitAt(x, y int) (Hit, bool) {
 
 	width, right := m.paneWidth(), false
 
-	if m.viewMode == ViewModeSideBySide {
+	if m.sideBySide() {
 		// The right pane ends at the edge of the content area, and the
 		// separator fills the cells between the panes.
 		switch second := m.maxWidth() - width; {
@@ -2609,7 +2586,7 @@ func (m *Model) HitAt(x, y int) (Hit, bool) {
 	// content row or below it, leaves blank rows above or below its own
 	// rows in this one.
 	count := m.rows.left[k]
-	if right && m.rows.right != nil {
+	if right {
 		count = m.rows.right[k]
 	}
 
@@ -2617,9 +2594,6 @@ func (m *Model) HitAt(x, y int) (Hit, bool) {
 	if row < 0 || row >= count {
 		return Hit{}, false
 	}
-
-	// Without a diff, both panes show the left content.
-	right = right && m.baseRight != nil
 
 	pos, ok := m.paneHit(right, k, row, x, width)
 	if !ok {
@@ -2790,8 +2764,8 @@ func (m *Model) locate(hit Hit) (bool, position.Position, bool) {
 	pos := hit.Position
 
 	if !m.ShowingDiff() {
-		// Without a diff every pane shows the view of the current
-		// revision, which the left base view copies.
+		// Without a diff the view shows the current revision once, and
+		// the left base view holds it.
 		return false, pos, hit.Revision == m.revIndex && holds(m.baseLeft, pos)
 	}
 
@@ -3288,7 +3262,7 @@ func (m *Model) renderContent(lines []string, contentW, contentH int) string {
 // The content area lacks room for rows in these cases:
 //   - The outer width is 0 or less.
 //   - The frame of the container style takes all of a dimension.
-//   - The separator of [ViewModeSideBySide] leaves its panes without a
+//   - The separator of a side-by-side diff leaves its panes without a
 //     column.
 //
 // In each of them, View renders blank rows without the frame of the
@@ -3300,6 +3274,8 @@ func (m *Model) renderContent(lines []string, contentW, contentH int) string {
 //   - [ViewModeHunks]: Renders only changed lines, with [Model.HunkContext]
 //     lines of context around each change.
 //   - [ViewModeSideBySide]: Renders before and after content in separate panes.
+//
+// Without a diff every mode renders the revision as ViewModeFull does.
 //
 //nolint:gocritic // hugeParam: value receivers match the Bubble Tea update loop.
 func (m Model) View() string {
@@ -3318,7 +3294,7 @@ func (m Model) View() string {
 
 	w, h := m.maxWidth(), m.maxHeight()
 
-	if m.viewMode == ViewModeSideBySide {
+	if m.sideBySide() {
 		return m.renderSideBySide(w, h)
 	}
 
@@ -3348,13 +3324,7 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 	p := m.renderPrinter(paneWidth)
 
 	leftRows := m.trimFrame(splitLines(p.Print(m.highlightedWithin(false, window))), first, last)
-
-	// Without a diff, both panes show the left content, so the right pane
-	// reuses the rows the left pane rendered.
-	rightRows := leftRows
-	if m.baseRight != nil {
-		rightRows = m.trimFrame(splitLines(p.Print(m.highlightedWithin(true, window))), first, last)
-	}
+	rightRows := m.trimFrame(splitLines(p.Print(m.highlightedWithin(true, window))), first, last)
 
 	blank := m.blankPaneRow(p)
 
@@ -3411,14 +3381,12 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 	// side. The pane with fewer rows after that gets blank rows at the
 	// bottom.
 	for k := first; k < last; k++ {
-		leftCount := m.rows.left[k]
-
-		rightCount := leftCount
-		if m.rows.right != nil {
-			rightCount = m.rows.right[k]
-		}
-
-		appendRows(m.lineRows(k), m.rows.padTop(k, false), leftCount, m.rows.padTop(k, true), rightCount, m.xOffset)
+		appendRows(
+			m.lineRows(k),
+			m.rows.padTop(k, false), m.rows.left[k],
+			m.rows.padTop(k, true), m.rows.right[k],
+			m.xOffset,
+		)
 	}
 
 	if last == len(m.rows.left) {

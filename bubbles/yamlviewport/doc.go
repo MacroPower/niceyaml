@@ -70,7 +70,10 @@
 // Set [ViewModeHunks] via [Model.SetViewMode] to render a condensed diff
 // showing only changed lines with surrounding context, or
 // [ViewModeSideBySide] to render the before and after content in two
-// panes. [Model.ToggleViewMode] cycles through the view modes.
+// panes. [Model.ToggleViewMode] cycles through the view modes. A view
+// mode is a presentation of a diff. Without a diff every mode renders the
+// revision as [ViewModeFull] does, and the mode takes effect when a diff
+// shows.
 //
 // A line of a diff keeps the overlays and annotations it has in its
 // revision. A diff therefore shows the error marks of the lines it holds.

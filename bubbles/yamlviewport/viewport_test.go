@@ -647,6 +647,13 @@ func setRevision(m *yamlviewport.Model, doc string) {
 	m.SetRevisions(niceyaml.NewSourceFromString(doc))
 }
 
+// setUnchanged shows a diff of doc with itself in m, so every view mode
+// shows a diff, and that diff holds no changes.
+func setUnchanged(m *yamlviewport.Model, doc string) {
+	source := niceyaml.NewSourceFromString(doc)
+	m.SetRevisions(source, source)
+}
+
 // addRevisions adds a revision of each document to m and shows the last.
 // It names each one after its place in the history, so the first is v1, the
 // second v2, and so on.
@@ -1904,21 +1911,6 @@ func TestViewport_ScrollBeforeSize(t *testing.T) {
 			after:    clearSearch,
 			centered: true,
 		},
-		"view mode that gives the pane room": {
-			// Side by side, a width of 4 gives each pane 0 columns beside
-			// the separator. The full view then gives its one pane room.
-			setup: func(m *yamlviewport.Model) {
-				setRevision(m, needle)
-				m.SetViewMode(yamlviewport.ViewModeSideBySide)
-			},
-			scroll: search,
-			size: func(m *yamlviewport.Model) {
-				m.SetWidth(4)
-				m.SetHeight(height)
-				m.SetViewMode(yamlviewport.ViewModeFull)
-			},
-			after: clearSearch,
-		},
 	}
 
 	for name, tc := range tcs {
@@ -2261,7 +2253,7 @@ func TestViewport_ContainerFrame(t *testing.T) {
 
 			m := testModel(framedPrinter(tc.container), 40, tc.height)
 			m.SetViewMode(tc.mode)
-			setRevision(&m, src)
+			setUnchanged(&m, src)
 
 			total := tc.top + lines + tc.bottom
 			require.Equal(t, total, m.TotalRowCount())
@@ -2392,7 +2384,7 @@ func TestViewport_ContainerBoxKeepsItsColumns(t *testing.T) {
 			m := testModel(framedPrinter(normalBorder()), width, height)
 			m.SetViewMode(tc.mode)
 			m.SetWordWrap(tc.wrap)
-			setRevision(&m, src)
+			setUnchanged(&m, src)
 
 			for offset := range m.TotalRowCount() - height + 1 {
 				m.SetYOffset(offset)
@@ -2425,7 +2417,7 @@ func TestViewport_SideBySideSeparatorStyle(t *testing.T) {
 
 			m := testModel(testPrinter().With(printer.WithStyles(styles)), tc.width, 3)
 			m.SetViewMode(yamlviewport.ViewModeSideBySide)
-			setRevision(&m, stringtest.LinesLF("a: 1", "b: 2"))
+			setUnchanged(&m, stringtest.LinesLF("a: 1", "b: 2"))
 
 			rows := strings.Split(m.View(), "\n")
 			require.GreaterOrEqual(t, len(rows), 2)
@@ -2588,7 +2580,7 @@ func TestViewport_HorizontalScrollKeepsFrame(t *testing.T) {
 			m := testModel(framedPrinter(normalBorder()), tc.width, 3)
 			m.SetViewMode(tc.mode)
 			m.SetWordWrap(false)
-			setRevision(&m, "k: 0123456789abcdefghijklmnopqrstuvwxyz\n")
+			setUnchanged(&m, "k: 0123456789abcdefghijklmnopqrstuvwxyz\n")
 
 			m.SetXOffset(5)
 			require.Equal(t, 5, m.XOffset())
@@ -2678,7 +2670,7 @@ func TestViewport_HorizontalScrollKeepsFrameAtWideCluster(t *testing.T) {
 				m := testModel(framedPrinter(normalBorder()), mode.width, 4)
 				m.SetViewMode(mode.mode)
 				m.SetWordWrap(false)
-				setRevision(&m, stringtest.LinesLF("a: "+strings.Repeat("a", 34), tc.line))
+				setUnchanged(&m, stringtest.LinesLF("a: "+strings.Repeat("a", 34), tc.line))
 
 				for offset, want := range tc.wants {
 					m.SetXOffset(offset)
@@ -2720,7 +2712,7 @@ func TestViewport_KeycapRowsFitWidth(t *testing.T) {
 			m := testModel(printer.New(), tc.width, 2)
 			m.SetViewMode(tc.mode)
 			m.SetWordWrap(false)
-			setRevision(&m, stringtest.LinesLF("k: "+keycaps+"abcdefghij", "other: plain"))
+			setUnchanged(&m, stringtest.LinesLF("k: "+keycaps+"abcdefghij", "other: plain"))
 
 			for i, row := range strings.Split(m.View(), "\n") {
 				assert.Equal(t, tc.width, ansi.StringWidth(row), "row %d: %q", i, ansi.Strip(row))
@@ -3448,12 +3440,15 @@ func TestViewport_ViewFillsContentArea(t *testing.T) {
 	tcs := map[string]struct {
 		yaml string
 		mode yamlviewport.ViewMode
+		// Shows a diff of yaml with itself, so side-by-side mode draws
+		// two panes.
+		diff bool
 	}{
 		"empty":                    {},
 		"fewer lines than height":  {yaml: "a: 1\n"},
 		"more lines than height":   {yaml: long.String()},
-		"side by side empty":       {mode: yamlviewport.ViewModeSideBySide},
-		"side by side fewer lines": {yaml: "a: 1\n", mode: yamlviewport.ViewModeSideBySide},
+		"side by side empty":       {mode: yamlviewport.ViewModeSideBySide, diff: true},
+		"side by side fewer lines": {yaml: "a: 1\n", mode: yamlviewport.ViewModeSideBySide, diff: true},
 	}
 
 	for name, tc := range tcs {
@@ -3465,7 +3460,12 @@ func TestViewport_ViewFillsContentArea(t *testing.T) {
 			m := testModel(testPrinterWithColors(), width, height)
 			m.SetViewMode(tc.mode)
 
-			if tc.yaml != "" {
+			switch {
+			case tc.diff:
+				setUnchanged(&m, tc.yaml)
+				require.True(t, m.ShowingDiff())
+
+			case tc.yaml != "":
 				setRevision(&m, tc.yaml)
 			}
 
@@ -5393,7 +5393,8 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 			setupFunc: sideBySide(1, yamlviewport.DiffModeAdjacent, rev1YAML, rev1YAML),
 		},
 		"SideBySideAtOrigin": {
-			// At revision 0, both panes show the same content.
+			// At revision 0 there is no diff, so the revision renders once
+			// at full width.
 			setupFunc: sideBySide(0, yamlviewport.DiffModeAdjacent, rev1YAML, rev2YAML),
 		},
 		"SideBySideScrolled": {
@@ -5409,7 +5410,8 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 			setupFunc: sideBySide(2, yamlviewport.DiffModeOrigin, rev1YAML, rev2YAML, modeRev3YAML),
 		},
 		"SideBySideDiffModeNone": {
-			// Side-by-side with no diff mode shows the same content on both panes.
+			// DiffModeNone shows no diff, so the revision renders once at
+			// full width.
 			setupFunc: sideBySide(1, yamlviewport.DiffModeNone, rev1YAML, rev2YAML),
 		},
 		"SideBySideNarrow": {
@@ -6859,7 +6861,11 @@ func TestViewport_WrapKeepsFrameOfOverflowingRow(t *testing.T) {
 			)
 			m := testModel(p, width, 10)
 			m.SetViewMode(tc.mode)
-			m.SetRevisions(yamlviewport.NewRevision(source.Name(), view))
+
+			// A diff of the revision with itself shows two panes in
+			// side-by-side mode.
+			revision := yamlviewport.NewRevision(source.Name(), view)
+			m.SetRevisions(revision, revision)
 			require.True(t, m.WordWrap())
 
 			out := m.View()
@@ -7019,47 +7025,86 @@ func TestViewport_SideBySidePanesShareGutterWidth(t *testing.T) {
 	assert.Contains(t, left, "k0: ")
 }
 
-// countingGutter renders line numbers and counts the gutters it renders for
-// each line number.
-type countingGutter struct {
-	renders map[int]int
-}
-
-func (g *countingGutter) Width(ctx printer.GutterContext) int {
-	return printer.LineNumberGutter.Width(ctx)
-}
-
-func (g *countingGutter) Render(ctx printer.GutterContext) string {
-	g.renders[ctx.Number]++
-
-	return printer.LineNumberGutter.Render(ctx)
-}
-
-func TestViewport_SideBySideWithoutDiffPrintsOnce(t *testing.T) {
+func TestViewport_SideBySideWithoutDiff(t *testing.T) {
 	t.Parallel()
 
-	// Without a diff both panes show the same content, so the view prints
-	// the window once and shows its rows in both panes.
-	gutter := &countingGutter{renders: map[int]int{}}
-	p := testPrinter().With(printer.WithGutter(gutter))
-	m := testModel(p, 40, 10)
-	m.SetViewMode(yamlviewport.ViewModeSideBySide)
-	setRevision(&m, threeYAML)
-	m.TotalRowCount()
-
-	clear(gutter.renders)
-
-	rows := strings.Split(m.View(), "\n")
-
-	for i, want := range []string{"a: 1", "b: 2", "c: 3"} {
-		left, right := panes(t, rows[i])
-		assert.Contains(t, left, want)
-		assert.Contains(t, right, want)
+	// A view mode presents a diff. Without one, side-by-side mode renders
+	// the revision once at full width, as full mode does, and HitAt maps
+	// each cell as full mode does.
+	tcs := map[string]struct {
+		setup func(m *yamlviewport.Model)
+	}{
+		"single revision": {
+			setup: func(m *yamlviewport.Model) {
+				setRevision(m, wrapYAML)
+			},
+		},
+		"first revision": {
+			setup: func(m *yamlviewport.Model) {
+				addRevisions(m, wrapYAML, threeYAML)
+				m.GotoRevision(0)
+			},
+		},
+		"diff mode none": {
+			setup: func(m *yamlviewport.Model) {
+				addRevisions(m, threeYAML, wrapYAML)
+				m.SetDiffMode(yamlviewport.DiffModeNone)
+			},
+		},
 	}
 
-	for number := 1; number <= 3; number++ {
-		assert.Equal(t, 1, gutter.renders[number], "line %d", number)
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			full := testModel(testPrinterWithLineNumbers(), 40, 6)
+			tc.setup(&full)
+			require.False(t, full.ShowingDiff())
+
+			m := testModel(testPrinterWithLineNumbers(), 40, 6)
+			tc.setup(&m)
+			m.SetYOffset(2)
+			m.SetViewMode(yamlviewport.ViewModeSideBySide)
+
+			// The mode stays set, and the view stays where it was.
+			assert.Equal(t, yamlviewport.ViewModeSideBySide, m.ViewMode())
+			assert.Equal(t, 2, m.YOffset())
+
+			full.SetYOffset(2)
+
+			assert.Equal(t, full.View(), m.View())
+			assert.NotContains(t, m.View(), "│")
+			assert.Equal(t, full.TotalRowCount(), m.TotalRowCount())
+			assert.Equal(t, hitMap(&full), hitMap(&m))
+		})
 	}
+}
+
+func TestViewport_SideBySideAppliesWhenDiffShows(t *testing.T) {
+	t.Parallel()
+
+	// The mode set without a diff takes effect when the viewport moves to
+	// a revision that shows one.
+	m := testModel(testPrinterWithLineNumbers(), 40, 4)
+	addRevisions(&m, stringtest.LinesLF("name: app", "replicas: 3"))
+	m.ToggleViewMode()
+	m.ToggleViewMode()
+	require.Equal(t, yamlviewport.ViewModeSideBySide, m.ViewMode())
+
+	assert.Equal(t, stringtest.JoinLF(
+		"   1  name: app",
+		"   2  replicas: 3",
+	), plainRows(&m))
+
+	addRevisions(&m, stringtest.LinesLF("name: app", "replicas: 5"))
+	require.True(t, m.ShowingDiff())
+
+	left, right := panes(t, firstRow(m.View()))
+	assert.Contains(t, left, "name: app")
+	assert.Contains(t, right, "name: app")
+
+	m.GotoRevision(0)
+	assert.NotContains(t, m.View(), "│")
 }
 
 func TestViewport_SideBySideSearchCountsEqualLineOnce(t *testing.T) {
@@ -8508,11 +8553,11 @@ func TestViewport_HitAt_Screen(t *testing.T) {
 				m.SetDiffMode(yamlviewport.DiffModeNone)
 			},
 			want: stringtest.JoinLF(
-				".1111.............1111.........", // ·a: 1          │  a: 1
-				".111111111........111111111....", // ·b: 日本 y     │  b: 日本 y
-				".111111111........111111111....", // ·new: line     │  new: line
-				".1111.............1111.........", // ·here          │  here
-				".1111.............1111.........", // ·c: 3          │  c: 3
+				".1111..........................", // ·a: 1
+				".111111111.....................", // ·b: 日本 y
+				".11111111111111................", // ·new: line here
+				".1111..........................", // ·c: 3
+				"...............................",
 			),
 		},
 		"frames of both container styles": {
@@ -8876,14 +8921,15 @@ func TestViewport_HitAt(t *testing.T) {
 			y:         0,
 			setup:     sideBySide,
 		},
-		"right pane without a diff": {
+		"side by side without a diff": {
+			// Without a diff the revision shows once at full width, so a
+			// cell right of the middle lies past the end of the line.
 			revisions: []yamlviewport.Revision{source(hitV1)},
 			width:     31,
 			height:    6,
 			x:         22,
 			y:         1,
 			setup:     sideBySide,
-			want:      &yamlviewport.Hit{Position: position.New(1, 3)},
 		},
 		"line of a slice keeps its index in the content": {
 			revisions: []yamlviewport.Revision{
