@@ -561,7 +561,7 @@ func (r *Result) HunksOf(view *line.View, context int) *line.View {
 		}
 
 		// The hunk header goes above the first line of each hunk.
-		hunks.Annotate(span.Start, line.Annotation{
+		hunks.AnnotateLine(span.Start, line.Annotation{
 			Content:   r.formatHunkHeader(parts[i], beforeIdx, beforeCount, afterIdx, afterCount),
 			Kind:      kind.UIHunkHeader,
 			Placement: line.Above,
@@ -584,7 +584,7 @@ func (r *Result) HunksOf(view *line.View, context int) *line.View {
 
 		for _, a := range view.Annotations(i) {
 			if !isHunkMark(a) || a.Placement != line.Above {
-				hunks.Annotate(i, a)
+				hunks.AnnotateLine(i, a)
 			}
 		}
 	}
@@ -1226,7 +1226,7 @@ func (r *Result) Carry(dst, before, after *line.View) {
 
 		for _, a := range view.Annotations(i) {
 			if !slices.Contains(dst.Annotations(row), a) {
-				dst.Annotate(row, a)
+				dst.AnnotateLine(row, a)
 			}
 		}
 	}

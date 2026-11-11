@@ -56,7 +56,7 @@ func BenchmarkViewSlice(b *testing.B) {
 		view := line.NewView(lines)
 		view.SetFlag(110, line.FlagInserted)
 		view.AddLineOverlay(120, line.Overlay{Cols: position.NewSpan(0, 3), Kind: kind.GenericHighlight})
-		view.Annotate(130, line.Annotation{Content: "note", Placement: line.Below})
+		view.AnnotateLine(130, line.Annotation{Content: "note", Placement: line.Below})
 
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()

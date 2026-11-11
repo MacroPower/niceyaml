@@ -110,13 +110,25 @@
 // [kind.UIAnnotation]. Its Cols name the columns of the line it labels.
 // Below the line, a renderer draws a caret under each cell of those
 // columns, so a rune that takes two cells gets two carets. The content
-// sits beside the carets:
+// sits beside the carets. [View.Annotate] labels a [position.Range], such
+// as a search match or the range of a node, and sets Cols from it:
 //
-//	view.Annotate(i, line.Annotation{
+//	view.Annotate(line.Annotation{
 //	    Content:   "missing required field",
 //	    Kind:      kind.TextError,
 //	    Placement: line.Below,
-//	    Cols:      position.NewSpan(4, 9), // The columns of the error location.
+//	}, errorRange)
+//
+// A range that spans several lines gets an annotation on each line it
+// covers, and the first of them carries the content. A range that does
+// not cover any column, such as the point of a diagnostic, gets one
+// annotation of zero width at its start. [View.AnnotateLine] adds an
+// annotation to one line with the Cols the caller sets:
+//
+//	view.AnnotateLine(i, line.Annotation{
+//	    Content:   "Bestseller.",
+//	    Placement: line.Above,
+//	    Cols:      position.NewSpan(6, 6),
 //	})
 //
 // [Overlays] define column ranges with associated styles. Their main use is
@@ -129,9 +141,8 @@
 //	view.BlendOverlay(kind.GenericHighlight, matches...)
 //
 // An overlay does not draw a caret, so a range shows in plain output only
-// when an annotation labels the same columns. For a range that spans
-// several lines, add one annotation for each range that [Lines.SliceLines]
-// splits it into.
+// when an annotation labels the same columns. View.Annotate takes the
+// range that View.AddOverlay takes and labels every line the range covers.
 //
 // [View.Segments] cuts a line into the runs that one kind and one set of
 // overlays style, each with its text. A renderer that writes HTML, or any

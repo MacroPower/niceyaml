@@ -11,7 +11,6 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/finder"
 	"go.jacobcolvin.com/niceyaml/line"
-	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style/kind"
 	"go.jacobcolvin.com/niceyaml/style/theme"
@@ -50,12 +49,11 @@ func main() {
 	// does not show any content of the source.
 	view := source.View()
 	view.BlendOverlay(kind.GenericHighlight, dish, lemon)
-	view.Annotate(dish.Start.Line, line.Annotation{
+	view.Annotate(line.Annotation{
 		Content:   "Dagens lunch",
 		Kind:      kind.TextOK,
 		Placement: line.Above,
-		Cols:      position.NewSpan(dish.Start.Col, dish.End.Col),
-	})
+	}, dish)
 
 	fmt.Println("\nCount the rows of a wrapped view:")
 

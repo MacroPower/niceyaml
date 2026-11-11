@@ -32,7 +32,7 @@ func TestDiffer_Views(t *testing.T) {
 	// The decoration of an input view stays on that view.
 	decorated := before.View()
 	decorated.AddOverlay(kind.GenericHighlight, yamltest.LineRange(1, 0, 1))
-	decorated.Annotate(1, line.Annotation{Content: "note", Placement: line.Below})
+	decorated.AnnotateLine(1, line.Annotation{Content: "note", Placement: line.Below})
 	decorated.SetFlag(0, line.FlagInserted)
 
 	result := diff.Diff(decorated, after.View())
@@ -877,7 +877,7 @@ func TestDiffResult_HunksOf(t *testing.T) {
 	// revision with an error, as a validation of that revision does.
 	errorAt := func(i int, cols position.Span) func(result *diff.Result, beforeView, afterView *line.View) *line.View {
 		return func(result *diff.Result, beforeView, afterView *line.View) *line.View {
-			afterView.Annotate(i, yamltest.ErrorAnnotation(cols, "bad"))
+			afterView.AnnotateLine(i, yamltest.ErrorAnnotation(cols, "bad"))
 
 			view := result.Unified()
 			result.Carry(view, beforeView, afterView)
@@ -945,7 +945,7 @@ func TestDiffResult_HunksOf(t *testing.T) {
 		},
 		"header stays above a carried note": {
 			view: func(result *diff.Result, beforeView, afterView *line.View) *line.View {
-				afterView.Annotate(9, line.Annotation{Content: "note", Placement: line.Above})
+				afterView.AnnotateLine(9, line.Annotation{Content: "note", Placement: line.Above})
 
 				view := result.Unified()
 				result.Carry(view, beforeView, afterView)
@@ -965,7 +965,7 @@ func TestDiffResult_HunksOf(t *testing.T) {
 		// a separator below that line, which labels the line and not a gap.
 		"a separator below a row stays with its row": {
 			view: func(result *diff.Result, beforeView, afterView *line.View) *line.View {
-				afterView.Annotate(
+				afterView.AnnotateLine(
 					11,
 					yamltest.ErrorAnnotation(position.NewSpan(5, 7), "bad"),
 					line.Annotation{Content: "and 2 more on this line", Kind: kind.UISeparator, Placement: line.Below},
@@ -1093,7 +1093,7 @@ func TestDiffResult_HunksOf_KeepsClip(t *testing.T) {
 			result := yamltest.Diff(tc.before, tc.after)
 
 			view := result.Unified()
-			view.Annotate(tc.row, yamltest.ErrorAnnotation(position.NewSpan(50, 51), "bad"))
+			view.AnnotateLine(tc.row, yamltest.ErrorAnnotation(position.NewSpan(50, 51), "bad"))
 
 			clipped := view.Clip(20)
 			hunks := result.HunksOf(clipped, 0)
@@ -2641,8 +2641,8 @@ func TestDiffResult_Origins_SharedLines(t *testing.T) {
 
 	// The marks of each revision land on the row of its own copy.
 	beforeView, afterView := line.NewView(before), line.NewView(after)
-	beforeView.Annotate(0, line.Annotation{Content: "before"})
-	afterView.Annotate(2, line.Annotation{Content: "after"})
+	beforeView.AnnotateLine(0, line.Annotation{Content: "before"})
+	afterView.AnnotateLine(2, line.Annotation{Content: "after"})
 
 	result.Carry(unified, beforeView, afterView)
 	assert.Equal(t, []string{"before"}, unified.Annotations(deleted).Contents())
@@ -2845,13 +2845,13 @@ func TestDiffResult_Carry(t *testing.T) {
 	marked := func() (*line.View, *line.View) {
 		before, after := originViews()
 
-		before.Annotate(2, note("a before"))
-		before.Annotate(3, note("b deleted"))
+		before.AnnotateLine(2, note("a before"))
+		before.AnnotateLine(3, note("b deleted"))
 		before.AddOverlay(kind.GenericHighlight, yamltest.LineRange(3, 0, 1))
-		before.Annotate(0, note("x skipped"))
+		before.AnnotateLine(0, note("x skipped"))
 
-		after.Annotate(1, note("a after"))
-		after.Annotate(4, note("e inserted"))
+		after.AnnotateLine(1, note("a after"))
+		after.AnnotateLine(4, note("e inserted"))
 		after.AddOverlay(kind.GenericHighlight, yamltest.LineRange(4, 0, 1))
 
 		return before, after
@@ -2922,10 +2922,10 @@ func TestDiffResult_Carry(t *testing.T) {
 		plain, other := originViews()
 		result := diff.Diff(plain, other)
 
-		plain.Annotate(3, note("b deleted"))
+		plain.AnnotateLine(3, note("b deleted"))
 
 		clone := other.Clone()
-		clone.Annotate(4, note("e inserted"))
+		clone.AnnotateLine(4, note("e inserted"))
 
 		dst := result.Unified()
 		result.Carry(dst, plain, clone)
@@ -2956,7 +2956,7 @@ func TestDiffResult_Carry(t *testing.T) {
 		// the row of that line takes no marks from it, though the slice
 		// carries one there.
 		part := before.Slice(position.NewSpan(4, 6))
-		part.Annotate(3, note("b left out"))
+		part.AnnotateLine(3, note("b left out"))
 
 		dst := result.Unified()
 		result.Carry(dst, part, after)
@@ -2986,8 +2986,8 @@ func TestDiffResult_Carry(t *testing.T) {
 		// marks of its own revision.
 		src := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: 2"))
 		left, right := src.View(), src.View()
-		left.Annotate(0, note("before"))
-		right.Annotate(0, note("after"))
+		left.AnnotateLine(0, note("before"))
+		right.AnnotateLine(0, note("after"))
 
 		result := diff.Diff(left, right)
 		unified, beforePane, afterPane := result.Unified(), result.Before(), result.After()

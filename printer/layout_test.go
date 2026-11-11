@@ -80,9 +80,9 @@ func TestPrinter_Layout(t *testing.T) {
 			"b: 2",
 			"c: 3",
 		)).View()
-		view.Annotate(0, line.Annotation{Content: "a note above that wraps too", Placement: line.Above})
-		view.Annotate(0, line.Annotation{Content: "below", Placement: line.Below, Cols: position.NewSpan(5, 5)})
-		view.Annotate(2, line.Annotation{Content: "last", Placement: line.Below, Cols: position.NewSpan(3, 3)})
+		view.AnnotateLine(0, line.Annotation{Content: "a note above that wraps too", Placement: line.Above})
+		view.AnnotateLine(0, line.Annotation{Content: "below", Placement: line.Below, Cols: position.NewSpan(5, 5)})
+		view.AnnotateLine(2, line.Annotation{Content: "last", Placement: line.Below, Cols: position.NewSpan(3, 3)})
 
 		return view
 	}
@@ -385,7 +385,7 @@ func TestPrinter_Layout(t *testing.T) {
 				t.Parallel()
 
 				view := niceyaml.NewSourceFromString(tc.content).View()
-				view.Annotate(0, tc.below...)
+				view.AnnotateLine(0, tc.below...)
 
 				p := testPrinter().With(printer.WithWrapWidth(tc.wrap), printer.WithStyles(tc.styles))
 
@@ -500,10 +500,10 @@ func TestPrinter_Layout_Width(t *testing.T) {
 	wide := niceyaml.NewSourceFromString(stringtest.JoinLF("k: 日日日", "b: 2")).View()
 
 	annotated := niceyaml.NewSourceFromString(stringtest.JoinLF("a: 1", "b: 2")).View()
-	annotated.Annotate(0, line.Annotation{Content: "a note wider than the lines", Placement: line.Above})
+	annotated.AnnotateLine(0, line.Annotation{Content: "a note wider than the lines", Placement: line.Above})
 
 	noted := niceyaml.NewSourceFromString("key: value\n").View()
-	noted.Annotate(0, line.Annotation{Content: "note", Placement: line.Below, Cols: position.NewSpan(5, 5)})
+	noted.AnnotateLine(0, line.Annotation{Content: "note", Placement: line.Below, Cols: position.NewSpan(5, 5)})
 
 	tcs := map[string]struct {
 		view   *line.View
@@ -590,7 +590,7 @@ func TestPrinter_Layout_LineWidth(t *testing.T) {
 		"bb: "+strings.Repeat("日", 3),
 		"c: 3",
 	)).View()
-	view.Annotate(2, line.Annotation{Content: "a note wider than the lines", Placement: line.Below})
+	view.AnnotateLine(2, line.Annotation{Content: "a note wider than the lines", Placement: line.Below})
 
 	tcs := map[string]struct {
 		spans []position.Span
@@ -656,7 +656,7 @@ func TestPrinter_Layout_MultiLineAnnotation(t *testing.T) {
 			t.Parallel()
 
 			view := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: 2")).View()
-			view.Annotate(0, line.Annotation{Content: "one\ntwo"})
+			view.AnnotateLine(0, line.Annotation{Content: "one\ntwo"})
 
 			p := testPrinter().With(printer.WithAnnotation(joined), printer.WithWrapWidth(tc.width))
 
@@ -699,7 +699,7 @@ func TestPrinter_Layout_StyledAnnotationRows(t *testing.T) {
 			t.Parallel()
 
 			view := niceyaml.NewSourceFromString("a: 1\n").View()
-			view.Annotate(
+			view.AnnotateLine(
 				0,
 				line.Annotation{
 					Content:   "hello world foo",
@@ -773,7 +773,7 @@ func TestPrinter_Layout_TallGutter(t *testing.T) {
 
 			view := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: 2")).View()
 			view.SetFlag(0, line.FlagInserted)
-			view.Annotate(0, line.Annotation{Content: "note", Placement: line.Below})
+			view.AnnotateLine(0, line.Annotation{Content: "note", Placement: line.Below})
 
 			opts := []printer.Option{printer.WithContainerStyle(lipgloss.NewStyle())}
 			if tc.gutter != nil {
@@ -1264,7 +1264,7 @@ func TestPrinter_Layout_PositionAt(t *testing.T) {
 			view.AddOverlay(testOverlayHighlight, tc.overlays...)
 
 			if tc.annotation != nil {
-				view.Annotate(0, *tc.annotation)
+				view.AnnotateLine(0, *tc.annotation)
 			}
 
 			if tc.slice != nil {
@@ -1341,12 +1341,12 @@ func TestPrinter_Layout_PositionAt_Inverse(t *testing.T) {
 			printer: testPrinter().With(printer.WithWrapWidth(12)),
 			input:   stringtest.LinesLF("key: aaaa bbbb cccc", "b: 2"),
 			decorate: func(view *line.View) {
-				view.Annotate(0, line.Annotation{Content: "above", Placement: line.Above})
-				view.Annotate(
+				view.AnnotateLine(0, line.Annotation{Content: "above", Placement: line.Above})
+				view.AnnotateLine(
 					0,
 					line.Annotation{Content: "below", Placement: line.Below, Cols: position.NewSpan(12, 12)},
 				)
-				view.Annotate(1, line.Annotation{Content: "last", Placement: line.Below})
+				view.AnnotateLine(1, line.Annotation{Content: "last", Placement: line.Below})
 			},
 		},
 		"full.yaml with a gutter": {
@@ -1358,8 +1358,11 @@ func TestPrinter_Layout_PositionAt_Inverse(t *testing.T) {
 			input:   stringtest.LinesLF("k: abcdefghijklmnopqrstuvwxyz", "b: 2"),
 			clip:    8,
 			decorate: func(view *line.View) {
-				view.Annotate(0, line.Annotation{Content: "first", Placement: line.Below, Cols: position.NewSpan(5, 5)})
-				view.Annotate(
+				view.AnnotateLine(
+					0,
+					line.Annotation{Content: "first", Placement: line.Below, Cols: position.NewSpan(5, 5)},
+				)
+				view.AnnotateLine(
 					0,
 					line.Annotation{Content: "second", Placement: line.Below, Cols: position.NewSpan(24, 24)},
 				)
@@ -1378,7 +1381,10 @@ func TestPrinter_Layout_PositionAt_Inverse(t *testing.T) {
 			input:   "k: aaaa bbbb cccc dddd eeee ffff gggg\n",
 			clip:    16,
 			decorate: func(view *line.View) {
-				view.Annotate(0, line.Annotation{Content: "x", Placement: line.Below, Cols: position.NewSpan(20, 20)})
+				view.AnnotateLine(
+					0,
+					line.Annotation{Content: "x", Placement: line.Below, Cols: position.NewSpan(20, 20)},
+				)
 			},
 		},
 		"full.yaml clipped with a gutter": {

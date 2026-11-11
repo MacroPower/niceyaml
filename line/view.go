@@ -310,7 +310,7 @@ func (v *View) SetFlag(i int, f Flag) {
 
 // Annotations returns the [Annotation] values on line i, in the order the
 // caller added them. The slice belongs to the view, so treat it as
-// read-only and add to it with [View.Annotate].
+// read-only and add to it with [View.Annotate] or [View.AnnotateLine].
 //
 // The columns of each annotation are those of the whole line, whatever
 // [View.Clip] set. [View.Row] returns the annotations of a clipped line
@@ -321,8 +321,11 @@ func (v *View) Annotations(i int) Annotations {
 	return v.annotations[i]
 }
 
-// Annotate adds the given [Annotation] values to line i.
-func (v *View) Annotate(i int, ann ...Annotation) {
+// AnnotateLine adds the given [Annotation] values to line i as given.
+// [View.Annotate] sets the columns of an annotation from a range, but
+// AnnotateLine keeps the [Annotation.Cols] of each one and does not clamp
+// them.
+func (v *View) AnnotateLine(i int, ann ...Annotation) {
 	_ = v.lines.lines[i]
 
 	if v.annotations == nil {
@@ -330,6 +333,74 @@ func (v *View) Annotate(i int, ann ...Annotation) {
 	}
 
 	v.annotations[i] = append(v.annotations[i], ann...)
+}
+
+// Annotate labels each of the given ranges with a, in the coordinates of
+// the content. It takes the ranges that [View.AddOverlay] takes, so one
+// range both highlights a location and labels it:
+//
+//	view.AddOverlay(kind.GenericError, match)
+//	view.Annotate(line.Annotation{
+//	    Content:   "stale",
+//	    Kind:      kind.TextError,
+//	    Placement: line.Below,
+//	}, match)
+//
+// It splits each range into one annotation per line with
+// [Lines.SliceLines], as AddOverlay splits it into overlays. Each
+// annotation gets the columns of the range on its line as its
+// [Annotation.Cols], which replace the Cols of a. The annotation on the
+// first line a range covers carries the content of a. The annotations on
+// the later lines do not carry content, so below each of those lines a
+// renderer draws the carets alone. SliceLines clamps the columns to the
+// width of the line and skips lines outside the content.
+//
+// A range that does not cover a column of any line still gets a label
+// when its start line is inside the content. An empty range does not
+// cover a column. Neither does a range that ends before its start, or
+// one that covers only a line break. Annotate then adds one annotation
+// of zero width at the start of the range, with the column clamped to
+// the line. A renderer draws a single caret there, so a diagnostic at a
+// point keeps its message. Annotate skips such a range when its start
+// line is outside the content.
+//
+// An annotation on a line the View does not hold never renders. The
+// content of a therefore does not render for a range whose first covered
+// line the View does not hold. [View.AnnotateLine] adds an annotation to
+// one line with the columns the caller gives it.
+func (v *View) Annotate(a Annotation, ranges ...position.Range) {
+	for _, r := range ranges {
+		v.annotateRange(a, r)
+	}
+}
+
+// annotateRange adds a to each line r covers within the content, with the
+// columns of r on that line and the content of a on the first of them. A
+// range that does not cover any column gets one annotation of zero width
+// at its start, when that line is inside the content.
+func (v *View) annotateRange(a Annotation, r position.Range) {
+	pieces := v.lines.SliceLines(r)
+
+	if len(pieces) == 0 {
+		i := r.Start.Line
+		if i < 0 || i >= v.lines.Len() {
+			return
+		}
+
+		col := min(max(0, r.Start.Col), v.lines.lines[i].Width())
+		a.Cols = position.NewSpan(col, col)
+		v.AnnotateLine(i, a)
+
+		return
+	}
+
+	for _, lr := range pieces {
+		a.Cols = position.NewSpan(lr.Start.Col, lr.End.Col)
+		v.AnnotateLine(lr.Start.Line, a)
+
+		// Only the first line of the range carries the content.
+		a.Content = ""
+	}
 }
 
 // Overlays returns the [Overlay] values on line i, in the order the caller
@@ -413,7 +484,7 @@ func (v *View) Clone() *View {
 	}
 
 	for i, a := range v.annotations {
-		c.Annotate(i, a...)
+		c.AnnotateLine(i, a...)
 	}
 
 	return c
@@ -449,7 +520,7 @@ func (v *View) Slice(spans ...position.Span) *View {
 		}
 
 		if a := v.Annotations(i); len(a) > 0 {
-			out.Annotate(i, a...)
+			out.AnnotateLine(i, a...)
 		}
 	}
 
@@ -540,7 +611,7 @@ func (v *View) Hunks(context int) *View {
 			continue
 		}
 
-		hunks.Annotate(i, separator)
+		hunks.AnnotateLine(i, separator)
 
 		anns := hunks.annotations[i]
 		copy(anns[1:], anns[:len(anns)-1])

@@ -1343,7 +1343,7 @@ func TestPrinter_WordWrap_RowOfRunes(t *testing.T) {
 			t.Parallel()
 
 			view := niceyaml.NewSourceFromString(tc.input).View()
-			view.Annotate(0, tc.annotations...)
+			view.AnnotateLine(0, tc.annotations...)
 
 			p := testPrinterWithGutter(tc.gutter).With(printer.WithWrapWidth(tc.width))
 
@@ -2103,7 +2103,7 @@ func TestPrinter_PrintSideBySide(t *testing.T) {
 		"annotation above a line of the right pane": {
 			views: func() (*line.View, *line.View) {
 				left, right := view(twoLines), view(twoLines)
-				right.Annotate(1, line.Annotation{Content: "a note", Placement: line.Above})
+				right.AnnotateLine(1, line.Annotation{Content: "a note", Placement: line.Above})
 
 				return left, right
 			},
@@ -2116,7 +2116,7 @@ func TestPrinter_PrintSideBySide(t *testing.T) {
 		"annotation below a line of the left pane": {
 			views: func() (*line.View, *line.View) {
 				left, right := view(twoLines), view(twoLines)
-				left.Annotate(0, yamltest.ErrorAnnotation(position.NewSpan(3, 4), "bad"))
+				left.AnnotateLine(0, yamltest.ErrorAnnotation(position.NewSpan(3, 4), "bad"))
 
 				return left, right
 			},
@@ -2144,7 +2144,7 @@ func TestPrinter_PrintSideBySide(t *testing.T) {
 		"line with more rows above in one pane and after in the other": {
 			views: func() (*line.View, *line.View) {
 				left, right := view(twoLines), view(stringtest.LinesLF("a: one two three four", "b: 2"))
-				left.Annotate(0,
+				left.AnnotateLine(0,
 					line.Annotation{Content: "one", Kind: kind.TextError, Placement: line.Above},
 					line.Annotation{Content: "two", Kind: kind.TextWarn, Placement: line.Above},
 				)
@@ -2197,7 +2197,7 @@ func TestPrinter_PrintSideBySide(t *testing.T) {
 		"left row past the pane width": {
 			views: func() (*line.View, *line.View) {
 				left, right := view(twoLines), view(twoLines)
-				left.Annotate(0, yamltest.ErrorAnnotation(position.NewSpan(20, 21), "far"))
+				left.AnnotateLine(0, yamltest.ErrorAnnotation(position.NewSpan(20, 21), "far"))
 
 				return left, right
 			},
@@ -2278,13 +2278,13 @@ func TestPrinter_PrintSideBySide_PaneLayout(t *testing.T) {
 	// the row the zip gives it, and its first content row sits below the
 	// larger block of rows above it.
 	left := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: 2", "c: 3")).View()
-	left.Annotate(0,
+	left.AnnotateLine(0,
 		line.Annotation{Content: "one", Kind: kind.TextError, Placement: line.Above},
 		line.Annotation{Content: "two", Kind: kind.TextWarn, Placement: line.Above},
 	)
 
 	right := niceyaml.NewSourceFromString(stringtest.LinesLF("a: one two three four", "b: 2", "c: 3")).View()
-	right.Annotate(2, line.Annotation{Content: "a note", Placement: line.Above})
+	right.AnnotateLine(2, line.Annotation{Content: "a note", Placement: line.Above})
 
 	p := testPrinterWithGutter(printer.DefaultGutter).With(
 		printer.WithWrapWidth(33),
@@ -2366,12 +2366,12 @@ func TestPrinter_PrintSideBySide_Golden(t *testing.T) {
 
 			viewBefore := niceyaml.NewSourceFromString(before).View()
 			viewBefore.AddOverlay(kind.GenericError, yamltest.LineRange(2, 11, 17))
-			viewBefore.Annotate(2, yamltest.ErrorAnnotation(position.NewSpan(11, 17), "price is not in kr"))
+			viewBefore.AnnotateLine(2, yamltest.ErrorAnnotation(position.NewSpan(11, 17), "price is not in kr"))
 
 			viewAfter := niceyaml.NewSourceFromString(after).View()
 			viewAfter.AddOverlay(kind.GenericError, yamltest.LineRange(6, 11, 16))
-			viewAfter.Annotate(6, yamltest.ErrorAnnotation(position.NewSpan(11, 16), "price is not in kr"))
-			viewAfter.Annotate(5, line.Annotation{Content: "new item", Kind: kind.TextOK, Placement: line.Above})
+			viewAfter.AnnotateLine(6, yamltest.ErrorAnnotation(position.NewSpan(11, 16), "price is not in kr"))
+			viewAfter.AnnotateLine(5, line.Annotation{Content: "new item", Kind: kind.TextOK, Placement: line.Above})
 
 			result := diff.Diff(viewBefore, viewAfter)
 			left, right := result.Before(), result.After()
@@ -3912,7 +3912,7 @@ func TestPrinter_AnnotationFuncOverlays(t *testing.T) {
 			line.Overlay{Kind: kind.GenericHeadingOK, Cols: position.NewSpan(5, 7)},
 			line.Overlay{Kind: kind.GenericHeadingWarn, Cols: position.NewSpan(0, 10)},
 		)
-		view.Annotate(0, anns...)
+		view.AnnotateLine(0, anns...)
 
 		return view
 	}
@@ -3971,7 +3971,7 @@ func TestPrinter_AnnotationKind(t *testing.T) {
 	// errors come first, then those of warnings, then those of the other
 	// kinds. The zero kind renders as kind.UIAnnotation.
 	view := niceyaml.NewSourceFromString("key: value").View()
-	view.Annotate(
+	view.AnnotateLine(
 		0,
 		line.Annotation{Content: "hunk", Placement: line.Above},
 		line.Annotation{Content: "note", Placement: line.Below, Cols: position.NewSpan(5, 5)},
@@ -4008,7 +4008,7 @@ func TestPrinter_AnnotationKindAbove(t *testing.T) {
 	// View.String renders them. A warning added before an error thus stays
 	// above it.
 	view := niceyaml.NewSourceFromString("key: value").View()
-	view.Annotate(
+	view.AnnotateLine(
 		0,
 		line.Annotation{Content: "old key", Kind: kind.TextWarn, Placement: line.Above},
 		line.Annotation{Content: "bad key", Kind: kind.TextError, Placement: line.Above},
@@ -4034,7 +4034,7 @@ func TestPrinter_AnnotationFuncKind(t *testing.T) {
 	t.Parallel()
 
 	view := niceyaml.NewSourceFromString("key: value").View()
-	view.Annotate(0, line.Annotation{Content: "oops \x1b[31mred", Placement: line.Below})
+	view.AnnotateLine(0, line.Annotation{Content: "oops \x1b[31mred", Placement: line.Below})
 
 	errored := func(ctx printer.AnnotationContext) []printer.AnnotationRow {
 		return []printer.AnnotationRow{{
@@ -4831,14 +4831,14 @@ func TestPrinter_Annotation(t *testing.T) {
 			view.AddOverlay(kind.GenericError, tc.marks...)
 
 			for _, r := range tc.marks {
-				view.Annotate(r.Start.Line, line.Annotation{
+				view.AnnotateLine(r.Start.Line, line.Annotation{
 					Placement: line.Below,
 					Cols:      position.NewSpan(r.Start.Col, r.End.Col),
 				})
 			}
 
 			if tc.annotation != (line.Annotation{}) {
-				view.Annotate(tc.line, tc.annotation)
+				view.AnnotateLine(tc.line, tc.annotation)
 			}
 
 			// A nil func selects DefaultAnnotation rather than panicking on
@@ -4914,7 +4914,10 @@ func TestPrinter_AnnotationWrap_ContainerFrame(t *testing.T) {
 			t.Parallel()
 
 			view := niceyaml.NewSourceFromString("key: value\n").View()
-			view.Annotate(0, line.Annotation{Content: "abcdefg", Placement: line.Below, Cols: position.NewSpan(8, 8)})
+			view.AnnotateLine(
+				0,
+				line.Annotation{Content: "abcdefg", Placement: line.Below, Cols: position.NewSpan(8, 8)},
+			)
 
 			p := testPrinter().With(
 				printer.WithContainerStyle(tc.container),
@@ -4937,7 +4940,7 @@ func TestPrinter_LineNumbers_MaxNumber(t *testing.T) {
 	input := tenThousandLines + "last: this is a long value that wraps"
 	source := niceyaml.NewSourceFromString(input)
 	view := source.View().Slice(position.NewSpan(10000, source.Lines().Len()))
-	view.Annotate(10000, line.Annotation{Content: "note", Placement: line.Below, Cols: position.NewSpan(6, 6)})
+	view.AnnotateLine(10000, line.Annotation{Content: "note", Placement: line.Below, Cols: position.NewSpan(6, 6)})
 
 	p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWrapWidth(30))
 
@@ -5128,7 +5131,7 @@ func TestPrinter_WithGutter_Nil(t *testing.T) {
 	t.Parallel()
 
 	view := niceyaml.NewSourceFromString("key: value").View()
-	view.Annotate(0, line.Annotation{Content: "note", Placement: line.Below, Cols: position.NewSpan(5, 5)})
+	view.AnnotateLine(0, line.Annotation{Content: "note", Placement: line.Below, Cols: position.NewSpan(5, 5)})
 
 	want := yamltest.NewPlainPrinter(printer.WithGutter(printer.DefaultGutter)).Print(view)
 
@@ -5424,7 +5427,7 @@ func TestPrinter_AnnotationGutterSoft(t *testing.T) {
 
 			view := niceyaml.NewSourceFromString(tc.input).View()
 			view.AddOverlay(kind.GenericError, tc.overlays...)
-			view.Annotate(0, tc.annotations...)
+			view.AnnotateLine(0, tc.annotations...)
 
 			var gutters []string
 
@@ -5680,7 +5683,7 @@ const clipLetters = "key: abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 func newClippedView(input string, cols int, overlays []position.Span, annotations ...line.Annotation) *line.View {
 	view := niceyaml.NewSourceFromString(input + "\n").View()
 	view.AddLineOverlay(0, yamltest.ErrorOverlays(overlays...)...)
-	view.Annotate(0, annotations...)
+	view.AnnotateLine(0, annotations...)
 
 	return view.Clip(cols)
 }

@@ -344,7 +344,7 @@ func addOverlay(view *line.View, i int, o line.Overlay) {
 // annotation already.
 func addAnnotation(view *line.View, i int, a line.Annotation) {
 	if !slices.Contains(view.Annotations(i), a) {
-		view.Annotate(i, a)
+		view.AnnotateLine(i, a)
 	}
 }
 

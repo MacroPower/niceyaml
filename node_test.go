@@ -4592,7 +4592,7 @@ func TestDocument_View(t *testing.T) {
 		doc := docs[0]
 
 		first := doc.View()
-		first.Annotate(0, line.Annotation{Content: "here", Placement: line.Below})
+		first.AnnotateLine(0, line.Annotation{Content: "here", Placement: line.Below})
 
 		assert.NotEqual(t, first.String(), doc.View().String())
 		assert.Equal(t, source.View().Slice(doc.Span()).String(), doc.View().String())

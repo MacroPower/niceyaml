@@ -31,14 +31,15 @@ func main() {
 	view.BlendOverlay(kind.GenericHighlight, finder.New().Load(source.Lines()).Find("kaffe")...)
 
 	// Lines and columns count from 0, so this range covers "45 kr" on the
-	// line the gutter numbers 9.
-	view.AddOverlay(kind.GenericError, position.NewRange(position.New(8, 11), position.New(8, 16)))
-	view.Annotate(8, line.Annotation{
+	// line the gutter numbers 9. The overlay and the annotation take the
+	// same range.
+	price := position.NewRange(position.New(8, 11), position.New(8, 16))
+	view.AddOverlay(kind.GenericError, price)
+	view.Annotate(line.Annotation{
 		Content:   "the menu board says 40 kr",
 		Kind:      kind.TextError,
 		Placement: line.Below,
-		Cols:      position.NewSpan(11, 16),
-	})
+	}, price)
 
 	fmt.Println("\nPrint the view as plain text:")
 

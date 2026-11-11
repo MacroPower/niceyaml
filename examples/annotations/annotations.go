@@ -31,7 +31,8 @@ func main() {
 
 	// Lines and columns count from 0, so index 6 is the line the gutter
 	// numbers 7. A note above a line starts at the first column it labels.
-	view.Annotate(6, line.Annotation{
+	// AnnotateLine takes a line and the columns as given.
+	view.AnnotateLine(6, line.Annotation{
 		Content:   "Bestseller.",
 		Kind:      kind.TextOK,
 		Placement: line.Above,
@@ -49,16 +50,16 @@ func main() {
 			continue
 		}
 
-		// This overlay replaces the token colors. A note below a line draws
-		// carets under the columns it labels, then its text.
+		// This overlay replaces the token colors. Annotate labels the same
+		// range. A note below a line draws carets under the columns it
+		// labels, then its text.
 		rng := position.NewRange(position.New(i, maxWidth), position.New(i, ln.Width()))
 		view.AddOverlay(kind.GenericError, rng)
-		view.Annotate(i, line.Annotation{
+		view.Annotate(line.Annotation{
 			Content:   fmt.Sprintf("%d columns over", over),
 			Kind:      kind.TextError,
 			Placement: line.Below,
-			Cols:      position.NewSpan(maxWidth, ln.Width()),
-		})
+		}, rng)
 	}
 
 	fmt.Println("\nPrint with annotations and overlays:")

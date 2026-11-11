@@ -2484,8 +2484,8 @@ func TestViewport_SideBySideAlignsRowsAbove(t *testing.T) {
 			before := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: 2", "c: 3")).View()
 			after := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: 20", "c: 3")).View()
 
-			before.Annotate(1, tc.before...)
-			after.Annotate(1, tc.after...)
+			before.AnnotateLine(1, tc.before...)
+			after.AnnotateLine(1, tc.after...)
 
 			m := testModel(testPrinterWithLineNumbers(), 33, 5)
 			m.SetViewMode(yamlviewport.ViewModeSideBySide)
@@ -3816,7 +3816,7 @@ func notedRevision(name, doc string, notes ...int) yamlviewport.Revision {
 	view := niceyaml.NewSourceFromString(doc, niceyaml.WithName(name), niceyaml.WithByteLimit(0)).View()
 
 	for _, i := range notes {
-		view.Annotate(i, line.Annotation{Content: "note", Placement: line.Above})
+		view.AnnotateLine(i, line.Annotation{Content: "note", Placement: line.Above})
 	}
 
 	return yamlviewport.NewRevision(name, view)
@@ -4025,7 +4025,7 @@ func TestViewport_ReplaceRevisionOffDisplay(t *testing.T) {
 
 			// Every view gets a mark on a line that is on the screen.
 			for _, v := range views {
-				v.Annotate(31, line.Annotation{Content: "late", Placement: line.Above})
+				v.AnnotateLine(31, line.Annotation{Content: "late", Placement: line.Above})
 			}
 
 			for _, r := range revs {
@@ -6434,7 +6434,7 @@ func TestViewport_WrapKeepsFrameOfOverflowingRow(t *testing.T) {
 				"a: 1", "k: v", "c: 3", "d: 4", "e: 5", "f: 6", "g: 7", "h: 8", "i: 9", "j: 10",
 			))
 			view := source.View()
-			view.Annotate(1, line.Annotation{Content: "BAD", Placement: line.Below, Cols: position.NewSpan(50, 50)})
+			view.AnnotateLine(1, line.Annotation{Content: "BAD", Placement: line.Below, Cols: position.NewSpan(50, 50)})
 
 			p := testPrinterWithLineNumbers().With(
 				printer.WithContainerStyle(normalBorder()),
@@ -6750,7 +6750,7 @@ func TestViewport_RevisionKeepsDecoration(t *testing.T) {
 		niceyaml.WithName("marked"),
 	)
 	view := source.View()
-	view.Annotate(0, line.Annotation{Content: "note", Placement: line.Below})
+	view.AnnotateLine(0, line.Annotation{Content: "note", Placement: line.Below})
 	view.AddOverlay(kind.GenericError, yamltest.LineRange(1, 0, 5))
 
 	m.SetRevisions(yamlviewport.NewRevision(source.Name(), view))
@@ -6837,7 +6837,7 @@ func TestViewport_RevisionIgnoresLaterMarks(t *testing.T) {
 			_ = m.View()
 			rows := m.TotalRowCount()
 
-			view.Annotate(0, line.Annotation{Content: "late", Placement: line.Below})
+			view.AnnotateLine(0, line.Annotation{Content: "late", Placement: line.Below})
 
 			tc.act(&m)
 
@@ -6863,7 +6863,7 @@ func markedRevision(name, doc string, marks ...int) yamlviewport.Revision {
 		field, _, _ := strings.Cut(view.Line(i).Content(), ":")
 
 		view.AddOverlay(kind.GenericError, yamltest.LineRange(i, 0, len(field)))
-		view.Annotate(i, line.Annotation{
+		view.AnnotateLine(i, line.Annotation{
 			Content:   name + " " + field,
 			Placement: line.Below,
 			Cols:      position.NewSpan(0, len(field)),
@@ -7083,8 +7083,8 @@ func TestViewport_DiffKeepsMarksOfSharedLines(t *testing.T) {
 			source := niceyaml.NewSourceFromString(stringtest.LinesLF("x: 1", "y: 2"))
 
 			before, after := source.View(), source.View()
-			before.Annotate(0, line.Annotation{Content: "before", Placement: line.Below})
-			after.Annotate(0, line.Annotation{Content: "after", Placement: line.Below})
+			before.AnnotateLine(0, line.Annotation{Content: "before", Placement: line.Below})
+			after.AnnotateLine(0, line.Annotation{Content: "after", Placement: line.Below})
 
 			m := testModel(testPrinter(), 45, 5)
 			m.SetViewMode(tc.viewMode)
@@ -7105,7 +7105,7 @@ func TestViewport_DiffKeepsHunkHeaderAboveMarks(t *testing.T) {
 	// The first line of a hunk carries the header of the hunk, and an
 	// annotation a revision puts above that line renders below the header.
 	after := niceyaml.NewSourceFromString(threeChangedYAML).View()
-	after.Annotate(0, line.Annotation{Content: "note", Placement: line.Above})
+	after.AnnotateLine(0, line.Annotation{Content: "note", Placement: line.Above})
 
 	m := testModel(testPrinter(), 30, 8)
 	m.SetViewMode(yamlviewport.ViewModeHunks)
@@ -7162,8 +7162,8 @@ func TestViewport_DiffIgnoresLaterMarks(t *testing.T) {
 			m := testModel(testPrinter(), 45, 10)
 			m.SetRevisions(revisions...)
 
-			before.Annotate(1, line.Annotation{Content: "late before", Placement: line.Below})
-			after.Annotate(1, line.Annotation{Content: "late after", Placement: line.Below})
+			before.AnnotateLine(1, line.Annotation{Content: "late before", Placement: line.Below})
+			after.AnnotateLine(1, line.Annotation{Content: "late after", Placement: line.Below})
 
 			tc.act(&m)
 
@@ -8094,12 +8094,12 @@ func TestViewport_HitAt(t *testing.T) {
 	}
 
 	annotated := niceyaml.NewSourceFromString(hitV1).View()
-	annotated.Annotate(0, line.Annotation{Content: "bad", Placement: line.Below})
+	annotated.AnnotateLine(0, line.Annotation{Content: "bad", Placement: line.Below})
 
 	// The mark at column 20 centers the window of the long line, which
 	// shows as "...mnopqrstuv..." behind the gutter.
 	marked := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "k: abcdefghijklmnopqrstuvwxyz", "c: 3")).View()
-	marked.Annotate(1, line.Annotation{Content: "x", Placement: line.Below, Cols: position.NewSpan(20, 20)})
+	marked.AnnotateLine(1, line.Annotation{Content: "x", Placement: line.Below, Cols: position.NewSpan(20, 20)})
 
 	clipped := yamlviewport.NewRevision("clipped", marked.Clip(10))
 

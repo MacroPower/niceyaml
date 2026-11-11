@@ -277,7 +277,7 @@ func flagsOf(view *line.View) []line.Flag {
 	return flags
 }
 
-func TestView_Annotate(t *testing.T) {
+func TestView_AnnotateLine(t *testing.T) {
 	t.Parallel()
 
 	view := newView(stringtest.LinesLF(letterRows(2)...))
@@ -286,13 +286,244 @@ func TestView_Annotate(t *testing.T) {
 	first := line.Annotation{Content: "first", Placement: line.Above}
 	second := line.Annotation{Content: "second", Placement: line.Below}
 	third := line.Annotation{Content: "third"}
+	// Annotate would cut these columns to the width of the line.
+	wide := line.Annotation{Content: "wide", Cols: position.NewSpan(-2, 99)}
 
-	// Each call adds to the annotations of its line.
-	view.Annotate(1, first)
-	view.Annotate(1, second, third)
+	// Each call adds to the annotations of its line and keeps their
+	// columns.
+	view.AnnotateLine(1, first)
+	view.AnnotateLine(1, second, third, wide)
 
-	assert.Equal(t, line.Annotations{first, second, third}, view.Annotations(1))
+	assert.Equal(t, line.Annotations{first, second, third, wide}, view.Annotations(1))
 	assert.Nil(t, view.Annotations(0))
+}
+
+func TestView_Annotate(t *testing.T) {
+	t.Parallel()
+
+	three := stringtest.Input(`
+		key1: value1
+		key2: value2
+		key3: value3
+	`)
+
+	// Annotate adds the annotation that label returns on the first line a
+	// range covers, and the one that mark returns on each later line.
+	label := func(start, end int) line.Annotation {
+		return line.Annotation{
+			Content:   "note",
+			Kind:      kind.TextWarn,
+			Placement: line.Below,
+			Cols:      position.NewSpan(start, end),
+		}
+	}
+	mark := func(start, end int) line.Annotation {
+		return line.Annotation{Kind: kind.TextWarn, Placement: line.Below, Cols: position.NewSpan(start, end)}
+	}
+
+	tcs := map[string]struct {
+		input  string
+		ranges []position.Range
+		want   []line.Annotations // The annotations on each line.
+	}{
+		"no ranges add nothing": {
+			input: "key: value\n",
+			want:  []line.Annotations{nil},
+		},
+		"single line range": {
+			input:  "key: value\n",
+			ranges: []position.Range{yamltest.LineRange(0, 5, 10)},
+			want:   []line.Annotations{{label(5, 10)}},
+		},
+		"columns are clamped to the line": {
+			input:  "key: value\n",
+			ranges: []position.Range{yamltest.LineRange(0, -3, 99)},
+			want:   []line.Annotations{{label(0, len("key: value"))}},
+		},
+		// The first line takes column 3 to its end, the middle line all of
+		// its columns, and the last line its start to column 5. Only the
+		// first carries the content.
+		"multi-line range labels its first line": {
+			input:  three,
+			ranges: []position.Range{position.NewRange(position.New(0, 3), position.New(2, 5))},
+			want: []line.Annotations{
+				{label(3, len("key1: value1"))},
+				{mark(0, len("key2: value2"))},
+				{mark(0, 5)},
+			},
+		},
+		"each range carries the content": {
+			input: three,
+			ranges: []position.Range{
+				yamltest.LineRange(0, 0, 4),
+				position.NewRange(position.New(0, 6), position.New(1, 4)),
+			},
+			want: []line.Annotations{
+				{label(0, 4), label(6, len("key1: value1"))},
+				{mark(0, 4)},
+				nil,
+			},
+		},
+		// A range that ends at column 0 of the next line does not cover a
+		// column of that line.
+		"range ending at column 0 stops on the line before": {
+			input:  three,
+			ranges: []position.Range{position.NewRange(position.New(0, 0), position.New(1, 0))},
+			want:   []line.Annotations{{label(0, len("key1: value1"))}, nil, nil},
+		},
+		// The range does not cover a column of the line it starts on, so
+		// the next line is the first it covers.
+		"range starting at the end of a line labels the next line": {
+			input:  three,
+			ranges: []position.Range{position.NewRange(position.New(0, len("key1: value1")), position.New(1, 4))},
+			want:   []line.Annotations{nil, {label(0, 4)}, nil},
+		},
+		"empty range labels its start": {
+			input:  "key: value\n",
+			ranges: []position.Range{yamltest.LineRange(0, 3, 3)},
+			want:   []line.Annotations{{label(3, 3)}},
+		},
+		// The ranges start past the end of the line, at its end, and
+		// before its first column.
+		"empty range is clamped to the line": {
+			input: "key: value\n",
+			ranges: []position.Range{
+				yamltest.LineRange(0, 50, 60),
+				position.NewRange(position.New(0, len("key: value")), position.New(1, 0)),
+				yamltest.LineRange(0, -5, -2),
+			},
+			want: []line.Annotations{{
+				label(len("key: value"), len("key: value")),
+				label(len("key: value"), len("key: value")),
+				label(0, 0),
+			}},
+		},
+		// Both ranges end before they start, one on an earlier line and
+		// one on the same line.
+		"inverted range labels its start": {
+			input: three,
+			ranges: []position.Range{
+				position.NewRange(position.New(2, 4), position.New(1, 3)),
+				yamltest.LineRange(1, 6, 2),
+			},
+			want: []line.Annotations{nil, {label(6, 6)}, {label(4, 4)}},
+		},
+		// A range that starts before the first line and ends past the last
+		// applies only to the lines that exist. A range outside the content
+		// adds nothing, whether or not it covers a column.
+		"out of range lines are skipped": {
+			input: stringtest.LinesLF(letterRows(2)...),
+			ranges: []position.Range{
+				position.NewRange(position.New(-1, 0), position.New(5, 3)),
+				yamltest.LineRange(7, 0, 3),
+				yamltest.LineRange(7, 2, 2),
+				yamltest.LineRange(-1, 2, 2),
+				position.NewRange(position.New(2, 0), position.New(1, 0)),
+			},
+			want: []line.Annotations{{label(0, 4)}, {mark(0, 4)}},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			view := newView(tc.input)
+			require.Equal(t, len(tc.want), view.Count())
+
+			// Annotate sets the columns from each range, so the columns of
+			// the annotation it takes do not reach the view.
+			view.Annotate(line.Annotation{
+				Content:   "note",
+				Kind:      kind.TextWarn,
+				Placement: line.Below,
+				Cols:      position.NewSpan(40, 50),
+			}, tc.ranges...)
+
+			for i, want := range tc.want {
+				assert.Equal(t, want, view.Annotations(i), "line %d", i)
+			}
+		})
+	}
+}
+
+func TestView_Annotate_Renders(t *testing.T) {
+	t.Parallel()
+
+	input := stringtest.Input(`
+		menu:
+		  note: fresh
+		  bread: daily
+	`)
+
+	// The range covers "fresh" and the "  bread" of the next line.
+	stale := position.NewRange(position.New(1, 8), position.New(2, 7))
+	note := line.Annotation{Content: "stale", Kind: kind.TextError, Placement: line.Below}
+
+	t.Run("range across lines", func(t *testing.T) {
+		t.Parallel()
+
+		view := newView(input)
+		view.Annotate(note, stale)
+
+		assert.Equal(t, stringtest.JoinLF(
+			"   1 | menu:",
+			"   2 |   note: fresh",
+			"     |         ^^^^^ stale",
+			"   3 |   bread: daily",
+			"     | ^^^^^^^",
+		), view.String())
+	})
+
+	t.Run("point", func(t *testing.T) {
+		t.Parallel()
+
+		view := newView(input)
+		view.Annotate(note, position.NewRange(position.New(1, 2), position.New(1, 2)))
+
+		assert.Equal(t, stringtest.JoinLF(
+			"   2 |   note: fresh",
+			"     |   ^ stale",
+		), view.Hunks(0).String())
+	})
+
+	t.Run("above", func(t *testing.T) {
+		t.Parallel()
+
+		// Above a line, only an annotation with content renders, so the
+		// later lines of the range do not get a row.
+		view := newView(input)
+		view.Annotate(line.Annotation{Content: "stale", Placement: line.Above}, stale)
+
+		assert.Equal(t, stringtest.JoinLF(
+			"   1 | menu:",
+			"     |         stale",
+			"   2 |   note: fresh",
+			"   3 |   bread: daily",
+		), view.String())
+	})
+
+	t.Run("slice", func(t *testing.T) {
+		t.Parallel()
+
+		// A range from the content applies to a view that holds some of
+		// its lines. This slice does not hold the first line the range
+		// covers, so the content does not render. Slicing after the
+		// annotation renders the same.
+		sliced := newView(input).Slice(position.NewSpan(2, 3))
+		sliced.Annotate(note, stale)
+
+		whole := newView(input)
+		whole.Annotate(note, stale)
+
+		want := stringtest.JoinLF(
+			"   3 |   bread: daily",
+			"     | ^^^^^^^",
+		)
+
+		assert.Equal(t, want, sliced.String())
+		assert.Equal(t, want, whole.Slice(position.NewSpan(2, 3)).String())
+	})
 }
 
 func TestView_AddLineOverlay(t *testing.T) {
@@ -477,7 +708,7 @@ func TestView_Clone(t *testing.T) {
 				view := newView(input)
 				view.SetFlag(1, line.FlagDeleted)
 				view.AddLineOverlay(1, overlay)
-				view.Annotate(1, note)
+				view.AnnotateLine(1, note)
 
 				got := copyOf(view)
 
@@ -490,7 +721,7 @@ func TestView_Clone(t *testing.T) {
 				got.SetFlag(1, line.FlagInserted)
 				got.SetFlag(2, line.FlagInserted)
 				got.AddLineOverlay(1, line.Overlay{Cols: position.NewSpan(5, 10), Kind: "test2"})
-				got.Annotate(1, line.Annotation{Content: "modified", Placement: line.Above})
+				got.AnnotateLine(1, line.Annotation{Content: "modified", Placement: line.Above})
 
 				assert.Equal(t, []line.Flag{line.FlagDefault, line.FlagDeleted, line.FlagDefault}, flagsOf(view))
 				assert.Equal(t, line.Overlays{overlay}, view.Overlays(1))
@@ -506,7 +737,7 @@ func TestView_Clone(t *testing.T) {
 				got := copyOf(view)
 
 				got.AddOverlay(kind.GenericHighlight, yamltest.LineRange(0, 0, 3))
-				got.Annotate(1, line.Annotation{Content: "note", Placement: line.Below})
+				got.AnnotateLine(1, line.Annotation{Content: "note", Placement: line.Below})
 				got.SetFlag(2, line.FlagInserted)
 
 				assert.Empty(t, view.Overlays(0))
@@ -514,7 +745,7 @@ func TestView_Clone(t *testing.T) {
 				assert.Equal(t, line.FlagDefault, view.Flag(2))
 
 				view.AddOverlay(kind.GenericError, yamltest.LineRange(1, 0, 3))
-				view.Annotate(0, line.Annotation{Content: "other", Placement: line.Above})
+				view.AnnotateLine(0, line.Annotation{Content: "other", Placement: line.Above})
 				view.SetFlag(0, line.FlagDeleted)
 
 				assert.Empty(t, got.Overlays(1))
@@ -650,7 +881,7 @@ func TestView_Slice(t *testing.T) {
 		for i, ln := range view.All() {
 			view.SetFlag(i, line.Flag(i))
 			view.AddLineOverlay(i, line.Overlay{Cols: position.NewSpan(0, i+1), Kind: "test"})
-			view.Annotate(i, line.Annotation{
+			view.AnnotateLine(i, line.Annotation{
 				Content:   ln.Content(),
 				Placement: line.Below,
 				Cols:      position.NewSpan(0, i+1),
@@ -697,13 +928,13 @@ func TestView_Slice(t *testing.T) {
 
 		before := newView(input)
 		before.AddOverlay("test", rng)
-		before.Annotate(2, ann)
+		before.AnnotateLine(2, ann)
 
 		before = before.Slice(position.NewSpan(2, 4))
 
 		after := newView(input).Slice(position.NewSpan(2, 4))
 		after.AddOverlay("test", rng)
-		after.Annotate(2, ann)
+		after.AnnotateLine(2, ann)
 
 		want := stringtest.JoinLF(
 			"   3 | c: 3",
@@ -731,7 +962,7 @@ func TestView_Slice(t *testing.T) {
 
 		view := newView(input).Slice(position.NewSpan(0, 2))
 		view.AddOverlay("test", yamltest.LineRange(3, 0, 4))
-		view.Annotate(3, line.Annotation{Content: "hidden", Placement: line.Below})
+		view.AnnotateLine(3, line.Annotation{Content: "hidden", Placement: line.Below})
 
 		assert.Len(t, view.Overlays(3), 1)
 		assert.Equal(t, stringtest.JoinLF("   1 | a: 1", "   2 | b: 2"), view.String())
@@ -765,7 +996,7 @@ func TestView_Slice_CostIndependentOfContent(t *testing.T) {
 		view := line.NewView(newLines(yamltest.GenerateYAML(n)))
 		view.SetFlag(110, line.FlagInserted)
 		view.AddLineOverlay(120, line.Overlay{Cols: position.NewSpan(0, 3), Kind: kind.GenericHighlight})
-		view.Annotate(130, line.Annotation{Content: "note", Placement: line.Below})
+		view.AnnotateLine(130, line.Annotation{Content: "note", Placement: line.Below})
 
 		var (
 			before, after runtime.MemStats
@@ -871,11 +1102,14 @@ func TestView_String_Flags(t *testing.T) {
 			input: stringtest.LinesLF("a: 1", "b: 2"),
 			decorate: func(view *line.View) *line.View {
 				view.SetFlag(1, line.FlagInserted)
-				view.Annotate(
+				view.AnnotateLine(
 					1,
 					line.Annotation{Content: "@@ -1 +1,2 @@", Kind: kind.UIHunkHeader, Placement: line.Above},
 				)
-				view.Annotate(1, line.Annotation{Content: "new", Placement: line.Below, Cols: position.NewSpan(3, 4)})
+				view.AnnotateLine(
+					1,
+					line.Annotation{Content: "new", Placement: line.Below, Cols: position.NewSpan(3, 4)},
+				)
 
 				return view
 			},
@@ -946,8 +1180,8 @@ func TestView_String(t *testing.T) {
 		t.Parallel()
 
 		view := newView(stringtest.LinesLF(letterRows(3)...))
-		view.Annotate(0, line.Annotation{Content: "top", Placement: line.Above})
-		view.Annotate(2, line.Annotation{Content: "bottom", Placement: line.Below, Cols: position.NewSpan(3, 4)})
+		view.AnnotateLine(0, line.Annotation{Content: "top", Placement: line.Above})
+		view.AnnotateLine(2, line.Annotation{Content: "bottom", Placement: line.Below, Cols: position.NewSpan(3, 4)})
 
 		want := stringtest.JoinLF(
 			"     | top",
@@ -1395,7 +1629,7 @@ func TestView_String(t *testing.T) {
 				view := newView(tc.input + "\n")
 				view.AddOverlay("test1", tc.ranges...)
 				view.AddLineOverlay(0, tc.overlays...)
-				view.Annotate(0, tc.annotations...)
+				view.AnnotateLine(0, tc.annotations...)
 
 				assert.Equal(t, tc.want, view.String())
 			})
@@ -1410,7 +1644,7 @@ func TestView_OutOfRange(t *testing.T) {
 		"Flag":           func(v *line.View, i int) { v.Flag(i) },
 		"SetFlag":        func(v *line.View, i int) { v.SetFlag(i, line.FlagInserted) },
 		"Annotations":    func(v *line.View, i int) { v.Annotations(i) },
-		"Annotate":       func(v *line.View, i int) { v.Annotate(i, line.Annotation{Content: "x"}) },
+		"AnnotateLine":   func(v *line.View, i int) { v.AnnotateLine(i, line.Annotation{Content: "x"}) },
 		"Overlays":       func(v *line.View, i int) { v.Overlays(i) },
 		"AddLineOverlay": func(v *line.View, i int) { v.AddLineOverlay(i, line.Overlay{}) },
 		"Windows":        func(v *line.View, i int) { v.Windows(i) },
@@ -1428,7 +1662,7 @@ func TestView_OutOfRange(t *testing.T) {
 
 				// Decorated, so every slice exists and is bounds-checked.
 				view.SetFlag(0, line.FlagInserted)
-				view.Annotate(0, line.Annotation{Content: "x"})
+				view.AnnotateLine(0, line.Annotation{Content: "x"})
 				view.AddLineOverlay(0, line.Overlay{})
 
 				assert.Panics(t, func() { call(view, i) }, "index %d on decorated view", i)
@@ -1464,7 +1698,7 @@ func TestView_Hunks(t *testing.T) {
 		view := newView(input)
 		view.SetFlag(0, line.FlagInserted)
 		view.AddOverlay("test", yamltest.LineRange(7, 0, 1))
-		view.Annotate(4, line.Annotation{Content: "here", Placement: line.Below})
+		view.AnnotateLine(4, line.Annotation{Content: "here", Placement: line.Below})
 
 		got := view.Hunks(1)
 
@@ -1543,7 +1777,7 @@ func TestView_Hunks(t *testing.T) {
 				}
 
 				for _, i := range tc.annotated {
-					view.Annotate(i, line.Annotation{Content: "note", Placement: line.Below})
+					view.AnnotateLine(i, line.Annotation{Content: "note", Placement: line.Below})
 				}
 
 				got := view.Hunks(tc.context)
@@ -1572,8 +1806,8 @@ func TestView_Hunks(t *testing.T) {
 		// The hunks at context 2 hold a separator above line g, a context
 		// line, which must not count as decoration when narrowed.
 		view := newView(stringtest.JoinLF(letterRows(10)...))
-		view.Annotate(1, line.Annotation{Content: "x", Placement: line.Below})
-		view.Annotate(8, line.Annotation{Content: "y", Placement: line.Below})
+		view.AnnotateLine(1, line.Annotation{Content: "x", Placement: line.Below})
+		view.AnnotateLine(8, line.Annotation{Content: "y", Placement: line.Below})
 
 		hunks := view.Hunks(2)
 		require.Equal(t, []int{6}, separators(hunks))
@@ -1593,12 +1827,12 @@ func TestView_Hunks(t *testing.T) {
 		t.Parallel()
 
 		view := newView(input)
-		view.Annotate(
+		view.AnnotateLine(
 			1,
 			line.Annotation{Content: "one", Placement: line.Below},
 			line.Annotation{Content: "and 2 more", Kind: kind.UISeparator, Placement: line.Below},
 		)
-		view.Annotate(6, line.Annotation{Content: "two", Placement: line.Below})
+		view.AnnotateLine(6, line.Annotation{Content: "two", Placement: line.Below})
 
 		want := stringtest.JoinLF(
 			"   2 | b: 2",
@@ -1704,7 +1938,7 @@ func TestView_Hunks(t *testing.T) {
 				}
 
 				for i, ann := range tc.annotations {
-					view.Annotate(i, ann)
+					view.AnnotateLine(i, ann)
 				}
 
 				assert.Equal(t, stringtest.JoinLF(tc.want...), view.Hunks(tc.context).String())
@@ -2029,10 +2263,10 @@ func TestView_Clip(t *testing.T) {
 
 			for _, cols := range tc.marks {
 				view.AddLineOverlay(0, line.Overlay{Kind: kind.GenericError, Cols: cols})
-				view.Annotate(0, line.Annotation{Kind: kind.TextError, Placement: line.Below, Cols: cols})
+				view.AnnotateLine(0, line.Annotation{Kind: kind.TextError, Placement: line.Below, Cols: cols})
 			}
 
-			view.Annotate(0, tc.annotations...)
+			view.AnnotateLine(0, tc.annotations...)
 
 			clipped := view.Clip(tc.cols)
 
@@ -2057,7 +2291,7 @@ func TestView_Clip_KeepsView(t *testing.T) {
 		view := newView(input)
 		view.SetFlag(1, line.FlagInserted)
 		view.AddOverlay(kind.GenericError, yamltest.LineRange(1, 30, 32))
-		view.Annotate(1, line.Annotation{Content: "bad", Placement: line.Below, Cols: position.NewSpan(30, 32)})
+		view.AnnotateLine(1, line.Annotation{Content: "bad", Placement: line.Below, Cols: position.NewSpan(30, 32)})
 
 		return view
 	}
@@ -2070,7 +2304,7 @@ func TestView_Clip_KeepsView(t *testing.T) {
 		clipped := newMarked().Clip(10)
 		require.Equal(t, window, clipped.Windows(1))
 
-		clipped.Annotate(1, line.Annotation{Content: "more", Placement: line.Below, Cols: position.NewSpan(12, 12)})
+		clipped.AnnotateLine(1, line.Annotation{Content: "more", Placement: line.Below, Cols: position.NewSpan(12, 12)})
 
 		assert.Equal(t, position.Spans{position.NewSpan(7, 17), position.NewSpan(25, 35)}, clipped.Windows(1))
 		assert.Equal(t, stringtest.JoinLF(

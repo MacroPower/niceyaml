@@ -45,7 +45,7 @@ func rowSegments(segs []line.Segment) string {
 func newClippedView(input string, i, cols int, overlays []position.Span, annotations ...line.Annotation) *line.View {
 	view := newView(input)
 	view.AddLineOverlay(i, yamltest.ErrorOverlays(overlays...)...)
-	view.Annotate(i, annotations...)
+	view.AnnotateLine(i, annotations...)
 
 	return view.Clip(cols)
 }

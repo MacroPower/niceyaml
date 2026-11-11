@@ -140,7 +140,7 @@ func TestSource_View_Annotate(t *testing.T) {
 			for idx, ann := range tc.annotations {
 				require.Less(t, idx, view.Count(), "annotation index out of range")
 
-				view.Annotate(idx, ann)
+				view.AnnotateLine(idx, ann)
 			}
 
 			assert.Equal(t, tc.want, view.String())
@@ -4154,7 +4154,7 @@ func TestSource_View_IsIndependent(t *testing.T) {
 	// A change to one view reaches neither the Source nor another view.
 	view := source.View()
 	view.AddOverlay("test1", yamltest.LineRange(0, 0, 5))
-	view.Annotate(0, line.Annotation{Content: "note", Placement: line.Below})
+	view.AnnotateLine(0, line.Annotation{Content: "note", Placement: line.Below})
 
 	assert.Empty(t, source.View().Overlays(0))
 	assert.Empty(t, source.View().Annotations(0))

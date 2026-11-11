@@ -117,7 +117,8 @@ func annotationCol(col, width int) int {
 // first column and without carets. [View.Clip] does not center a window on
 // it.
 //
-// Add annotations to a [View] with [View.Annotate].
+// Add annotations to a [View] with [View.Annotate], which sets Cols from a
+// [position.Range], or with [View.AnnotateLine], which keeps Cols as given.
 type Annotation struct {
 	Content   string
 	Kind      kind.Kind
@@ -315,9 +316,8 @@ func (a Annotations) String() string {
 // specific portions of a line. Kind names the style the printer renders the
 // columns with, as its [go.jacobcolvin.com/niceyaml/style.Styles] resolves
 // it. An overlay does not draw a caret, so a range shows in plain output
-// only when an [Annotation] labels the same columns. For a range that spans
-// several lines, add one annotation for each range that [Lines.SliceLines]
-// splits it into.
+// only when an [Annotation] labels the same columns. [View.Annotate] labels
+// the range that [View.AddOverlay] takes, on every line the range covers.
 //
 // Add overlays to a [View] with [View.AddOverlay], [View.BlendOverlay], or
 // [View.AddLineOverlay].
