@@ -65,12 +65,48 @@ func WithDefaults[T any](fn func(*T)) DecodeOption {
 //		return err
 //	}
 //
+// A caller that holds its type as a runtime value, such as a
+// [reflect.Type], starts from [DefaultsInto]. A pointer to a nil pointer
+// also starts from the defaults, because DecodeInto allocates the value
+// that the nil pointer points to from them. A null or empty document
+// leaves that pointer nil, though, and Decode returns the defaults for it.
+//
 // A panic in a function of WithDefaults reaches the caller.
 func Defaults[T any](opts ...DecodeOption) T {
 	// A nil interface asserts to the zero value, which it is.
 	v, _ := reflect.TypeAssert[T](newDecodeConfig(nil, opts).defaults.value(reflect.TypeFor[T]()))
 
 	return v
+}
+
+// DefaultsInto replaces the value that v points to with the value that
+// [Defaults] returns for its type under opts. It does not merge, so a
+// field that v held before takes its default too. [Node.DecodeInto] from
+// the result matches [Node.Decode], as it does from Defaults. A caller
+// whose type is a runtime value, such as a [reflect.Type], uses
+// DefaultsInto where it cannot name a type for Defaults:
+//
+//	v := reflect.New(t).Interface()
+//	if err := niceyaml.DefaultsInto(v, decoding); err != nil {
+//		return err
+//	}
+//	if err := doc.DecodeInto(ctx, v, decoding); err != nil {
+//		return err
+//	}
+//
+// For a v that is nil, a nil pointer, or not a pointer, DefaultsInto
+// returns an error that wraps [ErrDecodeTarget] and leaves v as it is. A
+// panic in a function of [WithDefaults] reaches the caller.
+func DefaultsInto(v any, opts ...DecodeOption) error {
+	err := checkTarget(v, ErrDecodeTarget, true)
+	if err != nil {
+		return err
+	}
+
+	rv := reflect.ValueOf(v).Elem()
+	rv.Set(newDecodeConfig(nil, opts).defaults.value(rv.Type()))
+
+	return nil
 }
 
 // defaultFuncs holds the function that [WithDefaults] gives each type.

@@ -2,7 +2,6 @@ package niceyaml
 
 import (
 	"context"
-	"reflect"
 	"slices"
 
 	"github.com/goccy/go-yaml/ast"
@@ -31,11 +30,6 @@ func init() {
 		return isolate(ctx, held)
 	}
 	hook.Rewrap = rewrap
-	hook.Defaults = func(t reflect.Type, opts any) reflect.Value {
-		o, _ := opts.([]DecodeOption) //nolint:errcheck // The hook takes the options of a decode.
-
-		return newDecodeConfig(nil, o).defaults.value(t)
-	}
 	hook.Layers = func(src any) []any {
 		s, _ := src.(*Source) //nolint:errcheck // The hook takes a *Source.
 

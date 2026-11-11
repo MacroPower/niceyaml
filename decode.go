@@ -878,7 +878,11 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // field the document leaves out keeps its value. The Decoding section
 // describes how a mapping, a null, and an alias fill v. The Defaults
 // section describes the value that each value the decode creates starts
-// from.
+// from. A decode into a v that [Defaults] or [DefaultsInto] filled returns
+// what [Node.Decode] returns. A caller whose type is a runtime value, such
+// as a [reflect.Type], fills v with DefaultsInto. A v that points to a nil
+// pointer starts from the defaults too, except for a null or empty
+// document, which leaves that pointer nil.
 //
 // Every error comes back bound to the source as a [SourceError]. An
 // error of the decoder matches [ErrDecode] and carries the `$` path of

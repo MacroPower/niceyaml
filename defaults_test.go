@@ -2,6 +2,7 @@ package niceyaml_test
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -92,6 +93,177 @@ func TestDefaults(t *testing.T) {
 	assert.PanicsWithValue(t, "boom", func() {
 		niceyaml.Defaults[defaultsPrinter](niceyaml.WithDefaults(func(*defaultsPrinter) { panic("boom") }))
 	})
+}
+
+func TestDefaultsInto(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		target any
+		want   any
+		opts   []niceyaml.DecodeOption
+	}{
+		"struct": {
+			target: &defaultsCafe{},
+			opts:   []niceyaml.DecodeOption{defaultsDecoding},
+			want:   new(defaultedCafe()),
+		},
+		"replaces what the target held": {
+			target: &defaultsPrinter{Host: "held", Port: 1},
+			opts:   []niceyaml.DecodeOption{defaultsDecoding},
+			want:   &defaultsPrinter{Port: 9100},
+		},
+		"without options": {
+			target: &defaultsPrinter{Host: "held", Port: 1},
+			want:   &defaultsPrinter{},
+		},
+		"pointer to a pointer": {
+			target: new(&defaultsPrinter{Port: 1}),
+			opts:   []niceyaml.DecodeOption{defaultsDecoding},
+			want:   new((*defaultsPrinter)(nil)),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			require.NoError(t, niceyaml.DefaultsInto(tc.target, tc.opts...))
+			assert.Equal(t, tc.want, tc.target)
+		})
+	}
+}
+
+func TestDefaultsInto_MatchesDefaults(t *testing.T) {
+	t.Parallel()
+
+	// A target built from a reflect.Type gets what Defaults returns.
+	v := reflect.New(reflect.TypeFor[defaultsCafe]()).Interface()
+
+	require.NoError(t, niceyaml.DefaultsInto(v, defaultsDecoding))
+	assert.Equal(t, new(niceyaml.Defaults[defaultsCafe](defaultsDecoding)), v)
+}
+
+func TestDefaultsInto_Target(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		target any
+	}{
+		"nil":         {target: nil},
+		"nil pointer": {target: (*defaultsCafe)(nil)},
+		"not a pointer": {
+			target: defaultsCafe{},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := niceyaml.DefaultsInto(tc.target, defaultsDecoding)
+			require.ErrorIs(t, err, niceyaml.ErrDecodeTarget)
+			require.ErrorAs(t, err, new(*niceyaml.Error))
+			assert.NotErrorAs(t, err, new(*niceyaml.SourceError))
+			assert.False(t, niceyaml.IsInvalid(err))
+		})
+	}
+}
+
+func TestDefaultsInto_Panic(t *testing.T) {
+	t.Parallel()
+
+	var p defaultsPrinter
+
+	assert.PanicsWithValue(t, "boom", func() {
+		//nolint:errcheck // The call panics before it returns.
+		_ = niceyaml.DefaultsInto(&p, niceyaml.WithDefaults(func(*defaultsPrinter) { panic("boom") }))
+	})
+}
+
+func TestNode_DecodeInto_DefaultsIntoStart(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+	}{
+		"mapping":        {input: "receipts: {host: r}\n"},
+		"null document":  {input: "~\n"},
+		"empty document": {input: ""},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input)
+
+			want, err := doc.Decode[defaultsCafe](t.Context(), defaultsDecoding)
+			require.NoError(t, err)
+
+			// A caller that starts from DefaultsInto gets what Decode
+			// returns.
+			v := reflect.New(reflect.TypeFor[defaultsCafe]()).Interface()
+			require.NoError(t, niceyaml.DefaultsInto(v, defaultsDecoding))
+			require.NoError(t, doc.DecodeInto(t.Context(), v, defaultsDecoding))
+			assert.Equal(t, &want, v)
+		})
+	}
+}
+
+func TestNode_DecodeInto_DefaultsThroughNilPointer(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input   string
+		wantNil bool
+	}{
+		"mapping starts from the defaults": {
+			input: "receipts: {host: r}\n",
+		},
+		"null leaves the pointer nil": {
+			input:   "~\n",
+			wantNil: true,
+		},
+		"null tag leaves the pointer nil": {
+			input:   "!!null ''\n",
+			wantNil: true,
+		},
+		"empty document leaves the pointer nil": {
+			input:   "",
+			wantNil: true,
+		},
+		"comment only leaves the pointer nil": {
+			input:   "# c\n",
+			wantNil: true,
+		},
+		"bare header leaves the pointer nil": {
+			input:   "---\n",
+			wantNil: true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input)
+
+			var got *defaultsCafe
+
+			require.NoError(t, doc.DecodeInto(t.Context(), &got, defaultsDecoding))
+
+			if tc.wantNil {
+				assert.Nil(t, got)
+
+				return
+			}
+
+			want, err := doc.Decode[defaultsCafe](t.Context(), defaultsDecoding)
+			require.NoError(t, err)
+			assert.Equal(t, &want, got)
+		})
+	}
 }
 
 func TestNode_Decode_Defaults(t *testing.T) {

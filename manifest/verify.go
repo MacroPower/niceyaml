@@ -14,7 +14,6 @@ import (
 	"go.jacobcolvin.com/x/jsonschema"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -715,10 +714,15 @@ func (r *Registry) verifyDefaults(entry *kindEntry, compiled map[*versionEntry]*
 	opts := slices.Concat(r.cfg.decodeOptions, entry.kind.cfg.decodeOptions)
 
 	w := &defaultsWalk{
-		doc:      newSchemaDoc(cv),
-		name:     entry.kind.name + " " + current.label(),
-		defaults: func(t reflect.Type) reflect.Value { return hook.Defaults(t, opts) },
-		onPath:   map[defaultsKey]bool{},
+		doc:  newSchemaDoc(cv),
+		name: entry.kind.name + " " + current.label(),
+		defaults: func(t reflect.Type) reflect.Value {
+			p := reflect.New(t)
+			_ = niceyaml.DefaultsInto(p.Interface(), opts...) //nolint:errcheck // p is a non-nil pointer.
+
+			return p.Elem()
+		},
+		onPath: map[defaultsKey]bool{},
 	}
 
 	t := entry.kind.typ
