@@ -746,40 +746,6 @@ func TestRatioError(t *testing.T) {
 	}
 }
 
-func TestLimited(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		opts []niceyaml.SourceOption
-		want bool
-	}{
-		"default":   {want: true},
-		"limit on":  {opts: []niceyaml.SourceOption{niceyaml.WithAliasLimit(true)}, want: true},
-		"limit off": {opts: []niceyaml.SourceOption{niceyaml.WithAliasLimit(false)}},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			// The source holds the setting, so every document of it and
-			// every node of a document answer alike.
-			source := niceyaml.NewSourceFromString(stringtest.LinesLF("a: [x]", "---", "b: 1"), tc.opts...)
-			docs := yamltest.Documents(t, source, 2)
-
-			assert.Equal(t, tc.want, aliasing.Limited(docs[0]))
-			assert.Equal(t, tc.want, aliasing.Limited(docs[1]))
-			assert.Equal(t, tc.want, aliasing.Limited(yamltest.At(t, docs[0], paths.Current().Child("a"))))
-		})
-	}
-
-	t.Run("nil node", func(t *testing.T) {
-		t.Parallel()
-
-		assert.False(t, aliasing.Limited((*niceyaml.Node)(nil)))
-	})
-}
-
 func TestPastLimit(t *testing.T) {
 	t.Parallel()
 
@@ -823,49 +789,5 @@ func TestPastLimit(t *testing.T) {
 		t.Parallel()
 
 		assert.False(t, aliasing.PastLimit((*niceyaml.Node)(nil)))
-	})
-}
-
-func TestHoldsReferenceAlias(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		input string
-		path  paths.Path
-		want  bool
-	}{
-		"no alias":                              {input: "a: [x, y]\n"},
-		"alias to an anchor before it":          {input: stringtest.LinesLF("s: &s [a, b]", "t: *s")},
-		"alias inside its own anchor":           {input: "x: &x [a, *x]\n"},
-		"alias with no anchor":                  {input: "t: *s\n", want: true},
-		"alias before the anchor of its name":   {input: stringtest.LinesLF("t: *s", "s: &s [a, b]"), want: true},
-		"tagged alias with no anchor":           {input: "t: !foo *s\n", want: true},
-		"alias key with no anchor":              {input: "t: {? *s : 1}\n", want: true},
-		"merge key alias with no anchor":        {input: stringtest.LinesLF("t:", "  <<: *s"), want: true},
-		"alias with no anchor inside an anchor": {input: stringtest.LinesLF("a: &a [*s]", "t: *a"), want: true},
-		"node without an alias beside an alias with no anchor": {
-			input: stringtest.LinesLF("a: [x]", "t: *s"),
-			path:  paths.Current().Child("a"),
-			want:  true,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			doc := yamltest.AtOrSelf(t, yamltest.FirstDocument(t, tc.input), tc.path)
-
-			// The document keeps the answer, so a second call returns
-			// the same one.
-			assert.Equal(t, tc.want, aliasing.HoldsReferenceAlias(doc))
-			assert.Equal(t, tc.want, aliasing.HoldsReferenceAlias(doc))
-		})
-	}
-
-	t.Run("nil node", func(t *testing.T) {
-		t.Parallel()
-
-		assert.False(t, aliasing.HoldsReferenceAlias((*niceyaml.Node)(nil)))
 	})
 }

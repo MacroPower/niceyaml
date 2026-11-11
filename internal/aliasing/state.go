@@ -16,13 +16,15 @@ var StateOf func(n any) *State
 // State is what one YAML document keeps for the checks of this package.
 // It holds whether the alias limit applies to the document and the
 // [Budget] of the text that its aliases write out. It also holds the
-// [Facts] of its anchors and aliases and the result of each count. Every Node of the
+// [Facts] of its anchors and aliases, the [ReferenceWeights] of its
+// reference documents, and the result of each count. Every Node of the
 // document shares it, so a check of each item of a list counts the
 // document once.
 //
 // Create instances with [NewState].
 type State struct {
 	facts     func() *Facts
+	refs      func() *ReferenceWeights
 	aliasErr  error
 	textErr   error
 	budget    Budget
@@ -35,10 +37,15 @@ type State struct {
 // applies to the document when limit is set, and the text that its
 // aliases write out must fit budget. The first call of [State.Facts] calls
 // doc for the body of the document and the resolver that its aliases
-// resolve through.
-func NewState(limit bool, budget Budget, doc func() (ast.Node, *paths.Resolver)) *State {
+// resolve through. [State.References] calls refs for the weights of the
+// reference documents that the aliases of the document read. A nil refs
+// stands for a document without reference documents.
+func NewState(
+	limit bool, budget Budget, doc func() (ast.Node, *paths.Resolver), refs func() *ReferenceWeights,
+) *State {
 	return &State{
 		facts:  sync.OnceValue(func() *Facts { return NewFacts(doc()) }),
+		refs:   refs,
 		budget: budget,
 		limit:  limit,
 	}
@@ -59,6 +66,17 @@ func (s *State) Budget() Budget {
 // call. Every caller gets the same Facts, so callers must not change them.
 func (s *State) Facts() *Facts {
 	return s.facts()
+}
+
+// References returns the [*ReferenceWeights] of the reference documents
+// that the aliases of the document read, or nil for a document without
+// reference documents.
+func (s *State) References() *ReferenceWeights {
+	if s.refs == nil {
+		return nil
+	}
+
+	return s.refs()
 }
 
 // ExcessiveAliasing returns the error of count, which checks what a

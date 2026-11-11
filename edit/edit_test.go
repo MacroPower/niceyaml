@@ -2201,6 +2201,24 @@ func TestDoc_Apply(t *testing.T) {
 			want:      mergeLists(8),
 			unlimited: true,
 		},
+		"set in a document that aliases to a reference document take past the alias limit": {
+			// The 500 aliases each read the 1000 scalars of the anchor of the
+			// reference document.
+			before: "v: " + yamltest.FlowSequence("*d", 500) + "\nz: 0\n",
+			ref:    "d: &d " + yamltest.FlowSequence("x", 1000) + "\n",
+			path:   paths.Doc().Child("z"),
+			fn:     set(1),
+			err:    "test.yaml:1:5: aliases expand the document past the alias limit",
+			errIs:  niceyaml.ErrExcessiveAliasing,
+		},
+		"set in a document that aliases to a reference document take past the alias limit, which does not apply": {
+			before:    "v: " + yamltest.FlowSequence("*d", 500) + "\nz: 0\n",
+			ref:       "d: &d " + yamltest.FlowSequence("x", 1000) + "\n",
+			path:      paths.Doc().Child("z"),
+			fn:        set(1),
+			want:      "v: " + yamltest.FlowSequence("*d", 500) + "\nz: 1\n",
+			unlimited: true,
+		},
 		"item that a removal leaves in a copy that a merge key hides, after a rename of the merged entry": {
 			before: stringtest.LinesLF("r0:", "  b: &x1", "    - 1", "", "  e: *x1", "  <<: {c: x}"),
 			path:   paths.Doc(),

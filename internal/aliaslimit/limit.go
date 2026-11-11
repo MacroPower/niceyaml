@@ -7,15 +7,15 @@
 //
 // The decode check of the aliasing package applies the limit to what a
 // decode of a document reads. The schema validator applies it to a
-// decoded value whose maps and slices a decode shares between aliases.
-// The paths package applies it to the nodes that one selector of a path
-// reaches. Each refuses a count past the limit with
-// [ErrExcessiveAliasing].
+// decoded value that a caller hands it, whose maps and slices a decode
+// shares between aliases. The paths package applies it to the nodes that
+// one selector of a path reaches. Each refuses a count past the limit
+// with [ErrExcessiveAliasing].
 //
 // With niceyaml.WithAliasLimit, the source of a document turns the limit
-// off for a decode of the document and for a value that the schema
-// validator decodes from it. The limit stays on for a value that a caller
-// hands the validator and for the selectors of a path.
+// off for a decode of the document, including the decode that the schema
+// validator runs. The limit stays on for a value that a caller hands the
+// validator and for the selectors of a path.
 package aliaslimit
 
 import (

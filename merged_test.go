@@ -6664,6 +6664,70 @@ func TestNewSourceFromLayers_AliasExpansion(t *testing.T) {
 		})
 	}
 
+	t.Run("aliases to a reference document past the byte limit", func(t *testing.T) {
+		t.Parallel()
+
+		// The merge writes the 100 scalars of the anchor d out at each of
+		// the 2000 aliases of the layer, each scalar on a line of its own.
+		shared := niceyaml.NewSourceFromString("d: &d " + yamltest.FlowSequence("x", 100) + "\n")
+		input := "v: " + yamltest.FlowSequence("*d", 2000) + "\n"
+
+		base := yamltest.FirstDocument(t, "base: 1\n", niceyaml.WithName("base.yaml"))
+		prod := yamltest.FirstDocument(t, input, niceyaml.WithName("prod.yaml"), niceyaml.WithReferences(shared))
+
+		merged, err := niceyaml.NewSourceFromLayers(t.Context(), []*niceyaml.Node{base, prod})
+		require.EqualError(t, err, "prod.yaml:1:1309: aliases repeat more than 256 KiB of text")
+		require.ErrorIs(t, err, niceyaml.ErrLimit)
+		require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
+		assert.True(t, niceyaml.IsInvalid(err))
+		assert.Nil(t, merged)
+
+		bound := yamltest.RequireSourceError(t, err)
+		assert.Same(t, prod, yamltest.BoundNode(t, bound))
+
+		// The same layer with the anchor inside it fails the same way,
+		// one line further down.
+		whole := yamltest.FirstDocument(t, "d: &d "+yamltest.FlowSequence("x", 100)+"\n"+input,
+			niceyaml.WithName("prod.yaml"))
+
+		_, err = niceyaml.NewSourceFromLayers(t.Context(), []*niceyaml.Node{base, whole})
+		require.EqualError(t, err, "prod.yaml:2:1309: aliases repeat more than 256 KiB of text")
+
+		// A layer of a Source with the alias limit off writes every alias
+		// out.
+		trusted := yamltest.FirstDocument(t, input, niceyaml.WithReferences(shared), niceyaml.WithAliasLimit(false))
+
+		merged, err = niceyaml.NewSourceFromLayers(t.Context(), []*niceyaml.Node{base, trusted})
+		require.NoError(t, err)
+		assert.Greater(t, len(merged.Text()), niceyaml.DefaultByteLimit)
+	})
+
+	t.Run("aliases inside a reference anchor spend the byte limit through an alias of the layer", func(t *testing.T) {
+		t.Parallel()
+
+		// The anchor b lists 20 aliases to the 100 scalars of the anchor a.
+		// The one alias of the layer writes that text out once.
+		anchors := stringtest.LinesLF(
+			"a: &a "+yamltest.FlowSequence("x", 100),
+			"b: &b "+yamltest.FlowSequence("*a", 20),
+		)
+		limit := niceyaml.WithByteLimit(16 << 10)
+
+		base := yamltest.FirstDocument(t, "base: 1\n")
+		prod := yamltest.FirstDocument(t, "v: *b\n", limit, yamltest.References(anchors))
+
+		merged, err := niceyaml.NewSourceFromLayers(t.Context(), []*niceyaml.Node{base, prod})
+		require.NoError(t, err)
+		assert.Less(t, len(merged.Text()), 16<<10)
+
+		// In one file, the aliases inside b are aliases of the layer as
+		// well, so the layer repeats that text twice.
+		whole := yamltest.FirstDocument(t, anchors+"v: *b\n", limit, niceyaml.WithName("prod.yaml"))
+
+		_, err = niceyaml.NewSourceFromLayers(t.Context(), []*niceyaml.Node{base, whole})
+		require.EqualError(t, err, "prod.yaml:3:4: aliases repeat more than 16 KiB of text")
+	})
+
 	t.Run("layers without aliases merge past the byte limit", func(t *testing.T) {
 		t.Parallel()
 

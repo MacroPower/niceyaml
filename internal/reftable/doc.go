@@ -8,4 +8,8 @@
 // anchors that a go-yaml decoder reads before a decode. These are the
 // anchors that the aliases of the decode reach. A decode thus costs what
 // its aliases reach, whatever the size of the reference documents.
+//
+// A table also keeps what the alias limit weighs for its anchors, as
+// [Table.Weights] returns it. The check of a document thus reads through
+// the aliases that the reference documents resolve.
 package reftable

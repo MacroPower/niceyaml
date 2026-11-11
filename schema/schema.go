@@ -19,7 +19,6 @@ import (
 	"go.jacobcolvin.com/x/jsonschema"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/aliaslimit"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/datapath"
@@ -652,9 +651,8 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // # Alias Limit
 //
 // The decode applies the alias limit to the document of n before it reads
-// anything. Check also applies the limit to the result, but only where
-// the document holds an alias to a reference document.
-// [niceyaml.WithAliasLimit] on the source of n turns both off.
+// anything. [niceyaml.WithAliasLimit] on the source of n turns the limit
+// off.
 //
 // The decoder writes the whole content of an alias it spells as text,
 // such as an alias used as a key. It also reads the sources of a merge
@@ -686,23 +684,13 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // root then passes the limit wherever its document does, even when
 // aliases make up a larger share of the node than of the document.
 //
-// A document that holds an alias without an anchor of its name before it
-// is the exception. A decode resolves such an alias against a reference
-// document, such as one of [niceyaml.WithReferences]. The count cannot
-// see a reference document, so it takes the alias as one node. For such
-// a document, Check also applies the limit to the result of the decode,
-// as [Schema.ValidateValue] does. A node below the root can then exceed
-// the limit where its document passes.
+// A decode resolves an alias without an anchor of its name before it
+// against a reference document, such as one of
+// [niceyaml.WithReferences]. The count reads through such an alias, so
+// the alias counts what the anchor of the reference document holds.
 //
-// The error of the check on the result matches ErrExcessiveAliasing as
-// well, and IsInvalid reports it. It does not carry a location, so Check
-// binds it as a Node binds any such error. A node below the root binds
-// it at the node, under its path, and a root binds it without a
-// position.
-//
-// [niceyaml.WithAliasLimit] on the source of n turns the limit off for
-// the decode and for the result. Check then reads every use of every
-// alias, at the cost WithAliasLimit describes.
+// With the limit off, Check reads every use of every alias, at the cost
+// that WithAliasLimit describes.
 func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 	err := n.Err()
 	if err != nil {
@@ -727,17 +715,7 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 	// the value a decode shares at it, which is a mapping or a sequence
 	// in full and a !!binary scalar by its text. An expansion check of
 	// data would repeat that count for the node alone, and could give a
-	// node below the root a verdict apart from its document's. The count
-	// cannot see a reference document, though, so data gets the check
-	// where the document holds an alias to one and the limit applies.
-	if aliasing.Limited(n) && aliasing.HoldsReferenceAlias(n) {
-		err = checkExpansion(data)
-		if err != nil {
-			//nolint:wrapcheck // Binding places the refusal, and the error keeps its own context.
-			return n.Bind(err)
-		}
-	}
-
+	// node below the root a verdict apart from its document's.
 	warnings, err := s.validate(ctx, data, n)
 
 	for _, w := range warnings {

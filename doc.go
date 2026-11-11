@@ -1687,12 +1687,45 @@
 // [Node.Nodes] refuses a path whose selectors reach far more nodes through
 // aliases than the document holds.
 //
-// The count reads the documents of a Source but not the reference documents
-// of [WithReferences], and the option on a reference Source does not change
-// anything. A decode reads in full each anchor of the reference documents
-// that its aliases reach. Nested `<<` merge keys there thus cost the decode
-// what they expand to, with the limit on or off. A program should pass only
-// trusted files as reference documents.
+// The count reads through each alias that a reference document of
+// [WithReferences] resolves. Such an alias counts what the anchor of its
+// name holds there, through the aliases inside that anchor. A decode also
+// reads each reference anchor that its aliases reach once. That read counts
+// as the definition of an anchor counts in its own document, and it holds
+// each anchor inside that anchor. A document thus gets the verdict that it
+// gets with those anchors defined inside it. Defaults that a few aliases or
+// `<<` merge keys share pass as they do in one file. An upload that repeats
+// a large reference anchor many times fails, and the error binds at an
+// alias of the upload:
+//
+//	upload.yaml:1:5: aliases expand the document past the alias limit
+//
+// The reference documents can define one anchor name more than once. The
+// count then takes the largest anchor that a decode can read for the name,
+// as the References section describes those anchors. A document whose
+// decode reads a smaller anchor of the name can thus fail, even with one
+// alias. One file that defines the same anchors counts the anchor that its
+// decode reads, so that file can pass. Give each reference anchor a name
+// of its own to avoid that refusal.
+//
+// Reference anchors that reach each other by name in a loop count as past
+// the limit, so a document whose aliases reach the loop fails. An anchor
+// that holds an alias of its own name, as in "m: &m {k: *m}", is a loop of
+// one name. A decode into an any value takes that alias as null, but a
+// decode into a Go type follows it and might not end. The count thus
+// refuses a document whose aliases reach such an anchor, whatever reads the
+// document. One file that defines the anchor reads the alias as null in
+// every decode, so that file can pass.
+//
+// A loop counts when it closes through any anchor that a decode can read
+// for a name. An anchor inside another anchor is such an anchor even when a
+// later anchor shares its name, as the References section describes. A
+// decode reads that inner anchor only after it reads the outer anchor, but
+// the count refuses every document whose aliases reach the loop.
+//
+// [WithAliasLimit] on the Source that reads the reference documents decides
+// whether the count runs. The option on a reference Source does not change
+// anything.
 //
 // [NewSourceFromLayers] expands each alias of a layer in full, so a layer
 // must pass the limit as a decode into a type that reads text does. The byte
@@ -1742,6 +1775,13 @@
 //   - Every alias keeps the nesting of the document within the depth limit.
 //     An alias nests the levels around it and the levels that its content
 //     nests, through the aliases there.
+//
+// An alias that a reference document of [WithReferences] resolves repeats
+// the text of its anchor there and nests the levels of that anchor. Both
+// counts follow the aliases inside the anchor. Those aliases are not
+// aliases of the document, so their text counts only where an alias of the
+// document repeats the anchor. A document can thus fit the byte limit
+// where one file that also defines the anchors does not.
 //
 // Such a decode or merge of a node that holds an alias checks the whole
 // document before it writes any text. The check does not follow which values

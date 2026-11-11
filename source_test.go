@@ -6082,26 +6082,63 @@ func TestWithReferences(t *testing.T) {
 		// sources through the aliases of the document. A document past the
 		// alias limit does not read them, so the error binds as the
 		// resolver binds it.
-		input := yamltest.AliasLevels(5) + stringtest.LinesLF("x:", "  kind: a", "  <<: *base")
-		refs := yamltest.References("base: &base {replicas: 1}\n")
-		path := paths.Doc().Child("x", "kind")
+		const merge = "x:\n  kind: a\n  <<: *base\n"
 
-		doc := yamltest.FirstDocument(t, input, niceyaml.WithName("app.yaml"), refs)
+		tcs := map[string]struct {
+			input string
+			refs  string
+			// The error of the same document with the limit off.
+			trusted string
+		}{
+			"aliases to anchors of the document": {
+				input:   yamltest.AliasLevels(5) + merge,
+				refs:    "base: &base {replicas: 1}\n",
+				trusted: "app.yaml:9:9: $.x.kind: bad",
+			},
+			"aliases to an anchor of a reference document": {
+				input:   "v: " + yamltest.FlowSequence("*d", 500) + "\n" + merge,
+				refs:    "base: &base {replicas: 1}\nd: &d " + yamltest.FlowSequence("x", 1000) + "\n",
+				trusted: "app.yaml:3:9: $.x.kind: bad",
+			},
+		}
 
-		_, err := doc.Decode[any](t.Context())
-		require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		err = doc.Bind(niceyaml.NewError("bad", niceyaml.AtPath(path)))
-		require.EqualError(t, err, "app.yaml: $.x.kind: bad")
+				refs := yamltest.References(tc.refs)
+				path := paths.Doc().Child("x", "kind")
 
-		bound := yamltest.RequireSourceError(t, err)
-		require.EqualError(t, bound.Unresolved(), "resolve $.x.kind: alias reads a reference document: *base")
-		require.ErrorIs(t, bound.Unresolved(), paths.ErrReferenceAlias)
+				doc := yamltest.FirstDocument(t, tc.input, niceyaml.WithName("app.yaml"), refs)
 
-		// With the limit off, the same document reads the merge sources.
-		trusted := yamltest.FirstDocument(t, input, niceyaml.WithName("app.yaml"), refs, niceyaml.WithAliasLimit(false))
-		err = trusted.Bind(niceyaml.NewError("bad", niceyaml.AtPath(path)))
-		require.EqualError(t, err, "app.yaml:9:9: $.x.kind: bad")
+				_, err := doc.Decode[any](t.Context())
+				require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
+
+				err = doc.Bind(niceyaml.NewError("bad", niceyaml.AtPath(path)))
+				require.EqualError(t, err, "app.yaml: $.x.kind: bad")
+
+				bound := yamltest.RequireSourceError(t, err)
+				require.EqualError(t, bound.Unresolved(), "resolve $.x.kind: alias reads a reference document: *base")
+				require.ErrorIs(t, bound.Unresolved(), paths.ErrReferenceAlias)
+
+				// A validator binds its error before any decode counts the
+				// aliases, and it binds the same way.
+				fresh := yamltest.FirstDocument(t, tc.input, niceyaml.WithName("app.yaml"), refs)
+
+				err = fresh.Validate(t.Context(), niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+					return niceyaml.NewError("bad", niceyaml.AtPath(path))
+				}))
+				require.EqualError(t, err, "app.yaml: $.x.kind: bad")
+
+				// With the limit off, the same document reads the merge
+				// sources.
+				trusted := yamltest.FirstDocument(t, tc.input,
+					niceyaml.WithName("app.yaml"), refs, niceyaml.WithAliasLimit(false))
+
+				err = trusted.Bind(niceyaml.NewError("bad", niceyaml.AtPath(path)))
+				require.EqualError(t, err, tc.trusted)
+			})
+		}
 	})
 
 	t.Run("goroutines bind beside a merge of a reference at once", func(t *testing.T) {
@@ -7161,6 +7198,293 @@ func TestWithAliasLimit(t *testing.T) {
 		require.EqualError(t, err, "bomb.yaml: resolve $.a[5][*][*][*][*][*]: excessive aliasing")
 		require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
 		assert.False(t, niceyaml.IsInvalid(err))
+	})
+}
+
+func TestWithAliasLimit_References(t *testing.T) {
+	t.Parallel()
+
+	// The reference document anchors a sequence of 1000 scalars. The
+	// upload lists 500 aliases to it, so a decode of the upload reads
+	// half a million nodes through them.
+	defaults := "d: &d " + yamltest.FlowSequence("x", 1000) + "\n"
+	upload := "v: " + yamltest.FlowSequence("*d", 500) + "\n"
+
+	const want = "upload.yaml:1:5: aliases expand the document past the alias limit"
+
+	type config struct {
+		V [][]string `yaml:"v"`
+	}
+
+	shape := schema.MustCompile([]byte(`{"type": "object"}`))
+
+	// Each reader takes the test that runs it, so a helper that fails
+	// inside a reader fails that test.
+	tcs := map[string]func(t *testing.T, n *niceyaml.Node) error{
+		"typed decode": func(t *testing.T, n *niceyaml.Node) error {
+			t.Helper()
+
+			_, err := n.Decode[config](t.Context())
+
+			return err
+		},
+		"decode into any": func(t *testing.T, n *niceyaml.Node) error {
+			t.Helper()
+
+			_, err := n.Decode[any](t.Context())
+
+			return err
+		},
+		"decode with a schema validator": func(t *testing.T, n *niceyaml.Node) error {
+			t.Helper()
+
+			_, err := n.Decode[config](t.Context(), niceyaml.WithValidator(shape))
+
+			return err
+		},
+		"schema validation": func(t *testing.T, n *niceyaml.Node) error {
+			t.Helper()
+
+			return n.Validate(t.Context(), shape)
+		},
+		"decode of a scoped node": func(t *testing.T, n *niceyaml.Node) error {
+			t.Helper()
+
+			_, err := yamltest.At(t, n, paths.Current().Child("v")).Decode[[][]string](t.Context())
+
+			return err
+		},
+		// An encode decodes the document, so it gets the error of that
+		// decode.
+		"encode of a node": func(t *testing.T, n *niceyaml.Node) error {
+			t.Helper()
+
+			_, err := n.MarshalYAML(t.Context())
+
+			return err //nolint:wrapcheck // The test inspects the error as it is.
+		},
+		"encode of a source": func(t *testing.T, n *niceyaml.Node) error {
+			t.Helper()
+
+			_, err := n.Source().MarshalYAML(t.Context())
+
+			return err
+		},
+	}
+
+	for name, read := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			// The node of the upload, in a Source with opts that reads a
+			// reference Source with refOpts.
+			node := func(refOpts []niceyaml.SourceOption, opts ...niceyaml.SourceOption) *niceyaml.Node {
+				shared := niceyaml.NewSourceFromString(defaults, refOpts...)
+				opts = append(opts, niceyaml.WithName("upload.yaml"), niceyaml.WithReferences(shared))
+
+				return yamltest.FirstDocument(t, upload, opts...)
+			}
+
+			// The option of the reference Source does not reach the
+			// upload.
+			limited := map[string]*niceyaml.Node{
+				"default":             node(nil),
+				"limit on":            node(nil, niceyaml.WithAliasLimit(true)),
+				"reference limit off": node([]niceyaml.SourceOption{niceyaml.WithAliasLimit(false)}),
+			}
+
+			for via, n := range limited {
+				err := read(t, n)
+				require.EqualError(t, err, want, via)
+				require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing, via)
+				require.NotErrorIs(t, err, niceyaml.ErrLimit, via)
+				require.NotErrorIs(t, err, niceyaml.ErrDecode, via)
+				assert.True(t, niceyaml.IsInvalid(err), via)
+			}
+
+			// With the limit off, the same reader reads the upload.
+			require.NoError(t, read(t, node(nil, niceyaml.WithAliasLimit(false))))
+		})
+	}
+
+	t.Run("the same anchor inside the document", func(t *testing.T) {
+		t.Parallel()
+
+		// A document that defines the anchor gets the same verdict, one
+		// line further down.
+		doc := yamltest.FirstDocument(t, defaults+upload, niceyaml.WithName("upload.yaml"))
+
+		_, err := doc.Decode[any](t.Context())
+		require.EqualError(t, err, "upload.yaml:2:5: aliases expand the document past the alias limit")
+	})
+
+	t.Run("shared defaults", func(t *testing.T) {
+		t.Parallel()
+
+		type service struct {
+			Host string `yaml:"host"`
+			Port int    `yaml:"port"`
+		}
+
+		shared := niceyaml.NewSourceFromString("d: &d {host: localhost, port: 80}\n")
+		doc := yamltest.FirstDocument(t,
+			stringtest.LinesLF("server: {<<: *d}", "worker: {<<: *d, port: 81}"),
+			niceyaml.WithReferences(shared),
+		)
+
+		got, err := doc.Decode[map[string]service](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]service{
+			"server": {Host: "localhost", Port: 80},
+			"worker": {Host: "localhost", Port: 81},
+		}, got)
+	})
+
+	t.Run("one alias to a large anchor", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, "v: [*d]\n", yamltest.References(defaults))
+
+		got, err := doc.Decode[config](t.Context())
+		require.NoError(t, err)
+		require.Len(t, got.V, 1)
+		assert.Len(t, got.V[0], 1000)
+	})
+
+	t.Run("text of a typed decode", func(t *testing.T) {
+		t.Parallel()
+
+		// The decoder writes the node of a value that reads text out as
+		// text, so the aliases must fit the byte limit of the upload.
+		type texts struct {
+			V []aliasText `yaml:"v"`
+		}
+
+		shared := niceyaml.NewSourceFromString("s: &s " + strings.Repeat("x", 1000) + "\n")
+		doc := yamltest.FirstDocument(t, "v: "+yamltest.FlowSequence("*s", 20)+"\n",
+			niceyaml.WithName("upload.yaml"),
+			niceyaml.WithByteLimit(4096),
+			niceyaml.WithReferences(shared),
+		)
+
+		_, err := doc.Decode[texts](t.Context())
+		require.EqualError(t, err, "upload.yaml:1:21: aliases repeat more than 4 KiB of text")
+		require.ErrorIs(t, err, niceyaml.ErrLimit)
+		require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
+		assert.True(t, niceyaml.IsInvalid(err))
+	})
+}
+
+func TestWithAliasLimit_ReferenceLoop(t *testing.T) {
+	t.Parallel()
+
+	const want = "upload.yaml:1:4: aliases expand the document past the alias limit"
+
+	// A decode into a recursive type follows a loop of aliases for as
+	// many levels as the loop gives it.
+	type tree map[string]tree
+
+	readers := map[string]func(t *testing.T, n *niceyaml.Node) error{
+		"decode into a recursive type": func(t *testing.T, n *niceyaml.Node) error {
+			t.Helper()
+
+			_, err := n.Decode[tree](t.Context())
+
+			return err
+		},
+		"decode into a type that reads text": func(t *testing.T, n *niceyaml.Node) error {
+			t.Helper()
+
+			_, err := n.Decode[map[string]aliasText](t.Context())
+
+			return err
+		},
+		"decode into any": func(t *testing.T, n *niceyaml.Node) error {
+			t.Helper()
+
+			_, err := n.Decode[any](t.Context())
+
+			return err
+		},
+		"layer merge": func(t *testing.T, n *niceyaml.Node) error {
+			t.Helper()
+
+			base := yamltest.FirstDocument(t, "base: 1\n")
+			_, err := niceyaml.NewSourceFromLayers(t.Context(), []*niceyaml.Node{base, n})
+
+			return err
+		},
+	}
+
+	// Each reference document holds an alias inside an anchor of its own
+	// name, and the alias of the upload reaches that anchor.
+	tcs := map[string]struct {
+		refs  string
+		input string
+	}{
+		"anchor around aliases of its name": {
+			refs:  "m: &m {k: *m, j: *m}\n",
+			input: "v: *m\n",
+		},
+		"anchor on an alias of its name": {
+			refs:  "e: &e\n  *e\n",
+			input: "v: *e\n",
+		},
+		"anchor inside another around aliases to the outer": {
+			refs:  "a: &a {b: &b {k: *a, j: *a}}\n",
+			input: "v: *b\n",
+		},
+		"anchor inside another before the last of its name": {
+			// A read of the anchor o follows each alias inside it to the
+			// last anchor a.
+			refs:  "o: &o {k: &a [*a, *a]}\nb: &a [x, y]\n",
+			input: "v: *o\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			for via, read := range readers {
+				doc := yamltest.FirstDocument(t, tc.input,
+					niceyaml.WithName("upload.yaml"), yamltest.References(tc.refs))
+
+				err := read(t, doc)
+				require.EqualError(t, err, want, via)
+				require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing, via)
+				require.NotErrorIs(t, err, niceyaml.ErrDecode, via)
+				assert.True(t, niceyaml.IsInvalid(err), via)
+			}
+		})
+	}
+
+	const loop = "m: &m {k: *m, j: *m}\n"
+
+	t.Run("anchor beside the loop", func(t *testing.T) {
+		t.Parallel()
+
+		// The aliases of the document do not reach the anchor m.
+		doc := yamltest.FirstDocument(t, "v: *d\n", yamltest.References(loop+"d: &d {k: {}}\n"))
+
+		got, err := doc.Decode[tree](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, tree{"v": {"k": {}}}, got)
+	})
+
+	t.Run("the same anchor inside the document", func(t *testing.T) {
+		t.Parallel()
+
+		// One file reads an alias inside the anchor of its name as null,
+		// so its decode ends.
+		doc := yamltest.FirstDocument(t, loop+"v: *m\n")
+
+		got, err := doc.Decode[tree](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, tree{
+			"m": {"k": nil, "j": nil},
+			"v": {"k": nil, "j": nil},
+		}, got)
 	})
 }
 

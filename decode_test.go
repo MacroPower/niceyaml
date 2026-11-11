@@ -14613,7 +14613,9 @@ func TestNode_Decode_SelfAliasInReferenceAnchor(t *testing.T) {
 
 	// A Node at an alias of a reference document decodes the anchor as the
 	// decode of the whole document reads the alias there. An alias inside
-	// the anchor that names it reads null in both.
+	// the anchor that names it reads null in both. The alias limit refuses
+	// a document whose aliases reach such an anchor, so each Source turns
+	// the limit off.
 	tcs := map[string]struct {
 		// The value at the path in the decode of the whole document.
 		pick  func(t *testing.T, whole map[string]any) any
@@ -14671,7 +14673,7 @@ func TestNode_Decode_SelfAliasInReferenceAnchor(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocument(t, tc.input, yamltest.References(tc.ref))
+			doc := yamltest.FirstDocument(t, tc.input, yamltest.References(tc.ref), niceyaml.WithAliasLimit(false))
 
 			whole, err := doc.Decode[map[string]any](t.Context())
 			require.NoError(t, err)

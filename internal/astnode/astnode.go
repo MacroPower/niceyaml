@@ -512,19 +512,19 @@ func (e Extent) of(node ast.Node, comments bool) Extent {
 // tokens under node carries a position. Several tokens can share an
 // offset, so each bound can hold more than one.
 func Bounds(node ast.Node) (token.Tokens, token.Tokens) {
-	var b boundsFinder
+	var b BoundsFinder
 
-	Inspect(node, b.visit)
+	Inspect(node, b.Visit)
 
-	return b.first, b.last
+	return b.Bounds()
 }
 
 // StartToken returns the token with the lowest offset under node that is
 // not a comment, or nil when none of those tokens carries a position.
 func StartToken(node ast.Node) *token.Token {
-	b := boundsFinder{skipComments: true}
+	b := BoundsFinder{skipComments: true}
 
-	Inspect(node, b.visit)
+	Inspect(node, b.Visit)
 
 	if len(b.first) == 0 {
 		return nil
@@ -575,22 +575,33 @@ func Tokens(node ast.Node) token.Tokens {
 	return tks
 }
 
-// boundsFinder records the tokens with the lowest and the highest offset
-// among the nodes that it visits, all of them when several share the
+// BoundsFinder finds the tokens that [Bounds] returns for a caller that
+// walks the nodes itself. It records the tokens with the lowest and the
+// highest offset among the nodes that [BoundsFinder.Visit] gets and the
+// tokens that [BoundsFinder.Add] gets, all of them when several share the
 // offset.
-// With skipComments set, it leaves out the comments.
-type boundsFinder struct {
-	first, last  token.Tokens
+//
+// A caller that knows the bounds of a node hands them to Add in place of
+// a walk below that node. The first token at each bound is then the one
+// that Bounds puts first, when the caller hands the nodes and the tokens
+// over in the order that [Inspect] visits them. The zero BoundsFinder
+// does not hold a token.
+type BoundsFinder struct {
+	first, last token.Tokens
+	// Whether the finder leaves out the comments.
 	skipComments bool
 }
 
-// visit is the function that [Inspect] calls for each node.
-func (b *boundsFinder) visit(node ast.Node) bool {
+// Visit widens the bounds to the tokens that node itself holds, and not
+// to those of the nodes below it. It reports whether a walk goes below
+// node, so a caller can pass it to [Inspect] as the function. The
+// argument node must not be nil.
+func (b *BoundsFinder) Visit(node ast.Node) bool {
 	if b.skipComments && node.Type() == ast.CommentType {
 		return false
 	}
 
-	b.consider(node.GetToken())
+	b.Add(node.GetToken())
 
 	// The walk visits the nodes of a collection, not the token that closes
 	// a flow collection or the "-" that opens each entry of a block
@@ -599,25 +610,25 @@ func (b *boundsFinder) visit(node ast.Node) bool {
 	// sequence.
 	switch n := node.(type) {
 	case *ast.SequenceNode:
-		b.consider(n.End)
+		b.Add(n.End)
 
 		for _, entry := range n.Entries {
 			if entry != nil {
-				b.consider(entry.Start)
+				b.Add(entry.Start)
 			}
 		}
 
 	case *ast.MappingNode:
-		b.consider(n.End)
+		b.Add(n.End)
 	}
 
 	return true
 }
 
-// consider widens the bounds to tk, or adds tk to the tokens at a bound
-// that it shares the offset of. A nil token, or one without a position,
-// does not change the bounds.
-func (b *boundsFinder) consider(tk *token.Token) {
+// Add widens the bounds to tk, or adds tk to the tokens at a bound that
+// it shares the offset of. A nil token, or one without a position, does
+// not change the bounds.
+func (b *BoundsFinder) Add(tk *token.Token) {
 	if tk == nil || tk.Position == nil {
 		return
 	}
@@ -637,6 +648,13 @@ func (b *boundsFinder) consider(tk *token.Token) {
 	case off == b.last[0].Position.Offset:
 		b.last = append(b.last, tk)
 	}
+}
+
+// Bounds returns the tokens with the lowest and the highest offset that
+// the finder has recorded, as [Bounds] returns them. Both are nil when
+// the finder does not hold a token.
+func (b *BoundsFinder) Bounds() (token.Tokens, token.Tokens) {
+	return b.first, b.last
 }
 
 // IsMergeKey reports whether key is a `<<` merge key. It looks through

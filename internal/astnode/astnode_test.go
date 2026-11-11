@@ -707,6 +707,80 @@ func TestBounds(t *testing.T) {
 	})
 }
 
+func TestBoundsFinder(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+	}{
+		"anchor in a flow mapping": {
+			input: "a: {k: &x [p, q], j: 1}\n",
+		},
+		"anchor at the end of a block mapping": {
+			input: stringtest.LinesLF("a:", "  k: 1", "  j: &x", "    p: 1 # tail"),
+		},
+		"anchor at the start of a block sequence": {
+			input: stringtest.LinesLF("- &x {k: v}", "- *x", "-"),
+		},
+		"anchors inside each other": {
+			input: "a: &x [&y [&z p, q], r] # tail\n",
+		},
+		"anchor on a sequence that ends in a null": {
+			input: stringtest.LinesLF("- &x", "  - a", "  -"),
+		},
+		"no anchor": {
+			input: stringtest.LinesLF("# head", "a: 1 # line", "b: [x, y] # tail"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			// A walk that hands over the bounds of each anchor below a
+			// node finds the bounds of the node.
+			for _, n := range astnode.Nodes(parse(t, tc.input)) {
+				var b astnode.BoundsFinder
+
+				astnode.Inspect(n, func(node ast.Node) bool {
+					if _, ok := node.(*ast.AnchorNode); !ok || node == n {
+						return b.Visit(node)
+					}
+
+					first, last := astnode.Bounds(node)
+					require.NotEmpty(t, first)
+
+					b.Add(first[0])
+					b.Add(last[0])
+
+					return false
+				})
+
+				wantFirst, wantLast := astnode.Bounds(n)
+				first, last := b.Bounds()
+
+				require.NotEmpty(t, first, describe(n))
+				require.NotEmpty(t, last, describe(n))
+				assert.Same(t, wantFirst[0], first[0], describe(n))
+				assert.Same(t, wantLast[0], last[0], describe(n))
+			}
+		})
+	}
+
+	t.Run("zero value", func(t *testing.T) {
+		t.Parallel()
+
+		var b astnode.BoundsFinder
+
+		b.Add(nil)
+		b.Add(&token.Token{})
+
+		first, last := b.Bounds()
+		assert.Nil(t, first)
+		assert.Nil(t, last)
+	})
+}
+
 // places returns the place of each token, as [yamltest.TokenPlace]
 // writes it.
 func places(tks token.Tokens) []string {

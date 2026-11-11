@@ -27,10 +27,6 @@ type Facts struct {
 	Aliases []AliasFact
 	// Anchors holds each anchor of the document, in document order.
 	Anchors []AnchorFact
-	// ReferenceAlias reports whether the resolver does not bind some alias
-	// of the document to an anchor, as for an alias to a reference
-	// document.
-	ReferenceAlias bool
 }
 
 // AliasFact is an alias of a document and the anchor that it refers to.
@@ -188,8 +184,6 @@ func (f *Facts) alias(alias *ast.AliasNode, merge bool, open, nullAnchors map[*a
 	}
 
 	if fact.Anchor == nil {
-		f.ReferenceAlias = true
-
 		return fact
 	}
 
