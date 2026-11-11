@@ -103,6 +103,15 @@ func main() {
 		fmt.Printf("%-18s %s:%d\n", node.Path(), origin.Source().Name(), origin.Span().Start+1)
 	}
 
+	fmt.Println("\nAppend the menu of each layer:")
+
+	err = appendMenu(ctx, base, prod)
+	if err != nil {
+		lipgloss.Println(p.PrintError(err))
+
+		return
+	}
+
 	fmt.Println("\nValidate the merged document:")
 
 	// The validator reads the merged document, and its error binds in the
@@ -169,6 +178,47 @@ func main() {
 
 	fmt.Printf("%s seats %d and closes at %s.\n", cfg.Cafe.Name, cfg.Cafe.Seats, cfg.Hours.Close)
 	fmt.Printf("Terrace: %t, wifi: %s, currency: %s\n", cfg.Terrace != nil, cfg.Wifi.Network, cfg.Currency)
+}
+
+// appendMenu merges layers with the menu of each layer behind the menu of
+// the layer below it. It prints each dish with the file that wrote it.
+func appendMenu(ctx context.Context, layers ...*niceyaml.Source) error {
+	menu := paths.Doc().Child("menu")
+
+	// MergeAppend names the sequences that add their elements to the
+	// sequence below them. Every other sequence still replaces.
+	merged, err := niceyaml.NewSourceFromLayers(ctx, layers, niceyaml.MergeAppend(menu))
+	if err != nil {
+		return fmt.Errorf("merge layers: %w", err)
+	}
+
+	doc, err := merged.Document()
+	if err != nil {
+		return fmt.Errorf("read merged document: %w", err)
+	}
+
+	dishes, err := doc.Nodes(menu.IndexAll())
+	if err != nil {
+		return fmt.Errorf("select menu: %w", err)
+	}
+
+	for _, dish := range dishes {
+		name, err := dish.Decode[string](ctx)
+		if err != nil {
+			return fmt.Errorf("decode dish: %w", err)
+		}
+
+		// The origin of an element lies in the file that wrote it, at the
+		// index the element has in that file.
+		origin, err := dish.Origin()
+		if err != nil {
+			return fmt.Errorf("trace dish: %w", err)
+		}
+
+		fmt.Printf("%-10s %-12s %s %s\n", dish.Path(), name, origin.Source().Name(), origin.Path())
+	}
+
+	return nil
 }
 
 // environment returns a layer of the values the program reads from its

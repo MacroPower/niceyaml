@@ -27,6 +27,14 @@ var (
 	// so the error does not bind in any layer and [IsInvalid] does not
 	// report it.
 	ErrUnknownLayer = errors.New("layer is not among the merged layers")
+
+	// ErrAppendPath indicates a path of [MergeAppend] that holds a selector
+	// other than a `.name` or a `.*` selector. [NewSourceFromLayers] matches
+	// each path key by key against the mappings that merge. A path thus
+	// holds one of those two selectors for each key above its sequence. It
+	// is a mistake of the caller, so the error does not bind in any layer
+	// and [IsInvalid] does not report it.
+	ErrAppendPath = errors.New("append path takes only name and .* selectors")
 )
 
 // NewSourceFromLayers creates a new [*Source] that holds the one document
@@ -34,9 +42,10 @@ var (
 // base file with the file of one environment over it. Each mapping merges
 // into the mapping below it key by key. Each sequence and each scalar
 // replaces what lies below it whole, so a layer cannot set one element of
-// a sequence. A null that a layer writes as `null` or `~` removes its key
-// and never adds one. The lowest layer that holds a value keeps the nulls
-// it writes.
+// a sequence. [MergeAppend] names the sequences that add their elements
+// to the sequence below them instead. A null that a layer writes as
+// `null` or `~` removes its key and never adds one. The lowest layer that
+// holds a value keeps the nulls it writes.
 //
 // A decode of the Source validates the merged document once. Each error
 // binds in the file that holds the value that the error is about. The
@@ -79,7 +88,9 @@ var (
 // [ErrUnnamedKey]. The merge returns the error of that layer, bound in
 // its file, and a nil Source. It returns the error of ctx when ctx ends.
 // A layer of MergeAs that the layers do not hold fails the call with
-// [ErrUnknownLayer] before any layer merges.
+// [ErrUnknownLayer] before any layer merges. So does a path of
+// MergeAppend that holds a selector it does not take, with
+// [ErrAppendPath].
 func NewSourceFromLayers[L Layer](ctx context.Context, layers []L, opts ...MergeOption) (*Source, error) {
 	var cfg mergeConfig
 
@@ -93,6 +104,7 @@ func NewSourceFromLayers[L Layer](ctx context.Context, layers []L, opts ...Merge
 // MergeOption configures [NewSourceFromLayers].
 //
 // Available options:
+//   - [MergeAppend]
 //   - [MergeAs]
 //   - [MergeUnmarshalers]
 type MergeOption func(*mergeConfig)
@@ -101,6 +113,8 @@ type MergeOption func(*mergeConfig)
 type mergeConfig struct {
 	// The layer that the merged Source stands for, or nil for the lowest.
 	as Layer
+	// The paths of [MergeAppend], in the order given.
+	appends []paths.Path
 	// The unmarshalers of [MergeUnmarshalers], in the order given.
 	unmarshalers []Unmarshaler
 	// Whether the caller passed a MergeUnmarshalers option, even an empty
@@ -179,6 +193,90 @@ func MergeUnmarshalers(us ...Unmarshaler) MergeOption {
 	}
 }
 
+// MergeAppend is a [MergeOption] that makes the sequence at each of at
+// add its elements to the sequence below it, in place of replacing that
+// sequence. A format whose lists grow from layer to layer names them
+// here, such as the plugins of a tool or the ports of a service:
+//
+//	merged, err := niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{base, prod},
+//		niceyaml.MergeAppend(
+//			paths.Doc().Child("plugins"),
+//			paths.Doc().Child("services").ChildAll().Child("ports"),
+//		),
+//	)
+//
+// Each path reads from the root of the merged document, whether it
+// starts at `$` or at `@`. It holds `.name` and `.*` selectors only,
+// where `.*` matches every key of a mapping. The merge matches a path
+// against the names of the keys that merge, as
+// [go.jacobcolvin.com/niceyaml/paths.Resolver.KeyName] gives them.
+//
+// For a path that holds any other selector, NewSourceFromLayers returns
+// an error that wraps [ErrAppendPath]. An element of a sequence never
+// merges with an element of a layer below. A path through `[0]` or `[*]`
+// thus cannot name a sequence that two layers hold.
+//
+// The merged sequence holds the elements of the lowest layer first and
+// those of each higher layer behind them, each as its layer writes it.
+// The merge does not drop an element that two layers hold. A list whose
+// elements merge by name goes in a mapping under those names instead,
+// which merges key by key without the option.
+//
+// A sequence appends only to a sequence. A sequence that at names still
+// replaces a scalar or a mapping below it, and a scalar or a mapping
+// still replaces that sequence.
+//
+// A layer cannot replace a sequence that appends. An empty sequence, as
+// in `plugins: []`, does not add an element and keeps the elements
+// below it. A written null still removes the key with every element
+// below it, and a sequence of a higher layer then starts the sequence
+// again.
+//
+// Each element keeps the layer that wrote it. An error at or under an
+// element binds in the file of that layer, with the index that the
+// element has in that file. An error at `$.plugins[2]` of the merged
+// document thus reads `$.plugins[0]` in the file whose first plugin it
+// is. [Node.Origin] returns the Node at that path of the file.
+//
+// An error at the sequence itself binds in the highest layer that holds
+// the sequence, as an error at a mapping does. An error under an element
+// stays in the file of that element when it binds at a value above the
+// element, or at the key of such a value. An error below a sequence that
+// decodes itself thus binds at that sequence in the file that wrote the
+// element.
+//
+// Each MergeAppend adds its paths to the ones before it. MergeAppend
+// copies the slice at, so the option keeps its paths when the caller
+// changes the slice it passed.
+func MergeAppend(at ...paths.Path) MergeOption {
+	at = slices.Clone(at)
+
+	return func(c *mergeConfig) {
+		c.appends = slices.Concat(c.appends, at)
+	}
+}
+
+// appendPaths returns the paths of [MergeAppend] as the merge matches
+// them, each from the root of the merged value. It returns an error that
+// wraps [ErrAppendPath] for the first path that holds a selector other
+// than a `.name` or a `.*` selector.
+func (c mergeConfig) appendPaths() (layermerge.Appends, error) {
+	rels := make([]paths.Path, 0, len(c.appends))
+
+	for _, path := range c.appends {
+		for sel := range path.Selectors() {
+			if sel.Kind != paths.SelectorChild && sel.Kind != paths.SelectorChildAll {
+				return layermerge.Appends{}, fmt.Errorf("%w: %s", ErrAppendPath, path)
+			}
+		}
+
+		rel, _ := path.CutPrefix(paths.Doc())
+		rels = append(rels, rel)
+	}
+
+	return layermerge.NewAppends(rels...), nil
+}
+
 // Layer is one layer of the Source [NewSourceFromLayers] builds, a
 // document that merges with the layers below it. [*Source] and [*Node]
 // each implement Layer, and types outside this package cannot implement
@@ -217,6 +315,11 @@ type Layer interface {
 // keys that the layers below add. The origin of the root is the highest
 // layer that holds a value, or else the highest layer of all.
 //
+// A sequence that [MergeAppend] names has its origin in the highest
+// layer that holds it too. That Node holds the elements of its own layer
+// alone. Each element has its origin in the layer that wrote it, at the
+// index it has there.
+//
 // The origin decodes with the unmarshalers of the Source of its layer,
 // and not with those of [MergeUnmarshalers]. So a program that decodes
 // origins gives the same [WithUnmarshalers] to the Source of every layer.
@@ -235,7 +338,8 @@ func (n *Node) Origin() (*Node, error) {
 		return n, nil
 	}
 
-	layer, _, path := n.source.layers.layer(n, n.base)
+	layer, held := n.source.layers.layer(n, n.base, n.base)
+	path := held(n.base)
 
 	// The path names the Node of the layer itself. At would scope a root to
 	// its content alone, and fail on a document with no content.
@@ -254,6 +358,9 @@ func (n *Node) Origin() (*Node, error) {
 type layering struct {
 	// The merged value, or nil when the layers do not hold a value.
 	root *layermerge.Value
+	// The sequences that [MergeAppend] names, whose elements each keep
+	// the layer that wrote them.
+	appends layermerge.Appends
 	// The layers that the merge read, lowest first. Each value names its
 	// layer by the index of the layer here.
 	layers []resolvedLayer
@@ -280,33 +387,67 @@ func (l *layering) home() resolvedLayer {
 	return layer
 }
 
+// layerPath returns a `$` path of a merged document as one layer of it
+// holds that path. The layer holds the merged value at the path of its
+// own Node. It holds each element of a sequence that several layers
+// append to at the index the element has in its own file.
+type layerPath func(paths.Path) paths.Path
+
 // layer returns the layer that an error at path binds in, where path is a
-// `$` path in doc. It also returns the path in that layer where the root
-// of doc sits, and path as the layer reads it. It picks the layer of the
-// deepest value on path, or else the highest, and continues into a layer
-// that a merge built.
-func (l *layering) layer(doc *Node, path paths.Path) (resolvedLayer, paths.Path, paths.Path) {
+// `$` path in doc. It also returns the [layerPath] of that layer for the
+// paths of doc. It picks the layer of the deepest value on path, or else
+// the highest, and continues into a layer that a merge built.
+//
+// The error is about the value at through. Through is path itself,
+// unless the error binds at a value above its own path. Below path,
+// through can go into an element of a sequence that [MergeAppend] names.
+// The error then binds in the layer of that element, because no other
+// layer holds through. A path that ends in `~` names the key of an
+// entry, and that key lies above the value of the entry. So such a path
+// counts there as the path of that value.
+func (l *layering) layer(doc *Node, path, through paths.Path) (resolvedLayer, layerPath) {
 	if l == nil {
-		return doc.resolveLayer(), paths.Doc(), path
+		return doc.resolveLayer(), func(p paths.Path) paths.Path { return p }
 	}
 
 	// The merged value stands at the root of its document, so the rest of
 	// the path reads from the value of each layer.
 	rel, _ := path.CutPrefix(paths.Doc())
 
-	layer := l.layers[len(l.layers)-1]
+	index := len(l.layers) - 1
 
 	if at, _ := l.root.Find(rel); at != nil {
-		layer = l.layers[at.Layer]
+		index = at.Layer
 	}
 
-	// The layer holds the merged value at its scope, and the search finds
-	// the root of the document of the layer at base.
-	scope, _ := layer.node.base.CutPrefix(paths.Doc())
+	above := path
+	if last, ok := path.Last(); ok && last.Kind == paths.SelectorKey {
+		above, _ = path.Parent()
+	}
 
-	holder, base, held := layer.source.layers.layer(layer.node, layer.node.base.Join(rel))
+	if _, ok := through.CutPrefix(above); ok {
+		whole, _ := through.CutPrefix(paths.Doc())
 
-	return holder, base.Join(scope), held
+		if elem := l.root.Element(whole, l.appends); elem != nil {
+			index = elem.Layer
+		}
+	}
+
+	layer := l.layers[index]
+
+	holder, held := layer.source.layers.layer(layer.node, l.held(index, path), l.held(index, through))
+
+	return holder, func(p paths.Path) paths.Path { return held(l.held(index, p)) }
+}
+
+// held returns path, a `$` path of the merged document, as the layer at
+// index holds it. The layer holds the merged value at the path of its
+// Node. It holds each element of a sequence at the index that
+// [layermerge.Value.LayerPath] gives.
+func (l *layering) held(index int, path paths.Path) paths.Path {
+	rel, _ := path.CutPrefix(paths.Doc())
+
+	return l.layers[index].node.base.Join(l.root.LayerPath(rel, index))
 }
 
 // value returns the value the layers hold at path, which starts at `$`,
@@ -478,6 +619,11 @@ func mergeLayers[L Layer](ctx context.Context, given []L, cfg mergeConfig) (*Sou
 		return nil, err
 	}
 
+	appends, err := cfg.appendPaths()
+	if err != nil {
+		return nil, err
+	}
+
 	if len(layers) == 0 {
 		return NewSourceFromString("", WithUnmarshalers(cfg.unmarshalers...)), nil
 	}
@@ -490,7 +636,7 @@ func mergeLayers[L Layer](ctx context.Context, given []L, cfg mergeConfig) (*Sou
 			return nil, err
 		}
 
-		root = root.Merge(v)
+		root = root.Merge(v, appends)
 	}
 
 	named := layers[identity]
@@ -505,7 +651,7 @@ func mergeLayers[L Layer](ctx context.Context, given []L, cfg mergeConfig) (*Sou
 	}
 
 	src := newMergedSource(named.source, text, showsLayers(layers), cfg)
-	src.layers = &layering{root: root, layers: layers, identity: identity}
+	src.layers = &layering{root: root, appends: appends, layers: layers, identity: identity}
 
 	return src, nil
 }

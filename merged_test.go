@@ -2178,6 +2178,62 @@ log:
 	// config.yaml:5:10: $.log.level: value does not match any enum member
 }
 
+func ExampleMergeAppend() {
+	ctx := context.Background()
+
+	base := niceyaml.NewSourceFromString(`plugins:
+  - auth
+  - cache
+tags: [base]
+`, niceyaml.WithName("base.yaml"))
+
+	prod := niceyaml.NewSourceFromString(`# prod
+plugins:
+  - metricz
+tags: [prod]
+`, niceyaml.WithName("prod.yaml"))
+
+	// The plugins of prod.yaml go behind those of base.yaml, and its tags
+	// replace the tags of base.yaml.
+	merged, err := niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{base, prod},
+		niceyaml.MergeAppend(paths.Doc().Child("plugins")),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	doc, err := merged.Document()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println(doc.View().Held().Content())
+
+	// The merged document holds the plugin at index 2. The error binds in
+	// prod.yaml, which holds the plugin at index 0.
+	unknown := niceyaml.NewError("unknown plugin metricz",
+		niceyaml.AtPath(paths.Doc().Child("plugins").Index(2)))
+
+	fmt.Println()
+	fmt.Print(niceyaml.FormatError(merged.Bind(unknown)))
+
+	// Output:
+	// plugins:
+	//   - auth
+	//   - cache
+	//   - metricz
+	// tags:
+	//   - prod
+	//
+	// prod.yaml:3:5: $.plugins[0]: unknown plugin metricz
+	//
+	//    1 | # prod
+	//    2 | plugins:
+	//    3 |   - metricz
+	//      |     ^^^^^^^
+	//    4 | tags: [prod]
+}
+
 func ExampleMergeUnmarshalers() {
 	ctx := context.Background()
 
@@ -2947,6 +3003,1284 @@ func identityLayer(t *testing.T, dir, name, input string) *niceyaml.Source {
 	require.NoError(t, err)
 
 	return source
+}
+
+func TestMergeAppend(t *testing.T) {
+	t.Parallel()
+
+	var (
+		plugins = paths.Doc().Child("plugins")
+		ports   = paths.Doc().Child("services").ChildAll().Child("ports")
+	)
+
+	t.Run("a sequence at a path adds its elements to the sequence below it", func(t *testing.T) {
+		t.Parallel()
+
+		// Each case merges its layers with the paths of at and reads the
+		// text of the merged document. The files are base.yaml and
+		// prod.yaml, with mid.yaml between them when the case has three.
+		tcs := map[string]struct {
+			// The error that an error at each path binds as. Its path is
+			// the path that the file of the layer has for the value.
+			binds map[string]string
+			// The text of the merged document.
+			want string
+			// The documents of the layers, lowest first.
+			layers []string
+			at     []paths.Path
+		}{
+			"each element binds in the file that wrote it": {
+				layers: []string{
+					stringtest.LinesLF("plugins: [auth, cache]", "tags: [a, b]"),
+					stringtest.LinesLF("# prod", "plugins:", "  - metricz", "tags: [c]"),
+				},
+				at: []paths.Path{plugins},
+				want: stringtest.LinesLF(
+					"plugins:",
+					"  - auth",
+					"  - cache",
+					"  - metricz",
+					"tags:",
+					"  - c",
+				),
+				binds: map[string]string{
+					"$.plugins[0]": "base.yaml:1:11: $.plugins[0]: here",
+					"$.plugins[1]": "base.yaml:1:17: $.plugins[1]: here",
+					"$.plugins[2]": "prod.yaml:3:5: $.plugins[0]: here",
+					"$.plugins":    "prod.yaml:2:1: $.plugins: here",
+					"$.plugins~":   "prod.yaml:2:1: $.plugins~: here",
+					"$.plugins[3]": "prod.yaml: $.plugins[3]: here",
+					"$.tags[0]":    "prod.yaml:4:8: $.tags[0]: here",
+					"$.plugins[*]": "prod.yaml: $.plugins[*]: here",
+					"$.*":          "prod.yaml: $.*: here",
+					"$..plugins":   "prod.yaml: $..plugins: here",
+					"$..*":         "prod.yaml: $..*: here",
+				},
+			},
+			"three layers append in the order given": {
+				layers: []string{
+					"plugins: [a]\n",
+					stringtest.LinesLF("plugins:", "  - b", "  - c"),
+					"plugins: [d]\n",
+				},
+				at:   []paths.Path{plugins},
+				want: stringtest.LinesLF("plugins:", "  - a", "  - b", "  - c", "  - d"),
+				binds: map[string]string{
+					"$.plugins[0]": "base.yaml:1:11: $.plugins[0]: here",
+					"$.plugins[1]": "mid.yaml:2:5: $.plugins[0]: here",
+					"$.plugins[2]": "mid.yaml:3:5: $.plugins[1]: here",
+					"$.plugins[3]": "prod.yaml:1:11: $.plugins[0]: here",
+					"$.plugins":    "prod.yaml:1:1: $.plugins: here",
+				},
+			},
+			"a layer that lacks the key adds no element": {
+				layers: []string{"plugins: [a]\n", "name: shop\n", "plugins: [b]\n"},
+				at:     []paths.Path{plugins},
+				want:   stringtest.LinesLF("plugins:", "  - a", "  - b", "name: shop"),
+				binds: map[string]string{
+					"$.plugins[1]": "prod.yaml:1:11: $.plugins[0]: here",
+				},
+			},
+			"an error under an element binds in the file of the element": {
+				layers: []string{
+					stringtest.LinesLF("rules:", "  - {name: a, port: 1}"),
+					stringtest.LinesLF("rules:", "  - name: b", "    hosts: [x, y]"),
+				},
+				at: []paths.Path{paths.Doc().Child("rules")},
+				want: stringtest.LinesLF(
+					"rules:",
+					"  - name: a",
+					"    port: 1",
+					"  - name: b",
+					"    hosts:",
+					"      - x",
+					"      - y",
+				),
+				binds: map[string]string{
+					"$.rules[0].port":     "base.yaml:2:21: $.rules[0].port: here",
+					"$.rules[1].name":     "prod.yaml:2:11: $.rules[0].name: here",
+					"$.rules[1].name~":    "prod.yaml:2:5: $.rules[0].name~: here",
+					"$.rules[1].hosts[1]": "prod.yaml:3:16: $.rules[0].hosts[1]: here",
+					"$.rules[1].port":     "prod.yaml:2:3: $.rules[0].port: here",
+					"$.rules[1]":          "prod.yaml:2:3: $.rules[0]: here",
+				},
+			},
+			"a wildcard names the sequence under every key": {
+				layers: []string{
+					stringtest.LinesLF("services:", "  web: {ports: [80]}", "  db: {ports: [5432]}"),
+					stringtest.LinesLF("services:", "  web: {ports: [443]}", "  db: {tags: [x]}"),
+				},
+				at: []paths.Path{ports},
+				want: stringtest.LinesLF(
+					"services:",
+					"  web:",
+					"    ports:",
+					"      - 80",
+					"      - 443",
+					"  db:",
+					"    ports:",
+					"      - 5432",
+					"    tags:",
+					"      - x",
+				),
+				binds: map[string]string{
+					"$.services.web.ports[1]": "prod.yaml:2:17: $.services.web.ports[0]: here",
+					"$.services.db.ports[0]":  "base.yaml:3:16: $.services.db.ports[0]: here",
+				},
+			},
+			"a sequence at any other path replaces": {
+				layers: []string{
+					stringtest.LinesLF("plugins: [a]", "nested: {plugins: [a]}"),
+					stringtest.LinesLF("plugins: [b]", "nested: {plugins: [b]}"),
+				},
+				at: []paths.Path{paths.Doc().Child("nested", "plugins")},
+				want: stringtest.LinesLF(
+					"plugins:",
+					"  - b",
+					"nested:",
+					"  plugins:",
+					"    - a",
+					"    - b",
+				),
+			},
+			"a path that names a mapping leaves the sequences below it to replace": {
+				layers: []string{"nested: {plugins: [a]}\n", "nested: {plugins: [b]}\n"},
+				at:     []paths.Path{paths.Doc().Child("nested")},
+				want:   stringtest.LinesLF("nested:", "  plugins:", "    - b"),
+				binds: map[string]string{
+					"$.nested.plugins[0]": "prod.yaml:1:20: $.nested.plugins[0]: here",
+				},
+			},
+			"a path from the current node reads from the root": {
+				layers: []string{"plugins: [a]\n", "plugins: [b]\n"},
+				at:     []paths.Path{paths.Current().Child("plugins")},
+				want:   stringtest.LinesLF("plugins:", "  - a", "  - b"),
+			},
+			"a sequence at the root appends": {
+				layers: []string{"- a\n", stringtest.LinesLF("- b", "- c")},
+				at:     []paths.Path{paths.Doc()},
+				want:   stringtest.LinesLF("- a", "- b", "- c"),
+				binds: map[string]string{
+					"$[2]": "prod.yaml:2:3: $[1]: here",
+					"$":    "prod.yaml:1:3: $: here",
+				},
+			},
+			"an empty sequence keeps the elements below it": {
+				layers: []string{"plugins: [a]\n", "plugins: []\n"},
+				at:     []paths.Path{plugins},
+				want:   stringtest.LinesLF("plugins:", "  - a"),
+				binds: map[string]string{
+					"$.plugins[0]": "base.yaml:1:11: $.plugins[0]: here",
+					"$.plugins":    "prod.yaml:1:1: $.plugins: here",
+				},
+			},
+			"a written null removes the key, and a higher layer starts again": {
+				layers: []string{"plugins: [a]\n", "plugins: ~\n", "plugins: [b]\n"},
+				at:     []paths.Path{plugins},
+				want:   stringtest.LinesLF("plugins:", "  - b"),
+				binds: map[string]string{
+					"$.plugins[0]": "prod.yaml:1:11: $.plugins[0]: here",
+				},
+			},
+			"an unwritten null keeps the elements below it": {
+				layers: []string{"plugins: [a]\n", "plugins:\n", "plugins: [b]\n"},
+				at:     []paths.Path{plugins},
+				want:   stringtest.LinesLF("plugins:", "  - a", "  - b"),
+			},
+			"a scalar and a mapping replace a sequence that appends": {
+				layers: []string{
+					stringtest.LinesLF("plugins: [a]", "services: {web: {ports: [80]}}"),
+					stringtest.LinesLF("plugins: none", "services: {web: {ports: {http: 80}}}"),
+				},
+				at: []paths.Path{plugins, ports},
+				want: stringtest.LinesLF(
+					"plugins: none",
+					"services:",
+					"  web:",
+					"    ports:",
+					"      http: 80",
+				),
+			},
+			"a sequence replaces a scalar and a mapping at a path that appends": {
+				layers: []string{
+					stringtest.LinesLF("plugins: none", "services: {web: {ports: {http: 80}}}"),
+					stringtest.LinesLF("plugins: [a]", "services: {web: {ports: [80]}}"),
+				},
+				at: []paths.Path{plugins, ports},
+				want: stringtest.LinesLF(
+					"plugins:",
+					"  - a",
+					"services:",
+					"  web:",
+					"    ports:",
+					"      - 80",
+				),
+			},
+			"the merge keeps an element that two layers hold": {
+				layers: []string{"plugins: [a, ~]\n", "plugins: [a, {k: ~}]\n"},
+				at:     []paths.Path{plugins},
+				want:   stringtest.LinesLF("plugins:", "  - a", "  - ~", "  - a", "  - k: ~"),
+			},
+			"an alias appends the elements of its anchor": {
+				layers: []string{
+					"plugins: [a]\n",
+					stringtest.LinesLF("more: &more", "  - b", "  - c", "plugins: *more"),
+				},
+				at: []paths.Path{plugins},
+				want: stringtest.LinesLF(
+					"plugins:",
+					"  - a",
+					"  - b",
+					"  - c",
+					"more:",
+					"  - b",
+					"  - c",
+				),
+				binds: map[string]string{
+					"$.plugins[2]": "prod.yaml:3:5: $.plugins[1]: here",
+				},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				layers, err := niceyaml.NewSourceFromLayers(t.Context(),
+					layerNodes(t, tc.layers...), niceyaml.MergeAppend(tc.at...))
+				require.NoError(t, err)
+
+				assert.Equal(t, tc.want, mergedText(t, layers))
+
+				for expr, want := range tc.binds {
+					err := layers.Bind(niceyaml.NewError("here", niceyaml.AtPath(paths.MustParse(expr))))
+					require.EqualError(t, err, want, expr)
+				}
+
+				// A decode of the merged document reads what a decode of its
+				// text reads.
+				want, err := niceyaml.NewSourceFromString(tc.want).Decode[any](t.Context())
+				require.NoError(t, err)
+
+				got, err := layers.Decode[any](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, want, got)
+			})
+		}
+	})
+
+	t.Run("a decode reads every element and binds each error in its file", func(t *testing.T) {
+		t.Parallel()
+
+		sources := layerSources(t,
+			stringtest.LinesLF("servers:", "  - {host: a, port: 1}"),
+			stringtest.LinesLF("# prod", "servers:", "  - host: b", "  - host: c", "    port: 3"),
+		)
+
+		layers, err := niceyaml.NewSourceFromLayers(t.Context(), sources,
+			niceyaml.MergeAppend(paths.Doc().Child("servers")))
+		require.NoError(t, err)
+
+		cfg, err := layers.Decode[layerConfig](t.Context(), niceyaml.WithSelfValidation(false))
+		require.NoError(t, err)
+		assert.Equal(t, []layerServer{{Host: "a", Port: 1}, {Host: "b"}, {Host: "c", Port: 3}}, cfg.Servers)
+
+		// The second server of the merged document lacks a port, and
+		// prod.yaml holds that server first.
+		_, err = layers.Decode[layerConfig](t.Context())
+		require.EqualError(t, err, "prod.yaml:3:3: $.servers[0].port: port must be at least 1")
+
+		bound := yamltest.RequireSourceError(t, err)
+		assert.Same(t, sources[1], bound.Source())
+		assert.Equal(t, "$.servers[0].port", yamltest.PathOf(t, bound).String())
+		assert.Equal(t, "$.servers[0].port", yamltest.PathOf(t, yamltest.RequireError(t, err)).String())
+
+		nearest, ok := bound.Nearest()
+		require.True(t, ok)
+		assert.Equal(t, "$.servers[0]", nearest.String())
+
+		// A position in the merged text binds at the element that lies
+		// there. The position names the host of the third server.
+		err = layers.Bind(niceyaml.NewError("here", niceyaml.AtPosition(position.New(4, 10))))
+		require.EqualError(t, err, "prod.yaml:4:11: here")
+	})
+
+	t.Run("the origin of an element lies in the file that wrote it", func(t *testing.T) {
+		t.Parallel()
+
+		sources := layerSources(t,
+			"plugins: [auth, cache]\n",
+			stringtest.LinesLF("# prod", "plugins:", "  - name: metricz"),
+		)
+
+		layers, err := niceyaml.NewSourceFromLayers(t.Context(), sources, niceyaml.MergeAppend(plugins))
+		require.NoError(t, err)
+
+		doc := yamltest.Document(t, layers)
+
+		tcs := map[string]struct {
+			path      paths.Path
+			wantLayer *niceyaml.Source
+			wantPath  string
+			want      string
+		}{
+			"an element of the lowest layer": {
+				path:      plugins.Index(1),
+				wantLayer: sources[0],
+				wantPath:  "$.plugins[1]",
+				want:      "plugins: [auth, cache]",
+			},
+			"an element of the highest layer": {
+				path:      plugins.Index(2),
+				wantLayer: sources[1],
+				wantPath:  "$.plugins[0]",
+				want:      "  - name: metricz",
+			},
+			"a value inside an element": {
+				path:      plugins.Index(2).Child("name"),
+				wantLayer: sources[1],
+				wantPath:  "$.plugins[0].name",
+				want:      "  - name: metricz",
+			},
+			"the sequence itself": {
+				path:      plugins,
+				wantLayer: sources[1],
+				wantPath:  "$.plugins",
+				want:      stringtest.JoinLF("plugins:", "  - name: metricz"),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				origin, err := yamltest.At(t, doc, tc.path).Origin()
+				require.NoError(t, err)
+				assert.Same(t, tc.wantLayer, origin.Source())
+				assert.Equal(t, tc.wantPath, origin.Path().String())
+				assert.Equal(t, tc.want, origin.View().Held().Content())
+			})
+		}
+
+		// The origin of the sequence holds the elements of its own layer.
+		origin, err := yamltest.At(t, doc, plugins).Origin()
+		require.NoError(t, err)
+
+		own, err := origin.Decode[[]any](t.Context())
+		require.NoError(t, err)
+		assert.Len(t, own, 1)
+	})
+
+	t.Run("a scoped layer gives the path its file has for an element", func(t *testing.T) {
+		t.Parallel()
+
+		envs := yamltest.FirstDocument(t,
+			stringtest.LinesLF(
+				"defaults:",
+				"  plugins: [auth, cache]",
+				"prod:",
+				"  plugins:",
+				"    - metricz",
+			),
+			niceyaml.WithName("envs.yaml"))
+
+		layers, err := niceyaml.NewSourceFromLayers(t.Context(),
+			[]*niceyaml.Node{
+				yamltest.At(t, envs, paths.Doc().Child("defaults")),
+				yamltest.At(t, envs, paths.Doc().Child("prod")),
+			},
+			niceyaml.MergeAppend(plugins),
+		)
+		require.NoError(t, err)
+
+		err = layers.Bind(niceyaml.NewError("here", niceyaml.AtPath(plugins.Index(2))))
+		require.EqualError(t, err, "envs.yaml:5:7: $.prod.plugins[0]: here")
+
+		err = layers.Bind(niceyaml.NewError("here", niceyaml.AtPath(plugins.Index(1))))
+		require.EqualError(t, err, "envs.yaml:2:19: $.defaults.plugins[1]: here")
+
+		origin, err := yamltest.At(t, yamltest.Document(t, layers), plugins.Index(2)).Origin()
+		require.NoError(t, err)
+		assert.Equal(t, "$.prod.plugins[0]", origin.Path().String())
+	})
+
+	t.Run("a derived layer gives the index its home document has for an element", func(t *testing.T) {
+		t.Parallel()
+
+		// Each derived text keeps every line and column of its home
+		// document, so a place differs from its location in the path alone.
+		type recorded struct {
+			located []niceyaml.Located
+		}
+
+		record := func(r *recorded) func(niceyaml.Located) niceyaml.Place {
+			return func(at niceyaml.Located) niceyaml.Place {
+				r.located = append(r.located, at)
+
+				return niceyaml.Place{Path: at.Path, HasPath: at.HasPath, Range: at.Range, HasRange: at.HasRange}
+			}
+		}
+
+		tcs := map[string]struct {
+			// The layers of the merge, with the derived layer highest. A
+			// nil locate keeps each location as it is.
+			layers func(t *testing.T, locate func(niceyaml.Located) niceyaml.Place) []niceyaml.Layer
+			// The error that an error at each path binds as.
+			binds map[string]string
+			// The path that the derived layer holds each path at. The
+			// binding reports that path, and the locate function takes it.
+			held map[string]string
+		}{
+			"a derived Source": {
+				layers: func(t *testing.T, locate func(niceyaml.Located) niceyaml.Place) []niceyaml.Layer {
+					t.Helper()
+
+					home := yamltest.FirstDocument(t,
+						stringtest.LinesLF("# prod", "plugins:", "  - ${X}", "  - last"),
+						niceyaml.WithName("prod.yaml"))
+
+					return []niceyaml.Layer{
+						yamltest.FirstDocument(t, "plugins: [auth, cache]\n", niceyaml.WithName("base.yaml")),
+						niceyaml.NewSourceFromDerived(
+							stringtest.LinesLF("# prod", "plugins:", "  - metr", "  - last"), home, locate,
+						),
+					}
+				},
+				binds: map[string]string{
+					"$.plugins[1]": "base.yaml:1:17: $.plugins[1]: here",
+					"$.plugins[2]": "prod.yaml:3:5: $.plugins[0]: here",
+					"$.plugins[3]": "prod.yaml:4:5: $.plugins[1]: here",
+					"$.plugins":    "prod.yaml:2:1: $.plugins: here",
+				},
+				held: map[string]string{
+					"$.plugins[2]": "$.plugins[0]",
+					"$.plugins[3]": "$.plugins[1]",
+					"$.plugins":    "$.plugins",
+				},
+			},
+			"scoped Nodes of a derived Source": {
+				layers: func(t *testing.T, locate func(niceyaml.Located) niceyaml.Place) []niceyaml.Layer {
+					t.Helper()
+
+					home := yamltest.FirstDocument(t,
+						stringtest.LinesLF(
+							"defaults:",
+							"  plugins: [auth, cache]",
+							"prod:",
+							"  plugins:",
+							"    - ${X}",
+							"    - last",
+						),
+						niceyaml.WithName("envs.yaml"))
+
+					envs := yamltest.Document(t, niceyaml.NewSourceFromDerived(
+						stringtest.LinesLF(
+							"defaults:",
+							"  plugins: [auth, cache]",
+							"prod:",
+							"  plugins:",
+							"    - metr",
+							"    - last",
+						),
+						home, locate,
+					))
+
+					return []niceyaml.Layer{
+						yamltest.At(t, envs, paths.Doc().Child("defaults")),
+						yamltest.At(t, envs, paths.Doc().Child("prod")),
+					}
+				},
+				binds: map[string]string{
+					"$.plugins[1]": "envs.yaml:2:19: $.defaults.plugins[1]: here",
+					"$.plugins[2]": "envs.yaml:5:7: $.prod.plugins[0]: here",
+					"$.plugins[3]": "envs.yaml:6:7: $.prod.plugins[1]: here",
+					"$.plugins":    "envs.yaml:4:3: $.prod.plugins: here",
+				},
+				held: map[string]string{
+					"$.plugins[1]": "$.defaults.plugins[1]",
+					"$.plugins[2]": "$.prod.plugins[0]",
+					"$.plugins[3]": "$.prod.plugins[1]",
+					"$.plugins":    "$.prod.plugins",
+				},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				t.Run("a nil locate keeps the path of the layer", func(t *testing.T) {
+					t.Parallel()
+
+					layers, err := niceyaml.NewSourceFromLayers(t.Context(),
+						tc.layers(t, nil), niceyaml.MergeAppend(plugins))
+					require.NoError(t, err)
+
+					for expr, want := range tc.binds {
+						err := layers.Bind(niceyaml.NewError("here", niceyaml.AtPath(paths.MustParse(expr))))
+						require.EqualError(t, err, want, expr)
+					}
+
+					for expr, want := range tc.held {
+						err := layers.Bind(niceyaml.NewError("here", niceyaml.AtPath(paths.MustParse(expr))))
+
+						assert.Equal(t, want, yamltest.PathOf(t, yamltest.RequireSourceError(t, err)).String(), expr)
+						assert.Equal(t, want, yamltest.PathOf(t, yamltest.RequireError(t, err)).String(), expr)
+					}
+				})
+
+				t.Run("a locate takes the path of the layer", func(t *testing.T) {
+					t.Parallel()
+
+					var got recorded
+
+					layers, err := niceyaml.NewSourceFromLayers(t.Context(),
+						tc.layers(t, record(&got)), niceyaml.MergeAppend(plugins))
+					require.NoError(t, err)
+
+					for expr, want := range tc.held {
+						got.located = nil
+
+						err := layers.Bind(niceyaml.NewError("here", niceyaml.AtPath(paths.MustParse(expr))))
+						require.EqualError(t, err, tc.binds[expr], expr)
+
+						require.Len(t, got.located, 1, expr)
+						assert.True(t, got.located[0].HasPath, expr)
+						assert.Equal(t, want, got.located[0].Path.String(), expr)
+					}
+				})
+			})
+		}
+	})
+
+	t.Run("an error below an element that decodes itself names that element of its file", func(t *testing.T) {
+		t.Parallel()
+
+		type config struct {
+			Addrs []layerAddr `yaml:"addrs"`
+		}
+
+		addrs := paths.Doc().Child("addrs")
+
+		envs := yamltest.FirstDocument(t,
+			stringtest.LinesLF(
+				"defaults:",
+				"  addrs: [a:1, b:2]",
+				"prod:",
+				"  addrs:",
+				"    - c",
+			),
+			niceyaml.WithName("envs.yaml"))
+
+		// The third address of the merged document lacks a port, and each
+		// highest layer holds that address first. No document holds the
+		// port of an address, so the error binds at the address.
+		tcs := map[string]struct {
+			layers      []*niceyaml.Node
+			want        string
+			wantPath    string
+			wantNearest string
+		}{
+			"files": {
+				layers:      layerNodes(t, "addrs: [a:1, b:2]\n", stringtest.LinesLF("addrs:", "  - c")),
+				want:        "prod.yaml:2:5: $.addrs[0].port: port is required",
+				wantPath:    "$.addrs[0].port",
+				wantNearest: "$.addrs[0]",
+			},
+			"scoped Nodes": {
+				layers: []*niceyaml.Node{
+					yamltest.At(t, envs, paths.Doc().Child("defaults")),
+					yamltest.At(t, envs, paths.Doc().Child("prod")),
+				},
+				want:        "envs.yaml:5:7: $.prod.addrs[0].port: port is required",
+				wantPath:    "$.prod.addrs[0].port",
+				wantNearest: "$.prod.addrs[0]",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				layers, err := niceyaml.NewSourceFromLayers(t.Context(), tc.layers, niceyaml.MergeAppend(addrs))
+				require.NoError(t, err)
+
+				_, err = layers.Decode[config](t.Context())
+				require.EqualError(t, err, tc.want)
+
+				bound := yamltest.RequireSourceError(t, err)
+				assert.Same(t, tc.layers[1].Source(), bound.Source())
+				assert.Equal(t, tc.wantPath, yamltest.PathOf(t, bound).String())
+
+				nearest, ok := bound.Nearest()
+				require.True(t, ok)
+				assert.Equal(t, tc.wantNearest, nearest.String())
+
+				// The nearest path names the address in the file of the
+				// binding.
+				held, err := yamltest.Document(t, bound.Source()).At(nearest)
+				require.NoError(t, err)
+
+				text, err := held.Decode[string](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, "c", text)
+			})
+		}
+	})
+
+	t.Run("an error below a value that decodes itself binds in the file of its element", func(t *testing.T) {
+		t.Parallel()
+
+		type config struct {
+			Addrs layerEndpoints `yaml:"addrs"`
+			Svc   layerService   `yaml:"svc"`
+		}
+
+		appending := niceyaml.MergeAppend(paths.Doc().Child("addrs"), paths.Doc().Child("svc", "addrs"))
+
+		envs := yamltest.FirstDocument(t,
+			stringtest.LinesLF(
+				"defaults:",
+				"  addrs: [a:1, b]",
+				"prod:",
+				"  addrs:",
+				"    - c:3",
+			),
+			niceyaml.WithName("envs.yaml"))
+
+		// One address of each case lacks a port. No document holds the
+		// port of an address, so the error binds at the nearest value
+		// that decodes itself. That value is the sequence of addresses,
+		// or the service that holds the sequence.
+		tcs := map[string]struct {
+			// The layers of the merge, lowest first.
+			layers func(t *testing.T) []*niceyaml.Node
+			want   string
+			// The path of the error and the path of the value it binds
+			// at, each as the file of the binding holds it.
+			wantPath    string
+			wantNearest string
+			// The text of the address at the path of the error.
+			wantAddr string
+		}{
+			"a sequence, for an address of the lower file": {
+				layers: func(t *testing.T) []*niceyaml.Node {
+					t.Helper()
+
+					return layerNodes(t, "addrs: [a:1, b]\n", stringtest.LinesLF("addrs:", "  - c:3"))
+				},
+				want:        "base.yaml:1:1: $.addrs[1].port: port is required",
+				wantPath:    "$.addrs[1].port",
+				wantNearest: "$.addrs",
+				wantAddr:    "b",
+			},
+			"a sequence, for an address of the higher file": {
+				layers: func(t *testing.T) []*niceyaml.Node {
+					t.Helper()
+
+					return layerNodes(t,
+						"addrs: [a:1, b:2]\n",
+						stringtest.LinesLF("# prod", "addrs:", "  - c:3", "  - d"),
+					)
+				},
+				want:        "prod.yaml:2:1: $.addrs[1].port: port is required",
+				wantPath:    "$.addrs[1].port",
+				wantNearest: "$.addrs",
+				wantAddr:    "d",
+			},
+			"a sequence, for an address of the middle file": {
+				layers: func(t *testing.T) []*niceyaml.Node {
+					t.Helper()
+
+					return layerNodes(t, "addrs: [a:1, b:2]\n", "addrs: [c]\n", "addrs: [d:4]\n")
+				},
+				want:        "mid.yaml:1:1: $.addrs[0].port: port is required",
+				wantPath:    "$.addrs[0].port",
+				wantNearest: "$.addrs",
+				wantAddr:    "c",
+			},
+			"a sequence, below an empty sequence of the higher file": {
+				layers: func(t *testing.T) []*niceyaml.Node {
+					t.Helper()
+
+					return layerNodes(t, "addrs: [a:1, b]\n", "addrs: []\n")
+				},
+				want:        "base.yaml:1:1: $.addrs[1].port: port is required",
+				wantPath:    "$.addrs[1].port",
+				wantNearest: "$.addrs",
+				wantAddr:    "b",
+			},
+			"a sequence, for an address of the lower scoped Node": {
+				layers: func(t *testing.T) []*niceyaml.Node {
+					t.Helper()
+
+					return []*niceyaml.Node{
+						yamltest.At(t, envs, paths.Doc().Child("defaults")),
+						yamltest.At(t, envs, paths.Doc().Child("prod")),
+					}
+				},
+				want:        "envs.yaml:2:3: $.defaults.addrs[1].port: port is required",
+				wantPath:    "$.defaults.addrs[1].port",
+				wantNearest: "$.defaults.addrs",
+				wantAddr:    "b",
+			},
+			"a sequence, for an address of a file of a merged layer": {
+				layers: func(t *testing.T) []*niceyaml.Node {
+					t.Helper()
+
+					files := layerNodes(t, "addrs: [a:1]\n", "addrs: [b:2, c]\n", "addrs: [d:4]\n")
+
+					lower, err := niceyaml.NewSourceFromLayers(t.Context(), files[:2], appending)
+					require.NoError(t, err)
+
+					return []*niceyaml.Node{yamltest.Document(t, lower), files[2]}
+				},
+				want:        "mid.yaml:1:1: $.addrs[1].port: port is required",
+				wantPath:    "$.addrs[1].port",
+				wantNearest: "$.addrs",
+				wantAddr:    "c",
+			},
+			"a sequence, for an address of the lower file of a merged layer": {
+				layers: func(t *testing.T) []*niceyaml.Node {
+					t.Helper()
+
+					files := layerNodes(t, "addrs: [a]\n", "addrs: ['b:2', 'c:3']\n", "addrs: ['d:4']\n")
+
+					lower, err := niceyaml.NewSourceFromLayers(t.Context(), files[:2], appending)
+					require.NoError(t, err)
+
+					return []*niceyaml.Node{yamltest.Document(t, lower), files[2]}
+				},
+				want:        "base.yaml:1:1: $.addrs[0].port: port is required",
+				wantPath:    "$.addrs[0].port",
+				wantNearest: "$.addrs",
+				wantAddr:    "a",
+			},
+			// The file below the merged layer writes the first address, so
+			// the merged layer holds each of its addresses one index lower
+			// than the merged document does. The second address of the
+			// merged document is the first of mid.yaml. The second address
+			// of the merged layer is the first of prod.yaml.
+			"a sequence, for an address of the lower file of a merged layer above a file": {
+				layers: func(t *testing.T) []*niceyaml.Node {
+					t.Helper()
+
+					files := layerNodes(t, "addrs: ['z:9']\n", "addrs: [a]\n", "addrs: ['b:2', 'c:3']\n")
+
+					upper, err := niceyaml.NewSourceFromLayers(t.Context(), files[1:], appending)
+					require.NoError(t, err)
+
+					return []*niceyaml.Node{files[0], yamltest.Document(t, upper)}
+				},
+				want:        "mid.yaml:1:1: $.addrs[0].port: port is required",
+				wantPath:    "$.addrs[0].port",
+				wantNearest: "$.addrs",
+				wantAddr:    "a",
+			},
+			// The layer is the env mapping of a merged document, so that
+			// document holds each address below $.env. The file below the
+			// layer writes the first address, so the index differs too.
+			"a sequence, for an address of the lower file of a scoped Node of a merged document": {
+				layers: func(t *testing.T) []*niceyaml.Node {
+					t.Helper()
+
+					env := paths.Doc().Child("env")
+
+					files := layerNodes(t,
+						"addrs: ['z:9']\n",
+						stringtest.LinesLF("env:", "  addrs: [a]"),
+						stringtest.LinesLF("env:", "  addrs: ['b:2', 'c:3']"),
+					)
+
+					upper, err := niceyaml.NewSourceFromLayers(t.Context(), files[1:],
+						niceyaml.MergeAppend(env.Child("addrs")))
+					require.NoError(t, err)
+
+					return []*niceyaml.Node{files[0], yamltest.At(t, yamltest.Document(t, upper), env)}
+				},
+				want:        "mid.yaml:2:3: $.env.addrs[0].port: port is required",
+				wantPath:    "$.env.addrs[0].port",
+				wantNearest: "$.env.addrs",
+				wantAddr:    "a",
+			},
+			"a service, for an address of the lower file": {
+				layers: func(t *testing.T) []*niceyaml.Node {
+					t.Helper()
+
+					return layerNodes(t,
+						"svc: {addrs: ['a:1', b]}\n",
+						stringtest.LinesLF("svc:", "  addrs:", "    - c:3"),
+					)
+				},
+				want:        "base.yaml:1:1: $.svc.addrs[1].port: port is required",
+				wantPath:    "$.svc.addrs[1].port",
+				wantNearest: "$.svc",
+				wantAddr:    "b",
+			},
+			"a service, for an address of the higher file": {
+				layers: func(t *testing.T) []*niceyaml.Node {
+					t.Helper()
+
+					return layerNodes(t,
+						"svc: {addrs: ['a:1', 'b:2']}\n",
+						stringtest.LinesLF("# prod", "svc:", "  addrs:", "    - c"),
+					)
+				},
+				want:        "prod.yaml:2:1: $.svc.addrs[0].port: port is required",
+				wantPath:    "$.svc.addrs[0].port",
+				wantNearest: "$.svc",
+				wantAddr:    "c",
+			},
+			"a service, below a file that holds the service without an address": {
+				layers: func(t *testing.T) []*niceyaml.Node {
+					t.Helper()
+
+					return layerNodes(t, "svc: {addrs: ['a:1']}\n", "svc: {addrs: [b]}\n", "svc: {name: api}\n")
+				},
+				want:        "mid.yaml:1:1: $.svc.addrs[0].port: port is required",
+				wantPath:    "$.svc.addrs[0].port",
+				wantNearest: "$.svc",
+				wantAddr:    "b",
+			},
+			"a service, for an address of the one file that holds the sequence": {
+				layers: func(t *testing.T) []*niceyaml.Node {
+					t.Helper()
+
+					return layerNodes(t, "svc: {addrs: ['a:1', b]}\n", "svc: {name: api}\n")
+				},
+				want:        "base.yaml:1:1: $.svc.addrs[1].port: port is required",
+				wantPath:    "$.svc.addrs[1].port",
+				wantNearest: "$.svc",
+				wantAddr:    "b",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				layers, err := niceyaml.NewSourceFromLayers(t.Context(), tc.layers(t), appending)
+				require.NoError(t, err)
+
+				_, err = layers.Decode[config](t.Context())
+				require.EqualError(t, err, tc.want)
+
+				bound := yamltest.RequireSourceError(t, err)
+				path := yamltest.PathOf(t, bound)
+
+				assert.Equal(t, tc.wantPath, path.String())
+				assert.Equal(t, tc.wantPath, yamltest.PathOf(t, yamltest.RequireError(t, err)).String())
+
+				nearest, ok := bound.Nearest()
+				require.True(t, ok)
+				assert.Equal(t, tc.wantNearest, nearest.String())
+
+				// The path of the error names the address in the file of
+				// the binding.
+				addr, ok := path.Parent()
+				require.True(t, ok)
+
+				held, err := yamltest.Document(t, bound.Source()).At(addr)
+				require.NoError(t, err)
+
+				text, err := held.Decode[string](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, tc.wantAddr, text)
+			})
+		}
+
+		// Without the option, the highest file that holds the service
+		// holds the sequence whole or lacks it, and the error binds there.
+		t.Run("a sequence that replaces keeps the layer of the value", func(t *testing.T) {
+			t.Parallel()
+
+			layers, err := niceyaml.NewSourceFromLayers(t.Context(),
+				layerNodes(t, "svc: {addrs: ['a:1', b]}\n", "svc: {name: api}\n"))
+			require.NoError(t, err)
+
+			_, err = layers.Decode[config](t.Context())
+			require.EqualError(t, err, "prod.yaml:1:1: $.svc.addrs[1].port: port is required")
+		})
+
+		// The path of the option does not go through an element, so it
+		// does not name the addresses of a group. The groups replace, and
+		// the error binds in the highest file that holds the service.
+		t.Run("a sequence inside an element that replaces keeps the layer of the value", func(t *testing.T) {
+			t.Parallel()
+
+			layers, err := niceyaml.NewSourceFromLayers(t.Context(),
+				layerNodes(t, "svc: {groups: [{addrs: ['a:1', b]}]}\n", "svc: {name: api}\n"),
+				niceyaml.MergeAppend(paths.Doc().Child("svc", "groups", "addrs")),
+			)
+			require.NoError(t, err)
+
+			_, err = layers.Decode[config](t.Context())
+			require.EqualError(t, err, "prod.yaml:1:1: $.svc.groups[0].addrs[1].port: port is required")
+		})
+	})
+
+	t.Run("an error at a key above an element binds in the file of its element", func(t *testing.T) {
+		t.Parallel()
+
+		var (
+			addrs     = paths.Doc().Child("svc", "addrs")
+			appending = niceyaml.MergeAppend(plugins, addrs)
+
+			// The merged text holds the key of the plugins on its first
+			// line and one plugin on each line below it.
+			pluginLayers = []string{"plugins: [a, b]\n", stringtest.LinesLF("plugins:", "  - c")}
+		)
+
+		at := func(line, col int) func(*testing.T, *niceyaml.Node) niceyaml.ErrorOption {
+			return func(*testing.T, *niceyaml.Node) niceyaml.ErrorOption {
+				return niceyaml.AtPosition(position.New(line, col))
+			}
+		}
+
+		// Each case binds an error that names an element by its path in
+		// the merged document. The error also carries a position or a
+		// range of the merged text.
+		tcs := map[string]struct {
+			// The position or the range of the error in doc, the merged
+			// document.
+			at func(t *testing.T, doc *niceyaml.Node) niceyaml.ErrorOption
+			// The path of the error in the merged document.
+			path paths.Path
+			want string
+			// The documents of the layers, lowest first.
+			layers []string
+		}{
+			"the key of the sequence, for an element of the lower file": {
+				layers: pluginLayers,
+				at:     at(0, 0),
+				path:   plugins.Index(0),
+				want:   "base.yaml:1:1: $.plugins[0]: here",
+			},
+			"the key of the sequence, for an element of the higher file": {
+				layers: pluginLayers,
+				at:     at(0, 0),
+				path:   plugins.Index(2),
+				want:   "prod.yaml:1:1: $.plugins[0]: here",
+			},
+			"the key of the sequence, for a value inside an element": {
+				layers: []string{
+					"plugins: [{name: a}]\n",
+					stringtest.LinesLF("plugins:", "  - name: b"),
+				},
+				at:   at(0, 0),
+				path: plugins.Index(0).Child("name").Key(),
+				want: "base.yaml:1:1: $.plugins[0].name~: here",
+			},
+			"the range that Ranges gives for the sequence": {
+				layers: pluginLayers,
+				at: func(t *testing.T, doc *niceyaml.Node) niceyaml.ErrorOption {
+					t.Helper()
+
+					ranges, err := doc.Ranges(plugins)
+					require.NoError(t, err)
+					require.Len(t, ranges, 1)
+
+					return niceyaml.AtRange(ranges[0])
+				},
+				path: plugins.Index(0),
+				want: "base.yaml:1:1: $.plugins[0]: here",
+			},
+			"the colon behind the key of the sequence": {
+				layers: pluginLayers,
+				at:     at(0, 7),
+				path:   plugins.Index(0),
+				want:   "base.yaml:1:1: $.plugins[0]: here",
+			},
+			"the key of a mapping above the sequence": {
+				layers: []string{"svc: {addrs: [a, b]}\n", stringtest.LinesLF("svc:", "  name: x")},
+				at:     at(0, 0),
+				path:   addrs.Index(1),
+				want:   "base.yaml:1:1: $.svc.addrs[1]: here",
+			},
+			"the key of a mapping above the sequence, for an element of the middle file": {
+				layers: []string{"svc: {addrs: [a]}\n", "svc: {addrs: [b]}\n", "svc: {name: x}\n"},
+				at:     at(0, 0),
+				path:   addrs.Index(1),
+				want:   "mid.yaml:1:1: $.svc.addrs[0]: here",
+			},
+			// The position lies in the plugin of prod.yaml, which the path
+			// does not go through. The error stays at its position.
+			"an element of another file than the path names": {
+				layers: pluginLayers,
+				at:     at(3, 4),
+				path:   plugins.Index(0),
+				want:   "prod.yaml:2:5: $.plugins[0]: here",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				layers, err := niceyaml.NewSourceFromLayers(t.Context(), layerNodes(t, tc.layers...), appending)
+				require.NoError(t, err)
+
+				doc := yamltest.Document(t, layers)
+
+				err = layers.Bind(niceyaml.NewError("here", tc.at(t, doc), niceyaml.AtPath(tc.path)))
+				require.EqualError(t, err, tc.want)
+			})
+		}
+
+		// A layer that a merge built passes the error to the file of the
+		// element, at the key of that file. Each case binds an error at
+		// the key of the plugins in the merged text.
+		merges := map[string]struct {
+			// The layers of the merge, lowest first.
+			layers func(t *testing.T) []niceyaml.Layer
+			// The path of the error in the merged document.
+			path paths.Path
+			want string
+		}{
+			"an element of a file of a merged layer": {
+				layers: func(t *testing.T) []niceyaml.Layer {
+					t.Helper()
+
+					nodes := layerNodes(t, "plugins: [a, b]\n", "plugins: [c]\n", "plugins: [d]\n")
+
+					lower, err := niceyaml.NewSourceFromLayers(t.Context(), nodes[:2], appending)
+					require.NoError(t, err)
+
+					return []niceyaml.Layer{lower, nodes[2]}
+				},
+				path: plugins.Index(2),
+				want: "mid.yaml:1:1: $.plugins[0]: here",
+			},
+			// The file below the merged layer writes the first plugin, so
+			// the merged layer holds each of its plugins one index lower
+			// than the merged document does. The second plugin of the
+			// merged document is the first of mid.yaml. The second plugin
+			// of the merged layer is the first of prod.yaml.
+			"an element of the lower file of a merged layer above a file": {
+				layers: func(t *testing.T) []niceyaml.Layer {
+					t.Helper()
+
+					nodes := layerNodes(t, "plugins: [z]\n", "plugins: [a]\n", "plugins: [b, c]\n")
+
+					upper, err := niceyaml.NewSourceFromLayers(t.Context(), nodes[1:], appending)
+					require.NoError(t, err)
+
+					return []niceyaml.Layer{nodes[0], upper}
+				},
+				path: plugins.Index(1),
+				want: "mid.yaml:1:1: $.plugins[0]: here",
+			},
+			// The layer is the env mapping of a merged document, so that
+			// document holds each plugin below $.env. The file below the
+			// layer writes the first plugin, so the index differs too.
+			"an element of the lower file of a scoped Node of a merged document": {
+				layers: func(t *testing.T) []niceyaml.Layer {
+					t.Helper()
+
+					env := paths.Doc().Child("env")
+
+					nodes := layerNodes(t,
+						"plugins: [z]\n",
+						stringtest.LinesLF("env:", "  plugins: [a]"),
+						stringtest.LinesLF("env:", "  plugins: [b, c]"),
+					)
+
+					upper, err := niceyaml.NewSourceFromLayers(t.Context(), nodes[1:],
+						niceyaml.MergeAppend(env.Child("plugins")))
+					require.NoError(t, err)
+
+					return []niceyaml.Layer{nodes[0], yamltest.At(t, yamltest.Document(t, upper), env)}
+				},
+				path: plugins.Index(1),
+				want: "mid.yaml:2:3: $.env.plugins[0]: here",
+			},
+		}
+
+		for name, tc := range merges {
+			t.Run("the key of the sequence, for "+name, func(t *testing.T) {
+				t.Parallel()
+
+				layers, err := niceyaml.NewSourceFromLayers(t.Context(), tc.layers(t), appending)
+				require.NoError(t, err)
+
+				err = layers.Bind(niceyaml.NewError("here",
+					niceyaml.AtPosition(position.New(0, 0)), niceyaml.AtPath(tc.path)))
+				require.EqualError(t, err, tc.want)
+			})
+		}
+	})
+
+	t.Run("a merged layer passes each element to the file that wrote it", func(t *testing.T) {
+		t.Parallel()
+
+		inputs := []string{
+			"plugins: [a, b]\n",
+			stringtest.LinesLF("plugins:", "  - c"),
+			stringtest.LinesLF("plugins:", "  - d", "  - e"),
+		}
+
+		appending := niceyaml.MergeAppend(plugins)
+
+		// Each case layers base.yaml, mid.yaml, and prod.yaml in that
+		// order, with some of them merged into one document first.
+		tcs := map[string]func(t *testing.T, base, mid, prod *niceyaml.Node) []niceyaml.Layer{
+			"no layer merged": func(_ *testing.T, base, mid, prod *niceyaml.Node) []niceyaml.Layer {
+				return []niceyaml.Layer{base, mid, prod}
+			},
+			"the lower two merged": func(t *testing.T, base, mid, prod *niceyaml.Node) []niceyaml.Layer {
+				t.Helper()
+
+				lower, err := niceyaml.NewSourceFromLayers(t.Context(), []*niceyaml.Node{base, mid}, appending)
+				require.NoError(t, err)
+
+				return []niceyaml.Layer{lower, prod}
+			},
+			"the upper two merged": func(t *testing.T, base, mid, prod *niceyaml.Node) []niceyaml.Layer {
+				t.Helper()
+
+				upper, err := niceyaml.NewSourceFromLayers(t.Context(), []*niceyaml.Node{mid, prod}, appending)
+				require.NoError(t, err)
+
+				return []niceyaml.Layer{base, upper}
+			},
+			"all three merged": func(t *testing.T, base, mid, prod *niceyaml.Node) []niceyaml.Layer {
+				t.Helper()
+
+				all, err := niceyaml.NewSourceFromLayers(t.Context(), []*niceyaml.Node{base, mid, prod}, appending)
+				require.NoError(t, err)
+
+				return []niceyaml.Layer{all}
+			},
+		}
+
+		binds := map[string]string{
+			"$.plugins[1]": "base.yaml:1:14: $.plugins[1]: here",
+			"$.plugins[2]": "mid.yaml:2:5: $.plugins[0]: here",
+			"$.plugins[3]": "prod.yaml:2:5: $.plugins[0]: here",
+			"$.plugins[4]": "prod.yaml:3:5: $.plugins[1]: here",
+			"$.plugins":    "prod.yaml:1:1: $.plugins: here",
+		}
+
+		origins := map[string]string{
+			"$.plugins[1]": "base.yaml $.plugins[1]",
+			"$.plugins[2]": "mid.yaml $.plugins[0]",
+			"$.plugins[4]": "prod.yaml $.plugins[1]",
+		}
+
+		for name, arrange := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				nodes := layerNodes(t, inputs...)
+
+				layers, err := niceyaml.NewSourceFromLayers(t.Context(),
+					arrange(t, nodes[0], nodes[1], nodes[2]), appending)
+				require.NoError(t, err)
+
+				assert.Equal(t,
+					stringtest.LinesLF("plugins:", "  - a", "  - b", "  - c", "  - d", "  - e"),
+					mergedText(t, layers),
+				)
+
+				for expr, want := range binds {
+					err := layers.Bind(niceyaml.NewError("here", niceyaml.AtPath(paths.MustParse(expr))))
+					require.EqualError(t, err, want, expr)
+				}
+
+				for expr, want := range origins {
+					origin, err := yamltest.At(t, yamltest.Document(t, layers), paths.MustParse(expr)).Origin()
+					require.NoError(t, err)
+					assert.Equal(t, want, origin.Source().Name()+" "+origin.Path().String(), expr)
+				}
+			})
+		}
+	})
+
+	t.Run("a merged layer that replaces is one sequence of the merge above it", func(t *testing.T) {
+		t.Parallel()
+
+		nodes := layerNodes(t, "plugins: [a, b]\n", "plugins: [c]\n", "plugins: [d]\n")
+
+		// The lower two files merge without the option, so mid.yaml
+		// replaces the plugins of base.yaml.
+		layers, err := niceyaml.NewSourceFromLayers(t.Context(),
+			[]niceyaml.Layer{layersDocument(t, nodes[0], nodes[1]), nodes[2]},
+			niceyaml.MergeAppend(plugins),
+		)
+		require.NoError(t, err)
+
+		assert.Equal(t, stringtest.LinesLF("plugins:", "  - c", "  - d"), mergedText(t, layers))
+
+		err = layers.Bind(niceyaml.NewError("here", niceyaml.AtPath(plugins.Index(0))))
+		require.EqualError(t, err, "mid.yaml:1:11: $.plugins[0]: here")
+	})
+
+	t.Run("each option adds its paths to the ones before it", func(t *testing.T) {
+		t.Parallel()
+
+		at := []paths.Path{plugins}
+		option := niceyaml.MergeAppend(at...)
+
+		// The option keeps its paths when the caller changes the slice.
+		at[0] = paths.Doc().Child("other")
+
+		layers, err := niceyaml.NewSourceFromLayers(t.Context(),
+			layerNodes(t,
+				stringtest.LinesLF("plugins: [a]", "tags: [x]", "other: [1]"),
+				stringtest.LinesLF("plugins: [b]", "tags: [y]", "other: [2]"),
+			),
+			option,
+			niceyaml.MergeAppend(),
+			niceyaml.MergeAppend(paths.Doc().Child("tags")),
+		)
+		require.NoError(t, err)
+
+		assert.Equal(t,
+			stringtest.LinesLF("plugins:", "  - a", "  - b", "tags:", "  - x", "  - y", "other:", "  - 2"),
+			mergedText(t, layers),
+		)
+	})
+
+	t.Run("a path that holds any other selector returns ErrAppendPath", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]paths.Path{
+			"an index":               plugins.Index(0).Child("hosts"),
+			"an index wildcard":      plugins.IndexAll().Child("hosts"),
+			"a recursive selector":   paths.Doc().Recursive("plugins"),
+			"a recursive wildcard":   paths.Doc().RecursiveAll(),
+			"a key":                  plugins.Key(),
+			"an index from the node": paths.Current().Index(0),
+		}
+
+		for name, path := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				layers, err := niceyaml.NewSourceFromLayers(t.Context(),
+					layerNodes(t, "plugins: [a]\n", "plugins: [b]\n"),
+					niceyaml.MergeAppend(plugins, path),
+				)
+				require.ErrorIs(t, err, niceyaml.ErrAppendPath)
+				require.EqualError(t, err, "append path takes only name and .* selectors: "+path.String())
+				assert.Nil(t, layers)
+				assert.False(t, niceyaml.IsInvalid(err))
+			})
+		}
+
+		// The call fails before any layer merges, so it fails with no
+		// layer and with a layer that does not parse.
+		bad := plugins.Index(0)
+
+		_, err := niceyaml.NewSourceFromLayers(t.Context(), []*niceyaml.Source{}, niceyaml.MergeAppend(bad))
+		require.ErrorIs(t, err, niceyaml.ErrAppendPath)
+
+		broken := niceyaml.NewSourceFromString("a: [\n", niceyaml.WithName("broken.yaml"))
+
+		_, err = niceyaml.NewSourceFromLayers(t.Context(), []*niceyaml.Source{broken}, niceyaml.MergeAppend(bad))
+		require.ErrorIs(t, err, niceyaml.ErrAppendPath)
+		require.NotErrorIs(t, err, niceyaml.ErrSyntax)
+	})
 }
 
 func TestMergeUnmarshalers(t *testing.T) {
@@ -5870,6 +7204,118 @@ func (s *layerSwitch) UnmarshalYAML(unmarshal func(any) error) error {
 	}
 
 	*s = layerSwitch(decoded)
+
+	return nil
+}
+
+// layerAddr decodes itself from the text "host:port", so a document
+// holds neither of its fields. It needs a port.
+type layerAddr struct {
+	Host string
+	Port string
+}
+
+func (a *layerAddr) UnmarshalYAML(unmarshal func(any) error) error {
+	var text string
+
+	err := unmarshal(&text)
+	if err != nil {
+		return err
+	}
+
+	host, port, _ := strings.Cut(text, ":")
+
+	*a = layerAddr{Host: host, Port: port}
+
+	return nil
+}
+
+func (a layerAddr) Validate() error {
+	if a.Port == "" {
+		return yamltest.ErrorAt("port is required", "port")
+	}
+
+	return nil
+}
+
+// layerEndpoint is an address that a document writes as the text
+// "host:port", so a document holds neither of its fields. It needs a
+// port.
+type layerEndpoint struct {
+	Host string
+	Port string
+}
+
+func (e layerEndpoint) Validate() error {
+	if e.Port == "" {
+		return yamltest.ErrorAt("port is required", "port")
+	}
+
+	return nil
+}
+
+// newLayerEndpoints returns the endpoint that each of texts writes as
+// "host:port".
+func newLayerEndpoints(texts []string) []layerEndpoint {
+	endpoints := make([]layerEndpoint, len(texts))
+
+	for i, text := range texts {
+		host, port, _ := strings.Cut(text, ":")
+
+		endpoints[i] = layerEndpoint{Host: host, Port: port}
+	}
+
+	return endpoints
+}
+
+// layerEndpoints decodes itself from a sequence of "host:port" texts.
+type layerEndpoints []layerEndpoint
+
+func (e *layerEndpoints) UnmarshalYAML(unmarshal func(any) error) error {
+	var texts []string
+
+	err := unmarshal(&texts)
+	if err != nil {
+		return err
+	}
+
+	*e = newLayerEndpoints(texts)
+
+	return nil
+}
+
+// layerService decodes itself from a mapping that writes each address
+// as a "host:port" text.
+type layerService struct {
+	Name   string          `yaml:"name"`
+	Addrs  []layerEndpoint `yaml:"addrs"`
+	Groups []layerGroup    `yaml:"groups"`
+}
+
+// layerGroup holds the addresses of one group of a [layerService].
+type layerGroup struct {
+	Addrs []layerEndpoint `yaml:"addrs"`
+}
+
+func (s *layerService) UnmarshalYAML(unmarshal func(any) error) error {
+	var plain struct {
+		Name   string   `yaml:"name"`
+		Addrs  []string `yaml:"addrs"`
+		Groups []struct {
+			Addrs []string `yaml:"addrs"`
+		} `yaml:"groups"`
+	}
+
+	err := unmarshal(&plain)
+	if err != nil {
+		return err
+	}
+
+	*s = layerService{Name: plain.Name, Addrs: newLayerEndpoints(plain.Addrs)}
+
+	for _, group := range plain.Groups {
+		s.Groups = append(s.Groups, layerGroup{Addrs: newLayerEndpoints(group.Addrs)})
+	}
 
 	return nil
 }

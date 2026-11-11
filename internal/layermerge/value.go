@@ -29,10 +29,66 @@ type Value struct {
 	entries []*mapEntry
 	// Layer is the index of the layer the value comes from, among the
 	// layers the merge reads. A mapping that several layers hold takes the
-	// index of the highest one.
-	Layer   int
+	// index of the highest one, and so does a sequence that several layers
+	// append to.
+	Layer int
+	// The index of the value in the sequence that holds it in its own
+	// layer. A sequence that several layers append to holds the element
+	// at another index.
+	index   int
 	kind    valueKind
 	written bool
+}
+
+// Appends names the sequences that [Value.Merge] appends to the sequence
+// below them. It holds paths of names and `.*` selectors, and each path
+// reads from the value that Merge merges. The zero Appends does not name
+// a sequence.
+//
+// Create instances with [NewAppends].
+type Appends struct {
+	// The selectors that each path still holds below the value, for each
+	// path that matches every key down to that value.
+	rest [][]paths.Selector
+}
+
+// NewAppends creates a new [Appends] that names the sequence at each of
+// rels. Each path reads from the value that [Value.Merge] merges. It
+// holds `.name` and `.*` selectors only, and Merge does not match a path
+// that holds any other selector.
+func NewAppends(rels ...paths.Path) Appends {
+	var a Appends
+
+	for _, rel := range rels {
+		a.rest = append(a.rest, slices.Collect(rel.Selectors()))
+	}
+
+	return a
+}
+
+// here reports whether a names the sequence at the value itself.
+func (a Appends) here() bool {
+	return slices.ContainsFunc(a.rest, func(rest []paths.Selector) bool { return len(rest) == 0 })
+}
+
+// under returns the sequences that a names below the entry of the given
+// name. A `.name` selector matches the name of the entry, and a `.*`
+// selector matches every name.
+func (a Appends) under(name string) Appends {
+	var below Appends
+
+	for _, rest := range a.rest {
+		if len(rest) == 0 {
+			continue
+		}
+
+		sel := rest[0]
+		if sel.Kind == paths.SelectorChildAll || (sel.Kind == paths.SelectorChild && sel.Name == name) {
+			below.rest = append(below.rest, rest[1:])
+		}
+	}
+
+	return below
 }
 
 // mapEntry is an entry of a mapping in a [Value].
@@ -57,8 +113,9 @@ type mapEntry struct {
 // over e. A removed upper removes e, and so does a null that removes, as
 // [Value.removes] reports. Any other null keeps a removed e and a null of
 // e that removes. Any other value replaces a removed e, or merges over
-// the value of e as [Value.Merge] describes.
-func (e *mapEntry) merge(upper *mapEntry) {
+// the value of e as [Value.Merge] describes, with the sequences that
+// appends names below e.
+func (e *mapEntry) merge(upper *mapEntry, appends Appends) {
 	value := upper.value
 
 	switch {
@@ -74,7 +131,7 @@ func (e *mapEntry) merge(upper *mapEntry) {
 		e.value, e.removed = value, false
 
 	default:
-		e.value = e.value.Merge(value)
+		e.value = e.value.Merge(value, appends)
 	}
 
 	// The key reads as the layer of the value spells it, so a path to the
@@ -98,8 +155,8 @@ func (v *Value) removes() bool {
 // merged document takes whole. The layers below do not hold a value for
 // such a null to remove, and the null does not add its key either. The
 // entries of each mapping inside v take the same mark. A sequence keeps
-// each null it holds, because a sequence replaces what lies below it
-// with every element.
+// each null it holds, because an element never merges with an element of
+// a layer below.
 func (v *Value) strip() {
 	for _, entry := range v.entries {
 		entry.strip()
@@ -120,9 +177,16 @@ func (e *mapEntry) strip() {
 
 // Merge returns upper merged over v, where upper comes from a higher
 // layer. Two mappings merge entry by entry, as [mapEntry.merge]
-// describes, and v then holds the result. A null in upper keeps v,
-// unless v is a null too. Any other upper replaces v. Either value can be
-// nil. A nil value stands for a layer that does not hold a value there.
+// describes, and v then holds the result. Two sequences that appends
+// names put the elements of upper behind the elements of v, and v then
+// holds them all. Each element keeps its own layer, and the sequence
+// takes the layer of upper. A null in upper keeps v, unless v is a null
+// too. Any other upper replaces v. Either value can be nil. A nil value
+// stands for a layer that does not hold a value there.
+//
+// The paths of appends read from v. Merge matches them against the name
+// of each entry on the way down, so they name sequences under the keys of
+// mappings only.
 //
 // For a nil v, the result is upper as its layer wrote it, with each null
 // it holds. Over any other v, the null of an entry of upper that removes,
@@ -134,7 +198,7 @@ func (e *mapEntry) strip() {
 // Merge does not let a null remove v itself. [mapEntry.merge] decides
 // removal for the value under a key, and the root of a layer does not
 // have a key.
-func (v *Value) Merge(upper *Value) *Value {
+func (v *Value) Merge(upper *Value, appends Appends) *Value {
 	switch {
 	case v == nil:
 		return upper
@@ -146,6 +210,9 @@ func (v *Value) Merge(upper *Value) *Value {
 		}
 
 		return v
+
+	case v.kind == kindSequence && upper.kind == kindSequence && appends.here():
+		v.items = append(v.items, upper.items...)
 
 	case v.kind != kindMapping || upper.kind != kindMapping:
 		upper.strip()
@@ -164,7 +231,7 @@ func (v *Value) Merge(upper *Value) *Value {
 			continue
 		}
 
-		v.entries[i].merge(entry)
+		v.entries[i].merge(entry, appends.under(entry.name))
 	}
 
 	v.Layer = upper.Layer
@@ -230,6 +297,92 @@ func (v *Value) Find(rel paths.Path) (*Value, bool) {
 	}
 
 	return at, true
+}
+
+// LayerPath returns rel, a path relative to v, as the layer at the given
+// index holds it. A sequence that several layers append to holds each
+// element at another index than the layer of that element does. So each
+// `[n]` selector of rel that selects an element of that layer takes the
+// index the element has there. Every other selector stays as it is. The
+// result differs from rel only when rel goes through such an element.
+func (v *Value) LayerPath(rel paths.Path, layer int) paths.Path {
+	var held paths.Path
+
+	at := v
+
+	for sel := range rel.Selectors() {
+		if at != nil {
+			at = at.child(sel)
+		}
+
+		if sel.Kind == paths.SelectorIndex && at != nil && at.Layer == layer {
+			sel.Index = at.index
+		}
+
+		held = with(held, sel)
+	}
+
+	return held
+}
+
+// Element returns the first value on rel, a path relative to v, that is
+// an element of a sequence that appends names. Every value at or below
+// that element comes from the layer of the element. Element returns nil
+// when rel does not go through such an element, and when v does not hold
+// the element.
+func (v *Value) Element(rel paths.Path, appends Appends) *Value {
+	at := v
+
+	for sel := range rel.Selectors() {
+		if at == nil {
+			return nil
+		}
+
+		named := at.kind == kindSequence && appends.here()
+
+		at = at.child(sel)
+
+		switch sel.Kind {
+		case paths.SelectorIndex:
+			if named {
+				return at
+			}
+
+			appends = Appends{}
+
+		case paths.SelectorChild:
+			appends = appends.under(sel.Name)
+
+		case paths.SelectorKey:
+
+		case paths.SelectorChildAll, paths.SelectorIndexAll, paths.SelectorRecursive, paths.SelectorRecursiveAll:
+			return nil
+		}
+	}
+
+	return nil
+}
+
+// with returns p with sel behind its selectors.
+func with(p paths.Path, sel paths.Selector) paths.Path {
+	switch sel.Kind {
+	case paths.SelectorChild:
+		return p.Child(sel.Name)
+	case paths.SelectorIndex:
+		return p.Index(sel.Index)
+	case paths.SelectorChildAll:
+		return p.ChildAll()
+	case paths.SelectorIndexAll:
+		return p.IndexAll()
+	case paths.SelectorRecursive:
+		return p.Recursive(sel.Name)
+	case paths.SelectorRecursiveAll:
+		return p.RecursiveAll()
+	case paths.SelectorKey:
+		return p.Key()
+	}
+
+	return p
 }
 
 // child returns the value sel selects in v, or nil when v does not hold

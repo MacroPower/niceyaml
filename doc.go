@@ -1434,6 +1434,28 @@
 // merges element by element, and an empty sequence, as in `tags: []`, clears
 // the one below it. An empty mapping keeps the mapping below it.
 //
+// A sequence replaces because the file of one environment then states its
+// whole list. It can thus shorten or clear the list of the base file. A format
+// whose lists grow from layer to layer instead names them with [MergeAppend],
+// such as the plugins of a tool or the ports of each service:
+//
+//	merged, err := niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{base, prod},
+//		niceyaml.MergeAppend(
+//			paths.Doc().Child("plugins"),
+//			paths.Doc().Child("services").ChildAll().Child("ports"),
+//		),
+//	)
+//
+// The sequence at each of those paths adds its elements to the sequence below
+// it. The merged sequence thus holds the elements of the lowest layer first.
+// Each path holds `.name` and `.*` selectors only, because the merge matches
+// it against the keys of the mappings that merge.
+//
+// A layer cannot replace a sequence that appends. An empty sequence there
+// keeps the elements below it. A written null still removes the key with
+// every element below it, and a sequence of a higher layer then starts the
+// sequence again.
+//
 // An untagged null that a layer writes as `null` or `~` removes its key and
 // the value below it, at any depth:
 //
@@ -1457,8 +1479,8 @@
 // it change, so it keeps each null it writes. A merge of one layer thus holds
 // what its file holds. A written null of a higher layer removes a null that a
 // layer below holds under its key, written or not, as it removes any other
-// value. In every layer, a written null stays inside a sequence, because a
-// sequence replaces what lies below it whole.
+// value. In every layer, a written null stays inside a sequence, because an
+// element never merges with an element of a layer below.
 //
 // A layer without content, such as a file of comments, does not hold a value.
 // A layer with content holds one, even where its document is an empty mapping
@@ -1546,6 +1568,14 @@
 // a position or a range in the merged text binds at the value that lies
 // there.
 //
+// Several layers hold a sequence that [MergeAppend] names, and each element
+// keeps the layer that wrote it. An error at an element or under one binds in
+// that layer. An error at the sequence itself binds in the highest layer that
+// holds the sequence, as an error at a mapping does. An error under an element
+// stays in the layer of that element when it binds at a value above the
+// element, such as a sequence that decodes itself. It stays there too when it
+// binds at the key of such a value.
+//
 // An error for a key that is missing from every layer binds at the key of the
 // mapping that lacks it. It binds in the layer whose mapping lies deepest
 // along the path, and in the highest of several such layers. An error at a
@@ -1561,6 +1591,11 @@
 // the value under defaults. [Annotate] marks the error on a view of that
 // layer but not on a view of the merged Source, and [SourceError.Excerpt]
 // shows the lines of the layer.
+//
+// A layer holds each element of a sequence that MergeAppend names at the
+// index the element has in its own file. An error at `$.plugins[2]` thus
+// reads `$.plugins[0]` in the file whose first plugin it is. [Node.Origin]
+// returns the Node at that path of the file.
 //
 // A merged Source is a layer like any other, and so is a Node of its
 // document. A merge that holds one reads it as a file of the same text. That
