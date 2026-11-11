@@ -22,6 +22,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/manifest"
 	"go.jacobcolvin.com/niceyaml/matcher"
 	"go.jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
@@ -1130,6 +1131,34 @@ func TestPlan_Blocked(t *testing.T) {
 	assert.Equal(t, []string{"config/bad.yaml"}, plan.Blocked())
 }
 
+func TestPlan_Counts(t *testing.T) {
+	t.Parallel()
+
+	plan := planOf(t, drinkOptions(false), map[string]string{
+		"a.yaml": drinkDoc + "  size: XL\n",
+		"b.yaml": drinkDoc + stringtest.LinesLF(
+			"  size: S",
+			"---",
+			"apiVersion: cafe.jacobcolvin.com/v9",
+			"kind: Drink",
+		),
+		"c.yaml": drinkDoc + "  size: M\n",
+		"d.yaml": stringtest.LinesLF(
+			"apiVersion: cafe.jacobcolvin.com/v1",
+			"kind: Drink",
+			"---",
+			"apiVersion: cafe.jacobcolvin.com/v9",
+			"kind: Drink",
+		),
+		"e.yaml": stringtest.LinesLF("apiVersion: cafe.jacobcolvin.com/v1", "kind: Drink"),
+	})
+
+	assert.Equal(t, manifest.Counts{Migrate: 2, Unrouted: 2, Blocked: 1, UpToDate: 2}, plan.Counts())
+	assert.Equal(t,
+		"2 files to migrate, 2 documents not migrated, 1 file not migrated, 2 up to date, nothing written",
+		plan.Summary())
+}
+
 func TestPlanFile_Diff(t *testing.T) {
 	t.Parallel()
 
@@ -1230,6 +1259,121 @@ func TestPlanFile_Removals(t *testing.T) {
 	assert.Equal(t, "Drink", w.Kind)
 
 	assert.NoError(t, planOf(t, cafeOptions(), map[string]string{"hours.yaml": hoursDoc}).Files()[0].Removals())
+}
+
+func TestPlanFile_Documents(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		opts  []manifest.RegistryOption
+		files map[string]string
+		want  []manifest.PlanDocument
+	}{
+		"removal and a document that fails to route": {
+			opts: drinkOptions(false),
+			files: map[string]string{"drink.yaml": colorDrinkDoc + stringtest.LinesLF(
+				"---",
+				"apiVersion: cafe.jacobcolvin.com/v9",
+				"kind: Drink",
+				"---",
+				"apiVersion: cafe.jacobcolvin.com/v1beta1",
+				"kind: Drink",
+			)},
+			want: []manifest.PlanDocument{
+				{
+					Kind: "Drink",
+					From: "cafe.jacobcolvin.com/v1beta1",
+					To:   "cafe.jacobcolvin.com/v1",
+					Removals: []edit.Removal{{
+						Reason: "menu colors moved to the theme of the Cafe",
+						Label:  "cafe.jacobcolvin.com/v1",
+						Key:    "color",
+						Path:   paths.MustParse("$.spec.color~"),
+						Range:  position.NewRange(position.New(5, 2), position.New(5, 7)),
+					}},
+				},
+				{
+					Kind:  "Drink",
+					From:  "cafe.jacobcolvin.com/v1beta1",
+					To:    "cafe.jacobcolvin.com/v1",
+					Index: 2,
+				},
+			},
+		},
+		"name and the unversioned layout": {
+			opts:  adoptOptions(),
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF("name: yamull", "seats: 40")},
+			want: []manifest.PlanDocument{
+				{Kind: "Cafe", Name: "yamull", To: "cafe.jacobcolvin.com/v1"},
+			},
+		},
+		"version names without a group": {
+			// The header names the versions as "version 1" and "version 2".
+			opts:  configOptions(),
+			files: map[string]string{"config.yaml": stringtest.LinesLF("version: 1", "port: 80")},
+			want:  []manifest.PlanDocument{{Kind: "Config", From: "1", To: "2"}},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			plan := planOf(t, tc.opts, tc.files)
+			require.Len(t, plan.Files(), 1)
+			assert.Equal(t, tc.want, plan.Files()[0].Documents())
+		})
+	}
+}
+
+func TestPlanFile_Documents_Copy(t *testing.T) {
+	t.Parallel()
+
+	plan := planOf(t, drinkOptions(false), map[string]string{"drink.yaml": colorDrinkDoc})
+	require.Len(t, plan.Files(), 1)
+
+	f := plan.Files()[0]
+	docs := f.Documents()
+	require.Len(t, docs, 1)
+	require.Len(t, docs[0].Removals, 1)
+
+	// The plan keeps its documents when a caller changes the slice or the
+	// removals of a document.
+	docs[0].Kind = "Other"
+	docs[0].Removals[0].Reason = "changed"
+
+	assert.Equal(t, "Drink", f.Documents()[0].Kind)
+	assert.Equal(t, "menu colors moved to the theme of the Cafe", f.Documents()[0].Removals[0].Reason)
+}
+
+func TestPlanDocument_String(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		doc  manifest.PlanDocument
+		want string
+	}{
+		"kind": {
+			doc:  manifest.PlanDocument{Kind: "Hours", Index: 1},
+			want: "Hours",
+		},
+		"kind and name": {
+			doc:  manifest.PlanDocument{Kind: "Hours", Name: "weekday"},
+			want: `Hours "weekday"`,
+		},
+		"name with control characters": {
+			doc:  manifest.PlanDocument{Kind: "Hours", Name: "week\x1b[2J\nday"},
+			want: `Hours "week\x1b[2J\nday"`,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.doc.String())
+		})
+	}
 }
 
 func TestPlanFile_Header(t *testing.T) {

@@ -165,6 +165,19 @@
 // in [PlanFile.Header] and [PlanFile.Removals], so each value that a
 // rewrite deletes has a row that says so.
 //
+// Header, [Plan.Summary], and [Result.Summary] write lines for a terminal.
+// A program that renders a plan another way, such as a JSON report or a
+// table, reads the same facts as fields. [PlanFile.Documents] gives the
+// kind, the name, the versions, and the removed values of each document
+// that migrates. [Plan.Counts] and [Result.Counts] give the numbers that a
+// summary counts:
+//
+//	for _, f := range plan.Files() {
+//		for _, d := range f.Documents() {
+//			report.Add(f.Source().Name(), d.Kind, d.Name, d.From, d.To)
+//		}
+//	}
+//
 // By default, Apply writes each file with [WriteAtomic]. It writes each
 // file atomically and keeps its mode. On unix systems, it also keeps the
 // owner and the group of the file, and on Linux, the access control list

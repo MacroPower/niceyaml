@@ -579,6 +579,43 @@ func TestResult_Summary(t *testing.T) {
 	}
 }
 
+func TestResult_Counts(t *testing.T) {
+	t.Parallel()
+
+	reg := manifest.MustNewRegistry(drinkOptions(false)...)
+
+	// A document that fails to route, after a document that migrates.
+	unrouted := stringtest.LinesLF("---", "apiVersion: cafe.jacobcolvin.com/v9", "kind: Drink")
+
+	plan, err := reg.PlanMigration(t.Context(), configFS(map[string]string{
+		"a.yaml": drinkDoc + "  size: XL\n",
+		"b.yaml": drinkDoc + "  size: S\n" + unrouted,
+		"c.yaml": drinkDoc + "  size: M\n" + unrouted,
+		"d.yaml": drinkDoc + "  size: L\n",
+		"e.yaml": stringtest.LinesLF("apiVersion: cafe.jacobcolvin.com/v1", "kind: Drink") + unrouted,
+	}))
+	require.NotNil(t, plan)
+	require.Error(t, err)
+	assert.Equal(t, manifest.Counts{Migrate: 3, Unrouted: 3, Blocked: 1, UpToDate: 1}, plan.Counts())
+
+	write := func(_ context.Context, f *manifest.PlanFile) error {
+		if f.Source().Name() == "config/c.yaml" {
+			return errors.New("store offline")
+		}
+
+		return nil
+	}
+
+	// The result counts the documents that fail to route only in the
+	// files that Apply wrote and in the files that are up to date.
+	res, err := plan.Apply(t.Context(), manifest.WithWriter(write))
+	require.Error(t, err)
+	assert.Equal(t, manifest.Counts{Migrate: 2, Unrouted: 2, Blocked: 1, NotWritten: 1, UpToDate: 1}, res.Counts())
+	assert.Equal(t,
+		"2 files migrated, 2 documents not migrated, 1 file not migrated, 1 not written, 1 up to date",
+		lastLine(res.Summary()))
+}
+
 func TestResult_Summary_ControlCharacters(t *testing.T) {
 	t.Parallel()
 

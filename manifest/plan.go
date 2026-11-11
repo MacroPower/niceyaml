@@ -75,7 +75,7 @@ type Plan struct {
 	sources  []*niceyaml.Source
 	// The rows of the plan, finished, in load order.
 	rows   []*row
-	counts counts
+	counts Counts
 }
 
 // PlanFile is one file that a [Plan] changes: its text as the plan read it
@@ -88,7 +88,7 @@ type PlanFile struct {
 	// The warnings of the values that the rewrite deletes, finished.
 	removals []error
 	after    string
-	docs     []migratedDoc
+	docs     []PlanDocument
 	// The index of the file in the load.
 	index int
 	// The number of documents of the file that fail to route, so the
@@ -96,22 +96,71 @@ type PlanFile struct {
 	notMigrated int
 }
 
-// migratedDoc is one document that a [PlanFile] migrates.
-type migratedDoc struct {
-	// The document as messages name it, as in `Hours "weekday"`.
-	name     string
-	from     string
-	to       string
-	removals []edit.Removal
+// PlanDocument is one document that a [PlanFile] migrates. It holds the
+// facts that [PlanFile.Header] names in its line for the document, so a
+// program can render them in a format of its own, such as a JSON report.
+//
+// Receive instances from [PlanFile.Documents].
+type PlanDocument struct {
+	// Kind is the registered name of the kind of the document, as
+	// [NewKind] gives it, also for a document that writes an old name
+	// from [KindName].
+	Kind string
+	// Name is the name that the document holds in its [NameField], or ""
+	// when the kind has no NameField. The name comes from the text of the
+	// file, so it can hold control characters.
+	Name string
+	// From is the name of the version that the document declares, as
+	// [Version] gives it, or "" for the unversioned layout of the kind.
+	From string
+	// To is the name of the version that the rewrite writes, the written
+	// version of the kind.
+	To string
+	// Removals holds each value that the rewrite deletes from the
+	// document, or nil when it deletes none. The path and the range of
+	// each value are in the text of [PlanFile.Source]. [PlanFile.Removals]
+	// returns the same values as warnings bound in that text.
+	Removals []edit.Removal
+	// Index is the place of the document among the documents of the
+	// file, from 0.
+	Index int
 }
 
-// counts holds the numbers of files and documents that a summary counts.
-type counts struct {
-	migrated    int
-	notMigrated int
-	blocked     int
-	notWritten  int
-	upToDate    int
+// String returns the document as a line of [PlanFile.Header] names it:
+// the kind and the quoted name, as in `Hours "weekday"`, or the kind
+// alone when the document has no name. A header puts the place of a
+// document without a name before it when the file holds several
+// documents, as in `document 2: Hours`.
+func (d PlanDocument) String() string {
+	if d.Name != "" {
+		return fmt.Sprintf("%s %q", d.Kind, d.Name)
+	}
+
+	return d.Kind
+}
+
+// Counts holds the numbers of files and documents that [Plan.Summary] and
+// [Result.Summary] count.
+//
+// Receive instances from [Plan.Counts] or [Result.Counts].
+type Counts struct {
+	// Migrate counts the files that migrate. In a [Plan], they are the
+	// files of [Plan.Files]. In a [Result], they are the files that
+	// [Plan.Apply] wrote.
+	Migrate int
+	// Unrouted counts the documents that fail to route, which the rewrite
+	// leaves as they are. A Result counts only those of the files that
+	// Apply wrote and of the files that are up to date.
+	Unrouted int
+	// Blocked counts the files that a problem blocks, the files of
+	// [Plan.Blocked].
+	Blocked int
+	// NotWritten counts the files of [Plan.Files] that Apply did not
+	// write. It is 0 in a Plan.
+	NotWritten int
+	// UpToDate counts the files that hold no document that migrates and
+	// that a problem does not block.
+	UpToDate int
 }
 
 // newPlan returns the plan of the files that l checked.
@@ -130,16 +179,16 @@ func (l *loader) newPlan() *Plan {
 		switch {
 		case f.blocked:
 			p.blocked = append(p.blocked, f.name)
-			p.counts.blocked++
+			p.counts.Blocked++
 
 		case f.plan != nil:
 			p.files = append(p.files, f.plan)
-			p.counts.migrated++
-			p.counts.notMigrated += f.plan.notMigrated
+			p.counts.Migrate++
+			p.counts.Unrouted += f.plan.notMigrated
 
 		default:
-			p.counts.upToDate++
-			p.counts.notMigrated += f.notMigrated
+			p.counts.UpToDate++
+			p.counts.Unrouted += f.notMigrated
 		}
 	}
 
@@ -183,9 +232,16 @@ func (p *Plan) Sources() []*niceyaml.Source {
 
 // Summary returns a line that counts the files of the plan, as in
 // "2 files to migrate, 1 up to date, nothing written". The line also
-// counts the documents that fail to route as not migrated.
+// counts the documents that fail to route as not migrated. [Plan.Counts]
+// returns the same numbers.
 func (p *Plan) Summary() string {
 	return p.counts.text("to migrate") + ", nothing written"
+}
+
+// Counts returns the numbers of files and documents that [Plan.Summary]
+// counts.
+func (p *Plan) Counts() Counts {
+	return p.counts
 }
 
 // Warnings returns the warnings that remain after [Plan.Apply] writes the
@@ -232,6 +288,22 @@ func (f *PlanFile) Removals() error {
 	return newLoadError(namedSource(f.f.name), f.removals)
 }
 
+// Documents returns each document of the file that migrates, in the
+// order of the file. A document that is up to date or that fails to route
+// does not appear.
+//
+// Every call returns the same documents in a new slice, so a caller that
+// changes the slice or the removals of a document does not change the
+// plan.
+func (f *PlanFile) Documents() []PlanDocument {
+	docs := slices.Clone(f.docs)
+	for i := range docs {
+		docs[i].Removals = slices.Clone(docs[i].Removals)
+	}
+
+	return docs
+}
+
 // Header returns a line for each document of the file that migrates, as
 // in `config/hours.yaml: Hours "weekday" from cafe.jacobcolvin.com/v1alpha1
 // to cafe.jacobcolvin.com/v1`. An indented row below the line of a
@@ -243,14 +315,16 @@ func (f *PlanFile) Removals() error {
 // Each line takes one row of a terminal. Header passes the name of the
 // file and the reason of each removal through [escape.Line], as an error
 // of the load draws them. [PlanFile.Source] holds the name as the input
-// gives it.
+// gives it, and [PlanFile.Documents] holds the facts of each line as
+// fields.
 func (f *PlanFile) Header() string {
 	var b strings.Builder
 
 	for _, d := range f.docs {
-		fmt.Fprintf(&b, "%s: %s from %s to %s\n", f.f.label(), d.name, d.from, d.to)
+		fmt.Fprintf(&b, "%s: %s from %s to %s\n", f.f.label(), f.docLabel(d), f.reg.layoutLabel(d.Kind, d.From),
+			f.reg.layoutLabel(d.Kind, d.To))
 
-		for _, rm := range d.removals {
+		for _, rm := range d.Removals {
 			b.WriteString("  removes " + removalPath(rm))
 
 			if rm.Reason != "" {
@@ -311,6 +385,16 @@ func (f *PlanFile) Diff(ctx context.Context, lines int) (*line.View, error) {
 	}
 
 	return line.NewView(niceyaml.NewSourceFromString(strings.Join(parts, ", ")).Lines()), nil
+}
+
+// docLabel returns d as a line of a header names it. A document without
+// a name follows its place when the file holds several documents.
+func (f *PlanFile) docLabel(d PlanDocument) string {
+	if d.Name == "" && len(f.f.src.Documents()) > 1 {
+		return fmt.Sprintf("document %d: %s", d.Index+1, d)
+	}
+
+	return d.String()
 }
 
 // removalPath returns the path of the value that rm removed, as a header
@@ -383,11 +467,13 @@ func (l *loader) planFile(i int, f *file) {
 		d.rewritten = true
 		d.report(true)
 
-		pf.docs = append(pf.docs, migratedDoc{
-			name:     d.label(),
-			from:     l.reg.label(d.route.version),
-			to:       l.reg.label(d.route.kind.written),
-			removals: d.removedValues,
+		pf.docs = append(pf.docs, PlanDocument{
+			Index:    d.index,
+			Kind:     d.route.kind.kind.name,
+			Name:     d.name,
+			From:     d.route.version.cfg.name,
+			To:       d.route.kind.written.cfg.name,
+			Removals: d.removedValues,
 		})
 
 		for _, w := range d.removed {
@@ -407,22 +493,6 @@ func (d *docState) blocks() bool {
 	}
 
 	return d.routed && !d.passed && slices.ContainsFunc(d.problems, niceyaml.HasErrors)
-}
-
-// label returns the document as a header names it. The label is the kind
-// and the name when the kind has a [NameField]. Otherwise it is the kind,
-// after the place of the document when the file holds several.
-func (d *docState) label() string {
-	name := d.route.kind.kind.name
-	if d.hasName {
-		return fmt.Sprintf("%s %q", name, d.name)
-	}
-
-	if len(d.f.src.Documents()) > 1 {
-		return fmt.Sprintf("document %d: %s", d.index+1, name)
-	}
-
-	return name
 }
 
 // newText returns text, the text of a file, with the text of each of docs
@@ -472,7 +542,7 @@ func checkLimits(src *niceyaml.Source, after string) error {
 // names them, as in "2 files migrated, 1 up to date". So does the first
 // count of files after the count of documents, as in "1 file migrated, 1
 // document not migrated, 1 file not migrated".
-func (c counts) text(verb string) string {
+func (c Counts) text(verb string) string {
 	var parts []string
 
 	named := false
@@ -490,16 +560,16 @@ func (c counts) text(verb string) string {
 		parts = append(parts, count+" "+what)
 	}
 
-	files(c.migrated, verb)
+	files(c.Migrate, verb)
 
-	if c.notMigrated > 0 {
-		parts = append(parts, quantity.Plural(c.notMigrated, "document")+" not migrated")
+	if c.Unrouted > 0 {
+		parts = append(parts, quantity.Plural(c.Unrouted, "document")+" not migrated")
 		named = false
 	}
 
-	files(c.blocked, "not migrated")
-	files(c.notWritten, "not written")
-	files(c.upToDate, "up to date")
+	files(c.Blocked, "not migrated")
+	files(c.NotWritten, "not written")
+	files(c.UpToDate, "up to date")
 
 	if len(parts) == 0 {
 		return "no files"

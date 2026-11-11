@@ -123,7 +123,7 @@ type Result struct {
 	// their problems.
 	failed map[int]failure
 	files  []*PlanFile
-	counts counts
+	counts Counts
 }
 
 // failure is a file that [Plan.Apply] did not write.
@@ -182,9 +182,9 @@ func (r *Result) Summary() string {
 			wf := written[i]
 
 			for _, d := range wf.docs {
-				fmt.Fprintf(&b, "%s: migrated %s to %s\n", f.label(), d.name, d.to)
+				fmt.Fprintf(&b, "%s: migrated %s to %s\n", f.label(), wf.docLabel(d), p.reg.layoutLabel(d.Kind, d.To))
 
-				for _, rm := range d.removals {
+				for _, rm := range d.Removals {
 					b.WriteString("  removed " + removalPath(rm) + "\n")
 				}
 			}
@@ -198,6 +198,12 @@ func (r *Result) Summary() string {
 	b.WriteString(r.counts.text("migrated"))
 
 	return b.String()
+}
+
+// Counts returns the numbers of files and documents that the last line of
+// [Result.Summary] counts.
+func (r *Result) Counts() Counts {
+	return r.counts
 }
 
 // Warnings returns the warnings that remain in the files as Apply left
@@ -272,17 +278,17 @@ func (r *Result) check(ctx context.Context) {
 	r.err, r.warnings = l.outcome(rows)
 
 	r.counts = p.counts
-	r.counts.migrated = len(r.files)
-	r.counts.notWritten = len(r.failed)
-	r.counts.notMigrated = 0
+	r.counts.Migrate = len(r.files)
+	r.counts.NotWritten = len(r.failed)
+	r.counts.Unrouted = 0
 
 	for i, f := range p.l.files {
 		switch {
 		case f.blocked:
 		case f.plan != nil && written[i]:
-			r.counts.notMigrated += f.plan.notMigrated
+			r.counts.Unrouted += f.plan.notMigrated
 		case f.plan == nil:
-			r.counts.notMigrated += f.notMigrated
+			r.counts.Unrouted += f.notMigrated
 		}
 	}
 }
