@@ -146,7 +146,14 @@
 // rewrite deletes has a row that says so.
 //
 // Apply writes each file atomically and keeps its mode, its owner, and its
-// group. It writes only the files that a [Path] input read from disk. Each
+// group. On Linux, it also keeps the access control list and the SELinux
+// label of the file. Apply leaves a file as it is when the file has more
+// than one hard link. Apply does the same when the system refuses to give
+// the replacement the owner, the group, the access control list, or the
+// SELinux label of the file. Each such file fails with an error that
+// matches [ErrReadOnly].
+//
+// Apply writes only the files that a [Path] input read from disk. Each
 // other file fails with an error that matches [ErrReadOnly], but its plan
 // still holds its new text. A dry run thus shows the diff, and an app that
 // keeps its files elsewhere writes [PlanFile.After] itself. A file whose

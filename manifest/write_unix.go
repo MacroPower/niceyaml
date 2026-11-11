@@ -3,6 +3,7 @@
 package manifest
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -31,8 +32,8 @@ func linkCount(info fs.FileInfo) int {
 }
 
 // keepOwner gives tmp the owner and the group of the file that info
-// describes. It returns the problem of an owner or a group that it cannot
-// give.
+// describes. For an owner or a group that it cannot give, it returns a
+// problem that matches [ErrReadOnly].
 func keepOwner(tmp *os.File, info fs.FileInfo) error {
 	want, ok := info.Sys().(*syscall.Stat_t)
 	if !ok {
@@ -55,10 +56,18 @@ func keepOwner(tmp *os.File, info fs.FileInfo) error {
 	}
 
 	if got.Uid != want.Uid {
-		return fmt.Errorf("cannot keep owner %q", ownerName(want.Uid))
+		return unkeptProblem(err, fmt.Sprintf("cannot keep owner %q", ownerName(want.Uid)),
+			errors.New("a rewrite replaces the file, and the new file cannot get this owner"),
+			errors.New("run the command as the owner of the file, or as root"))
 	}
 
-	return fmt.Errorf("cannot keep group %q", groupName(want.Gid))
+	// The process runs as the owner of the file here, because the new file
+	// already has the owner of the old one. The owner is not in the group
+	// of the file. Another member of that group is not the owner, so the
+	// advice does not name such a user.
+	return unkeptProblem(err, fmt.Sprintf("cannot keep group %q", groupName(want.Gid)),
+		errors.New("a rewrite replaces the file, and the new file cannot get this group"),
+		errors.New("add the owner of the file to the group, or run the command as root"))
 }
 
 // ownerName returns the name of the user uid, or its number.

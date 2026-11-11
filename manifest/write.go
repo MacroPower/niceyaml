@@ -208,7 +208,9 @@ func replace(root *os.Root, name string, old, text []byte, app string) error {
 }
 
 // fill writes text to tmp and gives it the mode, the owner, the group, and
-// the attributes of old, whose details info holds. Then it syncs tmp.
+// the attributes of old, whose details info holds. Then it syncs tmp. An
+// owner, a group, or an attribute that the system refuses to give fails
+// with a problem that matches [ErrReadOnly].
 func fill(tmp, old *os.File, info fs.FileInfo, text []byte) error {
 	_, err := tmp.Write(text)
 	if err != nil {
@@ -399,6 +401,13 @@ func relBelow(dir, target string) (string, bool) {
 // systemProblem returns the problem of a file that the system refuses to
 // replace, with the reason that the system gives.
 func systemProblem(err error) error {
+	return niceyaml.Unchecked(fmt.Errorf("cannot replace the file: %w", systemReason(err)))
+}
+
+// systemReason returns the reason that the system gives in err, without
+// the operation and the path that an [fs.PathError] or an [os.LinkError]
+// adds.
+func systemReason(err error) error {
 	if pe, ok := errors.AsType[*fs.PathError](err); ok {
 		err = pe.Err
 	}
@@ -407,5 +416,5 @@ func systemProblem(err error) error {
 		err = le.Err
 	}
 
-	return niceyaml.Unchecked(fmt.Errorf("cannot replace the file: %w", err))
+	return err
 }

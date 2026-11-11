@@ -15,15 +15,20 @@ import (
 // Apply writes the new text of each file of [Plan.Files] and returns a
 // [Result] that records what it did. It writes each file atomically, so a
 // crash leaves the old text or the new text. Each file keeps its mode, its
-// owner, and its group. A symlink keeps pointing at its target, which
+// owner, and its group. On Linux, each file also keeps its access control
+// list and its SELinux label. A symlink keeps pointing at its target, which
 // receives the new text.
 //
 // Apply checks each file immediately before it replaces it, and leaves the
-// file as it is when it cannot replace it whole. A file that the plan did
-// not read from disk, or that the process cannot write, fails with an
-// error that matches [ErrReadOnly]. A file whose text differs from the
-// text that the plan read fails with an error that matches [ErrChanged].
-// Apply continues with the other files.
+// file as it is when it cannot replace it whole. Apply continues with the
+// other files. A file whose text differs from the text that the plan read
+// fails with an error that matches [ErrChanged].
+//
+// A file that the plan did not read from disk, or that the process cannot
+// write, fails with an error that matches [ErrReadOnly]. So does a file
+// with more than one hard link. So does a file whose owner, group, access
+// control list, or SELinux label the system refuses to give to the
+// replacement.
 //
 // A program that keeps its files elsewhere writes [PlanFile.After] itself,
 // under the name that [PlanFile.Source] gives. [Plan.Err] and
@@ -286,6 +291,17 @@ func (f *PlanFile) layersProblem() error {
 // cannot write. The problem matches [ErrReadOnly].
 func readOnlyProblem(msg string, details ...error) error {
 	return niceyaml.Unchecked(&problemError{msg: msg, marks: []error{ErrReadOnly}}, niceyaml.WithDetails(details...))
+}
+
+// unkeptProblem returns the problem, with details, of a file that Apply
+// cannot replace whole. The system refuses to give the new file something
+// that the old one has, and err is the error of that refusal. The problem
+// matches [ErrReadOnly] and keeps the reason that the system gives in err.
+func unkeptProblem(err error, msg string, details ...error) error {
+	return niceyaml.Unchecked(
+		&problemError{err: systemReason(err), msg: msg, marks: []error{ErrReadOnly}},
+		niceyaml.WithDetails(details...),
+	)
 }
 
 // changedProblem returns the problem of a file whose text differs from

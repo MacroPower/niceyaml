@@ -2,7 +2,6 @@ package manifest
 
 import (
 	"errors"
-	"fmt"
 	"os"
 
 	"golang.org/x/sys/unix"
@@ -14,12 +13,13 @@ var keptAttributes = []struct {
 	name string
 	what string
 }{
-	{name: "system.posix_acl_access", what: "the access control list"},
-	{name: "security.selinux", what: "the SELinux label"},
+	{name: "system.posix_acl_access", what: "access control list"},
+	{name: "security.selinux", what: "SELinux label"},
 }
 
 // keepAttributes gives tmp the access control list and the SELinux label
-// of old, and returns the problem of an attribute that it cannot give.
+// of old. For an attribute that it cannot give, it returns a problem that
+// matches [ErrReadOnly].
 func keepAttributes(tmp, old *os.File) error {
 	for _, attr := range keptAttributes {
 		value, err := getxattr(old, attr.name)
@@ -29,7 +29,8 @@ func keepAttributes(tmp, old *os.File) error {
 
 		err = unix.Fsetxattr(int(tmp.Fd()), attr.name, value, 0) //nolint:gosec // A descriptor fits an int.
 		if err != nil {
-			return fmt.Errorf("cannot keep %s", attr.what)
+			return unkeptProblem(err, "cannot keep the "+attr.what,
+				errors.New("a rewrite replaces the file, and the new file cannot get this "+attr.what))
 		}
 	}
 
