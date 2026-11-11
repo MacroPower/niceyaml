@@ -580,7 +580,7 @@ type Match struct {
 // holds the directive, and binds there the error of a directive that
 // cannot name a schema too:
 //
-//	app.yaml:3:1: load schema: "https://cdn.example.org/menu.json": URL not under an allowed prefix
+//	app.yaml:3:1: load schema: "https://cdn.example.org/menu.json": fetch https://cdn.example.org/menu.json: URL not allowed
 //
 // A merged document from [niceyaml.NewSourceFromLayers] does not hold a
 // value at the comment, so there such an error binds without a position.
@@ -1550,10 +1550,9 @@ func (r *Registry) load(ctx context.Context, ref Ref) ([]byte, error) {
 			return nil, errNotHTTPURL
 		}
 
-		// The caller names the URL beside the error, so the refusal
-		// does not repeat it.
-		if r.loaderFor(ref.key) == nil && !r.access.allowsURL(ref.key) {
-			return nil, ErrURLNotAllowed
+		err := r.checkFetch(ref.key)
+		if err != nil {
+			return nil, err
 		}
 
 		return r.fetch(ctx, ref.key)

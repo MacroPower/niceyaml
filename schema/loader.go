@@ -153,15 +153,15 @@ func (c *registryConfig) loaderFor(rawURL string) LoaderFunc {
 }
 
 // checkFetch returns nil when the registry can load rawURL, an HTTP or
-// HTTPS URL, and an error wrapping [ErrURLNotAllowed] that names rawURL
-// otherwise. A loader from [WithLoader] serves the URLs under its prefix
-// whatever the [Access] allows.
+// HTTPS URL. Otherwise it returns a [*FetchError] that names rawURL,
+// with an Err of [ErrURLNotAllowed]. A loader from [WithLoader] serves
+// the URLs under its prefix whatever the [Access] allows.
 func (c *registryConfig) checkFetch(rawURL string) error {
-	if c.loaderFor(rawURL) != nil {
+	if c.loaderFor(rawURL) != nil || c.access.allowsURL(rawURL) {
 		return nil
 	}
 
-	return c.access.checkURL(rawURL)
+	return &FetchError{URL: httpfetch.Redacted(rawURL), Err: ErrURLNotAllowed}
 }
 
 // loadURL returns the bytes that load returns for rawURL without its

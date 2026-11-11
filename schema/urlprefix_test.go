@@ -312,7 +312,8 @@ func TestAllowURLPrefixes(t *testing.T) {
 		require.ErrorIs(t, err, schema.ErrLoad)
 		require.ErrorIs(t, err, schema.ErrURLNotAllowed)
 		assert.Equal(t,
-			`load schema: "https://user:xxxxx@evil.test/app.json": URL not under an allowed prefix`, err.Error())
+			`load schema: "https://user:xxxxx@evil.test/app.json": `+
+				`fetch https://user:xxxxx@evil.test/app.json: URL not allowed`, err.Error())
 		assert.Empty(t, requests())
 	})
 
@@ -470,7 +471,16 @@ func TestAllowURLPrefixes(t *testing.T) {
 
 				require.ErrorIs(t, err, schema.ErrLoad)
 				require.ErrorIs(t, err, schema.ErrURLNotAllowed)
-				assert.Contains(t, err.Error(), "redirect: URL not under an allowed prefix")
+				assert.Contains(t, err.Error(), "fetch https://schemas.test/v1/s.json: redirect: URL not allowed")
+
+				// The FetchError of the requested URL holds the refused hop.
+				// Its Err wraps the sentinel, because the request went out.
+				found := fetchErrors(err)
+				require.Len(t, found, 1)
+				assert.Equal(t, "https://schemas.test/v1/s.json", found[0].URL)
+				assert.Zero(t, found[0].StatusCode)
+				require.ErrorIs(t, found[0], schema.ErrURLNotAllowed)
+				assert.NotEqual(t, schema.ErrURLNotAllowed, found[0].Err)
 				assert.Equal(t, []string{"https://schemas.test/v1/s.json"}, requests())
 			})
 		}
