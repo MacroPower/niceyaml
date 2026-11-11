@@ -2776,6 +2776,8 @@ func TestNode_Append(t *testing.T) {
 		path   paths.Path
 		want   string
 		err    string
+		// Whether the error matches edit.ErrProtected.
+		protected bool
 	}{
 		"block sequence": {
 			before: stringtest.LinesLF("args:", "  - --quiet # first", "  - --color"),
@@ -2816,16 +2818,69 @@ func TestNode_Append(t *testing.T) {
 			err:    "cafe.jacobcolvin.com/v1 inserts $.m[0], but m holds a mapping",
 		},
 		"place without a value": {
+			// The Append creates the sequence, as an Insert at the index 0
+			// does.
 			before: "a: 1\n",
 			path:   paths.Doc().Child("s"),
 			value:  "b",
-			err:    "cafe.jacobcolvin.com/v1 inserts $.s[0], but the document holds no $.s",
+			want:   stringtest.LinesLF("a: 1", "s:", "  - b"),
+		},
+		"null": {
+			before: stringtest.LinesLF("s: ~", "a: 1"),
+			path:   paths.Doc().Child("s"),
+			value:  "b",
+			want:   stringtest.LinesLF("s:", "  - b", "a: 1"),
 		},
 		"root of an empty document": {
 			before: "# c\n",
 			path:   paths.Doc(),
 			value:  "b",
-			err:    "cafe.jacobcolvin.com/v1 inserts $[0], but the document holds no $",
+			want:   "# c\n- b\n",
+		},
+		"null in a flow mapping with a comment inside it": {
+			before: stringtest.LinesLF("a: {", "  b: ~, # c", "  d: 1", "}"),
+			path:   paths.MustParse("$.a.b"),
+			value:  1,
+			err:    "test.yaml:1:4: $.a: cafe.jacobcolvin.com/v1 inserts $.a.b[0], which reaches a flow collection with a comment inside it, and cafe does not edit inside such a collection",
+		},
+		"null in a pair without braces": {
+			before: "- [a: ~]\n",
+			path:   paths.MustParse("$[0][0].a"),
+			value:  1,
+			err:    "test.yaml:1:4: $[0][0].a: cafe.jacobcolvin.com/v1 inserts $[0][0].a[0], which reaches a pair without braces in a flow sequence, and cafe does not edit inside such a pair",
+		},
+		"null in an entry with an explicit key": {
+			before: stringtest.LinesLF("? a", ": ~", "b: 1"),
+			path:   paths.MustParse("$.a"),
+			value:  1,
+			err:    "test.yaml:1:1: $.a: cafe.jacobcolvin.com/v1 inserts $.a[0], which reaches an entry with an explicit key, and cafe does not edit such an entry other than by removing it",
+		},
+		"explicit key without a value": {
+			before: stringtest.LinesLF("? a", "b: 1"),
+			path:   paths.MustParse("$.a"),
+			value:  1,
+			err:    "test.yaml:1:1: $.a: cafe.jacobcolvin.com/v1 inserts $.a[0], which reaches an entry with an explicit key, and cafe does not edit such an entry other than by removing it",
+		},
+		"place without a value inside an anchored mapping that a protected value reads": {
+			before:    stringtest.LinesLF("x: &a {}", "kind: *a"),
+			path:      paths.MustParse("$.x.y"),
+			value:     1,
+			err:       "test.yaml:1:1: $.x: cafe.jacobcolvin.com/v1 inserts $.x.y[0], which lies inside a protected value",
+			protected: true,
+		},
+		"anchored null inside a mapping that a protected value reads": {
+			before:    stringtest.LinesLF("x: &a ~", "kind: *a"),
+			path:      paths.MustParse("$.x.y"),
+			value:     1,
+			err:       "test.yaml:1:7: $.x: cafe.jacobcolvin.com/v1 inserts $.x.y[0], which lies inside a protected value",
+			protected: true,
+		},
+		"anchored null that a protected value reads": {
+			before:    stringtest.LinesLF("a: &x ~", "kind: *x"),
+			path:      paths.MustParse("$.a"),
+			value:     1,
+			err:       "test.yaml:1:7: $.a: cafe.jacobcolvin.com/v1 inserts $.a[0], which lies inside a protected value",
+			protected: true,
 		},
 		"node whose place an earlier remove took away": {
 			// A node on the same path reads the new sequence, but the held
@@ -2882,6 +2937,10 @@ func TestNode_Append(t *testing.T) {
 
 			if tc.err != "" {
 				assert.Equal(t, tc.before, d.Text())
+			}
+
+			if tc.protected {
+				require.ErrorIs(t, err, edit.ErrProtected)
 			}
 		})
 	}

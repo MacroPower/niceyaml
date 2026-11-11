@@ -33,7 +33,9 @@ import (
 // in its own mapping. The key keeps its text, so a key such as 1 or 3.9
 // still reads as a number. A [Before] or an [After] that names the key of
 // the entry that moves fails the move. So does a placement option at a
-// target in a sequence, because the option places an entry. Move ignores
+// target in a sequence, because the option places an entry. An item of a
+// null fails the same way, because the null becomes a sequence, as
+// [Node.Set] describes. Move ignores
 // [Flow] and keeps the style of the value that it moves.
 //
 // A move to the path of its own entry keeps the keys of the mapping. So a
@@ -59,9 +61,9 @@ import (
 //   - Target lies inside the value, through an alias too. The path of the
 //     value itself lies inside it, unless a placement option comes with
 //     the path of an entry, and so does the index of an item.
-//   - The deepest value on target that the document holds cannot take the
+//   - The deepest value on target that holds content cannot take the
 //     rest of target, such as a scalar, or a sequence where target names a
-//     key.
+//     key. A null takes the rest of target, as [Node.Set] describes.
 //   - Target is the path of an entry that a `<<` merge key brings in, with
 //     a placement option.
 //
@@ -315,9 +317,8 @@ func (n *Node) move(target paths.Path, at placement) (modelPlace, error) {
 	}
 
 	// A placement puts an entry, so it does not apply to an item.
-	if _, isSeq := th.content.(*ast.SequenceNode); ok && isSeq && at.kind != placeLast {
-		return modelPlace{}, d.fail(n, "%s %s %s, but %s holds a sequence",
-			d.subject(), named, at.words(), d.describe(th.path))
+	if ok && th.rest[0].Kind == paths.SelectorIndex && at.kind != placeLast {
+		return modelPlace{}, d.itemPlacement(n, named, at, th.path, th.content, th.rest[0])
 	}
 
 	// The placement names a key of the mapping that holds target, as the
@@ -1205,7 +1206,8 @@ func lastIndex(path paths.Path) bool {
 }
 
 // insertAt inserts pl at target, a place that does not hold a value, and
-// creates the mappings above it that the document lacks. With occupied
+// creates the collections above it that the document lacks, as
+// [Doc.targetCollections] and the names of target give them. With occupied
 // set, target can hold a value: an item, which pl goes before, or the key
 // of an entry, which a `<<` merge key brings into the mapping that pl goes
 // back into. The entry that it creates goes at the place that where gives.
@@ -1240,6 +1242,13 @@ func (d *Doc) insertAt(h *Node, target paths.Path, pl payload, named string, whe
 		return d.bug(h, fmt.Errorf("%s does not resolve", th.path))
 	case why != "":
 		return d.bug(h, fmt.Errorf("%s: %s", target, why))
+	}
+
+	if !tp.exists {
+		th, where, err = d.targetCollections(h, target, th, named, where)
+		if err != nil {
+			return err
+		}
 	}
 
 	if seq, ok := th.content.(*ast.SequenceNode); ok {
@@ -1301,6 +1310,78 @@ func (d *Doc) insertAt(h *Node, target paths.Path, pl payload, named string, whe
 	entries, _ := readEntries(th.content)
 
 	return d.insertPayload(h, th.path, th.place, th.content, entries, keys[0], pl, origin, where)
+}
+
+// targetCollections creates the collections that a move of h to target
+// puts the value in, where the names of target alone cannot give them,
+// as a Set creates them. Th is the value that holds target, as
+// [Doc.targetHolder] gives it, and named says what the Move does. A null
+// there becomes the empty collection that the rest of target selects into,
+// as [Doc.fillNull] writes it. A sequence that the move creates below th,
+// or a sequence that takes the item past its last with more of target
+// below it, comes with the values above target, empty, as a Set of the
+// parent of target writes them. The entry that such a Set creates goes
+// where the placement of where puts it. TargetCollections returns the
+// value that then holds target, with the placement that is left for the
+// value.
+func (d *Doc) targetCollections(
+	h *Node, target paths.Path, th moveHolder, named string, where modelPlace,
+) (moveHolder, modelPlace, error) {
+	ctx := context.Background()
+
+	if !holdsCollection(th.content) {
+		err := d.fillNull(ctx, th.place, th.content, th.rest[0], named)
+		if err != nil {
+			return th, where, err
+		}
+
+		th, err = d.refreshHolder(h, target)
+		if err != nil {
+			return th, where, err
+		}
+	}
+
+	if len(th.rest) == 1 || !slices.ContainsFunc(th.rest, func(sel paths.Selector) bool {
+		return sel.Kind == paths.SelectorIndex
+	}) {
+		return th, where, nil
+	}
+
+	parent, _ := target.Parent()
+	last, _ := target.Last()
+
+	ph := &Node{d: d, path: parent}
+
+	pp, err := d.resolve(parent)
+	if err != nil || pp.exists {
+		return th, where, d.bug(h, fmt.Errorf("%s holds a value before the move creates it", parent))
+	}
+
+	_, _, err = d.createValue(ctx, ph, pp, emptyFor(last), setConfig{at: where.placement}, named)
+	if err != nil {
+		return th, where, err
+	}
+
+	th, err = d.refreshHolder(h, target)
+
+	return th, modelPlace{}, err
+}
+
+// refreshHolder returns the value that holds target, a place that does not
+// hold a value, after an edit of a move of h changed the text, as
+// [Doc.targetHolder] gives it.
+func (d *Doc) refreshHolder(h *Node, target paths.Path) (moveHolder, error) {
+	tp, err := d.resolve(target)
+	if err != nil || tp.exists {
+		return moveHolder{}, d.bug(h, fmt.Errorf("%s holds a value before the move creates it", target))
+	}
+
+	th, why, ok := d.targetHolder(target, tp)
+	if !ok || why != "" || len(th.rest) == 0 || !selectsInto(th.content, th.rest[0]) {
+		return th, d.bug(h, fmt.Errorf("%s cannot take the value after the move creates its holder", target))
+	}
+
+	return th, nil
 }
 
 // nest returns pl as the value of the entry key of a new block mapping,

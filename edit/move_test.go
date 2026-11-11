@@ -768,7 +768,33 @@ func TestNode_Move(t *testing.T) {
 		"to an item of null": {
 			before: stringtest.LinesLF("a:", "x: 5"),
 			moves:  [][2]paths.Path{{paths.MustParse("$.x"), paths.MustParse("$.a[0]")}},
-			err:    `test.yaml:2:4: $.x: cafe.jacobcolvin.com/v1 moves "x" to $.a[0], but a holds null`,
+			want:   stringtest.LinesLF("a:", "  - 5"),
+		},
+		"to an item past the first of null": {
+			before: stringtest.LinesLF("a:", "x: 5"),
+			moves:  [][2]paths.Path{{paths.MustParse("$.x"), paths.MustParse("$.a[1]")}},
+			err:    `test.yaml:2:4: $.x: cafe.jacobcolvin.com/v1 moves "x" to $.a[1], but a holds null`,
+		},
+		"to a key below null": {
+			before: stringtest.LinesLF("a: # todo", "  # b: 1", "x: {y: 5}"),
+			moves:  [][2]paths.Path{{paths.MustParse("$.x.y"), paths.MustParse("$.a.b.c")}},
+			want:   stringtest.LinesLF("a: # todo", "  b:", "    c: 5", "  # b: 1", "x: {}"),
+		},
+		"to a key below an alias of null": {
+			// The mapping goes at the anchor, so each alias reads it.
+			before: stringtest.LinesLF("x: 5", "a: &y ~", "b: *y"),
+			moves:  [][2]paths.Path{{paths.MustParse("$.x"), paths.MustParse("$.b.c")}},
+			want:   stringtest.LinesLF("a: &y", "  c: 5", "b: *y"),
+		},
+		"to a key of the item past the last": {
+			before: stringtest.LinesLF("x: 5", "l:", "  - k: 1"),
+			moves:  [][2]paths.Path{{paths.MustParse("$.x"), paths.MustParse("$.l[1].k")}},
+			want:   stringtest.LinesLF("l:", "  - k: 1", "  - k: 5"),
+		},
+		"to a key of an item of a sequence that the document lacks": {
+			before: stringtest.LinesLF("x: 5", "a: 1"),
+			moves:  [][2]paths.Path{{paths.MustParse("$.x"), paths.MustParse("$.l[0].k")}},
+			want:   stringtest.LinesLF("a: 1", "l:", "  - k: 5"),
 		},
 		"to an item of a mapping": {
 			before: stringtest.LinesLF("b: {k: 1}", "x: 5"),
@@ -778,7 +804,12 @@ func TestNode_Move(t *testing.T) {
 		"to a path through an index below a missing entry": {
 			before: stringtest.LinesLF("b: {k: 1}", "x: 5"),
 			moves:  [][2]paths.Path{{paths.MustParse("$.x"), paths.MustParse("$.b.s[0]")}},
-			err: `test.yaml:2:4: $.x: cafe.jacobcolvin.com/v1 moves "x" to $.b.s[0], ` +
+			want:   "b: {k: 1, s: [5]}\n",
+		},
+		"to a path through an index past the first below a missing entry": {
+			before: stringtest.LinesLF("b: {k: 1}", "x: 5"),
+			moves:  [][2]paths.Path{{paths.MustParse("$.x"), paths.MustParse("$.b.s[1]")}},
+			err: `test.yaml:2:4: $.x: cafe.jacobcolvin.com/v1 moves "x" to $.b.s[1], ` +
 				"but the document holds no $.b.s",
 		},
 		"item to a key of a sequence": {
@@ -1406,6 +1437,22 @@ func TestNode_Move_Placement(t *testing.T) {
 			target: paths.Doc().Child("s").Index(1),
 			opts:   []edit.SetOption{edit.Flow()},
 			want:   stringtest.LinesLF("s:", "  - y", "  - x: 1"),
+		},
+		"placement of an item of null": {
+			before: stringtest.LinesLF("a: 1", "s:"),
+			path:   paths.Doc().Child("a"),
+			target: paths.Doc().Child("s").Index(0),
+			opts:   []edit.SetOption{edit.First()},
+			err:    "cafe.jacobcolvin.com/v1 moves $.a to $.s[0] first, but $.s[0] is an item",
+		},
+		"placement of a key above an item that the document lacks": {
+			// The entry that the move creates in the mapping that the text
+			// holds takes the placement.
+			before: stringtest.LinesLF("a: 1", "m:", "  x: 1"),
+			path:   paths.Doc().Child("a"),
+			target: paths.MustParse("$.m.l[0].k"),
+			opts:   []edit.SetOption{edit.First()},
+			want:   stringtest.LinesLF("m:", "  l:", "    - k: 1", "  x: 1"),
 		},
 		"placement of an item that exists": {
 			before: stringtest.LinesLF("a: 1", "s: [x]"),

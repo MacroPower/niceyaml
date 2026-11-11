@@ -52,9 +52,10 @@ var (
 	// SetField also fails with a problem of the document when the lookup of
 	// path goes through an alias of the document that does not resolve, as
 	// "<<: *x" does without an anchor x. That problem binds at the alias.
-	// When the values above path leave no mapping to hold the field, as a
-	// scalar, null, or a sequence on the way does, SetField fails as
-	// edit.Node.Set fails there. That problem binds at the deepest value on
+	// A null on the way becomes the mapping that holds the field, as
+	// edit.Node.Set describes. When the values above path leave no mapping
+	// to hold the field, as a scalar or a sequence on the way does,
+	// SetField fails as edit.Node.Set fails there. That problem binds at the deepest value on
 	// path that the document holds and names what the value holds. It does
 	// not match paths.ErrReferenceAlias or edit.ErrEngine. The parse of the
 	// Source can refuse the key of the field, because the mapping holds

@@ -1143,8 +1143,10 @@ func (n *Node) Len() int {
 }
 
 // Append appends v as the last item of the sequence at the place, as
-// [Node.Insert] at the index [Node.Len] does. It fails where that Insert
-// fails, such as at a place that holds a mapping, a scalar, or no value.
+// [Node.Insert] at the index [Node.Len] does. At a place that holds null or
+// no value, Len returns 0, so Append creates the sequence there, as that
+// Insert does. It fails where that Insert fails, such as at a place that
+// holds a mapping or a scalar.
 // Like each other edit, it fails through a node that lost its place to an
 // earlier edit, as [Node] describes.
 func (n *Node) Append(ctx context.Context, v any) error {

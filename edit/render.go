@@ -203,20 +203,22 @@ func render(
 }
 
 // flowDepth is the depth in a value from which an edit writes it in flow
-// style: the number of mappings of one entry each above the part that goes
-// in flow style. A Set that creates mappings above its value encodes the
-// value inside them, and [Flow] writes the value alone in flow style. At
-// the depth noFlow, the encode decides the style of each part.
+// style: the number of collections above the part that goes in flow style,
+// each a mapping of one entry or a block sequence of one item. A Set that
+// creates collections above its value encodes the value inside them, and
+// [Flow] writes the value alone in flow style. At the depth noFlow, the
+// encode decides the style of each part.
 type flowDepth int
 
 // noFlow is the [flowDepth] of a value whose encode decides its style.
 const noFlow flowDepth = -1
 
 // flowFrom writes the value at depth in r, the text of body, the parse of
-// an encode in enc, in flow style. Depth counts the mappings of one entry
-// each above that value. The value at depth 0 is r itself, which then
-// has no block lines. Otherwise the block lines end on the line of the key
-// of the value, with its flow text after the ":".
+// an encode in enc, in flow style. Depth counts the collections above that
+// value, as [flowDepth] describes. The value at depth 0 is r itself, which
+// then has no block lines. Otherwise the block lines end on the line of the
+// key or the "-" of the value, with its flow text after the ":" or the
+// "-".
 func (r *rendered) flowFrom(enc *Doc, body ast.Node, depth int) {
 	if depth == 0 {
 		r.block, r.head = nil, false
@@ -225,23 +227,43 @@ func (r *rendered) flowFrom(enc *Doc, body ast.Node, depth int) {
 		return
 	}
 
-	var entry *ast.MappingValueNode
-
 	node := body
+	end := 0
 
 	for range depth {
-		entries, _ := readEntries(astnode.Content(node))
+		content := astnode.Content(node)
+
+		if seq, ok := content.(*ast.SequenceNode); ok {
+			if len(seq.Values) != 1 || seq.IsFlowStyle {
+				return
+			}
+
+			node = seq.Values[0]
+
+			// The block lines end with the "-" of the item.
+			s, ok := enc.nodeSpan(node)
+			if !ok {
+				return
+			}
+
+			end = len(strings.TrimRight(enc.cur[:s.start], " "))
+
+			continue
+		}
+
+		entries, _ := readEntries(content)
 		if len(entries) != 1 {
 			return
 		}
 
-		entry = entries[0]
-		node = entry.Value
-	}
+		node = entries[0].Value
 
-	end, _, ok := enc.colonEnd(entry)
-	if !ok {
-		return
+		var ok bool
+
+		end, _, ok = enc.colonEnd(entries[0])
+		if !ok {
+			return
+		}
 	}
 
 	inner := enc.flowRunOf(node, 0, &flowStyle{encoded: true}).text

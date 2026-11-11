@@ -95,8 +95,9 @@ type payload struct {
 	tail tailScalar
 }
 
-// Set replaces the value with v, or creates it and the mappings above it. It
-// encodes v once, as [go.jacobcolvin.com/niceyaml/encoder.Marshal] does. It
+// Set replaces the value with v, or creates it and the values above it that
+// the document lacks. It encodes v once, as
+// [go.jacobcolvin.com/niceyaml/encoder.Marshal] does. It
 // writes that encode, keeps the comments of the entry, and drops the tag of
 // the old value and the comments inside it. A Set at an anchored value keeps
 // the anchor and writes the new value after it, so each alias reads the new
@@ -118,6 +119,22 @@ type payload struct {
 // The blank lines after an old block scalar with a keep indicator, as in
 // "|+", belong to its text, so they go with it.
 //
+// Set creates each value that its path lacks below the nearest value that
+// holds content. A name there creates a mapping, and an index creates a
+// sequence. A sequence that Set creates holds no items before the call, so
+// it takes the index 0 alone, and another index fails. A null holds no
+// content, where a decode of the place reads nil, as for "a:", "a: ~", and
+// "a: !!null". So the next selector of the path turns a null on the path
+// into a mapping or a sequence. The text then reads as after a Set of an
+// empty collection at the null and a Set of v below it. The collection
+// keeps the key, the anchor, the comment of the entry, and the comment
+// lines below the entry. A path that reads the null through an alias
+// creates the collection at the anchor, so each alias reads it. The scalar
+// "!!str ~" reads "", not null, so Set fails below it, as below any other
+// scalar or a collection of the other kind. A [Func] that must keep an
+// explicit null reads the place with [Node.Exists] and [Node.Decode]
+// first.
+//
 // Set writes a mapping or a sequence on block lines, below its key or after
 // the "-" of its item, whether it creates the value or replaces one. When
 // the old value sits on the line of its key, the comment at the end of
@@ -132,12 +149,13 @@ type payload struct {
 //
 // A Set of the root fails with [ErrUsage], because it replaces the root.
 // In an empty document, which holds no value at its root, a Set of `$` or
-// of a path of names writes the first value instead. The value goes inside
-// the mappings that the names give, on block lines at the end of the text,
-// as the Empty Documents section of the package documentation describes.
-// [First] places the one entry of the root. [Before] and [After] fail
-// there, because the root holds no other entry. A Set of `$` places no
-// entry, so it ignores those options.
+// of a path below it writes the first value instead. The value goes inside
+// the collections that the path gives, on block lines at the end of the
+// text, as the Empty Documents section of the package documentation
+// describes. [First] places the one entry of the root. [Before] and
+// [After] fail there, because the root holds no other entry. Each option
+// fails at a path that starts with an index, because the option places an
+// entry. A Set of `$` places no entry, so it ignores those options.
 //
 // The value takes flow style on one line inside a flow collection, in
 // place of a flow collection that holds an entry or an item, and with the
@@ -395,9 +413,11 @@ func (p placement) words() string {
 // entry there, and the entry keeps the text of its key. A Set that replaces a value
 // leaves the value where it is. A call that creates an item of a sequence
 // fails with the option, because the option places an entry. When the
-// call creates mappings above the value too, it places the entry that it
-// creates in the nearest mapping that the text holds, and the new
-// mappings go with it. The last placement option of a call wins.
+// call creates collections above the value too, it places the entry that
+// it creates in the nearest mapping that the text holds, and the new
+// collections go with it. A null that the call turns into a mapping, as
+// [Node.Set] describes, holds no other entry. The last placement option of
+// a call wins.
 func First() SetOption {
 	return func(c *setConfig) {
 		c.at = placement{kind: placeFirst}
@@ -435,8 +455,8 @@ func After(key string) SetOption {
 // of the value, or that of the old value when the old value starts below
 // them. A string with a line break goes in double quotes there. The value
 // of a Set inside a flow collection takes flow style without the option.
-// When the Set creates mappings above the value, those mappings take block
-// style, and the value goes in flow style inside them. A [Node.Move]
+// When the Set creates collections above the value, those collections take
+// block style, and the value goes in flow style inside them. A [Node.Move]
 // ignores the option and keeps the style of the value that it moves.
 func Flow() SetOption {
 	return func(c *setConfig) {
@@ -487,9 +507,9 @@ func (n *Node) set(ctx context.Context, v any, protected bool, cfg setConfig) (*
 	case p.exists:
 		mv, err = d.setExisting(ctx, n, p, v, cfg.flow)
 	case p.bare:
-		mv, err = d.setFirst(ctx, n, p, v, cfg)
+		mv, err = d.setFirst(ctx, n, p, v, cfg, "sets "+n.path.String())
 	default:
-		mv, where, err = d.setCreated(ctx, n, p, v, cfg)
+		mv, where, err = d.setCreated(ctx, n, p, v, cfg, "sets "+n.path.String())
 	}
 
 	if err != nil {
@@ -511,9 +531,12 @@ func (n *Node) set(ctx context.Context, v any, protected bool, cfg setConfig) (*
 // path of the node stays, so the node reads the new item. An Insert at the
 // index past the last item appends the item, as a Set there does. Insert
 // takes the path of an item, and it fails with [ErrUsage] on a path that
-// ends in a name and on the root. It fails on an index past the index after
-// the last item too. It also fails where a Set there fails, such as inside
-// a protected value, and with the problems of the value that Set describes.
+// ends in a name and on the root. Where the document lacks the sequence or
+// a value above it, or holds null there, Insert creates them as Set does,
+// so the index 0 creates the sequence. It fails on an index past the index
+// after the last item too. It also fails where a Set there fails, such as
+// inside a protected value, and with the problems of the value that Set
+// describes.
 // The new item goes above the comment lines that belong to the item that it
 // goes before. In a flow sequence, it goes before that item with a comma of
 // its own.
@@ -573,6 +596,18 @@ func (n *Node) insert(ctx context.Context, v any) (*edge, error) {
 
 	named := "inserts " + n.path.String()
 
+	// The text lacks the sequence that takes the item, or a value above it,
+	// so the Insert creates them as a Set there does. It writes into the
+	// value that holds the place. A protected path can read that value
+	// through an alias, so the Insert fails where a Set there fails.
+	if seq == nil {
+		if why := d.protection(p, true); why != "" {
+			return nil, d.failAs(ErrProtected, n, "%s inserts %s, which %s", d.subject(), n.path, why)
+		}
+
+		return d.insertCreated(ctx, n, p, v, named)
+	}
+
 	// The Insert reaches the zones of the text as a Set of the item after
 	// the last does, because it takes no item away, as [Doc.renderPayload]
 	// checks it.
@@ -618,12 +653,33 @@ func (n *Node) insert(ctx context.Context, v any) (*edge, error) {
 	return mv, nil
 }
 
+// insertCreated inserts v at p, the place of n, which the text lacks
+// along with the sequence that takes the item or a value above it, as
+// [Node.Insert] describes. It creates them as [Node.Set] does. Named names
+// the call, as in "inserts $.a[0]". It returns the value of v as the model
+// reads it, as [Node.set] does.
+func (d *Doc) insertCreated(ctx context.Context, n *Node, p *place, v any, named string) (*edge, error) {
+	d.pending = &reachCall{kind: callSet, path: n.path, hidden: n.hidden, named: named}
+
+	defer func() { d.pending = nil }()
+
+	if p.bare {
+		return d.setFirst(ctx, n, p, v, setConfig{}, named)
+	}
+
+	mv, _, err := d.setCreated(ctx, n, p, v, setConfig{}, named)
+
+	return mv, err
+}
+
 // insertHolder returns the sequence that holds the item at holderPath,
 // the place of n, as an Insert of n reads it, with its place. It also
 // returns the reason that the Insert cannot put an item at p, the place
 // of n, or "" when it can. The reason reads as the words that a message
 // puts after "but", such as "s holds 2 items", as [Doc.createProblem]
-// gives it.
+// gives it. The sequence is nil where the text lacks it or a value above
+// it, or where the value at holderPath reads null, and the Insert then
+// creates them.
 func (d *Doc) insertHolder(n *Node, p *place, holderPath paths.Path) (*place, *ast.SequenceNode, string, error) {
 	seq, _ := p.container.(*ast.SequenceNode) //nolint:errcheck // Another container fails below.
 
@@ -640,14 +696,14 @@ func (d *Doc) insertHolder(n *Node, p *place, holderPath paths.Path) (*place, *a
 		return holder, seq, "", nil
 	}
 
-	// An empty document holds no sequence, so the Insert fails as a Set
-	// through an index fails there.
+	// An empty document holds no sequence, so the Insert creates one, as a
+	// Set through an index does there.
 	if p.bare {
 		return p, nil, d.firstProblem(n.path), nil
 	}
 
 	// The place lies past the last item of a sequence, or the document
-	// lacks a value on the way, which fails the Insert as it fails a Set.
+	// lacks a value on the way, which the Insert creates as a Set does.
 	found := prefixOf(n.path, p.found)
 
 	holder, err := d.resolveFrom(p, found)
@@ -658,7 +714,7 @@ func (d *Doc) insertHolder(n *Node, p *place, holderPath paths.Path) (*place, *a
 	sels := slices.Collect(n.path.Selectors())
 
 	why := d.createProblem(holder, found, p.container, sels[p.found:])
-	if why != "" || seq == nil {
+	if why != "" || seq == nil || p.found != len(sels)-1 {
 		return holder, nil, why, nil
 	}
 
@@ -701,15 +757,19 @@ func (d *Doc) readersInside(s *spot, at *reached, p *place) []*Node {
 // style when flow is true. It returns the value of v as the model reads it,
 // as [Node.set] does.
 func (d *Doc) setExisting(ctx context.Context, h *Node, p *place, v any, flow bool) (*edge, error) {
-	d.recordEdit(p, "sets "+h.path.String(), "")
+	named := "sets " + h.path.String()
 
-	return d.replaceValue(ctx, h, p, v, flow)
+	d.recordEdit(p, named, "")
+
+	return d.replaceValue(ctx, h, p, v, flow, named)
 }
 
-// setCreated creates the value of p, the place of h, as v, as cfg says. It
-// returns the value of v and the place of the entry as the model reads
-// them, as [Node.set] does.
-func (d *Doc) setCreated(ctx context.Context, h *Node, p *place, v any, cfg setConfig) (*edge, modelPlace, error) {
+// setCreated creates the value of p, the place of h, as v, as cfg says.
+// Named names the call, as in "sets $.a". It returns the value of v and the
+// place of the entry as the model reads them, as [Node.set] does.
+func (d *Doc) setCreated(
+	ctx context.Context, h *Node, p *place, v any, cfg setConfig, named string,
+) (*edge, modelPlace, error) {
 	// A merge key can bring in the key that the edit creates in its source
 	// over an entry on the path of h. The path then does not reach the new
 	// value, so the check of the merges names the edit at the value above
@@ -718,36 +778,39 @@ func (d *Doc) setCreated(ctx context.Context, h *Node, p *place, v any, cfg setC
 
 	holder, err := d.resolveFrom(p, holderPath)
 	if err == nil && holder.exists {
-		d.recordEdit(holder, "sets "+h.path.String(), "")
+		d.recordEdit(holder, named, "")
 	}
 
-	mv, where, err := d.createValue(ctx, h, p, v, cfg)
+	mv, where, err := d.createValue(ctx, h, p, v, cfg, named)
 	if err != nil {
 		return nil, modelPlace{}, err
 	}
 
 	created, err := d.nodePlace(h)
 	if err == nil && created.exists {
-		d.recordEdit(created, "sets "+h.path.String(), "")
+		d.recordEdit(created, named, "")
 	}
 
 	return mv, where, nil
 }
 
 // setFirst writes v as the first value of an empty document, at p, the
-// place of h. That place is the root, or a place below it that a path of
-// names selects, and v then goes inside the mappings that those names give.
-// The value goes on block lines at the end of the text of the document,
-// after its comment lines and before a "..." marker that ends it. It
-// returns the value that the Set writes at the root as the model reads it,
-// as [Node.set] does.
-func (d *Doc) setFirst(ctx context.Context, h *Node, p *place, v any, cfg setConfig) (*edge, error) {
-	named := "sets " + h.path.String()
+// place of h. That place is the root, or a place below it, and v then goes
+// inside the mappings and the sequences that the selectors of the path
+// give. The value goes on block lines at the end of the text of the
+// document, after its comment lines and before a "..." marker that ends
+// it. Named names the call, as in "sets $.a". It returns the value that
+// the call writes at the root as the model reads it, as [Node.set] does.
+func (d *Doc) setFirst(ctx context.Context, h *Node, p *place, v any, cfg setConfig, named string) (*edge, error) {
 	sels := slices.Collect(h.path.Selectors())
 
 	switch why := d.firstProblem(h.path); {
 	case why != "":
-		return nil, d.fail(h, "%s sets %s, but %s", d.subject(), h.path, why)
+		return nil, d.fail(h, "%s %s, but %s", d.subject(), named, why)
+
+	case len(sels) > 0 && sels[0].Kind == paths.SelectorIndex && cfg.at.kind != placeLast:
+		// A placement puts an entry, so it does not apply to an item.
+		return nil, d.fail(h, "%s %s %s, but %s is an item", d.subject(), named, cfg.at.words(), prefixOf(h.path, 1))
 
 	case len(sels) > 0 && (cfg.at.kind == placeBefore || cfg.at.kind == placeAfter):
 		return nil, d.fail(h, "%s %s %s %q, but the document holds no %s",
@@ -757,16 +820,13 @@ func (d *Doc) setFirst(ctx context.Context, h *Node, p *place, v any, cfg setCon
 	// Go-yaml's parser reads no value from a tag that ends the text, as in
 	// "--- !t". The first value would take the tag, so the Set writes none.
 	if props, ok := d.bareProperties(); ok {
-		return nil, d.fail(h, "%s sets %s, but the document holds %s without a value", d.subject(), h.path, props)
+		return nil, d.fail(h, "%s %s, but the document holds %s without a value", d.subject(), named, props)
 	}
 
-	wrapped := v
-	for _, sel := range slices.Backward(sels) {
-		wrapped = map[string]any{sel.Name: wrapped}
-	}
+	wrapped := wrapValue(v, sels)
 
-	// The mappings above v take block style, so v goes in flow style inside
-	// them.
+	// The collections above v take block style, so v goes in flow style
+	// inside them.
 	fd := noFlow
 	if cfg.flow {
 		fd = flowDepth(len(sels))
@@ -799,16 +859,50 @@ func (d *Doc) setFirst(ctx context.Context, h *Node, p *place, v any, cfg setCon
 // firstProblem returns the reason that a Set cannot write the first value
 // of an empty document at path, or "" when it can. The reason reads as the
 // words that a message puts after "but", as [Doc.createProblem] gives them.
-// The Set creates mappings alone above the value, so a path through an
-// index fails at the root, the first value that the document lacks.
+// Each sequence that the Set creates holds no items before it, so an index
+// other than 0 fails there, and the reason names that sequence.
 func (d *Doc) firstProblem(path paths.Path) string {
-	for sel := range path.Selectors() {
-		if sel.Kind != paths.SelectorChild {
-			return "the document holds no " + paths.Doc().String()
+	return missingProblem(paths.Doc(), slices.Collect(path.Selectors()))
+}
+
+// missingProblem returns the reason that an edit cannot create the values
+// that sels select below at, a value that the edit creates too, or "" when
+// it can. A sequence that the edit creates holds no items, so it takes the
+// index 0 alone. The reason then names that sequence, as in "the document
+// holds no $.a".
+func missingProblem(at paths.Path, sels []paths.Selector) string {
+	for i, sel := range sels {
+		if sel.Kind != paths.SelectorChild && sel.Index != 0 {
+			return "the document holds no " + appendSelectors(at, sels[:i]).String()
 		}
 	}
 
 	return ""
+}
+
+// emptyFor returns the empty collection that sel selects into: an empty
+// mapping for a name and an empty sequence for an index.
+func emptyFor(sel paths.Selector) any {
+	if sel.Kind == paths.SelectorIndex {
+		return []any{}
+	}
+
+	return map[string]any{}
+}
+
+// wrapValue returns v inside the collections that sels select it in, the
+// first selector outermost: a mapping of one entry for a name, and a
+// sequence of one item for an index.
+func wrapValue(v any, sels []paths.Selector) any {
+	for _, sel := range slices.Backward(sels) {
+		if sel.Kind == paths.SelectorIndex {
+			v = []any{v}
+		} else {
+			v = map[string]any{sel.Name: v}
+		}
+	}
+
+	return v
 }
 
 // bareProperties returns the text of a tag in the current text of an
@@ -1240,11 +1334,11 @@ func renderedLine(text string, shift, origin int) line {
 	return line{text: newRun(trimmed, origin), indent: shift + len(text) - len(trimmed)}
 }
 
-// replaceValue replaces the value of p with v, in flow style when flow is
-// true. It returns the value of v as the model reads it, as [Node.set]
-// does.
-func (d *Doc) replaceValue(ctx context.Context, h *Node, p *place, v any, flow bool) (*edge, error) {
-	n := d.setNote(p, "sets "+h.path.String())
+// replaceValue replaces the value of p, the place of h, with v, in flow
+// style when flow is true. Named names the call, as in "sets $.a". It
+// returns the value of v as the model reads it, as [Node.set] does.
+func (d *Doc) replaceValue(ctx context.Context, h *Node, p *place, v any, flow bool, named string) (*edge, error) {
+	n := d.setNote(p, named)
 
 	// The token of a new scalar or alias, and of a new item of a flow
 	// sequence, stands for the old value. That token lies under the tags
@@ -2041,18 +2135,17 @@ func prefixRun(text string, r run, origin int) run {
 	return appendRun(newRun(text, origin), r)
 }
 
-// createValue creates the value of p, and the mappings above it that the
-// document lacks, as cfg says. It returns the value of v as the model
-// reads it, as [Node.set] does.
-func (d *Doc) createValue(ctx context.Context, h *Node, p *place, v any, cfg setConfig) (*edge, modelPlace, error) {
+// createValue creates the value of p, the place of h, and the values above
+// it that the document lacks, as cfg says. Named names the call, as in
+// "sets $.a". The nearest value on the path that holds content takes the
+// first of them, and a null there first becomes the empty collection that
+// takes it, as [Doc.fillNull] writes it. It returns the value of v as the
+// model reads it, as [Node.set] does.
+func (d *Doc) createValue(
+	ctx context.Context, h *Node, p *place, v any, cfg setConfig, named string,
+) (*edge, modelPlace, error) {
 	at := cfg.at
-
-	var sels []paths.Selector
-
-	for sel := range h.path.Selectors() {
-		sels = append(sels, sel)
-	}
-
+	sels := slices.Collect(h.path.Selectors())
 	holderPath := appendSelectors(paths.Doc(), sels[:p.found])
 
 	holder, err := d.resolveFrom(p, holderPath)
@@ -2079,24 +2172,40 @@ func (d *Doc) createValue(ctx context.Context, h *Node, p *place, v any, cfg set
 			}
 		}
 
-		return nil, modelPlace{}, d.fail(h, "%s sets %s, but %s", d.subject(), h.path, why)
+		return nil, modelPlace{}, d.fail(h, "%s %s, but %s", d.subject(), named, why)
 	}
 
 	// A placement puts an entry, so it does not apply to an item.
 	if next.Kind == paths.SelectorIndex && at.kind != placeLast {
-		return nil, modelPlace{}, d.fail(h, "%s sets %s %s, but %s holds a sequence",
-			d.subject(), h.path, at.words(), d.describe(holderPath))
+		return nil, modelPlace{}, d.itemPlacement(h, named, at, holderPath, content, next)
+	}
+
+	if !holdsCollection(content) {
+		err = d.fillNull(ctx, holder, content, next, named)
+		if err != nil {
+			return nil, modelPlace{}, err
+		}
+
+		// The path now reads the empty collection where it read null.
+		found := p.found
+
+		p, err = d.nodePlace(h)
+		if err == nil && !p.exists && p.found == found {
+			holder, err = d.resolveFrom(p, holderPath)
+		}
+
+		if err != nil || p.exists || p.found != found || !holder.exists || !selectsInto(p.container, next) {
+			return nil, modelPlace{}, d.bug(h, fmt.Errorf("%s holds no collection after the edit fills it", holderPath))
+		}
+
+		content = p.container
 	}
 
 	entries, _ := readEntries(content)
 	seq, _ := content.(*ast.SequenceNode) //nolint:errcheck // An index past a mapping fails in createProblem.
-	wrapped := v
+	wrapped := wrapValue(v, sels[p.found+1:])
 
-	for i := len(sels) - 1; i > p.found; i-- {
-		wrapped = map[string]any{sels[i].Name: wrapped}
-	}
-
-	// The mappings above v stay in block style, so v goes in flow style
+	// The collections above v stay in block style, so v goes in flow style
 	// inside them.
 	fd := noFlow
 	if cfg.flow {
@@ -2109,13 +2218,13 @@ func (d *Doc) createValue(ctx context.Context, h *Node, p *place, v any, cfg set
 	)
 
 	if next.Kind == paths.SelectorChild {
-		where, err = d.placeEntry(h, "sets "+h.path.String(), holder, holderPath, content, at)
+		where, err = d.placeEntry(h, named, holder, holderPath, content, at)
 		if err != nil {
 			return nil, modelPlace{}, err
 		}
 	}
 
-	origin := d.addNote(d.createdNote(holder, "sets "+h.path.String()))
+	origin := d.addNote(d.createdNote(holder, named))
 
 	if next.Kind == paths.SelectorChild {
 		mv, err = d.insertEntry(ctx, h, holderPath, holder, content, entries, next.Name, wrapped, fd, origin, where)
@@ -2127,9 +2236,48 @@ func (d *Doc) createValue(ctx context.Context, h *Node, p *place, v any, cfg set
 		return nil, modelPlace{}, err
 	}
 
-	// The model names the mappings above v by the names of the path, so it
-	// takes v from inside them.
+	// The model names the collections above v by the selectors of the
+	// path, so it takes v from inside them.
 	return innerEdge(mv, len(sels)-1-p.found), where, nil
+}
+
+// itemPlacement returns the problem of a call of h, which named names,
+// with the placement at, at an item that the value at holderPath, whose
+// content is content, takes at next. A placement puts an entry, so it
+// does not apply to an item. The value holds a sequence, or null, which
+// becomes a sequence.
+func (d *Doc) itemPlacement(
+	h *Node, named string, at placement, holderPath paths.Path, content ast.Node, next paths.Selector,
+) error {
+	if _, ok := content.(*ast.SequenceNode); ok {
+		return d.fail(h, "%s %s %s, but %s holds a sequence", d.subject(), named, at.words(), d.describe(holderPath))
+	}
+
+	return d.fail(h, "%s %s %s, but %s is an item", d.subject(), named, at.words(), holderPath.Index(next.Index))
+}
+
+// selectsInto reports whether sel selects into content, a value as
+// [Doc.readValue] reads it: a name into a mapping and an index into a
+// sequence.
+func selectsInto(content ast.Node, sel paths.Selector) bool {
+	if sel.Kind == paths.SelectorIndex {
+		_, ok := content.(*ast.SequenceNode)
+
+		return ok
+	}
+
+	_, ok := readEntries(content)
+
+	return ok
+}
+
+// holdsCollection reports whether content, a value as [Doc.readValue] reads
+// it, holds a mapping or a sequence.
+func holdsCollection(content ast.Node) bool {
+	_, isMapping := readEntries(content)
+	_, isSequence := content.(*ast.SequenceNode)
+
+	return isMapping || isSequence
 }
 
 // placeEntry returns the place of the entry that the call of h creates in
@@ -2168,10 +2316,13 @@ func (d *Doc) placeEntry(
 // the place below holder, the value at holderPath, that rest selects, or
 // "" when it can. The content of holder is content, as a decode reads it.
 // The reason reads as the words that a message puts after "but", such as
-// "s holds 1 item". The edit appends an item at the index past the last
-// item of a sequence, and it creates mappings alone below it. A path
-// through an index below the first value that the document lacks thus
-// fails there, and the reason names that value.
+// "s holds 1 item". The edit creates each value that the path lacks below
+// holder. A name there selects an entry of a mapping, and an index selects
+// the item past the last of a sequence. A holder that reads null, as
+// [Doc.nullPlace] finds it, holds no content, so the edit creates the
+// collection that rest needs there, and that collection holds no items.
+// Each sequence that the edit creates below holder holds no items either,
+// so it takes the index 0 alone, and the reason names that sequence.
 func (d *Doc) createProblem(holder *place, holderPath paths.Path, content ast.Node, rest []paths.Selector) string {
 	name := d.describe(holderPath)
 	next := rest[0]
@@ -2179,27 +2330,31 @@ func (d *Doc) createProblem(holder *place, holderPath paths.Path, content ast.No
 	_, isMapping := readEntries(content)
 	seq, isSequence := content.(*ast.SequenceNode)
 
+	items := 0
+	if isSequence {
+		items = len(seq.Values)
+	}
+
+	if _, null := d.nullPlace(holder, content); null && next.Index == 0 {
+		isMapping, isSequence = next.Kind == paths.SelectorChild, next.Kind != paths.SelectorChild
+	}
+
 	switch {
 	case next.Kind == paths.SelectorChild && !isMapping, next.Kind != paths.SelectorChild && !isSequence:
 		return name + " holds " + d.kindOf(holder, content)
-	case next.Kind != paths.SelectorChild && (next.Index != len(seq.Values) || len(rest) > 1):
-		return name + " holds " + countItems(len(seq.Values))
+	case next.Kind != paths.SelectorChild && next.Index != items:
+		return name + " holds " + countItems(items)
 	}
 
-	for _, sel := range rest[1:] {
-		if sel.Kind != paths.SelectorChild {
-			return "the document holds no " + holderPath.Child(next.Name).String()
-		}
-	}
-
-	return ""
+	return missingProblem(appendSelectors(holderPath, rest[:1]), rest[1:])
 }
 
-// innerEdge returns the edge depth mappings down from e, an edge to an
-// encode of mappings of one entry each, or nil when e does not hold them.
+// innerEdge returns the edge depth collections down from e, an edge to an
+// encode of mappings of one entry each and sequences of one item each, or
+// nil when e does not hold them.
 func innerEdge(e *edge, depth int) *edge {
 	for range depth {
-		if e == nil || e.val == nil || e.val.kind != vMapping || len(e.val.edges) != 1 {
+		if e == nil || e.val == nil || e.val.kind != vMapping && e.val.kind != vSequence || len(e.val.edges) != 1 {
 			return nil
 		}
 
@@ -2239,19 +2394,29 @@ func (d *Doc) describe(path paths.Path) string {
 
 // kindOf returns what the value of p holds, as a message names it. The
 // content of the value is content, as [Doc.readValue] reads it. A scalar
-// holds null where a decode of the place reads null. So "!!str ~", which
-// reads "", holds a scalar, and so does "!t ~", which reads "~".
+// holds null where [Doc.readsNull] reports it.
+func (d *Doc) kindOf(p *place, content ast.Node) string {
+	switch {
+	case holdsCollection(content):
+		if _, ok := readEntries(content); ok {
+			return "a mapping"
+		}
+
+		return "a sequence"
+
+	case d.readsNull(p):
+		return "null"
+	}
+
+	return "a scalar"
+}
+
+// readsNull reports whether a decode of the value of p, a scalar, reads
+// null. So "!!str ~", which reads "", does not read null, and neither does
+// "!t ~", which reads "~".
 //
 //nolint:contextcheck // The decode of a scalar reads no state that a context carries.
-func (d *Doc) kindOf(p *place, content ast.Node) string {
-	if _, ok := readEntries(content); ok {
-		return "a mapping"
-	}
-
-	if _, ok := content.(*ast.SequenceNode); ok {
-		return "a sequence"
-	}
-
+func (d *Doc) readsNull(p *place) bool {
 	value := p.value
 
 	target, err := d.node.DocumentResolver().Deref(value)
@@ -2262,11 +2427,95 @@ func (d *Doc) kindOf(p *place, content ast.Node) string {
 	n, _ := hook.Scope(d.node, p.path, value).(*niceyaml.Node) //nolint:errcheck // The hook gives a *niceyaml.Node.
 
 	v, err := n.Decode[any](context.Background(), niceyaml.WithSelfValidation(false))
-	if err == nil && v == nil {
-		return "null"
+
+	return err == nil && v == nil
+}
+
+// nullPlace returns the place of the text that writes the null that
+// holder, a place that holds a value, reads, whose content is content, as
+// [Doc.readValue] reads it. Where the path of holder reads the null through
+// an alias, that place is the anchored value that the alias reads, so each
+// alias of the anchor reads what an edit writes there. It reports false
+// where holder does not read null, as [Doc.readsNull] tells, and for an
+// alias that reads null inside the value of its own anchor.
+func (d *Doc) nullPlace(holder *place, content ast.Node) (*place, bool) {
+	if !holder.exists || holdsCollection(content) || !d.readsNull(holder) {
+		return nil, false
 	}
 
-	return "a scalar"
+	if _, ok := content.(*ast.AliasNode); ok {
+		return nil, false
+	}
+
+	_, aliases, err := d.readValue(holder.value)
+
+	switch {
+	case err != nil:
+		return nil, false
+	case len(aliases) == 0:
+		return holder, true
+	}
+
+	alias, ok := aliases[len(aliases)-1].(*ast.AliasNode)
+	if !ok {
+		return nil, false
+	}
+
+	anchor, err := d.node.DocumentResolver().Anchor(alias)
+	if err != nil {
+		return nil, false
+	}
+
+	at, err := d.resolve(d.textPath(anchor))
+	if err != nil || !at.exists {
+		return nil, false
+	}
+
+	if a, ok := keptAnchorOf(at.value); !ok || a != anchor {
+		return nil, false
+	}
+
+	return at, true
+}
+
+// fillNull writes the empty collection that next selects into in place of
+// the null that holder reads, whose content is content, as
+// [Doc.nullPlace] finds it: an empty mapping for a name and an empty
+// sequence for an index. The collection keeps the anchor of the null, its
+// key, and its comments, as a Set of the collection there does. Named
+// names the call that creates a value below it, as in "sets $.a.b". The
+// call reaches the zones of the text before the fill writes, as
+// [Doc.stepProblem] and [Doc.reachProblem] tell. So a zone that the fill
+// rewrites still refuses the call. The rules of the value that the call
+// creates come with that value, so the write of the collection does not
+// check them.
+func (d *Doc) fillNull(ctx context.Context, holder *place, content ast.Node, next paths.Selector, named string) error {
+	at, ok := d.nullPlace(holder, content)
+	if !ok {
+		h := &Node{d: d, path: holder.path, hidden: holder.via}
+
+		return d.bug(h, fmt.Errorf("%s does not read null", holder.path))
+	}
+
+	pending := d.pending
+	if pending != nil {
+		err := d.stepProblem(*pending)
+		if err == nil {
+			err = d.reachProblem(*pending)
+		}
+
+		if err != nil {
+			return err
+		}
+	}
+
+	d.pending = nil
+
+	defer func() { d.pending = pending }()
+
+	_, err := d.replaceValue(ctx, &Node{d: d, path: at.path, hidden: at.via}, at, emptyFor(next), false, named)
+
+	return err
 }
 
 // createdNote returns the note of text that a call creates below holder,

@@ -223,7 +223,7 @@ func (d *Doc) replaceField(ctx context.Context, n *Node, p *place, text string) 
 // last entry of the mapping that takes them. Where the values above the
 // field leave no mapping to hold it, the write fails as such a Set fails.
 func (d *Doc) insertField(ctx context.Context, n *Node, p *place, text string) (fieldChange, error) {
-	at := d.model.placeOf(p)
+	at := d.placeCall(d.model, p)
 
 	var where placement
 
