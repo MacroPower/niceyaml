@@ -181,7 +181,7 @@ func (r *Registry) unsureTypeField(v *versionEntry, p paths.Path) error {
 
 	msg := fmt.Sprintf("%s cannot tell whether its schema of %s reads %s", r.app(), of, p)
 
-	return markedAuthorError(ErrSchemaTypeField, msg, unsureWhy, unsureRemedy(p))
+	return authorError(ErrSchemaTypeField, msg, unsureWhy, unsureRemedy(p))
 }
 
 // unsureWhy is the detail that says why the registry cannot tell whether
