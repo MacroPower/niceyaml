@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"log/slog"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
@@ -175,6 +176,10 @@ func Loadable(key string, load func(ctx context.Context) ([]byte, error)) Ref {
 // Key returns the key of a [Ref] from [Loadable], [File], or [URL]. It
 // returns "" for the zero Ref and for a Ref from [Schema.Ref], which does
 // not name bytes to cache.
+//
+// Key is the only method that returns the password in the userinfo of a
+// URL. The Ref itself formats and logs as [Ref.Name], which replaces the
+// password.
 func (r Ref) Key() string {
 	return r.key
 }
@@ -190,6 +195,19 @@ func (r Ref) Name() string {
 	}
 
 	return httpfetch.Redacted(r.key)
+}
+
+// String returns [Ref.Name], so a verb such as %v or %s prints a Ref
+// without the password of a URL. The %#v verb prints the fields of the
+// Ref, and the key among them keeps the password.
+func (r Ref) String() string {
+	return r.Name()
+}
+
+// LogValue implements [slog.LogValuer]. It gives a [log/slog] handler
+// the [Ref.Name] as a string, without the password of a URL.
+func (r Ref) LogValue() slog.Value {
+	return slog.StringValue(r.Name())
 }
 
 // Schema returns the compiled schema of a [Ref] from [Schema.Ref], or nil

@@ -2,6 +2,7 @@ package schema_test
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"math"
@@ -332,6 +333,8 @@ func TestLoadError_Fields(t *testing.T) {
 	require.NotErrorIs(t, err, schema.ErrCompile)
 	assert.Equal(t, "https://user:secret@example.com/s.json", err.Ref.Key())
 	assert.Equal(t, "https://user:xxxxx@example.com/s.json", err.Ref.Name())
+	// The Ref formats as its Name, so it does not print the password.
+	assert.Equal(t, "ref https://user:xxxxx@example.com/s.json", fmt.Sprintf("ref %v", err.Ref))
 }
 
 func TestFetchError(t *testing.T) {

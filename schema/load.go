@@ -77,7 +77,9 @@ type LoadError struct {
 	Phase error
 	// Ref names the schema, as the resolver or the caller gave it. Its
 	// [Ref.Key] keeps any password in the userinfo of a URL, and
-	// [Ref.Name] replaces the password, as the message does.
+	// [Ref.Name] replaces the password, as the message does. Key is the
+	// only method that keeps the password, and the Ref itself formats
+	// and logs as its Name.
 	Ref Ref
 }
 
