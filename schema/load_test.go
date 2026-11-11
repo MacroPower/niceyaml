@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"math"
 	"net/http"
 	"slices"
 	"strings"
@@ -139,21 +138,29 @@ func TestWithLoadLimit(t *testing.T) {
 		"embedded JSON past the limit": {
 			ref: schema.Embedded([]byte(bigJSON)),
 		},
-		"zero after a limit removes it for a file": {
+		"NoLimit after a limit removes it for a file": {
 			ref:  schema.FileFS(fsys, "big.json"),
-			opts: []schema.RegistryOption{schema.WithLoadLimit(0)},
+			opts: []schema.RegistryOption{schema.WithLoadLimit(niceyaml.NoLimit)},
 		},
-		"zero after a limit removes it for a URL": {
+		"NoLimit after a limit removes it for a URL": {
 			ref:  schema.URL("https://example.com/big.json"),
-			opts: []schema.RegistryOption{schema.WithLoadLimit(0)},
+			opts: []schema.RegistryOption{schema.WithLoadLimit(niceyaml.NoLimit)},
 		},
-		"zero after a limit removes it for embedded YAML": {
+		"NoLimit after a limit removes it for embedded YAML": {
 			ref:  schema.Embedded([]byte(bigYAML)),
-			opts: []schema.RegistryOption{schema.WithLoadLimit(0)},
+			opts: []schema.RegistryOption{schema.WithLoadLimit(niceyaml.NoLimit)},
 		},
-		"negative after a limit removes it": {
-			ref:  schema.FileFS(fsys, "big.json"),
-			opts: []schema.RegistryOption{schema.WithLoadLimit(-1)},
+		"zero after a limit keeps it": {
+			ref:    schema.FileFS(fsys, "big.json"),
+			opts:   []schema.RegistryOption{schema.WithLoadLimit(0)},
+			err:    schema.ErrLoad,
+			status: 0,
+		},
+		"negative after a limit keeps it": {
+			ref:    schema.FileFS(fsys, "big.json"),
+			opts:   []schema.RegistryOption{schema.WithLoadLimit(-1)},
+			err:    schema.ErrLoad,
+			status: 0,
 		},
 		"later limit replaces an earlier one": {
 			ref:  schema.FileFS(fsys, "big.json"),
@@ -198,44 +205,50 @@ func TestWithLoadLimit(t *testing.T) {
 func TestWithLoadLimit_Unbounded(t *testing.T) {
 	t.Parallel()
 
-	// A limit of zero or less removes the limit, and so does the largest
-	// int. Each reads a file and a URL past DefaultLoadLimit.
+	// NoLimit removes the limit, so the registry reads a file and a URL
+	// past DefaultLoadLimit.
 	body := `{"type": "object"}` + strings.Repeat(" ", schema.DefaultLoadLimit)
 	fsys := yamltest.MapFS(map[string]string{"s.json": body})
 	client := yamltest.Respond(http.StatusOK, body).Client()
 
+	refs := []schema.Ref{
+		schema.FileFS(fsys, "s.json"),
+		schema.URL("https://example.com/s.json"),
+	}
+
+	t.Run("NoLimit", func(t *testing.T) {
+		t.Parallel()
+
+		reg := schema.NewRegistry(schema.WithHTTPClient(client), schema.WithLoadLimit(niceyaml.NoLimit))
+
+		for _, ref := range refs {
+			_, err := reg.Schema(t.Context(), ref)
+			require.NoError(t, err, ref.Name())
+		}
+	})
+
+	// The default limit holds without the option, and a limit of zero or
+	// less keeps it.
 	tcs := map[string]struct {
-		limit int
+		opts []schema.RegistryOption
 	}{
-		"zero":        {limit: 0},
-		"negative":    {limit: -1},
-		"largest int": {limit: math.MaxInt},
+		"without the option": {},
+		"zero":               {opts: []schema.RegistryOption{schema.WithLoadLimit(0)}},
+		"negative":           {opts: []schema.RegistryOption{schema.WithLoadLimit(-1)}},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			reg := schema.NewRegistry(schema.WithHTTPClient(client), schema.WithLoadLimit(tc.limit))
+			reg := schema.NewRegistry(append([]schema.RegistryOption{schema.WithHTTPClient(client)}, tc.opts...)...)
 
-			for _, ref := range []schema.Ref{
-				schema.FileFS(fsys, "s.json"),
-				schema.URL("https://example.com/s.json"),
-			} {
+			for _, ref := range refs {
 				_, err := reg.Schema(t.Context(), ref)
-				require.NoError(t, err, ref.Name())
+				require.ErrorIs(t, err, niceyaml.ErrLimit, ref.Name())
 			}
 		})
 	}
-
-	t.Run("the default limit holds without the option", func(t *testing.T) {
-		t.Parallel()
-
-		reg := schema.NewRegistry(schema.WithHTTPClient(client))
-
-		_, err := reg.Schema(t.Context(), schema.FileFS(fsys, "s.json"))
-		require.ErrorIs(t, err, niceyaml.ErrLimit)
-	})
 }
 
 func TestLoadError(t *testing.T) {

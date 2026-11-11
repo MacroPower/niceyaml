@@ -343,8 +343,8 @@ func isJSONObject(data []byte) bool {
 
 // decodeYAML decodes data, the text of a schema document in YAML, into
 // the value a decode into any yields. The text must be one document of at
-// most limit bytes, or of any size when limit is 0 or less. The decode
-// refuses a duplicate key and aliases past the limit
+// most limit bytes, or of any size when limit is [niceyaml.NoLimit]. The
+// decode refuses a duplicate key and aliases past the limit
 // [niceyaml.WithAliasLimit] describes.
 //
 // The error of a text past limit wraps the error of [httpfetch.TooLarge],
@@ -362,7 +362,7 @@ func isJSONObject(data []byte) bool {
 func decodeYAML(ctx context.Context, data []byte, limit int) (any, error) {
 	// The go-yaml decoder takes several hundred times the size of the text
 	// in memory, so the decode refuses text past limit.
-	if limit > 0 && len(data) > limit {
+	if len(data) > limit {
 		return nil, fmt.Errorf("YAML decode: %w", httpfetch.TooLarge("text", limit))
 	}
 

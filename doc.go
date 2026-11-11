@@ -127,10 +127,12 @@
 // check, and the option adds nothing for a nil function.
 //
 // Every integer limit option, such as [WithByteLimit] or
-// [go.jacobcolvin.com/niceyaml/schema.WithLoadLimit], reads 0 as no
-// limit, counts a negative as 0, and takes the last option given. A zero
-// from a configuration field thus removes a safety bound, as the Limits
-// section describes for the limits of a [Source].
+// [go.jacobcolvin.com/niceyaml/schema.WithLoadLimit], follows one rule. A
+// positive limit sets the limit, and a limit of zero or less keeps the
+// limit as it is. A program thus passes a field of a configuration as it
+// is, and an unset field keeps the default. [NoLimit] turns the check
+// off, so the off state is visible at the call site. Given more than
+// once, the last option with a positive limit wins.
 //
 // # Lines
 //
@@ -1810,8 +1812,9 @@
 // one document, so every [Source] bounds what it parses. By default, a Source
 // reads at most 256 KiB from a file or a reader and parses at most 256 KiB of
 // text, and each of its documents nests at most 100 levels. [WithByteLimit]
-// and [WithDepthLimit] set other limits, and a limit of 0 turns the check
-// off.
+// and [WithDepthLimit] set other limits, and [NoLimit] turns the check off.
+// [WithoutLimits] turns both checks off, and a later WithByteLimit or
+// WithDepthLimit sets its limit again.
 //
 // A file or a reader past the byte limit fails as a file that does not read.
 // A Source of a text that the program holds, as [NewSourceFromString] takes
@@ -1870,7 +1873,7 @@
 // A [go.jacobcolvin.com/niceyaml/schema/matcher.Content] matcher that decodes
 // into a type that reads text applies the same bounds. [WithAliasLimit] set
 // to false turns both bounds off with the alias limit. [WithByteLimit] or
-// [WithDepthLimit] set to 0 turns off the bound that its limit sets.
+// [WithDepthLimit] set to [NoLimit] turns off the bound that its limit sets.
 //
 // The merged text of NewSourceFromLayers skips the byte limit and the depth
 // limit. It holds the content of its layers in block style, plus at most what

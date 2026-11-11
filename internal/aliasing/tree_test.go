@@ -483,7 +483,7 @@ func TestCheckDecodeText(t *testing.T) {
 		},
 		"aliases with the byte limit off": {
 			input: yamltest.AliasedScalar(100, 20),
-			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(0)},
+			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(niceyaml.NoLimit)},
 		},
 		"aliases that repeat aliases past the byte limit": {
 			// Each *b repeats both copies of a, so the second *b brings
@@ -552,7 +552,7 @@ func TestCheckDecodeText(t *testing.T) {
 		},
 		"alias chain with the depth limit off": {
 			input: yamltest.AliasChain(20),
-			opts:  []niceyaml.SourceOption{niceyaml.WithDepthLimit(0)},
+			opts:  []niceyaml.SourceOption{niceyaml.WithDepthLimit(niceyaml.NoLimit)},
 		},
 		"alias chain past the default depth limit": {
 			input: yamltest.AliasChain(150),
@@ -714,7 +714,7 @@ func TestRatioError(t *testing.T) {
 			// With the byte limit off, the text of the aliases still makes
 			// up too much of the read.
 			input: stringtest.LinesLF(longScalar, "kind: "+yamltest.FlowSequence("*a", 500)),
-			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(0)},
+			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(niceyaml.NoLimit)},
 			want:  "2:8",
 			text:  true,
 		},

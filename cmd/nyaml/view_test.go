@@ -111,3 +111,39 @@ func TestViewCmdLineNumbersFlag(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, lineNumbers)
 }
+
+func TestViewCmdLimitFlags(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		msg  string
+		args []string
+	}{
+		"a negative byte limit": {
+			args: []string{"--byte-limit", "-1"},
+			msg:  "--byte-limit -1: limit is negative",
+		},
+		"a negative depth limit": {
+			args: []string{"--depth-limit", "-1"},
+			msg:  "--depth-limit -1: limit is negative",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			// The file does not exist, so the flag error shows that the
+			// command checks the flags before it reads any file.
+			cmd := viewCmd()
+			cmd.SilenceErrors = true
+			cmd.SilenceUsage = true
+			cmd.SetArgs(append(tc.args, filepath.Join(t.TempDir(), "missing.yaml")))
+
+			err := cmd.Execute()
+			require.ErrorIs(t, err, errNegativeLimit)
+			require.NotErrorIs(t, err, fs.ErrNotExist)
+			assert.EqualError(t, err, tc.msg)
+		})
+	}
+}

@@ -1,6 +1,7 @@
 package docparse
 
 import (
+	"math"
 	"runtime/debug"
 	"slices"
 	"strings"
@@ -79,13 +80,13 @@ type standIn struct {
 // costs the file only its own documents. [Result.File] holds stand-ins in
 // their place, and [Result.Failures] holds the run.
 func Parse(tks token.Tokens, opts ...parser.Option) *Result {
-	return ParseDepth(tks, 0, opts...)
+	return ParseDepth(tks, math.MaxInt, opts...)
 }
 
 // ParseDepth is [Parse] with a limit on the levels a document can nest. A
 // run that holds a document past the limit fails with a [*DepthError] in
 // place of a parse. The memory of the parser grows with the square of the
-// depth, so the parser never reads such a run. A depth of zero or less
+// depth, so the parser never reads such a run. A depth of [math.MaxInt]
 // does not set a limit.
 func ParseDepth(tks token.Tokens, depth int, opts ...parser.Option) *Result {
 	return parse(tks, depth, parser.ParseComments, opts)
@@ -96,7 +97,7 @@ func ParseDepth(tks token.Tokens, depth int, opts ...parser.Option) *Result {
 // whether it reads the comment tokens, so a stream without a comment
 // parses as Parse parses it.
 func ParseWithoutComments(tks token.Tokens, opts ...parser.Option) *Result {
-	return parse(tks, 0, 0, opts)
+	return parse(tks, math.MaxInt, 0, opts)
 }
 
 // parse parses tks in mode, as [ParseDepth] describes.

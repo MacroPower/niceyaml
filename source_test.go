@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/fs"
 	"iter"
-	"math"
 	"net"
 	"os"
 	"path/filepath"
@@ -8002,7 +8001,7 @@ func TestWithByteLimit(t *testing.T) {
 			limit int
 		}{
 			"the limit holds the text": {limit: len(text)},
-			"a limit of zero":          {limit: 0},
+			"NoLimit":                  {limit: niceyaml.NoLimit},
 		}
 
 		for name, tc := range tcs {
@@ -8075,10 +8074,49 @@ func TestWithByteLimit(t *testing.T) {
 		yamltest.Document(t, niceyaml.NewSourceFromString(text, niceyaml.WithByteLimit(len(text))))
 	})
 
-	t.Run("a limit of zero turns the check off", func(t *testing.T) {
+	t.Run("NoLimit turns the check off", func(t *testing.T) {
 		t.Parallel()
 
-		yamltest.Document(t, niceyaml.NewSourceFromString(text, niceyaml.WithByteLimit(0)))
+		yamltest.Document(t, niceyaml.NewSourceFromString(text, niceyaml.WithByteLimit(niceyaml.NoLimit)))
+	})
+
+	t.Run("a limit of zero or less keeps the default", func(t *testing.T) {
+		t.Parallel()
+
+		big := "name: " + strings.Repeat("x", niceyaml.DefaultByteLimit) + "\n"
+
+		for _, n := range []int{0, -1} {
+			_, err := niceyaml.NewSourceFromReader(strings.NewReader(big), niceyaml.WithByteLimit(n))
+			require.ErrorIs(t, err, niceyaml.ErrLimit)
+			assert.ErrorContains(t, err, "file is larger than 256 KiB")
+		}
+	})
+
+	t.Run("a limit after WithoutLimits applies", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			source *niceyaml.Source
+		}{
+			"options": {
+				source: niceyaml.NewSourceFromString(text, niceyaml.WithoutLimits(), niceyaml.WithByteLimit(1024)),
+			},
+			"text of a source without limits": {
+				source: niceyaml.NewSourceFromString("name: x\n", niceyaml.WithoutLimits()).
+					WithText(text, niceyaml.WithByteLimit(1024)),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				assert.Equal(t, 1024, tc.source.ByteLimit())
+
+				_, err := tc.source.Document()
+				require.ErrorIs(t, err, niceyaml.ErrLimit)
+			})
+		}
 	})
 
 	t.Run("readers stop one byte past the limit", func(t *testing.T) {
@@ -8151,7 +8189,7 @@ func TestWithByteLimit(t *testing.T) {
 		}
 	})
 
-	t.Run("readers read the whole text with a limit of zero or the largest limit", func(t *testing.T) {
+	t.Run("readers read the whole text with NoLimit", func(t *testing.T) {
 		t.Parallel()
 
 		path := yamltest.WriteFile(t, t.TempDir(), "big.yaml", text)
@@ -8171,18 +8209,14 @@ func TestWithByteLimit(t *testing.T) {
 			}},
 		}
 
-		limits := map[string]int{"a limit of zero": 0, "the largest limit": math.MaxInt}
-
 		for name, tc := range tcs {
-			for limitName, limit := range limits {
-				t.Run(name+" with "+limitName, func(t *testing.T) {
-					t.Parallel()
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-					source, err := tc.read(niceyaml.WithByteLimit(limit))
-					require.NoError(t, err)
-					assert.Equal(t, text, source.Text())
-				})
-			}
+				source, err := tc.read(niceyaml.WithByteLimit(niceyaml.NoLimit))
+				require.NoError(t, err)
+				assert.Equal(t, text, source.Text())
+			})
 		}
 	})
 
@@ -8217,13 +8251,12 @@ func TestWithDepthLimit(t *testing.T) {
 
 	tcs := map[string]struct {
 		input string
-		limit int
 		// The message of the error of the first document, or none.
 		want string
+		opts []niceyaml.SourceOption
 	}{
 		"flow brackets past the default": {
 			input: "a: " + strings.Repeat("[", 101) + strings.Repeat("]", 101) + "\n",
-			limit: -1,
 			want:  "deep.yaml:1:103: document nests more than 100 levels",
 		},
 		"block mappings past a limit": {
@@ -8233,8 +8266,8 @@ func TestWithDepthLimit(t *testing.T) {
 				    c:
 				      d: 1
 			`),
-			limit: 3,
-			want:  "deep.yaml:4:7: document nests more than 3 levels",
+			opts: []niceyaml.SourceOption{niceyaml.WithDepthLimit(3)},
+			want: "deep.yaml:4:7: document nests more than 3 levels",
 		},
 		"a sequence in the column of its key opens a level": {
 			input: stringtest.Input(`
@@ -8242,8 +8275,8 @@ func TestWithDepthLimit(t *testing.T) {
 				- b:
 				  - 1
 			`),
-			limit: 3,
-			want:  "deep.yaml:3:3: document nests more than 3 levels",
+			opts: []niceyaml.SourceOption{niceyaml.WithDepthLimit(3)},
+			want: "deep.yaml:3:3: document nests more than 3 levels",
 		},
 		"block mappings within a limit": {
 			input: stringtest.LinesLF(
@@ -8251,15 +8284,30 @@ func TestWithDepthLimit(t *testing.T) {
 				"  b:",
 				"    c: 1",
 			),
-			limit: 3,
+			opts: []niceyaml.SourceOption{niceyaml.WithDepthLimit(3)},
 		},
 		"an alias opens no level": {
 			input: stringtest.LinesLF("a: &a [[1]]", "b: [*a, *a]"),
-			limit: 3,
+			opts:  []niceyaml.SourceOption{niceyaml.WithDepthLimit(3)},
 		},
-		"a limit of zero turns the check off": {
+		"NoLimit turns the check off": {
 			input: "a: " + strings.Repeat("[", 200) + strings.Repeat("]", 200) + "\n",
-			limit: 0,
+			opts:  []niceyaml.SourceOption{niceyaml.WithDepthLimit(niceyaml.NoLimit)},
+		},
+		"a limit of zero keeps the default": {
+			input: "a: " + strings.Repeat("[", 101) + strings.Repeat("]", 101) + "\n",
+			opts:  []niceyaml.SourceOption{niceyaml.WithDepthLimit(0)},
+			want:  "deep.yaml:1:103: document nests more than 100 levels",
+		},
+		"a negative limit keeps the default": {
+			input: "a: " + strings.Repeat("[", 101) + strings.Repeat("]", 101) + "\n",
+			opts:  []niceyaml.SourceOption{niceyaml.WithDepthLimit(-1)},
+			want:  "deep.yaml:1:103: document nests more than 100 levels",
+		},
+		"a limit after WithoutLimits": {
+			input: stringtest.LinesLF("a:", "  b:", "    c: 1"),
+			opts:  []niceyaml.SourceOption{niceyaml.WithoutLimits(), niceyaml.WithDepthLimit(2)},
+			want:  "deep.yaml:3:5: document nests more than 2 levels",
 		},
 	}
 
@@ -8267,11 +8315,7 @@ func TestWithDepthLimit(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			opts := []niceyaml.SourceOption{niceyaml.WithName("deep.yaml")}
-			if tc.limit >= 0 {
-				opts = append(opts, niceyaml.WithDepthLimit(tc.limit))
-			}
-
+			opts := append([]niceyaml.SourceOption{niceyaml.WithName("deep.yaml")}, tc.opts...)
 			source := niceyaml.NewSourceFromString(tc.input, opts...)
 
 			_, err := source.Document()
@@ -8415,8 +8459,8 @@ func TestSource_WithText(t *testing.T) {
 		next := merged.WithText("c: x\n")
 
 		// The merged Source skips the limits, and so does the next one.
-		assert.Equal(t, 0, next.ByteLimit())
-		assert.Equal(t, 0, next.DepthLimit())
+		assert.Equal(t, niceyaml.NoLimit, next.ByteLimit())
+		assert.Equal(t, niceyaml.NoLimit, next.DepthLimit())
 
 		_, err := next.Decode[struct {
 			C int `yaml:"c"`
@@ -8452,7 +8496,27 @@ func TestSource_WithText(t *testing.T) {
 
 		next := work.WithText(text)
 
-		assert.Equal(t, 0, next.ByteLimit())
+		assert.Equal(t, niceyaml.NoLimit, next.ByteLimit())
+
+		_, err := next.Decode[map[string]rawText](t.Context())
+		require.ErrorIs(t, err, niceyaml.ErrLimit)
+		assert.Equal(t, "3:4: aliases repeat more than 1 KiB of text", err.Error())
+	})
+
+	t.Run("a derived Source with limits keeps the alias bounds of home", func(t *testing.T) {
+		t.Parallel()
+
+		// The derived Source keeps the limits of home, a byte limit of
+		// 1 KiB, and its copy turns the byte limit off. The copy still
+		// holds the aliases of home, so the 1 KiB that the byte limit of
+		// home allows bounds them.
+		text := "a: &a " + strings.Repeat("x", 600) + "\nb: *a\nc: *a\n"
+		home := niceyaml.NewSourceFromString(text, niceyaml.WithByteLimit(1024))
+		work := niceyaml.NewSourceFromDerived(text, yamltest.Document(t, home), nil)
+
+		next := work.WithText(text, niceyaml.WithByteLimit(niceyaml.NoLimit))
+
+		assert.Equal(t, niceyaml.NoLimit, next.ByteLimit())
 
 		_, err := next.Decode[map[string]rawText](t.Context())
 		require.ErrorIs(t, err, niceyaml.ErrLimit)
@@ -8480,19 +8544,38 @@ func TestSource_ByteLimit(t *testing.T) {
 		source *niceyaml.Source
 		want   int
 	}{
-		"default":         {source: niceyaml.NewSourceFromString("a: 1\n"), want: niceyaml.DefaultByteLimit},
-		"set":             {source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithByteLimit(10)), want: 10},
-		"off":             {source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithByteLimit(0))},
-		"negative is off": {source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithByteLimit(-1))},
+		"default": {source: niceyaml.NewSourceFromString("a: 1\n"), want: niceyaml.DefaultByteLimit},
+		"set":     {source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithByteLimit(10)), want: 10},
+		"off": {
+			source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithByteLimit(niceyaml.NoLimit)),
+			want:   niceyaml.NoLimit,
+		},
+		"zero keeps the default": {
+			source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithByteLimit(0)),
+			want:   niceyaml.DefaultByteLimit,
+		},
+		"negative keeps the default": {
+			source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithByteLimit(-1)),
+			want:   niceyaml.DefaultByteLimit,
+		},
+		"zero keeps an earlier limit": {
+			source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithByteLimit(10), niceyaml.WithByteLimit(0)),
+			want:   10,
+		},
 		"WithoutLimits": {
 			source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithByteLimit(10), niceyaml.WithoutLimits()),
+			want:   niceyaml.NoLimit,
+		},
+		"a limit after WithoutLimits": {
+			source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithoutLimits(), niceyaml.WithByteLimit(10)),
+			want:   10,
 		},
 		"tokens": {
 			source: niceyaml.NewSourceFromTokens(lexer.Tokenize("a: 1\n")),
 			want:   niceyaml.DefaultByteLimit,
 		},
 		"zero value": {source: &niceyaml.Source{}, want: niceyaml.DefaultByteLimit},
-		"nil":        {source: nilSource},
+		"nil":        {source: nilSource, want: niceyaml.NoLimit},
 	}
 
 	for name, tc := range tcs {
@@ -8511,7 +8594,7 @@ func TestSource_ByteLimit(t *testing.T) {
 			yamltest.Document(t, niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithByteLimit(10))),
 		)
 
-		assert.Equal(t, 0, merged.ByteLimit())
+		assert.Equal(t, niceyaml.NoLimit, merged.ByteLimit())
 	})
 }
 
@@ -8524,15 +8607,34 @@ func TestSource_DepthLimit(t *testing.T) {
 		source *niceyaml.Source
 		want   int
 	}{
-		"default":         {source: niceyaml.NewSourceFromString("a: 1\n"), want: niceyaml.DefaultDepthLimit},
-		"set":             {source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithDepthLimit(10)), want: 10},
-		"off":             {source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithDepthLimit(0))},
-		"negative is off": {source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithDepthLimit(-1))},
+		"default": {source: niceyaml.NewSourceFromString("a: 1\n"), want: niceyaml.DefaultDepthLimit},
+		"set":     {source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithDepthLimit(10)), want: 10},
+		"off": {
+			source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithDepthLimit(niceyaml.NoLimit)),
+			want:   niceyaml.NoLimit,
+		},
+		"zero keeps the default": {
+			source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithDepthLimit(0)),
+			want:   niceyaml.DefaultDepthLimit,
+		},
+		"negative keeps the default": {
+			source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithDepthLimit(-1)),
+			want:   niceyaml.DefaultDepthLimit,
+		},
+		"zero keeps an earlier limit": {
+			source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithDepthLimit(10), niceyaml.WithDepthLimit(0)),
+			want:   10,
+		},
 		"WithoutLimits": {
+			source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithDepthLimit(10), niceyaml.WithoutLimits()),
+			want:   niceyaml.NoLimit,
+		},
+		"a limit after WithoutLimits": {
 			source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithoutLimits(), niceyaml.WithDepthLimit(10)),
+			want:   10,
 		},
 		"zero value": {source: &niceyaml.Source{}, want: niceyaml.DefaultDepthLimit},
-		"nil":        {source: nilSource},
+		"nil":        {source: nilSource, want: niceyaml.NoLimit},
 	}
 
 	for name, tc := range tcs {
@@ -8551,7 +8653,7 @@ func TestSource_DepthLimit(t *testing.T) {
 			yamltest.Document(t, niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithDepthLimit(10))),
 		)
 
-		assert.Equal(t, 0, merged.DepthLimit())
+		assert.Equal(t, niceyaml.NoLimit, merged.DepthLimit())
 	})
 }
 

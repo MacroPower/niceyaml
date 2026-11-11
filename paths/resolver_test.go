@@ -4867,7 +4867,7 @@ func TestResolver_Matches_RecursiveReachedTwice(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := documentOf(t, tc.input, niceyaml.WithDepthLimit(0))
+			doc := documentOf(t, tc.input, niceyaml.WithDepthLimit(niceyaml.NoLimit))
 
 			matches := requireMatches(t, doc, tc.path)
 
