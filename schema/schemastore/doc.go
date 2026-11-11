@@ -19,6 +19,13 @@
 // specific pattern. So a pattern for the directory of one tool wins over a
 // broad one such as "**/tasks/*.yml".
 //
+// The store matches a relative path as written, as a
+// [go.jacobcolvin.com/niceyaml/matcher.FilePath] matcher does, and never
+// joins it to the working directory. A relative path matches
+// a pattern that names directories only when it carries those directories
+// itself. A file on disk should carry an absolute path, which
+// [go.jacobcolvin.com/niceyaml.NewSourceFromFile] sets.
+//
 // The store drops some patterns from the catalog:
 //
 //   - The patterns for formats that are not YAML, such as *.toml and

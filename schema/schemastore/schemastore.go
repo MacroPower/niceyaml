@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -422,13 +421,16 @@ func (s *Store) Resolve(ctx context.Context, doc *niceyaml.Node) (schema.Ref, er
 
 // FindMatch finds the catalog entry that matches a file path.
 //
-// FindMatch resolves a relative path against the working directory before
-// it matches, because yaml-language-server matches the absolute path of a
-// document. A pattern such as ".github/workflows/*.yml" then matches
-// "ci.yml" read from inside that directory. Patterns match at any depth,
-// so the directories above the working directory never stop a match. For
-// a path from [niceyaml.NewSourceFromFS], the root of the file system
-// stands for the working directory.
+// FindMatch matches a path as written and never joins it to the working
+// directory. Patterns match at any depth, so a relative path that carries
+// its directories matches. A pattern such as ".github/workflows/*.yml"
+// matches ".github/workflows/ci.yml" read from the root of a project file
+// system, an upload, or a blob of a repository. It does not match "ci.yml"
+// alone, whatever the working directory is. A file on disk should carry
+// an absolute path, which [niceyaml.NewSourceFromFile] sets. A caller that
+// knows the directory a relative path leads from passes
+// filepath.Join(dir, path) to FindMatch, or sets an absolute path with
+// [niceyaml.WithFilePath].
 //
 // When several entries match, FindMatch returns the one whose matching
 // pattern spells out the most characters of the names in the path.
@@ -448,23 +450,12 @@ func (s *Store) FindMatch(ctx context.Context, filePath string) (CatalogEntry, e
 		return CatalogEntry{}, fmt.Errorf("%w: document has no file path", ErrNoCatalogMatch)
 	}
 
-	// Abs fails only when the working directory is unknown, and the path
-	// as written is then the closest match left.
-	matchPath := filePath
-
-	if !filepath.IsAbs(filePath) {
-		abs, err := filepath.Abs(filePath)
-		if err == nil {
-			matchPath = abs
-		}
-	}
-
 	entries, err := s.catalog(ctx)
 	if err != nil {
 		return CatalogEntry{}, err
 	}
 
-	cleanPath := filepaths.CleanPath(matchPath)
+	cleanPath := filepaths.CleanPath(filePath)
 
 	// A registry resolves each document of a multi-document file on its
 	// own, and every one of those lookups brings the same path. The scan
