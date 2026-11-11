@@ -189,7 +189,10 @@ func WithDecodeOptions(opts ...niceyaml.DecodeOption) RegistryOption {
 // inside a validator, and [go.jacobcolvin.com/niceyaml/edit.Node.Decode]
 // in a step thus apply them. So does a decode of [Object.Current].
 // [Object.Original] from a Source that Sources reads keeps the unmarshalers
-// of that Source alone.
+// of that Source alone. The load thus parses each document of such a
+// Source again, into a copy that holds both lists, and [Object.Current]
+// holds that copy. A Source that the load builds itself holds the
+// unmarshalers already, so its documents do not get that copy.
 //
 // The unmarshalers of the Source of a document apply over them. Those
 // come from [input.WithSourceOptions], or from the program that built a

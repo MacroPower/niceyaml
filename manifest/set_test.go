@@ -406,7 +406,7 @@ func TestObject_Layouts(t *testing.T) {
 		require.EqualError(t, hours.Original.Bind(problem), "config/hours.yaml:5:1: $.spec.open: too early")
 	})
 
-	t.Run("a document after the first of its file", func(t *testing.T) {
+	t.Run("a document of the current version", func(t *testing.T) {
 		t.Parallel()
 
 		set := loadExample(t)
@@ -414,35 +414,25 @@ func TestObject_Layouts(t *testing.T) {
 		semla, ok := set.Get[MenuItem]("semla")
 		require.True(t, ok)
 
-		// Original is the document of the file, so it gives the place of
-		// the document in the file.
-		assert.Contains(t, set.Sources(), semla.Original.Source())
-		assert.Equal(t, 1, semla.Original.DocumentIndex())
-		assert.Equal(t, position.NewSpan(8, 17), semla.Original.Span())
-
-		// Current is a copy that holds the lines of the document alone,
-		// so its positions describe the copy.
-		assert.NotContains(t, set.Sources(), semla.Current.Source())
-		assert.Equal(t, "config/menu.yaml", semla.Current.Source().Name())
-		assert.Equal(t, 0, semla.Current.DocumentIndex())
-		assert.Equal(t, position.NewSpan(0, 9), semla.Current.Span())
+		// The document declares the current version, so Current is
+		// Original, the document of the file, and gives the place of the
+		// document in the file.
+		assert.Same(t, semla.Original, semla.Current)
+		assert.Contains(t, set.Sources(), semla.Current.Source())
+		assert.Equal(t, 1, semla.Current.DocumentIndex())
+		assert.Equal(t, position.NewSpan(8, 17), semla.Current.Span())
 
 		price := spec.Child("price")
 
 		value, err := semla.Current.At(price)
 		require.NoError(t, err)
-		assert.Equal(t, "6:9-6:11", yamltest.RangeOf(t, value).String())
+		assert.Equal(t, "14:9-14:11", yamltest.RangeOf(t, value).String())
 
-		// An error that binds through Current still lands in the file,
-		// and its binding holds the position there.
 		bound := semla.Current.Bind(niceyaml.NewError("pricey", niceyaml.AtPath(price)))
 		require.EqualError(t, bound, "config/menu.yaml:15:10: $.spec.price: pricey")
 		require.EqualError(t, semla.Current.Bind(errors.New("pricey")), "config/menu.yaml: document 2: pricey")
-
-		for problem := range niceyaml.Problems(bound) {
-			assert.Equal(t, "14:9-14:11", yamltest.RangeOf(t, problem).String())
-			assert.Same(t, semla.Original.Source(), problem.Source())
-		}
+		require.EqualError(t, semla.Bind(niceyaml.NewError("pricey", niceyaml.AtPath(price))),
+			"config/menu.yaml:15:10: $.spec.price: pricey")
 
 		// An Object of Objects holds the documents of its typed Object.
 		for o := range set.Objects() {
@@ -450,6 +440,55 @@ func TestObject_Layouts(t *testing.T) {
 				assert.Same(t, semla.Current, o.Current)
 				assert.Same(t, semla.Original, o.Original)
 			}
+		}
+	})
+
+	t.Run("a Source that the program built", func(t *testing.T) {
+		t.Parallel()
+
+		set, err := newCafeRegistry(t).Load(t.Context(), input.Sources(niceyaml.NewSourceFromString(
+			cafeDoc+"---\n"+hoursDoc,
+			niceyaml.WithName("cafe.yaml"),
+		)))
+		require.NoError(t, err)
+
+		// The registry has no unmarshalers, so the load decodes the Node
+		// of the caller for a document of the current version.
+		cafe, ok := set.Get[Cafe]("yamull")
+		require.True(t, ok)
+		assert.Same(t, cafe.Original, cafe.Current)
+		assert.Contains(t, set.Sources(), cafe.Current.Source())
+		assert.Equal(t, 0, cafe.Current.DocumentIndex())
+
+		hours, ok := set.Get[Hours]("weekday")
+		require.True(t, ok)
+
+		// Original is the document of the file, so it gives the place of
+		// the document in the file.
+		assert.Contains(t, set.Sources(), hours.Original.Source())
+		assert.Equal(t, 1, hours.Original.DocumentIndex())
+		assert.Equal(t, position.NewSpan(6, 14), hours.Original.Span())
+
+		// Current is a migrated copy that holds the lines of the document
+		// alone, so its positions describe the copy.
+		assert.NotContains(t, set.Sources(), hours.Current.Source())
+		assert.Equal(t, "cafe.yaml", hours.Current.Source().Name())
+		assert.Equal(t, 0, hours.Current.DocumentIndex())
+		assert.Equal(t, position.NewSpan(0, 8), hours.Current.Span())
+
+		value, err := hours.Current.At(open)
+		require.NoError(t, err)
+		assert.Equal(t, "6:8-6:15", yamltest.RangeOf(t, value).String())
+
+		// An error that binds through Current still lands in the file,
+		// and its binding holds the position there.
+		bound := hours.Current.Bind(niceyaml.NewError("too early", niceyaml.AtPath(open)))
+		require.EqualError(t, bound, "cafe.yaml:13:10: $.spec.open: too early")
+		require.EqualError(t, hours.Current.Bind(errors.New("too early")), "cafe.yaml: document 2: too early")
+
+		for problem := range niceyaml.Problems(bound) {
+			assert.Equal(t, "12:9-12:16", yamltest.RangeOf(t, problem).String())
+			assert.Same(t, hours.Original.Source(), problem.Source())
 		}
 	})
 
@@ -488,6 +527,43 @@ func TestObject_Layouts(t *testing.T) {
 
 		_, err = alarm.Original.DecodeAt[AlarmLevel](t.Context(), level)
 		require.EqualError(t, err, "alarm.yaml:6:10: $.spec.level: expected integer, got string")
+
+		// Current is a copy that holds the unmarshalers of the registry.
+		assert.NotSame(t, alarm.Original, alarm.Current)
+		assert.NotSame(t, alarm.Original.Source(), alarm.Current.Source())
+	})
+
+	t.Run("the unmarshalers of the registry on a file that the load reads", func(t *testing.T) {
+		t.Parallel()
+
+		reg := manifest.MustNewRegistry(
+			manifest.WithUnmarshalers(niceyaml.CustomUnmarshaler(decodeAlarmLevel)),
+			manifest.WithKinds(manifest.NewKind[Alarm]("Alarm",
+				manifest.NameField(meta.Child("name")), manifest.Version("alarm.jacobcolvin.com/v1"))),
+		)
+
+		set, err := reg.Load(t.Context(), configFS(map[string]string{
+			"alarm.yaml": stringtest.LinesLF(
+				"apiVersion: alarm.jacobcolvin.com/v1",
+				"kind: Alarm",
+				"metadata:",
+				"  name: smoke",
+				"spec:",
+				"  level: high",
+			),
+		}))
+		require.NoError(t, err)
+
+		alarm, ok := set.Get[Alarm]("smoke")
+		require.True(t, ok)
+
+		// The load built the Source with the unmarshalers of the
+		// registry, so Current is Original.
+		assert.Same(t, alarm.Original, alarm.Current)
+
+		got, err := alarm.Original.DecodeAt[AlarmLevel](t.Context(), spec.Child("level"))
+		require.NoError(t, err)
+		assert.Equal(t, alarm.Value.Spec.Level, got)
 	})
 }
 

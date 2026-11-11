@@ -30,7 +30,8 @@ type docState struct {
 	doc *niceyaml.Node
 	// The working copy of the document, in the layout of the current
 	// version after the steps ran, or nil. The checks of the document read
-	// it.
+	// it. It is doc itself, unless the document migrated or startWork
+	// built a copy.
 	work *niceyaml.Node
 	// The name, when the document reached the layout of the current version
 	// with a name that is a non-empty string.
@@ -127,7 +128,7 @@ func (d *docState) check(ctx context.Context) {
 
 	d.deprecations()
 
-	if !d.prepareWork(d.doc, nil) || !d.checkSchema(ctx, d.route.version, nil) ||
+	if !d.startWork() || !d.checkSchema(ctx, d.route.version, nil) ||
 		!d.migrate(ctx) {
 		return
 	}
@@ -817,7 +818,7 @@ type objectBinder struct {
 	// The document as the user wrote it.
 	doc *niceyaml.Node
 	// The working copy of the document, in the layout of the current
-	// version.
+	// version. It is doc itself for a document that did not need a copy.
 	work *niceyaml.Node
 	// The label of the current version of the kind, as messages name it.
 	currentLabel string

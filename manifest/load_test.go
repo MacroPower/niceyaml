@@ -3984,31 +3984,58 @@ func firstLine(s string) string {
 func TestRegistry_Load_Layers(t *testing.T) {
 	t.Parallel()
 
-	base := niceyaml.NewSourceFromString(
-		stringtest.LinesLF(
-			"apiVersion: cafe.jacobcolvin.com/v1alpha1",
-			"kind: Hours",
-			"metadata:",
-			"  name: weekday",
-		),
-		niceyaml.WithName("config/base/hours.yaml"),
+	hours := stringtest.LinesLF(
+		"apiVersion: cafe.jacobcolvin.com/v1alpha1",
+		"kind: Hours",
+		"metadata:",
+		"  name: weekday",
+	)
+	item := stringtest.LinesLF(
+		"apiVersion: cafe.jacobcolvin.com/v1",
+		"kind: MenuItem",
+		"metadata:",
+		"  name: semla",
+		"spec:",
+		"  price: 3",
 	)
 
+	// Each case merges the top layer, config/prod/doc.yaml, over the base
+	// layer, config/base/doc.yaml.
 	tcs := map[string]struct {
-		top  string
-		want []string
-		err  string
+		base  string
+		top   string
+		want  []string
+		errIs error
+		err   string
 	}{
 		"layers agree": {
+			base: hours,
 			top:  stringtest.LinesLF("spec:", `  opens: "08:00"`),
 			want: []string{`Hours "weekday" cafe.jacobcolvin.com/v1alpha1 up-to-date=false`},
 		},
 		"layers declare different versions": {
-			top: "apiVersion: cafe.jacobcolvin.com/v1\n",
+			base:  hours,
+			top:   "apiVersion: cafe.jacobcolvin.com/v1\n",
+			errIs: manifest.ErrMixedLayers,
 			err: stringtest.JoinLF(
-				"config/base/hours.yaml:1:13: $.apiVersion: layers declare different versions",
-				"`-- config/prod/hours.yaml:1:13: $.apiVersion: cafe.jacobcolvin.com/v1 overrides cafe.jacobcolvin.com/v1alpha1",
+				"config/base/doc.yaml:1:13: $.apiVersion: layers declare different versions",
+				"`-- config/prod/doc.yaml:1:13: $.apiVersion: cafe.jacobcolvin.com/v1 overrides cafe.jacobcolvin.com/v1alpha1",
 			),
+		},
+		"top layer writes a value that the schema rejects": {
+			base: item,
+			top:  stringtest.LinesLF("spec:", "  price: 0"),
+			err:  stringtest.LinesLF("config/prod/doc.yaml:2:10: $.spec.price: 0 is less than 1"),
+		},
+		"top layer writes an unknown field": {
+			base: item,
+			top:  stringtest.LinesLF("spec:", "  extra: 1"),
+			err:  stringtest.LinesLF(`config/prod/doc.yaml:2:3: $.spec.extra~: unknown field "extra"`),
+		},
+		"top layer writes a name that is not a string": {
+			base: item,
+			top:  stringtest.LinesLF("metadata:", "  name: 5"),
+			err:  stringtest.LinesLF("config/prod/doc.yaml:2:9: $.metadata.name: name must be a non-empty string"),
 		},
 	}
 
@@ -4016,12 +4043,18 @@ func TestRegistry_Load_Layers(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			top := niceyaml.NewSourceFromString(tc.top, niceyaml.WithName("config/prod/hours.yaml"))
+			base := niceyaml.NewSourceFromString(tc.base, niceyaml.WithName("config/base/doc.yaml"))
+			top := niceyaml.NewSourceFromString(tc.top, niceyaml.WithName("config/prod/doc.yaml"))
 			merged := yamltest.Layers(t, base, top)
 
 			set, err := newCafeRegistry(t).Load(t.Context(), input.Sources(merged), manifest.WithSetChecks(false))
 			if tc.err != "" {
-				require.ErrorIs(t, err, manifest.ErrMixedLayers)
+				require.Error(t, err)
+
+				if tc.errIs != nil {
+					require.ErrorIs(t, err, tc.errIs)
+				}
+
 				assert.Equal(t, tc.err, firstTwoLines(niceyaml.FormatError(err)))
 
 				return

@@ -458,11 +458,11 @@
 // type that several kinds share. [Set.Objects] yields every manifest of
 // every kind, for a tool that does not know the Go types.
 //
-// An Object holds its document twice. [Object.Current] holds the document
-// in the layout of the current version, which [Object.Value] decoded from.
-// A function of [WithCheck] reads it to decode another Go type, to run a
-// [niceyaml.Validator], or to resolve a path. A path of the current
-// version resolves there, whatever version the file declares:
+// An Object holds its document in two layouts. [Object.Current] holds the
+// document in the layout of the current version, which [Object.Value]
+// decoded from. A function of [WithCheck] reads it to decode another Go
+// type, to run a [niceyaml.Validator], or to resolve a path. A path of the
+// current version resolves there, whatever version the file declares:
 //
 //	for item := range set.All[config.MenuItem]() {
 //		errs = append(errs, item.Current.Validate(ctx, affordable))
@@ -472,6 +472,14 @@
 // layout of [Object.Version]. It gives the name of the file and the place
 // of the document there. A path of the current version might not resolve
 // in it, because a step might have renamed or moved the value.
+//
+// For a document that declares the current version, the two layouts
+// match, and Current is Original, except for a Source that
+// [input.Sources] reads under [WithUnmarshalers]. Only a copy puts the
+// unmarshalers of the registry under those of that Source, so the load
+// builds Current as a copy of such a document. It also builds Current
+// as a copy of a migrated document, and the copy holds the migrated
+// text.
 //
 // # Problems
 //
