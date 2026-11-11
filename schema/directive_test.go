@@ -831,6 +831,41 @@ func TestDirective_Resolve(t *testing.T) {
 			})
 		}
 	})
+
+	t.Run("a reference that does not resolve is no fault", func(t *testing.T) {
+		t.Parallel()
+
+		// The document names its schema, but the reference cannot name a
+		// file, so no check of the document runs. Each case gives the
+		// path of the document and the sentinel of the error.
+		tcs := map[string]struct {
+			is   error
+			path string
+		}{
+			"document without a file path": {is: schema.ErrNoFilePath},
+			"document with a relative file path": {
+				is:   schema.ErrNoBaseDir,
+				path: "configs/app.yaml",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				var opts []niceyaml.SourceOption
+
+				if tc.path != "" {
+					opts = append(opts, niceyaml.WithFilePath(tc.path))
+				}
+
+				doc := yamltest.FirstDocument(t, yamltest.SchemaDirective("./schema.json", "a: 1\n"), opts...)
+
+				_, err := schema.Directive().Resolve(t.Context(), doc)
+				requireNoFault(t, err, tc.is)
+			})
+		}
+	})
 }
 
 func TestDirective_ErrorDrawsControlCharacters(t *testing.T) {

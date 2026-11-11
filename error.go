@@ -45,7 +45,8 @@ var (
 	// [Node.DecodeIfPresent] is nil, a nil pointer, or not a pointer, so the
 	// decode cannot write into it. The call returns the error bound to the
 	// source as a [SourceError] with no location. It is a mistake of the
-	// caller, so [IsInvalid] does not report it.
+	// caller, so the error comes inside [Unchecked]. [IsInvalid] does not
+	// report it, even from a check that returns it as it is.
 	ErrDecodeTarget = errors.New("decode target is not a non-nil pointer")
 
 	// ErrSelfValidateTarget indicates that the value given to
@@ -54,7 +55,8 @@ var (
 	// Node.SelfValidate and Source.SelfValidate return the error bound to the
 	// source as a [SourceError] with no location. SelfValidateValue binds it
 	// with [BindValue], outside any document. It is a mistake of the caller,
-	// so [IsInvalid] does not report it.
+	// so the error comes inside [Unchecked]. [IsInvalid] does not report it,
+	// even from a check that returns it as it is.
 	ErrSelfValidateTarget = errors.New("self-validation target is nil")
 
 	// ErrDecode indicates that the go-yaml decoder did not decode a node into
@@ -356,11 +358,12 @@ const (
 	// anything.
 	undeclared declaration = iota
 	// The Error comes from [Unchecked], so its check could not run. A
-	// fault that a hook presumes does not reach the error the Error wraps.
+	// fault that a check presumes does not reach the error the Error wraps.
 	unchecked
-	// A hook presumes the document at fault for an error that the code it
-	// calls returns, as a decode does for each error of a [SelfValidator]
-	// or a function from [WithValueCheck].
+	// Niceyaml presumes the document at fault for an error that a check it
+	// runs returns. A decode does so for each error of a [SelfValidator]
+	// or a function from [WithValueCheck], and [Node.Validate] does so for
+	// each error of a [Validator].
 	presumed
 	// [NewError] or [Invalid] declared the fault.
 	declared
@@ -384,11 +387,13 @@ func (d declaration) on(err error) declaration {
 
 // under returns the declaration that the errors below x take when d comes
 // from above x. A fault that x declares passes down when it is stronger
-// than d, and an x from [Unchecked] stops a presumed fault.
+// than d. An x from [Unchecked] stops a presumed fault, and the errors
+// below it take its declaration in its place. Each of them thus stops a
+// presumed fault on its own, even apart from x.
 func (d declaration) under(x *Error) declaration {
 	switch {
-	case x.fault == unchecked && d == presumed:
-		return undeclared
+	case x.fault == unchecked && d <= presumed:
+		return unchecked
 	case x.fault.invalid() && x.fault > d:
 		return x.fault
 	default:
@@ -453,7 +458,7 @@ func NewError(msg string, opts ...ErrorOption) *Error {
 // Invalid returns nil for a nil err, and for a nil [*Error] or
 // [*SourceError] pointer, whatever the options. It returns an error rather
 // than an [*Error], so the nil compares equal to nil wherever it goes. A
-// validator thus returns the result as it is:
+// check thus returns the result as it is:
 //
 //	return niceyaml.Invalid(spec.Check())
 //
@@ -500,13 +505,13 @@ func Invalid(err error, opts ...ErrorOption) error {
 // rejection, stays a fault inside Unchecked. An Unchecked inside Invalid is
 // a fault too.
 //
-// A hook presumes the document at fault for an error that it returns and
-// that does not declare anything, as the Errors section of the package
-// documentation describes. An Error from Unchecked on the cause chain of
-// the error cancels that presumption. An I/O error that a Validate method,
-// a function from [WithValueCheck], or an unmarshaler wraps in Unchecked is
-// thus not a fault. Such an error from an unmarshaler does not match
-// [ErrDecode] either.
+// Niceyaml presumes the document at fault for an error that a check it
+// runs returns and that does not declare anything, as the Errors section
+// of the package documentation describes. An Error from Unchecked on the
+// cause chain of the error cancels that presumption. An I/O error that a
+// [Validator], a Validate method, a function from [WithValueCheck], or an
+// unmarshaler wraps in Unchecked is thus not a fault. Such an error from
+// an unmarshaler does not match [ErrDecode] either.
 //
 // An Unchecked around a join cancels the presumption for each branch it
 // heads. A branch that declares a fault itself stays a fault. An Unchecked
@@ -514,10 +519,10 @@ func Invalid(err error, opts ...ErrorOption) error {
 // does an Unchecked in one branch of a wrapper that [fmt.Errorf] builds
 // with several %w verbs and that heads several problems.
 //
-// The result of a Validate method or a function from WithValueCheck is an
-// exception. When any branch of that result matches [context.Canceled] or
-// [context.DeadlineExceeded], the decode does not presume a fault for any of
-// its branches, with Unchecked or without it.
+// The result of a check is an exception when any branch of it matches
+// [context.Canceled] or [context.DeadlineExceeded], or holds a
+// [PanicError]. Niceyaml then does not presume a fault for any of its
+// branches, with Unchecked or without it.
 // Only a branch that declares a fault, as one from [NewError] or Invalid
 // does, stays a fault. The Cancellation section of the package
 // documentation describes that rule.
@@ -554,13 +559,12 @@ func Unchecked(err error, opts ...ErrorOption) error {
 // neither reads as err does in a wrapper with several %w verbs. A result
 // around a plain error thus reads as a sentinel there.
 //
-// [IsInvalid] reports the result only when it reports err. A hook presumes
-// a fault for the result exactly when it presumes one for err, as the
-// Errors section of the package documentation describes. A plain I/O error
-// that a Validate method or a function from [WithValueCheck] returns inside
-// Locate is thus a fault. Such a check should wrap the error in Unchecked
-// instead. A [Validator] declares its own faults, so a plain error that it
-// returns inside Locate is not a fault.
+// [IsInvalid] reports the result only when it reports err. Niceyaml
+// presumes a fault for the result of a check exactly when it presumes one
+// for err, as the Errors section of the package documentation describes.
+// A plain I/O error that a [Validator], a Validate method, or a function
+// from [WithValueCheck] returns inside Locate is thus a fault. Such a check
+// should wrap the error in Unchecked instead.
 //
 // Locate returns nil for a nil err, and for a nil [*Error] or
 // [*SourceError] pointer, whatever the options. It returns an error rather
@@ -756,18 +760,20 @@ func NewSummary(msg string, errs ...error) error {
 // [errors.Is].
 //
 // An Error from [NewError] or [Invalid] declares the fault, with a location
-// or without. So does the Error a decode puts around the result of a
-// [SelfValidator] or a function from [WithValueCheck], with two exceptions.
+// or without. So does the Error that niceyaml puts around the result of a
+// check it runs, such as a [Validator], a [SelfValidator], or a function
+// from [WithValueCheck], with three exceptions.
 // That Error does not declare the fault when an Error from [Unchecked] sits
 // on the cause chain of the result. It does not declare the fault either
 // when any branch of the result matches [context.Canceled] or
 // [context.DeadlineExceeded]. The Cancellation section of the package
-// documentation describes that rule. An Error from Unchecked, [Locate], or
-// [Rebase], a summary from [NewSummary], and the Error a scoped [Node.Bind]
-// puts around an error do not declare a fault. Neither does an Error from
-// Invalid around the error of a context that ended. Any other target
-// matches through the errors the Error wraps, as [Error.Unwrap] returns
-// them.
+// documentation describes that rule. Nor does it declare the fault when
+// any branch of the result holds a [PanicError]. An Error from Unchecked,
+// [Locate], or [Rebase], a summary from [NewSummary], and the Error a
+// scoped [Node.Bind] puts around an error do not declare a fault. Neither
+// does an Error from Invalid around the error of a context that ended. Any
+// other target matches through the errors the Error wraps, as
+// [Error.Unwrap] returns them.
 func (e *Error) Is(target error) bool {
 	return target == errInvalid && e != nil && e.fault.invalid()
 }
@@ -799,11 +805,11 @@ func (e *Error) Is(target error) bool {
 //	switch {
 //	case err == nil:
 //	case !niceyaml.IsInvalid(err):
-//		status = 500 // schema load, canceled context, I/O, panic
+//		status = 500 // schema load, canceled context, Unchecked I/O, panic
 //	case errors.Is(err, niceyaml.ErrSyntax):
 //		status = 400
 //	default:
-//		status = 422 // decode rejection, violation, Validate method, value check
+//		status = 422 // decode rejection, violation, validator, Validate method, value check
 //	}
 func IsInvalid(err error) bool {
 	return NewErrorTree(err).IsInvalid()
@@ -913,22 +919,34 @@ func rebase(err error, m move, d declaration) error {
 
 // markFault returns err with d on it, as [declaration.on] puts d on err. An
 // err whose own Error declares as much stays as it is, and so does an err
-// that d does not declare a fault for. It wraps any other err in an Error
-// that adds only the mark. The result keeps the text, location, and
-// children of err, and [isBound] still reports it.
+// that d does not declare anything for. The mark of [Unchecked] does not
+// reach an err that holds one already or that declares a fault. A binding
+// gets the mark below it, as [SourceError.faulted] puts it there, so the
+// binding stays on top. It wraps any other err in an Error that adds only
+// the mark. The result keeps the text, location, and children of err, and
+// [isBound] still reports it.
 func markFault(err error, d declaration) error {
 	if isNothing(err) {
 		return err
 	}
 
 	d = d.on(err)
-	if !d.invalid() {
+
+	switch {
+	case d == undeclared:
+		return err
+	case d == unchecked && (holdsUnchecked(err) || declaresInvalid(err)):
 		return err
 	}
 
-	x, ok := err.(*Error) //nolint:errorlint // The node itself, not a chain search.
-	if ok && x.fault >= d {
-		return err
+	switch x := err.(type) { //nolint:errorlint // The node itself, not a chain search.
+	case *Error:
+		if x.fault >= d {
+			return err
+		}
+
+	case *SourceError:
+		return x.faulted(d)
 	}
 
 	return &Error{err: err, fault: d}
@@ -2761,7 +2779,7 @@ func keptNode(src *Source, doc *keptDocument) *Node {
 // returns them.
 func (e *SourceError) collect(err error, b binder) {
 	e.end = walkChildren(err,
-		func(x *SourceError) { e.below = append(e.below, e.adoptChildren(x, b)...) },
+		func(x *SourceError, _ childBase) { e.below = append(e.below, e.adoptChildren(x, b)...) },
 		func(n error, base childBase, detail bool) { e.addChild(n, b, base, detail) },
 	)
 }
@@ -2949,6 +2967,38 @@ func (e *SourceError) heads() bool {
 // location.
 func (e *SourceError) headsAlone() bool {
 	return e.heads() && e.headline() == ""
+}
+
+// faulted returns a copy of e with d on each of its problems, as
+// [markFault] puts d on an error. A binding of one problem gets the mark
+// on the error it binds, so it keeps its location, its text, and its
+// children. A binding that heads several problems passes the mark to the
+// binding of each problem. The mark does not reach a problem that holds
+// an Error from [Unchecked], as [declaration.on] puts it, or a detail.
+func (e *SourceError) faulted(d declaration) *SourceError {
+	c := e.copied()
+
+	if e.heads() {
+		c.below = make([]boundChild, 0, len(e.below))
+
+		for _, child := range e.below {
+			if bd := d.on(child.bound); !child.detail && bd != undeclared {
+				child.bound = child.bound.faulted(bd)
+			}
+
+			c.below = append(c.below, child)
+		}
+
+		return c
+	}
+
+	c.err = markFault(e.err, d)
+
+	if e.free != nil {
+		c.free = markFault(e.free, d)
+	}
+
+	return c
 }
 
 // Source returns the [*Source] the error is bound to. It returns nil for a

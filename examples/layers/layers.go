@@ -258,7 +258,8 @@ func closesBy8(ctx context.Context, n *niceyaml.Node) error {
 
 	closing, err := time.Parse("15:04", text)
 	if err != nil {
-		// Invalid declares the document at fault for a plain error.
+		// Invalid declares the document at fault for a plain error, so a
+		// direct call of the check reports the fault as the decode does.
 		return niceyaml.Invalid(err, niceyaml.AtPath(closePath))
 	}
 

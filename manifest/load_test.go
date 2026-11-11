@@ -4209,6 +4209,69 @@ func TestRegistry_Load_Warnings(t *testing.T) {
 	}
 }
 
+func TestRegistry_Load_ValidatorPlainWarning(t *testing.T) {
+	t.Parallel()
+
+	// The validator warns a plain error at the open field of the spec,
+	// which the decode presumes a fault of the document.
+	legacy := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+		open, err := n.At(spec.Child("open"))
+		if err != nil {
+			return err //nolint:wrapcheck // The decode binds the error of a validator.
+		}
+
+		open.Warn(ctx, errors.New("legacy open"))
+
+		return nil
+	})
+
+	reg := manifest.MustNewRegistry(
+		manifest.WithAppName("cafe"),
+		manifest.WithDecodeOptions(niceyaml.WithValidator(legacy)),
+		manifest.WithKinds(manifest.NewKind[Shift]("Shift", manifest.Version("cafe.jacobcolvin.com/v1"))),
+	)
+
+	input := configFS(map[string]string{"shift.yaml": stringtest.LinesLF(
+		"apiVersion: cafe.jacobcolvin.com/v1",
+		"kind: Shift",
+		"spec:",
+		`  open: "07:00"`,
+	)})
+
+	t.Run("warning", func(t *testing.T) {
+		t.Parallel()
+
+		var got []string
+
+		set, err := reg.Load(t.Context(), input, manifest.WithWarningFilter(func(p *manifest.Problem) bool {
+			got = append(got, p.Error())
+
+			return true
+		}))
+		require.NoError(t, err)
+
+		// The Problem holds the message of the check, and the warnings of
+		// the set bind it.
+		assert.Equal(t, []string{"legacy open"}, got)
+		assert.Equal(t, "config/shift.yaml:4:9: warning: $.spec.open: legacy open", set.Warnings().Error())
+		assert.True(t, niceyaml.IsInvalid(set.Warnings()))
+	})
+
+	t.Run("strict", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := reg.Load(t.Context(), input, manifest.WithWarningsAsErrors(true))
+		require.EqualError(t, err, "config/shift.yaml:4:9: $.spec.open: legacy open")
+		assert.True(t, niceyaml.IsInvalid(err))
+
+		var p *manifest.Problem
+
+		require.ErrorAs(t, err, &p)
+		assert.Equal(t, "legacy open", p.Error())
+		assert.Equal(t, "Shift", p.Kind)
+	})
+}
+
 func TestRegistry_Load_LeftOut(t *testing.T) {
 	t.Parallel()
 

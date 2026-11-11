@@ -593,6 +593,13 @@ func TestRefBeside(t *testing.T) {
 		err := byName.Check(t.Context(), invalid)
 		require.ErrorContains(t, err, `missing required property "kind"`)
 	})
+
+	t.Run("an error is no fault of the document", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := schema.RefBeside(noPath, "./schema.json")
+		requireNoFault(t, err, schema.ErrNoBaseDir)
+	})
 }
 
 // A relative file path with no file system names a file on disk only

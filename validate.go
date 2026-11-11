@@ -1116,7 +1116,9 @@ func (w *selfWalker) validate(v reflect.Value, at place) bool {
 // timeout is not a fault of the document, as [Invalid] reads it. The test
 // reads the whole failure, as Invalid does. Each branch of a join with one
 // such branch thus rebases without a declaration, and only a branch that
-// declares its own fault stays one.
+// declares its own fault stays one. A failure that holds a [PanicError]
+// rebases without a declaration the same way. A panic is a bug in code,
+// not a fault of the document.
 func (w *selfWalker) report(failure, warnings error, at place, d declaration) bool {
 	m := move{base: at.path(), ambiguous: w.ambiguous, fallback: w.fallback()}
 
@@ -1132,7 +1134,7 @@ func (w *selfWalker) report(failure, warnings error, at place, d declaration) bo
 		return false
 	}
 
-	if contextEnded(failure) {
+	if contextEnded(failure) || holdsPanic(failure) {
 		d = undeclared
 	}
 
@@ -1488,10 +1490,11 @@ func (l *DataLocator) locate(names []string, key bool) (paths.Path, *token.Token
 //	}
 //
 // A decode presumes the document at fault for each error from Validate
-// that does not declare a fault, a plain I/O error included. A check that
-// can fail for reasons outside the document returns such an error inside
-// [Unchecked]. Unchecked disables the presumption, as the Errors section
-// of the package documentation describes.
+// that does not declare a fault, a plain I/O error included, as it does
+// for a [Validator]. A check that can fail for reasons outside the
+// document returns such an error inside [Unchecked]. Unchecked disables
+// the presumption, as the Errors section of the package documentation
+// describes.
 //
 // The decode also does not presume a fault for a result of Validate that
 // matches [context.Canceled] or [context.DeadlineExceeded], such as the
@@ -1525,10 +1528,23 @@ type SelfValidator interface {
 // [Node.Bind] binds an error. They bind each warning that Check hands to
 // its context the same way.
 //
+// Node.Validate and a decode presume the document at fault for each error
+// and each warning of Check that does not declare anything, as they do for
+// a Validate method. A Validator thus returns a plain error for a fault
+// of the document. It returns the error of a check that could not run,
+// such as a failed lookup, inside [Unchecked]. The Errors section of the
+// package documentation describes the rule.
+//
+// A direct call to Check returns the error as Check wrote it, without
+// the presumption. A Check that runs Node.Validate gets the presumption
+// from that call. [Each] runs its validator through Node.Validate, so a
+// direct call to its Check presumes the fault for the errors and warnings
+// of that validator.
+//
 // The validators of this module bind in Check itself. They return their
 // errors bound at the Node that Check got, and nil when they have only
-// warnings. A direct call to Check of one of them thus returns what
-// Node.Validate returns for it. A rule that checks each element of a list
+// warnings. A direct call to Check of one of them thus places its errors
+// where Node.Validate places them. A rule that checks each element of a list
 // can return those results as its own, and each error names its element:
 //
 //	for _, item := range items {
@@ -1590,17 +1606,17 @@ type Validator interface {
 //		return nil
 //	})
 //
-// A check that does not know about YAML returns a plain error, which does
-// not declare a fault. The function declares the document at fault for that
-// error by returning the check inside [Invalid], which returns nil for a
-// value that passes:
+// The Node that runs the function presumes the document at fault for a
+// plain error, as [Validator] describes. A check that does not know about
+// YAML thus returns its result as it is:
 //
-//	return niceyaml.Invalid(check(v))
+//	return check(v)
 type ValidatorFunc func(ctx context.Context, n *Node) error
 
 // Check implements [Validator]. It returns the errors of what f returns,
-// bound at n as [Node.Bind] binds an error, so it returns what
-// [Node.Validate] returns for f. It returns nil when f returns warnings
+// bound at n as [Node.Bind] binds an error, so it places them where
+// [Node.Validate] places them for f. Check does not presume a fault for
+// them, as Validator describes. It returns nil when f returns warnings
 // alone or a nil [*Error] or [*SourceError] pointer. The [Warnings]
 // collector of ctx gets the warnings that f returns and the warnings that
 // f hands to its context, bound the same way. An error that f bound
@@ -1613,7 +1629,7 @@ func (f ValidatorFunc) Check(ctx context.Context, n *Node) error {
 		return n.doc.err
 	}
 
-	return n.Bind(n.checkWith(ctx, f))
+	return n.Bind(n.checkWith(ctx, f, false))
 }
 
 // noValidator is the [Validator] behind [NoValidator].
@@ -1688,7 +1704,7 @@ func MultiValidator(validators ...Validator) Validator {
 
 			// A typed nil pointer is no failure, as [Node.Bind] reads it, and
 			// neither is a result of warnings alone.
-			err = n.checkWith(ctx, dv.Check)
+			err = n.checkWith(ctx, dv.Check, false)
 			if err == nil {
 				continue
 			}
@@ -1734,7 +1750,9 @@ func ChainValidator(validators ...Validator) Validator {
 	mustValidators("ChainValidator", validators)
 
 	return ValidatorFunc(func(ctx context.Context, n *Node) error {
-		return n.firstFailure(ctx, validators)
+		// The Node that runs the chain presumes the fault, so a direct
+		// call to Check presumes nothing for the errors or the warnings.
+		return n.firstFailure(ctx, validators, false)
 	})
 }
 
@@ -1804,11 +1822,14 @@ func SkipEmpty(v Validator) Validator {
 //
 // Each reports every failure in document order, as [MultiValidator] reports
 // the failures of its validators. It hands the warnings of v to the
-// [Warnings] collector of its context, bound at the Node that v checked. A
-// path that does not select a Node passes. An error from Node.Nodes comes
-// back as Node.Nodes returns it, and a document that did not parse returns
-// the error of its parse. A context that ends stops the run, as the
-// Cancellation section of the package documentation describes.
+// [Warnings] collector of its context, bound at the Node that v checked.
+// Each presumes the document at fault for each error and each warning of v
+// that does not declare anything, as Node.Validate does, even for a
+// direct call to its Check. A path that does not select a Node passes. An
+// error from Node.Nodes comes back as Node.Nodes returns it, and a
+// document that did not parse returns the error of its parse. A context
+// that ends stops the run, as the Cancellation section of the package
+// documentation describes.
 //
 // Each panics if v is nil, including a v that holds a nil pointer or func.
 func Each(path paths.Path, v Validator) Validator {
@@ -1856,10 +1877,13 @@ func Each(path paths.Path, v Validator) Validator {
 // document without content pass.
 //
 // Validate binds what v returns through [Node.Bind], so an [*Error]
-// renders its location with its `@` paths read from the node. An error
-// that v bound itself comes back as it is, unless it also holds a
-// warning. Validate hands the warnings of v to the [Warnings] collector of
-// ctx, as the Warnings section of the package documentation describes.
+// renders its location with its `@` paths read from the node. It presumes
+// the document at fault for each error of v that does not declare
+// anything, as [Validator] describes. An error that v bound itself comes
+// back as it is when the document is at fault for each of its problems
+// and it does not hold a warning. Validate hands the warnings of v to the
+// [Warnings] collector of ctx, as the Warnings section of the package
+// documentation describes.
 //
 // A Node from [Node.At] or [Node.Nodes] points an error without a
 // location at its own value. A validator that runs another on a Node of
@@ -1883,26 +1907,46 @@ func (n *Node) Validate(ctx context.Context, v Validator) error {
 }
 
 // validate runs validators in order on n, and binds the first error with n
-// when the validator left it unbound. A document that did not parse returns
-// the error of its parse, and validate does not run a validator. The warnings
-// of the validators go to the collectors of ctx.
+// when the validator left it unbound. It presumes the document at fault for
+// that error, as [presume] marks it. A document that did not parse returns
+// the error of its parse, and validate does not run a validator. The
+// warnings of the validators go to the collectors of ctx.
 func (n *Node) validate(ctx context.Context, validators []Validator) error {
 	if n.doc.err != nil {
 		return n.doc.err
 	}
 
-	return n.Bind(n.firstFailure(ctx, validators))
+	return n.Bind(presume(n.firstFailure(ctx, validators, true)))
+}
+
+// presume returns err, the error or the warnings of a check that niceyaml
+// ran against a document, with the fault that a hook presumes on it. The
+// fault does not reach a problem that holds an Error from [Unchecked], as
+// [declaration.on] puts it. An err that matches the error of a context
+// that ended or holds a [PanicError] comes back as it is, as
+// [selfWalker.report] leaves such an error. Only a problem that declares
+// a fault of its own then stays one. An err that the document is at fault
+// for already comes back as it is too, so a validator that binds its own
+// faults gets its error back.
+func presume(err error) error {
+	if isNothing(err) || contextEnded(err) || holdsPanic(err) || IsInvalid(err) {
+		return err
+	}
+
+	return markFault(err, presumed)
 }
 
 // firstFailure runs validators in order on n and returns the errors of
 // the first failure, as [Node.checkWith] returns them, or nil when each
-// of them passes. [WithValidator], [ChainValidator], and [Node.Validate]
-// reject a nil validator before the run, so none of the validators is nil.
-func (n *Node) firstFailure(ctx context.Context, validators []Validator) error {
+// of them passes. With presumes set, it presumes the fault on the
+// warnings of each validator, as [presume] marks them. [WithValidator],
+// [ChainValidator], and [Node.Validate] reject a nil validator before the
+// run, so none of the validators is nil.
+func (n *Node) firstFailure(ctx context.Context, validators []Validator, presumes bool) error {
 	for _, dv := range validators {
 		// A typed nil pointer is no failure, as [Node.Bind] reads it, and
 		// neither is a result of warnings alone.
-		err := n.checkWith(ctx, dv.Check)
+		err := n.checkWith(ctx, dv.Check, presumes)
 		if err != nil {
 			return err
 		}
@@ -1915,11 +1959,17 @@ func (n *Node) firstFailure(ctx context.Context, validators []Validator) error {
 // errors of the result as [splitWarnings] splits them, or nil when the
 // result does not hold such an error. The collectors of ctx get the
 // warnings of the result and the warnings that check hands to its
-// context, bound as [Node.Bind] binds them.
-func (n *Node) checkWith(ctx context.Context, check func(context.Context, *Node) error) error {
+// context, bound as [Node.Bind] binds them. With presumes set, those
+// warnings take the fault that [presume] puts on them first, as the
+// warnings of a hook do.
+func (n *Node) checkWith(ctx context.Context, check func(context.Context, *Node) error, presumes bool) error {
 	failure, warnings := runHook(ctx, func(ctx context.Context) error {
 		return check(ctx, n)
 	})
+
+	if presumes {
+		warnings = presume(warnings)
+	}
 
 	deliver(ctx, n.Bind(warnings))
 

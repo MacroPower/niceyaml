@@ -12839,6 +12839,16 @@ func TestIsInvalid(t *testing.T) {
 
 	unchecked := fails(niceyaml.Unchecked(fmt.Errorf("stat license: %w", fs.ErrPermission), niceyaml.AtPath(namePath)))
 
+	// A heading above plain errors, as a wrapper of a join and as a
+	// summary, and each with an Unchecked I/O error as its second problem.
+	headed := fmt.Errorf("check hours: %w", errors.Join(errors.New("opens too late"), errors.New("closes too early")))
+	summary := niceyaml.NewSummary("2 problems", errors.New("opens too late"), errors.New("closes too early"))
+	headedUnchecked := fmt.Errorf(
+		"check hours: %w",
+		errors.Join(errors.New("opens too late"), niceyaml.Unchecked(ioErr)),
+	)
+	summaryUnchecked := niceyaml.NewSummary("2 problems", errors.New("opens too late"), niceyaml.Unchecked(ioErr))
+
 	// The explained error is an I/O error placed at the name, with a
 	// located detail the document is at fault for.
 	explained := niceyaml.Unchecked(
@@ -12999,22 +13009,99 @@ func TestIsInvalid(t *testing.T) {
 			want: true,
 		},
 		"Validator join of errors.New": {
-			err: validated(fails(errors.Join(errors.New("opens too late"), errors.New("closes too early")))),
+			// A check that niceyaml runs presumes the document at fault for
+			// each problem that does not declare anything.
+			err:  validated(fails(errors.Join(errors.New("opens too late"), errors.New("closes too early")))),
+			want: true,
+		},
+		"Validator join of errors.New and Unchecked of an I/O error": {
+			// The Unchecked turns off the presumption for its own branch.
+			err: validated(fails(errors.Join(errors.New("opens too late"), niceyaml.Unchecked(ioErr)))),
+			is:  fs.ErrNotExist,
 		},
 		"Validator errors.New at the root": {
-			err: validated(unlocated),
+			err:  validated(unlocated),
+			want: true,
 		},
 		"Validator errors.New on a scoped Node": {
-			err: scopedValidated(unlocated),
+			err:  scopedValidated(unlocated),
+			want: true,
 		},
 		"Validator Bind of errors.New on a scoped Node": {
 			err: scopedValidated(niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
 				return n.Bind(errors.New("closes before it opens"))
 			})),
+			want: true,
+		},
+		"Validator Bind of a join of errors.New": {
+			err: validated(niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
+				return n.Bind(errors.Join(errors.New("opens too late"), errors.New("closes too early")))
+			})),
+			want: true,
+		},
+		"Each of errors.New": {
+			err:  validated(niceyaml.Each(paths.Current().Child("hours").ChildAll(), unlocated)),
+			want: true,
+		},
+		"decode WithValidator of errors.New": {
+			err:  doc.DecodeInto(t.Context(), new(map[string]any), niceyaml.WithValidator(unlocated)),
+			want: true,
+		},
+		"ValidateDocuments of errors.New": {
+			err:  doc.Source().ValidateDocuments(t.Context(), unlocated),
+			want: true,
+		},
+		"Validator wrapper around a join of errors.New": {
+			// The presumed fault reaches each problem below the heading.
+			err:  validated(fails(headed)),
+			want: true,
+		},
+		"Validator wrapper around a join of errors.New on a scoped Node": {
+			err:  scopedValidated(fails(headed)),
+			want: true,
+		},
+		"Validator summary of errors.New": {
+			err:  validated(fails(summary)),
+			want: true,
+		},
+		"Each of a summary of errors.New": {
+			err:  validated(niceyaml.Each(paths.Current().Child("hours").ChildAll(), fails(summary))),
+			want: true,
+		},
+		"decode WithValidator of a wrapper around a join of errors.New": {
+			err:  doc.DecodeInto(t.Context(), new(map[string]any), niceyaml.WithValidator(fails(headed))),
+			want: true,
+		},
+		"Validator wrapper around a join with an Unchecked I/O error": {
+			err: validated(fails(headedUnchecked)),
+			is:  fs.ErrNotExist,
+		},
+		"Validator summary with an Unchecked I/O error": {
+			err: validated(fails(summaryUnchecked)),
+			is:  fs.ErrNotExist,
+		},
+		"WithValueCheck binding of a summary of errors.New": {
+			err:  valueChecked(doc.Bind(summary)),
+			want: true,
+		},
+		"Validator PanicError": {
+			// A panic is a bug in code, so the check presumes nothing.
+			err: validated(fails(&niceyaml.PanicError{Value: "boom"})),
+		},
+		"Validator join of errors.New and a PanicError": {
+			err: validated(fails(errors.Join(errors.New("opens too late"), &niceyaml.PanicError{Value: "boom"}))),
+		},
+		"SelfValidator PanicError": {
+			err: selfValidated(&niceyaml.PanicError{Value: "boom"}),
+		},
+		"WithValueCheck PanicError": {
+			err: valueChecked(&niceyaml.PanicError{Value: "boom"}),
 		},
 		"Validator Rebase of an I/O error": {
-			err: validated(rebased),
-			is:  fs.ErrPermission,
+			// Rebase declares nothing, so the check presumes a fault.
+			err:  validated(rebased),
+			is:   fs.ErrPermission,
+			want: true,
 		},
 		"Validator Unchecked of an I/O error at the root": {
 			err: validated(unchecked),
@@ -13068,6 +13155,11 @@ func TestIsInvalid(t *testing.T) {
 			err:  valueChecked(errors.Join(errors.New("name is reserved"), errors.New("port is taken"))),
 			want: true,
 		},
+		"WithValueCheck binding of a join of errors.New": {
+			// The decode presumes a fault for each problem of the binding.
+			err:  valueChecked(doc.Bind(errors.Join(errors.New("name is reserved"), errors.New("port is taken")))),
+			want: true,
+		},
 		"WithValueCheck Unchecked of an I/O error": {
 			err: valueChecked(niceyaml.Unchecked(ioErr, niceyaml.AtPath(namePath))),
 			is:  fs.ErrNotExist,
@@ -13082,10 +13174,31 @@ func TestIsInvalid(t *testing.T) {
 			want: true,
 		},
 		"Validator Locate of an I/O error": {
-			// A Validator presumes nothing, so the I/O error inside Locate
-			// is not a fault.
-			err: validated(fails(niceyaml.Locate(ioErr, niceyaml.AtPath(namePath)))),
+			// Locate declares nothing, so the check presumes a fault.
+			err:  validated(fails(niceyaml.Locate(ioErr, niceyaml.AtPath(namePath)))),
+			is:   fs.ErrNotExist,
+			want: true,
+		},
+		"Validator Locate of Unchecked of an I/O error": {
+			err: validated(fails(niceyaml.Locate(niceyaml.Unchecked(ioErr), niceyaml.AtPath(namePath)))),
 			is:  fs.ErrNotExist,
+		},
+		"Validator that a direct Check runs": {
+			// A direct call to Check returns the error as the function
+			// wrote it, so it presumes nothing.
+			err: unlocated.Check(t.Context(), doc),
+		},
+		"ChainValidator that a direct Check runs": {
+			err: niceyaml.ChainValidator(unlocated).Check(t.Context(), doc),
+		},
+		"MultiValidator that a direct Check runs": {
+			err: niceyaml.MultiValidator(unlocated).Check(t.Context(), doc),
+		},
+		"Each that a direct Check runs": {
+			// Each runs the validator through Node.Validate, which
+			// presumes the fault.
+			err:  niceyaml.Each(namePath, unlocated).Check(t.Context(), doc),
+			want: true,
 		},
 		"Validator Locate of NewError": {
 			err:  validated(fails(niceyaml.Locate(niceyaml.NewError("unknown name"), niceyaml.AtPath(namePath)))),
@@ -13139,6 +13252,16 @@ func TestIsInvalid(t *testing.T) {
 			}))),
 			is:   niceyaml.ErrDecode,
 			want: true,
+		},
+		"CustomUnmarshaler decode into a target that is no pointer": {
+			// The target is a mistake of the code, so the decode presumes
+			// nothing for it.
+			err: errOf(yamltest.FirstDocument(t, "v: x\n").Decode[struct {
+				V licenseRef `yaml:"v"`
+			}](t.Context(), withLicenseCheck(func(decode func(any) error) error {
+				return decode(0)
+			}))),
+			is: niceyaml.ErrDecodeTarget,
 		},
 		"Validator Unchecked of a rejection from DecodeAt": {
 			err: validated(niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
@@ -13213,12 +13336,14 @@ func TestIsInvalid(t *testing.T) {
 			is: context.Canceled,
 		},
 		"Validator I/O error at the root": {
-			err: validated(failing),
-			is:  fs.ErrNotExist,
+			err:  validated(failing),
+			is:   fs.ErrNotExist,
+			want: true,
 		},
 		"Validator I/O error on a scoped Node": {
-			err: scopedValidated(failing),
-			is:  fs.ErrNotExist,
+			err:  scopedValidated(failing),
+			is:   fs.ErrNotExist,
+			want: true,
 		},
 		"Validator Invalid of an I/O error": {
 			err:  validated(fails(niceyaml.Invalid(ioErr, niceyaml.AtPath(namePath)))),
@@ -13318,6 +13443,32 @@ func TestIsInvalid(t *testing.T) {
 			err: doc.SelfValidate(t.Context(), nil),
 			is:  niceyaml.ErrSelfValidateTarget,
 		},
+		"Validator DecodeInto of a target that is no pointer": {
+			// The target is a mistake of the caller, even when a check
+			// returns the error as it is.
+			err: validated(niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+				return n.DecodeInto(ctx, map[string]any{})
+			})),
+			is: niceyaml.ErrDecodeTarget,
+		},
+		"Validator DecodeIfPresent of a target that is no pointer": {
+			err: validated(niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+				_, err := n.DecodeIfPresent(ctx, namePath, "")
+
+				return err //nolint:wrapcheck // The check returns the error as it is.
+			})),
+			is: niceyaml.ErrDecodeTarget,
+		},
+		"Validator SelfValidate of a nil target": {
+			err: validated(niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+				return n.SelfValidate(ctx, nil)
+			})),
+			is: niceyaml.ErrSelfValidateTarget,
+		},
+		"WithValueCheck SelfValidateValue of a nil target": {
+			err: valueChecked(niceyaml.SelfValidateValue(t.Context(), nil)),
+			is:  niceyaml.ErrSelfValidateTarget,
+		},
 		"excessive aliasing": {
 			err:  errOf(yamltest.FirstDocument(t, yamltest.AliasLevels(5)).Decode[any](t.Context())),
 			is:   niceyaml.ErrExcessiveAliasing,
@@ -13369,8 +13520,21 @@ func TestIsInvalid(t *testing.T) {
 			is: schema.ErrLoad,
 		},
 		"MultiValidator of an invalid problem and an I/O error": {
-			err: validated(niceyaml.MultiValidator(unknownName, failing)),
+			err:  validated(niceyaml.MultiValidator(unknownName, failing)),
+			is:   fs.ErrNotExist,
+			want: true,
+		},
+		"MultiValidator of an invalid problem and Unchecked of an I/O error": {
+			err: validated(niceyaml.MultiValidator(unknownName, fails(niceyaml.Unchecked(ioErr)))),
 			is:  fs.ErrNotExist,
+		},
+		"Each of a path past the alias limit": {
+			// The path selects far more nodes than the document holds,
+			// which is no fault of the document, so Each reports it as
+			// Node.Nodes does.
+			err: yamltest.FirstDocument(t, yamltest.AliasLevels(5)).Validate(t.Context(),
+				niceyaml.Each(paths.MustParse("$.a[5][*][*][*][*][*]"), unlocated)),
+			is: niceyaml.ErrExcessiveAliasing,
 		},
 		"join of a syntax error and a violation": {
 			err:  errors.Join(decoded("name: [cafe\n"), validated(portSchema)),
@@ -13540,14 +13704,22 @@ func TestIsInvalid(t *testing.T) {
 			is:  fs.ErrNotExist,
 		},
 		"MultiValidator of a violation and a permission error": {
-			err: validated(niceyaml.MultiValidator(portSchema, denied)),
+			// The check presumes the document at fault for the plain
+			// permission error too.
+			err:  validated(niceyaml.MultiValidator(portSchema, denied)),
+			is:   fs.ErrPermission,
+			want: true,
+		},
+		"MultiValidator of a violation and Unchecked of a permission error": {
+			err: validated(niceyaml.MultiValidator(portSchema, fails(niceyaml.Unchecked(fs.ErrPermission)))),
 			is:  fs.ErrPermission,
 		},
 		"MultiValidator of a decode rejection and a permission error": {
 			// The error matches ErrDecode through one problem, and the
-			// other is no fault of the document.
-			err: validated(niceyaml.MultiValidator(decoding, denied)),
-			is:  niceyaml.ErrDecode,
+			// check presumes the other a fault.
+			err:  validated(niceyaml.MultiValidator(decoding, denied)),
+			is:   niceyaml.ErrDecode,
+			want: true,
 		},
 		"Validator I/O error with a located detail": {
 			// The detail explains the I/O error and decides nothing.
@@ -13602,6 +13774,327 @@ func TestIsInvalid(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("a presumed fault reaches each problem below a heading", func(t *testing.T) {
+		t.Parallel()
+
+		// Each case lists, in order, whether the document is at fault for
+		// each problem of the error.
+		tcs := map[string]struct {
+			err  error
+			want []bool
+		}{
+			"Validator wrapper around a join": {
+				err:  validated(fails(headedUnchecked)),
+				want: []bool{true, false},
+			},
+			"Validator summary": {
+				err:  validated(fails(summaryUnchecked)),
+				want: []bool{true, false},
+			},
+			"WithValueCheck wrapper around a join": {
+				err:  valueChecked(headedUnchecked),
+				want: []bool{true, false},
+			},
+			"WithValueCheck summary": {
+				err:  valueChecked(summaryUnchecked),
+				want: []bool{true, false},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				var got []bool
+
+				for problem := range niceyaml.Problems(tc.err) {
+					got = append(got, problem.IsInvalid())
+				}
+
+				assert.Equal(t, tc.want, got)
+			})
+		}
+	})
+
+	t.Run("a warning of a check is presumed a fault", func(t *testing.T) {
+		t.Parallel()
+
+		warns := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+			n.Warn(ctx, errors.New("legacy layout"))
+
+			return nil
+		})
+
+		// Each case runs a check that warns, and reports whether a run of
+		// the check presumes the warning a fault.
+		tcs := map[string]struct {
+			run  func(ctx context.Context) error
+			want bool
+		}{
+			"Validator": {
+				run:  func(ctx context.Context) error { return doc.Validate(ctx, warns) },
+				want: true,
+			},
+			"Each": {
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, niceyaml.Each(hoursPath, warns))
+				},
+				want: true,
+			},
+			"decode WithValidator": {
+				run: func(ctx context.Context) error {
+					return doc.DecodeInto(ctx, new(map[string]any), niceyaml.WithValidator(warns))
+				},
+				want: true,
+			},
+			"WithValueCheck": {
+				run: func(ctx context.Context) error {
+					return doc.DecodeInto(ctx, new(map[string]any),
+						niceyaml.WithValueCheck(func(ctx context.Context, _ *map[string]any) error {
+							doc.Warn(ctx, errors.New("legacy layout"))
+
+							return nil
+						}))
+				},
+				want: true,
+			},
+			"Unchecked warning of a Validator": {
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+						n.Warn(ctx, niceyaml.Unchecked(errors.New("legacy layout")))
+
+						return nil
+					}))
+				},
+			},
+			"direct Check": {
+				// A direct call to Check presumes nothing.
+				run: func(ctx context.Context) error { return warns.Check(ctx, doc) },
+			},
+			"direct ChainValidator Check": {
+				run: func(ctx context.Context) error { return niceyaml.ChainValidator(warns).Check(ctx, doc) },
+			},
+			"direct MultiValidator Check": {
+				run: func(ctx context.Context) error { return niceyaml.MultiValidator(warns).Check(ctx, doc) },
+			},
+			"direct Each Check": {
+				// Each runs the validator through Node.Validate, which
+				// presumes the fault.
+				run:  func(ctx context.Context) error { return niceyaml.Each(hoursPath, warns).Check(ctx, doc) },
+				want: true,
+			},
+			"ChainValidator": {
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, niceyaml.ChainValidator(warns))
+				},
+				want: true,
+			},
+			"MultiValidator": {
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, niceyaml.MultiValidator(warns))
+				},
+				want: true,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				w := niceyaml.NewWarnings()
+
+				require.NoError(t, tc.run(w.Context(t.Context())))
+				require.Error(t, w.Err())
+				assert.Equal(t, tc.want, niceyaml.IsInvalid(w.Err()))
+			})
+		}
+	})
+
+	t.Run("an Unchecked warning of a check is no fault", func(t *testing.T) {
+		t.Parallel()
+
+		// The collector splits a join of warnings into one row for each
+		// problem, and each row below an Unchecked keeps the opt-out.
+		uncheckedJoin := func() error {
+			return niceyaml.Unchecked(errors.Join(errors.New("legacy layout"), errors.New("short day")))
+		}
+
+		warnings := map[string]struct {
+			warn func(ctx context.Context, n *niceyaml.Node)
+			want []bool
+		}{
+			"Unchecked around a join": {
+				warn: func(ctx context.Context, n *niceyaml.Node) { n.Warn(ctx, uncheckedJoin()) },
+				want: []bool{false, false},
+			},
+			"bound Unchecked around a join": {
+				warn: func(ctx context.Context, n *niceyaml.Node) { n.Warn(ctx, n.Bind(uncheckedJoin())) },
+				want: []bool{false, false},
+			},
+			"Unchecked around a bound join": {
+				warn: func(ctx context.Context, n *niceyaml.Node) {
+					n.Warn(ctx, niceyaml.Unchecked(n.Bind(
+						errors.Join(errors.New("legacy layout"), errors.New("short day")),
+					)))
+				},
+				want: []bool{false, false},
+			},
+			"Unchecked around a join of bound warnings": {
+				warn: func(ctx context.Context, n *niceyaml.Node) {
+					n.Warn(ctx, niceyaml.Unchecked(errors.Join(
+						n.Bind(errors.New("legacy layout")), n.Bind(errors.New("short day")),
+					)))
+				},
+				want: []bool{false, false},
+			},
+			"Unchecked around a wrapper around a join": {
+				warn: func(ctx context.Context, n *niceyaml.Node) {
+					n.Warn(ctx, niceyaml.Unchecked(fmt.Errorf("lint: %w",
+						errors.Join(errors.New("legacy layout"), errors.New("short day")))))
+				},
+				want: []bool{false, false},
+			},
+			"plain warning beside an Unchecked one": {
+				warn: func(ctx context.Context, n *niceyaml.Node) {
+					n.Warn(ctx, errors.Join(errors.New("legacy layout"),
+						niceyaml.Unchecked(errors.New("short day"))))
+				},
+				want: []bool{true, false},
+			},
+		}
+
+		// Each check runs the warning at the root of the document.
+		checks := map[string]func(ctx context.Context, warn func(context.Context, *niceyaml.Node)) error{
+			"Validator": func(ctx context.Context, warn func(context.Context, *niceyaml.Node)) error {
+				return doc.Validate(ctx, niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+					warn(ctx, n)
+
+					return nil
+				}))
+			},
+			"WithValueCheck": func(ctx context.Context, warn func(context.Context, *niceyaml.Node)) error {
+				return doc.DecodeInto(ctx, new(map[string]any),
+					niceyaml.WithValueCheck(func(ctx context.Context, _ *map[string]any) error {
+						warn(ctx, doc)
+
+						return nil
+					}))
+			},
+		}
+
+		for check, run := range checks {
+			for name, tc := range warnings {
+				t.Run(check+" "+name, func(t *testing.T) {
+					t.Parallel()
+
+					w := niceyaml.NewWarnings()
+					require.NoError(t, run(w.Context(t.Context()), tc.warn))
+
+					var got []bool
+
+					for problem := range niceyaml.Problems(w.Err()) {
+						got = append(got, problem.IsInvalid())
+					}
+
+					assert.Equal(t, tc.want, got)
+					assert.Equal(t, !slices.Contains(tc.want, false), niceyaml.IsInvalid(w.Err()))
+				})
+			}
+		}
+	})
+
+	t.Run("a presumed warning stays a binding", func(t *testing.T) {
+		t.Parallel()
+
+		hours := paths.Doc().Child("hours")
+
+		// Each case warns at the hours node, and AsErrors turns each
+		// warning into an error that reads without the label.
+		tcs := map[string]struct {
+			warn func(ctx context.Context, n *niceyaml.Node)
+			want string
+		}{
+			"plain warning": {
+				warn: func(ctx context.Context, n *niceyaml.Node) {
+					n.Warn(ctx, errors.New("legacy layout"))
+				},
+				want: "3:1: $.hours: legacy layout",
+			},
+			"join of plain warnings": {
+				warn: func(ctx context.Context, n *niceyaml.Node) {
+					n.Warn(ctx, errors.Join(errors.New("legacy layout"), errors.New("short day")))
+				},
+				want: stringtest.JoinLF(
+					"2 errors",
+					"3:1: $.hours: legacy layout",
+					"3:1: $.hours: short day",
+				),
+			},
+			"two warnings": {
+				warn: func(ctx context.Context, n *niceyaml.Node) {
+					n.Warn(ctx, errors.New("legacy layout"))
+					n.Warn(ctx, errors.New("short day"))
+				},
+				want: stringtest.JoinLF(
+					"2 errors",
+					"3:1: $.hours: legacy layout",
+					"3:1: $.hours: short day",
+				),
+			},
+		}
+
+		// Each check hands the hours node to the warn function of a case.
+		checks := map[string]func(ctx context.Context, warn func(context.Context, *niceyaml.Node)) error{
+			"Validator": func(ctx context.Context, warn func(context.Context, *niceyaml.Node)) error {
+				return doc.Validate(ctx, niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+					at, err := n.At(hours)
+					if err != nil {
+						return fmt.Errorf("find hours: %w", err)
+					}
+
+					warn(ctx, at)
+
+					return nil
+				}))
+			},
+			"WithValueCheck": func(ctx context.Context, warn func(context.Context, *niceyaml.Node)) error {
+				return doc.DecodeInto(ctx, new(map[string]any),
+					niceyaml.WithValueCheck(func(ctx context.Context, _ *map[string]any) error {
+						at, err := doc.At(hours)
+						if err != nil {
+							return fmt.Errorf("find hours: %w", err)
+						}
+
+						warn(ctx, at)
+
+						return nil
+					}))
+			},
+		}
+
+		for check, run := range checks {
+			for name, tc := range tcs {
+				t.Run(check+" "+name, func(t *testing.T) {
+					t.Parallel()
+
+					w := niceyaml.NewWarnings()
+					require.NoError(t, run(w.Context(t.Context()), tc.warn))
+
+					require.True(t, niceyaml.IsInvalid(w.Err()))
+
+					got := niceyaml.AsErrors(w.Err())
+					assert.Equal(t, tc.want, got.Error())
+					assert.True(t, niceyaml.IsInvalid(got))
+
+					for problem := range niceyaml.Problems(got) {
+						_, ok := problem.Err.(*niceyaml.SourceError) //nolint:errorlint // The binding stays the top-level value.
+						assert.True(t, ok, "problem %T is not a binding", problem.Err)
+					}
+				})
+			}
+		}
+	})
 
 	t.Run("an error a detail wraps decides nothing", func(t *testing.T) {
 		t.Parallel()
@@ -13714,7 +14207,11 @@ func TestIsInvalid(t *testing.T) {
 			validator niceyaml.Validator
 		}{
 			"Unchecked with a path": {validator: unchecked},
-			"Rebase under a path":   {validator: rebased},
+			"Unchecked of a Rebase under a path": {
+				validator: fails(
+					niceyaml.Unchecked(niceyaml.Rebase(fmt.Errorf("stat license: %w", fs.ErrPermission), namePath)),
+				),
+			},
 		}
 
 		for name, tc := range tcs {

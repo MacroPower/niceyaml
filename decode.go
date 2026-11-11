@@ -114,7 +114,9 @@ func newDecodeConfig(s *Source, opts []DecodeOption) decodeConfig {
 // Each WithValidator option adds a validator. The decode runs them as
 // [ChainValidator] runs them, so it runs them in the order given and stops
 // at the first that fails. A caller that wants every failure of several
-// validators gives one option a [MultiValidator].
+// validators gives one option a [MultiValidator]. The decode presumes the
+// document at fault for each error of a validator that does not declare
+// anything, as [Validator] describes.
 //
 // A [go.jacobcolvin.com/niceyaml/schema.Schema] checks the document
 // against one JSON schema, and a
@@ -839,22 +841,24 @@ func (n *Node) aliasingError(err error) error {
 	return n.Bind(Invalid(err, atToken(astnode.StartToken(n.AST()))))
 }
 
-// checkTarget returns sentinel when v is nil or a nil pointer, or, with
-// needPointer set, when v is not a pointer. The go-yaml decoder panics on
-// such a target or ignores it. [allocate] fills a nil pointer that v
-// points to.
+// checkTarget returns an error wrapping sentinel when v is nil or a nil
+// pointer, or, with needPointer set, when v is not a pointer. The go-yaml
+// decoder panics on such a target or ignores it. [allocate] fills a nil
+// pointer that v points to. The target is a mistake of the caller and no
+// fault of the document, so the error comes inside [Unchecked]. A check
+// that returns it as it is thus does not report a fault.
 func checkTarget(v any, sentinel error, needPointer bool) error {
 	rv := reflect.ValueOf(v)
 	if !rv.IsValid() {
 		if needPointer {
-			return fmt.Errorf("%w: got nil", sentinel)
+			return Unchecked(fmt.Errorf("%w: got nil", sentinel))
 		}
 
-		return sentinel
+		return Unchecked(sentinel)
 	}
 
 	if needPointer && rv.Kind() != reflect.Pointer || rv.Kind() == reflect.Pointer && rv.IsNil() {
-		return fmt.Errorf("%w: got %T", sentinel, v)
+		return Unchecked(fmt.Errorf("%w: got %T", sentinel, v))
 	}
 
 	return nil

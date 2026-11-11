@@ -61,6 +61,31 @@ func requireExcessiveAliasing(t *testing.T, err error) {
 	assert.True(t, niceyaml.IsInvalid(err), "IsInvalid(%v)", err)
 }
 
+// requireNoFault fails the test unless err is no fault of a document
+// wherever a check returns it as it is. A [niceyaml.ValidatorFunc] and a
+// function of [niceyaml.WithValueCheck] each return err, and
+// [niceyaml.IsInvalid] must not report either result. Each result must
+// still match is.
+func requireNoFault(t *testing.T, err, is error) {
+	t.Helper()
+
+	require.ErrorIs(t, err, is)
+
+	doc := yamltest.FirstDocument(t, "a: 1\n")
+
+	validated := doc.Validate(t.Context(), niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+		return err
+	}))
+
+	checked := doc.DecodeInto(t.Context(), new(map[string]any),
+		niceyaml.WithValueCheck(func(context.Context, *map[string]any) error { return err }))
+
+	for name, got := range map[string]error{"validator": validated, "value check": checked} {
+		require.ErrorIs(t, got, is, name)
+		assert.False(t, niceyaml.IsInvalid(got), "%s: IsInvalid(%v)", name, got)
+	}
+}
+
 // Schemas that several tests share. A stringMembers document holds only
 // strings, and a closedName document holds only a name, which is a string.
 // The integersInM and integersInUser schemas take integers for the members
@@ -707,6 +732,7 @@ func TestCompile_Document(t *testing.T) {
 				require.NotErrorIs(t, err, niceyaml.ErrSyntax)
 				require.NotErrorIs(t, err, schema.ErrExcessiveAliasing)
 				assert.False(t, niceyaml.IsInvalid(err), "IsInvalid(%v)", err)
+				requireNoFault(t, err, schema.ErrCompile)
 
 				assert.Panics(t, func() { schema.MustCompile([]byte(tc.schema)) })
 
@@ -807,13 +833,20 @@ func TestSchema_UnresolvableRef(t *testing.T) {
 			require.ErrorAs(t, err, &failure)
 			assert.Equal(t, jsonschema.KeywordRef, failure.Keyword)
 
-			var nerr *niceyaml.Error
+			// The schema is at fault, so the error is no fault of the
+			// value, even beside a violation.
+			assert.False(t, niceyaml.IsInvalid(err))
 
-			require.NotErrorAs(t, err, &nerr)
+			// A Check of a document reports the same failure.
+			doc := yamltest.FirstDocument(t, "a: 1\nb: 2\n")
+
+			checked := doc.Validate(t.Context(), v)
+			require.ErrorIs(t, checked, schema.ErrValidate)
+			assert.False(t, niceyaml.IsInvalid(checked))
 		})
 	}
 
-	t.Run("a value check returns the failure inside Unchecked", func(t *testing.T) {
+	t.Run("a value check returns the failure as no fault", func(t *testing.T) {
 		t.Parallel()
 
 		v := compileSchema(t,
@@ -822,36 +855,17 @@ func TestSchema_UnresolvableRef(t *testing.T) {
 		)
 		doc := yamltest.FirstDocument(t, "a: 1\n")
 
-		// A decode presumes the document at fault for the failure until
-		// the check wraps it in Unchecked.
-		tcs := map[string]struct {
-			wrap func(err error) error
-			want bool
-		}{
-			"as it is": {
-				wrap: func(err error) error { return err },
-				want: true,
-			},
-			"inside Unchecked": {
-				wrap: func(err error) error { return niceyaml.Unchecked(err) },
-			},
-		}
+		// ValidateValue returns the failure inside Unchecked, so a decode
+		// does not presume the document at fault for it.
+		var data map[string]any
 
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
+		err := doc.DecodeInto(t.Context(), &data,
+			niceyaml.WithValueCheck(func(ctx context.Context, m *map[string]any) error {
+				return v.ValidateValue(ctx, *m)
+			}))
 
-				var data map[string]any
-
-				err := doc.DecodeInto(t.Context(), &data,
-					niceyaml.WithValueCheck(func(ctx context.Context, m *map[string]any) error {
-						return tc.wrap(v.ValidateValue(ctx, *m))
-					}))
-
-				require.ErrorIs(t, err, schema.ErrValidate)
-				assert.Equal(t, tc.want, niceyaml.IsInvalid(err))
-			})
-		}
+		require.ErrorIs(t, err, schema.ErrValidate)
+		assert.False(t, niceyaml.IsInvalid(err))
 	})
 }
 
@@ -1464,6 +1478,15 @@ func TestSchema_ValidateValue(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 		assert.NotSame(t, doc.Source(), bound.Source())
+	})
+
+	t.Run("a value the validator does not read is no fault", func(t *testing.T) {
+		t.Parallel()
+
+		// The validator reads maps, slices, and scalars alone, so the
+		// check of a struct cannot run.
+		err := v.ValidateValue(t.Context(), struct{ Port int }{Port: 80})
+		requireNoFault(t, err, schema.ErrValidate)
 	})
 }
 
@@ -2645,6 +2668,7 @@ func TestSchema_AliasExpansion(t *testing.T) {
 					require.ErrorIs(t, err, tc.err)
 					require.NotErrorIs(t, err, schema.ErrExcessiveAliasing)
 					assert.False(t, niceyaml.IsInvalid(err))
+					requireNoFault(t, err, tc.err)
 
 				default:
 					require.NoError(t, err)

@@ -329,33 +329,40 @@
 //	niceyaml.Unchecked(statErr, niceyaml.AtPath(p))                      // check could not run
 //	niceyaml.Locate(nameErr, niceyaml.AtPath(p))                         // what nameErr declares
 //
-// A hook is code of the caller that a decode runs on one value. Each
-// [SelfValidator], UnmarshalYAML or UnmarshalText method, [CustomUnmarshaler]
-// function, and [WithValueCheck] function is a hook. When a hook returns an
-// error that does not declare anything, such as a plain I/O error, the decode
-// presumes the document at fault for it. Such an error from an unmarshaler
-// matches ErrDecode too. A check thus keeps its faults when it moves from one
-// hook to another.
+// A check is code of the caller that niceyaml runs against a document. Each
+// [Validator], [SelfValidator], UnmarshalYAML or UnmarshalText method,
+// [CustomUnmarshaler] function, and [WithValueCheck] function is a check. When
+// a check returns an error that does not declare anything, such as a plain
+// I/O error, niceyaml presumes the document at fault for it. Such an error
+// from an unmarshaler matches ErrDecode too. A check thus keeps its faults
+// when it moves from one kind to another. [Node.Validate],
+// [Source.ValidateDocuments], and the WithValidator step of a decode presume
+// the fault for the result of a Validator. The decode presumes it for the
+// result of each other check.
 //
-// A [Validator] checks a node before the decode and is not a hook. It
-// declares its own faults, so a plain error that it returns is not a fault.
+// The presumption covers only the result of a check that niceyaml runs.
+// [Node.Bind] binds an error without it, because niceyaml did not run the
+// code that returned the error. A direct call to [Validator.Check] does not
+// add a presumption of its own. A Check that runs Node.Validate gets the
+// presumption from that call. [Each] runs its validator that way, so a
+// direct call to its Check presumes the fault for that validator.
 //
-// An Error from Unchecked on the cause chain of the error that a hook returns
-// turns the presumption off. An I/O error that a hook wraps in Unchecked is
-// thus not a fault, and it does not match ErrDecode. An Error from Locate
-// leaves the presumption on. An Unchecked around a join turns the presumption
-// off for each branch that it heads. An Unchecked in one branch turns it off
-// for that branch alone, in a join or in a wrapper that has several %w verbs
-// and heads several problems. A declared fault still holds anywhere on the
-// chain, so NewError inside Unchecked and Unchecked inside Invalid are
-// faults.
+// An Error from Unchecked on the cause chain of the error that a check
+// returns turns the presumption off. An I/O error that a check wraps in
+// Unchecked is thus not a fault, and it does not match ErrDecode. An Error
+// from Locate leaves the presumption on. An Unchecked around a join turns
+// the presumption off for each branch that it heads. An Unchecked in one
+// branch turns it off for that branch alone, in a join or in a wrapper that
+// has several %w verbs and heads several problems. A declared fault still
+// holds anywhere on the chain, so NewError inside Unchecked and Unchecked
+// inside Invalid are faults.
 //
-// The result of a SelfValidator or a WithValueCheck function is an exception.
-// When any branch of that result matches [context.Canceled] or
-// [context.DeadlineExceeded], the decode does not presume a fault for any of
+// When any branch of the result of a check matches [context.Canceled] or
+// [context.DeadlineExceeded], niceyaml does not presume a fault for any of
 // its branches, with Unchecked or without it. Only a branch that declares a
-// fault, as one from NewError or Invalid does, stays a fault. The Cancellation
-// section describes that rule.
+// fault, as one from NewError or Invalid does, stays a fault. The
+// Cancellation section describes that rule. The same holds for the result of
+// a check when any branch of it holds a [PanicError].
 //
 // A wrapper that [fmt.Errorf] builds with several %w verbs heads the branches
 // that are problems, as a join does. Each other branch reads as a sentinel.
@@ -988,8 +995,11 @@
 //
 // A validator writes its errors from the Node it gets, so an `@` path reads
 // from that Node. The decode or the Node.Validate call that runs the
-// validator binds the result as [Node.Bind] binds an error. It leaves an
-// error that the validator bound itself as it is.
+// validator binds the result as [Node.Bind] binds an error. An error that
+// the validator bound itself comes back as it is only when the document is
+// at fault for each of its problems already and the error holds no warning.
+// The call presumes the fault on any other bound error, as the Errors
+// section describes.
 //
 // The validators of niceyaml bind their errors in [Validator.Check] the same
 // way, at the Node that Check got. A validator can thus call Check of one of
@@ -1038,20 +1048,32 @@
 // the decoder does. A check of the data thus reports a finding where a schema
 // reports a violation of the same value.
 //
-// A validator declares which of its errors are the fault of the document by
-// the constructor it calls, as the Errors section describes. [NewError] and
-// [Invalid] declare a fault. A plain error does not declare a fault, and
-// neither does an error from [Unchecked]. A schema reports each violation as
-// a fault. When the schema itself fails to load, its error does not declare a
-// fault, so [IsInvalid] distinguishes the two.
+// Every check follows one rule for the fault of the document, as the Errors
+// section describes. When a validator, a Validate method, or a function from
+// WithValueCheck returns an error that does not declare anything, niceyaml
+// presumes the document at fault for it. A check thus keeps its faults when
+// it moves from one kind to another. A check that cannot run, such as one
+// whose I/O fails, wraps its error in [Unchecked] so that [IsInvalid] does not
+// report it:
 //
-// When a Validate method or a function from WithValueCheck returns an error
-// that does not declare anything, a decode presumes the document at fault for
-// it. A check thus keeps its faults when it moves from one to the other. Such
-// a check wraps an I/O error in Unchecked so that IsInvalid does not report
-// it. A decode does not presume a fault for a result that matches
-// [context.Canceled] or [context.DeadlineExceeded], as the Cancellation
-// section describes.
+//	allowed := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+//		ok, err := tenant.Allows(ctx, n.FilePath())
+//		if err != nil {
+//			return niceyaml.Unchecked(err)
+//		}
+//
+//		if !ok {
+//			return errors.New("tenant may not deploy this file")
+//		}
+//
+//		return nil
+//	})
+//
+// A schema reports each violation as a fault. When the schema itself fails
+// to load, its error comes inside Unchecked, so IsInvalid distinguishes the
+// two. The presumption skips a result that matches [context.Canceled] or
+// [context.DeadlineExceeded], as the Cancellation section describes. It
+// skips a result that holds a [PanicError] too.
 //
 // A decode calls Validate on every value in the result that implements
 // SelfValidator. It then calls the functions from WithValueCheck for the type
@@ -1224,13 +1246,14 @@
 // failures of their run. A caller that wants the first timeout to stop the
 // call cancels the context that it passed.
 //
-// The walk does not presume the document at fault for the result of a check
-// that matches [context.Canceled] or [context.DeadlineExceeded]. That rule
-// reads the whole result, as [Invalid] does. One such branch in a join thus
-// turns the presumption off for each problem of the join. An [Unchecked]
-// around that branch does not keep the presumption for the other branches. A
-// check that returns other problems beside a timeout should declare each of
-// them with [NewError] or Invalid, and each declared problem stays a fault.
+// Niceyaml does not presume the document at fault for the result of a check
+// that matches [context.Canceled] or [context.DeadlineExceeded], whether the
+// walk or [Node.Validate] runs the check. That rule reads the whole result,
+// as [Invalid] does. One such branch in a join thus turns the presumption
+// off for each problem of the join. An [Unchecked] around that branch does
+// not keep the presumption for the other branches. A check that returns
+// other problems beside a timeout should declare each of them with
+// [NewError] or Invalid, and each declared problem stays a fault.
 //
 // The error of a context that ended matches [context.Canceled] or
 // [context.DeadlineExceeded], but not [ErrDecode]. Invalid does not declare
