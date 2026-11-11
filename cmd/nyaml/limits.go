@@ -25,13 +25,16 @@ type limitFlags struct {
 }
 
 // addLimitFlags adds the --byte-limit, --document-byte-limit, and
-// --depth-limit flags to cmd. Each flag defaults to the limit that a
-// [niceyaml.Source] applies without the option. A value of 0 disables the
-// check of that flag. A stream of many small documents, such as the output
-// of a Helm render, reads with a raised --byte-limit alone. A large dump
-// of "kubectl get -o yaml" is one document, so it reads with
-// --byte-limit 0 and --document-byte-limit 0. A negative value fails the
-// command.
+// --depth-limit flags to cmd. The limits bound the cost of the go-yaml
+// parser, so only validate, the command that parses, takes the flags.
+// Each flag defaults to the limit that a [niceyaml.Source] applies without
+// the option. A value of 0 disables the check of that flag. A negative
+// value fails the command.
+//
+// The validate command reads a stream of many small documents, such as
+// the output of a Helm render, with a raised --byte-limit alone. A large
+// dump of "kubectl get -o yaml" is one document, so validate reads it with
+// --byte-limit 0 and --document-byte-limit 0.
 func addLimitFlags(cmd *cobra.Command) *limitFlags {
 	l := &limitFlags{cmd: cmd}
 

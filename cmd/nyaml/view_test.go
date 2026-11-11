@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
 
+	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/escape"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
@@ -116,42 +117,47 @@ func TestViewCmdLineNumbersFlag(t *testing.T) {
 	assert.False(t, lineNumbers)
 }
 
-func TestViewCmdLimitFlags(t *testing.T) {
+func TestViewerCmdsLimits(t *testing.T) {
 	t.Parallel()
 
-	tcs := map[string]struct {
-		msg  string
-		args []string
-	}{
-		"a negative byte limit": {
-			args: []string{"--byte-limit", "-1"},
-			msg:  "--byte-limit -1: limit is negative",
-		},
-		"a negative document byte limit": {
-			args: []string{"--document-byte-limit", "-1"},
-			msg:  "--document-byte-limit -1: limit is negative",
-		},
-		"a negative depth limit": {
-			args: []string{"--depth-limit", "-1"},
-			msg:  "--depth-limit -1: limit is negative",
-		},
+	// The view and diff commands never parse a file, so they read files
+	// past every limit of a Source and take none of the limit flags of
+	// validate. The large file holds more than [niceyaml.DefaultByteLimit]
+	// in one document, and the deep file nests past
+	// [niceyaml.DefaultDepthLimit].
+	large := "a: 1\n# " + strings.Repeat("x", niceyaml.DefaultByteLimit) + "\n"
+	deep := "a: " + strings.Repeat("[", niceyaml.DefaultDepthLimit+1) +
+		strings.Repeat("]", niceyaml.DefaultDepthLimit+1) + "\n"
+
+	cmds := map[string]func() *cobra.Command{
+		"view": viewCmd,
+		"diff": diffCmd,
 	}
 
-	for name, tc := range tcs {
+	for name, newCmd := range cmds {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			// The file does not exist, so the flag error shows that the
-			// command checks the flags before it reads any file.
-			cmd := viewCmd()
+			dir := t.TempDir()
+			largePath := yamltest.WriteFile(t, dir, "large.yaml", large)
+			deepPath := yamltest.WriteFile(t, dir, "deep.yaml", deep)
+
+			var out bytes.Buffer
+
+			cmd := newCmd()
+			cmd.SetOut(&out)
+
 			cmd.SilenceErrors = true
 			cmd.SilenceUsage = true
-			cmd.SetArgs(append(tc.args, filepath.Join(t.TempDir(), "missing.yaml")))
+			cmd.SetArgs([]string{largePath, deepPath})
 
-			err := cmd.Execute()
-			require.ErrorIs(t, err, errNegativeLimit)
-			require.NotErrorIs(t, err, fs.ErrNotExist)
-			assert.EqualError(t, err, tc.msg)
+			require.NoError(t, cmd.ExecuteContext(t.Context()))
+			assert.Contains(t, out.String(), strings.Repeat("x", 64))
+			assert.Contains(t, out.String(), strings.Repeat("[", niceyaml.DefaultDepthLimit+1))
+
+			for _, flag := range []string{"byte-limit", "document-byte-limit", "depth-limit"} {
+				assert.Nil(t, newCmd().Flags().Lookup(flag), flag)
+			}
 		})
 	}
 }
