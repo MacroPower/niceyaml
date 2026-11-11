@@ -403,8 +403,8 @@ func TestBaseViewFillsTerminal(t *testing.T) {
 func TestBaseViewNoColumns(t *testing.T) {
 	t.Parallel()
 
-	// A viewport with rows but no columns renders nothing, and the status
-	// bar still sits on the bottom rows of the terminal.
+	// A viewport with rows but no columns renders blank rows, and the
+	// status bar still sits on the bottom rows of the terminal.
 	tcs := map[string]struct {
 		mode  yamlviewport.ViewMode
 		width int
