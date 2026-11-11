@@ -466,7 +466,7 @@
 //
 // The registry tries the resolvers of [WithResolvers] in the order given,
 // and the first that does not report [ErrNoMatch] wins. [When] guards any
-// resolver with a [go.jacobcolvin.com/niceyaml/schema/matcher.Matcher], so
+// resolver with a [go.jacobcolvin.com/niceyaml/matcher.Matcher], so
 // the schema applies only to documents the matcher accepts. [Directive]
 // reads the schema a document names for itself in a yaml-language-server
 // comment. A common order puts explicit user intent first, then
@@ -649,7 +649,7 @@
 // server that shows the faults of a document to its author shows those
 // reasons too. Such a server keeps absolute patterns out of the guards
 // of that registry, or words them with
-// [go.jacobcolvin.com/niceyaml/schema/matcher.Described]. It ends its
+// [go.jacobcolvin.com/niceyaml/matcher.Described]. It ends its
 // resolvers with one that names a schema for every document, as reg
 // does, or builds its own message for an error that matches
 // [ErrNoMatch].

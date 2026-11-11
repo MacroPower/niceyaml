@@ -294,7 +294,7 @@ func WithOutsideLinks(follow bool) Option {
 // WithInclude is an [Option] that replaces the patterns that select the
 // files of a directory, "*.yaml" and "*.yml" by default. A pattern reads
 // as a .gitignore line without negation, with the glob syntax of
-// [go.jacobcolvin.com/niceyaml/schema/matcher.FilePath]. A pattern without
+// [go.jacobcolvin.com/niceyaml/matcher.FilePath]. A pattern without
 // a "/" matches a name at any depth, and one with a "/" matches the path
 // below the input directory.
 //

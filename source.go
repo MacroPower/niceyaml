@@ -435,8 +435,8 @@ func WithName(name string) SourceOption {
 
 // WithFilePath is a [SourceOption] that sets the file path for the [Source].
 // Each document of the Source reports the path from [Node.FilePath].
-// Schema matchers route on the path, and a schema directive resolves
-// beside it.
+// A [go.jacobcolvin.com/niceyaml/matcher.FilePath] matcher routes on the
+// path, and a schema directive resolves beside it.
 //
 // The Source keeps path as given. A relative path suits a document that
 // is not a file on disk, such as a request body or a blob of a
@@ -538,8 +538,8 @@ func WithAllowDuplicateKeys(allow bool) SourceOption {
 // limit refuses a document whose aliases make a reader read far more
 // than the document holds. With the limit on, a decode, a
 // [go.jacobcolvin.com/niceyaml/schema.Schema], and a
-// [go.jacobcolvin.com/niceyaml/schema/matcher.Content] or
-// [go.jacobcolvin.com/niceyaml/schema/matcher.Text] matcher refuse a
+// [go.jacobcolvin.com/niceyaml/matcher.Content] or
+// [go.jacobcolvin.com/niceyaml/matcher.Text] matcher refuse a
 // node of such a document that holds an alias. The error matches
 // [ErrExcessiveAliasing], and [IsInvalid] reports it.
 //
@@ -603,7 +603,7 @@ func WithAliasLimit(enabled bool) SourceOption {
 // with those anchors rather than with the size of refs. One call to
 // [Node.Decode] or [Node.Validate] can run several decodes. Those include
 // one for each validator that decodes and one for each
-// [go.jacobcolvin.com/niceyaml/schema/matcher.Content] matcher of a
+// [go.jacobcolvin.com/niceyaml/matcher.Content] matcher of a
 // schema registry. Each of them reads the anchors it reaches.
 //
 // The alias limit of the Source counts what its aliases read in refs. A

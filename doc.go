@@ -1448,11 +1448,11 @@
 // hold. Inside the anchor, each value that the decoder creates keeps the
 // value of the decoder in both decodes, as the Defaults section describes.
 //
-// A [go.jacobcolvin.com/niceyaml/schema/matcher.Content] or
-// [go.jacobcolvin.com/niceyaml/schema/matcher.Text] matcher whose path ends
+// A [go.jacobcolvin.com/niceyaml/matcher.Content] or
+// [go.jacobcolvin.com/niceyaml/matcher.Text] matcher whose path ends
 // at such an alias reads the value through the decode, with the spelling
 // and the quotes that the reference document gives it. A
-// [go.jacobcolvin.com/niceyaml/schema/matcher.Exists] matcher matches,
+// [go.jacobcolvin.com/niceyaml/matcher.Exists] matcher matches,
 // because the path selects the alias. A matcher whose path enters the alias
 // returns the error, so a registry does not route that document.
 //
@@ -1681,7 +1681,7 @@
 //	)
 //
 // The directive of the file then picks the schema, and a
-// [go.jacobcolvin.com/niceyaml/schema/matcher.FilePath] matcher routes on the
+// [go.jacobcolvin.com/niceyaml/matcher.FilePath] matcher routes on the
 // path of the file. The heading of an error names the file rather than the
 // defaults. Every decode of the merged Source applies cidr, including the
 // decode inside a [Validator].
@@ -1785,8 +1785,8 @@
 // can take minutes on such a document and never checks the context, and a
 // schema reads every use of every alias. A decode, a
 // [go.jacobcolvin.com/niceyaml/schema.Schema], and a
-// [go.jacobcolvin.com/niceyaml/schema/matcher.Content] or
-// [go.jacobcolvin.com/niceyaml/schema/matcher.Text] matcher therefore refuse
+// [go.jacobcolvin.com/niceyaml/matcher.Content] or
+// [go.jacobcolvin.com/niceyaml/matcher.Text] matcher therefore refuse
 // a node that holds an alias when the aliases of its document exceed the
 // limit. The error matches [ErrExcessiveAliasing], and [IsInvalid] reports
 // it, because the aliases of the document are the cause wherever the count
@@ -1923,7 +1923,7 @@
 // A decode into a value that does not read text does not write any text, so
 // these bounds do not apply to it. The alias limit still applies.
 //
-// A [go.jacobcolvin.com/niceyaml/schema/matcher.Content] matcher that decodes
+// A [go.jacobcolvin.com/niceyaml/matcher.Content] matcher that decodes
 // into a type that reads text applies the same bounds. [WithAliasLimit] set
 // to false turns both bounds off with the alias limit. [WithByteLimit] or
 // [WithDepthLimit] set to [NoLimit] turns off the bound that its limit sets.

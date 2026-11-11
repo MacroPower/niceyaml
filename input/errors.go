@@ -18,7 +18,7 @@ var (
 
 	// ErrInvalidPattern indicates a pattern of [WithInclude] or
 	// [WithExclude] that a directory input rejects. It is
-	// [go.jacobcolvin.com/niceyaml/schema/matcher.ErrInvalidPattern], so
+	// [go.jacobcolvin.com/niceyaml/matcher.ErrInvalidPattern], so
 	// either name matches the error.
 	ErrInvalidPattern = filepaths.ErrInvalidPattern
 )

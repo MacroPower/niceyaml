@@ -37,6 +37,7 @@ rules:
       - internal
       - line
       - manifest
+      - matcher
       - paths
       - position
       - printer
