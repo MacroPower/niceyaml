@@ -20,7 +20,7 @@ import (
 // and the fields that name them. [Registry.Load] reads manifests into a
 // [Set], and [Registry.Verify] checks the schemas in a test.
 // [Registry.Check] returns the manifests that pass beside the problems of
-// a load.
+// a load. [Registry.Kinds] lists the kinds as data.
 //
 // A nil error from [Registry.Load] or [Registry.Check] means that the
 // documents pass the checks of a load. A nil error from
