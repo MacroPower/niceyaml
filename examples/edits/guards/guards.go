@@ -56,7 +56,15 @@ func main() {
 		}
 
 		edited := niceyaml.NewSourceFromString(text)
-		lipgloss.Println(p.Print(diff.Diff(source.Lines(), edited.Lines()).Hunks(1)))
+
+		result, err := diff.Diff(ctx, source.Lines(), edited.Lines())
+		if err != nil {
+			lipgloss.Println(p.PrintError(err))
+
+			return
+		}
+
+		lipgloss.Println(p.Print(result.Hunks(1)))
 	}
 
 	// WithLabel names the edits of one Apply in its messages.

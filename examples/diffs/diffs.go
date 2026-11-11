@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"time"
 
 	"charm.land/lipgloss/v2"
 
@@ -26,8 +28,18 @@ func main() {
 
 	p := printer.New()
 
-	// Create a diff result between the two sources.
-	result := diff.Diff(before.Lines(), after.Lines())
+	// Create a diff result between the two sources. A deadline on the
+	// context bounds the time the diff takes, and the diff returns the
+	// error of the context when the deadline passes.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	result, err := diff.Diff(ctx, before.Lines(), after.Lines())
+	if err != nil {
+		lipgloss.Println(p.PrintError(err))
+
+		return
+	}
 
 	fmt.Println("\nPrint the full diff:")
 	lipgloss.Println(p.Print(result.Unified()))

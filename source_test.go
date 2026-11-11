@@ -457,7 +457,7 @@ func TestSource_Runes_DiffBuiltLines(t *testing.T) {
 
 	// The diff holds the deleted line above the inserted one. Both come
 	// from line 1 of their source, and each has a visual line of its own.
-	lines := diff.Diff(before.Lines(), after.Lines()).Unified()
+	lines := yamltest.DiffLines(t, before.Lines(), after.Lines()).Unified()
 	require.Equal(t, 2, lines.Count())
 
 	// The first character of each line.
@@ -8123,7 +8123,7 @@ func TestWithByteLimit(t *testing.T) {
 		before := niceyaml.NewSourceFromString(text+"port: 80\n", niceyaml.WithByteLimit(1024))
 		after := niceyaml.NewSourceFromString(text+"port: 81\n", niceyaml.WithByteLimit(1024))
 
-		result := diff.Diff(before.Lines(), after.Lines())
+		result := yamltest.DiffLines(t, before.Lines(), after.Lines())
 
 		assert.Len(t, result.Changes(), 1)
 		assert.Equal(t, diff.Stats{Added: 1, Removed: 1}, result.Stats())

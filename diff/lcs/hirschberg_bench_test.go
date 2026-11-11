@@ -70,7 +70,10 @@ func BenchmarkHirschberg_Diff(b *testing.B) {
 				b.ReportAllocs()
 
 				for b.Loop() {
-					h.Diff(before, tc.after)
+					_, err := h.Diff(b.Context(), before, tc.after)
+					if err != nil {
+						b.Fatal(err)
+					}
 				}
 			})
 		}
@@ -124,13 +127,21 @@ func BenchmarkHirschberg_DiffAfterLarge(b *testing.B) {
 			// A large diff leaves its buffers in the pool, and the small
 			// diffs after it should run as fast as on a fresh instance.
 			if tc.large != nil {
-				h.Diff(tc.large(100000))
+				largeBefore, largeAfter := tc.large(100000)
+
+				_, err := h.Diff(b.Context(), largeBefore, largeAfter)
+				if err != nil {
+					b.Fatal(err)
+				}
 			}
 
 			b.ReportAllocs()
 
 			for b.Loop() {
-				h.Diff(before, after)
+				_, err := h.Diff(b.Context(), before, after)
+				if err != nil {
+					b.Fatal(err)
+				}
 			}
 		})
 	}

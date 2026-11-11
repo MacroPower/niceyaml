@@ -1,6 +1,7 @@
 package lcs
 
 import (
+	"context"
 	"slices"
 	"sync"
 )
@@ -58,7 +59,17 @@ func NewHirschberg() *Hirschberg {
 
 // Diff returns operations that transform before into after. Each call
 // returns a fresh slice, so it stays valid across later calls.
-func (h *Hirschberg) Diff(before, after []string) []Op {
+//
+// Diff checks ctx when it starts and before each round of its search.
+// After ctx ends, Diff stops within one round and returns nil with the
+// error of ctx, which matches [context.Canceled] or
+// [context.DeadlineExceeded]. It returns no other error.
+func (h *Hirschberg) Diff(ctx context.Context, before, after []string) ([]Op, error) {
+	err := ctx.Err()
+	if err != nil {
+		return nil, err //nolint:wrapcheck // The error of ctx, as Diff documents.
+	}
+
 	b, ok := h.pool.Get().(*buffers)
 	if !ok {
 		b = &buffers{}
@@ -77,9 +88,13 @@ func (h *Hirschberg) Diff(before, after []string) []Op {
 
 	numIDs := b.intern(before[prefix:bEnd], after[prefix:aEnd])
 	b.discard(prefix, numIDs)
-	b.recurse(0, len(b.beforeIDs), 0, len(b.afterIDs))
 
-	return b.compact(before, after)
+	err = b.recurse(ctx, 0, len(b.beforeIDs), 0, len(b.afterIDs))
+	if err != nil {
+		return nil, err
+	}
+
+	return b.compact(before, after), nil
 }
 
 // buffers is the working memory of one [Hirschberg.Diff] call.
@@ -248,8 +263,9 @@ func commonEnds(before, after []string) (int, int) {
 // recurse marks the input lines behind b.beforeIDs[bStart:bEnd] and
 // b.afterIDs[aStart:aEnd] that a shortest edit script of those ranges
 // deletes or inserts. It splits both ranges at the point that midpoint
-// finds and solves each half the same way.
-func (b *buffers) recurse(bStart, bEnd, aStart, aEnd int) {
+// finds and solves each half the same way. It returns the error of ctx
+// after ctx ends, as midpoint does.
+func (b *buffers) recurse(ctx context.Context, bStart, bEnd, aStart, aEnd int) error {
 	before, after := b.beforeIDs, b.afterIDs
 
 	// Lines the ranges share at the start and at the end pair up in order.
@@ -277,10 +293,20 @@ func (b *buffers) recurse(bStart, bEnd, aStart, aEnd int) {
 		}
 
 	default:
-		x, y := b.midpoint(before[bStart:bEnd], after[aStart:aEnd])
-		b.recurse(bStart, bStart+x, aStart, aStart+y)
-		b.recurse(bStart+x, bEnd, aStart+y, aEnd)
+		x, y, err := b.midpoint(ctx, before[bStart:bEnd], after[aStart:aEnd])
+		if err != nil {
+			return err
+		}
+
+		err = b.recurse(ctx, bStart, bStart+x, aStart, aStart+y)
+		if err != nil {
+			return err
+		}
+
+		return b.recurse(ctx, bStart+x, bEnd, aStart+y, aEnd)
 	}
+
+	return nil
 }
 
 // midpoint returns a point (x, y) that some shortest edit script of before
@@ -300,7 +326,11 @@ func (b *buffers) recurse(bStart, bEnd, aStart, aEnd int) {
 // The caller must pass two non-empty inputs and must trim the lines that
 // both share at the start and at the end. Such inputs need at least two
 // edits.
-func (b *buffers) midpoint(before, after []int) (int, int) {
+//
+// Midpoint checks ctx before each round of the two walks and returns the
+// error of ctx after ctx ends. Each round costs time in proportion to the
+// number of diagonals the walks cover, so a round ends soon after ctx ends.
+func (b *buffers) midpoint(ctx context.Context, before, after []int) (int, int, error) {
 	n, m := len(before), len(after)
 
 	// Diagonal k is at index k+off of both walks, and the walks keep to
@@ -322,6 +352,11 @@ func (b *buffers) midpoint(before, after []int) (int, int) {
 	bmin, bmax := bmid, bmid
 
 	for {
+		err := ctx.Err()
+		if err != nil {
+			return 0, 0, err //nolint:wrapcheck // The error of ctx, as Diff documents.
+		}
+
 		// Widen the forward walk by one diagonal on each side. A new
 		// diagonal gets a neighbor that no step can extend.
 		if fmin > dmin {
@@ -357,7 +392,7 @@ func (b *buffers) midpoint(before, after []int) (int, int) {
 			fwd[k+off] = x
 
 			if odd && bmin <= k && k <= bmax && bwd[k+off] <= x {
-				return x, y
+				return x, y, nil
 			}
 		}
 
@@ -395,7 +430,7 @@ func (b *buffers) midpoint(before, after []int) (int, int) {
 			bwd[k+off] = x
 
 			if !odd && fmin <= k && k <= fmax && x <= fwd[k+off] {
-				return x, y
+				return x, y, nil
 			}
 		}
 	}

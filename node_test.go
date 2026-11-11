@@ -3759,7 +3759,7 @@ func TestDocument_Err(t *testing.T) {
 
 		after := yamltest.Documents(t, niceyaml.NewSourceFromString(strings.Replace(input, "d: [", "d: []", 1)), 3)
 
-		result := diff.Diff(before[1].View(), after[1].View())
+		result := yamltest.DiffLines(t, before[1].View(), after[1].View())
 
 		assert.Equal(t, diff.Stats{Added: 1, Removed: 1}, result.Stats())
 
@@ -5181,7 +5181,7 @@ func TestDocument_View(t *testing.T) {
 			c: 9
 		`)), 2)
 
-		result := diff.Diff(before[1].View(), after[1].View())
+		result := yamltest.DiffLines(t, before[1].View(), after[1].View())
 
 		assert.Equal(t, diff.Stats{Added: 1, Removed: 1}, result.Stats())
 

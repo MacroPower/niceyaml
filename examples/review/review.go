@@ -71,7 +71,14 @@ func main() {
 	// A Node view holds the lines of one document with the numbers they
 	// have in the file. A diff of two such views covers that document
 	// alone, and its gutter and hunk headers print those numbers.
-	exact := diff.Diff(viewBefore, viewAfter).Stats()
+	exactResult, err := diff.Diff(ctx, viewBefore, viewAfter)
+	if err != nil {
+		lipgloss.Println(p.PrintError(err))
+
+		return
+	}
+
+	exact := exactResult.Stats()
 	fmt.Printf("default:        +%d -%d\n", exact.Added, exact.Removed)
 
 	// A formatter removed the padding from the after revision, so the
@@ -81,7 +88,13 @@ func main() {
 	// It also hides a change to the whitespace inside a quoted value. The
 	// rest of the review uses its diff.
 	differ := diff.New(diff.WithLineKey(spacing))
-	result := differ.Diff(viewBefore, viewAfter)
+	result, err := differ.Diff(ctx, viewBefore, viewAfter)
+	if err != nil {
+		lipgloss.Println(p.PrintError(err))
+
+		return
+	}
+
 	loose := result.Stats()
 	fmt.Printf("ignore spacing: +%d -%d\n", loose.Added, loose.Removed)
 

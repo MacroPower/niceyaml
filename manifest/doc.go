@@ -144,7 +144,13 @@
 //
 //	for _, f := range plan.Files() {
 //		fmt.Println(f.Header())
-//		lipgloss.Println(printer.New().Print(f.Diff(3)))
+//
+//		hunks, err := f.Diff(ctx, 3)
+//		if err != nil {
+//			return err
+//		}
+//
+//		lipgloss.Println(printer.New().Print(hunks))
 //	}
 //
 //	res, err := plan.Apply(ctx)

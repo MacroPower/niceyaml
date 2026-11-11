@@ -1368,6 +1368,10 @@
 //     of the context, or the error that its validator returned on the Node
 //     where the context ended.
 //   - [NewSourceFromLayers] returns the error of the context.
+//   - [go.jacobcolvin.com/niceyaml/diff.Diff] and
+//     [go.jacobcolvin.com/niceyaml/diff.Differ.Diff] stop the search for
+//     the edits between two revisions, and return the error of the context
+//     in place of a result.
 //
 // Only the context of the call stops these steps. A check can hold a deadline
 // of its own, such as one that a function from WithValueCheck derives from
@@ -2027,7 +2031,11 @@
 // [go.jacobcolvin.com/niceyaml/diff/lcs.Hirschberg], is space-efficient for
 // large files:
 //
-//	result := diff.Diff(original.Lines(), modified.Lines())
+//	result, err := diff.Diff(ctx, original.Lines(), modified.Lines())
+//	if err != nil {
+//		return err
+//	}
+//
 //	p := printer.New()
 //	lipgloss.Println(p.Print(result.Unified()))
 //	lipgloss.Println(p.Print(result.Hunks(3)))
@@ -2042,19 +2050,24 @@
 //	d := diff.New(diff.WithLineKey(func(l *line.Line) string {
 //		return strings.TrimRight(l.Content(), " \t")
 //	}))
-//	result := d.Diff(before.Lines(), after.Lines())
+//	result, err := d.Diff(ctx, before.Lines(), after.Lines())
 //
 // Custom algorithms implement
 // [go.jacobcolvin.com/niceyaml/diff/lcs.Algorithm], and
 // [go.jacobcolvin.com/niceyaml/diff.WithAlgorithm] sets one. The algorithm
 // aligns the lines by their keys.
 //
+// Inputs that share many lines in a different order take time close to the
+// square of their length, even inside the byte limit of a Source. The
+// context that a diff takes bounds that time, as the Cancellation section
+// describes.
+//
 // [Source.Lines] is every line of the file. [Node.View] holds the lines that
 // one document or node covers. A diff reads a view as it reads lines, so a
 // diff of one document of a file that holds several compares only that
 // document:
 //
-//	result := diff.Diff(before[1].View(), after[1].View())
+//	result, err := diff.Diff(ctx, before[1].View(), after[1].View())
 //
 // The gutter and the hunk headers of the diff show the line numbers of the
 // file.

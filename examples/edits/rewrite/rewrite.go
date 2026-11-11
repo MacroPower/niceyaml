@@ -115,7 +115,15 @@ func main() {
 	// Every line that the edits leave alone keeps the bytes that the owner
 	// wrote. Hunks shows each change with one line of context around it.
 	edited := niceyaml.NewSourceFromString(text)
-	lipgloss.Println(p.Print(diff.Diff(source.Lines(), edited.Lines()).Hunks(1)))
+
+	result, err := diff.Diff(ctx, source.Lines(), edited.Lines())
+	if err != nil {
+		lipgloss.Println(p.PrintError(err))
+
+		return
+	}
+
+	lipgloss.Println(p.Print(result.Hunks(1)))
 
 	fmt.Println("\nList the removals:")
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"html"
 	"slices"
@@ -57,7 +58,13 @@ func main() {
 	// opens with a header annotation above its first line. This diff fixes
 	// the price.
 	after := niceyaml.NewSourceFromString(strings.Replace(example, "45 kr", "40 kr", 1))
-	result := diff.Diff(source.Lines(), after.Lines())
+	result, err := diff.Diff(context.Background(), source.Lines(), after.Lines())
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
 	fmt.Println(renderHTML(result.Hunks(1)))
 }
 

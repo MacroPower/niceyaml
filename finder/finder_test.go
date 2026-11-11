@@ -566,7 +566,7 @@ func TestFinder_Load(t *testing.T) {
 
 	// The unified diff holds nine rows, and its hunks hold rows 0 and 1,
 	// where k1 changed, and rows 7 and 8, where k7 changed.
-	hunks := yamltest.Diff(
+	hunks := yamltest.Diff(t,
 		stringtest.LinesLF(
 			"k1: a",
 			"k2: b",
@@ -600,14 +600,14 @@ func TestFinder_Load(t *testing.T) {
 
 	// The unified diff holds "key: old" on row 0 and "key: new" on row 1.
 	// Both lines are line 1 of their revision, and a match names the row.
-	unified := yamltest.Diff("key: old\n", "key: new\n").Unified()
+	unified := yamltest.Diff(t, "key: old\n", "key: new\n").Unified()
 
 	// A diff view can hold a line with no line ending before another line,
 	// such as the last line of a revision or a placeholder row. The loaded
 	// text still ends every line but the last with "\n", so no match joins
 	// the text of two lines.
-	noEnding := yamltest.Diff("x: 1", "x: 2\n")
-	placeholders := yamltest.Diff(
+	noEnding := yamltest.Diff(t, "x: 1", "x: 2\n")
+	placeholders := yamltest.Diff(t,
 		stringtest.LinesLF("a: 1", "b: 2"),
 		stringtest.LinesLF(
 			"a: 1",
