@@ -208,7 +208,6 @@ func TestNewRegistry(t *testing.T) {
 				manifest.NewKind[Cafe]("Cafe", v1),
 				manifest.NewKind[Cafe]("Bistro", v1),
 			),
-			err: "kinds Cafe and Bistro share the Go type manifest_test.Cafe",
 		},
 		"version listed twice": {
 			opts: withKinds(manifest.NewKind[Cafe]("Cafe",

@@ -431,6 +431,13 @@
 // such as a type that is not the Go type of a kind. The first test that
 // runs the line thus fails.
 //
+// Several kinds can share a Go type, such as kinds that a tool reads from
+// a catalog at run time and decodes into map[string]any. [Set.All] then
+// yields the manifests of each of those kinds, and [Object.Kind] tells
+// them apart. [Set.One] and [Set.Get] address one kind, so they panic on a
+// type that several kinds share. [Set.Objects] yields every manifest of
+// every kind, for a tool that does not know the Go types.
+//
 // An Object holds its document twice. [Object.Current] holds the document
 // in the layout of the current version, which [Object.Value] decoded from.
 // A function of [WithCheck] reads it to decode another Go type, to run a

@@ -31,6 +31,38 @@ func loadExample(t *testing.T) *manifest.Set {
 	return set
 }
 
+// loadShared loads a Deployment and a Service, two kinds that share the Go
+// type map[string]any.
+func loadShared(t *testing.T) *manifest.Set {
+	t.Helper()
+
+	name := manifest.NameField(paths.Doc().Child("metadata", "name"))
+	reg, err := manifest.NewRegistry(manifest.WithKinds(
+		manifest.NewKind[map[string]any]("Deployment", name, manifest.Singleton(), manifest.Version("apps/v1")),
+		manifest.NewKind[map[string]any]("Service", name, manifest.Version("v1")),
+	))
+	require.NoError(t, err)
+
+	set, err := reg.Load(t.Context(), configFS(map[string]string{
+		"web.yaml": stringtest.LinesLF(
+			"apiVersion: v1",
+			"kind: Service",
+			"metadata:",
+			"  name: web",
+			"---",
+			"apiVersion: apps/v1",
+			"kind: Deployment",
+			"metadata:",
+			"  name: web",
+			"spec:",
+			"  replicas: 2",
+		),
+	}))
+	require.NoError(t, err)
+
+	return set
+}
+
 func TestSet_One(t *testing.T) {
 	t.Parallel()
 
@@ -56,6 +88,14 @@ func TestSet_One(t *testing.T) {
 
 	_, ok = empty.One[Cafe]()
 	assert.False(t, ok)
+
+	shared := loadShared(t)
+
+	assert.PanicsWithValue(
+		t,
+		"manifest: One needs the Go type of one kind, and map[string]interface {} is the type of Deployment and Service",
+		func() { shared.One[map[string]any]() },
+	)
 }
 
 func TestSet_All(t *testing.T) {
@@ -76,6 +116,18 @@ func TestSet_All(t *testing.T) {
 	assert.Equal(t, []string{"kanelbulle cafe.jacobcolvin.com/v1beta1"}, names)
 
 	assert.Panics(t, func() { set.All[Metadata]() })
+
+	var kinds []string
+
+	for o := range loadShared(t).All[map[string]any]() {
+		kinds = append(kinds, o.Kind+" "+o.Name)
+
+		if o.Kind == "Deployment" {
+			assert.Equal(t, map[string]any{"replicas": uint64(2)}, o.Value["spec"])
+		}
+	}
+
+	assert.Equal(t, []string{"Service web", "Deployment web"}, kinds)
 }
 
 func TestSet_Get(t *testing.T) {
@@ -100,6 +152,14 @@ func TestSet_Get(t *testing.T) {
 	assert.PanicsWithValue(t, "manifest: Get needs a kind with manifest.NameField, and Cafe has none", func() {
 		unnamed.Get[Cafe]("yamull")
 	})
+
+	shared := loadShared(t)
+
+	assert.PanicsWithValue(
+		t,
+		"manifest: Get needs the Go type of one kind, and map[string]interface {} is the type of Deployment and Service",
+		func() { shared.Get[map[string]any]("web") },
+	)
 }
 
 func TestSet_Objects(t *testing.T) {
