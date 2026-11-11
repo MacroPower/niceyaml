@@ -43,11 +43,13 @@ import (
 // then reads the entry of the merge key, as the Supported YAML section of
 // the package documentation describes.
 //
-// A place that does not hold a value stays as it is, but a Move of the root
-// fails, also at the root of an empty document. The comments include
-// the comment lines that [Node.Remove] takes with the entry or the item,
-// such as those that the user indented past its key or its "-". Move
-// deletes blank lines next to the old lines of the value as Remove does.
+// A place that does not hold a value stays as it is. A Move fails with
+// [ErrUsage] there too when its arguments alone decide the refusal, such as
+// a Move of the root, also at the root of an empty document, or to a path
+// inside the value. The comments include the comment lines that
+// [Node.Remove] takes with the entry or the item, such as those that the
+// user indented past its key or its "-". Move deletes blank lines next to
+// the old lines of the value as Remove does.
 //
 // A Move makes the checks of a Remove of the value and an insertion of the
 // same text at target. It passes where that pair passes, except where it
@@ -158,43 +160,34 @@ func (n *Node) move(target paths.Path, at placement) (modelPlace, error) {
 		return modelPlace{}, err
 	}
 
-	// The text lacks the place, so the move does nothing, unless a step of
-	// the path reaches a zone of the Apply. The root of an empty document
-	// holds no value either, but the move of a root fails.
-	if !p.exists && !p.root {
-		return modelPlace{}, n.stepProblem()
-	}
-
 	// A message quotes the name of a key and names an item by its path.
 	name := n.path.String()
 	if last, ok := n.path.Last(); ok && last.Kind == paths.SelectorChild {
 		name = strconv.Quote(last.Name)
 	}
 
-	why := d.protection(p, true)
+	named := fmt.Sprintf("moves %s to %s", n.path, target)
 
-	switch {
-	case !target.IsAbsolute() || !plain(target):
-		return modelPlace{}, d.fail(n, "%s moves %s to %s, which is no $ path of names and indexes",
-			d.subject(), name, target)
+	// The arguments decide these problems whatever the text holds, so they
+	// come first, also for a place that does not hold a value.
+	err = n.moveUsage(target, at, name, named)
+	if err != nil {
+		return modelPlace{}, err
+	}
 
-	case target.IsRoot():
-		return modelPlace{}, d.fail(n, "%s moves %s to $, but a value cannot move to the document root",
-			d.subject(), name)
+	// The text lacks the place, so the move does nothing, unless a step of
+	// the path reaches a zone of the Apply.
+	if !p.exists {
+		return modelPlace{}, n.stepProblem()
+	}
 
-	case p.root:
-		return modelPlace{}, d.fail(n, "%s moves the root of the document", d.subject())
-	case why != "":
-		return modelPlace{}, d.fail(n, "%s moves %s, which %s", d.subject(), name, why)
+	if why := d.protection(p, true); why != "" {
+		return modelPlace{}, d.failAs(ErrProtected, n, "%s moves %s, which %s", d.subject(), name, why)
 	}
 
 	// A move to the path of its own entry with a placement reorders the
-	// entry in its mapping.
+	// entry in its mapping, as [Node.moveUsage] tells.
 	reorder := target.Equal(n.path) && p.entry != nil && at.kind != placeLast
-
-	if _, inside := target.CutPrefix(n.path); inside && !reorder {
-		return modelPlace{}, d.fail(n, "%s moves %s to %s, which lies inside it", d.subject(), name, target)
-	}
 
 	if reorder && p.merged {
 		parent, _ := n.path.Parent()
@@ -219,10 +212,16 @@ func (n *Node) move(target paths.Path, at placement) (modelPlace, error) {
 	}
 
 	if whyTarget := d.protection(tp, true); whyTarget != "" {
-		return modelPlace{}, d.fail(n, "%s moves %s to %s, which %s", d.subject(), name, target, whyTarget)
+		return modelPlace{}, d.failAs(
+			ErrProtected,
+			n,
+			"%s moves %s to %s, which %s",
+			d.subject(),
+			name,
+			target,
+			whyTarget,
+		)
 	}
-
-	named := fmt.Sprintf("moves %s to %s", n.path, target)
 
 	// A target that a kept merge brings in is a key that the Move would
 	// hide, which rule M2 of the merge rules refuses before the target
@@ -269,8 +268,9 @@ func (n *Node) move(target paths.Path, at placement) (modelPlace, error) {
 	}
 
 	var (
-		th moveHolder
-		ok bool
+		th  moveHolder
+		why string
+		ok  bool
 	)
 
 	if occupied || reorder {
@@ -329,7 +329,10 @@ func (n *Node) move(target paths.Path, at placement) (modelPlace, error) {
 	}
 
 	// The entry leaves its mapping before the new entry goes in, so the new
-	// entry cannot go before or after it.
+	// entry cannot go before or after it. A placement that names the key of
+	// the entry in its own mapping failed in [Node.moveUsage]. Here the text,
+	// such as through an alias, puts target in the mapping of the entry, so
+	// the document decides the problem.
 	if p.entry != nil && where.entry == p.entry {
 		return modelPlace{}, d.fail(n, "%s %s %s %q, which is the entry that moves",
 			d.subject(), named, at.side(), at.key)
@@ -590,6 +593,50 @@ func (d *Doc) removePlace(p *place) error {
 	}
 
 	return d.removeBlock(p)
+}
+
+// moveUsage returns the problem of a move of n to target with the placement
+// at, when the arguments of the move decide it whatever the text holds. The
+// problem matches [ErrUsage]. A message names the value that moves as name
+// and the move as named. MoveUsage returns nil for a move that the text
+// decides.
+func (n *Node) moveUsage(target paths.Path, at placement, name, named string) error {
+	d := n.d
+	last, keyed := n.path.Last()
+	keyed = keyed && last.Kind == paths.SelectorChild
+
+	switch {
+	case !target.IsAbsolute() || !plain(target):
+		return d.failAs(ErrUsage, n, "%s moves %s to %s, which is no $ path of names and indexes",
+			d.subject(), name, target)
+
+	case target.IsRoot():
+		return d.failAs(ErrUsage, n, "%s moves %s to $, but a value cannot move to the document root",
+			d.subject(), name)
+
+	case n.path.IsRoot():
+		return d.failAs(ErrUsage, n, "%s moves the root of the document", d.subject())
+	}
+
+	// A move to the path of its own entry with a placement reorders the
+	// entry in its mapping.
+	reorder := target.Equal(n.path) && keyed && at.kind != placeLast
+
+	if _, inside := target.CutPrefix(n.path); inside && !reorder {
+		return d.failAs(ErrUsage, n, "%s moves %s to %s, which lies inside it", d.subject(), name, target)
+	}
+
+	// The entry leaves its mapping before the new entry goes in, so the new
+	// entry cannot go before or after it.
+	from, _ := n.path.Parent()
+	to, _ := target.Parent()
+
+	if keyed && (at.kind == placeBefore || at.kind == placeAfter) && at.key == last.Name && to.Equal(from) {
+		return d.failAs(ErrUsage, n, "%s %s %s %q, which is the entry that moves",
+			d.subject(), named, at.side(), at.key)
+	}
+
+	return nil
 }
 
 // plain reports whether path holds only names and indexes.

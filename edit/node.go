@@ -867,15 +867,14 @@ func (d *Doc) guardChanged(path paths.Path, texts []string) error {
 
 		rec := d.lastEdit
 		if rec == nil {
-			return d.fail(&Node{d: d, path: path}, "%s edits %s, which %s the protected value %s",
+			return d.failAs(ErrProtected, &Node{d: d, path: path}, "%s edits %s, which %s the protected value %s",
 				d.subject(), path, verb, g.path)
 		}
 
 		msg := fmt.Sprintf("%s %s, which %s the protected value %s", d.subject(), rec.named, verb, g.path)
-		err := d.user.Bind(niceyaml.NewError(msg, niceyaml.AtPath(rec.holder()), niceyaml.AtRange(rec.at),
-			niceyaml.WithDetails(d.callDetails(rec.site())...)))
 
-		return err //nolint:wrapcheck // The binding is the problem of the call.
+		return d.programProblem(ErrProtected, msg, niceyaml.AtPath(rec.holder()), niceyaml.AtRange(rec.at),
+			niceyaml.WithDetails(d.callDetails(rec.site())...))
 	}
 
 	return nil
@@ -1295,11 +1294,13 @@ func (n *Node) Decode[T any](ctx context.Context, opts ...niceyaml.DecodeOption)
 // float64.
 //
 // A Set of a node at a place that does not hold a value fails. So does a
-// Set of a node that lost its place to an earlier edit. The root of an
-// empty document encodes as null, because its Decode returns the zero
-// value. Set calls each
-// MarshalYAML method twice, so a Set of a node decodes its value twice. A
-// nil Node encodes as null.
+// Set of a node that lost its place to an earlier edit. The document
+// decides such a problem for a node of the Doc of the Set. So the error of
+// the Set keeps the fault that the error of the decode declares, as
+// [ErrValue] describes. A node of another Doc fails the Set with ErrValue.
+// The root of an empty document encodes as null, because its Decode
+// returns the zero value. Set calls each MarshalYAML method twice, so a
+// Set of a node decodes its value twice. A nil Node encodes as null.
 func (n *Node) MarshalYAML(ctx context.Context) (any, error) {
 	if n == nil {
 		return nil, nil //nolint:nilnil // A nil pointer encodes as null.
@@ -1413,17 +1414,17 @@ func (d *Doc) view(n *Node, p *place) (*niceyaml.Node, error) {
 // documentation describes. When the merge key reads a reference document,
 // a path through the entry fails instead.
 //
-// Each method of the node that edits or decodes fails on a path that
-// selects more than one value or holds a `~`. So does each such method on
-// a path through an alias that does not resolve in the text, such as one
-// without an anchor. The problem then binds at the alias. A path that
-// enters an alias of a reference document of [niceyaml.WithReferences]
-// fails the same way, with a problem that matches [paths.ErrReferenceAlias],
-// as [niceyaml.Node.At] fails there. A `<<` merge key of such an alias
-// decides the names of its mapping. So a path through a name that the
-// mapping writes before the merge key fails too. So does a path through a
-// name that it does not write after every such merge key, as the package
-// documentation describes.
+// Each method of the node that edits or decodes fails with [ErrUsage] on a
+// path that selects more than one value or holds a `~`. Each such method
+// also fails on a path through an alias that does not resolve in the text,
+// such as one without an anchor. The problem then binds at the alias. A
+// path that enters an alias of a reference document of
+// [niceyaml.WithReferences] fails the same way, with a problem that matches
+// [paths.ErrReferenceAlias], as [niceyaml.Node.At] fails there. A `<<`
+// merge key of such an alias decides the names of its mapping. So a path
+// through a name that the mapping writes before the merge key fails too. So
+// does a path through a name that it does not write after every such merge
+// key, as the package documentation describes.
 //
 // A path through an alias or a `<<` merge key reaches the anchored value.
 // Two nodes with different paths can thus edit the same text. [Doc.Apply]
@@ -1461,7 +1462,7 @@ func (n *Node) At(path paths.Path) *Node {
 		}
 
 		at.err = func(verb string) error {
-			return n.bindOwn(niceyaml.NewError(fmt.Sprintf("%s %s %s, which %s", n.d.subject(), verb, full, why)))
+			return n.d.failAs(ErrUsage, n, "%s %s %s, which %s", n.d.subject(), verb, full, why)
 		}
 
 		return at
@@ -1598,9 +1599,27 @@ func (d *Doc) subject() string {
 }
 
 // fail returns the problem that format describes, bound at the place of
-// n.
+// n. The current values of the document decide the problem, so the
+// document is at fault for it.
 func (d *Doc) fail(n *Node, format string, args ...any) error {
 	return n.bindOwn(niceyaml.NewError(fmt.Sprintf(format, args...)))
+}
+
+// failAs returns the problem that format describes, as [fmt.Errorf] formats
+// it, bound at the place of n. The program decides the problem, so the
+// problem matches sentinel, such as [ErrUsage], and the document is not at
+// fault for it.
+func (d *Doc) failAs(sentinel error, n *Node, format string, args ...any) error {
+	return n.bindOwn(niceyaml.Unchecked(&sentinelError{sentinel: sentinel, err: fmt.Errorf(format, args...)}))
+}
+
+// programProblem returns the problem that msg describes, bound in the
+// user's text at the place that opts give. The program decides the
+// problem, so the problem matches sentinel, as [Doc.failAs] describes.
+func (d *Doc) programProblem(sentinel error, msg string, opts ...niceyaml.ErrorOption) error {
+	err := d.user.Bind(niceyaml.Unchecked(&sentinelError{sentinel: sentinel, err: errors.New(msg)}, opts...))
+
+	return err //nolint:wrapcheck // The binding is the problem of the call.
 }
 
 // readFail returns problem, the problem of an edit of n on a path whose

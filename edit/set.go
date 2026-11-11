@@ -130,14 +130,14 @@ type payload struct {
 // indents its "-" as the first such sequence of the user's document does,
 // or one step when the document has none.
 //
-// A Set of the root fails, because it replaces the root. In an empty
-// document, which holds no value at its root, a Set of `$` or of a path of
-// names writes the first value instead. The value goes inside the mappings
-// that the names give, on block lines at the end of the text, as the Empty
-// Documents section of the package documentation describes. [First] places
-// the one entry of the root. [Before] and [After] fail there, because the
-// root holds no other entry. A Set of `$` places no entry, so it ignores
-// those options.
+// A Set of the root fails with [ErrUsage], because it replaces the root.
+// In an empty document, which holds no value at its root, a Set of `$` or
+// of a path of names writes the first value instead. The value goes inside
+// the mappings that the names give, on block lines at the end of the text,
+// as the Empty Documents section of the package documentation describes.
+// [First] places the one entry of the root. [Before] and [After] fail
+// there, because the root holds no other entry. A Set of `$` places no
+// entry, so it ignores those options.
 //
 // The value takes flow style on one line inside a flow collection, in
 // place of a flow collection that holds an entry or an item, and with the
@@ -193,7 +193,7 @@ type payload struct {
 //
 // A path names a key by its text. Set fails before it writes when a
 // mapping of v holds two keys of one text, such as the int 1 and the
-// string "1" of a map[any]any. The problem does not match [ErrEngine]. The
+// string "1" of a map[any]any. The problem matches [ErrValue]. The
 // key has no text in the user's text. So the problem binds at the site of
 // the place of the Set, as every problem of a call does by the Errors
 // section of the package documentation. Set makes this check after the
@@ -209,8 +209,8 @@ type payload struct {
 // an array or a struct. Such a key fails the Set the same way, before the
 // encode. The encoder writes that string for a key whose encode fails too,
 // as for a key whose MarshalYAML method returns an error. The Set then
-// fails before the encode with that error, which does not match ErrEngine,
-// as the error of the marshaler of a value does not. A text of the encode
+// fails before the encode with that error, which matches ErrValue, as
+// the error of the marshaler of a value does. A text of the encode
 // that go-yaml's parser or decoder refuses fails the Set with ErrEngine.
 // The encoder quotes a string key that YAML reads as a << merge key or as
 // an explicit key, so the parse reads such a key as the string. A panic
@@ -240,13 +240,23 @@ type payload struct {
 // way marshals. A chain of MarshalYAML methods and marshaler functions, in
 // which each returns the value that the next marshals, holds at most 1,000
 // marshalers. A longer chain fails the Set too, and its message names the
-// type of the first.
+// type of the first. A value of a type that go-yaml's encoder does not
+// encode, such as a channel or a function, fails the Set too, and so does
+// a value that holds one. Each of these problems matches [ErrValue]. The
+// problem of a marshaler that fails keeps the error of the marshaler, so
+// [errors.Is] and [errors.As] find that error, also when it is the error
+// of a context. The problem binds and declares its fault as ErrValue
+// describes, so [errors.As] does not find a [*niceyaml.Error], a
+// [*niceyaml.SourceError], or a [*niceyaml.PanicError] of the marshaler. A
+// marshaler that returns a problem of the user's document, such as the
+// error of a [Node] of the same Doc, fails the Set with the fault of that
+// problem.
 //
 // The YAML text that a MarshalYAML method returns must be YAML of one
 // node, so text of more than one document fails the Set. So does a mapping
 // that repeats a key, as go-yaml's decoder reads each key, because YAML
 // does not allow it. The problem names the path of the Set and the
-// marshaler, and it does not match ErrEngine.
+// marshaler, and it matches ErrValue.
 // Every other problem of the text is go-yaml's, and it fails the Set with
 // ErrEngine at its place. Go-yaml's parser can refuse the text, with its
 // comments or without them. It refuses some text that YAML allows, such as
@@ -451,9 +461,9 @@ func (n *Node) set(ctx context.Context, v any, protected bool, cfg setConfig) (*
 
 	switch {
 	case p.root && p.exists:
-		return nil, modelPlace{}, d.fail(n, "%s replaces the root of the document", d.subject())
+		return nil, modelPlace{}, d.failAs(ErrUsage, n, "%s replaces the root of the document", d.subject())
 	case !protected && why != "":
-		return nil, modelPlace{}, d.fail(n, "%s sets %s, which %s", d.subject(), n.path, why)
+		return nil, modelPlace{}, d.failAs(ErrProtected, n, "%s sets %s, which %s", d.subject(), n.path, why)
 	}
 
 	// The Set checks its reach once go-yaml took the text of its value, as
@@ -500,13 +510,13 @@ func (n *Node) set(ctx context.Context, v any, protected bool, cfg setConfig) (*
 // the index after theirs, and so do the paths of the nodes on them. The
 // path of the node stays, so the node reads the new item. An Insert at the
 // index past the last item appends the item, as a Set there does. Insert
-// takes the path of an item, and it fails on a path that ends in a name,
-// on the root, and on an index past the index after the last item. It
-// also fails where a Set there fails, such as inside a protected value,
-// and with the problems of the value that Set describes. The new item
-// goes above the comment lines that belong to the item that it goes
-// before. In a flow sequence, it goes before that item with a comma of its
-// own.
+// takes the path of an item, and it fails with [ErrUsage] on a path that
+// ends in a name and on the root. It fails on an index past the index after
+// the last item too. It also fails where a Set there fails, such as inside
+// a protected value, and with the problems of the value that Set describes.
+// The new item goes above the comment lines that belong to the item that it
+// goes before. In a flow sequence, it goes before that item with a comma of
+// its own.
 func (n *Node) Insert(ctx context.Context, v any) error {
 	c := n.d.modelStart(n, "inserts "+n.path.String(), false)
 
@@ -528,7 +538,7 @@ func (n *Node) insert(ctx context.Context, v any) (*edge, error) {
 
 	last, ok := n.path.Last()
 	if !ok || last.Kind != paths.SelectorIndex {
-		return nil, d.fail(n, "%s inserts %s, which is no path of an item", d.subject(), n.path)
+		return nil, d.failAs(ErrUsage, n, "%s inserts %s, which is no path of an item", d.subject(), n.path)
 	}
 
 	holderPath, _ := n.path.Parent()
@@ -550,7 +560,15 @@ func (n *Node) insert(ctx context.Context, v any) (*edge, error) {
 	}
 
 	if why := d.protection(holder, false); why != "" {
-		return nil, d.fail(n, "%s inserts %s, but %s %s", d.subject(), n.path, d.describe(holderPath), why)
+		return nil, d.failAs(
+			ErrProtected,
+			n,
+			"%s inserts %s, but %s %s",
+			d.subject(),
+			n.path,
+			d.describe(holderPath),
+			why,
+		)
 	}
 
 	named := "inserts " + n.path.String()
@@ -863,6 +881,43 @@ func (d *Doc) firstEdit(text run, brk string, pl payload, origin int) []edit {
 	return d.linesEdit(line, text, brk, pl, origin)
 }
 
+// valueProblem returns the problem of a call of h whose value does not
+// encode with err, such as the error of a marshaler. The problem keeps err
+// as its cause and binds at the place of h, whatever err declares.
+//
+// The value of the call is at fault, so the problem matches [ErrValue] and
+// declares no fault. A problem that d bound in the user's document, such as
+// the error of a decode of a [Node] of d at a place that holds no value, is
+// the exception. The values of the document decide it, so the problem
+// keeps the fault that err declares and does not match ErrValue.
+func (d *Doc) valueProblem(h *Node, err error) error {
+	msg := fmt.Errorf("%s cannot write the value of %s: %s", d.subject(), h.path, err.Error())
+
+	if !d.ownProblem(err) {
+		return h.bindOwn(niceyaml.Unchecked(&sentinelError{sentinel: ErrValue, err: msg, cause: err}))
+	}
+
+	problem := &sentinelError{err: msg, cause: err}
+	if niceyaml.IsInvalid(err) {
+		return h.bindOwn(niceyaml.Invalid(problem))
+	}
+
+	return h.bindOwn(niceyaml.Unchecked(problem))
+}
+
+// ownProblem reports whether err holds a problem that is bound in the
+// user's document of d.
+func (d *Doc) ownProblem(err error) bool {
+	bound, ok := errors.AsType[*niceyaml.SourceError](err)
+	if !ok {
+		return false
+	}
+
+	doc, ok := bound.Document()
+
+	return ok && doc == d.user
+}
+
 // renderPayload returns v as a payload for a place whose block collections
 // indent by step, encoded under the marshalers ms, in flow style from the
 // depth fd on, as [render] writes it. The text that the payload writes takes
@@ -899,7 +954,7 @@ func (d *Doc) renderPayload(
 	case errors.Is(err, errEncoder):
 		return payload{}, d.valueBug(h, origin, err)
 	case err != nil:
-		return payload{}, d.fail(h, "%s cannot write the value of %s: %v", d.subject(), h.path, err)
+		return payload{}, d.valueProblem(h, err)
 	}
 
 	pl := d.payloadOf(r, v, step, origin, seqIndent, old)

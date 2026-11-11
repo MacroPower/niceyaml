@@ -516,6 +516,8 @@ func TestRegistry_Load_Steps(t *testing.T) {
 				"   2 | kind: Hours",
 				"   3 | x: 1",
 			),
+			// The step is at fault, not the file.
+			matches: []error{edit.ErrProtected},
 		},
 		"step that sets the version field through an alias of its mapping": {
 			// The version field is the value that the alias reads, so the
@@ -547,6 +549,8 @@ func TestRegistry_Load_Steps(t *testing.T) {
 				"     |            ^^",
 				"   4 | other: *m",
 			),
+			// The step is at fault, not the file.
+			matches: []error{edit.ErrProtected},
 		},
 		"rename that a merge key undoes": {
 			opts:  closes("$.spec.closes"),

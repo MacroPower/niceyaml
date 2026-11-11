@@ -40,7 +40,13 @@ import (
 //     package, as the Versions section of the package documentation
 //     describes. A refusal of YAML outside the subset that the package
 //     edits matches [go.jacobcolvin.com/niceyaml/edit.ErrUnsupported], for
-//     example.
+//     example. A step that passes an argument that the edit package does
+//     not take matches [go.jacobcolvin.com/niceyaml/edit.ErrUsage]. A step
+//     that sets a Go value that the engine cannot write matches
+//     [go.jacobcolvin.com/niceyaml/edit.ErrValue]. A step that edits a type
+//     field matches [go.jacobcolvin.com/niceyaml/edit.ErrProtected]. The
+//     author of the step is at fault for those three, so
+//     [niceyaml.IsInvalid] does not report them.
 //   - An error that a step, a validator, a matcher of [WithIgnore] or
 //     [Claim], or a function of [WithCheck] returns keeps what it matched.
 //     A panic in a step, a validator, or a function of WithCheck wraps a

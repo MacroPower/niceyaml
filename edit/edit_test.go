@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"reflect"
 	"slices"
@@ -4357,6 +4358,534 @@ func TestDoc_Apply_Usage(t *testing.T) {
 			assert.Zero(t, calls)
 		})
 	}
+}
+
+// errorMarshaler is a value whose MarshalYAML method returns err.
+type errorMarshaler struct{ err error }
+
+// MarshalYAML returns the error of m.
+func (m errorMarshaler) MarshalYAML() (any, error) {
+	return nil, m.err
+}
+
+func TestDoc_Apply_Fault(t *testing.T) {
+	t.Parallel()
+
+	var (
+		kind = paths.Doc().Child("kind")
+		a    = paths.Doc().Child("a")
+		// The error of a lookup that a marshaler makes.
+		errLookup = errors.New("the lookup fails")
+		// The typed error of a lookup that a marshaler makes.
+		errOpen = &fs.PathError{Op: "open", Path: "x", Err: fs.ErrNotExist}
+		// A problem of another document that a marshaler returns.
+		errOther = yamltest.FirstDocument(t, "x: 1\n", niceyaml.WithName("other.yaml")).
+				Bind(niceyaml.NewError("x is stale", niceyaml.AtPath(paths.Doc().Child("x"))))
+		// Another Doc, whose node a Set of the user's document reads.
+		other = newDoc(t, "b: 1\n", niceyaml.WithName("other.yaml"))
+		// The error of a lookup that a marshaler makes, which matches
+		// ErrEngine.
+		errLookupEngine = fmt.Errorf("the lookup fails: %w", edit.ErrEngine)
+		// The error of an Apply of another Doc that sets its protected
+		// $.kind, which a marshaler returns.
+		errOtherProtected = newDoc(t, "kind: X\n", niceyaml.WithName("other.yaml")).
+					Apply(t.Context(), paths.Doc(), func(ctx context.Context, on *edit.Node) error {
+				return on.At(kind).Set(ctx, "Y")
+			})
+	)
+
+	require.ErrorIs(t, errOtherProtected, edit.ErrProtected)
+
+	// Each refusal that the program decides matches its sentinel, and the
+	// document is not at fault for it. A refusal that the values of the
+	// document decide matches none of them, and the document is at fault.
+	sentinels := []error{edit.ErrUsage, edit.ErrValue, edit.ErrProtected, edit.ErrEngine}
+
+	tcs := map[string]struct {
+		call func(ctx context.Context, root *edit.Node) error
+		// The sentinel that the error matches, or nil for a problem of the
+		// document.
+		sentinel error
+		// An error that the chain of the error holds, or nil.
+		cause error
+		// A typed error that errors.As finds in the chain of the error, or
+		// nil.
+		typed  *fs.PathError
+		before string
+		err    string
+	}{
+		"path that selects more than one value": {
+			before: "a: {b: 1}\n",
+			call: func(ctx context.Context, root *edit.Node) error {
+				return root.At(a.ChildAll()).Set(ctx, 1)
+			},
+			sentinel: edit.ErrUsage,
+			err:      "test.yaml:1:1: $: cafe.jacobcolvin.com/v1 sets $.a.*, which selects more than one value",
+		},
+		"path that selects a key": {
+			before: "a: {b: 1}\n",
+			call: func(ctx context.Context, root *edit.Node) error {
+				return root.At(paths.MustParse("$.a.b~")).Set(ctx, 1)
+			},
+			sentinel: edit.ErrUsage,
+			err:      "test.yaml:1:1: $: cafe.jacobcolvin.com/v1 sets $.a.b~, which selects a key",
+		},
+		"set of the root": {
+			before: "a: 1\n",
+			call: func(ctx context.Context, root *edit.Node) error {
+				return root.Set(ctx, 1)
+			},
+			sentinel: edit.ErrUsage,
+			err:      "cafe.jacobcolvin.com/v1 replaces the root of the document",
+		},
+		"rename of the root": {
+			before: "a: 1\n",
+			call: func(_ context.Context, root *edit.Node) error {
+				return root.SetKey("b")
+			},
+			sentinel: edit.ErrUsage,
+			err:      "cafe.jacobcolvin.com/v1 renames the root of the document, which has no key",
+		},
+		"rename of an item": {
+			before: "a: [1]\n",
+			call: func(_ context.Context, root *edit.Node) error {
+				return root.At(a.Index(0)).SetKey("b")
+			},
+			sentinel: edit.ErrUsage,
+			err:      "cafe.jacobcolvin.com/v1 renames this item, but an item of a sequence has no key",
+		},
+		"remove of the root": {
+			before: "a: 1\n",
+			call: func(_ context.Context, root *edit.Node) error {
+				return root.Remove()
+			},
+			sentinel: edit.ErrUsage,
+			err:      "cafe.jacobcolvin.com/v1 removes the root of the document",
+		},
+		"move of the root": {
+			before: "a: 1\n",
+			call: func(_ context.Context, root *edit.Node) error {
+				return root.Move(paths.Doc().Child("b"))
+			},
+			sentinel: edit.ErrUsage,
+			err:      "cafe.jacobcolvin.com/v1 moves the root of the document",
+		},
+		"insert at a name": {
+			before: "a: 1\n",
+			call: func(ctx context.Context, root *edit.Node) error {
+				return root.At(a).Insert(ctx, 2)
+			},
+			sentinel: edit.ErrUsage,
+			err:      "cafe.jacobcolvin.com/v1 inserts $.a, which is no path of an item",
+		},
+		"move to an @ path": {
+			before: "a: 1\n",
+			call: func(_ context.Context, root *edit.Node) error {
+				return root.At(a).Move(paths.Current().Child("b"))
+			},
+			sentinel: edit.ErrUsage,
+			err:      `cafe.jacobcolvin.com/v1 moves "a" to @.b, which is no $ path of names and indexes`,
+		},
+		"move to the root": {
+			before: "a: 1\n",
+			call: func(_ context.Context, root *edit.Node) error {
+				return root.At(a).Move(paths.Doc())
+			},
+			sentinel: edit.ErrUsage,
+			err:      `cafe.jacobcolvin.com/v1 moves "a" to $, but a value cannot move to the document root`,
+		},
+		"move inside the value": {
+			before: "a: {b: 1}\n",
+			call: func(_ context.Context, root *edit.Node) error {
+				return root.At(a).Move(a.Child("c"))
+			},
+			sentinel: edit.ErrUsage,
+			err:      `cafe.jacobcolvin.com/v1 moves "a" to $.a.c, which lies inside it`,
+		},
+		"move before the key that moves": {
+			before: "a: 1\nb: 2\n",
+			call: func(_ context.Context, root *edit.Node) error {
+				return root.At(a).Move(a, edit.Before("a"))
+			},
+			sentinel: edit.ErrUsage,
+			err:      `cafe.jacobcolvin.com/v1 moves $.a to $.a before "a", which is the entry that moves`,
+		},
+		"move of a place without a value to an @ path": {
+			before: "a: 1\n",
+			call: func(_ context.Context, root *edit.Node) error {
+				return root.At(paths.Doc().Child("zz")).Move(paths.Current().Child("b"))
+			},
+			sentinel: edit.ErrUsage,
+			err:      `cafe.jacobcolvin.com/v1 moves "zz" to @.b, which is no $ path of names and indexes`,
+		},
+		"move of a place without a value to the root": {
+			before: "a: 1\n",
+			call: func(_ context.Context, root *edit.Node) error {
+				return root.At(paths.Doc().Child("zz")).Move(paths.Doc())
+			},
+			sentinel: edit.ErrUsage,
+			err:      `cafe.jacobcolvin.com/v1 moves "zz" to $, but a value cannot move to the document root`,
+		},
+		"move of a place without a value inside it": {
+			before: "a: 1\n",
+			call: func(_ context.Context, root *edit.Node) error {
+				return root.At(paths.Doc().Child("zz")).Move(paths.MustParse("$.zz.q"))
+			},
+			sentinel: edit.ErrUsage,
+			err:      `cafe.jacobcolvin.com/v1 moves "zz" to $.zz.q, which lies inside it`,
+		},
+		"move of a place without a value before its own key": {
+			before: "a: 1\n",
+			call: func(_ context.Context, root *edit.Node) error {
+				return root.At(paths.Doc().Child("zz")).Move(paths.Doc().Child("b"), edit.Before("zz"))
+			},
+			sentinel: edit.ErrUsage,
+			err:      `cafe.jacobcolvin.com/v1 moves $.zz to $.b before "zz", which is the entry that moves`,
+		},
+		"move before the key that moves through an alias": {
+			// The alias puts $.n.b in the mapping of $.m.a, so the document
+			// decides the problem.
+			before: "m: &x {a: 1, c: 2}\nn: *x\n",
+			call: func(_ context.Context, root *edit.Node) error {
+				return root.At(paths.MustParse("$.m.a")).Move(paths.MustParse("$.n.b"), edit.Before("a"))
+			},
+			err: `cafe.jacobcolvin.com/v1 moves $.m.a to $.n.b before "a", which is the entry that moves`,
+		},
+		"rename of an item that the text lacks": {
+			before: "a: [1]\n",
+			call: func(_ context.Context, root *edit.Node) error {
+				return root.At(a.Index(5)).SetKey("x")
+			},
+			sentinel: edit.ErrUsage,
+			err:      "cafe.jacobcolvin.com/v1 renames this item, but an item of a sequence has no key",
+		},
+		"marshaler that fails": {
+			before: "a: 1\n",
+			call: func(ctx context.Context, root *edit.Node) error {
+				return root.At(a).Set(ctx, errorMarshaler{err: errLookup})
+			},
+			sentinel: edit.ErrValue,
+			cause:    errLookup,
+			err:      "test.yaml:1:4: $.a: cafe.jacobcolvin.com/v1 cannot write the value of $.a: ",
+		},
+		"marshaler that fails with a typed error": {
+			before: "a: 1\n",
+			call: func(ctx context.Context, root *edit.Node) error {
+				return root.At(a).Set(ctx, errorMarshaler{err: errOpen})
+			},
+			sentinel: edit.ErrValue,
+			cause:    fs.ErrNotExist,
+			typed:    errOpen,
+			err: "test.yaml:1:4: $.a: cafe.jacobcolvin.com/v1 cannot write the value of $.a: " +
+				"value does not encode: open x: file does not exist",
+		},
+		"node of the document at a place that holds no value": {
+			// The document decides the problem, because the Set passes when
+			// the text holds $.missing.
+			before: "a: 1\n",
+			call: func(ctx context.Context, root *edit.Node) error {
+				return root.At(a).Set(ctx, root.At(paths.Doc().Child("missing")))
+			},
+			err: "test.yaml:1:4: $.a: cafe.jacobcolvin.com/v1 cannot write the value of $.a: " +
+				"value does not encode: test.yaml:1:1: $: cafe.jacobcolvin.com/v1 cannot decode $.missing, " +
+				"which holds no value",
+		},
+		"node of another document at a place that holds no value": {
+			// The values of the other document decide the problem, not those
+			// of the user's document.
+			before: "a: 1\n",
+			call: func(ctx context.Context, root *edit.Node) error {
+				return other.Apply(ctx, paths.Doc(), func(ctx context.Context, on *edit.Node) error {
+					return root.At(a).Set(ctx, on.At(paths.Doc().Child("missing")))
+				})
+			},
+			sentinel: edit.ErrValue,
+			err: "test.yaml:1:4: $.a: cafe.jacobcolvin.com/v1 cannot write the value of $.a: " +
+				"value does not encode: other.yaml:1:1: $: the edit cannot decode $.missing, which holds no value",
+		},
+		"node of the document on a path that selects more than one value": {
+			// The path of the node decides the problem, whatever the
+			// document holds.
+			before: "a: 1\n",
+			call: func(ctx context.Context, root *edit.Node) error {
+				return root.At(a).Set(ctx, root.At(paths.MustParse("$.*")))
+			},
+			sentinel: edit.ErrUsage,
+			err: "test.yaml:1:4: $.a: cafe.jacobcolvin.com/v1 cannot write the value of $.a: " +
+				"value does not encode: ",
+		},
+		"marshaler that returns the error of a context": {
+			before: "a: 1\n",
+			call: func(ctx context.Context, root *edit.Node) error {
+				return root.At(a).Set(ctx, errorMarshaler{err: context.Canceled})
+			},
+			sentinel: edit.ErrValue,
+			cause:    context.Canceled,
+			// An error of a context is about the call, so it binds at no
+			// place of the text, as Node.Bind binds it.
+			err: "test.yaml: cafe.jacobcolvin.com/v1 cannot write the value of $.a: value does not encode: " +
+				"context canceled",
+		},
+		"marshaler that returns a problem of a document": {
+			before: "a: 1\n",
+			call: func(ctx context.Context, root *edit.Node) error {
+				return root.At(a).Set(ctx, errorMarshaler{err: niceyaml.NewError("the input is bad")})
+			},
+			// The problem of the marshaler does not decide the place or the
+			// fault of the Set.
+			sentinel: edit.ErrValue,
+			err: "test.yaml:1:4: $.a: cafe.jacobcolvin.com/v1 cannot write the value of $.a: " +
+				"value does not encode: the input is bad",
+		},
+		"marshaler that returns a problem bound in another source": {
+			before: "a: 1\n",
+			call: func(ctx context.Context, root *edit.Node) error {
+				return root.At(a).Set(ctx, errorMarshaler{err: errOther})
+			},
+			sentinel: edit.ErrValue,
+			cause:    errOther,
+			err: "test.yaml:1:4: $.a: cafe.jacobcolvin.com/v1 cannot write the value of $.a: " +
+				"value does not encode: other.yaml:1:4: $.x: x is stale",
+		},
+		"marshaler that returns an error that matches ErrEngine": {
+			// The error of the Set does not match ErrEngine through the error
+			// of the marshaler. So the Apply fails with the error that the
+			// Func returns.
+			before: "a: 1\n",
+			call: func(ctx context.Context, root *edit.Node) error {
+				return root.At(a).Set(ctx, errorMarshaler{err: errLookupEngine})
+			},
+			sentinel: edit.ErrValue,
+			cause:    errLookupEngine,
+			err: "test.yaml:1:4: $.a: cafe.jacobcolvin.com/v1 cannot write the value of $.a: " +
+				"value does not encode: the lookup fails: the engine cannot write this edit",
+		},
+		"marshaler that returns a protected problem of another document": {
+			// The user's document holds no protected value at $.a.
+			before: "a: 1\n",
+			call: func(ctx context.Context, root *edit.Node) error {
+				return root.At(a).Set(ctx, errorMarshaler{err: errOtherProtected})
+			},
+			sentinel: edit.ErrValue,
+			cause:    errOtherProtected,
+			err: "test.yaml:1:4: $.a: cafe.jacobcolvin.com/v1 cannot write the value of $.a: " +
+				"value does not encode: other.yaml:1:7: $.kind: ",
+		},
+		"value of a type that does not encode": {
+			before: "a: 1\n",
+			call: func(ctx context.Context, root *edit.Node) error {
+				return root.At(a).Set(ctx, make(chan int))
+			},
+			sentinel: edit.ErrValue,
+			err: "test.yaml:1:4: $.a: cafe.jacobcolvin.com/v1 cannot write the value of $.a: " +
+				"value does not encode: unknown value type chan int",
+		},
+		"value that holds a function": {
+			before: "a: 1\n",
+			call: func(ctx context.Context, root *edit.Node) error {
+				return root.At(a).Set(ctx, map[string]any{"x": func() {}})
+			},
+			sentinel: edit.ErrValue,
+			err:      "value does not encode: unknown value type func()",
+		},
+		"value that holds itself": {
+			before: "a: 1\n",
+			call: func(ctx context.Context, root *edit.Node) error {
+				return root.At(a).Set(ctx, selfMap())
+			},
+			sentinel: edit.ErrValue,
+			err:      "cafe.jacobcolvin.com/v1 cannot write the value of $.a: it refers to itself",
+		},
+		"value with two keys that read as one": {
+			before: "a: 1\n",
+			call: func(ctx context.Context, root *edit.Node) error {
+				return root.At(a).Set(ctx, map[any]any{1: "x", "1": "y"})
+			},
+			sentinel: edit.ErrValue,
+			err:      `the value it writes holds two keys that a decode reads as "1"`,
+		},
+		"marshaler YAML of two documents": {
+			before: "a: 1\n",
+			call: func(ctx context.Context, root *edit.Node) error {
+				return root.At(a).Set(ctx, yamlMarshaler("x: 1\n---\ny: 2\n"))
+			},
+			sentinel: edit.ErrValue,
+			err:      "writes 2 documents, but a value is one node of YAML",
+		},
+		"marshaler YAML that repeats a key": {
+			before: "a: 1\n",
+			call: func(ctx context.Context, root *edit.Node) error {
+				return root.At(a).Set(ctx, yamlMarshaler("x: 1\nx: 2\n"))
+			},
+			sentinel: edit.ErrValue,
+			err:      "writes a mapping that repeats the key x, which YAML does not allow",
+		},
+		"chain of 1,001 marshalers": {
+			before: "a: 1\n",
+			call: func(ctx context.Context, root *edit.Node) error {
+				return root.At(a).Set(ctx, countMarshaler(1000))
+			},
+			sentinel: edit.ErrValue,
+			err:      "return values with marshalers more than 1,000 levels deep",
+		},
+		"set of a protected value": {
+			before: "kind: X\n",
+			call: func(ctx context.Context, root *edit.Node) error {
+				return root.At(kind).Set(ctx, "Y")
+			},
+			sentinel: edit.ErrProtected,
+			err:      "test.yaml:1:7: $.kind: cafe.jacobcolvin.com/v1 sets $.kind, which is a protected value",
+		},
+		"set that creates a protected value": {
+			before: "a: 1\n",
+			call: func(ctx context.Context, root *edit.Node) error {
+				return root.At(kind).Set(ctx, "Y")
+			},
+			sentinel: edit.ErrProtected,
+			err:      "cafe.jacobcolvin.com/v1 sets $.kind, which creates the protected value $.kind",
+		},
+		"rename of a protected value": {
+			before: "kind: X\n",
+			call: func(_ context.Context, root *edit.Node) error {
+				return root.At(kind).SetKey("k")
+			},
+			sentinel: edit.ErrProtected,
+			err:      `cafe.jacobcolvin.com/v1 renames "kind", which is a protected value`,
+		},
+		"remove of a protected value": {
+			before: "kind: X\n",
+			call: func(_ context.Context, root *edit.Node) error {
+				return root.At(kind).Remove()
+			},
+			sentinel: edit.ErrProtected,
+			err:      "cafe.jacobcolvin.com/v1 removes $.kind, which is a protected value",
+		},
+		"move of a protected value": {
+			before: "kind: X\n",
+			call: func(_ context.Context, root *edit.Node) error {
+				return root.At(kind).Move(a)
+			},
+			sentinel: edit.ErrProtected,
+			err:      `cafe.jacobcolvin.com/v1 moves "kind", which is a protected value`,
+		},
+		"move to a protected value": {
+			before: "kind: X\na: 1\n",
+			call: func(_ context.Context, root *edit.Node) error {
+				return root.At(a).Move(kind)
+			},
+			sentinel: edit.ErrProtected,
+			err:      `cafe.jacobcolvin.com/v1 moves "a" to $.kind, which is a protected value`,
+		},
+		"insert into a protected value": {
+			before: "kind: [X]\n",
+			call: func(ctx context.Context, root *edit.Node) error {
+				return root.At(kind.Index(0)).Insert(ctx, "Y")
+			},
+			sentinel: edit.ErrProtected,
+			err:      "cafe.jacobcolvin.com/v1 inserts $.kind[0], but",
+		},
+		"set below a scalar": {
+			before: "a: 1\n",
+			call: func(ctx context.Context, root *edit.Node) error {
+				return root.At(a.Child("x")).Set(ctx, 1)
+			},
+			err: "cafe.jacobcolvin.com/v1 sets $.a.x, but a holds a scalar",
+		},
+		"rename to a key that exists": {
+			before: "a: 1\nb: 2\n",
+			call: func(_ context.Context, root *edit.Node) error {
+				return root.At(a).SetKey("b")
+			},
+			err: `cafe.jacobcolvin.com/v1 renames "a" to "b", which already exists`,
+		},
+		"float that go-yaml reads as a string": {
+			before: "a: 1\n",
+			call: func(ctx context.Context, root *edit.Node) error {
+				return root.At(a).Set(ctx, 1000000.0)
+			},
+			sentinel: edit.ErrEngine,
+			err:      "go-yaml",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d := newDoc(t, tc.before)
+
+			err := d.Apply(t.Context(), paths.Doc(), tc.call, label)
+			require.Error(t, err)
+			assert.Contains(t, niceyaml.FormatError(err), tc.err)
+			assert.Equal(t, tc.sentinel == nil, niceyaml.IsInvalid(err))
+
+			for _, s := range sentinels {
+				assert.Equal(t, errors.Is(s, tc.sentinel), errors.Is(err, s), s)
+			}
+
+			if tc.cause != nil {
+				require.ErrorIs(t, err, tc.cause)
+			}
+
+			if tc.typed != nil {
+				var got *fs.PathError
+
+				require.ErrorAs(t, err, &got)
+				assert.Same(t, tc.typed, got)
+			}
+
+			// The binding of the error is the binding of the call, not one
+			// of its cause.
+			bound, ok := errors.AsType[*niceyaml.SourceError](err)
+			require.True(t, ok)
+			assert.Equal(t, "test.yaml", bound.Name())
+
+			assert.Equal(t, tc.before, d.Text())
+		})
+	}
+}
+
+func TestDoc_Apply_MarshalerErrorAs(t *testing.T) {
+	t.Parallel()
+
+	a := paths.Doc().Child("a")
+
+	t.Run("panic error", func(t *testing.T) {
+		t.Parallel()
+
+		inner := &niceyaml.PanicError{Value: "boom"}
+		d := newDoc(t, "a: 1\n")
+
+		err := d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, root *edit.Node) error {
+			return root.At(a).Set(ctx, errorMarshaler{err: fmt.Errorf("lookup: %w", inner)})
+		}, label)
+		require.ErrorIs(t, err, edit.ErrValue)
+		require.ErrorIs(t, err, inner)
+
+		// The error of the Set does not report a panic of the marshaler.
+		var pe *niceyaml.PanicError
+
+		assert.NotErrorAs(t, err, &pe)
+	})
+
+	t.Run("problem of a document", func(t *testing.T) {
+		t.Parallel()
+
+		inner := niceyaml.NewError("the input is bad")
+		d := newDoc(t, "a: 1\n")
+
+		err := d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, root *edit.Node) error {
+			return root.At(a).Set(ctx, errorMarshaler{err: inner})
+		}, label)
+		require.ErrorIs(t, err, edit.ErrValue)
+
+		// The problem that errors.As finds is that of the Set, not that
+		// of the marshaler.
+		got, ok := errors.AsType[*niceyaml.Error](err)
+		require.True(t, ok)
+		assert.NotSame(t, inner, got)
+		assert.False(t, niceyaml.IsInvalid(err))
+	})
 }
 
 func TestDoc_Apply_Nested(t *testing.T) {

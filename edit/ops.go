@@ -19,14 +19,15 @@ import (
 // SetKey renames the key of the entry. The value and its comments stay in
 // place, and the key keeps its quotes. A decode then reads the key as the
 // string key, so SetKey quotes a key that a decode reads as another value,
-// as it writes "0x10" for a rename to 0x10. SetKey fails on a sequence item
-// and on the root of the document, because neither has a key.
+// as it writes "0x10" for a rename to 0x10. SetKey fails with [ErrUsage] on
+// a sequence item and on the root of the document, because neither has a
+// key.
 //
 // SetKey leaves the text as it is when a decode reads the key as the
 // string key and a path by key selects the entry already. The key then
 // keeps its text. Otherwise it writes key. A place that does not hold a
-// value stays as it is, but SetKey fails at the root of an empty document,
-// as at any root.
+// value stays as it is, but SetKey fails at the root of an empty document
+// and at a path that ends in an index, as at any root or item.
 //
 // Go-yaml's parser compares keys by their text, as a path names them.
 // SetKey fails when the new key has the text of another key of its
@@ -74,22 +75,23 @@ func (n *Node) setKey(c *modelCall, key string) (renaming, error) {
 		return kept, err
 	}
 
+	// The path decides these problems whatever the text holds, so they come
+	// first, also for a place that does not hold a value.
+	switch {
+	case p.root:
+		return kept, d.failAs(ErrUsage, n, "%s renames the root of the document, which has no key", d.subject())
+	case lastIndex(n.path):
+		return kept, d.failAs(ErrUsage, n, "%s renames this item, but an item of a sequence has no key", d.subject())
+	}
+
 	// The text lacks the place, so the rename does nothing, unless a step of
-	// the path reaches a zone of the Apply. The root of an empty document
-	// holds no value either, but the rename of a root fails.
-	if !p.exists && !p.root {
+	// the path reaches a zone of the Apply.
+	if !p.exists {
 		return kept, n.stepProblem()
 	}
 
-	why := d.protection(p, false)
-
-	switch {
-	case p.root:
-		return kept, d.fail(n, "%s renames the root of the document, which has no key", d.subject())
-	case p.entry == nil:
-		return kept, d.fail(n, "%s renames this item, but an item of a sequence has no key", d.subject())
-	case why != "":
-		return kept, d.fail(n, "%s renames %q, which %s", d.subject(), n.Key(), why)
+	if why := d.protection(p, false); why != "" {
+		return kept, d.failAs(ErrProtected, n, "%s renames %q, which %s", d.subject(), n.Key(), why)
 	}
 
 	ks, tk, ok := d.keySpan(p)
@@ -211,8 +213,8 @@ func keyContent(e *ast.MappingValueNode) ast.Node {
 // and the finder on the YAML of v. It fails before the Set writes, so the
 // line breaks of the text do not change the problem. The problem binds
 // where every problem of the Set binds before the Set writes the text of
-// origin, as [Doc.setSite] gives the site. OwnRepeat returns nil for a v
-// without such a mapping.
+// origin, as [Doc.setSite] gives the site, and it matches [ErrValue].
+// OwnRepeat returns nil for a v without such a mapping.
 func (d *Doc) ownRepeat(h *Node, v *value, origin int) error {
 	x := &model{}
 	x.wroteIn(v)
@@ -257,10 +259,8 @@ func (d *Doc) ownRepeat(h *Node, v *value, origin int) error {
 	at := d.setSite(h, origin)
 	details := append([]error{errors.New("remove one of the two")}, d.callDetails(at)...)
 
-	err := d.user.Bind(niceyaml.NewError(msg, niceyaml.AtPath(at.path), niceyaml.AtRange(at.at),
-		niceyaml.WithDetails(details...)))
-
-	return err //nolint:wrapcheck // The binding is the problem of the call.
+	return d.programProblem(ErrValue, msg, niceyaml.AtPath(at.path), niceyaml.AtRange(at.at),
+		niceyaml.WithDetails(details...))
 }
 
 // parsedRepeat returns the problem of c, a rename in the mapping m to a key
@@ -449,8 +449,8 @@ func WithReason(reason string) RemoveOption {
 // the "-" in place. The next entry or item then takes that line, with its
 // comments. When another comment line lies between the two, the "-" ends
 // its line instead. A place that does not hold a value stays as it is. A
-// Remove of the root fails, also at the root of an empty document, which
-// holds no value.
+// Remove of the root fails with [ErrUsage], also at the root of an empty
+// document, which holds no value.
 func (n *Node) Remove(opts ...RemoveOption) error {
 	c := n.d.modelStart(n, "removes "+n.path.String(), false)
 	err := n.remove(opts...)
@@ -484,9 +484,9 @@ func (n *Node) remove(opts ...RemoveOption) error {
 
 	switch {
 	case p.root:
-		return d.fail(n, "%s removes the root of the document", d.subject())
+		return d.failAs(ErrUsage, n, "%s removes the root of the document", d.subject())
 	case why != "":
-		return d.fail(n, "%s removes %s, which %s", d.subject(), n.path, why)
+		return d.failAs(ErrProtected, n, "%s removes %s, which %s", d.subject(), n.path, why)
 	}
 
 	err = d.reachProblem(reachCall{

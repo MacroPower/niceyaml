@@ -137,11 +137,13 @@ func main() {
 	}
 
 	// A Func still reaches a protected value through At, and each edit
-	// there fails.
+	// there fails with ErrProtected. The program declared the guard, so
+	// IsInvalid does not blame the file.
 	err = d.Apply(ctx, paths.Doc(), func(ctx context.Context, root *edit.Node) error {
 		return root.At(paths.Doc().Child("kind")).Set(ctx, "Meny")
 	}, label)
 	lipgloss.Println(p.PrintError(err))
+	fmt.Println("Protected:", errors.Is(err, edit.ErrProtected), "Invalid:", niceyaml.IsInvalid(err))
 
 	fmt.Println("\nReplace an anchored value:")
 
