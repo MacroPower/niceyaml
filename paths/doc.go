@@ -32,6 +32,14 @@
 //	    - name: web  # $.spec.ports[0] points at "-"
 //	      port: 80   # $.spec.ports[0].port points at "80"
 //
+// A `~` selects a key or nothing. A sequence element and the root do not
+// have a key. The path `$..*~` thus selects the key of each entry that
+// `..*` selects and none of the sequence elements. [Path.RecursiveAll]
+// names the entries that `..*` leaves out, such as the entry of a `<<`
+// merge key. A path that ends in a `~` after an element or the root still
+// points where the path before the `~` does. An error at that path thus
+// has a place in the source.
+//
 // A Resolver resolves within a single document, so a caller with a
 // multi-document file must pick the document first. [NewResolver] walks
 // the document once to bind its aliases. Every path resolves through

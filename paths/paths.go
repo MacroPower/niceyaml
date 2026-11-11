@@ -371,14 +371,27 @@ func (p Path) IndexAll() Path {
 // picked, rather than its value. It looks through the `?` indicator of an
 // explicit key. It keeps a tag on the key, as a path to a value keeps a
 // tag on the value. The key thus decodes as it does when the decoder
-// reads the mapping, and [Resolver.Token] still gives the key text.
+// reads the mapping, and [Resolver.Token] still gives the key text. A `~`
+// after a `~` that found a key selects that key again, so `$.a~~` selects
+// what `$.a~` does.
 //
-// Where the path does not select an entry, such as where it selects a
-// sequence element or the root, the `~` selects the node the path already
-// does. An error at such a path thus highlights the same text with or
-// without the `~`. A path to a mapping or a sequence under a key already
-// points at that key, as [Resolver.Token] describes. The `~` there changes
-// the node the path selects but not the token it points at.
+// A sequence element and the root do not have a key, so a `~` after
+// either selects nothing, and so does every selector after that `~`.
+// [Resolver.Node] returns an error wrapping [ErrNotFound] for such a path,
+// and [Resolver.Nodes] leaves the element out. The path `$..*~` thus
+// selects the key of each entry that `..*` selects and none of the
+// sequence elements. It does not select the key of an entry that `..*`
+// leaves out, such as a `<<` merge key, as [Path.RecursiveAll] describes.
+//
+// For a path that ends in such a `~`, [Resolver.Token] points where the
+// path before the `~` does. An error at that path thus still has a place
+// in the source. A check that reports each problem at the key of the node
+// it checks also binds on a sequence element and on the root. A path with
+// a selector other than `~` after such a `~` does not point at a token.
+//
+// A path to a mapping or a sequence under a key already points at that
+// key, as [Resolver.Token] describes. The `~` there changes the node the
+// path selects but not the token it points at.
 //
 //	name := paths.Doc().Child("metadata", "name")
 //	r := paths.NewResolver(doc)
@@ -776,10 +789,11 @@ func (p Path) wildcard() bool {
 // A document under a "---" header is the null document when it does not
 // hold content. Its body is nil, or the body holds only comments or
 // directives. A parse that keeps comments leaves them in the body of a
-// comment-only document. A path with no selectors, or with only `~`
-// selectors, matches that null at the header. An error about the document
-// as a whole thus points at its header line. No deeper path matches
-// anything there.
+// comment-only document. A path with no selectors matches that null at
+// the header. A path with only `~` selectors gives the keyless match of
+// that null, as [match.key] describes. It points at the header but does
+// not select a node. An error about the document as a whole thus points
+// at its header line. No deeper path matches anything there.
 //
 // In a document without content and without a header, no path matches
 // anything. A file of whitespace alone parses to such a document, whose
@@ -790,7 +804,12 @@ func (p Path) wildcard() bool {
 // nil.
 func (p Path) matches(r *resolver, doc *ast.DocumentNode) ([]match, error) {
 	if doc != nil && doc.Start != nil && !astnode.HasContent(doc.Body) && p.selectsRoot() {
-		return []match{{node: ast.Null(doc.Start), segs: slices.Clone(p.segments)}}, nil
+		return []match{{
+			node: ast.Null(doc.Start),
+			segs: slices.Clone(p.segments),
+			// The root does not have a key for a `~` to select.
+			keyless: len(p.segments) > 0,
+		}}, nil
 	}
 
 	if doc == nil {
@@ -809,9 +828,10 @@ func (p Path) matches(r *resolver, doc *ast.DocumentNode) ([]match, error) {
 	return found, nil
 }
 
-// selectsRoot reports whether the path names the root node. A path names
-// the root when it does not have segments, or has only the `~` segments
-// of [Path.Key]. On the root, a `~` segment selects the root itself.
+// selectsRoot reports whether the path points at the root node. A path
+// points at the root when it does not have segments, or has only the `~`
+// segments of [Path.Key]. The root does not have a key, so a `~` segment
+// there points where the root path does.
 func (p Path) selectsRoot() bool {
 	for _, s := range p.segments {
 		if s.kind != segmentKey {
@@ -824,6 +844,10 @@ func (p Path) selectsRoot() bool {
 
 // single resolves the path in doc with r, a resolver for doc, to exactly
 // one match.
+//
+// A path that ends in a `~` without a key to select resolves to the
+// keyless match of that `~`, as [match.key] describes. The caller decides
+// whether such a match serves it.
 //
 // Returns [ErrWildcard] for a path with a `.*`, `[*]`, or `..` selector and
 // wraps [ErrNotFound] when nothing exists at the path, together with

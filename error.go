@@ -965,6 +965,9 @@ type errorConfig struct {
 //
 //	niceyaml.NewError("unknown field", niceyaml.AtPath(paths.Current().Child("spec", "foo").Key()))
 //
+// A sequence element and the root do not have a key. A path that ends in
+// a `~` after either points where the path before the `~` does.
+//
 // A path that the document leaves out, such as the path a check for a
 // required field names, binds at the key of the mapping that lacks the
 // value. A path that enters an alias the document cannot follow binds at

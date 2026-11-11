@@ -7761,6 +7761,65 @@ func TestEach(t *testing.T) {
 		}
 	})
 
+	t.Run("a key path runs v on the keys alone", func(t *testing.T) {
+		t.Parallel()
+
+		// The rule rejects any text with an underscore, so it fails on a
+		// sequence element or a mapping that Each hands it as a key.
+		camelCase := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+			key, err := n.Decode[string](ctx)
+			if err != nil {
+				return niceyaml.NewError("key must be a string")
+			}
+
+			if strings.Contains(key, "_") {
+				return niceyaml.NewError("key must be camelCase")
+			}
+
+			return nil
+		})
+
+		keyed := yamltest.FirstDocument(t, stringtest.Input(`
+			name: x
+			tags: [snake_case_value, other]
+			items:
+			  - one
+			  - k: v
+			  - bad_key: v
+		`), niceyaml.WithName("t.yaml"))
+
+		tcs := map[string]struct {
+			path paths.Path
+			want string
+		}{
+			"every key at any depth": {
+				path: paths.Doc().RecursiveAll().Key(),
+				want: "t.yaml:6:5: $.items[2].bad_key~: key must be camelCase",
+			},
+			"the keys of the elements select nothing": {
+				path: paths.Doc().Child("items").IndexAll().Key(),
+			},
+			"the key of the root selects nothing": {
+				path: paths.Doc().Key(),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				err := keyed.Validate(t.Context(), niceyaml.Each(tc.path, camelCase))
+				if tc.want == "" {
+					require.NoError(t, err)
+
+					return
+				}
+
+				require.EqualError(t, err, tc.want)
+			})
+		}
+	})
+
 	t.Run("a lone failure comes back as the Node bound it", func(t *testing.T) {
 		t.Parallel()
 

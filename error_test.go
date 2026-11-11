@@ -361,6 +361,15 @@ func TestError(t *testing.T) {
 				"<punctuationSequenceEntry>-</punctuationSequenceEntry><text> </text><literalString>third</literalString>",
 			),
 		},
+		"root level array - selector after the key that an element lacks": {
+			// Only a path that ends in the `~` falls back to the element.
+			input: stringtest.Input(`
+				- first
+				- k: v
+			`),
+			err:  niceyaml.NewError("below a key", niceyaml.AtPath(paths.Current().Index(1).Key().Child("k"))),
+			want: stringtest.JoinLF("$[1]~.k: below a key", "", "no excerpt: resolve $[1]~.k: not found"),
+		},
 		"document root - no entry selected": {
 			// A key target on the root falls back to the mapping's first key.
 			input: stringtest.Input(`

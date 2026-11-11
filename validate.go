@@ -1762,6 +1762,13 @@ func SkipEmpty(v Validator) Validator {
 //
 //	svc.yaml:3:11: $.items[1].name: reserved name
 //
+// A path that ends in the `~` selector of [paths.Path.Key] selects keys
+// alone. A rule for the keys of a document thus does not run on the
+// elements of its sequences:
+//
+//	keys := paths.Doc().RecursiveAll().Key() // $..*~
+//	err := doc.Validate(ctx, niceyaml.Each(keys, camelCase))
+//
 // Where path selects an alias that reads a reference document of
 // [WithReferences], Each hands v the Node of that alias, as Node.Nodes
 // scopes it. A v that decodes the Node it gets reads the anchor through the

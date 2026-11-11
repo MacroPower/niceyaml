@@ -175,6 +175,11 @@ func NewResolver(doc *ast.DocumentNode, opts ...ResolverOption) *Resolver {
 // the same way, because the decoder reads such an alias as null. A
 // selector below it returns an error that wraps [ErrAlias].
 //
+// The `~` selector from [Path.Key] selects the key of an entry. A sequence
+// element and the root do not have a key, so Node wraps [ErrNotFound] for
+// a path with a `~` after either. [Resolver.Token] still points at the
+// element or the root for a path that ends in such a `~`.
+//
 // Returns [ErrWildcard] for a path with a `.*`, `[*]`, or `..` selector.
 // Resolve such a path with [Resolver.Nodes]. Wraps [ErrNotFound] when
 // nothing exists at the path, together with [ErrNoDocument] when the
@@ -187,6 +192,12 @@ func (r *Resolver) Node(p Path) (ast.Node, error) {
 	m, err := p.single(r.resolver, r.doc)
 	if err != nil {
 		return nil, err
+	}
+
+	// Only the keyless match at the header of a document without content
+	// comes from such a document.
+	if m.keyless && !astnode.HasContent(r.doc.Body) {
+		return nil, fmt.Errorf("resolve %s: %w: %w", p, ErrNotFound, ErrNoDocument)
 	}
 
 	return r.nodeOf(p, m)
@@ -204,10 +215,12 @@ func (r *Resolver) Node(p Path) (ast.Node, error) {
 //
 // Where q is the path that resolves to node, NodeFrom gives the node
 // that q joined with an `@` path p resolves to, unless p starts with the
-// `~` selector from [Path.Key]. A path starts at node as it does at the
-// root, so a `~` there selects node itself. A `$` path reads from the
-// document root wherever it resolves. NodeFrom thus resolves it as
-// Resolver.Node does and ignores node.
+// `~` selector from [Path.Key]. NodeFrom gets node without the entry that
+// holds it, so a `~` there does not find a key, as at the root, and
+// NodeFrom wraps [ErrNotFound]. Resolve q joined with p from the root to
+// select the key of node. A `$` path reads from the document root wherever
+// it resolves. NodeFrom thus resolves it as Resolver.Node does and ignores
+// node.
 //
 // NodeFrom selects an alias that reads a reference document as
 // Resolver.Node does. A selector that applies below such an alias returns
@@ -232,8 +245,13 @@ func (r *Resolver) NodeFrom(node ast.Node, p Path) (ast.Node, error) {
 }
 
 // nodeOf returns the content of the node of m, a match of p, as
-// [Resolver.Node] gives it.
+// [Resolver.Node] gives it. A keyless match does not select a node, so
+// nodeOf returns an error wrapping [ErrNotFound] for one.
 func (r *Resolver) nodeOf(p Path, m match) (ast.Node, error) {
+	if m.keyless {
+		return nil, fmt.Errorf("resolve %s: %w", p, ErrNotFound)
+	}
+
 	node, err := r.resolver.selected(m.node)
 	if err != nil {
 		return nil, resolveError(p, err)
@@ -271,15 +289,21 @@ func (r *Resolver) nodeOf(p Path, m match) (ast.Node, error) {
 // content of its anchor, because the alias is where the path points in
 // the source.
 //
+// A sequence element and the root do not have a key. A path that ends in
+// the `~` selector after either thus points where the path before the
+// selector does. [Resolver.Node] wraps [ErrNotFound] for such a path, but
+// an error at it still binds to a token.
+//
 // The path resolves only against the document body, from its root,
 // whether the path starts at `$` or `@`. The same path thus resolves to
 // different tokens in different documents of one file. Token returns the
-// same errors as [Resolver.Node], except that it does not look through
-// the node the last selector reaches. An alias there that does not
-// resolve yields the alias's own token rather than [ErrAlias]. Such an
-// alias might not name an anchor, or it might sit inside the content of
-// its own anchor. Token still returns [ErrAlias] for an alias that an
-// earlier selector resolves through.
+// same errors as [Resolver.Node], except for a path that ends in a `~`
+// without a key to select. It also does not look through the node the
+// last selector reaches. An alias there that does not resolve yields the
+// alias's own token rather than [ErrAlias]. Such an alias might not name
+// an anchor, or it might sit inside the content of its own anchor. Token
+// still returns [ErrAlias] for an alias that an earlier selector resolves
+// through.
 func (r *Resolver) Token(p Path) (*token.Token, error) {
 	m, err := p.single(r.resolver, r.doc)
 	if err != nil {
@@ -308,9 +332,10 @@ func (r *Resolver) Token(p Path) (*token.Token, error) {
 // It reports false for a path that resolves, because such a path does
 // not miss a key. It also reports false when p fails to select a node for
 // another reason. An index past the end of a sequence is one such reason,
-// and a name looked up in a scalar or a sequence is another. A `.*`,
-// `[*]`, or `..` selector anywhere in p gives false, and so does a `~`
-// selector at or after the missing key. An alias that does not resolve
+// and a name looked up in a scalar or a sequence is another. So is a `~`
+// selector after a sequence element or the root, which do not have a key.
+// A `.*`, `[*]`, or `..` selector anywhere in p gives false, and so does a
+// `~` selector at or after the missing key. An alias that does not resolve
 // also gives false, and so does a document without content.
 func (r *Resolver) Nearest(p Path) (Path, bool) {
 	if p.wildcard() || r.doc == nil || !astnode.HasContent(r.doc.Body) {
@@ -325,7 +350,9 @@ func (r *Resolver) Nearest(p Path) (Path, bool) {
 			continue
 		}
 
-		if err != nil || k == len(p.segments) {
+		// A `~` that does not find a key selects nothing, so the path
+		// misses more than a key.
+		if err != nil || k == len(p.segments) || m.keyless {
 			return Path{}, false
 		}
 
@@ -370,6 +397,10 @@ func (r *Resolver) Nearest(p Path) (Path, bool) {
 // Each node is the one that [Resolver.Node] gives for the path of its
 // match. A match at an alias that reads a reference document thus holds
 // the alias, or the tag on it, rather than the content of the anchor.
+//
+// A `~` selects only the key of an entry. A path such as `$..*~` thus
+// yields a match for the key of each entry that `..*` selects and none for
+// a sequence element.
 func (r *Resolver) Matches(p Path) ([]Match, error) {
 	found, err := p.matches(r.resolver, r.doc)
 	if err != nil {
@@ -391,8 +422,10 @@ func (r *Resolver) Matches(p Path) ([]Match, error) {
 // A `$` path reads from the document root wherever it resolves, so
 // MatchesFrom resolves it as [Resolver.Matches] does and ignores node. An
 // `@` path resolves in node rather than in the document, so a nil node
-// yields no match. Returns the errors that [Resolver.Matches] returns,
-// other than those that wrap [ErrNoDocument] for an `@` path.
+// yields no match. MatchesFrom gets node without the entry that holds it,
+// so an `@` path that starts with a `~` yields no match either. Returns
+// the errors that [Resolver.Matches] returns, other than those that wrap
+// [ErrNoDocument] for an `@` path.
 func (r *Resolver) MatchesFrom(node ast.Node, p Path) ([]Match, error) {
 	if p.absolute {
 		return r.Matches(p)
@@ -407,12 +440,17 @@ func (r *Resolver) MatchesFrom(node ast.Node, p Path) ([]Match, error) {
 }
 
 // matchesOf returns the [Match] of each of found, the matches of p, as
-// [Resolver.Matches] gives them. The path of each starts at `$` when
-// absolute is set, and at `@` otherwise.
+// [Resolver.Matches] gives them. It leaves out a keyless match, which
+// does not select a node. The path of each starts at `$` when absolute is
+// set, and at `@` otherwise.
 func (r *Resolver) matchesOf(p Path, found []match, absolute bool) ([]Match, error) {
 	matches := make([]Match, 0, len(found))
 
 	for _, m := range found {
+		if m.keyless {
+			continue
+		}
+
 		node, err := r.resolver.selected(m.node)
 		if err != nil {
 			return nil, resolveError(p, err)
@@ -505,15 +543,29 @@ func (r *Resolver) matchesOf(p Path, found []match, absolute bool) ([]Match, err
 // sequence that lists the sources of one. It still lists the entries of a
 // mapping written inline under a merge key.
 //
+// # Key Selectors
+//
+// The `~` selector from [Path.Key] lists the key of each entry that the
+// path before it selects. A sequence element and the root do not have a
+// key, so the `~` lists nothing for them. After `..*`, `..name`, or `[*]`,
+// it thus lists the keys of the entries among the matches and leaves out
+// the elements:
+//
+//	keys, err := r.Nodes(paths.Doc().RecursiveAll().Key()) // $..*~
+//
+// The `~` lists a key only for an entry that the path before it selects.
+// The `.*` and `..*` selectors leave out the entry of a `<<` merge key, so
+// `$..*~` does not list a `<<` key. A path that names the merge key, such
+// as `$.base.<<~`, selects it.
+//
 // # Empty Documents
 //
 // A document without content, such as an empty one or one of comments
 // alone, does not hold a node for a selector to reach. The root path
-// selects the null at the "---" header of such a document, and so does a
-// path of only `~` selectors. When the document lacks a header, those
-// paths do not select anything. Nodes returns an empty result there for a
-// path with any other selector, as it does wherever a path does not
-// select anything.
+// selects the null at the "---" header of such a document. When the
+// document lacks a header, the root path does not select anything. Nodes
+// returns an empty result there for a path with a selector, as it does
+// wherever a path does not select anything.
 //
 // # Errors
 //

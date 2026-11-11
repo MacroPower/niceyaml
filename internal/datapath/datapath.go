@@ -329,12 +329,11 @@ func Read(r *paths.Resolver, node ast.Node) (ast.Node, bool) {
 // selector of p picks, or the sequence and the index that its last `[n]`
 // selector picks.
 //
-// The key of an entry does not have a holder. A path that ends in `~`
-// therefore does not have a parent when an entry with a key holds the
-// node that the path before the `~` selects. Otherwise, the `~` selects
-// the node itself, and ParentAt returns what holds it. ParentAt returns
-// the zero [astnode.Parent] for the root of the document and for a path
-// that does not select a node.
+// The key of an entry does not have a holder, and a `~` that does not
+// find a key does not select a node. ParentAt thus returns the zero
+// [astnode.Parent] for a path that ends in `~`. It also returns the zero
+// Parent for the root of the document and for a path that does not select
+// a node.
 func ParentAt(r *paths.Resolver, p paths.Path) astnode.Parent {
 	last, ok := p.Last()
 	if !ok {
@@ -344,12 +343,7 @@ func ParentAt(r *paths.Resolver, p paths.Path) astnode.Parent {
 	above, _ := p.Parent()
 
 	if last.Kind == paths.SelectorKey {
-		in := ParentAt(r, above)
-		if in.Entry != nil && astnode.Content(in.Entry.Key) != nil {
-			return astnode.Parent{}
-		}
-
-		return in
+		return astnode.Parent{}
 	}
 
 	node, err := r.Node(above)
