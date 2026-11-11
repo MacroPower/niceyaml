@@ -205,15 +205,6 @@
 //
 // # Mocks
 //
-// [NormalizerFunc] adapts a function to the
-// [go.jacobcolvin.com/niceyaml/finder.Normalizer] interface, for tests of
-// code paths that depend on normalization:
-//
-//	normalizer := yamltest.NormalizerFunc(strings.ToLower)
-//
-// A [niceyaml.ValidatorFunc] adapts a function to a [niceyaml.Validator]
-// in the same way.
-//
 // [RoundTripFunc] adapts a function to the transport of an [http.Client],
 // so a test answers each request itself:
 //

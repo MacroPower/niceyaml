@@ -1,9 +1,7 @@
 package normalizer
 
 import (
-	"fmt"
 	"log/slog"
-	"slices"
 	"sync"
 	"unicode"
 
@@ -13,8 +11,6 @@ import (
 	"golang.org/x/text/transform"
 	"golang.org/x/text/unicode/norm"
 	"golang.org/x/text/width"
-
-	"go.jacobcolvin.com/niceyaml/internal/nilness"
 )
 
 // Normalizer transforms strings by applying a configurable pipeline of Unicode
@@ -34,7 +30,6 @@ type Normalizer struct {
 // Available options:
 //   - [WithCaseFold]
 //   - [WithDiacriticFold]
-//   - [WithTransformer]
 //   - [WithWidthFold]
 type Option func(*config)
 
@@ -58,10 +53,9 @@ func isDiacritic(r rune) bool {
 }
 
 type config struct {
-	transformers []func() transform.Transformer
-	caseFold     bool
-	diacritics   bool
-	widthFold    bool
+	caseFold   bool
+	diacritics bool
+	widthFold  bool
 }
 
 // New creates a new [*Normalizer].
@@ -82,10 +76,6 @@ func New(opts ...Option) *Normalizer {
 	n.pool.New = func() any {
 		return cfg.build()
 	}
-
-	// Building the first pipeline now makes a constructor that returns nil
-	// panic here, next to the configuration, instead of in a later call.
-	n.pool.Put(cfg.build())
 
 	return n
 }
@@ -118,15 +108,6 @@ func (c *config) build() transform.Transformer {
 		)
 	}
 
-	for _, newTransformer := range c.transformers {
-		t := newTransformer()
-		if nilness.IsNil(t) {
-			panic("normalizer.WithTransformer: constructor returned nil")
-		}
-
-		transformers = append(transformers, t)
-	}
-
 	switch len(transformers) {
 	case 0:
 		return transform.Nop
@@ -155,35 +136,6 @@ func WithCaseFold(enabled bool) Option {
 func WithDiacriticFold(enabled bool) Option {
 	return func(c *config) {
 		c.diacritics = enabled
-	}
-}
-
-// WithTransformer is an [Option] that appends custom transformers to the end
-// of the pipeline. Call it multiple times to append more transformers.
-//
-// Each argument is a constructor rather than an instance, because a
-// [transform.Transformer] carries state between calls and the Normalizer
-// keeps one pipeline per concurrent caller:
-//
-//	normalizer.WithTransformer(func() transform.Transformer {
-//		return runes.Remove(runes.In(unicode.Zs))
-//	})
-//
-// WithTransformer panics if any constructor is nil. [New] calls each
-// constructor once and panics if one returns nil or a nil pointer.
-// [Normalizer.Normalize] might call a constructor again, and it panics the
-// same way.
-func WithTransformer(newTransformer ...func() transform.Transformer) Option {
-	for i, fn := range newTransformer {
-		if fn == nil {
-			panic(fmt.Sprintf("normalizer.WithTransformer: constructor at index %d is nil", i))
-		}
-	}
-
-	newTransformer = slices.Clone(newTransformer)
-
-	return func(c *config) {
-		c.transformers = append(c.transformers, newTransformer...)
 	}
 }
 

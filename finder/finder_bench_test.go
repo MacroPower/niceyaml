@@ -8,7 +8,6 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/finder"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
-	"go.jacobcolvin.com/niceyaml/normalizer"
 )
 
 // benchSizes lists the input sizes the find benchmarks share.
@@ -60,16 +59,16 @@ func BenchmarkFinderFind(b *testing.B) {
 	}
 }
 
-func BenchmarkFinderFind_WithNormalizer(b *testing.B) {
+func BenchmarkFinderFind_Folds(b *testing.B) {
 	for _, sz := range benchSizes {
 		yaml := yamltest.GenerateYAML(sz.lines)
 
-		b.Run(sz.name+"/without_normalizer", func(b *testing.B) {
-			benchFind(b, finder.New(finder.WithNormalizer(finder.Exact)), yaml, "value_")
+		b.Run(sz.name+"/exact", func(b *testing.B) {
+			benchFind(b, finder.New(finder.Exact()), yaml, "value_")
 		})
 
-		b.Run(sz.name+"/with_normalizer", func(b *testing.B) {
-			benchFind(b, finder.New(finder.WithNormalizer(normalizer.New())), yaml, "value_")
+		b.Run(sz.name+"/default_folds", func(b *testing.B) {
+			benchFind(b, finder.New(), yaml, "value_")
 		})
 	}
 }
@@ -91,13 +90,13 @@ func BenchmarkFinderFind_SearchLength(b *testing.B) {
 func BenchmarkFinderFind_UnicodeContent(b *testing.B) {
 	yaml := yamltest.GenerateLines(500, `key_%[1]d: "Héllo Wörld Ñoño %[1]d"`)
 
-	b.Run("without_normalizer", func(b *testing.B) {
-		benchFind(b, finder.New(finder.WithNormalizer(finder.Exact)), yaml, "Héllo")
+	b.Run("exact", func(b *testing.B) {
+		benchFind(b, finder.New(finder.Exact()), yaml, "Héllo")
 	})
 
-	b.Run("with_normalizer", func(b *testing.B) {
-		// The normalizer converts "Héllo" to "hello".
-		benchFind(b, finder.New(finder.WithNormalizer(normalizer.New())), yaml, "hello")
+	b.Run("default_folds", func(b *testing.B) {
+		// The default folds turn "Héllo" into "hello".
+		benchFind(b, finder.New(), yaml, "hello")
 	})
 }
 
@@ -105,14 +104,14 @@ func BenchmarkFinderCreate(b *testing.B) {
 	yaml := yamltest.GenerateYAML(500)
 	source := niceyaml.NewSourceFromString(yaml)
 
-	// Each iteration builds its own normalizer, so the benchmark counts the
-	// cost of building one.
+	// Each iteration builds its own Finder and Index, so the benchmark
+	// counts the cost of building the folds.
 	modes := []struct {
-		name       string
-		normalizer func() finder.Normalizer
+		name string
+		opts []finder.Option
 	}{
-		{"without_normalizer", func() finder.Normalizer { return finder.Exact }},
-		{"with_normalizer", func() finder.Normalizer { return normalizer.New() }},
+		{"exact", []finder.Option{finder.Exact()}},
+		{"default_folds", nil},
 	}
 
 	for _, mode := range modes {
@@ -120,7 +119,7 @@ func BenchmarkFinderCreate(b *testing.B) {
 			b.ReportAllocs()
 
 			for b.Loop() {
-				f := finder.New(finder.WithNormalizer(mode.normalizer()))
+				f := finder.New(mode.opts...)
 				_ = f.Load(source.Lines())
 			}
 		})

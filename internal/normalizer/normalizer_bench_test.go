@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"go.jacobcolvin.com/niceyaml/normalizer"
+	"go.jacobcolvin.com/niceyaml/internal/normalizer"
 )
 
 func BenchmarkNormalizerNormalize(b *testing.B) {
