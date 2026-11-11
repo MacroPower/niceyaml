@@ -262,12 +262,3 @@ func (d *Doc) refusal(in *instance, named string) error {
 
 	return d.user.Bind(niceyaml.Invalid(err, opts...)) //nolint:wrapcheck // The binding is the problem of the document.
 }
-
-// recordRefusal returns the problem of a call that named names, which
-// reaches in, as [Doc.refusal] gives it, and the Apply records it.
-func (d *Doc) recordRefusal(in *instance, named string) error {
-	problem := d.refusal(in, named)
-	d.record(problem)
-
-	return problem
-}

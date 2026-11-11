@@ -83,8 +83,9 @@ var (
 	ErrUsage = errors.New("the program passes an argument that the package does not take")
 
 	// ErrNested indicates an Apply that a [Func] of the same Doc calls. The
-	// nested Apply fails with the error, and so does the outer Apply, in
-	// which the error binds at the root of the document.
+	// nested Apply fails with the error and calls its Func zero times. The
+	// outer Apply fails with the error only when its Func returns it, and
+	// the error then binds at the node of that call.
 	ErrNested = errors.New("Apply runs inside another Apply of the Doc")
 
 	// ErrEnded indicates an edit or a decode through a [Node] after the
@@ -267,9 +268,8 @@ func WithLabel(label string) ApplyOption {
 //
 // Create instances with [New].
 type Doc struct {
-	// The first problem of the call that runs, which fails the Apply. The
-	// error that the Func returns comes first, unless the problem matches
-	// [ErrEngine].
+	// The first problem of the call that runs that matches [ErrEngine],
+	// which fails the Apply whatever the Func returns.
 	callErr error
 	// The problem of the first call of the Apply running after which the
 	// text differed from the model of the calls, which each later call of
@@ -745,10 +745,12 @@ func headerEnd(src *niceyaml.Source, line int) int {
 // Each call sees the edits of the calls before it. A read after the write of
 // an earlier call thus reads the written value, through an alias too. Apply
 // skips each place that an earlier call removed, either directly or by
-// replacing a value above it. When a method
-// of [Node] cannot make its edit, the Apply fails, even when fn continues
-// and returns nil. The calls act in order, so a later call can edit a value
-// that an earlier call edited, through any path.
+// replacing a value above it. When a method of [Node] cannot make its edit,
+// it returns its problem to fn and leaves the Doc as it found it. The
+// Apply fails with that problem only when fn returns it or when the
+// problem matches [ErrEngine]. So fn can skip the edit or try another. The
+// calls act in order, so a later call can edit a value that an earlier
+// call edited, through any path.
 //
 // After each call, the text must hold the values of a model of the calls,
 // and each alias must read the value that the model holds at its place.
@@ -791,17 +793,15 @@ func headerEnd(src *niceyaml.Source, line int) int {
 // every edit of the calls before the problem. Apply returns an error that
 // matches [ErrUsage], and calls fn zero times, for a path that does not
 // start at `$` or that holds a `~`. It returns an error that matches
-// [ErrNested] for a call from a Func of the same Doc, and that call fails
-// the outer Apply too. A text whose aliases expand past the
-// alias limit also fails before fn runs, with the error that a decode of
-// the text gives. A path whose matches read through an alias that the text
-// does not resolve, such as an alias of a reference document at a `<<`
-// merge key, fails the Apply too. That problem reads as the problem of such
-// a path of [Node.At] does, and it binds at the alias.
+// [ErrNested] for a call from a Func of the same Doc, and the outer Apply
+// fails with that error only when its Func returns it. A text whose aliases
+// expand past the alias limit also fails before fn runs, with the error that
+// a decode of the text gives. A path whose matches read through an alias
+// that the text does not resolve, such as an alias of a reference document
+// at a `<<` merge key, fails the Apply too. That problem reads as the
+// problem of such a path of [Node.At] does, and it binds at the alias.
 func (d *Doc) Apply(ctx context.Context, path paths.Path, fn Func, opts ...ApplyOption) error {
 	if d.applying {
-		d.record(ErrNested)
-
 		return ErrNested
 	}
 

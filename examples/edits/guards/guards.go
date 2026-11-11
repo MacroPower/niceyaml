@@ -188,23 +188,34 @@ func main() {
 	fmt.Println("Unsupported:", errors.Is(err, edit.ErrUnsupported))
 
 	// The error asks for a Set of each alias to the value that it reads
-	// first. A Set at an alias replaces the alias, so after those Sets no
-	// alias reads the milk, and the Remove passes.
-	err = d.Apply(ctx, paths.MustParse("$.drinks[*].milk"), func(ctx context.Context, n *edit.Node) error {
-		m, err := n.Decode[milk](ctx)
-		if err != nil {
-			return fmt.Errorf("decode milk: %w", err)
+	// first, and its Related field names each alias. A Set at an alias
+	// replaces the alias, so after those Sets no alias reads the milk. A
+	// refused Remove leaves the Doc as it was, so the Func can make the
+	// Sets and remove the milk again in the same Apply.
+	err = d.Apply(ctx, paths.Doc().Child("milk"), func(ctx context.Context, n *edit.Node) error {
+		err := n.Remove()
+
+		ue, ok := errors.AsType[*edit.UnsupportedError](err)
+		if !ok {
+			return err
 		}
 
-		return n.Set(ctx, m)
+		for _, path := range ue.Related {
+			alias := n.At(path)
+
+			m, err := alias.Decode[milk](ctx)
+			if err != nil {
+				return fmt.Errorf("decode milk: %w", err)
+			}
+
+			err = alias.Set(ctx, m)
+			if err != nil {
+				return fmt.Errorf("set milk: %w", err)
+			}
+		}
+
+		return n.Remove()
 	}, label)
-	if err != nil {
-		lipgloss.Println(p.PrintError(err))
-
-		return
-	}
-
-	err = d.Apply(ctx, paths.Doc().Child("milk"), remove, label)
 	if err != nil {
 		lipgloss.Println(p.PrintError(err))
 

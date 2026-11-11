@@ -1062,12 +1062,146 @@ func TestDoc_Apply(t *testing.T) {
 			path:   spec.Child("tags").IndexAll(),
 			opts:   []edit.ApplyOption{label},
 			fn: func(_ context.Context, n *edit.Node) error {
-				_ = n.SetKey("b") //nolint:errcheck // The Apply fails with the error anyway.
+				_ = n.SetKey("b") //nolint:errcheck // The test ignores the error of the method.
 
 				return nil
 			},
-			err: "test.yaml:5:10: $.spec.tags[0]: cafe.jacobcolvin.com/v1 renames this item, " +
-				"but an item of a sequence has no key",
+			calls: []string{"$.spec.tags[0]"},
+			want:  cafe,
+		},
+		"error of a method that the func handles with another edit": {
+			before: cafe,
+			path:   spec.Child("tags").IndexAll(),
+			fn: func(ctx context.Context, n *edit.Node) error {
+				if n.SetKey("b") == nil {
+					return errors.New("the rename passes")
+				}
+
+				return n.Set(ctx, "b")
+			},
+			want: "apiVersion: v1\nkind: Cafe\nspec:\n  cost: 45 # kr\n  tags: [b]\n",
+		},
+		"refused removal that the func skips": {
+			// The removal of the anchored defaults fails, because an alias reads
+			// them. The calls before and after it keep their removals.
+			before: stringtest.LinesLF(
+				"jobs:",
+				"  build:",
+				"    defaults: {retries: 1}",
+				"    run: make",
+				"  test:",
+				"    defaults: &t {retries: 3}",
+				"    run: make test",
+				"  lint:",
+				"    defaults: {retries: 2}",
+				"    run: lint",
+				"nightly:",
+				"  defaults: *t",
+			),
+			path: paths.MustParse("$.jobs.*"),
+			fn: func(_ context.Context, n *edit.Node) error {
+				err := n.At(paths.Current().Child("defaults")).Remove()
+				if errors.Is(err, edit.ErrUnsupported) && n.Key() == "test" {
+					return nil
+				}
+
+				return err
+			},
+			want: stringtest.LinesLF(
+				"jobs:",
+				"  build:",
+				"    run: make",
+				"  test:",
+				"    defaults: &t {retries: 3}",
+				"    run: make test",
+				"  lint:",
+				"    run: lint",
+				"nightly:",
+				"  defaults: *t",
+			),
+		},
+		"refused removal that the func retries after it sets each related alias": {
+			// The Remove names each alias that reads the milk. A Set at each of
+			// them replaces the alias, so the Remove passes in the same Apply.
+			before: drinks,
+			path:   paths.Doc().Child("milk"),
+			fn: func(ctx context.Context, n *edit.Node) error {
+				ue, ok := errors.AsType[*edit.UnsupportedError](n.Remove())
+				if !ok {
+					return errors.New("the removal passes")
+				}
+
+				for _, p := range ue.Related {
+					alias := n.At(p)
+
+					v, err := alias.Decode[map[string]any](ctx)
+					if err != nil {
+						return err
+					}
+
+					err = alias.Set(ctx, v)
+					if err != nil {
+						return err
+					}
+				}
+
+				return n.Remove()
+			},
+			want: stringtest.LinesLF(
+				"drinks:",
+				"  - item: K",
+				"    milk: {cost: 5, name: x}",
+				"  - item: L",
+				"    milk: {cost: 5, name: x}",
+			),
+		},
+		"refused set over a value that a merge key brings in, which the func ignores": {
+			// The Set of $.r0 brings in the protected kind through the merge
+			// key. So it fails after its write and leaves the Doc as it found
+			// it. The match $.a, which the merge key brings in from $.r0, keeps
+			// its place, so the wildcard still reaches it.
+			before: stringtest.LinesLF("r0: &x {a: 1}", "<<: *x"),
+			path:   paths.Doc().ChildAll(),
+			fn: func(ctx context.Context, n *edit.Node) error {
+				if n.Key() != "r0" {
+					return nil
+				}
+
+				err := n.Set(ctx, map[string]int{"a": 1, "kind": 2})
+				if err == nil || errors.Is(err, edit.ErrEngine) {
+					return fmt.Errorf("the set does not refuse the protected kind: %w", err)
+				}
+
+				return nil
+			},
+			calls: []string{"$.r0", "$.a"},
+			want:  stringtest.LinesLF("r0: &x {a: 1}", "<<: *x"),
+		},
+		"refused set over a value that a merge key brings in, then a set through a node held before": {
+			// The held node reads $.a through the merge key, and the refused
+			// Set leaves it its place.
+			before: stringtest.LinesLF("r0: &x {a: 1}", "<<: *x"),
+			path:   paths.Doc(),
+			fn: func(ctx context.Context, n *edit.Node) error {
+				held := n.At(paths.Doc().Child("a"))
+
+				err := n.At(paths.Doc().Child("r0")).Set(ctx, map[string]int{"a": 1, "kind": 2})
+				if err == nil || errors.Is(err, edit.ErrEngine) {
+					return fmt.Errorf("the set does not refuse the protected kind: %w", err)
+				}
+
+				err = held.Err()
+				if err != nil {
+					return err
+				}
+
+				if !held.Exists() {
+					return errors.New("the held node reads no value")
+				}
+
+				return held.Set(ctx, 5)
+			},
+			want: stringtest.LinesLF("r0: &x {a: 5}", "<<: *x"),
 		},
 		"message without a label": {
 			before: cafe,
@@ -4094,11 +4228,13 @@ func TestDoc_Apply_Nested(t *testing.T) {
 	const nested = "Apply runs inside another Apply of the Doc"
 
 	tcs := map[string]struct {
+		// The text after the outer Apply.
+		want string
 		// Whether the outer Func returns the error of the nested Apply.
 		returns bool
 	}{
-		"error that the func returns": {returns: true},
-		"error that the func ignores": {returns: false},
+		"error that the func returns": {returns: true, want: "a: 1\n"},
+		"error that the func ignores": {returns: false, want: "a: 2\n"},
 	}
 
 	for name, tc := range tcs {
@@ -4120,17 +4256,24 @@ func TestDoc_Apply_Nested(t *testing.T) {
 
 					return nil
 				})
+				require.ErrorIs(t, nestedErr, edit.ErrNested)
+				require.NotErrorIs(t, nestedErr, edit.ErrUsage)
+				assert.Contains(t, nestedErr.Error(), nested)
+
 				if tc.returns {
 					return nestedErr //nolint:wrapcheck // The test reads the error of the nested Apply.
 				}
 
 				return nil
 			})
-			require.ErrorIs(t, err, edit.ErrNested)
-			require.NotErrorIs(t, err, edit.ErrUsage)
-			assert.Contains(t, err.Error(), nested)
+			if tc.returns {
+				require.ErrorIs(t, err, edit.ErrNested)
+			} else {
+				require.NoError(t, err)
+			}
+
 			assert.Zero(t, calls)
-			assert.Equal(t, "a: 1\n", d.Text())
+			assert.Equal(t, tc.want, d.Text())
 
 			require.NoError(
 				t,
@@ -9563,6 +9706,41 @@ func TestDoc_Removals(t *testing.T) {
 		`$.spec.tags[1] "" "" key="" item=true 2:12-2:13`,
 		`$.spec.menu[1] "" "" key="" item=true 7:4-8:14`,
 		`$.spec.menu[2] "" "" key="" item=true 9:4-10:12`,
+	}, got)
+}
+
+func TestDoc_Removals_Refused(t *testing.T) {
+	t.Parallel()
+
+	// The removal of a fails, because b reads its anchor. The Func skips
+	// that removal, and the Removals list only the removals that passed.
+	d := newDoc(t, stringtest.LinesLF("a: &x 1", "b: *x", "c: 2"))
+
+	var skipped []string
+
+	require.NoError(t, d.Apply(t.Context(), paths.Doc().ChildAll(), func(_ context.Context, n *edit.Node) error {
+		err := n.Remove()
+		if errors.Is(err, edit.ErrUnsupported) {
+			skipped = append(skipped, n.Path().String())
+
+			return nil
+		}
+
+		return err
+	}))
+
+	assert.Equal(t, []string{"$.a"}, skipped)
+	assert.True(t, d.Edited())
+	assert.Equal(t, "a: &x 1\n", d.Text())
+
+	got := make([]string, 0, len(d.Removals()))
+	for _, rm := range d.Removals() {
+		got = append(got, removalString(rm))
+	}
+
+	assert.Equal(t, []string{
+		`$.b~ "" "" key="b" item=false 1:0-1:1`,
+		`$.c~ "" "" key="c" item=false 2:0-2:1`,
 	}, got)
 }
 

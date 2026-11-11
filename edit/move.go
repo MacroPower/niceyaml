@@ -249,7 +249,6 @@ func (n *Node) move(target paths.Path, at placement) (modelPlace, error) {
 		// the key of the entry.
 		err := d.entryProblem(p.entry, n.path.Key(),
 			fmt.Sprintf("%s moves %s to %s, which already exists", d.subject(), name, target))
-		d.record(err)
 
 		return modelPlace{}, err
 
@@ -262,7 +261,6 @@ func (n *Node) move(target paths.Path, at placement) (modelPlace, error) {
 			fmt.Sprintf("%s moves %s to %s, which already exists", d.subject(), name, target),
 			niceyaml.AtPath(at.path), niceyaml.AtRange(at.at), niceyaml.WithDetails(d.callDetails(at)...),
 		))
-		d.record(err)
 
 		return modelPlace{}, err //nolint:wrapcheck // The binding is the problem of the edit.
 	}
@@ -360,7 +358,7 @@ func (n *Node) move(target paths.Path, at placement) (modelPlace, error) {
 
 	// The text of the value goes to target with its bytes, and the Move
 	// writes no copy. Each alias must then read the anchor that it read.
-	saved, callErr := d.save(), d.callErr
+	saved := d.save()
 	bound := d.aliasBindings()
 
 	moved, index, err := d.moveValue(n, p, target, named, where, occupied, reorder)
@@ -376,8 +374,6 @@ func (n *Node) move(target paths.Path, at placement) (modelPlace, error) {
 
 	if err != nil || moves >= 0 || apart {
 		d.restore(saved)
-
-		d.callErr = callErr
 	}
 
 	switch {

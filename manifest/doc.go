@@ -57,14 +57,14 @@
 // edit package lists it. A document that migrates fails with an error that
 // matches [go.jacobcolvin.com/niceyaml/edit.ErrUnsupported] when it holds
 // a construct that [go.jacobcolvin.com/niceyaml/edit.New] refuses, or when
-// a step reaches a construct that a call refuses. A step reads and edits
-// the document as go-yaml reads it. A document that migrates fails with an
-// error that matches [go.jacobcolvin.com/niceyaml/edit.ErrMisread] when
-// go-yaml's decoder reads it otherwise than YAML does in one of the ways
-// the Supported YAML section lists. A plan then lists its file in
-// [Plan.Blocked], as it lists every file that a problem blocks. A document
-// of the current version does not migrate, so it loads with go-yaml's
-// reading.
+// a step returns the error of a call that refuses a construct. A step
+// reads and edits the document as go-yaml reads it. A document that
+// migrates fails with an error that matches
+// [go.jacobcolvin.com/niceyaml/edit.ErrMisread] when go-yaml's decoder
+// reads it otherwise than YAML does in one of the ways the Supported YAML
+// section lists. A plan then lists its file in [Plan.Blocked], as it lists
+// every file that a problem blocks. A document of the current version does
+// not migrate, so it loads with go-yaml's reading.
 //
 // A step must make the same edits for the same document. A load runs it
 // at each load of an older document, and a plan runs it again. A step

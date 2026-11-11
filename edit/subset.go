@@ -239,8 +239,8 @@ func (d *Doc) valueInstances(typ string) []instance {
 // whose value holds in, an instance of a construct in its YAML, as
 // [Doc.valueInstances] finds it. The Set writes the value with origin. The
 // problem binds where every problem of the Set binds before the Set
-// writes, as [Doc.setSite] gives the site, and the Apply records it. The
-// program wrote the construct, so the document is not at fault.
+// writes, as [Doc.setSite] gives the site. The program wrote the
+// construct, so the document is not at fault.
 func (d *Doc) valueRefusal(h *Node, origin int, in *instance, named string) error {
 	err := &UnsupportedError{
 		msg: fmt.Sprintf("%s %s to a value whose YAML holds %s, and %s does not write %s",
@@ -256,7 +256,6 @@ func (d *Doc) valueRefusal(h *Node, origin int, in *instance, named string) erro
 	problem := d.bindSite(d.setSite(h, origin), func(opts ...niceyaml.ErrorOption) error {
 		return niceyaml.Unchecked(err, append([]niceyaml.ErrorOption{niceyaml.WithDetails(fix)}, opts...)...)
 	})
-	d.record(problem)
 
 	return problem
 }
@@ -2723,13 +2722,9 @@ func (d *Doc) mergeKeyStarts() map[int]*ast.MappingValueNode {
 }
 
 // zoneProblem returns the problem of a call that named names, which
-// reaches z. It binds at the site of z in the user's text, and the Apply
-// records it.
+// reaches z. It binds at the site of z in the user's text.
 func (d *Doc) zoneProblem(z *zone, named string) error {
-	problem := d.refusal(&z.in, named)
-	d.record(problem)
-
-	return problem
+	return d.refusal(&z.in, named)
 }
 
 // offsetPath returns the path of the innermost value of the current text
@@ -3762,7 +3757,7 @@ func (d *Doc) userBlock(node ast.Node) bool {
 // puts value, a block value of the current text, inside a flow collection.
 // Such a Move writes the value from its decode and drops its comments and
 // its style. The problem binds at the first token of the value, under the
-// path of the value, and the Apply records it.
+// path of the value.
 func (d *Doc) flowMoveProblem(value ast.Node, named string) error {
 	at := d.nodeSite(value, false)
 
@@ -3782,7 +3777,6 @@ func (d *Doc) flowMoveProblem(value ast.Node, named string) error {
 		object:    "move a block value into a flow collection",
 		fix:       "write the value in flow style first, or move it into a block collection",
 	}, named)
-	d.record(problem)
 
 	return problem
 }
@@ -3791,8 +3785,7 @@ func (d *Doc) flowMoveProblem(value ast.Node, named string) error {
 // writes key, the new key of renamed, while r.other, another entry of its
 // mapping in the model of x, reads key. The Source allows a mapping to
 // repeat a key, so the rename makes a repeated key. The program passed the
-// key, so the problem lies in its value and binds at the renamed entry,
-// and the Apply records it.
+// key, so the problem lies in its value and binds at the renamed entry.
 func (d *Doc) repeatRefusal(x *model, r repeated, renamed *ast.MappingValueNode, key, named string) error {
 	in := instance{
 		construct: ConstructRepeatedKey,
@@ -3810,10 +3803,7 @@ func (d *Doc) repeatRefusal(x *model, r repeated, renamed *ast.MappingValueNode,
 		}}
 	}
 
-	problem := d.refusal(&in, named)
-	d.record(problem)
-
-	return problem
+	return d.refusal(&in, named)
 }
 
 // mappingEntries returns the entries of n, a node of the current text, when
@@ -4085,9 +4075,9 @@ func (d *Doc) mappingSite(m ast.Node) site {
 // the source of the kept merge k holds key. The call hides or reveals an
 // entry of the source, as rule M2 of the merge rules refuses it. The
 // problem binds at at, the site of the entry that the call takes, moves,
-// or renames, or at the merge key when at is nil, and the Apply records
-// it. The words after the name of the call name the mappings and the key
-// in the current text, as the name of the call does.
+// or renames, or at the merge key when at is nil. The words after the
+// name of the call name the mappings and the key in the current text, as
+// the name of the call does.
 func (d *Doc) mergeKeysProblem(k keptMerge, at *site, key string, made bool, named string) error {
 	merge := d.nodeSite(k.entry.Key, true)
 	mapping, source := d.textPath(k.m), d.textPath(k.s)
@@ -4113,7 +4103,7 @@ func (d *Doc) mergeKeysProblem(k keptMerge, at *site, key string, made bool, nam
 		in.fix = fmt.Sprintf("write a key that %s does not hold, or remove %s from %s first", source, key, source)
 	}
 
-	return d.recordRefusal(&in, named)
+	return d.refusal(&in, named)
 }
 
 // keySite returns the site of the entry that the call through h takes,
@@ -4231,7 +4221,7 @@ func (d *Doc) mergedTarget(w *callWalk) (keptMerge, string, bool) {
 // w. Reads returns the aliases of merge keys of the current text that the
 // rule judges. When one of them reads the mapping at the place, rule M5 of
 // the merge rules refuses the Set. Otherwise mergeSourceProblem returns
-// nil. The problem binds at the merge key, and the Apply records it.
+// nil. The problem binds at the merge key.
 func (d *Doc) mergeSourceProblem(w *callWalk, mapping bool, reads func() []keptMerge, named string) error {
 	if mapping || !w.p.exists {
 		return nil
@@ -4245,7 +4235,7 @@ func (d *Doc) mergeSourceProblem(w *callWalk, mapping bool, reads func() []keptM
 		merge := d.nodeSite(k.entry.Key, true)
 		pos := merge.at.Start
 
-		return d.recordRefusal(&instance{
+		return d.refusal(&instance{
 			construct: ConstructMergeForm,
 			at:        merge,
 			reach: fmt.Sprintf("leaves %s at %d:%d reading a value other than a mapping",
@@ -4375,7 +4365,7 @@ func (d *Doc) aliasCopyProblem(k *keeper, top ast.Node, named string, at paths.P
 	in.fix = d.aliasCopyFix(readers, at)
 	in.but = fmt.Sprintf(", %s, and %s does not write a copy of a value at its alias", words, d.appName())
 
-	return d.recordRefusal(&in, named)
+	return d.refusal(&in, named)
 }
 
 // aliasCopyFix returns the fix of a call whose place is at, which takes
@@ -4958,7 +4948,7 @@ func (d *Doc) mergeKept(h *Node, named string) error {
 			merge := d.nodeSite(k.entry.Key, true)
 			pos := merge.at.Start
 
-			return d.recordRefusal(&instance{
+			return d.refusal(&instance{
 				construct: ConstructMergeForm,
 				at:        merge,
 				reach: fmt.Sprintf("leaves %s at %d:%d reading a value other than a mapping",
@@ -5080,8 +5070,8 @@ func (d *Doc) referenceChange(c reachCall, w *callWalk) (keyChange, *ast.Mapping
 // reads another value under the name. The problem matches
 // [go.jacobcolvin.com/niceyaml/paths.ErrReferenceAlias] and
 // [go.jacobcolvin.com/niceyaml/paths.ErrAlias], as the problem of a path
-// through such a merge key does, and the Apply records it. It binds at the
-// entry of the call, with a detail at the merge key.
+// through such a merge key does. It binds at the entry of the call, with a
+// detail at the merge key.
 func (d *Doc) referenceProblem(c reachCall, w *callWalk, e *ast.MappingValueNode) error {
 	merge := d.nodeSite(e.Key, true)
 	holder := d.textPath(d.mappingOf(e))
@@ -5112,7 +5102,6 @@ func (d *Doc) referenceProblem(c reachCall, w *callWalk, e *ast.MappingValueNode
 
 	problem := d.user.Bind(niceyaml.Invalid(&referenceError{msg: msg},
 		niceyaml.AtPath(at.path), niceyaml.AtRange(at.at), niceyaml.WithDetails(details...)))
-	d.record(problem)
 
 	return problem //nolint:wrapcheck // The binding is the problem of the call.
 }
@@ -5230,8 +5219,7 @@ func (d *Doc) rebound(bound map[int]int) int {
 // which the alias whose first byte has the origin o reads another anchor
 // than before, or none, as an alias that comes before the anchor that it
 // read does. The engine does not write a copy of the value at the alias.
-// The problem binds at the alias in the text before the Move, and the
-// Apply records it.
+// The problem binds at the alias in the text before the Move.
 func (d *Doc) moveOrderProblem(o int, named string) error {
 	in := instance{
 		construct: ConstructAliasCopy,
@@ -5256,7 +5244,7 @@ func (d *Doc) moveOrderProblem(o int, named string) error {
 	in.but = fmt.Sprintf(", after which %s comes before the anchor that it reads, and %s does not write a copy of "+
 		"a value at its alias", reads, d.appName())
 
-	return d.recordRefusal(&in, named)
+	return d.refusal(&in, named)
 }
 
 // scalarProblem returns the problem of the call through h that named
@@ -5289,7 +5277,7 @@ func (d *Doc) scalarProblem(h *Node, named string) error {
 				continue
 			}
 
-			return d.recordRefusal(new(d.scalarInstance(lit, was)), named)
+			return d.refusal(new(d.scalarInstance(lit, was)), named)
 
 		case o < 0 && d.notes[-1-o].hasStr && d.notes[-1-o].str != str:
 			return d.bug(h, fmt.Errorf("go-yaml reads the block scalar that %s writes at %s as %s, not %s",
@@ -5366,7 +5354,7 @@ func (d *Doc) commentProblem(h *Node, named string) error {
 			}
 		}
 
-		return d.recordRefusal(&instance{
+		return d.refusal(&instance{
 			construct: ConstructBlockScalar,
 			at:        at,
 			but: fmt.Sprintf(", after which the comment at %d:%d is text of a value, and %s does not change the "+
@@ -5442,7 +5430,7 @@ func (d *Doc) madeProblem(h *Node, named string) error {
 		in := z.in
 		in.reach, in.object = z.odd.reread(false), reread
 
-		return d.recordRefusal(&in, named)
+		return d.refusal(&in, named)
 	}
 
 	for _, z := range zones {
@@ -5581,5 +5569,5 @@ func (d *Doc) madeRefusal(h *Node, in *instance, named string) error {
 			d.subject(), named, in.reach, d.appName()))
 	}
 
-	return d.recordRefusal(in, named)
+	return d.refusal(in, named)
 }

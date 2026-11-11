@@ -257,7 +257,6 @@ func (d *Doc) ownRepeat(h *Node, v *value, origin int) error {
 
 	err := d.user.Bind(niceyaml.NewError(msg, niceyaml.AtPath(at.path), niceyaml.AtRange(at.at),
 		niceyaml.WithDetails(details...)))
-	d.record(err)
 
 	return err //nolint:wrapcheck // The binding is the problem of the call.
 }
@@ -295,7 +294,7 @@ func (d *Doc) parsedRepeat(x *model, r repeated, c reachCall, m ast.Node, at pat
 // path of the key, as [Doc.keyPlace] places it. That key is a renamed key,
 // a moved key, or a key that the call created. The detail of the problem
 // binds at the key of other. Without such an entry, the problem binds at
-// the path at. The Apply records the problem.
+// the path at.
 func (d *Doc) repeatProblem(x *model, r repeated, rec editRecord, at paths.Path) error {
 	w, other := r.w, r.other
 
@@ -330,7 +329,6 @@ func (d *Doc) repeatProblem(x *model, r repeated, rec editRecord, at paths.Path)
 
 	err := d.user.Bind(niceyaml.NewError(msg, niceyaml.AtPath(place.path), niceyaml.AtRange(place.at),
 		niceyaml.WithDetails(details...)))
-	d.record(err)
 
 	return err //nolint:wrapcheck // The binding is the problem of the call.
 }

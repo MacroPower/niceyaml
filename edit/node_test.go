@@ -2320,11 +2320,18 @@ func TestNode_At(t *testing.T) {
 		"edit through a path that selects more than one value": {
 			before: stringtest.LinesLF("spec:", "  tags: [a, b]"),
 			fn: func(_ context.Context, n *edit.Node) error {
-				_ = n.At(paths.MustParse("$.spec.tags[*]")).Remove() //nolint:errcheck // The Apply fails anyway.
-
-				return nil
+				return n.At(paths.MustParse("$.spec.tags[*]")).Remove()
 			},
 			err: "cafe.jacobcolvin.com/v1 removes $.spec.tags[*], which selects more than one value",
+		},
+		"edit through a path that selects more than one value, whose error the Func ignores": {
+			before: stringtest.LinesLF("spec:", "  tags: [a, b]"),
+			fn: func(ctx context.Context, n *edit.Node) error {
+				_ = n.At(paths.MustParse("$.spec.tags[*]")).Remove() //nolint:errcheck // The test ignores the error.
+
+				return n.At(spec.Child("tags").Index(0)).Set(ctx, "c")
+			},
+			want: stringtest.LinesLF("spec:", "  tags: [c, b]"),
 		},
 		"decode through a path that selects a key, whose error the Func ignores": {
 			before: stringtest.LinesLF("spec:", "  tags: [a, b]"),
