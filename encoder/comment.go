@@ -117,12 +117,19 @@ func commentError(key string, err error) error {
 
 // setComments puts the comments of each entry on the node its path selects
 // in the tree under root. It skips an entry when go-yaml reports that the
-// path of keys and indexes does not select a node. It places every
-// comment where the go-yaml encoder places it for a [yaml.WithComment]
-// map. Each of these returns an error that matches [ErrComment] and wraps
-// the error of go-yaml:
+// path of keys and indexes does not select a node. It places each comment
+// where the go-yaml encoder places it for a [yaml.WithComment] map,
+// except for the line comment of a flow or empty sequence under a mapping
+// key and a line comment inside a flow collection. Go-yaml puts the line
+// comment of a flow or empty sequence under a mapping key on the key,
+// before the sequence. Here the sequence holds it, and the printer
+// writes it after the sequence. Go-yaml writes a line comment inside a
+// flow collection, before the closing bracket or brace. Here that
+// comment fails. Each of these returns an error that matches
+// [ErrComment] and wraps the error of go-yaml:
 //
-//   - A comment that its node cannot hold.
+//   - A comment that its node cannot hold, such as a line comment
+//     inside a flow collection.
 //   - A path that go-yaml cannot follow past a mapping key it cannot read.
 //   - A path that names a group of nodes, which has a recursive step or a
 //     step after "[*]".
@@ -208,8 +215,21 @@ func setHeadComment(root, target ast.Node, comment *ast.CommentGroupNode) error 
 
 // setLineComment puts comment at the end of the line that target starts
 // on. Mapping entries and sequences do not have lines of their own, so
-// setLineComment puts the comment of each one on its parent.
+// setLineComment puts the comment of each one on its parent. The
+// exception is a flow or empty sequence under a mapping key. That
+// sequence holds the comment itself, so the printer writes it after the
+// sequence. A target inside a flow mapping or a flow sequence cannot
+// hold a line comment, so setLineComment returns
+// [yaml.ErrUnsupportedLinePositionType] for that flow collection.
 func setLineComment(root, target ast.Node, comment *ast.CommentGroupNode) error {
+	// The printer writes a flow collection on one line and writes the
+	// line comment of a node inside it before the closing bracket or
+	// brace. The comment turns the rest of the line, that bracket or
+	// brace too, into comment text.
+	if flow := flowAncestor(root, target); flow != nil {
+		return yaml.ErrUnsupportedLinePositionType(flow) //nolint:wrapcheck // Return the original error.
+	}
+
 	switch target.(type) {
 	case *ast.MappingValueNode, *ast.SequenceNode:
 	default:
@@ -218,13 +238,50 @@ func setLineComment(root, target ast.Node, comment *ast.CommentGroupNode) error 
 
 	switch parent := ast.Parent(root, target).(type) {
 	case *ast.MappingValueNode:
+		// The printer writes a flow sequence on the line of its key, after
+		// the comment of the key. A comment there turns the rest of the
+		// line, the sequence too, into comment text. The sequence thus
+		// holds the comment, and the printer writes it after the "]". The
+		// printer writes an empty sequence as "[]" in any style.
+		if seq, ok := target.(*ast.SequenceNode); ok && (seq.IsFlowStyle || len(seq.Values) == 0) {
+			return seq.SetComment(comment) //nolint:wrapcheck // Return the original error.
+		}
+
 		return parent.Key.SetComment(comment) //nolint:wrapcheck // Return the original error.
+
 	case *ast.MappingNode:
 		return parent.SetComment(comment) //nolint:wrapcheck // Return the original error.
 	case nil:
 		return yaml.ErrUnsupportedLinePositionType(root) //nolint:wrapcheck // Return the original error.
 	default:
 		return yaml.ErrUnsupportedLinePositionType(parent) //nolint:wrapcheck // Return the original error.
+	}
+}
+
+// flowAncestor returns the closest flow mapping or flow sequence that
+// holds node in the tree under root. It returns nil when no flow
+// collection holds node. The node itself does not count.
+func flowAncestor(root, node ast.Node) ast.Node {
+	for {
+		parent := ast.Parent(root, node)
+		// The root node is its own parent.
+		if parent == nil || parent == node {
+			return nil
+		}
+
+		switch p := parent.(type) {
+		case *ast.MappingNode:
+			if p.IsFlowStyle {
+				return p
+			}
+
+		case *ast.SequenceNode:
+			if p.IsFlowStyle {
+				return p
+			}
+		}
+
+		node = parent
 	}
 }
 

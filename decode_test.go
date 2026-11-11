@@ -4505,7 +4505,7 @@ func TestNode_YAMLComments(t *testing.T) {
 		}
 
 		cfgDoc := yamltest.FirstDocument(t, stringtest.Input(`
-			hosts:
+			hosts: # the hosts
 			  - a.example # primary
 			  - b.example # standby
 			opts:
@@ -4527,7 +4527,7 @@ func TestNode_YAMLComments(t *testing.T) {
 					`  tls: "on" # required`,
 					"db:",
 					"  host: db.example # internal",
-					"hosts:",
+					"hosts: # the hosts",
 					"- a.example # primary",
 				),
 			},
@@ -4539,7 +4539,7 @@ func TestNode_YAMLComments(t *testing.T) {
 					`  tls: "on" # required`,
 					"db:",
 					"  host: db.example # internal",
-					"hosts: []",
+					"hosts: [] # the hosts",
 				),
 			},
 			"map entry": {
@@ -4549,7 +4549,7 @@ func TestNode_YAMLComments(t *testing.T) {
 					`  tls: "on" # required`,
 					"db:",
 					"  host: db.example # internal",
-					"hosts:",
+					"hosts: # the hosts",
 					"- a.example # primary",
 					"- b.example # standby",
 				),
@@ -4561,7 +4561,7 @@ func TestNode_YAMLComments(t *testing.T) {
 					"  old: x # legacy",
 					`  tls: "on" # required`,
 					"db: null",
-					"hosts:",
+					"hosts: # the hosts",
 					"- a.example # primary",
 					"- b.example # standby",
 				),
@@ -4576,7 +4576,7 @@ func TestNode_YAMLComments(t *testing.T) {
 					`  tls: "on" # required`,
 					"db:",
 					"  host: db.example # internal",
-					"hosts:",
+					"hosts: # the hosts",
 					"- b.example # primary",
 				),
 			},

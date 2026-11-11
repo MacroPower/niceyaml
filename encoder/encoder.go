@@ -230,6 +230,10 @@ func WithIndentSequence(indent bool) Option {
 //   - A key is not a YAML path.
 //   - A comment has a position that go-yaml does not define.
 //   - The selected node cannot hold a comment in that position.
+//   - A line comment selects a node inside a flow mapping or a flow
+//     sequence, such as a value of a mapping that [yaml.Flow] writes.
+//     The encoder writes a flow collection on one line, and a comment
+//     inside it turns the closing bracket or brace into comment text.
 //   - Go-yaml looks for the mapping key that a path names and cannot
 //     read a key of that mapping. A marshaler's YAML can hold such a
 //     key, for example the single-quoted key `'"x'`. With
@@ -253,12 +257,20 @@ func WithIndentSequence(indent bool) Option {
 // Encode checks the keys of cm and the positions before it encodes the
 // value, so a comment map with either fault fails every document.
 //
-// The paths and the placement of each comment are those of
-// [yaml.WithComment], and the error of go-yaml stays in the chain. Of the
-// paths that select no node, that option skips only a path to a key that
-// its mapping does not have. It fails on the others. As with that option,
-// a line comment on a string that go-yaml writes as a literal block does
-// not reach the output.
+// The paths are those of [yaml.WithComment], and so is the placement of
+// each comment, except for the line comment of a flow sequence under a
+// block mapping key and a line comment inside a flow collection. The
+// error of go-yaml stays in the chain. Of the paths that select no node,
+// that option skips only a path to a key that its mapping does not have.
+// It fails on the others. As with that option, a line comment on a string
+// that go-yaml writes as a literal block does not reach the output.
+//
+// [yaml.WithComment] writes the line comment of a flow sequence under a
+// block mapping key between the key and the sequence, as in `a # x: []`.
+// The sequence then becomes comment text. The encoder writes the comment
+// after the sequence, as in `a: [] # x`. Go-yaml writes an empty sequence
+// in flow style. [yaml.WithComment] writes a line comment inside a flow
+// collection, as in `{a: 1 # x}`, and the encoder fails on it.
 func WithYAMLComments(cm yaml.CommentMap) Option {
 	return func(c *config) {
 		c.comments = cm
