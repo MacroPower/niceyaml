@@ -5313,6 +5313,154 @@ func TestResolver_Matches_Paths(t *testing.T) {
 	}
 }
 
+// matchHolder describes what holds the node of m: "entry k" for the
+// entry with key k, "element i" for element i of a sequence, or "none".
+// It adds "written alias" when the holder writes the node as an alias, and
+// "line n" for the 1-based line of the key or the element as written.
+func matchHolder(t *testing.T, m paths.Match) string {
+	t.Helper()
+
+	var (
+		desc    string
+		written ast.Node
+	)
+
+	switch {
+	case m.Entry != nil:
+		require.Nil(t, m.Sequence)
+
+		desc, written = "entry "+m.Entry.Key.String(), m.Entry.Value
+
+	case m.Sequence != nil:
+		require.Less(t, m.Index, len(m.Sequence.Values))
+
+		desc, written = fmt.Sprintf("element %d", m.Index), m.Sequence.Values[m.Index]
+
+	default:
+		return "none"
+	}
+
+	if _, ok := written.(*ast.AliasNode); ok {
+		desc += " written alias"
+	}
+
+	return fmt.Sprintf("%s line %d", desc, written.GetToken().Position.Line)
+}
+
+func TestResolver_Matches_Holder(t *testing.T) {
+	t.Parallel()
+
+	doc := documentOf(t, stringtest.Input(`
+		base: &b
+		  name: x
+		jobs:
+		  build: {run: 1}
+		  test: *b
+		  mixed:
+		    <<: *b
+		list:
+		  - a
+		  - *b
+		  - [c]
+		inline:
+		  <<: [{ia: 1}, *b]
+	`))
+
+	tcs := map[string]struct {
+		path string
+		want []string
+	}{
+		"entry of an inline merge lies in the inline mapping": {
+			path: "$.inline.ia",
+			want: []string{"entry ia line 13"},
+		},
+		"entry of a merge sequence lies in the anchor": {
+			path: "$.inline.name",
+			want: []string{"entry name line 2"},
+		},
+		"entries of a mapping": {
+			path: "$.jobs.*",
+			want: []string{
+				"entry build line 4",
+				"entry test written alias line 5",
+				"entry mixed line 7",
+			},
+		},
+		"elements of a sequence": {
+			path: "$.list[*]",
+			want: []string{
+				"element 0 line 9",
+				"element 1 written alias line 10",
+				"element 2 line 11",
+			},
+		},
+		"entry through an alias lies in the anchor": {
+			path: "$.jobs.test.name",
+			want: []string{"entry name line 2"},
+		},
+		"entry of a merge key lies in the anchor": {
+			path: "$.jobs.mixed.name",
+			want: []string{"entry name line 2"},
+		},
+		"element below an element": {
+			path: "$.list[2][0]",
+			want: []string{"element 0 line 11"},
+		},
+		"key": {
+			path: "$.jobs.*~",
+			want: []string{"none", "none", "none"},
+		},
+		"root": {
+			path: "$",
+			want: []string{"none"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var got []string
+
+			for _, m := range requireMatches(t, doc, tc.path) {
+				got = append(got, matchHolder(t, m))
+			}
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestResolver_MatchesFrom_Holder(t *testing.T) {
+	t.Parallel()
+
+	doc := documentOf(t, stringtest.Input(`
+		spec:
+		  items: [a, b]
+	`))
+
+	r := paths.NewResolver(doc)
+
+	spec, err := r.Node(paths.MustParse("$.spec"))
+	require.NoError(t, err)
+
+	start, err := r.MatchesFrom(spec, paths.Current())
+	require.NoError(t, err)
+	require.Len(t, start, 1)
+	assert.Equal(t, "none", matchHolder(t, start[0]))
+
+	items, err := r.MatchesFrom(spec, paths.MustParse("@.items[*]"))
+	require.NoError(t, err)
+
+	var got []string
+
+	for _, m := range items {
+		got = append(got, matchHolder(t, m))
+	}
+
+	assert.Equal(t, []string{"element 0 line 2", "element 1 line 2"}, got)
+}
+
 func TestResolver_Matches(t *testing.T) {
 	t.Parallel()
 

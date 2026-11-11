@@ -909,10 +909,58 @@ func (p Path) singleFrom(r *resolver, node ast.Node) (match, error) {
 // path of a match of an `@` path of [Resolver.MatchesFrom] starts at `@`,
 // because it reads from the node that MatchesFrom starts at.
 //
+// A match also carries what holds its node in the document. That holder
+// is the mapping entry whose value the node is, or the sequence that holds
+// the node as an element. A caller can thus read the key of an entry, or
+// the element as the document writes it, without a second resolve:
+//
+//	for _, m := range matches {
+//		key := m.Entry.Key // $.jobs.* selects the value of each entry
+//	}
+//
+// The holder can differ from Node in two ways. First, Node is the content
+// that the path names, but Entry.Value and the element of Sequence hold
+// the node as the document writes it. That node can be an alias, or an
+// anchor or a tag on the content. Second, a node that the path reaches
+// through an alias lies in the content of the anchor. A node that a `<<`
+// merge key brings in lies in the mapping that the merge key names. That
+// mapping is the content of an anchor or a mapping that the document
+// writes inline after the merge key. The holder is the entry or the
+// sequence there, not the place where the document writes the alias or
+// the merge key.
+//
+// Three nodes do not have a holder: the key that a `~` selector selects,
+// the root of the document, and the node that [Resolver.MatchesFrom]
+// starts at. Entry and Sequence are both nil for each of them.
+//
 // Receive instances from [Resolver.Matches] or [Resolver.MatchesFrom].
 type Match struct {
+	// The node that Path selects, as [Resolver.Node] gives it.
 	Node ast.Node
+	// The entry whose value is Node, or nil.
+	Entry *ast.MappingValueNode
+	// The sequence that holds Node as an element, or nil.
+	Sequence *ast.SequenceNode
+	// The node as the document writes it, for [Match.Token].
+	written ast.Node
+	// The path that selects Node alone.
 	Path Path
+	// The index of Node in Sequence.
+	Index int
+}
+
+// Token returns the token that the match points at in the source, where
+// an error at the match binds. For a match of [Resolver.Matches], it is
+// the token that [Resolver.Token] gives for the path of the match. An
+// alias thus points at its own token, as the document writes it, not at
+// the content of its anchor. The node that [Resolver.MatchesFrom] starts
+// at does not have a holder. A mapping or a sequence there thus points at
+// its own first token rather than at its key or its "-".
+//
+// Token returns nil for a match without such a token, such as a Match
+// built by hand.
+func (m Match) Token() *token.Token {
+	return astnode.PathToken(m.written, astnode.Parent{Entry: m.Entry, Sequence: m.Sequence, Index: m.Index})
 }
 
 // tokenOf returns the token that p points at for m, a match of p, as

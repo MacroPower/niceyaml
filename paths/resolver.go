@@ -383,7 +383,8 @@ func (r *Resolver) Nearest(p Path) (Path, bool) {
 
 // Matches resolves every node that p selects in the document of the
 // Resolver, as [Resolver.Nodes] does. It returns each node with the path
-// that selects it alone. A caller that checks each element of a sequence,
+// that selects it alone and with the entry or the sequence that holds it,
+// as [Match] describes. A caller that checks each element of a sequence,
 // each entry of a mapping, or each node a `..` selector finds can thus
 // report the one it checked:
 //
@@ -466,7 +467,14 @@ func (r *Resolver) matchesOf(p Path, found []match, absolute bool) ([]Match, err
 			continue
 		}
 
-		matches = append(matches, Match{Node: node, Path: Path{segments: m.segs, absolute: absolute}})
+		matches = append(matches, Match{
+			Node:     node,
+			Path:     Path{segments: m.segs, absolute: absolute},
+			Entry:    m.entry,
+			Sequence: m.seq,
+			Index:    m.index,
+			written:  m.node,
+		})
 	}
 
 	return matches, nil
