@@ -12,6 +12,7 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/edit"
 	"go.jacobcolvin.com/niceyaml/encoder"
+	"go.jacobcolvin.com/niceyaml/input"
 	"go.jacobcolvin.com/niceyaml/manifest"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/schema"
@@ -1043,7 +1044,7 @@ func TestWithMarshalers(t *testing.T) {
 				)),
 			}, tc.opts...)...)
 
-			set, err := reg.Load(t.Context(), manifest.Sources(niceyaml.NewSourceFromString(stringtest.LinesLF(
+			set, err := reg.Load(t.Context(), input.Sources(niceyaml.NewSourceFromString(stringtest.LinesLF(
 				"apiVersion: alarm.jacobcolvin.com/v1",
 				"kind: Alarm",
 				"metadata:",

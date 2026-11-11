@@ -13,6 +13,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"go.jacobcolvin.com/niceyaml/edit"
+	"go.jacobcolvin.com/niceyaml/input"
 	"go.jacobcolvin.com/niceyaml/manifest"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/printer"
@@ -98,7 +99,7 @@ func main() {
 
 	// The steps run in memory, so the user's file stays as it is, and
 	// kanelbulle still declares v1beta1.
-	set, err := registry.Load(ctx, manifest.Path("config"))
+	set, err := registry.Load(ctx, input.Path("config"))
 	if err != nil {
 		lipgloss.Println(p.PrintError(err))
 
@@ -119,7 +120,7 @@ func main() {
 	// The schema of v1 checks each document after the steps run, so it
 	// rejects the value that dietaryList set from Lactose. The detail of
 	// that error names the version of the step.
-	_, err = registry.Load(ctx, manifest.Path("broken.yaml"))
+	_, err = registry.Load(ctx, input.Path("broken.yaml"))
 	lipgloss.Println(p.PrintError(err))
 
 	fmt.Println("\nPlan the rewrite:")
@@ -128,7 +129,7 @@ func main() {
 	// file, but it does not write a file. PlanMigration returns the problems
 	// of the plan as its error beside the plan, so a nil plan alone stops the
 	// example.
-	plan, err := registry.PlanMigration(ctx, manifest.Path("config"))
+	plan, err := registry.PlanMigration(ctx, input.Path("config"))
 	if plan == nil {
 		lipgloss.Println(p.PrintError(err))
 
@@ -162,7 +163,7 @@ func main() {
 
 	fmt.Println("\nLoad the rewritten files:")
 
-	set, err = registry.Load(ctx, manifest.Path("config"))
+	set, err = registry.Load(ctx, input.Path("config"))
 	if err != nil {
 		lipgloss.Println(p.PrintError(err))
 

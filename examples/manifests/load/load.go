@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/input"
 	"go.jacobcolvin.com/niceyaml/manifest"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/printer"
@@ -103,7 +104,7 @@ func main() {
 
 	// FS reads the *.yaml and *.yml files of a directory in an fs.FS in path
 	// order. A CLI passes the directory that its flag names to Path instead.
-	config := manifest.FS(files, "config")
+	config := input.FS(files, "config")
 
 	fmt.Println("\nLoad a directory of manifests:")
 
@@ -175,7 +176,7 @@ func main() {
 
 	// A load checks every document before it returns, so one error holds
 	// every problem in load order.
-	broken := manifest.FS(files, "broken")
+	broken := input.FS(files, "broken")
 	_, err = registry.Load(ctx, broken)
 	lipgloss.Println(p.PrintError(err, niceyaml.WithContextLines(0)))
 
@@ -218,7 +219,7 @@ func main() {
 	// menu leaves a set that passes those checks, but the featured item names
 	// a MenuItem that the set does not hold. The filter keeps the warning
 	// about the deprecated hours out of the report.
-	withoutMenu := manifest.FS(files, "config", manifest.WithExclude("menu.yaml"))
+	withoutMenu := input.FS(files, "config", input.WithExclude("menu.yaml"))
 	_, err = registry.Load(ctx, withoutMenu, acceptV1alpha1)
 	lipgloss.Println(p.PrintError(err))
 }

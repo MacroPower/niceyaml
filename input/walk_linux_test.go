@@ -1,4 +1,4 @@
-package manifest_test
+package input_test
 
 import (
 	"bytes"
@@ -16,13 +16,13 @@ import (
 	"golang.org/x/sys/unix"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/manifest"
+	"go.jacobcolvin.com/niceyaml/input"
 )
 
-// TestPath_ExchangedDirectory loads a directory while another goroutine
+// TestPath_ExchangedDirectory reads a directory while another goroutine
 // keeps exchanging its subdirectory with a directory outside it. The
-// subdirectory always holds a file, so each load must either read that
-// file or fail. A load must never drop the file without a problem.
+// subdirectory always holds a file, so each read must either take in that
+// file or fail. A read must never drop the file without a problem.
 func TestPath_ExchangedDirectory(t *testing.T) {
 	t.Parallel()
 
@@ -64,16 +64,15 @@ func TestPath_ExchangedDirectory(t *testing.T) {
 		wg.Wait()
 	})
 
-	reg := newCafeRegistry(t, manifest.WithKinds())
-	input := manifest.Path(filepath.Join(dir, "config"), manifest.WithRecursive(true))
+	in := input.Path(filepath.Join(dir, "config"), input.WithRecursive(true))
 	want := filepath.ToSlash(filepath.Join(dir, "config", "sub", "s.yaml"))
 
 	for range 500 {
-		chk, err := reg.Check(t.Context(), input, manifest.WithSetChecks(false))
-		require.NotNil(t, chk)
+		files, err := readAll(t, in)
+		require.NotNil(t, files)
 
 		if err == nil {
-			require.Contains(t, loadedNames(chk.Set()), want)
+			require.Contains(t, readNames(files), want)
 		}
 	}
 }
@@ -97,7 +96,7 @@ func TestPath_ExchangedEntry(t *testing.T) {
 
 	tcs := map[string]struct {
 		tree tree
-		opts []manifest.InputOption
+		opts []input.Option
 		// The two paths that the goroutine exchanges, below the directory of
 		// the test.
 		exchange [2]string
@@ -128,7 +127,7 @@ func TestPath_ExchangedEntry(t *testing.T) {
 			},
 			exchange: [2]string{"config/b.yaml", "config/.swap"},
 			entry:    "config/b.yaml",
-			reason:   "changed during the load",
+			reason:   "changed during the read",
 		},
 		"file outside the directory and a directory": {
 			tree: tree{
@@ -136,23 +135,23 @@ func TestPath_ExchangedEntry(t *testing.T) {
 				links: map[string]string{"config/b.yaml": "../outside/b.yaml"},
 				dirs:  []string{"outside/swap"},
 			},
-			opts:     []manifest.InputOption{manifest.WithOutsideLinks(true)},
+			opts:     []input.Option{input.WithOutsideLinks(true)},
 			exchange: [2]string{"outside/b.yaml", "outside/swap"},
 			entry:    "config/b.yaml",
-			reason:   "changed during the load",
+			reason:   "changed during the read",
 		},
 		"directory and a link to a directory the patterns do not select": {
 			tree: tree{
 				files: map[string]string{"config/sub/b.yaml": hoursV1Doc, "config/other/b.yaml": cafeDoc},
 				links: map[string]string{"config/.swap": "other"},
 			},
-			opts: []manifest.InputOption{
-				manifest.WithRecursive(true),
-				manifest.WithInclude("a.yaml", "sub/*.yaml"),
+			opts: []input.Option{
+				input.WithRecursive(true),
+				input.WithInclude("a.yaml", "sub/*.yaml"),
 			},
 			exchange: [2]string{"config/sub", "config/.swap"},
 			entry:    "config/sub/b.yaml",
-			reason:   "changed during the load",
+			reason:   "changed during the read",
 			problem:  "config/sub",
 		},
 	}
@@ -196,30 +195,23 @@ func TestPath_ExchangedEntry(t *testing.T) {
 				wg.Wait()
 			})
 
-			reg := newCafeRegistry(t, manifest.WithKinds())
-			in := manifest.Path(filepath.Join(dir, "config"), tc.opts...)
+			in := input.Path(filepath.Join(dir, "config"), tc.opts...)
 			entry := filepath.ToSlash(filepath.Join(dir, filepath.FromSlash(tc.entry)))
 			problem := filepath.ToSlash(filepath.Join(dir, filepath.FromSlash(tc.problem)))
 
 			for range 1000 {
-				chk, err := reg.Check(t.Context(), in, manifest.WithSetChecks(false))
-				require.NotNil(t, chk)
+				files, err := readAll(t, in)
+				require.NotNil(t, files)
 
 				if tc.reason != "" && err != nil {
-					for row := range niceyaml.Problems(err) {
-						name := filepath.ToSlash(row.Name())
-						if tc.problem == "" || name == problem {
-							require.Equal(t, tc.reason, row.Message(), name)
+					for _, f := range files {
+						if f.Err != nil && (tc.problem == "" || f.Name == problem) {
+							require.Equal(t, f.Name+": "+tc.reason, niceyaml.FormatError(f.Err))
 						}
 					}
 				}
 
-				texts := map[string]string{}
-				for _, src := range chk.Set().Sources() {
-					texts[filepath.ToSlash(src.Name())] = src.Text()
-				}
-
-				text, ok := texts[entry]
+				text, ok := readTexts(files)[entry]
 				if ok {
 					require.Equal(t, hoursV1Doc, text)
 				}
@@ -228,7 +220,7 @@ func TestPath_ExchangedEntry(t *testing.T) {
 	}
 }
 
-// volumeRootEnv names the directory that [TestPath_VolumeRoot] loads as
+// volumeRootEnv names the directory that [TestPath_VolumeRoot] reads as
 // the volume root, in the process that it starts.
 const volumeRootEnv = "NICEYAML_TEST_VOLUME_ROOT"
 
@@ -238,10 +230,10 @@ const volumeRootEnv = "NICEYAML_TEST_VOLUME_ROOT"
 // capability, as AppArmor does on Ubuntu 23.10 and later.
 const noChrootExit = 3
 
-// TestPath_VolumeRoot loads a directory that is the volume root, through
+// TestPath_VolumeRoot reads a directory that is the volume root, through
 // links that name it by an absolute path and by "..". The test starts
 // itself again in a user namespace, which changes its root to the
-// directory before the load.
+// directory before the read.
 func TestPath_VolumeRoot(t *testing.T) {
 	t.Parallel()
 
@@ -254,10 +246,9 @@ func TestPath_VolumeRoot(t *testing.T) {
 
 		require.NoError(t, err)
 
-		reg := newCafeRegistry(t, manifest.WithKinds())
-		set, err := reg.Load(t.Context(), manifest.Path("/"))
+		files, err := readAll(t, input.Path("/"))
 		require.NoError(t, err)
-		assert.ElementsMatch(t, []string{"/a.yaml", "/c.yaml"}, loadedNames(set))
+		assert.ElementsMatch(t, []string{"/a.yaml", "/c.yaml"}, readNames(files))
 
 		return
 	}

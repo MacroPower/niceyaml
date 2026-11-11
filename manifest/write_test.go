@@ -8,14 +8,64 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/input"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/manifest"
 )
+
+// tree describes the files and the links of a directory for a test.
+type tree struct {
+	files map[string]string
+	// The target of each link. A target can name the directory of the test
+	// as "{dir}".
+	links map[string]string
+	dirs  []string
+	// The files and the directories that the system refuses to read.
+	locked []string
+}
+
+// write creates tr below dir. It skips the test when the platform refuses
+// to create a link of tr or a directory whose name is not valid UTF-8. It
+// also skips the test when the platform reads a locked path anyway.
+func (tr tree) write(tb testing.TB, dir string) {
+	tb.Helper()
+
+	for _, d := range tr.dirs {
+		err := os.MkdirAll(filepath.Join(dir, filepath.FromSlash(d)), 0o750)
+		if err != nil && !utf8.ValidString(d) {
+			tb.Skipf("the file system refuses the name %q: %v", d, err)
+		}
+
+		require.NoError(tb, err)
+	}
+
+	yamltest.WriteFiles(tb, dir, tr.files)
+
+	for name, target := range tr.links {
+		p := filepath.Join(dir, filepath.FromSlash(name))
+		require.NoError(tb, os.MkdirAll(filepath.Dir(p), 0o750))
+		yamltest.SymlinkOrSkip(tb, strings.ReplaceAll(target, "{dir}", dir), p)
+	}
+
+	for _, name := range tr.locked {
+		if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+			tb.Skip("the platform reads a file without the permission to read it")
+		}
+
+		p := filepath.Join(dir, filepath.FromSlash(name))
+		require.NoError(tb, os.Chmod(p, 0))
+
+		// The cleanup of the test cannot remove a directory that it cannot
+		// list.
+		tb.Cleanup(func() { assert.NoError(tb, os.Chmod(p, 0o700)) }) //nolint:gosec // A test directory.
+	}
+}
 
 func TestPlan_Apply_Link(t *testing.T) {
 	t.Parallel()
@@ -73,7 +123,7 @@ func TestPlan_Apply_Link(t *testing.T) {
 
 			config := filepath.Join(dir, filepath.FromSlash(tc.config))
 
-			plan, err := newCafeRegistry(t).PlanMigration(t.Context(), manifest.Path(config))
+			plan, err := newCafeRegistry(t).PlanMigration(t.Context(), input.Path(config))
 			require.NoError(t, err)
 			require.Len(t, plan.Files(), 1)
 
@@ -113,7 +163,7 @@ func TestPlan_Apply_LinkThroughFile(t *testing.T) {
 	config := filepath.Join(dir, "config")
 	link := filepath.Join(config, "hours.yaml")
 
-	plan, err := newCafeRegistry(t).PlanMigration(t.Context(), manifest.Path(config))
+	plan, err := newCafeRegistry(t).PlanMigration(t.Context(), input.Path(config))
 	require.NoError(t, err)
 	require.Len(t, plan.Files(), 1)
 
@@ -170,7 +220,7 @@ func TestPlan_Apply_RelativeLink(t *testing.T) {
 
 			t.Chdir(filepath.Join(dir, filepath.FromSlash(tc.chdir)))
 
-			plan, err := newCafeRegistry(t).PlanMigration(t.Context(), manifest.Path(tc.config))
+			plan, err := newCafeRegistry(t).PlanMigration(t.Context(), input.Path(tc.config))
 			require.NoError(t, err)
 			require.Len(t, plan.Files(), 1)
 

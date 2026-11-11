@@ -1,4 +1,4 @@
-package manifest
+package input
 
 import (
 	"context"
@@ -15,6 +15,8 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/escape"
 	"go.jacobcolvin.com/niceyaml/internal/filepaths"
+	"go.jacobcolvin.com/niceyaml/internal/inputhook"
+	"go.jacobcolvin.com/niceyaml/internal/rootpath"
 )
 
 var (
@@ -24,62 +26,12 @@ var (
 
 	// The reason of an entry that changed during each try of a directory
 	// walk to read it.
-	errChangedInWalk = errors.New("changed during the load")
+	errChangedInWalk = errors.New("changed during the read")
 
 	// The reason of a path that runs through a link at a step of a
 	// directory walk that reads no link.
 	errLinkInWalk = errors.New("runs through a link")
 )
-
-// file is one file that a load reads.
-type file struct {
-	// The problem of the file as a whole, bound, or nil.
-	err error
-	// The Source of the file, or nil when the read of the file failed.
-	src *niceyaml.Source
-	// The change of the file that a plan writes, or nil.
-	plan *PlanFile
-	// The name of the directory input whose walk found the file, or "".
-	dir string
-	// The name of the file, as messages show it.
-	name string
-	// The documents of the file that the load checked, in order.
-	docs []*docState
-	// Where [WriteAtomic] writes the file.
-	target target
-	// The number of documents of the file that fail to route, so a plan
-	// leaves them as they are.
-	notMigrated int
-	// Whether a problem blocks the rewrite of the file.
-	blocked bool
-}
-
-// targetKind names the place that a file came from. The place decides
-// whether [WriteAtomic] rewrites the file.
-type targetKind int
-
-// The places that a file comes from.
-const (
-	targetDisk targetKind = iota + 1
-	targetStdin
-	targetReader
-	targetFS
-	targetSource
-)
-
-// target is where a file came from, and where [WriteAtomic] writes it.
-type target struct {
-	// The directory input whose walk found the file, or "" for a file that
-	// an input names directly.
-	root string
-	// The slash path of the file below root, or the path of a file that an
-	// input names directly.
-	path string
-	kind targetKind
-	// Whether a walk reached the file through a link that leads outside
-	// the input directory.
-	outside bool
-}
 
 // pattern is one pattern of [WithInclude] or [WithExclude], ready to
 // match the path of an entry below the input directory.
@@ -159,7 +111,7 @@ func matchAny(patterns []pattern, rel string, dir bool) bool {
 	})
 }
 
-// prepared is one input that is not a list, checked before the load reads
+// prepared is one input that is not a list, checked before the read reads
 // a file.
 type prepared struct {
 	def     *inputDef
@@ -169,7 +121,7 @@ type prepared struct {
 	globs   []string
 }
 
-// prepare checks every input of in before the load reads a file, and
+// prepare checks every input of in before the read reads a file, and
 // returns them in order. It fails for a pattern that the walk rejects and
 // for an input path that does not exist.
 func prepare(ctx context.Context, in Input, out []*prepared) ([]*prepared, error) {
@@ -199,7 +151,7 @@ func prepare(ctx context.Context, in Input, out []*prepared) ([]*prepared, error
 
 	err := ctx.Err()
 	if err != nil {
-		return nil, err //nolint:wrapcheck // The load ends with the error of its context.
+		return nil, err //nolint:wrapcheck // The read ends with the error of its context.
 	}
 
 	p := &prepared{def: d, globs: d.cfg.include}
@@ -232,7 +184,7 @@ func prepare(ctx context.Context, in Input, out []*prepared) ([]*prepared, error
 	return append(out, p), nil
 }
 
-// inputError returns the error of an input path that the load cannot
+// inputError returns the error of an input path that the read cannot
 // stat. The error names the path as the user gave it.
 func inputError(d *inputDef, err error) error {
 	name := filepath.Clean(d.path)
@@ -258,17 +210,17 @@ func cleanFSPath(p string) string {
 	return p
 }
 
-// reader reads the files of the inputs of a load, each once.
+// reader reads the files of the inputs of a read, each once.
 type reader struct {
 	ctx context.Context
 	// The details of each directory input that did not select a file.
 	empty []string
-	files []*file
-	// The unmarshalers of the registry, which every Source that the reader
-	// builds takes ahead of the options of its input.
+	files []*inputhook.File
+	// The unmarshalers that every Source that the reader builds takes ahead
+	// of the options of its input.
 	unmarshalers []niceyaml.Unmarshaler
-	// The files, Sources, and streams that the load has read, which a later
-	// input that names one of them skips.
+	// The files, Sources, and streams that the read has taken, which a
+	// later input that names one of them skips.
 	disk    []os.FileInfo
 	fsFiles []fsKey
 	sources []*niceyaml.Source
@@ -281,7 +233,7 @@ type fsKey struct {
 	path string
 }
 
-// readInputs reads the files of in, in load order. Each Source that it
+// readInputs reads the files of in, in read order. Each Source that it
 // builds takes the unmarshalers in us.
 func readInputs(ctx context.Context, in Input, us []niceyaml.Unmarshaler) (*reader, error) {
 	inputs, err := prepare(ctx, in, nil)
@@ -294,7 +246,7 @@ func readInputs(ctx context.Context, in Input, us []niceyaml.Unmarshaler) (*read
 	for _, p := range inputs {
 		err := ctx.Err()
 		if err != nil {
-			return nil, err //nolint:wrapcheck // The load ends with the error of its context.
+			return nil, err //nolint:wrapcheck // The read ends with the error of its context.
 		}
 
 		switch {
@@ -306,7 +258,8 @@ func readInputs(ctx context.Context, in Input, us []niceyaml.Unmarshaler) (*read
 			r.walkDisk(p)
 		case p.def.kind == inputPath:
 			name := filepath.Clean(p.def.path)
-			r.readDisk(name, p.def.path, p.def.cfg.sourceOptions, target{kind: targetDisk, path: p.def.path})
+			t := inputhook.Target{Kind: inputhook.Disk, Path: p.def.path}
+			r.readDisk(name, p.def.path, p.def.cfg.sourceOptions, t)
 
 		case p.info.IsDir():
 			r.walkFS(p)
@@ -318,24 +271,23 @@ func readInputs(ctx context.Context, in Input, us []niceyaml.Unmarshaler) (*read
 
 	err = ctx.Err()
 	if err != nil {
-		return nil, err //nolint:wrapcheck // The load ends with the error of its context.
+		return nil, err //nolint:wrapcheck // The read ends with the error of its context.
 	}
 
 	return r, nil
 }
 
 // fail adds the file name, whose read failed, with its problem err.
-func (r *reader) fail(name string, err error, t target) {
-	r.files = append(r.files, &file{err: namedSource(name).Bind(err), target: t, name: name})
+func (r *reader) fail(name string, err error, t inputhook.Target) {
+	r.files = append(r.files, &inputhook.File{Err: namedSource(name).Bind(err), Target: t, Name: name})
 }
 
-// add adds f, a file that the load read.
-func (r *reader) add(f *file) {
-	f.name = f.src.Name()
-	r.files = append(r.files, f)
+// add adds src, the Source of a file that the read took in.
+func (r *reader) add(src *niceyaml.Source, t inputhook.Target) {
+	r.files = append(r.files, &inputhook.File{Source: src, Target: t, Name: src.Name()})
 }
 
-// readSources adds each of srcs that the load has not read.
+// readSources adds each of srcs that the read has not taken.
 func (r *reader) readSources(srcs []*niceyaml.Source) {
 	for _, src := range srcs {
 		if src == nil || slices.Contains(r.sources, src) {
@@ -343,12 +295,12 @@ func (r *reader) readSources(srcs []*niceyaml.Source) {
 		}
 
 		r.sources = append(r.sources, src)
-		r.add(&file{src: src, target: target{kind: targetSource}})
+		r.add(src, inputhook.Target{Kind: inputhook.Source})
 	}
 }
 
 // readStream adds the Source of the text of s, built with opts, unless the
-// load has read s.
+// read has taken s.
 func (r *reader) readStream(s *stream, opts []niceyaml.SourceOption) {
 	if slices.Contains(r.streams, s) {
 		return
@@ -356,7 +308,7 @@ func (r *reader) readStream(s *stream, opts []niceyaml.SourceOption) {
 
 	r.streams = append(r.streams, s)
 
-	t := target{kind: s.kind}
+	t := inputhook.Target{Kind: s.kind}
 
 	text, err := s.read()
 	if err != nil {
@@ -366,12 +318,12 @@ func (r *reader) readStream(s *stream, opts []niceyaml.SourceOption) {
 	}
 
 	src := niceyaml.NewSourceFromString(text, r.sourceOptions(opts, niceyaml.WithName(s.name))...)
-	r.add(&file{src: src, target: t})
+	r.add(src, t)
 }
 
 // readDisk adds the file at full, which messages name name, unless the
-// load has read it under another path.
-func (r *reader) readDisk(name, full string, opts []niceyaml.SourceOption, t target) {
+// read has taken it under another path.
+func (r *reader) readDisk(name, full string, opts []niceyaml.SourceOption, t inputhook.Target) {
 	f, err := os.Open(full) //nolint:gosec // The user names the files to read.
 	if err != nil {
 		r.fail(name, readError(err), t)
@@ -382,10 +334,10 @@ func (r *reader) readDisk(name, full string, opts []niceyaml.SourceOption, t tar
 	r.readFile(f, name, full, opts, t)
 }
 
-// readFile adds the open file f unless the load has read it under another
+// readFile adds the open file f unless the read has taken it under another
 // path, and closes f. Messages name the file name, and full is its path
 // on disk.
-func (r *reader) readFile(f *os.File, name, full string, opts []niceyaml.SourceOption, t target) {
+func (r *reader) readFile(f *os.File, name, full string, opts []niceyaml.SourceOption, t inputhook.Target) {
 	defer f.Close() //nolint:errcheck // A read-only file has nothing to flush.
 
 	info, err := f.Stat()
@@ -410,11 +362,11 @@ func (r *reader) readFile(f *os.File, name, full string, opts []niceyaml.SourceO
 		return
 	}
 
-	r.add(&file{src: src, target: t})
+	r.add(src, t)
 }
 
 // readFS adds the file at p in fsys, which messages name name, unless the
-// load has read it.
+// read has taken it.
 func (r *reader) readFS(fsys fs.FS, name, p string, opts []niceyaml.SourceOption) {
 	key := fsKey{fsys: fsys, path: p}
 	if slices.ContainsFunc(r.fsFiles, key.same) {
@@ -423,7 +375,7 @@ func (r *reader) readFS(fsys fs.FS, name, p string, opts []niceyaml.SourceOption
 
 	r.fsFiles = append(r.fsFiles, key)
 
-	t := target{kind: targetFS}
+	t := inputhook.Target{Kind: inputhook.FS}
 
 	f, err := fsys.Open(p)
 	if err != nil {
@@ -442,7 +394,7 @@ func (r *reader) readFS(fsys fs.FS, name, p string, opts []niceyaml.SourceOption
 		return
 	}
 
-	r.add(&file{src: src, target: t})
+	r.add(src, t)
 }
 
 // same reports whether k and o name one file: one path in file systems
@@ -488,7 +440,7 @@ func equalFS(a, b reflect.Value) bool {
 }
 
 // sourceOptions returns the options of a Source that the reader builds:
-// the unmarshalers of the registry, then the options of the user, then
+// the unmarshalers of the reader, then the options of the user, then
 // own. Each later option wins.
 func (r *reader) sourceOptions(user []niceyaml.SourceOption, own ...niceyaml.SourceOption) []niceyaml.SourceOption {
 	return slices.Concat([]niceyaml.SourceOption{niceyaml.WithUnmarshalers(r.unmarshalers...)}, user, own)
@@ -544,7 +496,7 @@ func (r *reader) walkDisk(p *prepared) {
 
 	w, err := newDiskWalk(p, dir)
 	if err != nil {
-		r.fail(dir, readError(err), target{kind: targetDisk})
+		r.fail(dir, readError(err), inputhook.Target{Kind: inputhook.Disk})
 
 		return
 	}
@@ -561,7 +513,7 @@ func (r *reader) walkDisk(p *prepared) {
 		}
 
 		name := filepath.Join(dir, filepath.FromSlash(e.rel))
-		t := target{kind: targetDisk, root: dir, path: e.rel}
+		t := inputhook.Target{Kind: inputhook.Disk, Root: dir, Path: e.rel}
 
 		if e.err != nil {
 			r.fail(name, e.err, t)
@@ -570,7 +522,7 @@ func (r *reader) walkDisk(p *prepared) {
 		}
 
 		o := w.open(e.rel)
-		t.outside = o.outside
+		t.Outside = o.outside
 
 		switch {
 		case o.err != nil:
@@ -585,7 +537,7 @@ func (r *reader) walkDisk(p *prepared) {
 			r.readFile(o.f, name, name, p.def.cfg.sourceOptions, t)
 
 			for _, f := range r.files[before:] {
-				f.dir = dir
+				f.Dir = dir
 			}
 		}
 	}
@@ -1013,10 +965,10 @@ func (w *diskWalk) try(name string) (opened, bool) {
 		return opened{}, false
 	}
 
-	resolved, err := resolveIn(w.root, w.abs, name)
+	resolved, err := rootpath.Resolve(w.root, w.abs, name)
 
 	switch {
-	case errors.Is(err, errOutside):
+	case errors.Is(err, rootpath.ErrOutside):
 		return w.openOutside(name, full), false
 
 	case err != nil:
@@ -1176,9 +1128,4 @@ func outsideProblem(written, root string) error {
 func unselectedProblem(written string, globs []string) error {
 	return newProblem(ErrOutsideLink,
 		fmt.Sprintf("links to %s, which does not match %s", escape.Line(written), joinOr(globs)))
-}
-
-// joinOr returns items as a list in prose, as in "*.yaml or *.yml".
-func joinOr(items []string) string {
-	return joinList(items, "or")
 }

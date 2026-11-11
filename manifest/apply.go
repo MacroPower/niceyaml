@@ -9,6 +9,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
+	"go.jacobcolvin.com/niceyaml/internal/inputhook"
 	"go.jacobcolvin.com/niceyaml/internal/quantity"
 )
 
@@ -49,9 +50,9 @@ func WithWriter(fn WriteFunc) ApplyOption {
 // Apply writes the new text of each file of [Plan.Files] and returns a
 // [Result] that records what it did. It hands each file to the
 // [WriteFunc] of [WithWriter], or to [WriteAtomic] by default, one file at
-// a time in load order. WriteAtomic writes only the files that a [Path]
-// input read from disk, and fails each other file with an error that
-// matches [ErrReadOnly].
+// a time in load order. WriteAtomic writes only the files that an
+// [input.Path] input read from disk, and fails each other file with an
+// error that matches [ErrReadOnly].
 //
 // Apply counts a file as written when the WriteFunc returns nil for it.
 // When the WriteFunc returns an error, Apply counts the file as not
@@ -59,7 +60,7 @@ func WithWriter(fn WriteFunc) ApplyOption {
 // problem of the file in [Result.Err], and its first line becomes the
 // reason that [Result.Summary] gives.
 //
-// Apply refuses each file of [Sources] whose Source merges layers,
+// Apply refuses each file of [input.Sources] whose Source merges layers,
 // whatever the WriteFunc. Such a file fails with an error that matches
 // [ErrReadOnly], and Apply does not hand it to the WriteFunc.
 //
@@ -292,19 +293,19 @@ func (f *PlanFile) readOnly() error {
 	t := f.f.target
 
 	switch t.kind {
-	case targetStdin:
+	case inputhook.Stdin:
 		return readOnlyProblem("cannot rewrite standard input")
 
-	case targetReader:
+	case inputhook.Reader:
 		return readOnlyProblem("cannot rewrite a file that " + app + " read from a stream")
 
-	case targetFS:
+	case inputhook.FS:
 		return readOnlyProblem("cannot rewrite a file of a file system that " + app + " only reads")
 
-	case targetSource:
+	case inputhook.Source:
 		return readOnlyProblem("cannot rewrite a file that " + app + " built in memory")
 
-	case targetDisk:
+	case inputhook.Disk:
 		if t.outside {
 			return readOnlyProblem("cannot rewrite a file that links outside " + t.root)
 		}

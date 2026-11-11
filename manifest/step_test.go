@@ -12,6 +12,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/edit"
+	"go.jacobcolvin.com/niceyaml/input"
 	"go.jacobcolvin.com/niceyaml/manifest"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/schema"
@@ -626,7 +627,7 @@ func TestRegistry_Load_Steps(t *testing.T) {
 				`  closes: "21:00"`,
 				`  closes: "19:00"`,
 			)},
-			in: []manifest.InputOption{manifest.WithSourceOptions(niceyaml.WithAllowDuplicateKeys(true))},
+			in: []input.Option{input.WithSourceOptions(niceyaml.WithAllowDuplicateKeys(true))},
 			err: stringtest.JoinLF(
 				`config/hours.yaml:4:3: $.spec.closes: v2 renames $.spec.closes to "close", which reaches "closes", `+
 					`a key that its mapping repeats, and cafe does not edit the entries of a repeated key`,
@@ -649,7 +650,7 @@ func TestRegistry_Load_Steps(t *testing.T) {
 				"kind: Hours",
 				"spec: *summer",
 			)},
-			in: []manifest.InputOption{manifest.WithSourceOptions(niceyaml.WithReferences(
+			in: []input.Option{input.WithSourceOptions(niceyaml.WithReferences(
 				niceyaml.NewSourceFromString(stringtest.LinesLF("summer: &summer", `  closes: "21:00"`)),
 			))},
 			// The problem binds at the alias that the path reads through.
@@ -700,7 +701,7 @@ func TestRegistry_Load_StepValues(t *testing.T) {
 		niceyaml.WithName("holiday.yaml"),
 	)
 
-	shifts, err := reg.Load(t.Context(), manifest.Sources(src))
+	shifts, err := reg.Load(t.Context(), input.Sources(src))
 	require.NoError(t, err)
 
 	for shift := range shifts.All[map[string]any]() {
@@ -714,7 +715,7 @@ func TestRegistry_Load_StepValues(t *testing.T) {
 
 	drinkReg := manifest.MustNewRegistry(drinkOptions(false)...)
 
-	drinks, err := drinkReg.Load(t.Context(), manifest.Sources(niceyaml.NewSourceFromString(drinkDoc+"  size: M\n")))
+	drinks, err := drinkReg.Load(t.Context(), input.Sources(niceyaml.NewSourceFromString(drinkDoc+"  size: M\n")))
 	require.NoError(t, err)
 
 	want := map[string]any{

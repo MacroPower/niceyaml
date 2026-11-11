@@ -12,6 +12,7 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/edit"
+	"go.jacobcolvin.com/niceyaml/input"
 	"go.jacobcolvin.com/niceyaml/internal/quantity"
 	"go.jacobcolvin.com/niceyaml/line"
 )
@@ -37,7 +38,7 @@ import (
 // is a load of the same input that fails before it reads a file. A
 // pattern that Load rejects and an input path that does not exist each
 // fail a load that way.
-func (r *Registry) PlanMigration(ctx context.Context, in Input, opts ...LoadOption) (*Plan, error) {
+func (r *Registry) PlanMigration(ctx context.Context, in input.Input, opts ...LoadOption) (*Plan, error) {
 	cfg := newLoadConfig(opts)
 	cfg.plan = true
 	cfg.noSetChecks = true

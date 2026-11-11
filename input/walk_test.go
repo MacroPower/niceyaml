@@ -1,8 +1,7 @@
-package manifest_test
+package input_test
 
 import (
 	"errors"
-	"io"
 	"io/fs"
 	"maps"
 	"os"
@@ -13,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/fstest"
 	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
@@ -20,9 +20,8 @@ import (
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/input"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
-	"go.jacobcolvin.com/niceyaml/manifest"
-	"go.jacobcolvin.com/niceyaml/schema/matcher"
 )
 
 // tree describes the files and the links of a directory for a test.
@@ -73,15 +72,107 @@ func (tr tree) write(tb testing.TB, dir string) {
 	}
 }
 
-// loadedNames returns the names of the sources that set read.
-func loadedNames(set *manifest.Set) []string {
+var (
+	// The text of a file of a test.
+	cafeDoc = stringtest.LinesLF(
+		"apiVersion: cafe.jacobcolvin.com/v1",
+		"kind: Cafe",
+		"metadata:",
+		"  name: yamull",
+	)
+
+	// The text of another file of a test.
+	hoursV1Doc = stringtest.LinesLF(
+		"apiVersion: cafe.jacobcolvin.com/v1",
+		"kind: Hours",
+		"metadata:",
+		"  name: weekday",
+	)
+)
+
+// mapFS returns a file system that holds files under the directory config.
+func mapFS(files map[string]string) fstest.MapFS {
+	fsys := fstest.MapFS{}
+	for name, text := range files {
+		fsys["config/"+name] = &fstest.MapFile{Data: []byte(text)}
+	}
+
+	return fsys
+}
+
+// readAll returns the files of in. The error is the error of
+// [input.Input.Files], or the errors of the files joined when Files
+// passes.
+func readAll(t *testing.T, in input.Input) ([]input.File, error) {
+	t.Helper()
+
+	files, err := in.Files(t.Context())
+	if err != nil {
+		require.Nil(t, files)
+
+		return nil, err //nolint:wrapcheck // The test reads the error of the read.
+	}
+
+	var errs []error
+
+	for _, f := range files {
+		if f.Err != nil {
+			assert.Nil(t, f.Source, f.Name)
+
+			errs = append(errs, f.Err)
+
+			continue
+		}
+
+		require.NotNil(t, f.Source, f.Name)
+		assert.Equal(t, f.Source.Name(), f.Name)
+	}
+
+	return files, errors.Join(errs...)
+}
+
+// formatAll returns each error that err joins, formatted as
+// [niceyaml.FormatError] does, one after another.
+func formatAll(err error) string {
+	joined, ok := err.(interface{ Unwrap() []error })
+	if !ok {
+		return niceyaml.FormatError(err)
+	}
+
+	var parts []string
+
+	for _, e := range joined.Unwrap() {
+		parts = append(parts, niceyaml.FormatError(e))
+	}
+
+	return strings.Join(parts, "\n")
+}
+
+// readNames returns the slash names of the files that the read took in.
+func readNames(files []input.File) []string {
 	var names []string
 
-	for _, src := range set.Sources() {
-		names = append(names, filepath.ToSlash(src.Name()))
+	for _, f := range files {
+		if f.Source != nil {
+			names = append(names, filepath.ToSlash(f.Name))
+		}
 	}
 
 	return names
+}
+
+// readTexts returns the text of each file that the read took in, by its
+// slash name.
+func readTexts(files []input.File) map[string]string {
+	texts := map[string]string{}
+
+	for _, f := range files {
+		if f.Source != nil {
+			texts[filepath.ToSlash(f.Name)] = f.Source.Text()
+		}
+	}
+
+	return texts
 }
 
 // notExistReason returns the reason that the system gives for a path
@@ -114,10 +205,10 @@ func TestPath(t *testing.T) {
 
 	tcs := map[string]struct {
 		tree  tree
-		opts  []manifest.InputOption
+		opts  []input.Option
 		input string
 		want  []string
-		// The text of each file that the load reads, by its path below the
+		// The text of each file that the read takes in, by its path below the
 		// directory of the test, for each file that the test checks.
 		text map[string]string
 		err  string
@@ -147,9 +238,9 @@ func TestPath(t *testing.T) {
 				"config/sub/.hidden/e.yaml":     "",
 				"config/sub/testdata/deep.yaml": "",
 			}},
-			opts: []manifest.InputOption{
-				manifest.WithRecursive(true),
-				manifest.WithExclude("*.example.yaml", "testdata/"),
+			opts: []input.Option{
+				input.WithRecursive(true),
+				input.WithExclude("*.example.yaml", "testdata/"),
 			},
 			want: []string{"config/cafe.yaml", "config/sub/a.yaml"},
 		},
@@ -158,7 +249,7 @@ func TestPath(t *testing.T) {
 				"config/cafe.conf": cafeDoc,
 				"config/x.yaml":    "",
 			}},
-			opts: []manifest.InputOption{manifest.WithInclude("*.conf")},
+			opts: []input.Option{input.WithInclude("*.conf")},
 			want: []string{"config/cafe.conf"},
 		},
 		"hidden entries": {
@@ -169,10 +260,10 @@ func TestPath(t *testing.T) {
 				"config/.git/d.yaml":        "",
 				"config/sub/.deploy/e.yaml": "",
 			}},
-			opts: []manifest.InputOption{
-				manifest.WithRecursive(true),
-				manifest.WithHidden(true),
-				manifest.WithExclude(".git/"),
+			opts: []input.Option{
+				input.WithRecursive(true),
+				input.WithHidden(true),
+				input.WithExclude(".git/"),
 			},
 			want: []string{"config/.hidden.yaml", "config/cafe.yaml", "config/sub/.deploy/e.yaml"},
 		},
@@ -182,7 +273,7 @@ func TestPath(t *testing.T) {
 				"config/.hidden.yaml": "",
 				"config/.sub/a.yaml":  "",
 			}},
-			opts: []manifest.InputOption{manifest.WithHidden(true)},
+			opts: []input.Option{input.WithHidden(true)},
 			want: []string{"config/.hidden.yaml", "config/cafe.yaml"},
 		},
 		"hidden entries that include patterns name": {
@@ -193,11 +284,11 @@ func TestPath(t *testing.T) {
 				"config/.github/dependabot.yaml":   "",
 				"config/.git/workflows/x.yaml":     "",
 			}},
-			opts: []manifest.InputOption{
-				manifest.WithRecursive(true),
-				manifest.WithHidden(true),
-				manifest.WithInclude(".github/workflows/*.yaml", ".cafe.yaml"),
-				manifest.WithExclude(".git/"),
+			opts: []input.Option{
+				input.WithRecursive(true),
+				input.WithHidden(true),
+				input.WithInclude(".github/workflows/*.yaml", ".cafe.yaml"),
+				input.WithExclude(".git/"),
 			},
 			want: []string{"config/.cafe.yaml", "config/.github/workflows/ci.yaml"},
 		},
@@ -209,10 +300,10 @@ func TestPath(t *testing.T) {
 					"config/cafe.yaml": "..data/cafe.yaml",
 				},
 			},
-			opts: []manifest.InputOption{
-				manifest.WithRecursive(true),
-				manifest.WithHidden(true),
-				manifest.WithExclude("..*/"),
+			opts: []input.Option{
+				input.WithRecursive(true),
+				input.WithHidden(true),
+				input.WithExclude("..*/"),
 			},
 			want: []string{"config/cafe.yaml"},
 		},
@@ -221,7 +312,7 @@ func TestPath(t *testing.T) {
 				"config/cafe.yaml":   cafeDoc,
 				"config/.git/d.yaml": "",
 			}},
-			opts: []manifest.InputOption{manifest.WithRecursive(true), manifest.WithExclude(".git/")},
+			opts: []input.Option{input.WithRecursive(true), input.WithExclude(".git/")},
 			want: []string{"config/cafe.yaml"},
 		},
 		"exclude pattern with a hidden brace alternative without hidden": {
@@ -230,7 +321,7 @@ func TestPath(t *testing.T) {
 				"config/.git/d.yaml": "",
 				"config/sub/a.yaml":  "",
 			}},
-			opts: []manifest.InputOption{manifest.WithRecursive(true), manifest.WithExclude("{.git,sub}/")},
+			opts: []input.Option{input.WithRecursive(true), input.WithExclude("{.git,sub}/")},
 			want: []string{"config/cafe.yaml"},
 		},
 		"patterns with a dot element without hidden": {
@@ -240,58 +331,58 @@ func TestPath(t *testing.T) {
 				"config/sub/a.yaml": "",
 				"config/sub/c.yaml": "",
 			}},
-			opts: []manifest.InputOption{
-				manifest.WithRecursive(true),
-				manifest.WithInclude("./cafe.yaml", "./b.yaml", "sub/./*.yaml"),
-				manifest.WithExclude("./b.yaml", "sub/./c.yaml"),
+			opts: []input.Option{
+				input.WithRecursive(true),
+				input.WithInclude("./cafe.yaml", "./b.yaml", "sub/./*.yaml"),
+				input.WithExclude("./b.yaml", "sub/./c.yaml"),
 			},
 			want: []string{"config/cafe.yaml", "config/sub/a.yaml"},
 		},
 		"include pattern for a hidden file without hidden": {
 			tree: tree{files: map[string]string{"config/.cafe.yaml": cafeDoc}},
-			opts: []manifest.InputOption{manifest.WithInclude(".cafe.yaml")},
+			opts: []input.Option{input.WithInclude(".cafe.yaml")},
 			err: `pattern ".cafe.yaml": invalid glob pattern: ` +
 				`a walk skips entries whose names start with ".", and ".cafe.yaml" matches only those names`,
-			is: []error{matcher.ErrInvalidPattern},
+			is: []error{input.ErrInvalidPattern},
 		},
 		"include pattern for a hidden directory without hidden": {
 			tree: tree{files: map[string]string{"config/.github/workflows/ci.yaml": cafeDoc}},
-			opts: []manifest.InputOption{
-				manifest.WithRecursive(true),
-				manifest.WithInclude("*.yaml", ".github/workflows/*.yaml"),
+			opts: []input.Option{
+				input.WithRecursive(true),
+				input.WithInclude("*.yaml", ".github/workflows/*.yaml"),
 			},
 			err: `pattern ".github/workflows/*.yaml": invalid glob pattern: ` +
 				`a walk skips entries whose names start with ".", and ".github" matches only those names`,
-			is: []error{matcher.ErrInvalidPattern},
+			is: []error{input.ErrInvalidPattern},
 		},
 		"include pattern with a hidden brace alternative without hidden": {
 			tree: tree{files: map[string]string{"config/config/cafe.yaml": cafeDoc}},
-			opts: []manifest.InputOption{
-				manifest.WithRecursive(true),
-				manifest.WithInclude("{.config,config}/*.yaml"),
+			opts: []input.Option{
+				input.WithRecursive(true),
+				input.WithInclude("{.config,config}/*.yaml"),
 			},
 			err: `pattern "{.config,config}/*.yaml": invalid glob pattern: ` +
 				`a walk skips entries whose names start with ".", and ".config" matches only those names`,
-			is: []error{matcher.ErrInvalidPattern},
+			is: []error{input.ErrInvalidPattern},
 		},
 		"link into a hidden directory that an include pattern names without hidden": {
 			tree: tree{
 				files: map[string]string{"config/.store/cafe.yaml": cafeDoc},
 				links: map[string]string{"config/cafe.yaml": ".store/cafe.yaml"},
 			},
-			opts: []manifest.InputOption{manifest.WithInclude("/cafe.yaml", ".store/*.yaml")},
+			opts: []input.Option{input.WithInclude("/cafe.yaml", ".store/*.yaml")},
 			err: `pattern ".store/*.yaml": invalid glob pattern: ` +
 				`a walk skips entries whose names start with ".", and ".store" matches only those names`,
-			is: []error{matcher.ErrInvalidPattern},
+			is: []error{input.ErrInvalidPattern},
 		},
 		"link into a hidden directory that an include pattern names": {
 			tree: tree{
 				files: map[string]string{"config/.store/cafe.yaml": cafeDoc},
 				links: map[string]string{"config/cafe.yaml": ".store/cafe.yaml"},
 			},
-			opts: []manifest.InputOption{
-				manifest.WithHidden(true),
-				manifest.WithInclude("/cafe.yaml", ".store/*.yaml"),
+			opts: []input.Option{
+				input.WithHidden(true),
+				input.WithInclude("/cafe.yaml", ".store/*.yaml"),
 			},
 			want: []string{"config/cafe.yaml"},
 		},
@@ -300,19 +391,19 @@ func TestPath(t *testing.T) {
 				files: map[string]string{"config/.store/cafe.yaml": cafeDoc},
 				links: map[string]string{"config/cafe.yaml": ".store/cafe.yaml"},
 			},
-			opts: []manifest.InputOption{manifest.WithHidden(true), manifest.WithInclude("/cafe.yaml")},
+			opts: []input.Option{input.WithHidden(true), input.WithInclude("/cafe.yaml")},
 			err:  "config/cafe.yaml: links to .store/cafe.yaml, which does not match /cafe.yaml",
-			is:   []error{manifest.ErrOutsideLink},
+			is:   []error{input.ErrOutsideLink},
 		},
 		"link into a hidden directory under recursion": {
 			tree: tree{
 				files: map[string]string{"config/.store/cafe.yaml": cafeDoc},
 				links: map[string]string{"config/cafe.yaml": ".store/cafe.yaml"},
 			},
-			opts: []manifest.InputOption{
-				manifest.WithRecursive(true),
-				manifest.WithHidden(true),
-				manifest.WithInclude("/cafe.yaml", ".store/*.yaml"),
+			opts: []input.Option{
+				input.WithRecursive(true),
+				input.WithHidden(true),
+				input.WithInclude("/cafe.yaml", ".store/*.yaml"),
 			},
 			want: []string{"config/.store/cafe.yaml"},
 		},
@@ -321,11 +412,11 @@ func TestPath(t *testing.T) {
 				files: map[string]string{"config/.store/cafe.yaml": cafeDoc},
 				links: map[string]string{"config/cafe.yaml": ".store/cafe.yaml"},
 			},
-			opts: []manifest.InputOption{
-				manifest.WithRecursive(true),
-				manifest.WithHidden(true),
-				manifest.WithInclude("/cafe.yaml", ".store/*.yaml"),
-				manifest.WithExclude(".store/"),
+			opts: []input.Option{
+				input.WithRecursive(true),
+				input.WithHidden(true),
+				input.WithInclude("/cafe.yaml", ".store/*.yaml"),
+				input.WithExclude(".store/"),
 			},
 			want: []string{"config/cafe.yaml"},
 		},
@@ -337,10 +428,10 @@ func TestPath(t *testing.T) {
 					"config/cafe.yaml": "..data/cafe.yaml",
 				},
 			},
-			opts: []manifest.InputOption{manifest.WithInclude("/*.yaml", "..*/*.yaml")},
+			opts: []input.Option{input.WithInclude("/*.yaml", "..*/*.yaml")},
 			err: `pattern "..*/*.yaml": invalid glob pattern: ` +
 				`a walk skips entries whose names start with ".", and "..*" matches only those names`,
-			is: []error{matcher.ErrInvalidPattern},
+			is: []error{input.ErrInvalidPattern},
 		},
 		"links into the hidden directory of a volume that an include pattern names": {
 			tree: tree{
@@ -350,13 +441,13 @@ func TestPath(t *testing.T) {
 					"config/cafe.yaml": "..data/cafe.yaml",
 				},
 			},
-			opts: []manifest.InputOption{
-				manifest.WithHidden(true),
-				manifest.WithInclude("/*.yaml", "..*/*.yaml"),
+			opts: []input.Option{
+				input.WithHidden(true),
+				input.WithInclude("/*.yaml", "..*/*.yaml"),
 			},
 			want: []string{"config/cafe.yaml"},
 		},
-		"named file loads whatever its name": {
+		"named file reads whatever its name": {
 			tree:  tree{files: map[string]string{"cafe.txt": cafeDoc}},
 			input: "cafe.txt",
 			want:  []string{"cafe.txt"},
@@ -385,7 +476,7 @@ func TestPath(t *testing.T) {
 				files: map[string]string{"config/cafe.yaml": cafeDoc, "elsewhere/x.yaml": ""},
 				links: map[string]string{"config/sub": "../elsewhere"},
 			},
-			opts: []manifest.InputOption{manifest.WithRecursive(true)},
+			opts: []input.Option{input.WithRecursive(true)},
 			want: []string{"config/cafe.yaml"},
 		},
 		"link outside the directory": {
@@ -397,14 +488,14 @@ func TestPath(t *testing.T) {
 				"{dir}/config/hours.yaml: links to ../shared/hours.yaml, which leads outside {dir}/config",
 				"`-- copy the file into {dir}/config, or make {dir}/config itself the link",
 			),
-			is: []error{manifest.ErrOutsideLink},
+			is: []error{input.ErrOutsideLink},
 		},
 		"link outside the directory allowed": {
 			tree: tree{
 				files: map[string]string{"config/cafe.yaml": cafeDoc, "shared/hours.yaml": hoursV1Doc},
 				links: map[string]string{"config/hours.yaml": "../shared/hours.yaml"},
 			},
-			opts: []manifest.InputOption{manifest.WithOutsideLinks(true)},
+			opts: []input.Option{input.WithOutsideLinks(true)},
 			want: []string{"config/cafe.yaml", "config/hours.yaml"},
 		},
 		"link through a file link outside the directory that leads back": {
@@ -436,27 +527,27 @@ func TestPath(t *testing.T) {
 				},
 			},
 			err: "config/ci.yaml: links to ../shared/ci.yaml, which does not match *.yaml or *.yml",
-			is:  []error{manifest.ErrOutsideLink},
+			is:  []error{input.ErrOutsideLink},
 		},
 		"link through a directory link outside the directory and back up": {
 			tree: climbTree("../x/../config/..data/weekday.yaml"),
 			err:  "config/hours.yaml: links to ../x/../config/..data/weekday.yaml, which leads outside",
-			is:   []error{manifest.ErrOutsideLink},
+			is:   []error{input.ErrOutsideLink},
 		},
 		"link through a directory link outside the directory and back up allowed": {
 			tree: climbTree("../x/../config/..data/weekday.yaml"),
-			opts: []manifest.InputOption{manifest.WithOutsideLinks(true)},
+			opts: []input.Option{input.WithOutsideLinks(true)},
 			want: []string{"config/cafe.yaml", "config/hours.yaml"},
 			text: map[string]string{"config/hours.yaml": "# outside\n"},
 		},
 		"absolute link through a directory link and back up": {
 			tree: climbTree("{dir}/x/../config/..data/weekday.yaml"),
 			err:  "config/hours.yaml: links to {dir}/x/../config/..data/weekday.yaml, which leads outside",
-			is:   []error{manifest.ErrOutsideLink},
+			is:   []error{input.ErrOutsideLink},
 		},
 		"absolute link through a directory link and back up allowed": {
 			tree: climbTree("{dir}/x/../config/..data/weekday.yaml"),
-			opts: []manifest.InputOption{manifest.WithOutsideLinks(true)},
+			opts: []input.Option{input.WithOutsideLinks(true)},
 			want: []string{"config/cafe.yaml", "config/hours.yaml"},
 			text: map[string]string{"config/hours.yaml": "# outside\n"},
 		},
@@ -481,7 +572,7 @@ func TestPath(t *testing.T) {
 				links: map[string]string{"config/hours.yaml": "{dir}/shared/hours.yaml"},
 			},
 			err: "{dir}/config/hours.yaml: links to {dir}/shared/hours.yaml, which leads outside {dir}/config",
-			is:  []error{manifest.ErrOutsideLink},
+			is:  []error{input.ErrOutsideLink},
 		},
 		"link outside the directory to a directory": {
 			tree: tree{
@@ -496,7 +587,7 @@ func TestPath(t *testing.T) {
 				links:  map[string]string{"config/hours.yaml": "../shared/hours.yaml"},
 				locked: []string{"shared/hours.yaml"},
 			},
-			opts:   []manifest.InputOption{manifest.WithOutsideLinks(true)},
+			opts:   []input.Option{input.WithOutsideLinks(true)},
 			err:    "config/hours.yaml: {reason}",
 			reason: "shared/hours.yaml",
 			is:     []error{fs.ErrPermission},
@@ -525,7 +616,7 @@ func TestPath(t *testing.T) {
 				files:  map[string]string{"config/cafe.yaml": cafeDoc, "config/sub/hours.yaml": hoursV1Doc},
 				locked: []string{"config/sub"},
 			},
-			opts:   []manifest.InputOption{manifest.WithRecursive(true)},
+			opts:   []input.Option{input.WithRecursive(true)},
 			err:    "config/sub: {reason}",
 			reason: "config/sub",
 			is:     []error{fs.ErrPermission},
@@ -538,7 +629,7 @@ func TestPath(t *testing.T) {
 					"config/caf\xe9/hours.yaml": hoursV1Doc,
 				},
 			},
-			opts: []manifest.InputOption{manifest.WithRecursive(true)},
+			opts: []input.Option{input.WithRecursive(true)},
 			want: []string{"config/cafe.yaml", "config/caf\xe9/hours.yaml"},
 		},
 		"link to a file the patterns do not select": {
@@ -547,7 +638,7 @@ func TestPath(t *testing.T) {
 				links: map[string]string{"config/ci.yaml": ".env"},
 			},
 			err: "config/ci.yaml: links to .env, which does not match *.yaml or *.yml",
-			is:  []error{manifest.ErrOutsideLink},
+			is:  []error{input.ErrOutsideLink},
 		},
 		"dangling link": {
 			tree: tree{
@@ -596,19 +687,19 @@ func TestPath(t *testing.T) {
 		},
 		"bad pattern": {
 			tree: tree{dirs: []string{"config"}},
-			opts: []manifest.InputOption{manifest.WithExclude("[")},
+			opts: []input.Option{input.WithExclude("[")},
 			err:  `pattern "["`,
-			is:   []error{matcher.ErrInvalidPattern},
+			is:   []error{input.ErrInvalidPattern},
 		},
 		"include pattern with a slash at its end": {
 			tree: tree{dirs: []string{"config"}},
-			opts: []manifest.InputOption{manifest.WithInclude("sub/")},
-			is:   []error{matcher.ErrInvalidPattern},
+			opts: []input.Option{input.WithInclude("sub/")},
+			is:   []error{input.ErrInvalidPattern},
 		},
 		"pattern that climbs out": {
 			tree: tree{dirs: []string{"config"}},
-			opts: []manifest.InputOption{manifest.WithExclude("../x.yaml")},
-			is:   []error{matcher.ErrInvalidPattern},
+			opts: []input.Option{input.WithExclude("../x.yaml")},
+			is:   []error{input.ErrInvalidPattern},
 		},
 	}
 
@@ -619,15 +710,12 @@ func TestPath(t *testing.T) {
 			dir := t.TempDir()
 			tc.tree.write(t, dir)
 
-			input := tc.input
-			if input == "" {
-				input = "config"
+			p := tc.input
+			if p == "" {
+				p = "config"
 			}
 
-			reg := newCafeRegistry(t, manifest.WithKinds())
-
-			set, err := reg.Load(t.Context(), manifest.Path(filepath.Join(dir, input), tc.opts...),
-				manifest.WithSetChecks(false))
+			files, err := readAll(t, input.Path(filepath.Join(dir, p), tc.opts...))
 
 			if tc.err != "" || tc.is != nil {
 				require.Error(t, err)
@@ -644,7 +732,7 @@ func TestPath(t *testing.T) {
 						want = strings.ReplaceAll(want, "{reason}", reason)
 					}
 
-					assert.Contains(t, filepath.ToSlash(niceyaml.FormatError(err)), want)
+					assert.Contains(t, filepath.ToSlash(formatAll(err)), want)
 				}
 
 				return
@@ -658,12 +746,9 @@ func TestPath(t *testing.T) {
 				want = append(want, filepath.ToSlash(filepath.Join(dir, w)))
 			}
 
-			assert.Equal(t, want, loadedNames(set))
+			assert.Equal(t, want, readNames(files))
 
-			texts := map[string]string{}
-			for _, src := range set.Sources() {
-				texts[filepath.ToSlash(src.Name())] = src.Text()
-			}
+			texts := readTexts(files)
 
 			for name, text := range tc.text {
 				assert.Equal(t, text, texts[filepath.ToSlash(filepath.Join(dir, name))], name)
@@ -692,15 +777,7 @@ func climbTree(target string) tree {
 	}
 }
 
-// hoursV1Doc holds an Hours manifest that declares the written version.
-var hoursV1Doc = stringtest.LinesLF(
-	"apiVersion: cafe.jacobcolvin.com/v1",
-	"kind: Hours",
-	"metadata:",
-	"  name: weekday",
-)
-
-// onSourceBuild returns a source option that calls fn each time a load
+// onSourceBuild returns a source option that calls fn each time a read
 // builds a Source with it. A source option takes a value of an unexported
 // type, and the first argument, which onSourceBuild does not call, lets
 // the compiler infer that type.
@@ -713,7 +790,7 @@ func TestPath_ChangedEntry(t *testing.T) {
 
 	tcs := map[string]struct {
 		tree tree
-		opts []manifest.InputOption
+		opts []input.Option
 		// The target of the link that replaces config/b.yaml after the walk
 		// lists the directory. No link replaces the entry when it is empty.
 		link string
@@ -721,7 +798,7 @@ func TestPath_ChangedEntry(t *testing.T) {
 		// the entry when link is empty and dir is unset.
 		dir  bool
 		want []string
-		// The text of config/b.yaml in a load that reads it.
+		// The text of config/b.yaml in a read that takes it in.
 		text string
 		err  string
 		is   []error
@@ -733,11 +810,11 @@ func TestPath_ChangedEntry(t *testing.T) {
 				"{dir}/config/b.yaml: links to ../secret.yaml, which leads outside {dir}/config",
 				"`-- copy the file into {dir}/config, or make {dir}/config itself the link",
 			),
-			is: []error{manifest.ErrOutsideLink},
+			is: []error{input.ErrOutsideLink},
 		},
 		"link outside the directory allowed": {
 			tree: tree{files: map[string]string{"secret.yaml": hoursV1Doc}},
-			opts: []manifest.InputOption{manifest.WithOutsideLinks(true)},
+			opts: []input.Option{input.WithOutsideLinks(true)},
 			link: "../secret.yaml",
 			want: []string{"config/a.yaml", "config/b.yaml"},
 			text: hoursV1Doc,
@@ -746,7 +823,7 @@ func TestPath_ChangedEntry(t *testing.T) {
 			tree: tree{files: map[string]string{"config/hours.txt": hoursV1Doc}},
 			link: "hours.txt",
 			err:  "config/b.yaml: links to hours.txt, which does not match *.yaml or *.yml",
-			is:   []error{manifest.ErrOutsideLink},
+			is:   []error{input.ErrOutsideLink},
 		},
 		"link to a file the patterns select": {
 			tree: tree{files: map[string]string{"config/sub/hours.yaml": hoursV1Doc}},
@@ -811,20 +888,15 @@ func TestPath_ChangedEntry(t *testing.T) {
 				})
 			}
 
-			opts := slices.Concat(tc.opts, []manifest.InputOption{
-				manifest.WithSourceOptions(onSourceBuild(niceyaml.WithName(""), change)),
+			opts := slices.Concat(tc.opts, []input.Option{
+				input.WithSourceOptions(onSourceBuild(niceyaml.WithName(""), change)),
 			})
 
-			reg := newCafeRegistry(t, manifest.WithKinds())
+			files, err := readAll(t, input.Path(filepath.Join(dir, "config"), opts...))
+			require.NotNil(t, files)
 
-			chk, err := reg.Check(t.Context(), manifest.Path(filepath.Join(dir, "config"), opts...),
-				manifest.WithSetChecks(false))
-			require.NotNil(t, chk)
-
-			texts := map[string]string{}
-			for _, src := range chk.Set().Sources() {
-				texts[src.Name()] = src.Text()
-			}
+			texts := readTexts(files)
+			entry = filepath.ToSlash(entry)
 
 			if tc.err != "" {
 				require.Error(t, err)
@@ -834,7 +906,7 @@ func TestPath_ChangedEntry(t *testing.T) {
 				}
 
 				want := strings.ReplaceAll(tc.err, "{dir}", filepath.ToSlash(dir))
-				assert.Contains(t, filepath.ToSlash(niceyaml.FormatError(err)), want)
+				assert.Contains(t, filepath.ToSlash(formatAll(err)), want)
 				assert.NotContains(t, texts, entry)
 
 				return
@@ -848,7 +920,7 @@ func TestPath_ChangedEntry(t *testing.T) {
 				want = append(want, filepath.ToSlash(filepath.Join(dir, w)))
 			}
 
-			assert.Equal(t, want, loadedNames(chk.Set()))
+			assert.Equal(t, want, readNames(files))
 			assert.Equal(t, tc.text, texts[entry])
 		})
 	}
@@ -863,7 +935,7 @@ func TestPath_ChangedDirectory(t *testing.T) {
 		// config/sub a link.
 		replace tree
 		want    []string
-		// The text of config/sub/b.yaml in a load that reads it.
+		// The text of config/sub/b.yaml in a read that takes it in.
 		text string
 		err  string
 		is   []error
@@ -879,7 +951,7 @@ func TestPath_ChangedDirectory(t *testing.T) {
 				"{dir}/config/sub/b.yaml: links to ../outside, which leads outside {dir}/config",
 				"`-- copy the file into {dir}/config, or make {dir}/config itself the link",
 			),
-			is: []error{manifest.ErrOutsideLink},
+			is: []error{input.ErrOutsideLink},
 		},
 		"removed directory": {
 			err: "config/sub/b.yaml: " + notExistReason(t),
@@ -910,20 +982,12 @@ func TestPath_ChangedDirectory(t *testing.T) {
 				})
 			}
 
-			reg := newCafeRegistry(t, manifest.WithKinds())
+			files, err := readAll(t, input.Path(filepath.Join(dir, "config"), input.WithRecursive(true),
+				input.WithSourceOptions(onSourceBuild(niceyaml.WithName(""), change))))
+			require.NotNil(t, files)
 
-			chk, err := reg.Check(t.Context(),
-				manifest.Path(filepath.Join(dir, "config"), manifest.WithRecursive(true),
-					manifest.WithSourceOptions(onSourceBuild(niceyaml.WithName(""), change))),
-				manifest.WithSetChecks(false))
-			require.NotNil(t, chk)
-
-			entry := filepath.Join(dir, "config", "sub", "b.yaml")
-
-			texts := map[string]string{}
-			for _, src := range chk.Set().Sources() {
-				texts[src.Name()] = src.Text()
-			}
+			entry := filepath.ToSlash(filepath.Join(dir, "config", "sub", "b.yaml"))
+			texts := readTexts(files)
 
 			if tc.err != "" {
 				require.Error(t, err)
@@ -933,7 +997,7 @@ func TestPath_ChangedDirectory(t *testing.T) {
 				}
 
 				want := strings.ReplaceAll(tc.err, "{dir}", filepath.ToSlash(dir))
-				assert.Contains(t, filepath.ToSlash(niceyaml.FormatError(err)), want)
+				assert.Contains(t, filepath.ToSlash(formatAll(err)), want)
 				assert.NotContains(t, texts, entry)
 
 				return
@@ -947,7 +1011,7 @@ func TestPath_ChangedDirectory(t *testing.T) {
 				want = append(want, filepath.ToSlash(filepath.Join(dir, w)))
 			}
 
-			assert.Equal(t, want, loadedNames(chk.Set()))
+			assert.Equal(t, want, readNames(files))
 			assert.Equal(t, tc.text, texts[entry])
 		})
 	}
@@ -978,21 +1042,12 @@ func TestPath_ChangedDirectoryOfLink(t *testing.T) {
 		})
 	}
 
-	reg := newCafeRegistry(t, manifest.WithKinds())
-
-	chk, err := reg.Check(t.Context(),
-		manifest.Path(filepath.Join(dir, "config"), manifest.WithRecursive(true),
-			manifest.WithSourceOptions(onSourceBuild(niceyaml.WithName(""), change))),
-		manifest.WithSetChecks(false))
+	files, err := readAll(t, input.Path(filepath.Join(dir, "config"), input.WithRecursive(true),
+		input.WithSourceOptions(onSourceBuild(niceyaml.WithName(""), change))))
 	require.NoError(t, err)
 
-	texts := map[string]string{}
-	for _, src := range chk.Set().Sources() {
-		texts[src.Name()] = src.Text()
-	}
-
-	entry := filepath.Join(dir, "config", "sub", "b.yaml")
-	assert.Equal(t, hoursV1Doc, texts[entry])
+	entry := filepath.ToSlash(filepath.Join(dir, "config", "sub", "b.yaml"))
+	assert.Equal(t, hoursV1Doc, readTexts(files)[entry])
 }
 
 func TestFS(t *testing.T) {
@@ -1000,7 +1055,7 @@ func TestFS(t *testing.T) {
 
 	tcs := map[string]struct {
 		tree tree
-		opts []manifest.InputOption
+		opts []input.Option
 		want []string
 		err  string
 		is   []error
@@ -1012,7 +1067,7 @@ func TestFS(t *testing.T) {
 				"config/.deploy/e.yaml":   "",
 				"config/sub/.hidden.yaml": "",
 			}},
-			opts: []manifest.InputOption{manifest.WithRecursive(true)},
+			opts: []input.Option{input.WithRecursive(true)},
 			want: []string{"config/cafe.yaml"},
 		},
 		"hidden entries": {
@@ -1023,10 +1078,10 @@ func TestFS(t *testing.T) {
 				"config/.git/d.yaml":      "",
 				"config/sub/.hidden.yaml": "",
 			}},
-			opts: []manifest.InputOption{
-				manifest.WithRecursive(true),
-				manifest.WithHidden(true),
-				manifest.WithExclude(".git/"),
+			opts: []input.Option{
+				input.WithRecursive(true),
+				input.WithHidden(true),
+				input.WithExclude(".git/"),
 			},
 			want: []string{
 				"config/.deploy/e.yaml",
@@ -1037,27 +1092,27 @@ func TestFS(t *testing.T) {
 		},
 		"include pattern for a hidden file without hidden": {
 			tree: tree{files: map[string]string{"config/.cafe.yaml": cafeDoc}},
-			opts: []manifest.InputOption{manifest.WithInclude(".cafe.yaml")},
+			opts: []input.Option{input.WithInclude(".cafe.yaml")},
 			err:  `and ".cafe.yaml" matches only those names`,
-			is:   []error{matcher.ErrInvalidPattern},
+			is:   []error{input.ErrInvalidPattern},
 		},
 		"link into a hidden directory that an include pattern names without hidden": {
 			tree: tree{
 				files: map[string]string{"config/.store/cafe.yaml": cafeDoc},
 				links: map[string]string{"config/cafe.yaml": ".store/cafe.yaml"},
 			},
-			opts: []manifest.InputOption{manifest.WithInclude("/cafe.yaml", ".store/*.yaml")},
+			opts: []input.Option{input.WithInclude("/cafe.yaml", ".store/*.yaml")},
 			err:  `and ".store" matches only those names`,
-			is:   []error{matcher.ErrInvalidPattern},
+			is:   []error{input.ErrInvalidPattern},
 		},
 		"link into a hidden directory that an include pattern names": {
 			tree: tree{
 				files: map[string]string{"config/.store/cafe.yaml": cafeDoc},
 				links: map[string]string{"config/cafe.yaml": ".store/cafe.yaml"},
 			},
-			opts: []manifest.InputOption{
-				manifest.WithHidden(true),
-				manifest.WithInclude("/cafe.yaml", ".store/*.yaml"),
+			opts: []input.Option{
+				input.WithHidden(true),
+				input.WithInclude("/cafe.yaml", ".store/*.yaml"),
 			},
 			want: []string{"config/cafe.yaml"},
 		},
@@ -1066,11 +1121,11 @@ func TestFS(t *testing.T) {
 				files: map[string]string{"config/.store/cafe.yaml": cafeDoc},
 				links: map[string]string{"config/cafe.yaml": ".store/cafe.yaml"},
 			},
-			opts: []manifest.InputOption{
-				manifest.WithRecursive(true),
-				manifest.WithHidden(true),
-				manifest.WithInclude("/cafe.yaml", ".store/*.yaml"),
-				manifest.WithExclude(".store/"),
+			opts: []input.Option{
+				input.WithRecursive(true),
+				input.WithHidden(true),
+				input.WithInclude("/cafe.yaml", ".store/*.yaml"),
+				input.WithExclude(".store/"),
 			},
 			want: []string{"config/cafe.yaml"},
 		},
@@ -1087,7 +1142,7 @@ func TestFS(t *testing.T) {
 				links: map[string]string{"config/hours.yaml": "../shared/hours.yaml"},
 			},
 			err: "config/hours.yaml: links to ../shared/hours.yaml, which leads outside config",
-			is:  []error{manifest.ErrOutsideLink},
+			is:  []error{input.ErrOutsideLink},
 		},
 		"link through a directory link inside": {
 			tree: tree{
@@ -1102,7 +1157,7 @@ func TestFS(t *testing.T) {
 				links: map[string]string{"config/sub": "../shared", "config/hours.yaml": "sub/hours.yaml"},
 			},
 			err: "config/hours.yaml: links to sub/hours.yaml, which leads outside config",
-			is:  []error{manifest.ErrOutsideLink},
+			is:  []error{input.ErrOutsideLink},
 		},
 		"dangling link": {
 			tree: tree{
@@ -1125,10 +1180,7 @@ func TestFS(t *testing.T) {
 			dir := t.TempDir()
 			tc.tree.write(t, dir)
 
-			reg := newCafeRegistry(t)
-
-			set, err := reg.Load(t.Context(), manifest.FS(os.DirFS(dir), "config", tc.opts...),
-				manifest.WithSetChecks(false))
+			files, err := readAll(t, input.FS(os.DirFS(dir), "config", tc.opts...))
 			if tc.err != "" {
 				require.Error(t, err)
 
@@ -1136,13 +1188,13 @@ func TestFS(t *testing.T) {
 					require.ErrorIs(t, err, target)
 				}
 
-				assert.Contains(t, niceyaml.FormatError(err), tc.err)
+				assert.Contains(t, formatAll(err), tc.err)
 
 				return
 			}
 
 			require.NoError(t, err)
-			assert.Equal(t, tc.want, loadedNames(set))
+			assert.Equal(t, tc.want, readNames(files))
 		})
 	}
 }
@@ -1151,68 +1203,68 @@ func TestFS_UnreadableLinks(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		input func(t *testing.T, dir string) manifest.Input
+		input func(t *testing.T, dir string) input.Input
 		links map[string]string
 		err   string
 		is    []error
 	}{
 		"absolute link with outside links allowed": {
-			input: func(_ *testing.T, dir string) manifest.Input {
-				return manifest.FS(os.DirFS(dir), "config", manifest.WithOutsideLinks(true))
+			input: func(_ *testing.T, dir string) input.Input {
+				return input.FS(os.DirFS(dir), "config", input.WithOutsideLinks(true))
 			},
 			links: map[string]string{"config/hours.yaml": "{dir}/shared/hours.yaml"},
 			err:   "config/hours.yaml: links to {dir}/shared/hours.yaml, which leads outside the file system",
-			is:    []error{manifest.ErrOutsideLink},
+			is:    []error{input.ErrOutsideLink},
 		},
 		"link outside in fs.Sub of a file system that reports links": {
-			input: func(t *testing.T, dir string) manifest.Input {
+			input: func(t *testing.T, dir string) input.Input {
 				t.Helper()
 
-				return manifest.FS(subFS(t, os.DirFS(filepath.Dir(dir)), filepath.Base(dir)), "config")
+				return input.FS(subFS(t, os.DirFS(filepath.Dir(dir)), filepath.Base(dir)), "config")
 			},
 			links: map[string]string{"config/hours.yaml": "../shared/hours.yaml"},
 			err:   "config/hours.yaml: links to ../shared/hours.yaml, which leads outside config",
-			is:    []error{manifest.ErrOutsideLink},
+			is:    []error{input.ErrOutsideLink},
 		},
 		"link out of fs.Sub of a file system that reports links": {
-			input: func(t *testing.T, dir string) manifest.Input {
+			input: func(t *testing.T, dir string) input.Input {
 				t.Helper()
 
-				return manifest.FS(subFS(t, os.DirFS(dir), "config"), ".", manifest.WithOutsideLinks(true))
+				return input.FS(subFS(t, os.DirFS(dir), "config"), ".", input.WithOutsideLinks(true))
 			},
 			links: map[string]string{"config/hours.yaml": "../shared/hours.yaml"},
 			err:   "hours.yaml: links to ../shared/hours.yaml, which leads outside the file system",
-			is:    []error{manifest.ErrOutsideLink},
+			is:    []error{input.ErrOutsideLink},
 		},
 		"link that ReadLink cannot read": {
-			input: func(_ *testing.T, dir string) manifest.Input {
-				return manifest.FS(deniedFS{FS: os.DirFS(dir), readLink: true}, "config")
+			input: func(_ *testing.T, dir string) input.Input {
+				return input.FS(deniedFS{FS: os.DirFS(dir), readLink: true}, "config")
 			},
 			links: map[string]string{"config/hours.yaml": "../shared/hours.yaml"},
 			err:   "config/hours.yaml: permission denied",
 			is:    []error{fs.ErrPermission},
 		},
 		"absolute link that ReadLink cannot read with outside links allowed": {
-			input: func(_ *testing.T, dir string) manifest.Input {
-				return manifest.FS(deniedFS{FS: os.DirFS(dir), readLink: true}, "config",
-					manifest.WithOutsideLinks(true))
+			input: func(_ *testing.T, dir string) input.Input {
+				return input.FS(deniedFS{FS: os.DirFS(dir), readLink: true}, "config",
+					input.WithOutsideLinks(true))
 			},
 			links: map[string]string{"config/hours.yaml": "{dir}/shared/hours.yaml"},
 			err:   "config/hours.yaml: permission denied",
 			is:    []error{fs.ErrPermission},
 		},
 		"link that Lstat cannot describe": {
-			input: func(_ *testing.T, dir string) manifest.Input {
-				return manifest.FS(deniedFS{FS: os.DirFS(dir), lstat: true}, "config")
+			input: func(_ *testing.T, dir string) input.Input {
+				return input.FS(deniedFS{FS: os.DirFS(dir), lstat: true}, "config")
 			},
 			links: map[string]string{"config/hours.yaml": "../shared/hours.yaml"},
 			err:   "config/hours.yaml: permission denied",
 			is:    []error{fs.ErrPermission},
 		},
 		"link that Lstat cannot describe with outside links allowed": {
-			input: func(_ *testing.T, dir string) manifest.Input {
-				return manifest.FS(deniedFS{FS: os.DirFS(dir), lstat: true}, "config",
-					manifest.WithOutsideLinks(true))
+			input: func(_ *testing.T, dir string) input.Input {
+				return input.FS(deniedFS{FS: os.DirFS(dir), lstat: true}, "config",
+					input.WithOutsideLinks(true))
 			},
 			links: map[string]string{"config/hours.yaml": "../shared/hours.yaml"},
 			err:   "config/hours.yaml: permission denied",
@@ -1236,15 +1288,15 @@ func TestFS_UnreadableLinks(t *testing.T) {
 				links: links,
 			}.write(t, dir)
 
-			set, err := newCafeRegistry(t).Load(t.Context(), tc.input(t, dir), manifest.WithSetChecks(false))
+			files, err := readAll(t, tc.input(t, dir))
 			require.Error(t, err)
-			assert.Nil(t, set)
+			assert.Len(t, readNames(files), 1)
 
 			for _, target := range tc.is {
 				require.ErrorIs(t, err, target)
 			}
 
-			assert.Contains(t, niceyaml.FormatError(err), strings.ReplaceAll(tc.err, "{dir}", dir))
+			assert.Contains(t, formatAll(err), strings.ReplaceAll(tc.err, "{dir}", dir))
 		})
 	}
 }
@@ -1352,10 +1404,10 @@ func TestFS_LinksListedAsTargets(t *testing.T) {
 		// shared/hours.yaml.
 		files map[string]string
 		links map[string]string
-		opts  []manifest.InputOption
+		opts  []input.Option
 		want  []string
 	}{
-		// A file loads once for each entry that reaches it, and once at
+		// A file reads once for each entry that reaches it, and once at
 		// its own path.
 		"link to a file inside": {
 			links: map[string]string{"config/same.yaml": "cafe.yaml"},
@@ -1363,7 +1415,7 @@ func TestFS_LinksListedAsTargets(t *testing.T) {
 		},
 		"link to a file inside with outside links allowed": {
 			links: map[string]string{"config/same.yaml": "cafe.yaml"},
-			opts:  []manifest.InputOption{manifest.WithOutsideLinks(true)},
+			opts:  []input.Option{input.WithOutsideLinks(true)},
 			want:  []string{"config/cafe.yaml", "config/same.yaml"},
 		},
 		"link to a link to a file inside": {
@@ -1373,7 +1425,7 @@ func TestFS_LinksListedAsTargets(t *testing.T) {
 		"link to a directory inside in a recursive walk": {
 			files: map[string]string{"config/real/hours.yaml": hoursV1Doc},
 			links: map[string]string{"config/sub": "real"},
-			opts:  []manifest.InputOption{manifest.WithRecursive(true)},
+			opts:  []input.Option{input.WithRecursive(true)},
 			want:  []string{"config/cafe.yaml", "config/real/hours.yaml", "config/sub/hours.yaml"},
 		},
 		"link to a file outside": {
@@ -1382,7 +1434,7 @@ func TestFS_LinksListedAsTargets(t *testing.T) {
 		},
 		"link to a file outside with outside links refused": {
 			links: map[string]string{"config/hours.yaml": "../shared/hours.yaml"},
-			opts:  []manifest.InputOption{manifest.WithOutsideLinks(false)},
+			opts:  []input.Option{input.WithOutsideLinks(false)},
 			want:  []string{"config/cafe.yaml", "config/hours.yaml"},
 		},
 		"link to a directory outside": {
@@ -1391,12 +1443,12 @@ func TestFS_LinksListedAsTargets(t *testing.T) {
 		},
 		"link to a directory outside in a recursive walk": {
 			links: map[string]string{"config/sub": "../shared"},
-			opts:  []manifest.InputOption{manifest.WithRecursive(true)},
+			opts:  []input.Option{input.WithRecursive(true)},
 			want:  []string{"config/cafe.yaml", "config/sub/hours.yaml"},
 		},
 		"link to a directory outside in a recursive walk with outside links refused": {
 			links: map[string]string{"config/sub": "../shared"},
-			opts:  []manifest.InputOption{manifest.WithRecursive(true), manifest.WithOutsideLinks(false)},
+			opts:  []input.Option{input.WithRecursive(true), input.WithOutsideLinks(false)},
 			want:  []string{"config/cafe.yaml", "config/sub/hours.yaml"},
 		},
 	}
@@ -1408,17 +1460,16 @@ func TestFS_LinksListedAsTargets(t *testing.T) {
 
 				dir := t.TempDir()
 
-				files := map[string]string{"config/cafe.yaml": cafeDoc, "shared/hours.yaml": hoursV1Doc}
-				maps.Copy(files, tc.files)
+				texts := map[string]string{"config/cafe.yaml": cafeDoc, "shared/hours.yaml": hoursV1Doc}
+				maps.Copy(texts, tc.files)
 
-				tree{files: files, links: tc.links}.write(t, dir)
+				tree{files: texts, links: tc.links}.write(t, dir)
 
 				// The walk does not ask the file system about an entry that
 				// the listing does not name as a link.
-				set, err := newCafeRegistry(t).Load(t.Context(),
-					manifest.FS(newFS(dir), "config", tc.opts...), manifest.WithSetChecks(false))
+				files, err := readAll(t, input.FS(newFS(dir), "config", tc.opts...))
 				require.NoError(t, err)
-				assert.Equal(t, tc.want, loadedNames(set))
+				assert.Equal(t, tc.want, readNames(files))
 			})
 		}
 	}
@@ -1455,7 +1506,7 @@ func TestFS_UnreportedLinks(t *testing.T) {
 
 	tcs := map[string]struct {
 		links map[string]string
-		opts  []manifest.InputOption
+		opts  []input.Option
 		want  []string
 		err   string
 		is    []error
@@ -1463,27 +1514,27 @@ func TestFS_UnreportedLinks(t *testing.T) {
 		"link outside": {
 			links: map[string]string{"config/hours.yaml": "../shared/hours.yaml"},
 			err:   unreported("config/hours.yaml"),
-			is:    []error{manifest.ErrOutsideLink},
+			is:    []error{input.ErrOutsideLink},
 		},
 		"link outside with outside links refused": {
 			links: map[string]string{"config/hours.yaml": "../shared/hours.yaml"},
-			opts:  []manifest.InputOption{manifest.WithOutsideLinks(false)},
+			opts:  []input.Option{input.WithOutsideLinks(false)},
 			err:   unreported("config/hours.yaml"),
-			is:    []error{manifest.ErrOutsideLink},
+			is:    []error{input.ErrOutsideLink},
 		},
 		"link outside with outside links allowed": {
 			links: map[string]string{"config/hours.yaml": "../shared/hours.yaml"},
-			opts:  []manifest.InputOption{manifest.WithOutsideLinks(true)},
+			opts:  []input.Option{input.WithOutsideLinks(true)},
 			want:  []string{"config/cafe.yaml", "config/hours.yaml"},
 		},
 		"link inside": {
 			links: map[string]string{"config/same.yaml": "cafe.yaml"},
 			err:   unreported("config/same.yaml"),
-			is:    []error{manifest.ErrOutsideLink},
+			is:    []error{input.ErrOutsideLink},
 		},
 		"link inside with outside links allowed": {
 			links: map[string]string{"config/same.yaml": "cafe.yaml"},
-			opts:  []manifest.InputOption{manifest.WithOutsideLinks(true)},
+			opts:  []input.Option{input.WithOutsideLinks(true)},
 			want:  []string{"config/cafe.yaml", "config/same.yaml"},
 		},
 		"link that the patterns do not select": {
@@ -1501,7 +1552,7 @@ func TestFS_UnreportedLinks(t *testing.T) {
 		},
 		"dangling link with outside links allowed": {
 			links: map[string]string{"config/old.yaml": "gone.yaml"},
-			opts:  []manifest.InputOption{manifest.WithOutsideLinks(true)},
+			opts:  []input.Option{input.WithOutsideLinks(true)},
 			err:   "config/old.yaml: ",
 			is:    []error{fs.ErrNotExist},
 		},
@@ -1519,8 +1570,7 @@ func TestFS_UnreportedLinks(t *testing.T) {
 					links: tc.links,
 				}.write(t, dir)
 
-				set, err := newCafeRegistry(t).Load(t.Context(),
-					manifest.FS(newFS(t, dir), "config", tc.opts...), manifest.WithSetChecks(false))
+				files, err := readAll(t, input.FS(newFS(t, dir), "config", tc.opts...))
 				if tc.err != "" {
 					require.Error(t, err)
 
@@ -1528,13 +1578,13 @@ func TestFS_UnreportedLinks(t *testing.T) {
 						require.ErrorIs(t, err, target)
 					}
 
-					assert.Contains(t, niceyaml.FormatError(err), tc.err)
+					assert.Contains(t, formatAll(err), tc.err)
 
 					return
 				}
 
 				require.NoError(t, err)
-				assert.Equal(t, tc.want, loadedNames(set))
+				assert.Equal(t, tc.want, readNames(files))
 			})
 		}
 	}
@@ -1545,155 +1595,9 @@ func TestFS_UncomparableFS(t *testing.T) {
 
 	// The struct type is comparable, but == panics on the map it holds.
 	wrapped := struct{ fs.FS }{mapFS(map[string]string{"cafe.yaml": cafeDoc})}
-	in := manifest.FS(wrapped, "config/cafe.yaml")
+	in := input.FS(wrapped, "config/cafe.yaml")
 
-	set, err := newCafeRegistry(t).Load(t.Context(), manifest.Inputs(in, in), manifest.WithSetChecks(false))
+	files, err := readAll(t, input.Join(in, in))
 	require.NoError(t, err)
-	assert.Equal(t, []string{"config/cafe.yaml", "config/cafe.yaml"}, loadedNames(set))
-}
-
-// failingReader is an [io.Reader] whose first read fails with err, and
-// whose later reads find the end of the text.
-type failingReader struct {
-	err  error
-	done bool
-}
-
-// Read returns the error of r on the first call, and [io.EOF] after.
-func (r *failingReader) Read([]byte) (int, error) {
-	if r.done {
-		return 0, io.EOF
-	}
-
-	r.done = true
-
-	return 0, r.err
-}
-
-func TestReader(t *testing.T) {
-	t.Parallel()
-
-	errBroken := errors.New("broken pipe")
-
-	tcs := map[string]struct {
-		in   manifest.Input
-		want []string
-		err  string
-		is   []error
-	}{
-		"text": {
-			in:   manifest.Reader("cafe.yaml", strings.NewReader(cafeDoc)),
-			want: []string{`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`},
-		},
-		"name option": {
-			in: manifest.Reader("cafe.yaml", strings.NewReader(cafeDoc),
-				manifest.WithSourceOptions(niceyaml.WithName("ignored"))),
-			want: []string{`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`},
-		},
-		"one reader twice": {
-			in: func() manifest.Input {
-				in := manifest.Reader("cafe.yaml", strings.NewReader(cafeDoc))
-
-				return manifest.Inputs(in, in)
-			}(),
-			want: []string{`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`},
-		},
-		"read that fails": {
-			in:  manifest.Reader("cafe.yaml", &failingReader{err: errBroken}),
-			err: "cafe.yaml: read: broken pipe",
-			is:  []error{errBroken},
-		},
-		"byte limit": {
-			in: manifest.Reader("cafe.yaml", strings.NewReader(cafeDoc),
-				manifest.WithSourceOptions(niceyaml.WithByteLimit(10), niceyaml.WithName("ignored"))),
-			err: "cafe.yaml: file is larger than 10 bytes",
-			is:  []error{niceyaml.ErrLimit},
-		},
-		"bad pattern": {
-			in:  manifest.Reader("cafe.yaml", strings.NewReader(cafeDoc), manifest.WithExclude("[")),
-			err: `pattern "["`,
-			is:  []error{matcher.ErrInvalidPattern},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			reg := newCafeRegistry(t)
-
-			// Every load of the Input gives the result of the first read.
-			for range 2 {
-				set, err := reg.Load(t.Context(), tc.in, manifest.WithSetChecks(false))
-				if tc.err != "" {
-					require.Error(t, err)
-
-					for _, target := range tc.is {
-						require.ErrorIs(t, err, target)
-					}
-
-					assert.Contains(t, niceyaml.FormatError(err), tc.err)
-
-					continue
-				}
-
-				require.NoError(t, err)
-				assert.Equal(t, tc.want, listObjects(set))
-				assert.Equal(t, []string{"cafe.yaml"}, loadedNames(set))
-			}
-		})
-	}
-}
-
-func TestReader_PlanThenLoad(t *testing.T) {
-	t.Parallel()
-
-	reg := newCafeRegistry(t)
-	in := manifest.Reader("menu.yaml", strings.NewReader(menuDoc))
-
-	plan, err := reg.PlanMigration(t.Context(), in)
-	require.NoError(t, err)
-	require.Len(t, plan.Files(), 1)
-	assert.Equal(t, menuV1Doc, string(plan.Files()[0].After()))
-
-	set, err := reg.Load(t.Context(), in, manifest.WithSetChecks(false))
-	require.NoError(t, err)
-	assert.Equal(t, []string{
-		`MenuItem "kanelbulle" cafe.jacobcolvin.com/v1beta1 up-to-date=false`,
-		`MenuItem "semla" cafe.jacobcolvin.com/v1 up-to-date=true`,
-	}, listObjects(set))
-}
-
-// panicReader is an [io.Reader] whose reads panic.
-type panicReader struct{}
-
-// Read panics.
-func (panicReader) Read([]byte) (int, error) {
-	panic("reader broke")
-}
-
-func TestReader_Panic(t *testing.T) {
-	t.Parallel()
-
-	reg := newCafeRegistry(t)
-	in := manifest.Reader("cafe.yaml", panicReader{})
-
-	// Every load of the Input repeats the panic of the first read.
-	for range 2 {
-		assert.PanicsWithValue(t, "reader broke", func() {
-			_, _ = reg.Load(t.Context(), in, manifest.WithSetChecks(false)) //nolint:errcheck // The load panics.
-		})
-	}
-}
-
-func TestWithSourceOptions(t *testing.T) {
-	t.Parallel()
-
-	reg := newCafeRegistry(t)
-
-	_, err := reg.Load(t.Context(), configFS(map[string]string{"cafe.yaml": cafeDoc},
-		manifest.WithSourceOptions(niceyaml.WithByteLimit(10), niceyaml.WithName("ignored"))))
-	require.ErrorIs(t, err, niceyaml.ErrLimit)
-	assert.True(t, niceyaml.IsInvalid(err))
-	assert.Contains(t, err.Error(), "config/cafe.yaml: file is larger than 10 bytes")
+	assert.Equal(t, []string{"config/cafe.yaml", "config/cafe.yaml"}, readNames(files))
 }

@@ -1,12 +1,12 @@
-package manifest_test
+package input_test
 
 import (
 	"fmt"
 	"path"
 	"testing"
 
+	"go.jacobcolvin.com/niceyaml/input"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
-	"go.jacobcolvin.com/niceyaml/manifest"
 )
 
 // benchTree returns the files of a tree of regular files with no link.
@@ -20,7 +20,7 @@ func benchTree(depth, fanOut, files int) map[string]string {
 	fill = func(dir string, level int) {
 		if level == depth {
 			for i := range files {
-				out[path.Join(dir, fmt.Sprintf("f%d.yaml", i))] = hoursV1Doc
+				out[path.Join(dir, fmt.Sprintf("f%d.yaml", i))] = cafeDoc
 			}
 
 			return
@@ -46,27 +46,22 @@ func BenchmarkPath_Walk(b *testing.B) {
 		{"balanced_4x3_20", benchTree(4, 3, 20)},
 	}
 
-	reg, err := manifest.NewRegistry(cafeOptions()...)
-	if err != nil {
-		b.Fatal(err)
-	}
-
 	for _, in := range inputs {
 		dir := b.TempDir()
 		yamltest.WriteFiles(b, dir, in.files)
 
-		input := manifest.Path(dir, manifest.WithRecursive(true))
+		src := input.Path(dir, input.WithRecursive(true))
 
 		b.Run(in.name, func(b *testing.B) {
 			b.ReportAllocs()
 
 			for b.Loop() {
-				chk, err := reg.Check(b.Context(), input, manifest.WithSetChecks(false))
+				files, err := src.Files(b.Context())
 				if err != nil {
 					b.Fatal(err)
 				}
 
-				if n := len(chk.Set().Sources()); n != len(in.files) {
+				if n := len(files); n != len(in.files) {
 					b.Fatalf("got %d files, want %d", n, len(in.files))
 				}
 			}
