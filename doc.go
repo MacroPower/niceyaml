@@ -485,7 +485,14 @@
 // excerpt. The %+v verb and the LogValue methods show at most
 // [ErrorListLimit] problems and count the rest. An error with thousands of
 // problems thus reaches a log as a short text, but FormatError renders every
-// problem in its tree.
+// problem in its tree. A program that wants a short report from FormatError,
+// [NewErrorReport], or
+// [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] passes
+// [WithProblemLimit]. The report then keeps the first problems of the tree
+// and the headings above them, and it counts the rest in
+// [ErrorReport.Omitted]. Its excerpts mark only the problems it keeps:
+//
+//	log.Print(niceyaml.FormatError(err, niceyaml.WithProblemLimit(50)))
 //
 // An excerpt shows lines of the source to whoever reads the log. A program
 // that loads a text with secrets in it, such as the values of its
@@ -499,10 +506,10 @@
 // [DefaultExcerptMarks] problems on one line, and a row below their carets
 // counts the rest, as "and 15990 more on this line". A document minified
 // onto one line thus adds at most that many windows and caret rows,
-// however many problems the line holds. The tree still names every problem.
-// For each renderer, [WithContextLines] sets the number of context lines,
-// [WithExcerptWidth] sets that width, and [WithExcerptMarks] sets that
-// number of marks.
+// however many problems the line holds. The tree still names every problem
+// unless [WithProblemLimit] cuts it. For each renderer, [WithContextLines]
+// sets the number of context lines, [WithExcerptWidth] sets that width, and
+// [WithExcerptMarks] sets that number of marks.
 //
 // To build a report for another program to read, such as JSON lines, CI
 // annotations, or editor diagnostics, a program walks [Problems]. Problems

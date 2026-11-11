@@ -157,9 +157,14 @@ func withoutSurface(styles style.Styler) style.Styler {
 // [niceyaml.WithContextLines] sets the context lines around each location,
 // [niceyaml.WithExcerptWidth] sets how much of a long line an excerpt
 // shows, and [niceyaml.WithExcerptMarks] sets how many problems an excerpt
-// marks on one line. The styled output and the plain output of the handler
-// draw one report, so both show the same lines. A later call replaces the
-// options of an earlier one.
+// marks on one line. [niceyaml.WithProblemLimit] sets how many problems
+// the report shows, with a last row that counts the rest:
+//
+//	h := fangs.NewErrorHandler(fangs.WithExcerptOptions(niceyaml.WithProblemLimit(50)))
+//
+// The styled output and the plain output of the handler draw one report,
+// so both show the same lines. A later call replaces the options of an
+// earlier one.
 //
 // WithExcerptOptions copies the options it gets, so a caller that edits
 // the slice it passed does not change the handler.

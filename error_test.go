@@ -1639,6 +1639,14 @@ func TestSourceError_Format_ListLimit(t *testing.T) {
 			assert.Equal(t, tree+"\n\n"+stringtest.JoinLF(tc.excerpt...), fmt.Sprintf("%+v", err))
 			assert.Equal(t, tree, logged(t, err))
 
+			// The verb renders what FormatError renders at the limit, and
+			// the report counts the problems the tree leaves out.
+			assert.Equal(t, fmt.Sprintf("%+v", err), niceyaml.FormatError(err, niceyaml.WithProblemLimit(limit)))
+
+			rep := niceyaml.NewErrorReport(err, niceyaml.WithProblemLimit(limit))
+			assert.Equal(t, tc.problems-limit, rep.Omitted)
+			assert.Len(t, slices.Collect(rep.Tree.Problems()), limit)
+
 			// FormatError draws every problem, however many there are.
 			all := niceyaml.FormatError(err)
 
@@ -6859,6 +6867,227 @@ func TestWithExcerptMarks(t *testing.T) {
 		require.Len(t, got, 1+niceyaml.DefaultExcerptMarks+2)
 		assert.Equal(t, "     | and 2 more on this line", got[1+niceyaml.DefaultExcerptMarks])
 		assert.Equal(t, "   2 | more: [x, y, z]", got[len(got)-1])
+	})
+}
+
+func TestWithProblemLimit(t *testing.T) {
+	t.Parallel()
+
+	const input = "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n"
+
+	keys := []string{"a", "b", "c", "d", "e"}
+
+	// Rows returns the rows of the tree for the first n keys.
+	rows := func(n int) []string {
+		out := make([]string, 0, n)
+		for i, key := range keys[:n] {
+			out = append(out, fmt.Sprintf("%d:4: $.%s: expected \"string\", got \"integer\"", i+1, key))
+		}
+
+		return out
+	}
+
+	// Lines returns the excerpt that marks the first n keys, with
+	// context lines around them.
+	lines := func(n int) []string {
+		var out []string
+
+		for i, key := range keys[:min(n+2, len(keys))] {
+			out = append(out, fmt.Sprintf("%4d | %s: %d", i+1, key, i+1))
+			if i < n {
+				out = append(out, "     |    ^ expected \"string\", got \"integer\"")
+			}
+		}
+
+		return out
+	}
+
+	errs := make([]error, 0, len(keys))
+	for _, key := range keys {
+		errs = append(errs, yamltest.ErrorAt(`expected "string", got "integer"`, key))
+	}
+
+	source := niceyaml.NewSourceFromString(input, niceyaml.WithName("app.yaml"))
+	err := yamltest.Bind(t, source, niceyaml.NewSummary("5 schema violations", errs...))
+
+	tcs := map[string]struct {
+		opts []niceyaml.ExcerptOption
+		// The number of problems the report keeps.
+		kept int
+	}{
+		"no option keeps every problem": {
+			kept: 5,
+		},
+		"limit keeps the first problems": {
+			opts: []niceyaml.ExcerptOption{niceyaml.WithProblemLimit(3)},
+			kept: 3,
+		},
+		"one problem": {
+			opts: []niceyaml.ExcerptOption{niceyaml.WithProblemLimit(1)},
+			kept: 1,
+		},
+		"limit at the number of problems keeps them all": {
+			opts: []niceyaml.ExcerptOption{niceyaml.WithProblemLimit(5)},
+			kept: 5,
+		},
+		"zero alone keeps every problem": {
+			opts: []niceyaml.ExcerptOption{niceyaml.WithProblemLimit(0)},
+			kept: 5,
+		},
+		"zero keeps the limit as it is": {
+			opts: []niceyaml.ExcerptOption{niceyaml.WithProblemLimit(3), niceyaml.WithProblemLimit(0)},
+			kept: 3,
+		},
+		"negative keeps the limit as it is": {
+			opts: []niceyaml.ExcerptOption{niceyaml.WithProblemLimit(3), niceyaml.WithProblemLimit(-1)},
+			kept: 3,
+		},
+		"no limit keeps every problem": {
+			opts: []niceyaml.ExcerptOption{niceyaml.WithProblemLimit(niceyaml.NoLimit)},
+			kept: 5,
+		},
+		"no limit turns an earlier limit off": {
+			opts: []niceyaml.ExcerptOption{niceyaml.WithProblemLimit(3), niceyaml.WithProblemLimit(niceyaml.NoLimit)},
+			kept: 5,
+		},
+		"the last option wins": {
+			opts: []niceyaml.ExcerptOption{niceyaml.WithProblemLimit(0), niceyaml.WithProblemLimit(2)},
+			kept: 2,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			omitted := len(keys) - tc.kept
+
+			tree := rows(tc.kept)
+			if omitted > 0 {
+				tree = append(tree, fmt.Sprintf("and %d more", omitted))
+			}
+
+			want := slices.Concat(
+				[]string{"app.yaml: 5 schema violations"},
+				branches(tree...),
+				[]string{""},
+				lines(tc.kept),
+			)
+
+			assert.Equal(t, stringtest.JoinLF(want...), niceyaml.FormatError(err, tc.opts...))
+
+			// The report holds the kept problems alone and counts the rest
+			// as data.
+			rep := niceyaml.NewErrorReport(err, tc.opts...)
+			assert.Equal(t, omitted, rep.Omitted)
+
+			problems := slices.Collect(rep.Tree.Problems())
+			require.Len(t, problems, tc.kept)
+
+			for _, problem := range problems {
+				require.Error(t, problem.Err)
+			}
+
+			require.Len(t, rep.Excerpts, 1)
+			assert.Equal(t, stringtest.JoinLF(lines(tc.kept)...), rep.Excerpts[0].View.String())
+		})
+	}
+
+	t.Run("headings stay above the kept problems", func(t *testing.T) {
+		t.Parallel()
+
+		nested := yamltest.Bind(t, source, niceyaml.NewSummary("5 schema violations",
+			niceyaml.NewSummary("first", errs[:2]...),
+			niceyaml.NewSummary("second", errs[2:]...),
+		))
+
+		rep := niceyaml.NewErrorReport(nested, niceyaml.WithProblemLimit(3))
+		assert.Equal(t, 2, rep.Omitted)
+
+		assert.Equal(t, stringtest.JoinLF(
+			"app.yaml: 5 schema violations",
+			"|-- first",
+			`|   |-- 1:4: $.a: expected "string", got "integer"`,
+			`|   `+"`"+`-- 2:4: $.b: expected "string", got "integer"`,
+			"|-- second",
+			"|   `"+`-- 3:4: $.c: expected "string", got "integer"`,
+			"`-- and 2 more",
+		), strings.SplitN(niceyaml.FormatError(nested, niceyaml.WithProblemLimit(3)), "\n\n", 2)[0])
+	})
+
+	t.Run("a problem left out does not get a no excerpt line", func(t *testing.T) {
+		t.Parallel()
+
+		far := errors.Join(
+			yamltest.Bind(t, source, yamltest.ErrorAt("bad a", "a")),
+			yamltest.Bind(t, source, niceyaml.NewError("bad line", niceyaml.AtPosition(position.New(99, 0)))),
+		)
+
+		assert.Len(t, niceyaml.NewErrorReport(far).Unresolved, 1)
+
+		rep := niceyaml.NewErrorReport(far, niceyaml.WithProblemLimit(1))
+		assert.Empty(t, rep.Unresolved)
+		assert.Equal(t, 1, rep.Omitted)
+	})
+
+	t.Run("a source past the limit does not get an excerpt", func(t *testing.T) {
+		t.Parallel()
+
+		bound := func(name string, keys ...string) error {
+			src := niceyaml.NewSourceFromString(
+				keys[0]+": 1\n"+keys[1]+": 2\n"+keys[2]+": 3\n",
+				niceyaml.WithName(name),
+			)
+
+			errs := make([]error, 0, len(keys))
+			for _, key := range keys {
+				errs = append(errs, yamltest.ErrorAt("bad "+key, key))
+			}
+
+			return yamltest.Bind(t, src, niceyaml.NewSummary("3 problems", errs...))
+		}
+
+		joined := errors.Join(bound("one.yaml", "a", "b", "c"), bound("two.yaml", "x", "y", "z"))
+
+		names := func(rep niceyaml.ErrorReport) []string {
+			var out []string
+
+			for _, excerpt := range rep.Excerpts {
+				out = append(out, excerpt.Name)
+			}
+
+			return out
+		}
+
+		both := []string{"one.yaml", "two.yaml"}
+		limited := func(n int) []string {
+			return names(niceyaml.NewErrorReport(joined, niceyaml.WithProblemLimit(n)))
+		}
+
+		assert.Equal(t, both, names(niceyaml.NewErrorReport(joined)))
+		assert.Equal(t, []string{"one.yaml"}, limited(3))
+		assert.Equal(t, both, limited(4))
+
+		rep := niceyaml.NewErrorReport(joined, niceyaml.WithProblemLimit(1))
+		require.Len(t, rep.Excerpts, 1)
+		assert.Equal(t, stringtest.JoinLF(
+			"   1 | a: 1",
+			"     |    ^ bad a",
+			"   2 | b: 2",
+			"   3 | c: 3",
+		), rep.Excerpts[0].View.String())
+	})
+
+	t.Run("a detached error takes the limit of its renderer", func(t *testing.T) {
+		t.Parallel()
+
+		detached := niceyaml.Detach(err, niceyaml.WithProblemLimit(1))
+
+		assert.Equal(t, 0, niceyaml.NewErrorReport(detached).Omitted)
+		assert.Equal(t,
+			niceyaml.FormatError(err, niceyaml.WithProblemLimit(2)),
+			niceyaml.FormatError(detached, niceyaml.WithProblemLimit(2)),
+		)
 	})
 }
 

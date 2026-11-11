@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"charm.land/lipgloss/v2"
@@ -1329,6 +1330,19 @@ func TestPrinter_PrintReport(t *testing.T) {
 				"no excerpt: location outside source: line 100 not in lines 1-2",
 			),
 		},
+		// The report counts the problems past the limit, and PrintReport
+		// draws the count as the last branch of the root.
+		"report with a problem limit": {
+			err:  errors.Join(badB, badC, far),
+			opts: []niceyaml.ExcerptOption{niceyaml.WithContextLines(0), niceyaml.WithProblemLimit(1)},
+			want: stringtest.JoinLF(
+				"├── first.yaml:2:4: $.b: bad b",
+				"└── and 2 more",
+				"",
+				"   2  b: 2",
+				"         ^ bad b",
+			),
+		},
 		// PrintReport draws the parts the report holds, so a caller that
 		// drops the unresolved bindings prints no reason for them.
 		"report the caller trimmed": {
@@ -1361,6 +1375,94 @@ func TestPrinter_PrintReport(t *testing.T) {
 			assert.Equal(t, tc.want, p.PrintReport(rep))
 		})
 	}
+}
+
+func TestPrinter_PrintReport_SharedReport(t *testing.T) {
+	t.Parallel()
+
+	p := testPrinterWithGutter(printer.DefaultGutter)
+
+	lines := make([]string, 20)
+	errs := make([]error, 20)
+
+	for i := range lines {
+		key := fmt.Sprintf("k%d", i)
+		lines[i] = key + ": 1"
+		errs[i] = yamltest.ErrorAt("bad "+key, key)
+	}
+
+	src := niceyaml.NewSourceFromString(stringtest.LinesLF(lines...), niceyaml.WithName("many.yaml"))
+	err := yamltest.Bind(t, src, errors.Join(errs...))
+
+	tcs := map[string]struct {
+		report func() niceyaml.ErrorReport
+	}{
+		"report with a problem limit": {
+			report: func() niceyaml.ErrorReport {
+				return niceyaml.NewErrorReport(err, niceyaml.WithProblemLimit(5))
+			},
+		},
+		// The caller keeps the whole array of children behind the cut, as a
+		// program that reslices the tree of a report does.
+		"report the caller cut": {
+			report: func() niceyaml.ErrorReport {
+				rep := niceyaml.NewErrorReport(err)
+				rep.Tree.Children = rep.Tree.Children[:5]
+				rep.Omitted = 15
+
+				return rep
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			rep := tc.report()
+			require.Len(t, rep.Tree.Children, 5)
+			require.Equal(t, 15, rep.Omitted)
+
+			// PrintReport must not write the count into the array of
+			// children that the report shares with its caller.
+			full := rep.Tree.Children[:cap(rep.Tree.Children)]
+			before := slices.Clone(full)
+
+			want := p.PrintReport(rep)
+			assert.Contains(t, want, "└── and 15 more")
+
+			got := make([]string, 8)
+
+			var wg sync.WaitGroup
+
+			for i := range got {
+				wg.Go(func() {
+					got[i] = p.PrintReport(rep)
+				})
+			}
+
+			wg.Wait()
+
+			for _, out := range got {
+				assert.Equal(t, want, out)
+			}
+
+			// Compare the labels alone. A diff of the whole nodes dumps the
+			// source behind each error and takes minutes to print.
+			assert.Len(t, rep.Tree.Children, 5)
+			assert.Equal(t, treeLabels(before), treeLabels(full))
+		})
+	}
+}
+
+// treeLabels returns the label of each node in nodes.
+func treeLabels(nodes []niceyaml.ErrorTree) []string {
+	labels := make([]string, len(nodes))
+	for i, node := range nodes {
+		labels[i] = node.Label
+	}
+
+	return labels
 }
 
 func TestPrinter_PrintError_Warnings(t *testing.T) {
