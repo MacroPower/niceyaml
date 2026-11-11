@@ -4706,6 +4706,38 @@ func TestSchema_JSONSchema(t *testing.T) {
 	})
 }
 
+func TestSchema_AcceptsAll(t *testing.T) {
+	t.Parallel()
+
+	doc := yamltest.FirstDocument(t, yamltest.SchemaDirective("none", "a: 1\n"))
+
+	directive, err := schema.Directive().Resolve(t.Context(), doc)
+	require.NoError(t, err)
+
+	none := directive.Schema()
+	require.NotNil(t, none)
+
+	tcs := map[string]struct {
+		schema *schema.Schema
+		want   bool
+	}{
+		"accept all":                          {schema: schema.AcceptAll, want: true},
+		"accept all without deprecations":     {schema: schema.AcceptAll.WithoutDeprecations(), want: true},
+		"directive none":                      {schema: none, want: true},
+		"directive none without deprecations": {schema: none.WithoutDeprecations(), want: true},
+		"compiled true":                       {schema: compileSchema(t, `true`), want: false},
+		"compiled object":                     {schema: compileSchema(t, `{"type": "object"}`), want: false},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.schema.AcceptsAll())
+		})
+	}
+}
+
 func TestSchema_WithoutDeprecations(t *testing.T) {
 	t.Parallel()
 

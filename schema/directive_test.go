@@ -817,6 +817,7 @@ func TestDirective_Resolve(t *testing.T) {
 				sch := ref.Schema()
 				require.NotNil(t, sch)
 				assert.NotSame(t, schema.AcceptAll, sch)
+				assert.True(t, sch.AcceptsAll())
 				assert.Nil(t, sch.JSONSchema())
 				assert.Empty(t, ref.Key())
 

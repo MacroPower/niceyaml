@@ -51,9 +51,10 @@ var ErrNoMatch = errors.New("no matching schema")
 // bytes to compile. A Ref from [File] names a file that the registry
 // reads from disk. One from [FileFS] names a file in a file system, and
 // one from [URL] names an HTTP URL that the registry fetches. A Ref from
-// [Schema.Ref] carries a [*Schema] compiled already. [FileOrURL] builds a
-// file or a URL Ref from a reference as written, and [RefBeside] builds
-// one for a reference that belongs to a document.
+// [Schema.Ref] or [Registry.Resolve] carries a [*Schema] compiled
+// already. [FileOrURL] builds a file or a URL Ref from a reference as
+// written, and [RefBeside] builds one for a reference that belongs to a
+// document.
 //
 // A Ref is itself a [Resolver] that names its schema for every document,
 // so a Ref goes into [WithResolvers] or [When] as it is. A resolver that
@@ -113,14 +114,18 @@ var ErrNoMatch = errors.New("no matching schema")
 // lookup of that document locates the error of the schema there.
 //
 // Create instances with [Loadable], [Embedded], [File], [FileFS], [URL],
-// [FileOrURL], [RefBeside], or [Schema.Ref]. The zero Ref does not name a
-// schema. Return it beside an error, as a resolver does with
-// [ErrNoMatch].
+// [FileOrURL], [RefBeside], [Schema.Ref], or [Registry.Resolve]. The
+// zero Ref does not name a schema. Return it beside an error, as a
+// resolver does with [ErrNoMatch].
 type Ref struct {
 	load func(ctx context.Context) ([]byte, error)
-	// The compiled schema that the Ref carries, from Schema.Ref. The
-	// registry validates with it as it is.
+	// The compiled schema that the Ref carries, from Schema.Ref or
+	// Registry.Resolve. The registry validates with it as it is.
 	schema *Schema
+	// The name of a Ref that carries a compiled schema, which
+	// Registry.Resolve keeps from the Ref that the nested registry chose.
+	// It is empty for a Ref from Schema.Ref.
+	name string
 	// Where a document names the Ref, as NamedAt sets it, or nil. A
 	// lookup of that document locates the load or compile error of the
 	// schema there.
@@ -183,8 +188,9 @@ func Loadable(key string, load func(ctx context.Context) ([]byte, error)) Ref {
 }
 
 // Key returns the key of a [Ref] from [Loadable], [File], or [URL]. It
-// returns "" for the zero Ref and for a Ref from [Schema.Ref], which does
-// not name bytes to cache.
+// returns "" for the zero Ref and for a Ref that carries a compiled
+// schema, such as one from [Schema.Ref] or [Registry.Resolve], which
+// does not name bytes to cache.
 //
 // Key is the only method that returns the password in the userinfo of a
 // URL. The Ref itself formats and logs as [Ref.Name], which replaces the
@@ -198,7 +204,15 @@ func (r Ref) Key() string {
 // "xxxxx", so the errors do not print the password. A Ref that names its
 // file in a file system, such as one from [FileFS], goes by the path as
 // given, with the fragment of its key. The file system reads that path.
+//
+// A Ref that carries a compiled schema does not have a key. Name returns
+// "" for one from [Schema.Ref]. For one from [Registry.Resolve], Name
+// returns the name of the Ref that the registry chose.
 func (r Ref) Name() string {
+	if r.schema != nil {
+		return r.name
+	}
+
 	if r.file != "" && r.fsys != nil {
 		return r.file + fileFragment(r)
 	}
@@ -219,10 +233,11 @@ func (r Ref) LogValue() slog.Value {
 	return slog.StringValue(r.Name())
 }
 
-// Schema returns the compiled schema of a [Ref] from [Schema.Ref], or nil
-// for a Ref that names bytes to load. [Registry.Schema] returns it as it
-// is for such a Ref. A caller that loads bytes without a registry checks
-// it before [Registry.Load], as the registry does.
+// Schema returns the compiled schema of a [Ref] from [Schema.Ref] or
+// [Registry.Resolve], or nil for a Ref that names bytes to load.
+// [Registry.Schema] returns it as it is for such a Ref. A caller that
+// loads bytes without a registry checks it before [Registry.Load], as
+// the registry does.
 func (r Ref) Schema() *Schema {
 	return r.schema
 }

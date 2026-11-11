@@ -175,9 +175,10 @@ type directiveResolver struct{}
 // A directive of "$schema=none", in any letter case, turns validation off
 // for the document, as it does in yaml-language-server. Resolve names a
 // schema that passes every document without decoding it, as [AcceptAll]
-// does. The lookup thus ends at the directive, and the document does not
-// need a file path. Such a directive does not name a file or a URL, so
-// it resolves in a registry without [WithAccess] too.
+// does, and [Schema.AcceptsAll] reports true for it. The lookup thus
+// ends at the directive, and the document does not need a file path.
+// Such a directive does not name a file or a URL, so it resolves in a
+// registry without [WithAccess] too.
 //
 // The preamble holds the comments above the "---" header of the document
 // and those below it. A directive in either place names the schema of

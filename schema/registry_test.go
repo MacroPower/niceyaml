@@ -272,10 +272,107 @@ func TestRegistry_Lookup(t *testing.T) {
 			fallback,
 		))
 
-		v, err := reg.Lookup(t.Context(), yamltest.FirstDocument(t, "kind: Deployment"))
+		m, err := reg.Lookup(t.Context(), yamltest.FirstDocument(t, "kind: Deployment"))
 		require.NoError(t, err)
-		require.NotNil(t, v)
+		require.NotNil(t, m.Schema)
 		assert.Equal(t, int32(0), fallbackLoads.Load())
+	})
+
+	t.Run("returns the ref that named the schema", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		schemaPath := filepath.Join(dir, "schema.json")
+		require.NoError(t, os.WriteFile(schemaPath, schemaData, 0o600))
+
+		bundle := fstest.MapFS{"schemas/defs.json": {Data: schemaData}}
+		compiled := compileSchema(t, `{"type": "object"}`)
+
+		tcs := map[string]struct {
+			resolver schema.Resolver
+			doc      string
+			wantKey  string
+			wantName string
+		}{
+			"file": {
+				resolver: schema.File(schemaPath),
+				doc:      "kind: Service\n",
+				wantKey:  fileURL(t, schemaPath),
+				wantName: fileURL(t, schemaPath),
+			},
+			"file system": {
+				resolver: schema.FileFS(bundle, "schemas/defs.json"),
+				doc:      "kind: Service\n",
+				wantKey:  "file:///schemas/defs.json",
+				wantName: "schemas/defs.json",
+			},
+			"loadable": {
+				resolver: loading("app-schema", schemaData, nil),
+				doc:      "kind: Service\n",
+				wantKey:  "app-schema",
+				wantName: "app-schema",
+			},
+			"directive": {
+				resolver: schema.Directive(),
+				doc:      yamltest.SchemaDirective(schemaPath, "kind: Service\n"),
+				wantKey:  fileURL(t, schemaPath),
+				wantName: fileURL(t, schemaPath),
+			},
+			"compiled schema": {
+				resolver: compiled,
+				doc:      "kind: Service\n",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				reg := schema.NewRegistry(
+					schema.WithAccess(schema.Unrestricted),
+					schema.WithResolvers(
+						schema.When(matcher.Content(kindPath, "Deployment"), compileSchema(t, `false`)),
+						tc.resolver,
+					),
+				)
+
+				m, err := reg.Lookup(t.Context(), yamltest.FirstDocument(t, tc.doc))
+				require.NoError(t, err)
+				require.NotNil(t, m.Schema)
+				assert.Equal(t, tc.wantKey, m.Ref.Key())
+				assert.Equal(t, tc.wantName, m.Ref.Name())
+
+				fromRef, err := reg.Schema(t.Context(), m.Ref)
+				require.NoError(t, err)
+				assert.Same(t, m.Schema, fromRef)
+			})
+		}
+	})
+
+	t.Run("ref loads and invalidates the chosen schema", func(t *testing.T) {
+		t.Parallel()
+
+		ref, loads := countingLoader("app-schema", schemaData)
+		reg := schema.NewRegistry(schema.WithResolvers(ref))
+		doc := yamltest.FirstDocument(t, "kind: Service\n")
+
+		m, err := reg.Lookup(t.Context(), doc)
+		require.NoError(t, err)
+		assert.Equal(t, int32(1), loads.Load())
+
+		data, err := reg.Load(t.Context(), m.Ref)
+		require.NoError(t, err)
+		assert.Equal(t, schemaData, data)
+
+		// The lookup after the release compiles the schema again.
+		before := loads.Load()
+
+		reg.Invalidate(m.Ref)
+
+		again, err := reg.Lookup(t.Context(), doc)
+		require.NoError(t, err)
+		assert.NotSame(t, m.Schema, again.Schema)
+		assert.Equal(t, before+1, loads.Load())
 	})
 
 	t.Run("loader alone applies to every document", func(t *testing.T) {
@@ -494,7 +591,65 @@ func TestRegistry_Resolve(t *testing.T) {
 
 		ref, err := inner.Resolve(t.Context(), doc)
 		require.NoError(t, err)
-		assert.Same(t, found, ref.Schema())
+		assert.Same(t, found.Schema, ref.Schema())
+	})
+
+	t.Run("keeps the name of the schema it chose", func(t *testing.T) {
+		t.Parallel()
+
+		bundle := fstest.MapFS{"schemas/defs.json": {Data: []byte(nameSchema)}}
+		inner := schema.NewRegistry(schema.WithResolvers(schema.FileFS(bundle, "schemas/defs.json")))
+		outer := schema.NewRegistry(schema.WithResolvers(inner))
+		doc := yamltest.FirstDocument(t, "name: x\n")
+
+		ref, err := inner.Resolve(t.Context(), doc)
+		require.NoError(t, err)
+		assert.Equal(t, "schemas/defs.json", ref.Name())
+		assert.Equal(t, "schemas/defs.json", ref.String())
+		assert.Empty(t, ref.Key())
+
+		found, err := inner.Lookup(t.Context(), doc)
+		require.NoError(t, err)
+		assert.Same(t, found.Schema, ref.Schema())
+
+		m, err := outer.Lookup(t.Context(), doc)
+		require.NoError(t, err)
+		assert.Same(t, found.Schema, m.Schema)
+		assert.Equal(t, "schemas/defs.json", m.Ref.Name())
+		assert.Empty(t, m.Ref.Key())
+
+		// The outer registry does not load anything for the Ref, so the
+		// bytes stay with the registry that chose the schema.
+		_, err = outer.Load(t.Context(), m.Ref)
+		require.ErrorIs(t, err, schema.ErrLoad)
+
+		// The outer registry returns the schema that the Ref carries,
+		// and Invalidate ignores the Ref despite its file name.
+		fromRef, err := outer.Schema(t.Context(), m.Ref)
+		require.NoError(t, err)
+		assert.Same(t, found.Schema, fromRef)
+
+		outer.Invalidate(m.Ref)
+
+		again, err := outer.Lookup(t.Context(), doc)
+		require.NoError(t, err)
+		assert.Same(t, found.Schema, again.Schema)
+
+		data, err := inner.Load(t.Context(), found.Ref)
+		require.NoError(t, err)
+		assert.JSONEq(t, nameSchema, string(data))
+	})
+
+	t.Run("names a compiled schema without a name", func(t *testing.T) {
+		t.Parallel()
+
+		inner := schema.NewRegistry(schema.WithResolvers(compileSchema(t, nameSchema)))
+
+		ref, err := inner.Resolve(t.Context(), yamltest.FirstDocument(t, "name: x\n"))
+		require.NoError(t, err)
+		require.NotNil(t, ref.Schema())
+		assert.Empty(t, ref.Name())
+		assert.Empty(t, ref.Key())
 	})
 
 	t.Run("lists the reasons of its resolvers when it declines", func(t *testing.T) {
@@ -1168,7 +1323,7 @@ func TestRegistry_Check_Unparsed(t *testing.T) {
 			assert.Same(t, doc.Err(), doc.Validate(t.Context(), tc.reg))
 
 			found, err := tc.reg.Lookup(t.Context(), doc)
-			assert.Nil(t, found)
+			assert.Zero(t, found)
 			assert.Same(t, doc.Err(), err)
 		})
 	}
@@ -1193,7 +1348,7 @@ func TestRegistry_Caching(t *testing.T) {
 		v2, err := reg.Lookup(t.Context(), yamltest.FirstDocument(t, "kind: Deployment"))
 		require.NoError(t, err)
 
-		assert.Same(t, v1, v2)
+		assert.Same(t, v1.Schema, v2.Schema)
 	})
 
 	t.Run("scheme case does not split the cache", func(t *testing.T) {
@@ -1320,7 +1475,7 @@ func TestRegistry_Caching(t *testing.T) {
 
 			second, err := reg.Lookup(t.Context(), doc)
 			require.NoError(t, err)
-			assert.Same(t, first, second)
+			assert.Same(t, first.Schema, second.Schema)
 			assert.Equal(t, int32(2), loads.Load())
 		})
 	})
@@ -1383,7 +1538,7 @@ func TestRegistry_ConcurrentLoad(t *testing.T) {
 			docs[i] = document(t)
 		}
 
-		validators := make([]*schema.Schema, goroutines)
+		validators := make([]schema.Match, goroutines)
 		errs := make([]error, goroutines)
 
 		var wg sync.WaitGroup
@@ -1406,7 +1561,7 @@ func TestRegistry_ConcurrentLoad(t *testing.T) {
 		assert.Equal(t, int32(1), loads.Load(), "concurrent lookups should share one load")
 
 		for i := 1; i < goroutines; i++ {
-			assert.Same(t, validators[0], validators[i])
+			assert.Same(t, validators[0].Schema, validators[i].Schema)
 		}
 	})
 }
@@ -2072,7 +2227,7 @@ func TestRegistry_CompiledSchema(t *testing.T) {
 
 		got, err := reg.Lookup(t.Context(), doc)
 		require.NoError(t, err)
-		assert.Same(t, service, got)
+		assert.Same(t, service, got.Schema)
 		require.NoError(t, reg.Check(t.Context(), doc))
 
 		requireRejects(t, reg, "kind: Deployment\nport: 80\n", `missing required property "replicas"`)
@@ -2097,7 +2252,7 @@ func TestRegistry_CompiledSchema(t *testing.T) {
 
 		got, err := reg.Lookup(t.Context(), yamltest.FirstDocument(t, "kind: Pod\nimage: nginx\n"))
 		require.NoError(t, err)
-		assert.Same(t, podSchema, got)
+		assert.Same(t, podSchema, got.Schema)
 
 		_, err = reg.Lookup(t.Context(), yamltest.FirstDocument(t, "kind: Job\n"))
 		require.ErrorIs(t, err, schema.ErrNoMatch)
@@ -2120,7 +2275,7 @@ func TestRegistry_CompiledSchema(t *testing.T) {
 
 		got, err := reg.Lookup(t.Context(), doc)
 		require.NoError(t, err)
-		assert.Same(t, service, got)
+		assert.Same(t, service, got.Schema)
 	})
 
 	t.Run("a compiled schema keeps the options it was compiled with", func(t *testing.T) {
@@ -5081,7 +5236,7 @@ func TestRegistry_Schema(t *testing.T) {
 
 		fromRef, err := reg.Schema(t.Context(), ref)
 		require.NoError(t, err)
-		assert.Same(t, fromLookup, fromRef)
+		assert.Same(t, fromLookup.Schema, fromRef)
 		assert.Equal(t, int32(1), loads.Load())
 	})
 
