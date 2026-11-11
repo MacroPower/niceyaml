@@ -10,6 +10,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/layermerge"
+	"go.jacobcolvin.com/niceyaml/internal/multierr"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -73,20 +74,28 @@ var (
 // [MergeUnmarshalers], or else the unmarshalers that [WithUnmarshalers]
 // gives the Source of that layer.
 //
-// The merge fails on the lowest layer that it cannot read a value from.
-// Such layers include:
+// The merge fails with the error of every layer that it cannot read a
+// value from, lowest first. It reads each layer alone, so the error of
+// one layer never comes from another. Such layers include:
 //
 //   - A Source of several documents.
 //   - A document that did not parse.
 //   - A document that a decode of it alone into an any value rejects.
 //   - A document that goes past the alias limit of [WithAliasLimit].
 //
-// The merge expands each alias in full. A layer fails with an error that
-// matches [ErrLimit] when its aliases repeat more text than the document
-// byte limit of its Source allows, or nest the layer past its depth limit. A
-// key that is a sequence or a mapping fails its layer with
-// [ErrUnnamedKey]. The merge returns the error of that layer, bound in
-// its file, and a nil Source. It returns the error of ctx when ctx ends.
+// The merge expands each alias in full. A layer fails with an error
+// that matches [ErrLimit] when its aliases repeat more text than the
+// document byte limit of its Source allows, or nest the layer past its
+// depth limit. A key that is a sequence or a mapping fails its layer
+// with [ErrUnnamedKey]. The merge returns the error of each such layer,
+// bound in its file, and a nil Source. The error of one layer comes
+// back as that layer returns it, and the errors of several layers come
+// back as one [errors.Join] of them. A layer given more than once
+// reports its error once, and so does a Source given beside its own
+// Node. Layers that fail with the same error also report it once, such
+// as Node layers whose documents parse together, or layers that read
+// one reference document that does not parse. When ctx ends, the merge
+// returns the error of ctx alone and does not read another layer.
 // A layer of MergeAs that the layers do not hold fails the call with
 // [ErrUnknownLayer] before any layer merges. So does a path of
 // MergeAppend that holds a selector it does not take, with
@@ -613,6 +622,66 @@ func (l resolvedLayer) read(ctx context.Context, i int) (*layermerge.Value, erro
 	return v, nil
 }
 
+// identity returns a comparable value that names l. That is the Node of l,
+// or its Source when l does not have a Node. So a layer given twice, or a
+// Source given beside its own Node, has one identity.
+func (l resolvedLayer) identity() any {
+	if l.node != nil {
+		return l.node
+	}
+
+	return l.source
+}
+
+// contextError returns the error of a context that ended, ctxErr, for a
+// read of l that failed with err. That is err when err holds ctxErr, and
+// otherwise ctxErr bound in l.
+func (l resolvedLayer) contextError(err, ctxErr error) error {
+	if errors.Is(err, ctxErr) {
+		return err
+	}
+
+	if l.node != nil {
+		return l.node.bindOwn(ctxErr)
+	}
+
+	return bindTree(ctxErr, binder{src: l.source})
+}
+
+// unreportedError returns the part of err, the error of a layer, that no
+// error of reported holds. It returns nil when reported holds all of err.
+// A Source whose documents fail to parse returns the join of their
+// errors, and each Node of it returns one branch of that join. So
+// unreportedError drops each branch of a join that reported holds, and
+// the merge reports each error once in whatever order the layers come.
+func unreportedError(reported []error, err error) error {
+	held := func(e error) bool {
+		return slices.ContainsFunc(reported, func(r error) bool { return errors.Is(r, e) })
+	}
+
+	if held(err) {
+		return nil
+	}
+
+	if !multierr.IsJoin(err) {
+		return err
+	}
+
+	joined, ok := err.(interface{ Unwrap() []error }) //nolint:errorlint // IsJoin checked the error itself, not a chain.
+	if !ok {
+		return err
+	}
+
+	branches := joined.Unwrap()
+
+	kept := slices.DeleteFunc(slices.Clone(branches), held)
+	if len(kept) == len(branches) {
+		return err
+	}
+
+	return multierr.Join(kept)
+}
+
 // mergeLayers implements [NewSourceFromLayers]. It writes the merged text
 // below the preamble of the layer the merged Source stands for. It checks
 // ctx again before it parses that text, which aliases can make longer
@@ -632,15 +701,54 @@ func mergeLayers[L Layer](ctx context.Context, given []L, cfg mergeConfig) (*Sou
 		return NewSourceFromString("", WithUnmarshalers(cfg.unmarshalers...)), nil
 	}
 
-	var root *layermerge.Value
+	var (
+		root *layermerge.Value
+		// The error of each layer that failed, lowest first.
+		errs []error
+		// The identity of each layer that failed, which the merge does not
+		// read again.
+		failed = map[any]bool{}
+	)
 
+	// No layer reads another, so every layer reports its own error. The
+	// merge stops when ctx ends, because each later read fails with the
+	// same error of ctx.
 	for i, layer := range layers {
-		v, err := layer.read(ctx, i)
-		if err != nil {
-			return nil, err
+		// A layer that already failed fails again with the same error,
+		// so the merge reports it once.
+		key := layer.identity()
+		if failed[key] {
+			continue
 		}
 
-		root = root.Merge(v, appends)
+		v, err := layer.read(ctx, i)
+		if err != nil {
+			ctxErr := ctx.Err()
+			if ctxErr != nil {
+				return nil, layer.contextError(err, ctxErr)
+			}
+
+			failed[key] = true
+
+			// Distinct layers that fail with the same error report it
+			// once. Node layers whose documents parsed together share the
+			// error of that parse. Layers that read one broken reference
+			// document share the error of its parse.
+			unseen := unreportedError(errs, err)
+			if unseen != nil {
+				errs = append(errs, unseen)
+			}
+
+			continue
+		}
+
+		if len(errs) == 0 {
+			root = root.Merge(v, appends)
+		}
+	}
+
+	if len(errs) > 0 {
+		return nil, multierr.Join(errs)
 	}
 
 	named := layers[identity]
