@@ -118,6 +118,20 @@ func TestNew(t *testing.T) {
 				"never-set":  baseStyle,
 			},
 		},
+		"error and warning marks take the text style of their severity": {
+			opts: []style.Option{
+				style.Set(kind.Generic, grayStyle),
+				style.Set(kind.TextError, redStyle),
+				style.Set(kind.TextWarn, yellowStyle),
+			},
+			want: map[kind.Kind]lipgloss.Style{
+				kind.GenericError:        redStyle,
+				kind.GenericErrorInvalid: redStyle,
+				kind.GenericErrorUnknown: redStyle,
+				kind.GenericWarn:         yellowStyle,
+				kind.GenericDeleted:      grayStyle,
+			},
+		},
 		"kind below a predefined kind takes the style of its parent": {
 			opts: []style.Option{style.Set(kind.GenericHighlight, greenStyle)},
 			want: map[kind.Kind]lipgloss.Style{match: greenStyle, focus: greenStyle},

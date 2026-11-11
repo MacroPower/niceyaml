@@ -29,9 +29,9 @@
 //     Name.
 //   - Syntax: PunctuationMapping, PunctuationSequence, PunctuationBlock,
 //     PunctuationCollectEntry, and PunctuationHeading under Punctuation.
-//   - Diff and error markers: GenericDeleted, GenericInserted, and
-//     GenericError under Generic.
-//   - Warning markers: GenericWarn under TextWarn.
+//   - Diff markers: GenericDeleted and GenericInserted under Generic.
+//   - Error and warning markers: GenericError under TextError, and
+//     GenericWarn under TextWarn.
 //   - Search and selection highlights: GenericHighlight under Generic, and
 //     GenericHighlightDim under GenericHighlight.
 //   - Headings: GenericHeading under Generic, and GenericHeadingAccent,
@@ -46,6 +46,11 @@
 // The highlight and heading kinds inherit from [Generic] rather than from
 // [Text], so a theme that sets Generic and leaves them unset draws
 // highlights and headings in its Generic style.
+//
+// The error and warning markers inherit from the text kind of their
+// severity rather than from [Generic]. A theme that sets [TextError] and
+// [TextWarn] and leaves the markers unset thus draws the location of each
+// error and warning in the color of its message.
 //
 // The UI kinds inherit from [Comment] rather than from [Text]. A theme
 // that does not set any of them draws gutters, annotations, and hunk
@@ -131,7 +136,10 @@ const (
 	Generic Kind = "generic"
 	// GenericDeleted styles the deleted lines of a diff (-).
 	GenericDeleted Kind = "genericDeleted"
-	// GenericError styles error tokens.
+	// GenericError styles the location of an error, and its children
+	// style invalid and unknown tokens. It inherits from [TextError], so a
+	// theme that leaves it unset draws the location in its error text
+	// style.
 	GenericError Kind = "genericError"
 	// GenericErrorInvalid styles invalid tokens.
 	GenericErrorInvalid Kind = "genericErrorInvalid"
@@ -260,7 +268,7 @@ var parent = map[Kind]Kind{
 	CommentPreproc:           Comment,
 	Generic:                  Text,
 	GenericDeleted:           Generic,
-	GenericError:             Generic,
+	GenericError:             TextError,
 	GenericErrorInvalid:      GenericError,
 	GenericErrorUnknown:      GenericError,
 	GenericHeading:           Generic,

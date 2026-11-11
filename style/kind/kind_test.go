@@ -61,6 +61,9 @@ func TestParent(t *testing.T) {
 		"family under Text":     {kind: kind.Literal, want: kind.Text},
 		"chrome under comments": {kind: kind.UI, want: kind.Comment},
 		"leaf":                  {kind: kind.LiteralNumberFloat, want: kind.LiteralNumber},
+		"error mark":            {kind: kind.GenericError, want: kind.TextError},
+		"warning mark":          {kind: kind.GenericWarn, want: kind.TextWarn},
+		"invalid token":         {kind: kind.GenericErrorInvalid, want: kind.GenericError},
 	}
 
 	for name, tc := range tcs {
