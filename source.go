@@ -9,7 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -939,7 +941,8 @@ func readFile(path string, limit int) ([]byte, error) {
 // numbers, print the file's view with [Node.Span] instead.
 //
 // The Source does not read any text, so [Source.Text] returns an empty
-// string for it and [Source.Offset] reports false.
+// string for it and [Source.Offset] reports false. Its parse does not
+// check the encoding, as [ErrEncoding] describes.
 //
 // The byte limit counts the bytes of text that the tokens hold. The lexer
 // repeats some line endings in two tokens, as [tokens.Tokenize] describes,
@@ -1729,7 +1732,8 @@ func (s *Source) single() (*Node, error) {
 // syntax error matches [ErrSyntax], and its message draws each control
 // character as [go.jacobcolvin.com/niceyaml/escape.Control] draws it. The
 // error of a document past the depth limit, or of a text past the byte
-// limit, matches [ErrLimit] and not ErrSyntax. A panic in the parser comes
+// limit, matches [ErrLimit] and not ErrSyntax. The error of a text that is
+// not UTF-8 matches [ErrEncoding] and not ErrSyntax. A panic in the parser comes
 // back as a SourceError too, bound at the first token with a position
 // among those the parser was reading. It holds a [PanicError] and does
 // not match ErrSyntax.
@@ -1776,15 +1780,99 @@ func (s *Source) parse() *parsedFile {
 }
 
 // parseTokens returns the parse of tks, the tokens of the Source. A text
-// past the byte limit fails whole with the error of [limitError], and the
-// parser does not read it. The file then holds one document, which carries
-// that error and every token of tks.
+// past the byte limit fails whole with the error of [limitError], and a
+// text that is not UTF-8 fails whole with the error of
+// [Source.encodingError]. The parser does not read either text. The file
+// then holds one document, which carries that error and every token of
+// tks. The limit goes first, so the encoding check reads a bounded text.
 func (s *Source) parseTokens(tks token.Tokens) *docparse.Result {
 	if limit := s.bytes(); limit > 0 && s.size() > limit {
 		return docparse.Fail(tks, limitError(limit))
 	}
 
+	err := s.encodingError()
+	if err != nil {
+		return docparse.Fail(tks, err)
+	}
+
 	return docparse.ParseDepth(tks, s.depth(), s.parserOptions()...)
+}
+
+// encodingError returns the error of a text that the Source read and that
+// is not UTF-8, or nil. A UTF-8 byte order mark can start the text. A text
+// whose byte order mark or leading zero bytes show UTF-16 or UTF-32 fails
+// with no location. Any other text fails at its first byte that UTF-8
+// does not allow. The message calls a Source with a file path a file, and
+// any other Source a text. The error matches [ErrEncoding] and declares
+// the document at fault.
+func (s *Source) encodingError() error {
+	text := s.input
+
+	noun, fix := "file", errSaveUTF8
+	if s.filePath == "" {
+		noun, fix = "text", errEncodeUTF8
+	}
+
+	if enc := wideEncoding(text); enc != "" {
+		return Invalid(encodingProblem(noun+" is "+enc+", not UTF-8"), WithDetails(fix))
+	}
+
+	off := invalidByte(text)
+	if off < 0 {
+		return nil
+	}
+
+	at, _ := s.PositionAt(off)
+
+	return Invalid(encodingProblem(fmt.Sprintf("byte 0x%02x is not UTF-8", text[off])),
+		AtRange(position.NewRange(at, position.New(at.Line, at.Col+1))),
+		WithDetails(fix))
+}
+
+// encodingProblem returns the problem msg, which matches [ErrEncoding].
+func encodingProblem(msg string) error {
+	return &markedError{err: errors.New(msg), marks: []error{ErrEncoding}}
+}
+
+// wideEncoding returns "UTF-16" or "UTF-32" when the byte order mark or the
+// leading zero bytes of text show that encoding, as the YAML specification
+// detects it, or "" otherwise.
+func wideEncoding(text string) string {
+	switch {
+	case strings.HasPrefix(text, "\x00\x00\xfe\xff"), strings.HasPrefix(text, "\xff\xfe\x00\x00"):
+		return "UTF-32"
+	case strings.HasPrefix(text, "\xfe\xff"), strings.HasPrefix(text, "\xff\xfe"):
+		return "UTF-16"
+	}
+
+	if len(text) >= 4 {
+		switch {
+		case text[0] == 0 && text[1] == 0 && text[2] == 0 && text[3] != 0,
+			text[0] != 0 && text[1] == 0 && text[2] == 0 && text[3] == 0:
+			return "UTF-32"
+		}
+	}
+
+	if len(text) >= 2 && (text[0] == 0) != (text[1] == 0) {
+		return "UTF-16"
+	}
+
+	return ""
+}
+
+// invalidByte returns the offset of the first byte of text that UTF-8 does
+// not allow, or -1 when text is valid.
+func invalidByte(text string) int {
+	for i := 0; i < len(text); {
+		r, size := utf8.DecodeRuneInString(text[i:])
+		if r == utf8.RuneError && size <= 1 {
+			return i
+		}
+
+		i += size
+	}
+
+	return -1
 }
 
 // size returns the number of bytes that the byte limit counts. They are
@@ -1824,7 +1912,7 @@ func (s *Source) parseError(f docparse.Failure) error {
 		limit := &markedError{err: errors.New(depthErr.Error()), marks: []error{ErrLimit}}
 		err = Invalid(limit, atToken(depthErr.Token))
 
-	case errors.Is(f.Err, ErrLimit):
+	case errors.Is(f.Err, ErrLimit), errors.Is(f.Err, ErrEncoding):
 		err = f.Err
 
 	case f.Panic != nil:

@@ -313,6 +313,18 @@ func TestNew_Unparsed(t *testing.T) {
 		assert.True(t, niceyaml.IsInvalid(err))
 		assert.Contains(t, niceyaml.FormatError(err), "ref.yaml:2:3:")
 	})
+
+	t.Run("text that is not UTF-8", func(t *testing.T) {
+		t.Parallel()
+
+		docs := niceyaml.NewSourceFromString("name: caf\xe9\n", niceyaml.WithName("test.yaml")).AllDocuments()
+		require.Len(t, docs, 1)
+
+		_, err := edit.New(docs[0])
+		require.ErrorIs(t, err, niceyaml.ErrEncoding)
+		require.NotErrorIs(t, err, edit.ErrEngine)
+		assert.Equal(t, "test.yaml:1:10: byte 0xe9 is not UTF-8", err.Error())
+	})
 }
 
 func TestNew_Documents(t *testing.T) {
@@ -3314,6 +3326,30 @@ func TestDoc_Apply(t *testing.T) {
 			path:   paths.Doc().Child("a"),
 			fn:     rename("x\x01y"),
 			err: "1:1: $.a~: go-yaml's encoder writes U+0001 as it is, " +
+				"and YAML does not allow that in a text",
+			engine: true,
+		},
+		"rename to a key with a byte that is not UTF-8": {
+			before: "a: 1\nl: [1]\n",
+			path:   paths.Doc().Child("a"),
+			fn:     rename("caf\xe9"),
+			err: "1:1: $.a~: go-yaml's encoder writes the byte 0xe9, which is not UTF-8, as it is, " +
+				"and YAML does not allow that in a text",
+			engine: true,
+		},
+		"set of a new key with a byte that is not UTF-8": {
+			before: "a: 1\nl: [1]\n",
+			path:   paths.Doc(),
+			fn:     at(paths.Doc().Child("caf\xe9"), set(1)),
+			err: "1:1: $: go-yaml's encoder writes the byte 0xe9, which is not UTF-8, as it is, " +
+				"and YAML does not allow that in a text",
+			engine: true,
+		},
+		"set of a mapping with a key with a byte that is not UTF-8": {
+			before: "a: 1\n",
+			path:   paths.Doc().Child("a"),
+			fn:     set(map[string]int{"caf\xe9": 1}),
+			err: "1:4: $.a: go-yaml's encoder writes the byte 0xe9, which is not UTF-8, as it is, " +
 				"and YAML does not allow that in a text",
 			engine: true,
 		},

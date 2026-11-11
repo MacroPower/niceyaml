@@ -183,7 +183,8 @@
 // fails both, and both return that one error. [Source.File] returns the
 // errors of the documents that did not parse as one error. Each syntax error
 // matches [ErrSyntax], and each error of a document past a limit of the
-// Source matches [ErrLimit].
+// Source matches [ErrLimit]. A text that is not UTF-8 does not parse at all.
+// The whole text is one document whose error matches [ErrEncoding].
 //
 // A document without content is empty, as [Node.IsEmpty] reports. A trailing
 // "---" leaves one, as in `name: x\n---\n`. So does a Helm template that

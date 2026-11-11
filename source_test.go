@@ -2468,6 +2468,171 @@ func TestSource_File_ErrSyntax(t *testing.T) {
 	}
 }
 
+func TestSource_File_ErrEncoding(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		opts  []niceyaml.SourceOption
+		// The error the parse returns, with its details and its excerpt,
+		// or "" when the text parses.
+		err string
+	}{
+		"utf-8": {
+			input: "name: caf\u00e9\n",
+		},
+		"utf-8 with a byte order mark": {
+			input: "\ufeffname: caf\u00e9\n",
+		},
+		"latin-1 byte": {
+			input: stringtest.LinesLF("name: caf\xe9", "port: 80"),
+			opts:  []niceyaml.SourceOption{niceyaml.WithName("latin1.yaml")},
+			err: stringtest.JoinLF(
+				"latin1.yaml:1:10: byte 0xe9 is not UTF-8",
+				"`-- encode the text as UTF-8",
+				"",
+				"   1 | name: caf\ufffd",
+				"     |          ^",
+				"   2 | port: 80",
+			),
+		},
+		"latin-1 byte in a comment": {
+			input: stringtest.LinesLF("# caf\xe9", "port: 80"),
+			opts:  []niceyaml.SourceOption{niceyaml.WithName("latin1.yaml")},
+			err: stringtest.JoinLF(
+				"latin1.yaml:1:6: byte 0xe9 is not UTF-8",
+				"`-- encode the text as UTF-8",
+				"",
+				"   1 | # caf\ufffd",
+				"     |      ^",
+				"   2 | port: 80",
+			),
+		},
+		"latin-1 byte of a file": {
+			input: "name: caf\xe9\n",
+			opts:  []niceyaml.SourceOption{niceyaml.WithFilePath("latin1.yaml")},
+			err: stringtest.JoinLF(
+				"latin1.yaml:1:10: byte 0xe9 is not UTF-8",
+				"`-- save the file as UTF-8",
+				"",
+				"   1 | name: caf\ufffd",
+				"     |          ^",
+			),
+		},
+		"latin-1 byte of a later document": {
+			input: stringtest.LinesLF("a: 1", "---", "b: caf\xe9"),
+			opts:  []niceyaml.SourceOption{niceyaml.WithName("latin1.yaml")},
+			err: stringtest.JoinLF(
+				"latin1.yaml:3:7: byte 0xe9 is not UTF-8",
+				"`-- encode the text as UTF-8",
+				"",
+				"   1 | a: 1",
+				"   2 | ---",
+				"   3 | b: caf\ufffd",
+				"     |       ^",
+			),
+		},
+		"utf-16 byte order mark": {
+			input: "\xff\xfen\x00:\x00 \x00a\x00\n\x00",
+			opts:  []niceyaml.SourceOption{niceyaml.WithName("utf16.yaml")},
+			err:   stringtest.JoinLF("utf16.yaml: text is UTF-16, not UTF-8", "`-- encode the text as UTF-8"),
+		},
+		"utf-16 without a byte order mark": {
+			input: "\x00n\x00:",
+			opts:  []niceyaml.SourceOption{niceyaml.WithFilePath("utf16.yaml")},
+			err:   stringtest.JoinLF("utf16.yaml: file is UTF-16, not UTF-8", "`-- save the file as UTF-8"),
+		},
+		"utf-32 byte order mark": {
+			input: "\xff\xfe\x00\x00n\x00\x00\x00",
+			opts:  []niceyaml.SourceOption{niceyaml.WithName("utf32.yaml")},
+			err:   stringtest.JoinLF("utf32.yaml: text is UTF-32, not UTF-8", "`-- encode the text as UTF-8"),
+		},
+		"utf-32 without a byte order mark": {
+			input: "n\x00\x00\x00",
+			opts:  []niceyaml.SourceOption{niceyaml.WithName("utf32.yaml")},
+			err:   stringtest.JoinLF("utf32.yaml: text is UTF-32, not UTF-8", "`-- encode the text as UTF-8"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input, tc.opts...)
+
+			_, fileErr := source.File()
+			if tc.err == "" {
+				require.NoError(t, fileErr)
+
+				return
+			}
+
+			require.ErrorIs(t, fileErr, niceyaml.ErrEncoding)
+			require.NotErrorIs(t, fileErr, niceyaml.ErrSyntax)
+			assert.True(t, niceyaml.IsInvalid(fileErr))
+			assert.Equal(t, tc.err, niceyaml.FormatError(fileErr))
+
+			// The whole text is one document that carries the error, and the
+			// lines keep the text.
+			doc := yamltest.AllDocuments(t, source, 1)[0]
+			assert.Same(t, fileErr, doc.Err())
+			assert.Nil(t, doc.AST())
+			assert.Equal(t, source.Tokens(), doc.Tokens())
+			assert.Equal(t, tc.input, source.Text())
+
+			_, err := source.Document()
+			assert.Same(t, fileErr, err)
+
+			_, err = source.Decode[any](t.Context())
+			require.ErrorIs(t, err, niceyaml.ErrEncoding)
+
+			err = source.ValidateDocuments(t.Context(), niceyaml.NoValidator)
+			require.ErrorIs(t, err, niceyaml.ErrEncoding)
+		})
+	}
+}
+
+func TestSource_File_ErrEncodingPastByteLimit(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("name: caf\xe9\n", niceyaml.WithName("big.yaml"), niceyaml.WithByteLimit(4))
+
+	_, err := source.File()
+	require.ErrorIs(t, err, niceyaml.ErrLimit)
+	require.NotErrorIs(t, err, niceyaml.ErrEncoding)
+	assert.Equal(t, "big.yaml: file is larger than 4 bytes", err.Error())
+}
+
+func TestSource_File_ErrEncodingLossyRead(t *testing.T) {
+	t.Parallel()
+
+	// The function strings.ToValidUTF8 puts one U+FFFD in place of each
+	// run of bytes that UTF-8 does not allow. So the run of two reads as
+	// one.
+	text := "name: caf\xe9\xe9\n"
+
+	_, err := niceyaml.NewSourceFromString(text).Decode[map[string]string](t.Context())
+	require.ErrorIs(t, err, niceyaml.ErrEncoding)
+
+	lossy := niceyaml.NewSourceFromString(strings.ToValidUTF8(text, "\ufffd"))
+
+	got, err := lossy.Decode[map[string]string](t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"name": "caf\ufffd"}, got)
+}
+
+func TestSource_File_ErrEncodingOfTokens(t *testing.T) {
+	t.Parallel()
+
+	// A Source of tokens holds no text, so its parse reads the tokens as
+	// the lexer wrote them.
+	source := niceyaml.NewSourceFromTokens(tokens.Tokenize("name: caf\xe9\n"))
+
+	got, err := source.Decode[map[string]string](t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"name": "caf�"}, got)
+}
+
 func TestSource_AllDocuments(t *testing.T) {
 	t.Parallel()
 

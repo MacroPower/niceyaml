@@ -86,8 +86,9 @@ type renderedHeader struct {
 // it, and the text holds what go-yaml's parse of the encoded text reads.
 // When the two differ, as for a float that the encoder writes as 1e+06 and
 // the decoder reads as a string, render returns an error that matches
-// errEncoder. So does a panic of go-yaml's encoder, and a refusal of
-// go-yaml's parser of the encoded text. So does a byte order mark there, as
+// errEncoder. So does a panic of go-yaml's encoder, a byte of the encoded
+// text that UTF-8 does not allow, and a refusal of go-yaml's parser of the
+// encoded text. So does a byte order mark there, as
 // [Doc.valueMisread] finds it. So do line breaks of both kinds in the
 // encoded text where the YAML of no marshaler of v holds both. The encoder
 // wrote them then, as it writes the header of a block scalar of "\r\n"
@@ -108,6 +109,12 @@ func render(ctx context.Context, v any, step int, seqIndent bool, ms []encoder.M
 	// The string of a block scalar holds the line break that ends its
 	// text, so the parse reads the encode with that line break.
 	text := strings.TrimSuffix(string(data), "\n")
+
+	// Go-yaml's encoder writes a byte of a string that is not UTF-8 as it
+	// is, and a Source refuses a text with such a byte before its parse.
+	if what, ok := invalidByteIn(string(data)); ok {
+		return rendered{refused: refused}, &goyamlError{err: unprintableError(what)}
+	}
 
 	enc, err := encodedDoc(string(data))
 	if err != nil {

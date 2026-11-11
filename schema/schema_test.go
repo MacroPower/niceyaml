@@ -630,6 +630,10 @@ func TestCompile_Document(t *testing.T) {
 			valid:   named,
 			invalid: unnamed,
 		},
+		"YAML that is not UTF-8": {
+			schema: stringtest.LinesLF("type: object", "description: caf\xe9"),
+			want:   "compile schema: YAML decode: 2:17: byte 0xe9 is not UTF-8",
+		},
 		"two YAML documents": {
 			schema: stringtest.Input(`
 				type: object

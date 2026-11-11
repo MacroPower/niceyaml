@@ -147,6 +147,10 @@ func TestValidateFile(t *testing.T) {
 			content: "name: [\n",
 			want:    []string{"1:7:"},
 		},
+		"byte that is not UTF-8": {
+			content: stringtest.LinesLF("name: a", "---", "name: caf\xe9"),
+			want:    []string{"3:10:"},
+		},
 		"syntax errors beside violations": {
 			content: stringtest.LinesLF(
 				"name: a",
