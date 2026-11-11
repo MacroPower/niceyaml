@@ -80,6 +80,9 @@ func newSourceDoc(t *testing.T, text string, opts ...niceyaml.SourceOption) (*ni
 	d, err := edit.New(doc, edit.WithApp("cafe"), edit.WithProtected(typeFields...))
 	require.NoError(t, err)
 
+	docSources.Store(d, doc.Source())
+	t.Cleanup(func() { docSources.Delete(d) })
+
 	return doc.Source(), d
 }
 
@@ -115,7 +118,8 @@ func failsWith(t *testing.T, err error, want string) bool {
 
 // requireEdit checks the outcome of an Apply of d that returned err. With
 // wantErr set, the formatted err must hold wantErr. Otherwise the Apply
-// must pass and leave d holding the text want.
+// must pass and leave d holding the text want. For a Doc of [newSourceDoc],
+// the Changes of d must give that text too, as [requireChanges] checks.
 func requireEdit(t *testing.T, d *edit.Doc, err error, wantErr, want string) {
 	t.Helper()
 
@@ -128,6 +132,12 @@ func requireEdit(t *testing.T, d *edit.Doc, err error, wantErr, want string) {
 
 	require.NoError(t, err)
 	assert.Equal(t, want, d.Text())
+
+	if v, ok := docSources.Load(d); ok {
+		src, ok := v.(*niceyaml.Source)
+		require.True(t, ok)
+		requireChanges(t, src, d)
+	}
 }
 
 func TestNew(t *testing.T) {
@@ -10280,6 +10290,7 @@ func TestFileText(t *testing.T) {
 
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, got)
+			requireChanges(t, src, docs...)
 		})
 	}
 }
@@ -10331,7 +10342,8 @@ func TestDoc_Text(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			docs := niceyaml.NewSourceFromString(tc.text).Documents()
+			src := niceyaml.NewSourceFromString(tc.text)
+			docs := src.Documents()
 			require.Greater(t, len(docs), tc.doc)
 
 			d, err := edit.New(docs[tc.doc])
@@ -10358,6 +10370,7 @@ func TestDoc_Text(t *testing.T) {
 
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, d.Text())
+			requireChanges(t, src, d)
 		})
 	}
 }

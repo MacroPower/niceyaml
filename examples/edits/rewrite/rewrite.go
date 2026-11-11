@@ -134,6 +134,16 @@ func main() {
 		fmt.Printf("line %d: %s removes %s: %s\n", rm.Range.Start.Line+1, rm.Label, rm.Path, rm.Reason)
 	}
 
+	fmt.Println("\nList the changes:")
+
+	// Changes returns each edit as a range of the owner's text, 0-indexed,
+	// and the text that replaces it. An editor or a review bot takes them
+	// as text edits. The comment after the closing time stays out of its
+	// change.
+	for _, c := range d.Changes() {
+		fmt.Printf("%s: %q\n", c.Range, c.Text)
+	}
+
 	fmt.Println("\nValidate the edited document:")
 
 	// Node returns the edited document, and its errors bind in the text

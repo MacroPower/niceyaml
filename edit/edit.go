@@ -1038,14 +1038,27 @@ func (d *Doc) endApply() {
 // the document stands before the text of the document, so Text leaves it
 // out, and [FileText] keeps it.
 func (d *Doc) Text() string {
+	return d.withMarks(d.textMarks())
+}
+
+// markPlace is a byte order mark that [Doc.Text] writes. The mark stands
+// before the byte at in the current text, and mark is its index in the
+// marks of the Doc.
+type markPlace struct {
+	at, mark int
+}
+
+// textMarks returns the places of the marks that [Doc.Text] writes, in
+// the order of the current text.
+func (d *Doc) textMarks() []markPlace {
 	if len(d.marks) == 0 {
-		return d.cur
+		return nil
 	}
 
 	var (
-		b    strings.Builder
-		next = 0
-		last = 0
+		places []markPlace
+		next   = 0
+		last   = 0
 	)
 
 	for i := range len(d.cur) {
@@ -1063,24 +1076,46 @@ func (d *Doc) Text() string {
 		// there.
 		at := strings.LastIndexByte(d.cur[:i], '\n') + 1
 		at = max(at, last)
-
-		b.WriteString(d.cur[last:at])
-		b.WriteString(bom.Mark)
-
 		last = at
 
 		for next < len(d.marks) && d.marks[next] <= o {
 			next++
 		}
-	}
 
-	b.WriteString(d.cur[last:])
+		// Of the marks that the line takes, the one nearest the byte stands
+		// for them all.
+		places = append(places, markPlace{at: at, mark: next - 1})
+	}
 
 	// A mark at the end of the text stands after the last byte of the user.
 	if next < len(d.marks) && d.marks[next] == len(d.orig) && d.cur != "" &&
 		d.origin[len(d.cur)-1] == len(d.orig)-1 {
-		b.WriteString(bom.Mark)
+		places = append(places, markPlace{at: len(d.cur), mark: next})
 	}
+
+	return places
+}
+
+// withMarks returns the current text with a byte order mark at each of
+// places.
+func (d *Doc) withMarks(places []markPlace) string {
+	if len(places) == 0 {
+		return d.cur
+	}
+
+	var (
+		b    strings.Builder
+		last = 0
+	)
+
+	for _, p := range places {
+		b.WriteString(d.cur[last:p.at])
+		b.WriteString(bom.Mark)
+
+		last = p.at
+	}
+
+	b.WriteString(d.cur[last:])
 
 	return b.String()
 }

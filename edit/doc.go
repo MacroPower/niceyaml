@@ -137,7 +137,9 @@
 //
 // After the edits, a program reads the text of the document with
 // [Doc.Text], the text of the whole file with [FileText], or a document to
-// decode or validate with [Doc.Node].
+// decode or validate with [Doc.Node]. [Doc.Changes] returns the edits as
+// replacements of ranges of the user's text, which a program hands to an
+// editor or a review as text edits.
 //
 // The engine reads each document as go-yaml's parser reads it in its file.
 // The comment lines between a document and the "---" header of the next
