@@ -166,16 +166,16 @@ func hasValue(ctx context.Context, n *niceyaml.Node) error {
 	return niceyaml.NewError("value is empty")
 }
 
-// knownKind rejects a key that does not name a predefined kind.
-// [theme.Palette.Theme] rejects such a key too, but it names the kind
-// without a place in the file.
+// knownKind rejects a key that names neither a predefined kind nor a kind
+// below one. [theme.Palette.Theme] rejects such a key too, but it names
+// the kind without a place in the file.
 func knownKind(ctx context.Context, n *niceyaml.Node) error {
 	name, err := n.Decode[kind.Kind](ctx)
 	if err != nil {
 		return fmt.Errorf("decode kind: %w", err)
 	}
 
-	if kind.IsPredefined(name) {
+	if kind.IsPredefined(name) || kind.IsBelowPredefined(name) {
 		return nil
 	}
 

@@ -55,30 +55,53 @@
 // the built-in themes do, so the gutters do not read as comments. Setting
 // [UI] restyles all the chrome at once without changing the comments.
 //
-// A rendering names its own kinds, such as one for search matches, as
-// conversions of a string: kind.Kind("mine"). A custom Kind does not have
-// a parent in the hierarchy, so [Parent] returns [Text] for it, and a
-// theme styles it as plain text. The
-// [go.jacobcolvin.com/niceyaml/style.Inherit] option places it under a
-// predefined Kind, so it takes that Kind's style under any theme:
+// # Custom Kinds
 //
-//	const mine kind.Kind = "mine"
+// A rendering names its own kinds, such as one for search matches, below a
+// predefined Kind. [Kind.Child] joins a name to its parent with a '.', and
+// [Parent] returns the text before the last '.' of such a kind. A custom
+// Kind therefore carries its parent in its name, and every theme styles it
+// as that parent unless the theme sets the Kind itself:
 //
-//	styles := theme.Charm.Styles().With(style.Inherit(mine, kind.GenericHighlight))
+//	const match = kind.GenericHighlight + ".match"
 //
-// [IsPredefined] tells a predefined Kind from a custom one. A program that
-// reads kinds from a file, such as the keys of a theme file, uses it to
-// reject a misspelled name.
+//	// Or: var match = kind.GenericHighlight.Child("match")
+//
+// A custom Kind without a '.' in its name, such as kind.Kind("mine"), has
+// [Text] as its parent, so a theme styles it as plain text.
+//
+// [IsPredefined] tells a predefined Kind from a custom one, and
+// [IsBelowPredefined] reports whether a custom Kind sits below a
+// predefined one. A program that reads kinds from a file, such as the keys
+// of a theme file, uses the two to reject a misspelled name.
 package kind
 
 import (
 	"iter"
 	"maps"
+	"strings"
 )
 
 // Kind names one kind of text a rendering styles. Custom kinds are
-// conversions of a string: kind.Kind("mine").
+// conversions of a string, such as kind.Kind("mine"), or children of
+// another Kind that [Kind.Child] names.
 type Kind string
+
+// Child returns the Kind named name below k, which is k and name joined
+// with a '.'. For a name without a '.', [Parent] returns k for the result,
+// so a theme that does not set the child styles it as k:
+//
+//	kind.GenericHighlight.Child("match") // "genericHighlight.match"
+//
+// A name with a '.' names a Kind further down below k. [Parent] cuts at
+// the last '.', so the parent of k.Child("a.b") is k.Child("a").
+//
+// Kind is a string type, so a constant names the same Kind:
+//
+//	const match = kind.GenericHighlight + ".match"
+func (k Kind) Child(name string) Kind {
+	return k + "." + Kind(name)
+}
 
 // Kinds of YAML tokens and rendered text. Names follow Pygments token
 // naming conventions where they apply.
@@ -299,12 +322,19 @@ var parent = map[Kind]Kind{
 	UISeparator:              UIAnnotation,
 }
 
-// Parent returns the parent of k in the hierarchy. [Text] is the root, and a
-// Kind outside the hierarchy, such as a custom one, does not have a parent,
-// so Parent returns Text for both.
+// Parent returns the parent of k in the hierarchy. For a predefined Kind,
+// the hierarchy that the package documentation describes names the
+// parent. For a custom Kind with a '.' in its name, such as one that
+// [Kind.Child] returns, the parent is the text before the last '.'. [Text]
+// is the root, and a custom Kind without a '.' does not have a parent of
+// its own, so Parent returns Text for both.
 func Parent(k Kind) Kind {
 	if p, ok := parent[k]; ok {
 		return p
+	}
+
+	if i := strings.LastIndexByte(string(k), '.'); i >= 0 {
+		return k[:i]
 	}
 
 	return Text
@@ -312,8 +342,8 @@ func Parent(k Kind) Kind {
 
 // IsPredefined reports whether k is one of the kinds this package
 // declares, [Text] included. It reports false for a custom kind, such as
-// kind.Kind("mine"), and for a misspelled name, such as
-// kind.Kind("literalStrin").
+// kind.Kind("mine") or kind.GenericHighlight.Child("match"), and for a
+// misspelled name, such as kind.Kind("literalStrin").
 func IsPredefined(k Kind) bool {
 	if k == Text {
 		return true
@@ -322,6 +352,21 @@ func IsPredefined(k Kind) bool {
 	_, ok := parent[k]
 
 	return ok
+}
+
+// IsBelowPredefined reports whether k is a custom kind below a predefined
+// one, such as one that [Kind.Child] returns for a predefined parent. That
+// is the case when the text of k before its first '.' names a predefined
+// kind. IsBelowPredefined reports false for a predefined kind, for a
+// custom kind without a '.', such as kind.Kind("mine"), and for a kind
+// below a misspelled name, such as kind.Kind("genericHighlite.match").
+//
+// A program that reads kinds from a file accepts a kind that
+// [IsPredefined] or IsBelowPredefined accepts.
+func IsBelowPredefined(k Kind) bool {
+	head, _, ok := strings.Cut(string(k), ".")
+
+	return ok && IsPredefined(Kind(head))
 }
 
 // All returns an iterator over every predefined Kind, [Text] included, in

@@ -91,6 +91,25 @@ func TestDerive(t *testing.T) {
 			kind:   kind.Kind("mine"),
 			want:   "#00ffff bg:#101820",
 		},
+		// A kind below a predefined one takes the style of that kind, and a
+		// token for it layers over that style.
+		"kind below a predefined kind takes the style of its parent": {
+			colors: brand,
+			kind:   kind.GenericHighlight.Child("match"),
+			want:   "bg:#431700",
+		},
+		"token for a kind below a predefined kind layers over its parent": {
+			colors: brand,
+			tokens: map[kind.Kind]theme.Token{kind.GenericHighlight.Child("match"): "bold"},
+			kind:   kind.GenericHighlight.Child("match"),
+			want:   "bold bg:#431700",
+		},
+		"token for a kind below a predefined kind leaves its parent": {
+			colors: brand,
+			tokens: map[kind.Kind]theme.Token{kind.GenericHighlight.Child("match"): "bold"},
+			kind:   kind.GenericHighlight,
+			want:   "bg:#431700",
+		},
 
 		// A token for a derived kind layers over the derived style, and a
 		// token above it does not reach it.

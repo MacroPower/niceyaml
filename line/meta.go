@@ -123,9 +123,9 @@ func annotationCol(col, width int) int {
 // around it. Each drops the ones above a line before it adds its own, so
 // a separator or a header never states a gap or a count that the result
 // does not have. A caller that wants a mark of its own to look like a
-// separator gives it a kind of its own. The caller then styles that kind
-// with [go.jacobcolvin.com/niceyaml/style.Inherit] from
-// [kind.UISeparator].
+// separator gives it a kind of its own below [kind.UISeparator], such as
+// kind.UISeparator.Child("mark"), and the kind then takes the separator's
+// style.
 //
 // Add annotations to a [View] with [View.Annotate], which sets Cols from a
 // [position.Range], or with [View.AnnotateLine], which keeps Cols as given.

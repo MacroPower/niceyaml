@@ -231,6 +231,13 @@ func TestPalette_Theme(t *testing.T) {
 			err:    theme.ErrUnknownKind,
 			want:   `token for "literalStrin": unknown kind`,
 		},
+		"kind below a misspelled kind": {
+			change: func(p *theme.Palette) {
+				p.Tokens = map[kind.Kind]theme.Token{"genericHighlite.match": "bold"}
+			},
+			err:  theme.ErrUnknownKind,
+			want: `token for "genericHighlite.match": unknown kind`,
+		},
 	}
 
 	for name, tc := range tcs {
@@ -271,6 +278,21 @@ func TestPalette_Theme(t *testing.T) {
 			`token for "mine": invalid color: "#d0877"`+"\n"+
 			`token for "nameTag": unknown keyword: "bolder"`+"\n"+
 			`token for "zest": unknown kind`)
+	})
+
+	// A theme file styles a kind below a predefined one, and its token
+	// layers over the style of that kind.
+	t.Run("accepts a kind below a predefined kind", func(t *testing.T) {
+		t.Parallel()
+
+		match := kind.GenericHighlight.Child("match")
+
+		p := corp
+		p.Tokens = map[kind.Kind]theme.Token{match: "bold"}
+
+		got, err := p.Theme()
+		require.NoError(t, err)
+		assert.Equal(t, got.Style(kind.GenericHighlight).Bold(true), got.Style(match))
 	})
 
 	// A program whose theme file styles kinds of its own takes the colors

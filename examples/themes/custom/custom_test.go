@@ -97,8 +97,14 @@ func TestKnownKind(t *testing.T) {
 		input string
 		want  string
 	}{
-		"predefined kind": {input: `nameTag: "bold"`},
-		"misspelled kind": {input: `literalStrin: "#a3c585"`, want: "$.tokens.literalStrin~"},
+		"predefined kind":              {input: `nameTag: "bold"`},
+		"misspelled kind":              {input: `literalStrin: "#a3c585"`, want: "$.tokens.literalStrin~"},
+		"kind below a predefined kind": {input: `genericHighlight.match: "bold"`},
+		"kind below a misspelled kind": {
+			input: `genericHighlite.match: "bold"`,
+			want:  "$.tokens.'genericHighlite.match'~",
+		},
+		"custom kind": {input: `mine: "bold"`, want: "$.tokens.mine~"},
 	}
 
 	for name, tc := range tcs {

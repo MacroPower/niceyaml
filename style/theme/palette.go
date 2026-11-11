@@ -18,7 +18,7 @@ var (
 	ErrEmptyName = errors.New("empty name")
 
 	// ErrUnknownKind reports a token of a [Palette] for a kind that
-	// [kind.IsPredefined] rejects.
+	// neither [kind.IsPredefined] nor [kind.IsBelowPredefined] accepts.
 	ErrUnknownKind = errors.New("unknown kind")
 )
 
@@ -112,7 +112,7 @@ func (h Hex) Color() (color.Color, error) {
 type Palette struct {
 	// Tokens holds a [Token] for each kind that the theme styles, as
 	// [Derive] reads them. [Palette.Theme] accepts only the kinds that
-	// [kind.IsPredefined] accepts.
+	// [kind.IsPredefined] or [kind.IsBelowPredefined] accepts.
 	Tokens map[kind.Kind]Token `json:"tokens,omitempty" yaml:"tokens,omitempty"`
 	// Name is the kebab-case identifier for the theme, such as "monokai".
 	// [Palette.Theme] rejects an empty Name.
@@ -148,10 +148,10 @@ type Palette struct {
 // rejects such a color earlier, when it decodes the file. Colors does not
 // check the Mode, which [FromColors] and [Derive] check.
 //
-// [Palette.Theme] rejects a token for a kind outside the hierarchy, such
-// as a kind of the program's own. A program whose theme file styles such
-// kinds passes the result to FromColors instead, with the name and the
-// tokens of p:
+// [Palette.Theme] rejects a token for a custom kind that is not below a
+// predefined one, such as kind.Kind("mine"). A program whose theme file
+// styles such kinds passes the result to FromColors instead, with the name
+// and the tokens of p:
 //
 //	colors, err := pal.Colors()
 //	if err != nil {
@@ -181,9 +181,9 @@ func (p Palette) Colors() (Colors, error) {
 //     file without a mode key, gives an error that wraps [ErrUnknownMode].
 //   - A color that [style.ParseColor] rejects gives the error that
 //     [Palette.Colors] returns for it.
-//   - A token for a kind that [kind.IsPredefined] rejects, such as a
-//     misspelled name, gives an error that names the kind and wraps
-//     [ErrUnknownKind].
+//   - A token for a kind that neither [kind.IsPredefined] nor
+//     [kind.IsBelowPredefined] accepts, such as a misspelled name, gives
+//     an error that names the kind and wraps [ErrUnknownKind].
 //   - A token that [style.Parse] rejects gives an error that names the
 //     kind and wraps the error from style.Parse.
 //
@@ -212,7 +212,7 @@ func (p Palette) Theme() (Theme, error) {
 	errs = append(errs, colorErrs...)
 
 	for _, k := range slices.Sorted(maps.Keys(p.Tokens)) {
-		if !kind.IsPredefined(k) {
+		if !kind.IsPredefined(k) && !kind.IsBelowPredefined(k) {
 			errs = append(errs, fmt.Errorf("token for %q: %w", k, ErrUnknownKind))
 		}
 

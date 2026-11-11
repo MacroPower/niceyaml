@@ -53,9 +53,10 @@ func TestNew(t *testing.T) {
 	t.Parallel()
 
 	const (
-		match kind.Kind = "customMatch"
-		focus kind.Kind = "customFocus"
-		other kind.Kind = "customOther"
+		match = kind.GenericHighlight + ".match"
+		focus = match + ".focus"
+		mine  = kind.Kind("customMine")
+		sub   = mine + ".sub"
 	)
 
 	title := lipgloss.NewStyle().
@@ -117,72 +118,32 @@ func TestNew(t *testing.T) {
 				"never-set":  baseStyle,
 			},
 		},
-		"explicit Set before Inherit wins": {
-			opts: []style.Option{
-				style.Set(match, redStyle),
-				style.Inherit(match, kind.GenericHighlight),
-				style.Set(kind.GenericHighlight, greenStyle),
-			},
-			want: map[kind.Kind]lipgloss.Style{match: redStyle},
+		"kind below a predefined kind takes the style of its parent": {
+			opts: []style.Option{style.Set(kind.GenericHighlight, greenStyle)},
+			want: map[kind.Kind]lipgloss.Style{match: greenStyle, focus: greenStyle},
 		},
-		"explicit Set after Inherit wins": {
-			opts: []style.Option{
-				style.Inherit(match, kind.GenericHighlight),
-				style.Set(kind.GenericHighlight, greenStyle),
-				style.Set(match, redStyle),
-			},
-			want: map[kind.Kind]lipgloss.Style{match: redStyle},
-		},
-		"later Inherit replaces the parent": {
-			opts: []style.Option{
-				style.Set(kind.GenericHighlight, greenStyle),
-				style.Set(kind.TextAccent, redStyle),
-				style.Inherit(match, kind.GenericHighlight),
-				style.Inherit(match, kind.TextAccent),
-			},
-			want: map[kind.Kind]lipgloss.Style{match: redStyle},
-		},
-		"custom kinds chain to a predefined ancestor": {
-			opts: []style.Option{
-				style.Set(kind.GenericHighlight, greenStyle),
-				style.Inherit(focus, match),
-				style.Inherit(match, kind.GenericHighlight),
-			},
-			want: map[kind.Kind]lipgloss.Style{focus: greenStyle, match: greenStyle},
-		},
-		"predefined kind moves under a new parent": {
-			opts: []style.Option{
-				style.Set(kind.Comment, greenStyle),
-				style.Inherit(kind.UI, kind.Text),
-			},
-			want: map[kind.Kind]lipgloss.Style{
-				kind.UI:           baseStyle,
-				kind.UILineNumber: baseStyle,
-				kind.Comment:      greenStyle,
-			},
-		},
-		"cycle resolves to the base style": {
-			opts: []style.Option{
-				style.Inherit(match, focus),
-				style.Inherit(focus, match),
-			},
-			want: map[kind.Kind]lipgloss.Style{match: baseStyle, focus: baseStyle},
-		},
-		"cycle through a set kind resolves to that kind": {
-			opts: []style.Option{
-				style.Inherit(match, focus),
-				style.Inherit(focus, match),
-				style.Set(focus, redStyle),
-			},
+		"kind below a predefined kind takes a style set above its parent": {
+			opts: []style.Option{style.Set(kind.Generic, redStyle)},
 			want: map[kind.Kind]lipgloss.Style{match: redStyle, focus: redStyle},
 		},
-		"cycle above the child resolves to the base style": {
+		"explicit Set on a kind below a predefined kind wins": {
 			opts: []style.Option{
-				style.Inherit(match, focus),
-				style.Inherit(focus, other),
-				style.Inherit(other, focus),
+				style.Set(match, redStyle),
+				style.Set(kind.GenericHighlight, greenStyle),
 			},
-			want: map[kind.Kind]lipgloss.Style{match: baseStyle},
+			want: map[kind.Kind]lipgloss.Style{
+				match:                 redStyle,
+				focus:                 redStyle,
+				kind.GenericHighlight: greenStyle,
+			},
+		},
+		"kind below a set custom kind takes its style": {
+			opts: []style.Option{style.Set(mine, redStyle)},
+			want: map[kind.Kind]lipgloss.Style{mine: redStyle, sub: redStyle},
+		},
+		"kind below an unset custom kind takes the base style": {
+			opts: []style.Option{style.Set(kind.GenericHighlight, greenStyle)},
+			want: map[kind.Kind]lipgloss.Style{mine: baseStyle, sub: baseStyle},
 		},
 	}
 
@@ -304,14 +265,13 @@ func TestWithSurface(t *testing.T) {
 		"kinds with a background keep it": {
 			opts: []style.Option{
 				style.Set(kind.GenericHighlight, fill),
-				style.Inherit(custom, kind.GenericHighlight),
 				style.WithSurface(surface),
 			},
 			surface: surface,
 			want: map[kind.Kind]lipgloss.Style{
-				kind.GenericHighlight: fill,
-				custom:                fill,
-				kind.Text:             baseStyle.Background(surface),
+				kind.GenericHighlight:                fill,
+				kind.GenericHighlight.Child("match"): fill,
+				kind.Text:                            baseStyle.Background(surface),
 			},
 		},
 		"later surface replaces the earlier one": {
@@ -407,7 +367,7 @@ func TestStyles_Surface(t *testing.T) {
 func TestUpdate(t *testing.T) {
 	t.Parallel()
 
-	const custom kind.Kind = "customUpdate"
+	custom := kind.GenericHighlight.Child("update")
 
 	fill := lipgloss.NewStyle().Background(lipgloss.Color("#ff00ff"))
 
@@ -457,10 +417,9 @@ func TestUpdate(t *testing.T) {
 				kind.Comment: greenStyle,
 			},
 		},
-		"takes the style of an Inherit parent": {
+		"takes the style of the parent of a kind below a predefined kind": {
 			opts: []style.Option{
 				style.Set(kind.GenericHighlight, fill),
-				style.Inherit(custom, kind.GenericHighlight),
 				style.Update(custom, bold),
 			},
 			want: map[kind.Kind]lipgloss.Style{
@@ -468,11 +427,10 @@ func TestUpdate(t *testing.T) {
 				kind.GenericHighlight: fill,
 			},
 		},
-		"takes a Set style of the kind over an Inherit parent": {
+		"takes a Set style of a kind below a predefined kind over its parent": {
 			opts: []style.Option{
 				style.Set(kind.GenericHighlight, fill),
 				style.Set(custom, redStyle),
-				style.Inherit(custom, kind.GenericHighlight),
 				style.Update(custom, bold),
 			},
 			want: map[kind.Kind]lipgloss.Style{
@@ -503,17 +461,6 @@ func TestUpdate(t *testing.T) {
 				kind.LiteralNumberFloat:   baseStyle.Bold(true),
 				kind.LiteralNumber:        redStyle,
 				kind.LiteralNumberInteger: redStyle,
-			},
-		},
-		"later Inherit on the kind does not reach the kind": {
-			opts: []style.Option{
-				style.Set(kind.GenericHighlight, fill),
-				style.Update(custom, italic),
-				style.Inherit(custom, kind.GenericHighlight),
-			},
-			want: map[kind.Kind]lipgloss.Style{
-				custom:                baseStyle.Italic(true),
-				kind.GenericHighlight: fill,
 			},
 		},
 		"nil function leaves the kind inheriting": {
@@ -621,32 +568,39 @@ func TestUpdate(t *testing.T) {
 	})
 }
 
-func TestInherit(t *testing.T) {
+func TestStyles_Style(t *testing.T) {
 	t.Parallel()
 
-	const match kind.Kind = "customMatch"
+	const match = kind.GenericHighlight + ".match"
 
-	t.Run("custom kind takes the style of its parent under built-in themes", func(t *testing.T) {
+	t.Run("kind below a predefined kind takes its style under built-in themes", func(t *testing.T) {
 		t.Parallel()
 
 		dracula, ok := theme.Builtin().Get("dracula")
 		require.True(t, ok)
 
 		for _, th := range []theme.Theme{theme.Charm, dracula} {
-			styles := th.Styles().With(style.Inherit(match, kind.GenericHighlight))
+			styles := th.Styles()
 
 			assert.Equal(t, styles.Style(kind.GenericHighlight), styles.Style(match), th.Name)
+			assert.Equal(t, styles.Style(kind.GenericHighlight), styles.Style(match.Child("focus")), th.Name)
 			assert.NotEqual(t, styles.Style(kind.Text), styles.Style(match), th.Name)
 		}
 	})
 
-	t.Run("With re-resolves through the inherited parent", func(t *testing.T) {
+	t.Run("With re-resolves through the parent", func(t *testing.T) {
 		t.Parallel()
 
-		original := style.New(baseStyle, style.Inherit(match, kind.GenericHighlight))
+		original := style.New(baseStyle)
 		result := original.With(style.Set(kind.GenericHighlight, redStyle))
 
 		assert.Equal(t, redStyle, result.Style(match))
 		assert.Equal(t, baseStyle, original.Style(match))
+	})
+
+	t.Run("zero value returns an empty style for a kind below a predefined kind", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Equal(t, lipgloss.NewStyle(), style.Styles{}.Style(match))
 	})
 }
