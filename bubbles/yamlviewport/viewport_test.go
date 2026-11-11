@@ -7686,6 +7686,109 @@ func TestViewport_NewSearchTermStartsAtFirstMatch(t *testing.T) {
 	assert.NotContains(t, m.View(), "k16: needle")
 }
 
+func TestViewport_SetSearchIndex(t *testing.T) {
+	t.Parallel()
+
+	newModel := func() yamlviewport.Model {
+		m := testModel(testPrinter(), 80, 5)
+		setRevision(&m, yamltest.GenerateLines(40, "k%d: needle"))
+		m.SetSearchTerm("needle")
+
+		return m
+	}
+
+	m := newModel()
+	require.Equal(t, 40, m.SearchCount())
+
+	// An index outside the matches changes neither the selection nor the
+	// scroll position.
+	m.SetYOffset(10)
+
+	for _, i := range []int{-1, m.SearchCount()} {
+		assert.False(t, m.SetSearchIndex(i), "index %d", i)
+		assert.Equal(t, 0, m.SearchIndex(), "index %d", i)
+		assert.Equal(t, 10, m.YOffset(), "index %d", i)
+	}
+
+	// SetSearchIndex selects the match and scrolls to it as SearchNext does.
+	want := newModel()
+
+	searchNext(&want, 30)
+	require.Equal(t, 30, want.SearchIndex())
+
+	require.True(t, m.SetSearchIndex(30))
+	assert.Equal(t, 30, m.SearchIndex())
+	assert.Equal(t, want.YOffset(), m.YOffset())
+	assert.Equal(t, want.View(), m.View())
+
+	// A step back from the selected match lands on the match before it.
+	m.SearchPrevious()
+	assert.Equal(t, 29, m.SearchIndex())
+
+	// Selecting the current match again scrolls back to it, so the same
+	// term followed by index 0 restarts the search at its first match.
+	require.True(t, m.SetSearchIndex(0))
+	m.GotoBottom()
+	require.NotContains(t, m.View(), "k0: needle")
+
+	m.SetSearchTerm("needle")
+	require.True(t, m.SetSearchIndex(0))
+	assert.Equal(t, 0, m.SearchIndex())
+	assert.Equal(t, 0, m.YOffset())
+	assert.Contains(t, m.View(), "k0: needle")
+
+	// Without matches, every index is outside them.
+	m.SetSearchTerm("missing")
+	assert.False(t, m.SetSearchIndex(0))
+	assert.Equal(t, -1, m.SearchIndex())
+}
+
+func TestViewport_SetSearchIndexWithoutRoom(t *testing.T) {
+	t.Parallel()
+
+	// Before the content area has room for a row, the scroll to the
+	// selected match waits until the area has room.
+	m := testModel(testPrinter(), 80, 0)
+	setRevision(&m, yamltest.GenerateLines(40, "k%d: needle"))
+	m.SetSearchTerm("needle")
+
+	require.True(t, m.SetSearchIndex(30))
+	assert.Equal(t, 30, m.SearchIndex())
+
+	m.SetHeight(5)
+	assert.Contains(t, m.View(), "k30: needle", screenMessage(&m))
+}
+
+func TestViewport_SetSearchIndexOnPlaceholder(t *testing.T) {
+	t.Parallel()
+
+	// The current revision inserts two lines at line 5, so the left pane
+	// shows placeholders beside them. The term matches from the end of the
+	// second placeholder into the next line, so its first match starts on
+	// a placeholder.
+	m := testModel(testPrinter(), 80, 5)
+	addRevisions(&m,
+		yamltest.GenerateLines(10, "key%d: value"),
+		replaceLine(
+			yamltest.GenerateLines(10, "key%d: value"),
+			5,
+			stringtest.JoinLF("new: 1", "new: 2", "key5: value"),
+		),
+	)
+	m.SetViewMode(yamlviewport.ViewModeSideBySide)
+	m.SetSearchTerm("\nkey5")
+	require.Equal(t, 2, m.SearchCount())
+
+	_, ok := m.SearchMatch(0)
+	require.False(t, ok)
+
+	// The index space is the one SearchNext steps through, so the match
+	// that SearchMatch reports false for is still one to select.
+	require.True(t, m.SetSearchIndex(1))
+	assert.True(t, m.SetSearchIndex(0))
+	assert.Equal(t, 0, m.SearchIndex())
+}
+
 func TestViewport_SideBySideSearchOrder(t *testing.T) {
 	t.Parallel()
 
@@ -9746,4 +9849,5 @@ func TestViewport_TopHit_ZeroValue(t *testing.T) {
 	_, ok = m.SearchMatch(0)
 	assert.False(t, ok)
 	assert.Empty(t, slices.Collect(m.SearchMatches()))
+	assert.False(t, m.SetSearchIndex(0))
 }
