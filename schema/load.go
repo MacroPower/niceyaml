@@ -83,6 +83,24 @@ type LoadError struct {
 	// only method that keeps the password, and the Ref itself formats
 	// and logs as its Name.
 	Ref Ref
+	// Dependencies names each document that the failed attempt reached,
+	// in the form that [Schema.Dependencies] returns. A program that
+	// watches its schema files watches these documents. When one of them
+	// changes, the program passes it to [Registry.Invalidate] and checks
+	// the document that named the schema again. Dependencies covers a
+	// failed compile, where no [*FetchError] names the document at fault,
+	// such as a $ref document that loaded but does not parse. It also
+	// names each file and URL that the [Access] refused during the attempt,
+	// whether the Ref or a $ref named it.
+	//
+	// Dependencies is nil when the registry did not attempt to load the
+	// schema. A registry without an Access refuses a Ref that a document
+	// named before any attempt. A Ref without a cache key, such as a Ref
+	// from [URL] whose key is not an HTTP URL, fails before any attempt
+	// too. Dependencies is also nil when the context of the request ended
+	// before an attempt answered it, and for every error of
+	// [Registry.Load].
+	Dependencies []Ref
 }
 
 // Error returns the message of Phase, the name of the schema in quotes,

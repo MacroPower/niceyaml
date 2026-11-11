@@ -6,6 +6,8 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -330,6 +332,168 @@ func requireLoadErrorOf(t *testing.T, err error, ref schema.Ref, phase error) {
 	}
 
 	require.NotErrorIs(t, err, other)
+}
+
+func TestLoadError_Dependencies(t *testing.T) {
+	t.Parallel()
+
+	fsys := yamltest.MapFS(map[string]string{
+		"refs-missing.json":  `{"properties": {"a": {"$ref": "missing.json"}}}`,
+		"refs-broken.json":   `{"properties": {"a": {"$ref": "broken.json"}}}`,
+		"refs-invalid.json":  `{"properties": {"a": {"$ref": "invalid.json"}}}`,
+		"broken.json":        `{"type": `,
+		"invalid.json":       `{"type": 12}`,
+		"does-not-load.json": `{"type": 12}`,
+	})
+
+	dir := t.TempDir()
+	doc := yamltest.FirstDocumentWithPath(t, "a: 1\n", filepath.Join(dir, "app.yaml"))
+
+	named, err := schema.RefBeside(doc, "./defs.json")
+	require.NoError(t, err)
+
+	outside := filepath.Join(dir, "outside.json")
+
+	yamltest.WriteFiles(t, dir, map[string]string{
+		"root/refs-url.json": `{"properties": {"a": {"$ref": "https://schemas.test/defs.json"}}}`,
+		"root/refs-out.json": `{"properties": {"a": {"$ref": "../out/defs.json"}}}`,
+		"out/defs.json":      `{"type": "string"}`,
+	})
+
+	root, err := os.OpenRoot(filepath.Join(dir, "root"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, root.Close()) })
+
+	rootAccess, err := schema.NewAccess(schema.AllowRoot(root))
+	require.NoError(t, err)
+
+	refsURL := schema.File(filepath.Join(dir, "root", "refs-url.json"))
+	refsOut := schema.File(filepath.Join(dir, "root", "refs-out.json"))
+
+	tcs := map[string]struct {
+		ref  schema.Ref
+		opts []schema.RegistryOption
+		// The names of the documents the failed attempt reached, or nil.
+		want []string
+	}{
+		"file that does not exist": {
+			ref:  schema.FileFS(fsys, "missing.json"),
+			want: []string{"missing.json"},
+		},
+		"schema that does not compile": {
+			ref:  schema.FileFS(fsys, "does-not-load.json"),
+			want: []string{"does-not-load.json"},
+		},
+		"$ref document that does not exist": {
+			ref:  schema.FileFS(fsys, "refs-missing.json"),
+			want: []string{"refs-missing.json", "missing.json"},
+		},
+		"$ref document that does not parse": {
+			ref:  schema.FileFS(fsys, "refs-broken.json"),
+			want: []string{"refs-broken.json", "broken.json"},
+		},
+		"$ref document that does not compile": {
+			ref:  schema.FileFS(fsys, "refs-invalid.json"),
+			want: []string{"refs-invalid.json", "invalid.json"},
+		},
+		// The registry does not attempt a load for such a Ref.
+		"URL that is not HTTP": {
+			ref: schema.URL("ftp://example.com/s.json"),
+		},
+		// The registry refuses a Ref that a document named before it
+		// attempts a load, when the registry has no Access.
+		"Ref a document named without an Access": {
+			ref: named,
+		},
+		// The Access refuses the file during the attempt, so the error
+		// still names the file.
+		"file the Access refuses": {
+			ref:  schema.File(outside),
+			opts: []schema.RegistryOption{schema.WithAccess(schema.NoAccess)},
+			want: []string{schema.File(outside).Name()},
+		},
+		"URL the Access refuses": {
+			ref:  schema.URL("https://schemas.test/s.json"),
+			opts: []schema.RegistryOption{schema.WithAccess(schema.NoAccess)},
+			want: []string{"https://schemas.test/s.json"},
+		},
+		// The Access refuses a $ref document too, whether a file or a URL.
+		"$ref file the Access refuses": {
+			ref:  refsOut,
+			opts: []schema.RegistryOption{schema.WithAccess(rootAccess)},
+			want: []string{refsOut.Name(), schema.File(filepath.Join(dir, "out", "defs.json")).Name()},
+		},
+		"$ref URL the Access refuses": {
+			ref:  refsURL,
+			opts: []schema.RegistryOption{schema.WithAccess(rootAccess)},
+			want: []string{refsURL.Name(), "https://schemas.test/defs.json"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			reg := schema.NewRegistry(tc.opts...)
+
+			// The second request answers from the failure the registry
+			// remembers.
+			for range 2 {
+				_, err := reg.Schema(t.Context(), tc.ref)
+
+				loadErr, ok := errors.AsType[*schema.LoadError](err)
+				require.True(t, ok, "want a LoadError, got %v", err)
+
+				var names []string
+
+				for _, dep := range loadErr.Dependencies {
+					names = append(names, dep.Name())
+				}
+
+				assert.Equal(t, tc.want, names)
+			}
+		})
+	}
+
+	t.Run("fixed document", func(t *testing.T) {
+		t.Parallel()
+
+		fixable := yamltest.MapFS(map[string]string{
+			"s.json":    `{"properties": {"a": {"$ref": "defs.json"}}}`,
+			"defs.json": `{"type": `,
+		})
+
+		ref := schema.FileFS(fixable, "s.json")
+		reg := schema.NewRegistry()
+
+		_, err := reg.Schema(t.Context(), ref)
+
+		loadErr, ok := errors.AsType[*schema.LoadError](err)
+		require.True(t, ok, "want a LoadError, got %v", err)
+		require.Len(t, loadErr.Dependencies, 2)
+
+		// The registry remembers the failure until the program passes the
+		// fixed document to Invalidate.
+		fixable["defs.json"].Data = []byte(`{"type": "string"}`)
+
+		_, err = reg.Schema(t.Context(), ref)
+		require.ErrorIs(t, err, schema.ErrLoad)
+
+		reg.Invalidate(loadErr.Dependencies[1])
+
+		_, err = reg.Schema(t.Context(), ref)
+		require.NoError(t, err)
+	})
+
+	t.Run("Load", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := schema.NewRegistry().Load(t.Context(), schema.FileFS(fsys, "missing.json"))
+
+		loadErr, ok := errors.AsType[*schema.LoadError](err)
+		require.True(t, ok, "want a LoadError, got %v", err)
+		assert.Nil(t, loadErr.Dependencies)
+	})
 }
 
 func TestLoadError_Fields(t *testing.T) {

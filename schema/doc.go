@@ -384,6 +384,13 @@
 // registry then drops the schema of that file and each schema whose
 // $refs reached the file. The next document that names one loads it
 // again. [Registry.Purge] drops every schema the registry keeps.
+//
+// [Schema.Dependencies] lists the documents that a schema read, such as
+// a $ref target outside the directory that the program watches. The
+// Dependencies field of a [*LoadError] lists the documents that a failed
+// attempt read. The program watches each of them, and when one changes,
+// it checks again each document whose schema read it.
+//
 // [WithRefreshAfter] makes the registry fetch each schema and $ref
 // document from a URL again after an interval. When that fetch fails,
 // the registry keeps validating with the copy that it holds. The
