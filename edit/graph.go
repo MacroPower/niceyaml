@@ -95,6 +95,9 @@ type edge struct {
 	merge bool
 	// In a text graph, whether the text writes the value as an alias.
 	alias bool
+	// Whether a path selects the entry by name, as KeyName reports it. The
+	// key "" has the name "".
+	named bool
 }
 
 // scalar is the value of a scalar. Two scalars compare by their decodes.
@@ -391,7 +394,7 @@ func (g *graph) entry(out *edge, v *value, e *ast.MappingValueNode) *edge {
 	} else {
 		k, ok := g.keys.Key(e.Key)
 		out.key = keyText(e.Key, k, ok)
-		out.name, _ = g.res.KeyName(e.Key)
+		out.name, out.named = g.res.KeyName(e.Key)
 	}
 
 	out.val = g.value(e.Value)

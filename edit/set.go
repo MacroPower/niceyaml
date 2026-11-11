@@ -96,10 +96,12 @@ type payload struct {
 }
 
 // Set replaces the value with v, or creates it and the values above it that
-// the document lacks. It encodes v once, as
-// [go.jacobcolvin.com/niceyaml/encoder.Marshal] does. It
-// writes that encode, keeps the comments of the entry, and drops the tag of
-// the old value and the comments inside it. A Set at an anchored value keeps
+// the document lacks. It replaces the value whole, so it drops the
+// comments, the blank lines, the key order, and the quotes inside the old
+// value, and its tag. It keeps the comments of the entry. [Node.Update]
+// writes v and keeps the text inside the value where v keeps its value.
+// Set encodes v once, as [go.jacobcolvin.com/niceyaml/encoder.Marshal]
+// does, and writes that encode. A Set at an anchored value keeps
 // the anchor and writes the new value after it, so each alias reads the new
 // value, as the package documentation describes. A call of Set at the index
 // past the last item of a sequence appends an item, and [Node.Insert] puts
@@ -339,7 +341,7 @@ func (n *Node) Set(ctx context.Context, v any, opts ...SetOption) error {
 
 	c := n.d.modelStart(n, "sets "+n.path.String(), true)
 
-	mv, where, err := n.set(ctx, v, false, cfg)
+	mv, where, err := n.set(ctx, v, false, cfg, "sets")
 
 	return n.d.modelEnd(c, err, func() bool { return c.set(mv, where) })
 }
@@ -469,29 +471,33 @@ func Flow() SetOption {
 
 // set is [Node.Set], but it also sets a protected value when protected is
 // true. It writes v as cfg says, and puts an entry that it creates at the
-// place that cfg gives. It returns the value of v as the model reads it,
+// place that cfg gives. Verb names what the call does in its messages, as
+// "sets" does for a Set. It returns the value of v as the model reads it,
 // from the encode that gives the text of v, as the edge to its place holds
 // it. It also returns the place of the new entry as the model reads it.
-func (n *Node) set(ctx context.Context, v any, protected bool, cfg setConfig) (*edge, modelPlace, error) {
+func (n *Node) set(
+	ctx context.Context, v any, protected bool, cfg setConfig, verb string,
+) (*edge, modelPlace, error) {
 	d := n.d
 
-	p, err := n.place(useCreate, "sets")
+	p, err := n.place(useCreate, verb)
 	if err != nil {
 		return nil, modelPlace{}, err
 	}
 
 	why := d.protection(p, true)
+	named := verb + " " + n.path.String()
 
 	switch {
 	case p.root && p.exists:
 		return nil, modelPlace{}, d.failAs(ErrUsage, n, "%s replaces the root of the document", d.subject())
 	case !protected && why != "":
-		return nil, modelPlace{}, d.failAs(ErrProtected, n, "%s sets %s, which %s", d.subject(), n.path, why)
+		return nil, modelPlace{}, d.failAs(ErrProtected, n, "%s %s, which %s", d.subject(), named, why)
 	}
 
 	// The Set checks its reach once go-yaml took the text of its value, as
 	// [Doc.renderPayload] checks it.
-	d.pending = &reachCall{kind: callSet, path: n.path, hidden: n.hidden, named: "sets " + n.path.String()}
+	d.pending = &reachCall{kind: callSet, path: n.path, hidden: n.hidden, named: named}
 
 	defer func() { d.pending = nil }()
 
@@ -508,11 +514,11 @@ func (n *Node) set(ctx context.Context, v any, protected bool, cfg setConfig) (*
 
 	switch {
 	case p.exists:
-		mv, err = d.setExisting(ctx, n, p, v, cfg.flow)
+		mv, err = d.setExisting(ctx, n, p, v, cfg.flow, named)
 	case p.bare:
-		mv, err = d.setFirst(ctx, n, p, v, cfg, "sets "+n.path.String())
+		mv, err = d.setFirst(ctx, n, p, v, cfg, named)
 	default:
-		mv, where, err = d.setCreated(ctx, n, p, v, cfg, "sets "+n.path.String())
+		mv, where, err = d.setCreated(ctx, n, p, v, cfg, named)
 	}
 
 	if err != nil {
@@ -757,11 +763,9 @@ func (d *Doc) readersInside(s *spot, at *reached, p *place) []*Node {
 }
 
 // setExisting replaces the value of p, the place of h, with v, in flow
-// style when flow is true. It returns the value of v as the model reads it,
-// as [Node.set] does.
-func (d *Doc) setExisting(ctx context.Context, h *Node, p *place, v any, flow bool) (*edge, error) {
-	named := "sets " + h.path.String()
-
+// style when flow is true. Named names the call, as in "sets $.a". It
+// returns the value of v as the model reads it, as [Node.set] does.
+func (d *Doc) setExisting(ctx context.Context, h *Node, p *place, v any, flow bool, named string) (*edge, error) {
 	d.recordEdit(p, named, "")
 
 	return d.replaceValue(ctx, h, p, v, flow, named)
@@ -1453,6 +1457,8 @@ func (pl payload) withAnchor(anchor run, origin int) payload {
 }
 
 // writeValue replaces the value of p with pl, as [Doc.valueEdits] does.
+// While the Doc defers its edits, writeValue adds the edits of the value to
+// them, and the next [Doc.apply] makes them.
 func (d *Doc) writeValue(h *Node, p *place, pl payload, origin, step int) error {
 	// A key of a flow mapping without a ":" holds null, as in "{a, b: 1}".
 	// The value goes after a ":" that the edit writes first.
@@ -1468,7 +1474,15 @@ func (d *Doc) writeValue(h *Node, p *place, pl payload, origin, step int) error 
 		}
 	}
 
-	err := d.apply(d.valueEdits(p, pl, origin, step)...)
+	edits := d.valueEdits(p, pl, origin, step)
+
+	if d.deferring {
+		d.deferred = append(d.deferred, edits...)
+
+		return nil
+	}
+
+	err := d.apply(edits...)
 	if err != nil {
 		return d.bug(h, err)
 	}

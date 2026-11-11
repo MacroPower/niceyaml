@@ -5385,6 +5385,7 @@ func TestDoc_Apply_NodeAfterItsApply(t *testing.T) {
 	assert.Empty(t, kept.Text())
 	require.ErrorIs(t, kept.Err(), edit.ErrEnded)
 	require.ErrorIs(t, kept.Set(t.Context(), 2), edit.ErrEnded)
+	require.ErrorIs(t, kept.Update(t.Context(), 2), edit.ErrEnded)
 	require.ErrorIs(t, kept.At(paths.Current().Child("b")).Set(t.Context(), 2), edit.ErrEnded)
 	require.ErrorIs(t, kept.At(paths.Current().Child("b")).Err(), edit.ErrEnded)
 	require.ErrorIs(t, kept.Move(paths.Doc().Child("m").Child("a"), edit.Before("q")), edit.ErrEnded)
