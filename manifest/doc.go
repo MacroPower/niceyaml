@@ -360,7 +360,8 @@
 //  4. For each later version in turn, up to the current version, the steps
 //     of the version run. The result must pass the schema of the version.
 //  5. The result decodes into the Go type of its kind, and every value
-//     that implements [niceyaml.SelfValidator] validates itself.
+//     that implements [niceyaml.SelfValidator] or
+//     [niceyaml.SelfValidatorContext] validates itself.
 //  6. The document must hold a name, when its kind has [NameField].
 //
 // The check of each schema sees only the type fields that the schema

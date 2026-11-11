@@ -90,8 +90,8 @@ var (
 	// [ErrNoWarnings], or [ErrExcessiveAliasing]. An error from [Unchecked]
 	// that an unmarshaler or a [CustomUnmarshaler] function returns does not
 	// match either. Neither does an error that a [Validator], a
-	// [SelfValidator], or a function from [WithValueCheck] reports about the
-	// value it checks.
+	// [SelfValidator], a [SelfValidatorContext], or a function from
+	// [WithValueCheck] reports about the value it checks.
 	//
 	// Text the parser rejects matches [ErrSyntax] instead. [ErrUnknownField],
 	// [ErrWrongKind], and [ErrOverflow] label some of the rejections, and a
@@ -269,7 +269,8 @@ var (
 	// spells with one text share one path, such as 1 and "1" in a map[any]T.
 	// Several NaN keys share one path too. Such a path resolves to the
 	// document entry of one of them at most. A decode binds the errors a
-	// [SelfValidator] reports under such a path without a position. Those
+	// [SelfValidator] or a [SelfValidatorContext] reports under such a path
+	// without a position. Those
 	// errors thus do not point at the line of another entry.
 	// [SourceError.Unresolved] reports it.
 	//
@@ -425,9 +426,9 @@ const (
 	// fault that a check presumes does not reach the error the Error wraps.
 	unchecked
 	// Niceyaml presumes the document at fault for an error that a check it
-	// runs returns. A decode does so for each error of a [SelfValidator]
-	// or a function from [WithValueCheck], and [Node.Validate] does so for
-	// each error of a [Validator].
+	// runs returns. A decode does so for each error of a [SelfValidator],
+	// a [SelfValidatorContext], or a function from [WithValueCheck].
+	// [Node.Validate] does so for each error of a [Validator].
 	presumed
 	// [NewError] or [Invalid] declared the fault.
 	declared
@@ -573,7 +574,8 @@ func Invalid(err error, opts ...ErrorOption) error {
 // runs returns and that does not declare anything, as the Errors section
 // of the package documentation describes. An Error from Unchecked on the
 // cause chain of the error cancels that presumption. An I/O error that a
-// [Validator], a Validate method, a function from [WithValueCheck], or an
+// [Validator], a Validate method, a ValidateContext method of a
+// [SelfValidatorContext], a function from [WithValueCheck], or an
 // unmarshaler wraps in Unchecked is thus not a fault. Such an error from
 // an unmarshaler does not match [ErrDecode] either.
 //
@@ -626,8 +628,9 @@ func Unchecked(err error, opts ...ErrorOption) error {
 // [IsInvalid] reports the result only when it reports err. Niceyaml
 // presumes a fault for the result of a check exactly when it presumes one
 // for err, as the Errors section of the package documentation describes.
-// A plain I/O error that a [Validator], a Validate method, or a function
-// from [WithValueCheck] returns inside Locate is thus a fault. Such a check
+// A plain I/O error that a [Validator], a Validate method, a
+// ValidateContext method of a [SelfValidatorContext], or a function from
+// [WithValueCheck] returns inside Locate is thus a fault. Such a check
 // should wrap the error in Unchecked instead.
 //
 // Locate returns nil for a nil err, and for a nil [*Error] or
@@ -825,8 +828,9 @@ func NewSummary(msg string, errs ...error) error {
 //
 // An Error from [NewError] or [Invalid] declares the fault, with a location
 // or without. So does the Error that niceyaml puts around the result of a
-// check it runs, such as a [Validator], a [SelfValidator], or a function
-// from [WithValueCheck], with three exceptions.
+// check it runs, such as a [Validator], a [SelfValidator], a
+// [SelfValidatorContext], or a function from [WithValueCheck], with three
+// exceptions.
 // That Error does not declare the fault when an Error from [Unchecked] sits
 // on the cause chain of the result. It does not declare the fault either
 // when any branch of the result matches [context.Canceled] or
@@ -873,7 +877,7 @@ func (e *Error) Is(target error) bool {
 //	case errors.Is(err, niceyaml.ErrSyntax):
 //		status = 400
 //	default:
-//		status = 422 // decode rejection, violation, validator, Validate method, value check
+//		status = 422 // decode rejection, violation, validator, self-validation, value check
 //	}
 func IsInvalid(err error) bool {
 	return NewErrorTree(err).IsInvalid()
@@ -4461,13 +4465,13 @@ func (e *SourceError) Unresolved() error {
 //     the `*` of the alias of the merge key, and SourceError.Unresolved
 //     returns a reason that wraps
 //     [go.jacobcolvin.com/niceyaml/paths.ErrReferenceAlias].
-//   - A value that decodes itself, for an error a [SelfValidator] returns
-//     at or below it, because its fields do not have to mirror the
-//     document. The range covers the text of the value. Every error below a
-//     slice, an array, or a map that decodes itself binds at it. An error
-//     below any other such value binds at the longest part of its path that
-//     the document holds, as for any path. It binds at the value only when
-//     its path does not have such a part.
+//   - A value that decodes itself, for an error a [SelfValidator] or a
+//     [SelfValidatorContext] returns at or below it, because its fields do
+//     not have to mirror the document. The range covers the text of the
+//     value. Every error below a slice, an array, or a map that decodes
+//     itself binds at it. An error below any other such value binds at the
+//     longest part of its path that the document holds, as for any path. It
+//     binds at the value only when its path does not have such a part.
 //
 // An error about a required field thus binds at the key of the mapping that
 // lacks the field:
@@ -4822,8 +4826,8 @@ func checkInRange(loc location, lines line.Lines) error {
 // A panic is a bug in code, not a fault of the document. The error does not
 // match [ErrDecode], [ErrSyntax], or a decode label such as [ErrWrongKind],
 // and [IsInvalid] does not report it. The library does not recover a panic
-// in a [Validator] or a [SelfValidator], so such a panic reaches the caller
-// as a panic.
+// in a [Validator], a [SelfValidator], or a [SelfValidatorContext], so such
+// a panic reaches the caller as a panic.
 type PanicError struct {
 	// Value is the value the code passed to panic.
 	Value any

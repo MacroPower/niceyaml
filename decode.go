@@ -109,9 +109,10 @@ func newDecodeConfig(s *Source, opts []DecodeOption) decodeConfig {
 
 // WithValidator is a [DecodeOption] that validates the document with dv
 // before the decode. A validation error ends the decode before the decoder
-// runs. The decode then does not call any Validate method, so the warnings
-// of those methods do not reach the [Warnings] collector of the context.
-// Each WithValidator option adds a validator. The decode runs them as
+// runs. The decode then does not call any Validate or ValidateContext
+// method, so the warnings of those methods do not reach the [Warnings]
+// collector of the context. Each WithValidator option adds a validator.
+// The decode runs them as
 // [ChainValidator] runs them, so it runs them in the order given and stops
 // at the first that fails. A caller that wants every failure of several
 // validators gives one option a [MultiValidator]. The decode presumes the
@@ -146,8 +147,9 @@ func WithValidator(dv Validator) DecodeOption {
 
 // WithSelfValidation is a [DecodeOption] that sets whether the decode
 // runs the self-validation walk on the decoded value. The walk calls the
-// Validate method of each [SelfValidator] in the value and the functions
-// from [WithValueCheck]. The default is true. Validators given with
+// Validate method of each [SelfValidator] in the value, the
+// ValidateContext method of each [SelfValidatorContext], and the
+// functions from [WithValueCheck]. The default is true. Validators given with
 // [WithValidator] run either way. [Node.SelfValidate] and
 // [Source.SelfValidate] run the walk whatever the option says, so a
 // caller that turns it off for the decode validates the value later. That
@@ -160,9 +162,11 @@ func WithSelfValidation(enabled bool) DecodeOption {
 }
 
 // WithValueCheck is a [DecodeOption] that checks every value of type T in
-// the decoded value with fn. It suits a check that needs the context of
-// the call, and a check of a type the program cannot give a Validate
-// method, such as one of another package:
+// the decoded value with fn. It suits a rule that applies to one call,
+// and a check of a type the program cannot give a Validate method, such
+// as one of another package. A type that the program owns and whose
+// check needs the context of the call implements [SelfValidatorContext]
+// instead, so every decode runs that check:
 //
 //	allowed := niceyaml.WithValueCheck(func(ctx context.Context, p *netip.Prefix) error {
 //		ok, err := tenant.Allows(ctx, *p)
@@ -178,17 +182,20 @@ func WithSelfValidation(enabled bool) DecodeOption {
 //	})
 //
 // The self-validation walk calls fn on a value after the values below it
-// and after its own Validate method, whatever they return, as the
-// Validation section of the package documentation describes. Each
-// WithValueCheck adds a function. For one value, the walk runs every
-// function for its type in the order given and reports the failure of
-// each. A linter thus gives each independent rule its own WithValueCheck.
-// An fn that reads state that another check guarantees guards it itself.
+// and after its own Validate or ValidateContext method, whatever they
+// return. The Validation section of the package documentation describes
+// that order. Each WithValueCheck adds a function. For one value, the walk
+// runs every function for its type in the order given and reports the
+// failure of each. A linter thus gives each independent rule its own
+// WithValueCheck. An fn that reads state that another check guarantees
+// guards it itself.
 // For example, it returns nil when a field it depends on is empty. It can
 // also call the Validate method of the value first and return nil when
 // [HasErrors] reports an error in the result. The result of a Validate
 // that only warns is not nil. A guard that tests it against nil thus
-// skips fn on every value that only warns. T matches by its exact type,
+// skips fn on every value that only warns. For a type that implements
+// [SelfValidatorContext], the guard calls ValidateContext with the ctx of
+// fn in place of Validate. T matches by its exact type,
 // so a check of string skips a value of a type such as `type Name
 // string`. A field of type *T reaches fn through the value it points to,
 // and a nil pointer skips fn.
@@ -386,9 +393,9 @@ func (m *UnknownFieldsMode) UnmarshalText(text []byte) error {
 //
 // UnknownFieldsWarn and UnknownFieldsReject differ beyond the severity of
 // the fields. Under UnknownFieldsReject, the decoder stops at the first
-// unknown field, so the Validate methods of the value do not run. Under
-// UnknownFieldsWarn, they run when the decoder accepts the rest of the
-// document.
+// unknown field, so the Validate and ValidateContext methods of the value
+// do not run. Under UnknownFieldsWarn, they run when the decoder accepts
+// the rest of the document.
 //
 // UnknownFieldsWarn reports the fields that the search finds. The search
 // does not read below a value that decodes itself, except a struct whose

@@ -22,16 +22,17 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-// SelfValidate runs the self-validation step of [Node.DecodeInto] on its
-// own. It walks v and calls Validate on every value in it that implements
-// [SelfValidator]. It also runs each function of [WithValueCheck] in opts
-// on the values of its type. It binds what they report as [Node.Bind]
-// binds an error, with each `@` path under the path of its value in the
-// node. It returns nil when every check passes. It runs the walk whatever
-// [WithSelfValidation] says, and it does not run a [Validator]. A program
-// that fills v after the decode, such as from its environment, calls
-// SelfValidate after v is complete, as the Validation section of the
-// package documentation describes:
+// SelfValidate runs the self-validation step of [Node.DecodeInto] on its own.
+// It walks v and calls Validate on every value in it that implements
+// [SelfValidator]. It calls ValidateContext with ctx on every value that
+// implements [SelfValidatorContext]. It also runs each function of
+// [WithValueCheck] in opts on the values of its type. It binds what they
+// report as [Node.Bind] binds an error, with each `@` path under the path of
+// its value in the node. It returns nil when every check passes. It runs the
+// walk whatever [WithSelfValidation] says, and it does not run a [Validator].
+// A program that fills v after the decode, such as from its environment, calls
+// SelfValidate after v is complete, as the Validation section of the package
+// documentation describes:
 //
 //	if err := doc.DecodeInto(ctx, &cfg, settings, niceyaml.WithSelfValidation(false)); err != nil {
 //		return err
@@ -108,22 +109,39 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error 
 // unmarshalers of [WithUnmarshalers] do not reach the walk. A caller
 // passes them in opts with WithUnmarshaler instead.
 //
-// A Validate whose value holds fields a decode does not reach, such as
-// one tagged `yaml:"-"`, validates them with SelfValidateValue and
-// moves the result under their path with [Rebase]. A Validate does not
-// get a context, so it collects the warnings of the call with a
-// [Warnings] of its own. It returns them beside its errors, and the walk
-// places both:
+// A ValidateContext method of a [SelfValidatorContext] whose value holds
+// fields a decode does not reach, such as one tagged `yaml:"-"`,
+// validates them with SelfValidateValue and its own context. It passes a
+// struct that holds each field under its name, so each path of the call
+// reads from the value of the method. The walk then places the errors that
+// the method returns and the warnings that the call hands to the context:
+//
+//	func (p Proxy) ValidateContext(ctx context.Context) error {
+//		return niceyaml.SelfValidateValue(ctx, struct {
+//			Upstreams []Upstream `yaml:"upstreams"`
+//		}{p.Upstreams})
+//	}
+//
+// The walk places each warning that the method hands to its context at
+// the value of the method, under the path that the warning names. A
+// [Warnings] that the method derives from its context hands each warning
+// to the walk as well. So a method that passes p.Upstreams alone and
+// moves the result under its path with [Rebase] reports each warning
+// twice, and one of the two names the wrong path.
+//
+// A Validate method of a [SelfValidator] does not get a context, so it
+// collects the warnings of the call with a Warnings of its own. It
+// returns them beside its errors, and the walk places both:
 //
 //	warnings := niceyaml.NewWarnings()
 //	err := niceyaml.SelfValidateValue(warnings.Context(context.Background()), p.Upstreams)
 //
 //	return niceyaml.Rebase(errors.Join(err, warnings.Err()), paths.Current().Child("upstreams"))
 //
-// A Validate must not pass its own receiver to SelfValidateValue, because
-// the call then runs that Validate again without end. A Validate that
-// passes a field the decode reaches reports each error of that field
-// twice, because the walk validates that field too.
+// A method must not pass its own receiver to SelfValidateValue, because
+// the call then runs that method again without end. A method that passes
+// a field the decode reaches reports each error of that field twice,
+// because the walk validates that field too.
 //
 // Any v works except nil and a nil pointer, for which SelfValidateValue
 // returns an error wrapping [ErrSelfValidateTarget]. The walk stops when
@@ -142,14 +160,14 @@ func SelfValidateValue(ctx context.Context, v any, opts ...DecodeOption) error {
 	return BindValue(failure)
 }
 
-// walkSelfValidators runs Validate on every [SelfValidator] in v, which is
-// a non-nil pointer or a value that is not a pointer. It also runs the
-// functions of cfg from [WithValueCheck] on the values of their types. It
-// joins the errors under the path of each value in the document of n, and
-// it returns the failures and then the warnings. A nil n stands for a
-// value outside any document. The warnings are those that each check
-// returns and those that each function hands to its context, whether the
-// check passes or fails.
+// walkSelfValidators runs the method of every [SelfValidator] and
+// [SelfValidatorContext] in v, which is a non-nil pointer or a value that is
+// not a pointer. It also runs the functions of cfg from [WithValueCheck] on
+// the values of their types. It joins the errors under the path of each value
+// in the document of n, and it returns the failures and then the warnings. A
+// nil n stands for a value outside any document. The warnings are those that
+// each check returns and those that each check hands to its context,
+// whether the check passes or fails.
 func walkSelfValidators(ctx context.Context, v any, n *Node, cfg decodeConfig) (error, error) {
 	w := selfWalker{
 		ctx:      ctx,
@@ -170,12 +188,12 @@ func walkSelfValidators(ctx context.Context, v any, n *Node, cfg decodeConfig) (
 	return multierr.Join(w.errs), multierr.Join(w.warns)
 }
 
-// selfWalker collects the errors of the [SelfValidator] values in a decoded
-// value, and of the functions from [WithValueCheck]. It runs every check on
-// every value it reaches, whatever the other checks return. It walks each
-// pointer, map, and slice once. A value that two paths share thus reports
-// its errors under the first path, and the walk does not follow a back edge
-// of a cycle.
+// selfWalker collects the errors of the [SelfValidator] and
+// [SelfValidatorContext] values in a decoded value, and of the functions from
+// [WithValueCheck]. It runs every check on every value it reaches, whatever
+// the other checks return. It walks each pointer, map, and slice once. A value
+// that two paths share thus reports its errors under the first path, and the
+// walk does not follow a back edge of a cycle.
 type selfWalker struct {
 	ctx context.Context
 	// The context of the decodes that spell the map keys, which drops
@@ -494,20 +512,20 @@ var (
 	// every document.
 	NoValidator Validator = noValidator{}
 
-	// The result of [implementsSelfValidator] for each type it has read.
-	ownsValidator unmarshaler.TypeCache[bool]
+	// The result of [selfCheckOf] for each type it has read.
+	ownsValidator unmarshaler.TypeCache[selfCheck]
 
 	// The empty set of types, from which [checkedTypesOf] reaches every
 	// other set.
 	noCheckedTypes = &checkedTypes{}
 )
 
-// checkedTypes is a set of types that functions from [WithValueCheck]
-// check, with the answers about each type that the walk prunes by. A
-// validator of the walk is a value that implements [SelfValidator] or
-// whose type the set holds. [checkedTypesOf] returns one instance for each
-// set, so every walk with the same set shares the answers. The walks
-// without a function share the answers of [noCheckedTypes].
+// checkedTypes is a set of types that functions from [WithValueCheck] check,
+// with the answers about each type that the walk prunes by. A validator of the
+// walk is a value that implements [SelfValidator] or [SelfValidatorContext],
+// or whose type the set holds. [checkedTypesOf] returns one instance for each
+// set, so every walk with the same set shares the answers. The walks without a
+// function share the answers of [noCheckedTypes].
 type checkedTypes struct {
 	// Maps each type t that sorts after types to the set that holds types
 	// and t.
@@ -571,9 +589,10 @@ func (c *checkedTypes) with(t reflect.Type) *checkedTypes {
 }
 
 // validates reports whether the walk validates a value of type t itself,
-// through the Validate of [SelfValidator] or a function of the set.
+// through the method of [SelfValidator] or [SelfValidatorContext] or a
+// function of the set.
 func (c *checkedTypes) validates(t reflect.Type) bool {
-	return implementsSelfValidator(t) || slices.Contains(c.types, t)
+	return selfCheckOf(t) != noSelfCheck || slices.Contains(c.types, t)
 }
 
 // mayHold reports whether a value of type t, or one below it the walk
@@ -965,23 +984,47 @@ func iterValue(iter *reflect.MapIter, holder reflect.Value) reflect.Value {
 	return holder
 }
 
-// implementsSelfValidator reports whether t declares the Validate of
-// [SelfValidator] on its value or its pointer. A struct that gets Validate
-// from an embedded field does not, so the walk validates that field instead.
-func implementsSelfValidator(t reflect.Type) bool {
-	return ownsValidator.Get(t, func(t reflect.Type) bool {
-		return unmarshaler.Declares(t, reflect.TypeFor[SelfValidator]())
+// selfCheck names the method that the walk calls on a value to have it
+// validate itself.
+type selfCheck uint8
+
+const (
+	// The type declares neither method.
+	noSelfCheck selfCheck = iota
+	// The type declares the Validate of [SelfValidator] alone.
+	plainSelfCheck
+	// The type declares the ValidateContext of [SelfValidatorContext],
+	// whether or not it declares Validate too.
+	contextSelfCheck
+)
+
+// selfCheckOf returns the method that the walk calls on a value of type t.
+// A type declares a method on its value or its pointer. A struct that gets
+// the method from an embedded field does not declare it, so the walk
+// validates that field instead. A type that declares both methods gets
+// ValidateContext alone.
+func selfCheckOf(t reflect.Type) selfCheck {
+	return ownsValidator.Get(t, func(t reflect.Type) selfCheck {
+		switch {
+		case unmarshaler.Declares(t, reflect.TypeFor[SelfValidatorContext]()):
+			return contextSelfCheck
+		case unmarshaler.Declares(t, reflect.TypeFor[SelfValidator]()):
+			return plainSelfCheck
+		default:
+			return noSelfCheck
+		}
 	})
 }
 
-// validate runs Validate on v, through a copy when v is not addressable.
-// It then runs each function of the walk from [WithValueCheck] for the
-// type of v, in order. Every check runs and reports its own failure,
-// whatever the checks before it return. Rebasing the error of Validate or
-// of a function under at presumes every problem invalid, unless an Error
-// from [Unchecked] sits on its cause chain. Each such problem matches
-// [errInvalid] whether it has a location or not. [selfWalker.report]
-// describes the errors that the presumption skips.
+// validate runs the method of v that [selfCheckOf] names, through a copy
+// when v is not addressable. It runs ValidateContext as it runs a function
+// of [WithValueCheck]. It then runs each function of the walk from
+// WithValueCheck for the type of v, in order. Every check runs and reports
+// its own failure, whatever the checks before it return. Rebasing the
+// error of the method or of a function under at presumes every problem
+// invalid, unless an Error from [Unchecked] sits on its cause chain. Each
+// such problem matches [errInvalid] whether it has a location or not.
+// [selfWalker.report] describes the errors that the presumption skips.
 func (w *selfWalker) validate(v reflect.Value, at place) {
 	if !w.checked.validates(v.Type()) || w.stopped() {
 		return
@@ -989,12 +1032,22 @@ func (w *selfWalker) validate(v reflect.Value, at place) {
 
 	v = addressable(v)
 
-	if implementsSelfValidator(v.Type()) {
+	switch selfCheckOf(v.Type()) {
+	case contextSelfCheck:
+		validator, ok := reflect.TypeAssert[SelfValidatorContext](v.Addr())
+		if ok {
+			failure, warnings := runHook(w.ctx, validator.ValidateContext)
+			w.report(failure, warnings, at, presumed)
+		}
+
+	case plainSelfCheck:
 		validator, ok := reflect.TypeAssert[SelfValidator](v.Addr())
 		if ok {
 			failure, warnings := splitWarnings(validator.Validate())
 			w.report(failure, warnings, at, presumed)
 		}
+
+	case noSelfCheck:
 	}
 
 	for _, check := range w.cfg.checks {
@@ -1416,8 +1469,50 @@ func (l *DataLocator) locate(names []string, key bool) (paths.Path, *token.Token
 //
 // The Validation section describes the order the values validate in, the
 // path of each value, and where each error binds.
+//
+// A type whose check needs the context of the call, such as one that
+// does I/O, implements [SelfValidatorContext] instead.
 type SelfValidator interface {
 	Validate() error
+}
+
+// SelfValidatorContext is a type that validates itself after a decode, as
+// a [SelfValidator] does, with the context of the call. It does not need a
+// Validate method. The self-validation walk calls ValidateContext wherever it
+// calls Validate, and it passes the context as it does to a function of
+// [WithValueCheck]. A check thus stops when the caller cancels the
+// context, and it reads the deadline and the values of that context:
+//
+//	func (t TLS) ValidateContext(ctx context.Context) error {
+//		err := checkCert(ctx, t.CertFile)
+//		if err != nil {
+//			return niceyaml.Unchecked(err, niceyaml.AtPath(paths.Current().Child("certFile")))
+//		}
+//
+//		return nil
+//	}
+//
+// The walk calls ValidateContext alone on a type that declares both
+// methods itself. A method that an embedded field promotes runs on that
+// field instead, as the Validation section of the package documentation
+// describes. A type that declares both keeps Validate for code outside
+// niceyaml that expects that method, and Validate calls ValidateContext
+// with [context.Background].
+//
+// The walk places each warning that ValidateContext hands to its context
+// as it places a warning that the method returns. A nested
+// [SelfValidateValue] or
+// [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] that gets the
+// context hands its warnings there. ValidateContext can also return its
+// warnings beside its errors, as Validate does.
+//
+// The walk reads a result of ValidateContext as it reads a result of
+// Validate. The decode presumes a fault for each error that does not
+// declare one. It reports a timeout of the method at the value. The walk
+// stops when the context of the call ends, as the Cancellation section of
+// the package documentation describes.
+type SelfValidatorContext interface {
+	ValidateContext(ctx context.Context) error
 }
 
 // Validator validates a [*Node] before it decodes, as a JSON schema does.

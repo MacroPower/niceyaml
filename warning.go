@@ -174,6 +174,13 @@ func (e *SourceError) marksWarning() bool {
 //	if err := cfg.Validate(); niceyaml.HasErrors(err) {
 //		return err
 //	}
+//
+// A ValidateContext method of a [SelfValidatorContext] returns nil for a
+// value that passes when each of its warnings comes from a nested call
+// that gets its context, such as [SelfValidateValue]. Such a call hands
+// its warnings to that context. A ValidateContext returns each warning
+// that it raises itself beside its errors, so its callers ask HasErrors
+// too.
 func HasErrors(err error) bool {
 	if isNothing(err) {
 		return false
@@ -605,12 +612,12 @@ func NewWarnings() *Warnings {
 //
 // Outside a call of niceyaml, a later Context replaces w for the calls
 // that run with the derived context. A hook gets its context from a call.
-// Validators and functions of [WithValueCheck] are hooks. On the context
-// of a hook, a later Context hands each warning to the collectors of the
-// call as well. So does each Context derived from the context it
-// returns. A validator that reads the warnings of a check it runs
-// collects them with a Warnings of its own. The caller of the enclosing
-// call still gets them.
+// Validators, functions of [WithValueCheck], and ValidateContext methods
+// of a [SelfValidatorContext] are hooks. On the context of a hook, a later
+// Context hands each warning to the collectors of the call as well. So
+// does each Context derived from the context it returns. A validator that
+// reads the warnings of a check it runs collects them with a Warnings of
+// its own. The caller of the enclosing call still gets them.
 func (w *Warnings) Context(ctx context.Context) context.Context {
 	if w == nil {
 		return ctx
