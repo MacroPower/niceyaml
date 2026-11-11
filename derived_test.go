@@ -343,12 +343,16 @@ func TestNewSourceFromDerived(t *testing.T) {
 		home := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("h.yaml"), niceyaml.WithByteLimit(8))
 		doc := yamltest.Document(t, home)
 
-		work := niceyaml.NewSourceFromDerived("a: 123456\n", doc, nil)
+		work := niceyaml.NewSourceFromDerived("a: 123456\nb: 2\n", doc, nil)
 
 		_, err := work.Document()
 		require.ErrorIs(t, err, niceyaml.ErrLimit)
 		yamltest.AssertBoundTo(t, home, err)
 		assert.Equal(t, "h.yaml: file is larger than 8 bytes", err.Error())
+
+		// The text past the limit keeps its tokens and its lines.
+		assert.Equal(t, 2, work.Lines().Len())
+		assert.Equal(t, "a: 123456\nb: 2", work.Lines().Content())
 	})
 
 	t.Run("WithoutLimits turns the limits of home off", func(t *testing.T) {

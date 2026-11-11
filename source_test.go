@@ -7305,26 +7305,185 @@ func TestWithByteLimit(t *testing.T) {
 
 	text := "name: " + strings.Repeat("x", 2000) + "\n"
 
-	t.Run("a string past the limit holds no lines and fails its document", func(t *testing.T) {
+	t.Run("a text past the limit keeps its lines and fails its document", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString(text, niceyaml.WithName("big.yaml"), niceyaml.WithByteLimit(1024))
+		opts := []niceyaml.SourceOption{niceyaml.WithName("big.yaml"), niceyaml.WithByteLimit(1024)}
 
-		assert.Equal(t, 0, source.Lines().Len())
-		assert.Equal(t, text, source.Text())
+		tcs := map[string]struct {
+			source *niceyaml.Source
+		}{
+			"string": {source: niceyaml.NewSourceFromString(text, opts...)},
+			"bytes":  {source: niceyaml.NewSourceFromBytes([]byte(text), opts...)},
+			"text of another source": {
+				source: niceyaml.NewSourceFromString("name: x\n", opts...).WithText(text),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				source := tc.source
+
+				assert.Equal(t, text, source.Text())
+				assert.Equal(t, strings.TrimSuffix(text, "\n"), source.Lines().Content())
+				assert.Equal(t, 1024, source.ByteLimit())
+
+				_, err := source.Document()
+				require.ErrorIs(t, err, niceyaml.ErrLimit)
+				assert.Equal(t, "big.yaml: file is larger than 1 KiB", err.Error())
+				assert.True(t, niceyaml.IsInvalid(err))
+
+				_, fileErr := source.File()
+				assert.Same(t, err, fileErr)
+
+				doc := yamltest.Documents(t, source, 1)[0]
+				require.ErrorIs(t, doc.Err(), niceyaml.ErrLimit)
+				require.NotErrorIs(t, doc.Err(), niceyaml.ErrSyntax)
+				assert.Nil(t, doc.AST())
+				assert.Equal(t, position.NewSpan(0, 1), doc.Span())
+				assert.Equal(t, source.Tokens(), doc.Tokens())
+
+				_, err = source.Decode[map[string]any](t.Context())
+				require.ErrorIs(t, err, niceyaml.ErrLimit)
+			})
+		}
+	})
+
+	t.Run("texts past the limit diff by their lines", func(t *testing.T) {
+		t.Parallel()
+
+		before := niceyaml.NewSourceFromString(text+"port: 80\n", niceyaml.WithByteLimit(1024))
+		after := niceyaml.NewSourceFromString(text+"port: 81\n", niceyaml.WithByteLimit(1024))
+
+		result := diff.Diff(before.Lines(), after.Lines())
+
+		assert.Len(t, result.Changes(), 1)
+		assert.Equal(t, diff.Stats{Added: 1, Removed: 1}, result.Stats())
+	})
+
+	t.Run("a text of several documents past the limit fails as one document", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(
+			stringtest.LinesLF("# first", "a: "+strings.Repeat("x", 600), "---", "b: "+strings.Repeat("y", 600), "---"),
+			niceyaml.WithName("big.yaml"), niceyaml.WithByteLimit(1024),
+		)
+
+		_, fileErr := source.File()
+		require.ErrorIs(t, fileErr, niceyaml.ErrLimit)
+		assert.Equal(t, "big.yaml: file is larger than 1 KiB", fileErr.Error())
+
+		doc := yamltest.AllDocuments(t, source, 1)[0]
+		assert.Same(t, fileErr, doc.Err())
+		assert.Equal(t, position.NewSpan(0, source.Lines().Len()), doc.Span())
+		assert.Equal(t, source.Tokens(), doc.Tokens())
+		assert.Same(t, doc, yamltest.BoundDocument(t, yamltest.RequireSourceError(t, fileErr)))
+
+		at, ok := source.DocumentAt(position.New(3, 0))
+		require.True(t, ok)
+		assert.Same(t, doc, at)
+
+		err := source.ValidateDocuments(t.Context(), nil)
+		assert.Same(t, fileErr, err)
+	})
+
+	t.Run("tokens past the limit fail their document", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromTokens(tokens.Tokenize(text),
+			niceyaml.WithName("big.yaml"), niceyaml.WithByteLimit(1024))
+
+		assert.Equal(t, strings.TrimSuffix(text, "\n"), source.Lines().Content())
 
 		_, err := source.Document()
 		require.ErrorIs(t, err, niceyaml.ErrLimit)
 		assert.Equal(t, "big.yaml: file is larger than 1 KiB", err.Error())
-		assert.True(t, niceyaml.IsInvalid(err))
 
 		doc := yamltest.Documents(t, source, 1)[0]
-		require.ErrorIs(t, doc.Err(), niceyaml.ErrLimit)
-		require.NotErrorIs(t, doc.Err(), niceyaml.ErrSyntax)
 		assert.Nil(t, doc.AST())
+		assert.Equal(t, source.Tokens(), doc.Tokens())
+	})
 
-		_, err = source.Decode[map[string]any](t.Context())
-		require.ErrorIs(t, err, niceyaml.ErrLimit)
+	t.Run("tokens within the limit parse", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			limit int
+		}{
+			"the limit holds the text": {limit: len(text)},
+			"a limit of zero":          {limit: 0},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				yamltest.Document(
+					t,
+					niceyaml.NewSourceFromTokens(tokens.Tokenize(text), niceyaml.WithByteLimit(tc.limit)),
+				)
+			})
+		}
+	})
+
+	t.Run("tokens count a line ending that the lexer repeats once", func(t *testing.T) {
+		t.Parallel()
+
+		// The lexer ends a tag that ends its line with the line ending and
+		// opens the next token with that ending again. The Origins of such
+		// a stream thus hold more bytes than the text.
+		tcs := map[string]struct {
+			input string
+		}{
+			"tags at line ends": {
+				input: strings.Repeat(stringtest.LinesLF("- Value: !Join", "    - ''", "    - - a", "      - b"), 20),
+			},
+			"tags at CRLF line ends": {
+				input: strings.Repeat(stringtest.LinesCRLF("- !!map", "  a: !!str", "    x"), 20),
+			},
+			"tags before blank lines": {
+				input: strings.Repeat(stringtest.LinesLF("- !!str", "", "  x"), 20),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				streams := map[string]token.Tokens{
+					"tokenized text":     tokens.Tokenize(tc.input),
+					"tokens of a source": niceyaml.NewSourceFromString(tc.input).Tokens(),
+				}
+
+				for name, tks := range streams {
+					t.Run(name, func(t *testing.T) {
+						t.Parallel()
+
+						origins := 0
+						for _, tk := range tks {
+							origins += len(tk.Origin)
+						}
+
+						require.Greater(t, origins, len(tc.input))
+
+						yamltest.Document(t, niceyaml.NewSourceFromTokens(tks, niceyaml.WithByteLimit(len(tc.input))))
+
+						source := niceyaml.NewSourceFromTokens(tks, niceyaml.WithByteLimit(len(tc.input)-1))
+
+						_, err := source.Document()
+						require.ErrorIs(t, err, niceyaml.ErrLimit)
+					})
+				}
+			})
+		}
+	})
+
+	t.Run("a text of exactly the limit parses", func(t *testing.T) {
+		t.Parallel()
+
+		yamltest.Document(t, niceyaml.NewSourceFromString(text, niceyaml.WithByteLimit(len(text))))
 	})
 
 	t.Run("a limit of zero turns the check off", func(t *testing.T) {

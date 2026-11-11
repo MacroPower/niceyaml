@@ -1611,15 +1611,24 @@
 //
 // The go-yaml parser takes time and memory that grow faster than the text of
 // one document, so every [Source] bounds what it parses. By default, a Source
-// holds at most 256 KiB of text, and each of its documents nests at most 100
-// levels. [WithByteLimit] and [WithDepthLimit] set other limits, and a limit
-// of 0 turns the check off.
+// reads at most 256 KiB from a file or a reader and parses at most 256 KiB of
+// text, and each of its documents nests at most 100 levels. [WithByteLimit]
+// and [WithDepthLimit] set other limits, and a limit of 0 turns the check
+// off.
 //
-// A file past the byte limit fails as a file that does not read. A document
-// past the depth limit fails as a document that does not parse, at the token
-// that opens its first level past the limit. The other documents of the
-// Source still parse. Each such error matches [ErrLimit] and not [ErrSyntax],
-// and [IsInvalid] reports it.
+// A file or a reader past the byte limit fails as a file that does not read.
+// A Source of a text that the program holds, as [NewSourceFromString] takes
+// one, keeps a text past the byte limit with its tokens and its lines. A
+// program thus renders, diffs, and searches such a text as it does any
+// other. The parser does not read the text. The whole text is one document
+// that fails as a document that does not parse, however many documents it
+// holds. A Source of [NewSourceFromTokens] counts the bytes of text that its
+// tokens hold and fails the same way.
+//
+// A document past the depth limit fails as a document that does not parse,
+// at the token that opens its first level past the limit. The other
+// documents of the Source still parse. Each error of a limit matches
+// [ErrLimit] and not [ErrSyntax], and [IsInvalid] reports it.
 //
 // The go-yaml decoder writes the node of each value that reads text out as
 // text, with each alias in full. Types that read text include those with an

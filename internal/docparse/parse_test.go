@@ -1,6 +1,8 @@
 package docparse_test
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/goccy/go-yaml/ast"
@@ -10,6 +12,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml/internal/docparse"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
@@ -228,6 +231,54 @@ func TestParse_Panic(t *testing.T) {
 	// The stand-in of the run takes the place of its document.
 	require.Len(t, r.File.Docs, 1)
 	assert.Nil(t, r.File.Docs[0].Body)
+}
+
+func TestFail(t *testing.T) {
+	t.Parallel()
+
+	errRefused := errors.New("refused")
+
+	tcs := map[string]struct {
+		input string
+	}{
+		"one document":      {input: stringtest.LinesLF("# c", "a: 1")},
+		"several documents": {input: stringtest.LinesLF("a: 1", "---", "b: [", "---", "c: 3")},
+		"no text":           {input: ""},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tks := tokens.Tokenize(tc.input)
+			lines := strings.Count(tc.input, "\n") + 1
+
+			r := docparse.Fail(tks, errRefused)
+
+			require.Len(t, r.Failures, 1)
+			require.ErrorIs(t, r.Failures[0].Err, errRefused)
+			assert.Nil(t, r.Failures[0].Panic)
+			assert.Empty(t, r.Tokens)
+			assert.Empty(t, r.Index)
+
+			// The one stand-in holds every token and every line of the
+			// stream.
+			require.Len(t, r.File.Docs, 1)
+			assert.Nil(t, r.File.Docs[0].Body)
+
+			docs := r.Documents(tks, lines)
+			require.Len(t, docs, 1)
+
+			assert.Same(t, r.File.Docs[0], docs[0].Root)
+			assert.Equal(t, 0, docs[0].Failure)
+			assert.Equal(t, position.NewSpan(0, lines), docs[0].Span)
+			assert.Equal(t, tc.input, yamltest.DumpTokenOrigins(docs[0].Tokens))
+
+			for i, tk := range docs[0].Tokens {
+				assert.Same(t, tks[i], tk, "token %d", i)
+			}
+		})
+	}
 }
 
 func TestParseWithoutComments(t *testing.T) {

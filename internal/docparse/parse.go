@@ -14,27 +14,36 @@ import (
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
-// Result is what [Parse] gives.
+// Result is what [Parse] gives of a stream of tokens. It is also what
+// [Fail] gives of a stream that the caller refuses before the parse.
 type Result struct {
 	// File holds the documents of the runs that parsed, with the
-	// stand-ins of the runs that did not, in file order.
+	// stand-ins of the runs that did not, in file order. The file of
+	// Fail holds one stand-in for the whole stream.
 	File *ast.File
 	// Index maps each copy of a token that Parse hands the parser to the
-	// index of the token in the input.
+	// index of the token in the input. It is empty in a Result of Fail,
+	// which does not copy any token.
 	Index map[*token.Token]int
 	// Each stand-in among the Docs of File. The map is nil when every run
 	// parsed.
 	standIns map[*ast.DocumentNode]standIn
 	// Tokens holds the copies of the input that Parse hands the parser,
-	// each at the index of its own token.
+	// each at the index of its own token. It is nil in a Result of Fail.
 	Tokens token.Tokens
-	// Failures holds each run that did not parse, in file order.
+	// Failures holds each run that did not parse, in file order. Fail
+	// holds the whole stream as one run.
 	Failures []Failure
 }
 
-// Failure is a run of tokens the parser rejected or panicked on.
+// Failure is a run of tokens that did not parse. The parser rejected the
+// run or panicked on it, or the run failed before the parser read it. A
+// run past the depth limit of [ParseDepth] fails that way, and so does the
+// stream of [Fail].
 type Failure struct {
-	// Err is the error the parser returned, or nil after a panic.
+	// Err is the error of the run, or nil after a panic. It is the error
+	// that the parser returned, the [*DepthError] of a run past the depth
+	// limit, or the error that the caller handed [Fail].
 	Err error
 	// Panic is the value the parser panicked with, or nil.
 	Panic any
@@ -45,8 +54,10 @@ type Failure struct {
 	Run token.Tokens
 }
 
-// standIn describes a node that [Result.fail] puts in the file for a run
-// that the parser rejected, in place of the nodes of that run.
+// standIn describes a node that stands in the file for tokens that did
+// not parse, in place of the nodes of those tokens. [Result.fail] puts one
+// in the file for each token group of a run that did not parse, and [Fail]
+// puts in one for a whole stream.
 type standIn struct {
 	// The token that gives the stand-in its place in the file. It is nil
 	// when the tokens of the stand-in do not carry a position.
@@ -154,17 +165,35 @@ func parse(tks token.Tokens, depth int, mode parser.Mode, opts []parser.Option) 
 	return r
 }
 
-// Failed returns the [Result] of a text that fails whole with err before
-// any parse, such as one past a byte limit. Its file holds one stand-in
-// document that carries err.
-func Failed(err error) *Result {
-	r := &Result{File: &ast.File{}, Index: map[*token.Token]int{}}
-	r.fail(Failure{Err: err})
+// Fail returns the [Result] of tks, a stream that fails whole with err
+// before any parse, such as one past a byte limit. The parser does not read
+// tks, so the file does not hold a node for each document of the stream.
+// The file holds one stand-in, which carries err. The Result does not hold
+// any copy of tks.
+//
+// [Result.Documents] gives the document of that stand-in every token of
+// tks when every token has a position, as the tokens of [tokens.Tokenize]
+// do. Documents places a document by the positions of its tokens. The
+// document might thus lack tokens of a stream that holds a token without
+// a position.
+func Fail(tks token.Tokens, err error) *Result {
+	in := standIn{failure: 0}
 
-	return r
+	if i := slices.IndexFunc(tks, func(tk *token.Token) bool { return tk != nil && tk.Position != nil }); i >= 0 {
+		in.anchor = tks[i]
+	}
+
+	node := ast.Document(nil, nil)
+
+	return &Result{
+		File:     &ast.File{Docs: []*ast.DocumentNode{node}},
+		Index:    map[*token.Token]int{},
+		standIns: map[*ast.DocumentNode]standIn{node: in},
+		Failures: []Failure{{Err: err, Run: tks}},
+	}
 }
 
-// fail records f, a run the parser rejected. It adds a stand-in to the
+// fail records f, a run that did not parse. It adds a stand-in to the
 // file for each token group of the run, as [tokens.SplitDocuments] splits
 // it. The documents of the run thus keep their places and tokens. The
 // stand-in of a group that [isDocumentGroup] reports carries f. Any other

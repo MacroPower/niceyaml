@@ -307,8 +307,9 @@ func (r *reader) fail(name string, err error, t target) {
 }
 
 // add adds f, a file that the load read, with the problem of its encoding.
-// A Source whose text is longer than its byte limit does not hold a line,
-// so the load reports that limit instead.
+// A Source whose text is longer than its byte limit skips the check. The
+// load then reports that limit, as it does for a file that the read
+// refused past the limit.
 func (r *reader) add(f *file) {
 	f.name = f.src.Name()
 

@@ -27,6 +27,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/pathindex"
 	"go.jacobcolvin.com/niceyaml/internal/quantity"
 	"go.jacobcolvin.com/niceyaml/internal/reftable"
+	"go.jacobcolvin.com/niceyaml/internal/segment"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -65,9 +66,6 @@ import (
 // [NewSourceFromReader], [NewSourceFromBytes], [NewSourceFromString],
 // [NewSourceFromTokens], or [NewSourceFromLayers].
 type Source struct {
-	// The error of a text past the byte limit, or nil. The error fails the
-	// one document of the Source.
-	limitErr error
 	// Holds the layers [NewSourceFromLayers] merged into the Source, or nil.
 	// An error bound in the merged document binds in a layer instead.
 	layers *layering
@@ -215,8 +213,9 @@ type sourceConfig struct {
 
 // The limits a [Source] applies when its options do not set them.
 const (
-	// DefaultByteLimit is the most bytes of text a [Source] holds unless
-	// [WithByteLimit] sets another limit.
+	// DefaultByteLimit is the most bytes a [Source] reads from a file or a
+	// reader, and the most it parses, unless [WithByteLimit] sets another
+	// limit.
 	DefaultByteLimit = 256 << 10
 	// DefaultDepthLimit is the most levels a document of a [Source] nests
 	// unless [WithDepthLimit] sets another limit.
@@ -269,9 +268,10 @@ func (c *sourceConfig) budget() aliasing.Budget {
 	return b
 }
 
-// WithByteLimit is a [SourceOption] that sets the most bytes of text the
-// [Source] holds. Without the option, the limit is [DefaultByteLimit]. A
-// limit of 0 turns the check off, and a negative limit counts as 0.
+// WithByteLimit is a [SourceOption] that sets the most bytes a [Source]
+// reads from a file or a reader, and the most it parses. Without the
+// option, the limit is [DefaultByteLimit]. A limit of 0 turns the check
+// off, and a negative limit counts as 0.
 //
 // The go-yaml parser takes time and memory that grow faster than the text
 // of one document. The limit thus bounds the slowest file that a program
@@ -285,12 +285,25 @@ func (c *sourceConfig) budget() aliasing.Budget {
 // at most one byte past the limit. When the text holds more, they return a
 // nil Source and an error that matches [ErrLimit]. The error is a
 // [*SourceError] that names the Source as [WithName] or the constructor
-// names it, as in "app.yaml: file is larger than 256 KiB". For a text past
-// the limit, [NewSourceFromString] and [NewSourceFromBytes] keep the text
-// and skip the lexer. Such a Source does not hold any lines, and its one
-// document fails with the same error, as a document that does not parse
-// does. A reference document past a limit fails every decode of the Source
-// that reads it through [WithReferences].
+// names it, as in "app.yaml: file is larger than 256 KiB".
+//
+// [NewSourceFromString], [NewSourceFromBytes], [NewSourceFromDerived], and
+// [Source.WithText] take a text that the program holds already. The Source
+// thus keeps a text past the limit with its tokens and its lines. It
+// renders, diffs, and searches that text as it does any other. The parser
+// does not read the text, so the Source does not split it into documents.
+// The whole text is one document that fails with the same error, as a
+// document that does not parse does, however many documents the text
+// holds. [NewSourceFromTokens] applies the limit the same way, to the
+// bytes of text that its tokens hold.
+//
+// The lexer reads a text past the limit in time and memory that grow with
+// its length. A program that takes text from a sender it does not trust
+// bounds the text before it builds the Source, or reads the text through
+// NewSourceFromReader.
+//
+// A reference document past a limit fails every decode of the Source that
+// reads it through [WithReferences].
 //
 // The limit also bounds the text that the aliases of a document repeat,
 // for a decode into a type that reads text anywhere and for
@@ -821,9 +834,10 @@ func NewSourceFromBytes(data []byte, opts ...SourceOption) *Source {
 // does not read a mark as part of its text. The Source keeps src as it
 // is, and [Source.Text] returns it with every mark.
 //
-// A text past the byte limit, as [WithByteLimit] sets it, skips the lexer.
-// The Source then does not hold any lines, and its one document fails
-// with an error that matches [ErrLimit].
+// A Source of a text past the byte limit keeps the text, its tokens, and
+// its lines. The parser does not read the text, so the Source holds one
+// document, which fails with an error that matches [ErrLimit], as
+// [WithByteLimit] describes.
 func NewSourceFromString(src string, opts ...SourceOption) *Source {
 	return newStringSource(src, newSourceConfig(opts))
 }
@@ -832,10 +846,6 @@ func NewSourceFromString(src string, opts ...SourceOption) *Source {
 // from src with the settings cfg. Each constructor resolves its options
 // once and hands the result here, so an option runs once per Source.
 func newStringSource(src string, cfg sourceConfig) *Source {
-	if limit := cfg.bytes(); limit > 0 && len(src) > limit {
-		return &Source{sourceConfig: cfg, input: src, hasInput: true, limitErr: limitError(limit)}
-	}
-
 	// Nothing else holds the stream that Tokenize returns, so the Source
 	// shifts its tokens in place.
 	s := newResetSource(tokens.ResetPositionsInPlace(tokens.Tokenize(src)), cfg)
@@ -878,11 +888,12 @@ func (s *Source) WithText(text string, opts ...SourceOption) *Source {
 }
 
 // limitSourceError returns err, the error of a text past the byte limit,
-// bound to a [Source] of cfg that does not hold the text. The error thus
-// names the Source as the error of a Source from [NewSourceFromString]
-// names it.
+// bound to a [Source] of cfg without text. The read stopped past the
+// limit, so the Source does not hold the text or any of its lines. The
+// error names the Source as the error of a Source from
+// [NewSourceFromString] names it.
 func limitSourceError(cfg sourceConfig, err error) error {
-	return (&Source{sourceConfig: cfg, limitErr: err}).Bind(err)
+	return (&Source{sourceConfig: cfg}).Bind(err)
 }
 
 // readFile reads the file at path from disk, to one byte past limit when
@@ -922,6 +933,13 @@ func readFile(path string, limit int) ([]byte, error) {
 //
 // The Source does not read any text, so [Source.Text] returns an empty
 // string for it and [Source.Offset] reports false.
+//
+// The byte limit counts the bytes of text that the tokens hold. The lexer
+// repeats some line endings in two tokens, as [tokens.Tokenize] describes,
+// and the limit counts such an ending one time. Tokens past the limit make
+// one document that does not parse, as [WithByteLimit] describes. A caller
+// that passes the tokens of a Source with a raised limit, such as those
+// that [Node.Tokens] returns, passes the same option here.
 func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
 	return newTokenSource(tks, newSourceConfig(opts))
 }
@@ -1141,12 +1159,13 @@ func (s *Source) ShowsExcerpts() bool {
 	return s == nil || !s.noExcerpts
 }
 
-// ByteLimit returns the most bytes of text the [Source] holds, as
-// [WithByteLimit] sets it, or [DefaultByteLimit] without the option. It
-// returns 0 when the check is off, for a Source whose text niceyaml wrote,
-// such as one of [NewSourceFromLayers], and for a nil Source. A program
-// that rewrites the file of the Source checks the new text against it
-// before the write, so the next read of the file passes.
+// ByteLimit returns the most bytes the [Source] reads from a file or a
+// reader, and the most it parses, as [WithByteLimit] sets it, or
+// [DefaultByteLimit] without the option. It returns 0 when the check is
+// off, for a Source whose text niceyaml wrote, such as one of
+// [NewSourceFromLayers], and for a nil Source. A program that rewrites the
+// file of the Source checks the new text against it before the write, so
+// the next read of the file passes.
 func (s *Source) ByteLimit() int {
 	if s == nil {
 		return 0
@@ -1686,14 +1705,7 @@ type parsedFile struct {
 // before any caller holds the error.
 func (s *Source) parse() *parsedFile {
 	tks := s.Tokens()
-
-	var r *docparse.Result
-
-	if s.limitErr != nil {
-		r = docparse.Failed(s.limitErr)
-	} else {
-		r = docparse.ParseDepth(tks, s.depth(), s.parserOptions()...)
-	}
+	r := s.parseTokens(tks)
 
 	errs := make([]error, len(r.Failures))
 	for i, f := range r.Failures {
@@ -1703,6 +1715,37 @@ func (s *Source) parse() *parsedFile {
 	docs := newDocuments(s, r.Documents(tks, s.lines.Len()), errs)
 
 	return &parsedFile{result: r, err: multierr.Join(errs), docs: docs, content: pickContentDocuments(docs)}
+}
+
+// parseTokens returns the parse of tks, the tokens of the Source. A text
+// past the byte limit fails whole with the error of [limitError], and the
+// parser does not read it. The file then holds one document, which carries
+// that error and every token of tks.
+func (s *Source) parseTokens(tks token.Tokens) *docparse.Result {
+	if limit := s.bytes(); limit > 0 && s.size() > limit {
+		return docparse.Fail(tks, limitError(limit))
+	}
+
+	return docparse.ParseDepth(tks, s.depth(), s.parserOptions()...)
+}
+
+// size returns the number of bytes that the byte limit counts. They are
+// the bytes of the text that the Source read, or the bytes of the text
+// that its tokens hold for a Source that did not read any. The Origins of
+// the tokens hold some line endings twice, and the parts of the lines
+// hold them twice too. The count is thus the sum of [segment.TextLen]
+// for each line, which counts the bytes of a repeated ending one time.
+func (s *Source) size() int {
+	if s.hasInput {
+		return len(s.input)
+	}
+
+	n := 0
+	for _, l := range s.lines.All() {
+		n += segment.TextLen(l.Tokens())
+	}
+
+	return n
 }
 
 // parseError returns the error of f, a run the parser rejected, bound to
@@ -1762,7 +1805,7 @@ func markSyntax(err error) *markedError {
 // enclosed alias of every document, because the go-yaml formatter reads
 // every document.
 func (s *Source) reparse() *docparse.Result {
-	r := docparse.ParseDepth(s.Tokens(), s.depth(), s.parserOptions()...)
+	r := s.parseTokens(s.Tokens())
 
 	first := s.parsed.get(s.parse).result.Index
 

@@ -807,6 +807,41 @@ func lineEndingOverlap(prev, part string) int {
 	return 0
 }
 
+// TextLen returns the number of bytes of text on one line of [Split]. The
+// parts are the part tokens of that line in order, as
+// [Segments.PartTokens] returns them.
+//
+// The lexer repeats some line endings at the start of the next token, and
+// Split puts each repeat on the line that the ending closes. The source
+// holds the bytes that a repeat shares with that ending one time, so
+// TextLen counts them one time too. The sum over the lines of a stream
+// from [tokens.Tokenize] is thus the length of the text that the Origins
+// of the stream hold.
+func TextLen(parts token.Tokens) int {
+	var (
+		n      int
+		ending string // The line ending of the last part that has one.
+	)
+
+	for _, part := range parts {
+		if part == nil {
+			continue
+		}
+
+		n += len(part.Origin)
+
+		if isPureNewline(part.Origin) {
+			n -= lineEndingOverlap(ending, part.Origin)
+		}
+
+		if e := lineEnding(part.Origin); e != "" {
+			ending = e
+		}
+	}
+
+	return n
+}
+
 // isPureHorizontalWhitespace reports whether s contains only spaces and tabs.
 func isPureHorizontalWhitespace(s string) bool {
 	return s != "" && strings.TrimLeft(s, " \t") == ""

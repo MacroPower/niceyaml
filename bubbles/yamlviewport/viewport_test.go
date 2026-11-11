@@ -3745,6 +3745,30 @@ func TestViewport_NilRevision(t *testing.T) {
 	}
 }
 
+func TestViewport_RevisionPastByteLimit(t *testing.T) {
+	t.Parallel()
+
+	// A source keeps the lines of a text past its byte limit, so the
+	// viewport shows, searches, and diffs them.
+	revision := func(lines ...string) *niceyaml.Source {
+		return niceyaml.NewSourceFromString(stringtest.LinesLF(lines...), niceyaml.WithByteLimit(8))
+	}
+
+	m := testModel(testPrinter(), 80, 24)
+	require.True(t, m.SetRevisions(revision("name: app", "port: 80", "host: a")))
+
+	assert.Equal(t, 3, m.TotalLineCount())
+	assert.Contains(t, m.View(), "port: 80")
+
+	m.SetSearchTerm("port")
+	assert.Equal(t, 1, m.SearchCount())
+
+	addRevision(&m, revision("name: app", "port: 81", "host: a"))
+
+	require.True(t, m.ShowingDiff())
+	assert.Equal(t, diff.Stats{Added: 1, Removed: 1}, m.DiffStats())
+}
+
 func TestViewport_SameDiffBaseKeepsPosition(t *testing.T) {
 	t.Parallel()
 

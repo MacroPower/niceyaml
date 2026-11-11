@@ -10,7 +10,9 @@
 // reject or misread valid YAML. For each document of a run that the
 // parser rejects or panics on, it puts a stand-in into the file. The
 // [Result] holds the file, the copies of the tokens the parser read, and a
-// [Failure] for each run that did not parse.
+// [Failure] for each run that did not parse. [Fail] gives the Result of a
+// stream that the caller refuses before the parse, with one stand-in for
+// the whole stream.
 //
 // The parser cuts the comments and directives above a header, and the
 // comments after a "..." marker, into nodes of their own.

@@ -250,12 +250,15 @@ var (
 	// documentation describes.
 	ErrAmbiguousPath = errors.New("path names the entries of several keys")
 
-	// ErrLimit indicates a text past a limit of its [Source]. A file that
-	// holds more bytes than [WithByteLimit] allows fails as a file that does
-	// not read. A document that nests more levels than [WithDepthLimit]
-	// allows fails as a document that does not parse, as [Node.Err] reports.
-	// Its error matches ErrLimit and not [ErrSyntax]. The document is at
-	// fault for each, as [IsInvalid] describes.
+	// ErrLimit indicates a text past a limit of its [Source]. A file or a
+	// reader that holds more bytes than [WithByteLimit] allows fails as a
+	// file that does not read. A text that the program holds, as
+	// [NewSourceFromString] takes one, fails past that limit as one
+	// document that does not parse. A document that nests more levels than
+	// [WithDepthLimit] allows fails as a document that does not parse too,
+	// as [Node.Err] reports. The error of each such document matches
+	// ErrLimit and not [ErrSyntax]. The document is at fault for each, as
+	// [IsInvalid] describes.
 	//
 	// The same limits bound the text that the aliases of a document expand
 	// to, for a decode into a type that reads text anywhere and for
