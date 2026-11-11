@@ -35,8 +35,15 @@ import (
 // the entry that moves fails the move. So does a placement option at a
 // target in a sequence, because the option places an entry. An item of a
 // null fails the same way, because the null becomes a sequence, as
-// [Node.Set] describes. Move ignores
-// [Flow] and keeps the style of the value that it moves.
+// [Node.Set] describes. Move ignores [Flow] and keeps the style of the
+// value that it moves.
+//
+// Every other entry that the move creates takes a string key, so a target
+// that ends in the name 443 writes the key "443". To write a key of another
+// kind, a [Func] calls [Node.SetKey] after the Move on a Node at the path
+// of that key. SetKey(443) on the same Node renames the key of the target.
+// A parent that the Move created takes another kind through a Node at its
+// own path, as [Node.Set] describes.
 //
 // A move to the path of its own entry keeps the keys of the mapping. So a
 // `<<` merge key that brings in the key of the entry does not refuse the

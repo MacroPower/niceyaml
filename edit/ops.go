@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/goccy/go-yaml/ast"
@@ -16,18 +18,52 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
-// SetKey renames the key of the entry. The value and its comments stay in
-// place, and the key keeps its quotes. A decode then reads the key as the
-// string key, so SetKey quotes a key that a decode reads as another value,
-// as it writes "0x10" for a rename to 0x10. SetKey fails with [ErrUsage] on
-// a sequence item and on the root of the document, because neither has a
-// key.
+// KeyValue is a Go value that [Node.SetKey] writes as a key. It is a
+// string, a bool, an integer, or a float. A type whose underlying type is
+// one of them is a KeyValue too.
+type KeyValue interface {
+	~string | ~bool | ~int | ~int8 | ~int16 | ~int32 | ~int64 |
+		~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~float32 | ~float64
+}
+
+// SetKey renames the key of the entry to key. The value and its comments
+// stay in place. SetKey fails with [ErrUsage] on a sequence item and on the
+// root of the document, because neither has a key.
 //
-// SetKey leaves the text as it is when a decode reads the key as the
-// string key and a path by key selects the entry already. The key then
-// keeps its text. Otherwise it writes key. A place that does not hold a
-// value stays as it is, but SetKey fails at the root of an empty document
-// and at a path that ends in an index, as at any root or item.
+// A string key keeps the quotes of the old key. A decode then reads the
+// key that SetKey writes as the string key. So SetKey quotes a key that a
+// decode reads as another value, as it writes "0x10" for a rename to 0x10
+// and "404" for a rename to 404. SetKey leaves the text as it is when the
+// old key has the name key and a path by key selects the entry already.
+// The name of a key is its text, as a path names it, so SetKey(n.Key())
+// leaves the plain key 200 as it is.
+//
+// A key of another kind than a string takes the text that go-yaml's
+// encoder writes for its value as a key of a map. That encode runs no
+// marshaler, including those of [WithMarshalers], so SetKey(404) writes the
+// plain key 404 under a marshaler that writes each int as a string.
+// SetKey(true) writes true. A path selects the entry by that text. SetKey
+// leaves the text as it is when the old key is a plain scalar of that text
+// and a path by that text selects the entry already. Every other old key
+// takes the new text, so SetKey(404) rewrites the key "404" as 404.
+//
+// A float whose text reads back as another value than the text fails the
+// rename with [ErrUnsupported], as [ConstructKeyText] names it. The float
+// 1.0 is such a key, because its text 1.0 reads as 1. So are the floats
+// that the encoder writes as -0.0, .inf, and .nan. The problem has InValue
+// set, because the key comes from the program. A float whose text
+// go-yaml's decoder reads as a string, as it reads 1e+30, fails the rename
+// with [ErrEngine], as such a key fails a Set.
+//
+// The place of a key can decide how a decode reads it. Go-yaml reads the
+// first key of a block mapping under a tag such as !t as a string. So
+// SetKey(16) on that entry fails with ErrUnsupported in the same way, with
+// InValue set. SetKey writes a key there only as a Go string, as in
+// SetKey("16").
+//
+// A place that does not hold a value stays as it is. SetKey still fails at
+// the root of an empty document and at a path that ends in an index, as at
+// any root or item.
 //
 // Go-yaml's parser compares keys by their text, as a path names them.
 // SetKey fails when the new key has the text of another key of its
@@ -54,21 +90,133 @@ import (
 // describes. A reference document of [niceyaml.WithReferences] that a merge
 // key of the mapping reads decides which names the mapping reads. A rename
 // there fails with a problem that matches [paths.ErrReferenceAlias].
-func (n *Node) SetKey(key string) error {
-	c := n.d.modelStart(n, fmt.Sprintf("renames %s to %q", n.path, key), false)
-	r, err := n.setKey(c, key)
+func (n *Node) SetKey[K KeyValue](key K) error {
+	k := newKeyArg(reflect.ValueOf(key))
+	c := n.d.modelStart(n, fmt.Sprintf("renames %s to %s", n.path, k.shown()), false)
+	r, err := n.setKey(c, k)
 
 	return n.d.modelEnd(c, err, func() bool { return r.kept || c.rename(&r) })
 }
 
-// setKey renames the key of the entry, as [Node.SetKey] describes. The
-// model reads the place of the rename as c gives it. It returns the rename
-// as the model reads it.
+// keyArg is the key of a [Node.SetKey], as [newKeyArg] reads it.
+type keyArg struct {
+	// The problem of the encode of a typed key, which matches errEncoder,
+	// or nil.
+	err error
+	// The value of a typed key, of its basic type, or nil for a string.
+	val any
+	// The reading of a typed key whose text a decode reads as another
+	// value, or nil.
+	odd *oddKey
+	// The name of the key: the string, or the text that go-yaml's encoder
+	// writes for a typed key.
+	name string
+	// Whether the key is of another kind than a string.
+	typed bool
+}
+
+// basicKinds maps the kind of each [KeyValue] other than a string to its
+// basic type. A key of a named type converts to that type, so no method of
+// the named type runs in the encode.
+var basicKinds = map[reflect.Kind]reflect.Type{
+	reflect.Bool:    reflect.TypeFor[bool](),
+	reflect.Int:     reflect.TypeFor[int](),
+	reflect.Int8:    reflect.TypeFor[int8](),
+	reflect.Int16:   reflect.TypeFor[int16](),
+	reflect.Int32:   reflect.TypeFor[int32](),
+	reflect.Int64:   reflect.TypeFor[int64](),
+	reflect.Uint:    reflect.TypeFor[uint](),
+	reflect.Uint8:   reflect.TypeFor[uint8](),
+	reflect.Uint16:  reflect.TypeFor[uint16](),
+	reflect.Uint32:  reflect.TypeFor[uint32](),
+	reflect.Uint64:  reflect.TypeFor[uint64](),
+	reflect.Float32: reflect.TypeFor[float32](),
+	reflect.Float64: reflect.TypeFor[float64](),
+}
+
+// newKeyArg returns the key of a SetKey whose argument is v, a [KeyValue].
+// A typed key takes the text that go-yaml's encoder writes for its value as
+// the key of a map. The parse of that text must read back the kind of the
+// value, as [readsBack] checks for a Set.
+//
+//nolint:contextcheck // The encode of a basic value runs no marshaler, so it reads no context.
+func newKeyArg(v reflect.Value) keyArg {
+	if v.Kind() == reflect.String {
+		return keyArg{name: v.String()}
+	}
+
+	val := v.Convert(basicKinds[v.Kind()]).Interface()
+	k := keyArg{name: fmt.Sprint(val), val: val, typed: true}
+
+	data, meant, _, err := encode(context.Background(), map[any]any{val: nil})
+	if err != nil {
+		k.err = err
+
+		return k
+	}
+
+	enc, err := encodedDoc(string(data))
+	if err != nil {
+		k.err = fmt.Errorf("%w writes text that go-yaml's parser refuses: %s", errEncoder, refusal(err, "that text"))
+
+		return k
+	}
+
+	body := enc.node.AST()
+
+	var key ast.Node
+
+	switch m := astnode.Content(body).(type) {
+	case *ast.MappingValueNode:
+		key = plainKey(m)
+	case *ast.MappingNode:
+		if len(m.Values) == 1 {
+			key = plainKey(m.Values[0])
+		}
+	}
+
+	if key == nil {
+		k.err = fmt.Errorf("%w writes the key %s as text that go-yaml's parser does not read as a key",
+			errEncoder, cut(k.name))
+
+		return k
+	}
+
+	k.name, _ = astnode.ScalarText(key)
+
+	err = readsBack(meant, body)
+	if err != nil {
+		k.err = err
+
+		return k
+	}
+
+	if odd, ok := enc.oddKey(key); ok {
+		k.odd = &odd
+	}
+
+	return k
+}
+
+// shown returns the words that name k in a message. A string takes
+// quotes, and a typed key shows its text, such as 404.
+func (k keyArg) shown() string {
+	if k.typed {
+		return cut(k.name)
+	}
+
+	return strconv.Quote(k.name)
+}
+
+// setKey renames the key of the entry to k, as [Node.SetKey] describes.
+// The model reads the place of the rename as c gives it. It returns the
+// rename as the model reads it.
 //
 //nolint:contextcheck // A rename writes text and reads no state that a context carries.
-func (n *Node) setKey(c *modelCall, key string) (renaming, error) {
+func (n *Node) setKey(c *modelCall, k keyArg) (renaming, error) {
 	d := n.d
 	kept := renaming{kept: true}
+	key := k.name
 
 	p, err := n.place(useKey, "renames")
 	if err != nil {
@@ -94,21 +242,36 @@ func (n *Node) setKey(c *modelCall, key string) (renaming, error) {
 		return kept, d.failAs(ErrProtected, n, "%s renames %q, which %s", d.subject(), n.Key(), why)
 	}
 
+	// Go-yaml's encoder writes a typed key as text that go-yaml's decoder
+	// reads as a key of another kind, as for the key of a Set value.
+	if k.err != nil {
+		return kept, d.bug(n, k.err)
+	}
+
 	ks, tk, ok := d.keySpan(p)
 	if !ok {
 		return kept, d.bug(n, fmt.Errorf("the key of %s has no text", n.path))
 	}
 
-	// The text keeps a key that a decode reads as key, when a path by key
-	// selects the entry already.
-	if d.keeps(p, key) {
+	// The text keeps a key that has the name of k already, when a path by
+	// that name selects the entry. The name of a key is its text as a path
+	// names it.
+	if d.keeps(p, k) {
 		return kept, nil
 	}
 
-	text := renderKey(context.Background(), key, tk, p.flow)
-	r := renaming{key: key, name: key}
+	// A typed key takes the text of the encode, without the quotes of the
+	// old key.
+	text := key
+	if !k.typed {
+		text = renderKey(context.Background(), key, tk, p.flow)
+	}
 
-	d.recordEdit(p, fmt.Sprintf("renames %q to %q", n.Key(), key), fmt.Sprintf("renames %s to %q", n.path, key))
+	r := renaming{key: key, name: key}
+	before := d.save()
+
+	d.recordEdit(p, fmt.Sprintf("renames %q to %s", n.Key(), k.shown()),
+		fmt.Sprintf("renames %s to %s", n.path, k.shown()))
 
 	// The parse of the text refuses some keys that repeat a key, so the
 	// rename fails before it writes. A Source that allows a mapping to
@@ -124,7 +287,7 @@ func (n *Node) setKey(c *modelCall, key string) (renaming, error) {
 		rep, repeats = c.x.repeat(c.renames(&r))
 	}
 
-	named := fmt.Sprintf("renames %s to %q", n.path, key)
+	named := fmt.Sprintf("renames %s to %s", n.path, k.shown())
 	reach := reachCall{kind: callKey, path: n.path, hidden: n.hidden, key: key, named: named, repeats: repeats}
 
 	if repeats && !d.user.Source().AllowsDuplicateKeys() {
@@ -134,6 +297,12 @@ func (n *Node) setKey(c *modelCall, key string) (renaming, error) {
 	err = d.reachProblem(reach)
 	if err != nil {
 		return kept, err
+	}
+
+	// The key comes from the program, so its problem comes after the zones
+	// of the text, as the problem of a key in the YAML of a Set value does.
+	if k.odd != nil {
+		return kept, d.typedKeyRefusal(p.entry, k.odd, named)
 	}
 
 	err = d.ownKeysProblem(p.entry, p.container, key, true, named)
@@ -170,6 +339,15 @@ func (n *Node) setKey(c *modelCall, key string) (renaming, error) {
 		return kept, d.bug(n, err)
 	}
 
+	// The place of a key can decide how a decode reads it, as go-yaml reads
+	// the first key of a block mapping under a tag such as !t as a string.
+	// A typed key must read as a value of its own kind where it stands.
+	if read, ok := d.misplacedKey(k, ks.start); ok {
+		d.restore(before)
+
+		return kept, d.placedKeyRefusal(p.entry, k, read, named)
+	}
+
 	at.rebase(func(head paths.Path) paths.Path {
 		holder, _ := head.Parent()
 
@@ -179,15 +357,133 @@ func (n *Node) setKey(c *modelCall, key string) (renaming, error) {
 	return r, nil
 }
 
-// keeps reports whether a rename of p, an entry, to key leaves the text as
-// it is. It does so when a decode reads the key of p as key and a path by
-// key selects p, as p reads it with [Doc.resolveFrom]. A decode into a map
-// names the key null by its text, though it reads the key as the null
-// value. That value is no string, so a rename never keeps a key that
-// [Doc.oddKey] reads as another value than its text.
-func (d *Doc) keeps(p *place, key string) bool {
-	if _, odd := d.oddKey(plainKey(p.entry)); odd || keyOf(p.entry.Key, d.keyReader()) != key {
+// typedKeyRefusal returns the problem of a rename of the entry e that named
+// names to a typed key, which a decode reads as another value than its
+// text, as odd tells. The problem binds at the key of e, and InValue is
+// true.
+func (d *Doc) typedKeyRefusal(e *ast.MappingValueNode, odd *oddKey, named string) error {
+	in := instance{
+		construct: ConstructKeyText,
+		at:        d.entrySite(e),
+		reach:     fmt.Sprintf("writes the key %s, %s", odd.label(), odd.reading(false)),
+		object:    "write such a key",
+		fix:       "make the key a Go string, as in " + cut(strconv.Quote(odd.text)),
+		inValue:   true,
+	}
+
+	return d.refusal(&in, named)
+}
+
+// placedKeyRefusal returns the problem of a rename of the entry e that
+// named names to the typed key k, which a decode reads as read at the place
+// of e, a value of another kind than k. The problem binds at the key of e,
+// and InValue is true.
+func (d *Doc) placedKeyRefusal(e *ast.MappingValueNode, k keyArg, read any, named string) error {
+	in := instance{
+		construct: ConstructKeyText,
+		at:        d.entrySite(e),
+		reach: fmt.Sprintf(
+			"writes the key %s, a key that reads as %s%s at its place",
+			cut(k.name),
+			typeWord(read),
+			shownCut(read),
+		),
+		object:  "write such a key",
+		fix:     "make the key a Go string, as in " + cut(strconv.Quote(k.name)),
+		inValue: true,
+	}
+
+	return d.refusal(&in, named)
+}
+
+// misplacedKey returns what go-yaml's decoder reads from the key of the
+// current text that starts at the byte start, when k is a typed key and
+// the decode reads a value of another kind than k there.
+func (d *Doc) misplacedKey(k keyArg, start int) (any, bool) {
+	if !k.typed {
+		return nil, false
+	}
+
+	var e *ast.MappingValueNode
+
+	d.inspect(func(n ast.Node) bool {
+		if m, ok := n.(*ast.MappingValueNode); ok && e == nil {
+			if tk := astnode.KeyToken(m); tk != nil {
+				if s, ok := d.tokenSpan(tk); ok && s.start == start {
+					e = m
+				}
+			}
+		}
+
+		return e == nil
+	})
+
+	if e == nil {
+		return nil, false
+	}
+
+	read, ok := placedKey(e)
+	if !ok || typeWord(read) == typeWord(k.val) {
+		return nil, false
+	}
+
+	return read, true
+}
+
+// placedKey returns what go-yaml's decoder reads from the key of e, with
+// the tags of the key, as the token of the key reads at the place of e.
+// It reports false when the decoder does not read the key.
+func placedKey(e *ast.MappingValueNode) (any, bool) {
+	if e.Key == nil {
+		return nil, false
+	}
+
+	var m map[any]any
+
+	err := astnode.NodeToValue(ast.MappingValue(token.New(":", ":", &token.Position{}), e.Key,
+		ast.Null(token.New("null", "null", &token.Position{}))), &m)
+	if err != nil || len(m) != 1 {
+		return nil, false
+	}
+
+	for read := range m {
+		return read, true
+	}
+
+	return nil, false
+}
+
+// keeps reports whether a rename of p, an entry, to k leaves the text as
+// it is. It does so when the key of p has the name of k and a path by that
+// name selects p, as p reads it with [Doc.resolveFrom]. The name of the key
+// is its text as a path names it, as [keyOf] gives it. So keeps does not
+// compare the value that a decode gives the key. A typed key keeps only a
+// plain scalar whose text is its name. A decode
+// into a map names the key null by its text, though it reads the key as
+// the null value. That value is no string, so a rename never keeps a key
+// that [Doc.oddKey] reads as another value than its text.
+func (d *Doc) keeps(p *place, k keyArg) bool {
+	key := k.name
+	old := plainKey(p.entry)
+
+	if _, odd := d.oddKey(old); odd || keyOf(p.entry.Key, d.keyReader()) != key {
 		return false
+	}
+
+	if k.typed {
+		if old == nil {
+			return false
+		}
+
+		tk := astnode.Token(old)
+		if tk == nil || tk.Type == token.DoubleQuoteType || tk.Type == token.SingleQuoteType || tk.Value != key {
+			return false
+		}
+
+		// The place of the key can make a decode read it as a string.
+		if read, ok := placedKey(p.entry); !ok || typeWord(read) != typeWord(k.val) {
+			return false
+		}
 	}
 
 	holder, _ := p.path.Parent()

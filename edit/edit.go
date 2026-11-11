@@ -74,7 +74,10 @@ var (
 	// the request decide more refusals. Such a server tests for ErrUsage,
 	// ErrValue, and ErrProtected before the default case. It also tests for
 	// an [*UnsupportedError] whose InValue field is true, which a value of
-	// the request with an anchor or a tag fails with.
+	// the request with an anchor or a tag fails with. A typed key of the
+	// request that a [Node.SetKey] writes fails that way too when a decode
+	// reads it as another value, as 1.0 reads as 1, or as a string at its
+	// place.
 	//
 	// A call that writes such a text fails with an error that matches
 	// [ErrEngine] and not ErrMisread, because the engine wrote that text. So
@@ -353,7 +356,8 @@ func WithUnmarshalers(us ...niceyaml.Unmarshaler) Option {
 // WithMarshalers is an [Option] that sets how the Go types of the program
 // write YAML. [Node.Set] and [Node.Insert] encode each value under the
 // marshalers ms, as [encoder.Marshal] does under
-// [encoder.WithMarshalers]. A [Func] that reads a value with
+// [encoder.WithMarshalers]. [Node.SetKey] runs no marshaler on its key.
+// A [Func] that reads a value with
 // [Node.Decode] through the unmarshalers of the program thus writes it
 // back the way the document holds it:
 //

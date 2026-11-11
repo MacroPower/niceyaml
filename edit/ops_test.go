@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 
@@ -13,6 +14,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/edit"
+	"go.jacobcolvin.com/niceyaml/encoder"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -309,6 +311,268 @@ func TestNode_SetKey_Kept(t *testing.T) {
 
 			require.NoError(t, d.Apply(t.Context(), path, tc.fn, label))
 			assert.Equal(t, want, d.Text())
+		})
+	}
+}
+
+func TestNode_SetKey_Typed(t *testing.T) {
+	t.Parallel()
+
+	type code int
+
+	at := func(path string, fn edit.Func) edit.Func {
+		return func(ctx context.Context, n *edit.Node) error { return fn(ctx, n.At(paths.MustParse(path))) }
+	}
+
+	tcs := map[string]struct {
+		fn     edit.Func
+		before string
+		want   string
+		err    string
+		opts   []edit.Option
+		// The construct and the fix of an error that matches
+		// edit.ErrUnsupported, and whether the error matches edit.ErrEngine.
+		construct edit.Construct
+		fix       string
+		engine    bool
+	}{
+		"int over an int key": {
+			before: "responses:\n  200: ok # fine\n",
+			fn:     at("$.responses.200", func(_ context.Context, n *edit.Node) error { return n.SetKey(201) }),
+			want:   "responses:\n  201: ok # fine\n",
+		},
+		"string over an int key": {
+			// Control: a string writes a string key.
+			before: "responses:\n  200: ok\n",
+			fn:     at("$.responses.200", func(_ context.Context, n *edit.Node) error { return n.SetKey("201") }),
+			want:   "responses:\n  \"201\": ok\n",
+		},
+		"own name over an int key": {
+			// Control: a string of the text of the key keeps the key.
+			before: "responses:\n  200: ok\n",
+			fn:     at("$.responses.200", func(_ context.Context, n *edit.Node) error { return n.SetKey(n.Key()) }),
+			want:   "responses:\n  200: ok\n",
+		},
+		"int over a quoted key of its text": {
+			before: "responses:\n  \"404\": nf\n",
+			fn:     at("$.responses.404", func(_ context.Context, n *edit.Node) error { return n.SetKey(404) }),
+			want:   "responses:\n  404: nf\n",
+		},
+		"int over a plain key of its text": {
+			before: "responses: {404: nf}\n",
+			fn:     at("$.responses.404", func(_ context.Context, n *edit.Node) error { return n.SetKey(404) }),
+			want:   "responses: {404: nf}\n",
+		},
+		"int in a flow mapping": {
+			before: "ports: {http: 80, 'https': 443}\n",
+			fn:     at("$.ports.https", func(_ context.Context, n *edit.Node) error { return n.SetKey(-1) }),
+			want:   "ports: {http: 80, -1: 443}\n",
+		},
+		"bool": {
+			before: "flags:\n  on: 1\n",
+			fn:     at("$.flags.on", func(_ context.Context, n *edit.Node) error { return n.SetKey(true) }),
+			want:   "flags:\n  true: 1\n",
+		},
+		"named type": {
+			before: "codes:\n  '7': x\n",
+			fn:     at("$.codes.7", func(_ context.Context, n *edit.Node) error { return n.SetKey(code(7)) }),
+			want:   "codes:\n  7: x\n",
+		},
+		"int under a marshaler of int": {
+			// The encode of a typed key runs no marshaler of the Doc.
+			before: "a: 1\n",
+			opts: []edit.Option{edit.WithMarshalers(encoder.CustomMarshaler(
+				func(_ context.Context, i int) (any, error) { return fmt.Sprintf("n%d", i), nil },
+			))},
+			fn:   at("$.a", func(_ context.Context, n *edit.Node) error { return n.SetKey(404) }),
+			want: "404: 1\n",
+		},
+		"unsigned": {
+			before: "a: 1\n",
+			fn:     at("$.a", func(_ context.Context, n *edit.Node) error { return n.SetKey(uint16(443)) }),
+			want:   "443: 1\n",
+		},
+		"float": {
+			before: "python:\n  a: 1\n",
+			fn:     at("$.python.a", func(_ context.Context, n *edit.Node) error { return n.SetKey(float32(2.5)) }),
+			want:   "python:\n  2.5: 1\n",
+		},
+		"Set then SetKey": {
+			before: "responses:\n  # success\n  200: ok # fine\n",
+			fn: at("$.responses", func(ctx context.Context, n *edit.Node) error {
+				nf := n.At(paths.Current().Child("404"))
+
+				err := nf.Set(ctx, "nf")
+				if err != nil {
+					return err
+				}
+
+				return nf.SetKey(404)
+			}),
+			want: "responses:\n  # success\n  200: ok # fine\n  404: nf\n",
+		},
+		"Move then SetKey": {
+			before: "a: 1\nb:\n  80: x\n",
+			fn: at("$.a", func(_ context.Context, n *edit.Node) error {
+				err := n.Move(paths.MustParse("$.b.443"))
+				if err != nil {
+					return err
+				}
+
+				return n.SetKey(443)
+			}),
+			want: "b:\n  80: x\n  443: 1\n",
+		},
+		"Set then SetKey of a created parent": {
+			before: "b:\n  80: x\n",
+			fn: at("$.b", func(ctx context.Context, n *edit.Node) error {
+				err := n.At(paths.Current().Child("8080").Child("name")).Set(ctx, "web")
+				if err != nil {
+					return err
+				}
+
+				return n.At(paths.Current().Child("8080")).SetKey(8080)
+			}),
+			want: "b:\n  80: x\n  8080:\n    name: web\n",
+		},
+		"Move then SetKey of a created parent": {
+			before: "a: 1\nb:\n  80: x\n",
+			fn: func(_ context.Context, n *edit.Node) error {
+				err := n.At(paths.MustParse("$.a")).Move(paths.MustParse("$.b.443.port"))
+				if err != nil {
+					return err
+				}
+
+				return n.At(paths.MustParse("$.b.443")).SetKey(443)
+			},
+			want: "b:\n  80: x\n  443:\n    port: 1\n",
+		},
+		"int to the text of another key": {
+			before: "a: 1\n'2': 2\n",
+			fn:     at("$.a", func(_ context.Context, n *edit.Node) error { return n.SetKey(2) }),
+			err:    `test.yaml:1:1: $.a~: cafe.jacobcolvin.com/v1 renames "a" to 2, which already exists`,
+		},
+		"float that reads as another value": {
+			before:    "a: 1\n",
+			fn:        at("$.a", func(_ context.Context, n *edit.Node) error { return n.SetKey(1.0) }),
+			construct: edit.ConstructKeyText,
+			fix:       `make the key a Go string, as in "1.0"`,
+			err: "test.yaml:1:1: $.a: cafe.jacobcolvin.com/v1 renames $.a to 1.0, which writes the key 1.0, " +
+				"a key that reads as 1 rather than as its text, and cafe does not write such a key",
+		},
+		"infinite float": {
+			before:    "a: 1\n",
+			fn:        at("$.a", func(_ context.Context, n *edit.Node) error { return n.SetKey(math.Inf(1)) }),
+			construct: edit.ConstructKeyText,
+			fix:       `make the key a Go string, as in ".inf"`,
+			err:       "renames $.a to .inf, which writes the key .inf, a key that reads as the float .inf rather than as its text",
+		},
+		"negative zero float": {
+			before:    "a: 1\n",
+			fn:        at("$.a", func(_ context.Context, n *edit.Node) error { return n.SetKey(math.Copysign(0, -1)) }),
+			construct: edit.ConstructKeyText,
+			fix:       `make the key a Go string, as in "-0.0"`,
+			err:       "renames $.a to -0.0, which writes the key -0.0, a key that reads as -0 rather than as its text",
+		},
+		"NaN float": {
+			before:    "a: 1\n",
+			fn:        at("$.a", func(_ context.Context, n *edit.Node) error { return n.SetKey(math.NaN()) }),
+			construct: edit.ConstructKeyText,
+			fix:       `make the key a Go string, as in ".nan"`,
+			err:       "renames $.a to .nan, which writes the key .nan",
+		},
+		"int as the first key under a tag": {
+			// Go-yaml reads the first key of a block mapping under !t as a
+			// string.
+			before:    "a: !t\n  b: 1\n  c: 2\n",
+			fn:        at("$.a.b", func(_ context.Context, n *edit.Node) error { return n.SetKey(16) }),
+			construct: edit.ConstructKeyText,
+			fix:       `make the key a Go string, as in "16"`,
+			err: "test.yaml:2:3: $.a.b: cafe.jacobcolvin.com/v1 renames $.a.b to 16, which writes the key 16, " +
+				`a key that reads as the string "16" at its place, and cafe does not write such a key`,
+		},
+		"bool as the first key under a tag": {
+			before:    "!t\nb: 1\n",
+			fn:        at("$.b", func(_ context.Context, n *edit.Node) error { return n.SetKey(true) }),
+			construct: edit.ConstructKeyText,
+			fix:       `make the key a Go string, as in "true"`,
+			err:       `renames $.b to true, which writes the key true, a key that reads as the string "true" at its place`,
+		},
+		"float as the first key under a tag": {
+			before:    "a: !t\n  b: 1\n",
+			fn:        at("$.a.b", func(_ context.Context, n *edit.Node) error { return n.SetKey(0.5) }),
+			construct: edit.ConstructKeyText,
+			fix:       `make the key a Go string, as in "0.5"`,
+			err:       `renames $.a.b to 0.5, which writes the key 0.5, a key that reads as the string "0.5" at its place`,
+		},
+		"int over its text as the first key under a tag": {
+			// The key 16 reads as a string there, so the rename does not
+			// keep it.
+			before:    "a: !t\n  16: 1\n",
+			fn:        at("$.a.16", func(_ context.Context, n *edit.Node) error { return n.SetKey(16) }),
+			construct: edit.ConstructKeyText,
+			fix:       `make the key a Go string, as in "16"`,
+			err:       `renames $.a.16 to 16, which writes the key 16, a key that reads as the string "16" at its place`,
+		},
+		"int as the second key under a tag": {
+			// Control: a later key of the mapping reads as an int.
+			before: "a: !t\n  b: 1\n  c: 2\n",
+			fn:     at("$.a.c", func(_ context.Context, n *edit.Node) error { return n.SetKey(16) }),
+			want:   "a: !t\n  b: 1\n  16: 2\n",
+		},
+		"Set with First then SetKey under a tag": {
+			before: "a: !t\n  b: 1\n",
+			fn: at("$.a.9", func(ctx context.Context, n *edit.Node) error {
+				err := n.Set(ctx, 1, edit.First())
+				if err != nil {
+					return err
+				}
+
+				return n.SetKey(9)
+			}),
+			construct: edit.ConstructKeyText,
+			fix:       `make the key a Go string, as in "9"`,
+			err:       `renames $.a.9 to 9, which writes the key 9, a key that reads as the string "9" at its place`,
+		},
+		"float that reads as a string": {
+			before: "a: 1\n",
+			fn:     at("$.a", func(_ context.Context, n *edit.Node) error { return n.SetKey(1e30) }),
+			engine: true,
+			err:    `go-yaml's encoder writes the float 1e+30 as text that go-yaml's decoder reads as "1e+30"`,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d, err := edit.New(
+				yamltest.FirstDocument(t, tc.before, niceyaml.WithName("test.yaml")),
+				append([]edit.Option{edit.WithApp("cafe")}, tc.opts...)...,
+			)
+			require.NoError(t, err)
+
+			err = d.Apply(t.Context(), paths.Doc(), tc.fn, label)
+
+			if tc.construct != 0 {
+				var ue *edit.UnsupportedError
+
+				require.ErrorAs(t, err, &ue)
+				assert.Equal(t, tc.construct, ue.Construct)
+				assert.True(t, ue.InValue)
+				assert.False(t, niceyaml.IsInvalid(err))
+				assert.Equal(t, tc.fix, ue.Fix)
+			}
+
+			if tc.err != "" {
+				if tc.engine {
+					require.ErrorIs(t, err, edit.ErrEngine)
+				} else {
+					require.NotErrorIs(t, err, edit.ErrEngine)
+				}
+			}
+
+			requireEdit(t, d, err, tc.err, tc.want)
 		})
 	}
 }
