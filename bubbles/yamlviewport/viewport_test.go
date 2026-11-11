@@ -2,6 +2,8 @@ package yamlviewport_test
 
 import (
 	"cmp"
+	"context"
+	"errors"
 	"fmt"
 	"math"
 	"runtime"
@@ -23,6 +25,7 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/bubbles/yamlviewport"
 	"go.jacobcolvin.com/niceyaml/diff"
+	"go.jacobcolvin.com/niceyaml/diff/lcs"
 	"go.jacobcolvin.com/niceyaml/finder"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
@@ -766,6 +769,12 @@ var (
 	hitV1 = stringtest.LinesLF("a: 1", "b: 日本語 x", "c: 3")
 	hitV2 = stringtest.LinesLF("a: 1", "b: 日本 y", "new: line here", "c: 3")
 	hitV3 = stringtest.LinesLF("a: 1", "new: line here", "c: 3", "d: 4")
+
+	// Revisions that differ in the padding of one line and the value of
+	// another. The default differ counts both lines, and [paddingDiffer]
+	// counts only the value.
+	paddedBefore = stringtest.LinesLF("a: 1", "b:   2", "c: 3")
+	paddedAfter  = stringtest.LinesLF("a: 1", "b: 2", "c: 30")
 )
 
 func TestViewport_Golden(t *testing.T) {
@@ -2978,6 +2987,218 @@ func TestViewport_DiffResultFollowsHistory(t *testing.T) {
 	assert.NotSame(t, res, swapped)
 	assert.Equal(t, diff.Stats{Added: 2, Removed: 1}, swapped.Stats())
 	assert.Equal(t, m.DiffStats(), swapped.Stats())
+}
+
+// paddingDiffer returns a [*diff.Differ] that compares lines without the
+// spaces between their tokens.
+func paddingDiffer() *diff.Differ {
+	return diff.New(diff.WithLineKey(func(l *line.Line) string {
+		return strings.Join(strings.Fields(l.Content()), " ")
+	}))
+}
+
+func TestViewport_WithDiffer(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		opts       []yamlviewport.Option
+		want       diff.Stats
+		showPadded bool
+	}{
+		"default": {
+			want:       diff.Stats{Added: 2, Removed: 2},
+			showPadded: true,
+		},
+		"nil selects the default": {
+			opts:       []yamlviewport.Option{yamlviewport.WithDiffer(nil)},
+			want:       diff.Stats{Added: 2, Removed: 2},
+			showPadded: true,
+		},
+		"custom differ": {
+			opts:       []yamlviewport.Option{yamlviewport.WithDiffer(paddingDiffer())},
+			want:       diff.Stats{Added: 1, Removed: 1},
+			showPadded: false,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := testModel(testPrinter(), 40, 10, tc.opts...)
+			addRevisions(&m, paddedBefore, paddedAfter)
+
+			require.True(t, m.ShowingDiff())
+			assert.Equal(t, tc.want, m.DiffStats())
+
+			res, ok := m.DiffResult()
+			require.True(t, ok)
+			assert.Equal(t, tc.want, res.Stats())
+
+			// The unified diff and its hunks show the padded line of the
+			// before revision only as a removed line.
+			for _, mode := range []yamlviewport.ViewMode{yamlviewport.ViewModeFull, yamlviewport.ViewModeHunks} {
+				m.SetViewMode(mode)
+				assert.Equal(t, tc.showPadded, strings.Contains(m.View(), "b:   2"), "view mode %s", mode)
+			}
+		})
+	}
+}
+
+func TestViewport_SetDiffer(t *testing.T) {
+	t.Parallel()
+
+	// SetDiffer drops the cached diff, so the diff that shows next uses
+	// the new differ, whether the diff showed at the call or not.
+	tcs := map[string]struct {
+		hide func(m *yamlviewport.Model)
+		show func(m *yamlviewport.Model)
+	}{
+		"while the diff shows": {
+			hide: func(*yamlviewport.Model) {},
+			show: func(*yamlviewport.Model) {},
+		},
+		"while the diff is off": {
+			hide: func(m *yamlviewport.Model) { m.SetDiffMode(yamlviewport.DiffModeNone) },
+			show: func(m *yamlviewport.Model) { m.SetDiffMode(yamlviewport.DiffModeAdjacent) },
+		},
+		"at the first revision": {
+			hide: func(m *yamlviewport.Model) { m.GotoRevision(0) },
+			show: func(m *yamlviewport.Model) { m.GotoRevision(1) },
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := testModel(testPrinter(), 40, 10)
+			addRevisions(&m, paddedBefore, paddedAfter)
+			require.Equal(t, diff.Stats{Added: 2, Removed: 2}, m.DiffStats())
+
+			d := paddingDiffer()
+
+			tc.hide(&m)
+			m.SetDiffer(d)
+			tc.show(&m)
+
+			want := testModel(testPrinter(), 40, 10, yamlviewport.WithDiffer(d))
+			addRevisions(&want, paddedBefore, paddedAfter)
+
+			assert.Equal(t, diff.Stats{Added: 1, Removed: 1}, m.DiffStats())
+			assert.Equal(t, want.View(), m.View())
+
+			// A nil differ selects the default again.
+			tc.hide(&m)
+			m.SetDiffer(nil)
+			tc.show(&m)
+
+			assert.Equal(t, diff.Stats{Added: 2, Removed: 2}, m.DiffStats())
+			assert.Contains(t, m.View(), "b:   2")
+		})
+	}
+}
+
+func TestViewport_SetDifferScrolls(t *testing.T) {
+	t.Parallel()
+
+	var lines []string
+
+	for i := range 20 {
+		lines = append(lines, fmt.Sprintf("k%d: %d", i, i))
+	}
+
+	before := stringtest.LinesLF(append(slices.Clone(lines), "b:   2", "c: 3")...)
+	after := stringtest.LinesLF(append(slices.Clone(lines), "b: 2", "c: 30")...)
+	d := paddingDiffer()
+
+	m := testModel(testPrinter(), 40, 5)
+	addRevisions(&m, before, after)
+	m.SetYOffset(3)
+
+	// Another differ changes the content, so the view goes back to the top.
+	m.SetDiffer(d)
+	assert.Equal(t, 0, m.YOffset())
+	assert.Equal(t, diff.Stats{Added: 1, Removed: 1}, m.DiffStats())
+
+	// The differ already set leaves the view in place.
+	m.SetYOffset(3)
+	m.SetDiffer(d)
+	assert.Equal(t, 3, m.YOffset())
+
+	// Without a diff on display the view stays, and the diff that shows
+	// next uses the new differ.
+	m.SetDiffMode(yamlviewport.DiffModeNone)
+	m.SetYOffset(3)
+	m.SetDiffer(nil)
+	assert.Equal(t, 3, m.YOffset())
+
+	m.SetDiffMode(yamlviewport.DiffModeAdjacent)
+	assert.Equal(t, diff.Stats{Added: 2, Removed: 2}, m.DiffStats())
+}
+
+func TestViewport_ZeroValueSetDiffer(t *testing.T) {
+	t.Parallel()
+
+	// A Model not created with New has no differ, so it diffs with the
+	// default until SetDiffer sets one.
+	var m yamlviewport.Model
+
+	m.SetRevisions(niceyaml.NewSourceFromString(paddedBefore), niceyaml.NewSourceFromString(paddedAfter))
+	require.True(t, m.ShowingDiff())
+	assert.Equal(t, diff.Stats{Added: 2, Removed: 2}, m.DiffStats())
+
+	m.SetDiffer(paddingDiffer())
+	assert.Equal(t, diff.Stats{Added: 1, Removed: 1}, m.DiffStats())
+
+	m.SetDiffer(nil)
+	assert.Equal(t, diff.Stats{Added: 2, Removed: 2}, m.DiffStats())
+}
+
+// errAlgorithm is an [lcs.Algorithm] that returns its err for every pair
+// of inputs.
+type errAlgorithm struct {
+	err error
+}
+
+func (a errAlgorithm) Diff(context.Context, []string, []string) ([]lcs.Op, error) {
+	return nil, a.err
+}
+
+func TestViewport_DifferError(t *testing.T) {
+	t.Parallel()
+
+	// The viewport panics when its differ returns an error, whether the
+	// differ came from WithDiffer or from SetDiffer while a diff shows.
+	errDiffer := diff.New(diff.WithAlgorithm(errAlgorithm{err: errors.New("boom")}))
+
+	tcs := map[string]struct {
+		opts []yamlviewport.Option
+		run  func(m *yamlviewport.Model)
+	}{
+		"WithDiffer": {
+			opts: []yamlviewport.Option{yamlviewport.WithDiffer(errDiffer)},
+			run: func(m *yamlviewport.Model) {
+				addRevisions(m, paddedBefore, paddedAfter)
+			},
+		},
+		"SetDiffer while a diff shows": {
+			run: func(m *yamlviewport.Model) {
+				addRevisions(m, paddedBefore, paddedAfter)
+				m.SetDiffer(errDiffer)
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := testModel(testPrinter(), 40, 10, tc.opts...)
+
+			assert.PanicsWithValue(t, "yamlviewport: diff: boom", func() { tc.run(&m) })
+		})
+	}
 }
 
 func TestViewport_ViewFitsHeight(t *testing.T) {

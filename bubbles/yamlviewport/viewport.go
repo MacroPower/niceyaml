@@ -250,6 +250,7 @@ type Match struct {
 //   - [WithContainerStyle]
 //   - [WithSearcher]
 //   - [WithFinder]
+//   - [WithDiffer]
 type Option func(*config)
 
 // config holds the settings an [Option] configures. An option takes it in
@@ -259,6 +260,9 @@ type config struct {
 	style    lipgloss.Style
 	printer  *printer.Printer
 	searcher Searcher
+	// The differ that computes the diff on display. A nil differ selects
+	// the default of [diff.Diff].
+	differ *diff.Differ
 }
 
 // WithPrinter is an [Option] that sets the [*printer.Printer] the viewport
@@ -313,6 +317,39 @@ func WithFinder(f *finder.Finder) Option {
 	return WithSearcher(finderSearcher{finder: f})
 }
 
+// WithDiffer is an [Option] that sets the [*diff.Differ] that computes the
+// diff between two revisions. Every view mode, [Model.DiffStats], and
+// [Model.DiffResult] read that diff. Without it, the viewport diffs with
+// [diff.Diff], which compares lines by their content and aligns them with
+// [go.jacobcolvin.com/niceyaml/diff/lcs.Hirschberg]. A nil d selects that
+// same default. A differ from [diff.New] can compare lines by another key,
+// as [diff.WithLineKey] sets, or align them with another algorithm, as
+// [diff.WithAlgorithm] sets. This differ ignores spaces and tabs at the end
+// of each line, and it keeps the indentation that sets the nesting of YAML:
+//
+//	yamlviewport.WithDiffer(diff.New(diff.WithLineKey(func(l *line.Line) string {
+//		return strings.TrimRight(l.Content(), " \t")
+//	})))
+//
+// The viewport computes the diff of a pair of revisions once and keeps the
+// result until the pair, the history, or the differ changes. The differ
+// must therefore return the same diff each time it compares the same two
+// revisions.
+// [Model.SetDiffer] swaps the differ at runtime.
+//
+// The viewport calls [diff.Differ.Diff] with a context that never ends, on
+// the goroutine that calls [Model.Update], [Model.View], or the method that
+// reads the diff. It panics when the differ returns an error.
+// [diff.Differ.Diff] panics when its algorithm returns ops that break the
+// rule of [go.jacobcolvin.com/niceyaml/diff/lcs.Algorithm]. A custom
+// algorithm must therefore return valid ops and a nil error for every pair
+// of revisions.
+func WithDiffer(d *diff.Differ) Option {
+	return func(c *config) {
+		c.differ = d
+	}
+}
+
 // New creates a new [Model] with the given options.
 func New(opts ...Option) Model {
 	var m Model
@@ -361,7 +398,8 @@ func New(opts ...Option) Model {
 // the term has one. [Model.SetRevisions] changes the content, and so does a
 // move to another revision. So do a diff mode that changes the diff on
 // display, a view mode while a diff shows, and a hunk context while hunks of
-// a diff show. [Model.AppendRevision] changes the content only when the
+// a diff show. So does [Model.SetDiffer] with another differ while a diff
+// shows. [Model.AppendRevision] changes the content only when the
 // history is empty.
 //
 // A search or [Model.Reveal] waits to scroll while the content area does not
@@ -743,6 +781,34 @@ func (m *Model) SetPrinter(p *printer.Printer) {
 	m.relayout()
 }
 
+// SetDiffer sets the [*diff.Differ] that computes the diff between two
+// revisions. See [WithDiffer], which states what the viewport requires of
+// the differ. A nil d selects the default, as a nil [WithDiffer] does.
+//
+// SetDiffer does nothing when d is the differ already set. Otherwise it
+// drops the cached diff, and while a diff shows it computes the diff again
+// with d. The new diff is a change of content, as the [Model] doc defines
+// one. A key binding can thus switch between two differs, such as the
+// default and one that ignores spaces at the end of each line:
+//
+//	if ignoreTrailing {
+//		m.viewport.SetDiffer(trailingDiffer)
+//	} else {
+//		m.viewport.SetDiffer(nil)
+//	}
+func (m *Model) SetDiffer(d *diff.Differ) {
+	if d == m.differ {
+		return
+	}
+
+	m.differ = d
+	m.diffResult = nil
+
+	if m.ShowingDiff() {
+		m.rebuildViews()
+	}
+}
+
 // SetRevisions replaces the revision history with rs and shows the last
 // revision. The call is a change of content, as the [Model] doc defines one.
 // The view therefore starts at the top, or at the first search match when
@@ -960,11 +1026,12 @@ func (m *Model) DiffStats() diff.Stats {
 //
 // The viewport renders every view of the diff from the returned
 // [*diff.Result]. It keeps the Result until it compares another pair of
-// revisions or a change of the history, such as [Model.ReplaceRevision],
-// drops it. A parent can walk the changes with the Result, such as to
-// count them or to reveal the next one. Each [diff.Origin] of the Result
-// names a line of one of the two revisions on display, and
-// [Model.Reveal] takes that line as a [Hit]:
+// revisions, or until a change of the history, such as
+// [Model.ReplaceRevision], or a call to [Model.SetDiffer] drops it. A
+// parent can walk the changes with the Result, such as to count them or to
+// reveal the next one. Each [diff.Origin] of the Result names a line of one
+// of the two revisions on display, and [Model.Reveal] takes that line as a
+// [Hit]:
 //
 //	rev := m.viewport.RevisionIndex()
 //	if origin.Side == diff.Before {
@@ -1634,8 +1701,9 @@ func (m *Model) getDisplayLines() *line.View {
 
 // getDiffResult returns the [diff.Result] between the base revision for the
 // current [DiffMode] and the current revision. It caches the result by the
-// pair of revision indexes, and computes the diff again when the pair
-// changes or a change of the history drops the cache.
+// pair of revision indexes. It computes the diff again when the pair
+// changes, or when a change of the history or [Model.SetDiffer] drops the
+// cache.
 //
 // Callers must check [Model.ShowingDiff] first. Without a diff, the Model
 // does not have a base revision.
@@ -1648,10 +1716,11 @@ func (m *Model) getDiffResult() *diff.Result {
 		// view is over. The copies keep the marks the views carry now, so
 		// every view of the cached diff shows the same marks.
 		m.diffViews = [2]*line.View{m.revision(base).View().Clone(), m.currentRevision().View().Clone()}
-		result, err := diff.Diff(context.Background(), m.diffViews[diff.Before], m.diffViews[diff.After])
+		result, err := m.computeDiff(m.diffViews[diff.Before], m.diffViews[diff.After])
 		if err != nil {
 			// The default algorithm returns only the error of its context,
-			// and a background context never ends.
+			// and a background context never ends. WithDiffer documents
+			// the panic for the error of another algorithm.
 			panic("yamlviewport: diff: " + err.Error())
 		}
 
@@ -1660,6 +1729,16 @@ func (m *Model) getDiffResult() *diff.Result {
 	}
 
 	return m.diffResult
+}
+
+// computeDiff compares before with after using the differ that [WithDiffer]
+// or [Model.SetDiffer] set, or with [diff.Diff] when neither set one.
+func (m *Model) computeDiff(before, after *line.View) (*diff.Result, error) {
+	if m.differ == nil {
+		return diff.Diff(context.Background(), before, after) //nolint:wrapcheck // Passed to panic as it is.
+	}
+
+	return m.differ.Diff(context.Background(), before, after) //nolint:wrapcheck // Passed to panic as it is.
 }
 
 // carryMarks copies the marks of the two revisions of the diff on display
