@@ -22,6 +22,17 @@ var (
 	// binds its errors in the user's document through it.
 	Locator func(d any) func(niceyaml.Located) niceyaml.Place
 
+	// Bounds returns the bytes [start, end) of the text of the Source of d,
+	// a *edit.Doc, that the text of d stands for. The function
+	// edit.FileText writes edit.Doc.Text in place of those bytes. A caller
+	// that keeps the Doc.Text of one moment writes that text in place of
+	// the same bytes. Its file then reads as FileText returned it at that
+	// moment. The bytes hold the comment lines between the document and
+	// the "---" header of the next document. The comment lines between the
+	// document before d and the "---" header of d lie outside the bytes. So
+	// does a byte order mark at the start of the first line of d.
+	Bounds func(d any) (start, end int)
+
 	// SetField sets the protected type field at path of d, a *edit.Doc, to
 	// the string text, outside any Apply. It is the one write that reaches
 	// a value of edit.WithProtected, so the manifest package writes the

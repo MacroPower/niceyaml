@@ -20,6 +20,11 @@ func init() {
 
 		return doc.locate
 	}
+	edithook.Bounds = func(d any) (int, int) {
+		doc, _ := d.(*Doc) //nolint:errcheck // The hook takes a *Doc.
+
+		return doc.start, doc.end
+	}
 	edithook.SetField = func(ctx context.Context, d any, label string, path paths.Path, text string) error {
 		doc, _ := d.(*Doc) //nolint:errcheck // The hook takes a *Doc.
 

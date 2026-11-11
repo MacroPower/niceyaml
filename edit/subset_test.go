@@ -1411,14 +1411,16 @@ func TestNew_ByteOrderMark(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			docs := niceyaml.NewSourceFromString(tc.text, niceyaml.WithName("test.yaml")).Documents()
+			src := niceyaml.NewSourceFromString(tc.text, niceyaml.WithName("test.yaml"))
+
+			docs := src.Documents()
 			require.Greater(t, len(docs), tc.doc)
 
 			d, err := edit.New(docs[tc.doc])
 			if tc.err == "" {
 				require.NoError(t, err)
 
-				text, err := edit.FileText(d)
+				text, err := edit.FileText(src, d)
 				require.NoError(t, err)
 				assert.Equal(t, tc.text, text)
 

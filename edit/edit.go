@@ -74,8 +74,8 @@ var (
 	// take. [New] fails so with a nil Node, a Node below the root of its
 	// document, or a path of [WithProtected] that is not a `$` path of names
 	// and indexes. [Doc.Apply] fails so with a path that does not start at
-	// `$` or that holds a `~`. [FileText] fails so with no Doc, with Docs of
-	// two Sources, or with two Docs of one document. The program is at fault, so
+	// `$` or that holds a `~`. [FileText] fails so with a Doc of another
+	// Source, or with two Docs of one document. The program is at fault, so
 	// [go.jacobcolvin.com/niceyaml.IsInvalid] reports false for the error,
 	// and the error binds nowhere. The message says what the call takes, as
 	// in "Apply takes a $ path without ~, not @.spec".
@@ -107,10 +107,9 @@ var (
 	// The problem of an Apply on a path that does not start at `$`, or that
 	// holds a `~`.
 	errPath = usage("Apply takes a $ path without ~")
-	// The problems of a call of FileText without a Doc, with Docs of more
-	// than one Source, and with two Docs of one document.
-	errFileTextEmpty   = usage("FileText takes at least one Doc")
-	errFileTextSources = usage("FileText takes Docs of one Source")
+	// The problems of a call of FileText with a Doc of another Source than
+	// the one it takes, and with two Docs of one document.
+	errFileTextSources = usage("FileText takes Docs of its Source")
 	errFileTextTwice   = usage("FileText takes each document once")
 	// The problem of a parse of the text that finds no document in it.
 	errNoDocument = errors.New("the text holds no document")
@@ -900,21 +899,18 @@ func (d *Doc) Text() string {
 	return b.String()
 }
 
-// FileText returns the text of the [niceyaml.Source] of docs, with the
-// [Doc.Text] of each Doc in place of the text of its document. The other
-// documents of the Source keep their text, and so does a byte order mark
-// before a document. A program that edits several documents of one
-// file passes the Doc of each. FileText returns an error when docs is
-// empty, when the Docs come from more than one Source, and when two Docs
-// come from one document. During an Apply, FileText reads the text of
-// each Doc as Doc.Text does.
-func FileText(docs ...*Doc) (string, error) {
-	if len(docs) == 0 {
-		return "", errFileTextEmpty
-	}
-
-	src := docs[0].user.Source()
-
+// FileText returns the text of src, with the [Doc.Text] of each Doc in
+// place of the text of its document. The other documents of src keep
+// their text, and so does a byte order mark before a document. A program
+// that edits several documents of one file passes the Doc of each, in any
+// order. Without a Doc, FileText returns the text of src as it is. A
+// program that edits only the documents that match a test can thus pass
+// the Docs that it made, even when no document matched.
+//
+// FileText returns an error that matches [ErrUsage] when a Doc comes from
+// another Source than src, and when two Docs come from one document.
+// During an Apply, FileText reads the text of each Doc as Doc.Text does.
+func FileText(src *niceyaml.Source, docs ...*Doc) (string, error) {
 	sorted := slices.Clone(docs)
 	slices.SortStableFunc(sorted, func(a, b *Doc) int { return a.start - b.start })
 
@@ -927,7 +923,7 @@ func FileText(docs ...*Doc) (string, error) {
 	for i, d := range sorted {
 		switch {
 		case d.user.Source() != src:
-			return "", fmt.Errorf("%w, not Docs of two Sources", errFileTextSources)
+			return "", fmt.Errorf("%w, not a Doc of another Source", errFileTextSources)
 		case i > 0 && d.start < last:
 			return "", fmt.Errorf("%w, not the document at line %d twice", errFileTextTwice, d.base+1)
 		}

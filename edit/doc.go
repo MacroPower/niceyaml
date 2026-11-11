@@ -33,7 +33,7 @@
 //		return err
 //	}
 //
-//	text, err := edit.FileText(d)
+//	text, err := edit.FileText(source, d)
 //	if err != nil {
 //		return err
 //	}

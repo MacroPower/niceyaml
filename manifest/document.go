@@ -61,6 +61,9 @@ type docState struct {
 	// The number of warnings in warned that the steps up to the written
 	// version produced, which a rewrite clears.
 	earlyWarned int
+	// The bytes [afterStart, afterEnd) of the text of the file that after
+	// stands for, as the edit package bounds the document.
+	afterStart, afterEnd int
 	// Whether a document of the file writes a type field.
 	typedFile bool
 	// Whether the load skips the document, because the document is empty

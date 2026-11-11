@@ -32,12 +32,22 @@ var (
 func newDoc(t *testing.T, text string, opts ...niceyaml.SourceOption) *edit.Doc {
 	t.Helper()
 
+	_, d := newSourceDoc(t, text, opts...)
+
+	return d
+}
+
+// newSourceDoc returns the Source of text and the Doc of its first
+// document, as [newDoc] makes them.
+func newSourceDoc(t *testing.T, text string, opts ...niceyaml.SourceOption) (*niceyaml.Source, *edit.Doc) {
+	t.Helper()
+
 	doc := yamltest.FirstDocument(t, text, append([]niceyaml.SourceOption{niceyaml.WithName("test.yaml")}, opts...)...)
 
 	d, err := edit.New(doc, edit.WithApp("cafe"), edit.WithProtected(typeFields...))
 	require.NoError(t, err)
 
-	return d
+	return doc.Source(), d
 }
 
 // applyAt runs fn on the node at path, which an Apply at the root of d
@@ -305,7 +315,7 @@ func TestNew_Documents(t *testing.T) {
 				require.NoError(t, err)
 			}
 
-			got, err := edit.FileText(d)
+			got, err := edit.FileText(src, d)
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, got)
 		})
@@ -379,7 +389,7 @@ func TestDoc_Apply_Documents(t *testing.T) {
 
 			require.NoError(t, err)
 
-			got, err := edit.FileText(d)
+			got, err := edit.FileText(src, d)
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, got)
 		})
@@ -455,7 +465,7 @@ func TestDoc_Apply_DocumentEnd(t *testing.T) {
 				require.NoError(t, err)
 				require.NoError(t, d.Apply(t.Context(), paths.Doc(), tc.fn))
 
-				got, err := edit.FileText(d)
+				got, err := edit.FileText(src, d)
 				require.NoError(t, err)
 				assert.Equal(t, tc.want+tail, got)
 			})
@@ -4164,7 +4174,7 @@ func TestDoc_Apply_Failed(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			d := newDoc(t, before)
+			src, d := newSourceDoc(t, before)
 
 			err := func() (err error) {
 				defer func() {
@@ -4182,7 +4192,7 @@ func TestDoc_Apply_Failed(t *testing.T) {
 			assert.False(t, d.Edited())
 			assert.Empty(t, d.Removals())
 
-			text, err := edit.FileText(d)
+			text, err := edit.FileText(src, d)
 			require.NoError(t, err)
 			assert.Equal(t, before, text)
 
@@ -8834,42 +8844,51 @@ func TestFileText(t *testing.T) {
 	}
 
 	tcs := map[string]struct {
-		docs func(t *testing.T) []*edit.Doc
+		// Docs returns the Source and the Docs that FileText takes.
+		docs func(t *testing.T) (*niceyaml.Source, []*edit.Doc)
 		want string
 		err  string
 	}{
 		"one document": {
-			docs: func(t *testing.T) []*edit.Doc {
+			docs: func(t *testing.T) (*niceyaml.Source, []*edit.Doc) {
 				t.Helper()
 
-				return edited(t, niceyaml.NewSourceFromString(text), 1)
+				src := niceyaml.NewSourceFromString(text)
+
+				return src, edited(t, src, 1)
 			},
 			want: stringtest.LinesLF("a: 1 # first", "---", "b: 20 # second", "---", "c: 3 # third"),
 		},
 		"documents with comment lines before a header": {
 			// The comment lines belong to the document before the header.
-			docs: func(t *testing.T) []*edit.Doc {
+			docs: func(t *testing.T) (*niceyaml.Source, []*edit.Doc) {
 				t.Helper()
 
-				return edited(t, niceyaml.NewSourceFromString(stringtest.LinesLF(
+				src := niceyaml.NewSourceFromString(stringtest.LinesLF(
 					"a:", "  - 1", "# c", "---", "b: 2", "# d", "", "# e", "---", "c: 3",
-				)), 0, 1, 2)
+				))
+
+				return src, edited(t, src, 0, 1, 2)
 			},
 			want: stringtest.LinesLF("a: 20", "# c", "---", "b: 20", "# d", "", "# e", "---", "c: 20"),
 		},
 		"documents out of order": {
-			docs: func(t *testing.T) []*edit.Doc {
+			docs: func(t *testing.T) (*niceyaml.Source, []*edit.Doc) {
 				t.Helper()
 
-				return edited(t, niceyaml.NewSourceFromString(text), 2, 0)
+				src := niceyaml.NewSourceFromString(text)
+
+				return src, edited(t, src, 2, 0)
 			},
 			want: stringtest.LinesLF("a: 20 # first", "---", "b: 2 # second", "---", "c: 20 # third"),
 		},
 		"last document emptied without a final newline": {
-			docs: func(t *testing.T) []*edit.Doc {
+			docs: func(t *testing.T) (*niceyaml.Source, []*edit.Doc) {
 				t.Helper()
 
-				docs := niceyaml.NewSourceFromString(stringtest.JoinLF("a: 0", "---", "m: 1")).Documents()
+				src := niceyaml.NewSourceFromString(stringtest.JoinLF("a: 0", "---", "m: 1"))
+
+				docs := src.Documents()
 				require.Len(t, docs, 2)
 
 				d, err := edit.New(docs[1])
@@ -8880,14 +8899,14 @@ func TestFileText(t *testing.T) {
 				}
 				require.NoError(t, d.Apply(t.Context(), paths.Doc().Child("m"), remove))
 
-				return []*edit.Doc{d}
+				return src, []*edit.Doc{d}
 			},
 			want: stringtest.JoinLF("a: 0", "---", "{}"),
 		},
 		"byte order mark of a later document that no Doc edits": {
 			// New refuses the document with the mark inside it, so FileText
 			// writes that document as the user wrote it.
-			docs: func(t *testing.T) []*edit.Doc {
+			docs: func(t *testing.T) (*niceyaml.Source, []*edit.Doc) {
 				t.Helper()
 
 				src := niceyaml.NewSourceFromString(stringtest.LinesLF(
@@ -8917,34 +8936,51 @@ func TestFileText(t *testing.T) {
 					out = append(out, d)
 				}
 
-				return out
+				return src, out
 			},
 			want: stringtest.LinesLF("a: 20", "k: 20", "---", "b: 20", "---", "\ufeffc: 3"),
 		},
 		"no doc": {
-			docs: func(*testing.T) []*edit.Doc { return nil },
-			err:  "FileText takes at least one Doc",
+			// A program that edits the documents that match a test passes
+			// no Doc for a file without a match.
+			docs: func(*testing.T) (*niceyaml.Source, []*edit.Doc) {
+				return niceyaml.NewSourceFromString(text), nil
+			},
+			want: text,
+		},
+		"no doc of a file with a byte order mark and comment lines": {
+			docs: func(*testing.T) (*niceyaml.Source, []*edit.Doc) {
+				return niceyaml.NewSourceFromString("\ufeff# top\r\na: 1\r\n# c\r\n---\r\nb: 2"), nil
+			},
+			want: "\ufeff# top\r\na: 1\r\n# c\r\n---\r\nb: 2",
 		},
 		"two docs of one document": {
-			docs: func(t *testing.T) []*edit.Doc {
+			docs: func(t *testing.T) (*niceyaml.Source, []*edit.Doc) {
 				t.Helper()
 
 				src := niceyaml.NewSourceFromString(text)
 
-				return slices.Concat(edited(t, src, 1), edited(t, src, 1))
+				return src, slices.Concat(edited(t, src, 1), edited(t, src, 1))
 			},
 			err: "FileText takes each document once, not the document at line 2 twice",
 		},
-		"docs of two sources": {
-			docs: func(t *testing.T) []*edit.Doc {
+		"doc of another source": {
+			docs: func(t *testing.T) (*niceyaml.Source, []*edit.Doc) {
 				t.Helper()
 
-				return slices.Concat(
-					edited(t, niceyaml.NewSourceFromString(text), 0),
-					edited(t, niceyaml.NewSourceFromString(text), 1),
-				)
+				return niceyaml.NewSourceFromString(text), edited(t, niceyaml.NewSourceFromString(text), 1)
 			},
-			err: "FileText takes Docs of one Source, not Docs of two Sources",
+			err: "FileText takes Docs of its Source, not a Doc of another Source",
+		},
+		"docs of two sources": {
+			docs: func(t *testing.T) (*niceyaml.Source, []*edit.Doc) {
+				t.Helper()
+
+				src := niceyaml.NewSourceFromString(text)
+
+				return src, slices.Concat(edited(t, src, 0), edited(t, niceyaml.NewSourceFromString(text), 1))
+			},
+			err: "FileText takes Docs of its Source, not a Doc of another Source",
 		},
 	}
 
@@ -8952,7 +8988,9 @@ func TestFileText(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := edit.FileText(tc.docs(t)...)
+			src, docs := tc.docs(t)
+
+			got, err := edit.FileText(src, docs...)
 			if tc.err != "" {
 				require.ErrorIs(t, err, edit.ErrUsage)
 				assert.Equal(t, tc.err, err.Error())
@@ -9104,19 +9142,19 @@ func TestDoc_Text_DuringApply(t *testing.T) {
 	// the first Set wrote: a block scalar whose line of one space keeps its
 	// space past the indent of the scalar.
 	tcs := map[string]struct {
-		read func(t *testing.T, ctx context.Context, d *edit.Doc) any
+		read func(t *testing.T, ctx context.Context, src *niceyaml.Source, d *edit.Doc) any
 		// The value of the read.
 		want any
 	}{
 		"text of the document": {
-			read: func(_ *testing.T, _ context.Context, d *edit.Doc) any { return d.Text() },
+			read: func(_ *testing.T, _ context.Context, _ *niceyaml.Source, d *edit.Doc) any { return d.Text() },
 			want: stringtest.LinesLF("a: |", "  a", "   ", "  b"),
 		},
 		"text of the file": {
-			read: func(t *testing.T, _ context.Context, d *edit.Doc) any {
+			read: func(t *testing.T, _ context.Context, src *niceyaml.Source, d *edit.Doc) any {
 				t.Helper()
 
-				text, err := edit.FileText(d)
+				text, err := edit.FileText(src, d)
 				require.NoError(t, err)
 
 				return text
@@ -9124,7 +9162,7 @@ func TestDoc_Text_DuringApply(t *testing.T) {
 			want: stringtest.LinesLF("a: |", "  a", "   ", "  b"),
 		},
 		"decode of the document": {
-			read: func(t *testing.T, ctx context.Context, d *edit.Doc) any {
+			read: func(t *testing.T, ctx context.Context, _ *niceyaml.Source, d *edit.Doc) any {
 				t.Helper()
 
 				v, err := d.Node().Decode[map[string]string](ctx)
@@ -9140,7 +9178,7 @@ func TestDoc_Text_DuringApply(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			d := newDoc(t, "a: 1")
+			src, d := newSourceDoc(t, "a: 1")
 
 			err := d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, root *edit.Node) error {
 				n := root.At(a)
@@ -9150,7 +9188,7 @@ func TestDoc_Text_DuringApply(t *testing.T) {
 					return err
 				}
 
-				assert.Equal(t, tc.want, tc.read(t, ctx, d))
+				assert.Equal(t, tc.want, tc.read(t, ctx, src, d))
 
 				return n.Set(ctx, "q")
 			})
@@ -9169,19 +9207,19 @@ func TestDoc_Text_Differs(t *testing.T) {
 	before := stringtest.LinesLF("a: &y {c: &k !t 1}", "b: &x {a: *y, e: 1}", "c: !t []")
 
 	tcs := map[string]struct {
-		read func(t *testing.T, d *edit.Doc) any
+		read func(t *testing.T, src *niceyaml.Source, d *edit.Doc) any
 		// The value of the read.
 		want any
 	}{
 		"text of the document": {
-			read: func(_ *testing.T, d *edit.Doc) any { return d.Text() },
+			read: func(_ *testing.T, _ *niceyaml.Source, d *edit.Doc) any { return d.Text() },
 			want: before,
 		},
 		"text of the file": {
-			read: func(t *testing.T, d *edit.Doc) any {
+			read: func(t *testing.T, src *niceyaml.Source, d *edit.Doc) any {
 				t.Helper()
 
-				text, err := edit.FileText(d)
+				text, err := edit.FileText(src, d)
 				require.NoError(t, err)
 
 				return text
@@ -9189,7 +9227,7 @@ func TestDoc_Text_Differs(t *testing.T) {
 			want: before,
 		},
 		"node of the document": {
-			read: func(_ *testing.T, d *edit.Doc) any { return d.Node().Path().String() },
+			read: func(_ *testing.T, _ *niceyaml.Source, d *edit.Doc) any { return d.Node().Path().String() },
 			want: "$",
 		},
 	}
@@ -9198,12 +9236,12 @@ func TestDoc_Text_Differs(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			d := newDoc(t, before)
+			src, d := newSourceDoc(t, before)
 
 			err := d.Apply(t.Context(), paths.Doc(), func(_ context.Context, root *edit.Node) error {
 				err := root.At(paths.Doc().Child("b")).Move(paths.MustParse("$.a.q"))
 
-				assert.Equal(t, tc.want, tc.read(t, d))
+				assert.Equal(t, tc.want, tc.read(t, src, d))
 
 				return err
 			})
@@ -10391,7 +10429,7 @@ func ExampleDoc_Apply() {
 		return
 	}
 
-	text, err := edit.FileText(d)
+	text, err := edit.FileText(src, d)
 	if err != nil {
 		fmt.Println(err)
 

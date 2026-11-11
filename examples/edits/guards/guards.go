@@ -48,7 +48,7 @@ func main() {
 
 	// Each call of show prints the changes of the Doc to the file.
 	show := func() {
-		text, err := edit.FileText(d)
+		text, err := edit.FileText(source, d)
 		if err != nil {
 			lipgloss.Println(p.PrintError(err))
 

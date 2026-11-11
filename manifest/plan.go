@@ -391,19 +391,21 @@ func (d *docState) label() string {
 	return name
 }
 
-// newText returns text with the text of each of docs at the written
-// version in place of the text that the document held.
+// newText returns text, the text of a file, with the text of each of docs
+// at the written version in place of the text that the document held. The
+// documents come in the order of the file. Each text takes the place of
+// the bytes that [edit.FileText] gives its document. The comment lines
+// between two documents thus stay where they are.
 func newText(text string, docs []*docState) string {
 	var b strings.Builder
 
 	last := 0
 
 	for _, d := range docs {
-		start, end := textBounds(d.doc)
-		b.WriteString(text[last:start])
+		b.WriteString(text[last:d.afterStart])
 		b.WriteString(d.after)
 
-		last = end
+		last = d.afterEnd
 	}
 
 	b.WriteString(text[last:])

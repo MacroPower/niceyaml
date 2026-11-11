@@ -983,6 +983,84 @@ func TestPlanFile_After(t *testing.T) {
 	}
 }
 
+func TestPlanFile_After_CommentsBetweenDocuments(t *testing.T) {
+	t.Parallel()
+
+	// Each file holds documents of [configOptions], whose version 2
+	// renames port to listen. The comment lines before a "---" header
+	// stay where they are, once, whichever of the documents around them
+	// migrates.
+	tcs := map[string]struct {
+		text string
+		want string
+	}{
+		"document before the comments migrates": {
+			text: stringtest.LinesLF("version: 1", "port: 1", "# tail", "---", "version: 2", "listen: 2"),
+			want: stringtest.LinesLF("version: 2", "listen: 1", "# tail", "---", "version: 2", "listen: 2"),
+		},
+		"document after the comments migrates": {
+			text: stringtest.LinesLF("version: 2", "listen: 1", "# tail", "---", "version: 1", "port: 2"),
+			want: stringtest.LinesLF("version: 2", "listen: 1", "# tail", "---", "version: 2", "listen: 2"),
+		},
+		"documents on both sides of the comments migrate": {
+			text: stringtest.LinesLF("version: 1", "port: 1", "# tail", "---", "version: 1", "port: 2", "# end"),
+			want: stringtest.LinesLF("version: 2", "listen: 1", "# tail", "---", "version: 2", "listen: 2", "# end"),
+		},
+		"document between two that migrate keeps its text": {
+			text: stringtest.LinesLF(
+				"# top",
+				"---",
+				"version: 1",
+				"port: 1",
+				"# tail",
+				"",
+				"# more",
+				"--- # header",
+				"version: 2",
+				"listen: 2",
+				"# between",
+				"---",
+				"version: 1",
+				"port: 3",
+			),
+			want: stringtest.LinesLF(
+				"# top",
+				"---",
+				"version: 2",
+				"listen: 1",
+				"# tail",
+				"",
+				"# more",
+				"--- # header",
+				"version: 2",
+				"listen: 2",
+				"# between",
+				"---",
+				"version: 2",
+				"listen: 3",
+			),
+		},
+		"comments after a document end marker": {
+			text: stringtest.LinesLF("version: 1", "port: 1", "...", "# tail", "---", "version: 1", "port: 2"),
+			want: stringtest.LinesLF("version: 2", "listen: 1", "...", "# tail", "---", "version: 2", "listen: 2"),
+		},
+		"byte order mark before the header of the document that migrates": {
+			text: stringtest.LinesLF("version: 2", "listen: 1", "# tail", "\ufeff---", "version: 1", "port: 2"),
+			want: stringtest.LinesLF("version: 2", "listen: 1", "# tail", "\ufeff---", "version: 2", "listen: 2"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			plan := planOf(t, configOptions(), map[string]string{"config.yaml": tc.text})
+			require.NoError(t, plan.Err())
+			assert.Equal(t, []string{tc.want}, afters(plan))
+		})
+	}
+}
+
 // configOptions returns the options of a registry of one kind, Config,
 // whose documents write a version field alone, followed by extra. Version
 // 2 renames port to listen.

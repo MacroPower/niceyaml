@@ -69,6 +69,7 @@ func (d *docState) migrate(ctx context.Context) bool {
 		// writes, as the next load of the file does.
 		if v == entry.written {
 			d.after = ed.Text()
+			d.afterStart, d.afterEnd = edithook.Bounds(ed)
 			d.earlyWarned = len(d.warned)
 		}
 

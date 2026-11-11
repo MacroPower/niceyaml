@@ -103,7 +103,7 @@ func main() {
 
 	// FileText returns the text to write back to the file. A file can hold
 	// several documents, and each one that no Doc edits keeps its text.
-	text, err := edit.FileText(d)
+	text, err := edit.FileText(source, d)
 	if err != nil {
 		lipgloss.Println(p.PrintError(err))
 
