@@ -185,9 +185,10 @@ func prepare(ctx context.Context, in Input, out []*prepared) ([]*prepared, error
 }
 
 // inputError returns the error of an input path that the read cannot
-// stat. The error names the path as the user gave it.
+// stat. The error names the path as the user gave it, cleaned as
+// [filepaths.Clean] cleans it.
 func inputError(d *inputDef, err error) error {
-	name := filepath.Clean(d.path)
+	name := filepaths.Clean(d.path)
 	if d.kind == inputFS {
 		name = cleanFSPath(d.path)
 	}
@@ -257,7 +258,7 @@ func readInputs(ctx context.Context, in Input, us []niceyaml.Unmarshaler) (*read
 		case p.def.kind == inputPath && p.info.IsDir():
 			r.walkDisk(p)
 		case p.def.kind == inputPath:
-			name := filepath.Clean(p.def.path)
+			name := filepaths.Clean(p.def.path)
 			t := inputhook.Target{Kind: inputhook.Disk, Path: p.def.path}
 			r.readDisk(name, p.def.path, p.def.cfg.sourceOptions, t)
 
@@ -349,7 +350,7 @@ func (r *reader) readFile(f *os.File, name, full string, opts []niceyaml.SourceO
 		r.disk = append(r.disk, info)
 	}
 
-	abs, err := filepath.Abs(full)
+	abs, err := filepaths.Abs(full)
 	if err != nil {
 		abs = full
 	}
@@ -492,7 +493,9 @@ const walkTries = 4
 // entry lead the walk outside the input directory, even when the entry
 // changes during the walk.
 func (r *reader) walkDisk(p *prepared) {
-	dir := filepath.Clean(p.def.path)
+	// The walk reads the directory that the stat of prepare found, so a
+	// ".." after a link steps up from the target of the link.
+	dir := filepaths.Clean(p.def.path)
 
 	w, err := newDiskWalk(p, dir)
 	if err != nil {
@@ -587,7 +590,9 @@ func newDiskWalk(p *prepared, dir string) (*diskWalk, error) {
 
 	w := &diskWalk{p: p, root: root, dir: dir, escapes: escapeReason(root)}
 
-	w.abs, err = filepath.Abs(dir)
+	// A leading ".." in dir climbs from the directory that a symlinked
+	// working directory leads to, as the Root that the walk reads climbs.
+	w.abs, err = filepaths.Abs(dir)
 	if err == nil {
 		w.abs, err = filepath.EvalSymlinks(w.abs)
 	}

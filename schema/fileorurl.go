@@ -75,7 +75,20 @@ var ErrNoBaseDir = errors.New("relative schema path has no base directory")
 //	}
 //
 //	reg := schema.NewRegistry(schema.WithResolvers(ref))
+//
+// A file path resolves as the OS resolves it, as [File] describes, so the
+// Ref names the file that [os.Open] opens for the path. A ".." in a
+// relative path thus steps up from the directory that a symbolic link in
+// baseDir or in the path leads to. The path of a file:// URL resolves
+// its ".." elements as text, as a URL does.
 func FileOrURL(baseDir, ref string) (Ref, error) {
+	return fileOrURL(baseDir, ref, true)
+}
+
+// fileOrURL is [FileOrURL] with the choice of [file] for a plain path.
+// [RefBeside] passes false for physical, so a reference that a document
+// holds resolves its ".." elements as text.
+func fileOrURL(baseDir, ref string, physical bool) (Ref, error) {
 	// Check for an HTTP/HTTPS URL by string prefix, so a malformed URL that
 	// fails to parse does not fall through as a file path.
 	if httpfetch.IsHTTPURL(ref) {
@@ -98,7 +111,7 @@ func FileOrURL(baseDir, ref string) (Ref, error) {
 	// fragment, which names a subschema, so the key takes it back as
 	// written, as the key of an HTTP/HTTPS URL keeps it.
 	if fromFileURL {
-		r, err := file(path)
+		r, err := file(path, false)
 		if err != nil {
 			return Ref{}, err
 		}
@@ -117,14 +130,20 @@ func FileOrURL(baseDir, ref string) (Ref, error) {
 	// Windows reads one that carries no volume as relative. There it
 	// resolves on the current drive.
 	if filepath.IsAbs(path) || hasDriveLetter(path) || os.IsPathSeparator(path[0]) {
-		return file(path)
+		return file(path, physical)
 	}
 
 	if baseDir == "" {
 		return Ref{}, fmt.Errorf("%w: %q", ErrNoBaseDir, ref)
 	}
 
-	return file(filepath.Join(baseDir, path))
+	if !physical {
+		return file(filepath.Join(baseDir, path), false)
+	}
+
+	// Join the parts as text, because filepath.Join drops a ".." of path
+	// together with the last element of baseDir, which file must see.
+	return file(baseDir+string(filepath.Separator)+path, true)
 }
 
 // RefBeside creates a [Ref] for a schema reference that belongs to doc,
@@ -132,8 +151,10 @@ func FileOrURL(baseDir, ref string) (Ref, error) {
 // derives from its content. It reads the reference as [FileOrURL] does,
 // with the directory of the document's file as the base directory. A
 // relative path thus names a file beside the document. RefBeside also
-// splits a fragment off a plain path, as yaml-language-server does. A
-// document without a file path does not have such a directory, and a
+// splits a fragment off a plain path, as yaml-language-server does. It
+// resolves each ".." element as text, as a URI reference does, so a
+// reference never makes the registry check the disk for symbolic links.
+// A document without a file path does not have such a directory, and a
 // relative path then reports [ErrNoBaseDir]. Each error of RefBeside
 // comes inside [niceyaml.Unchecked], because the check could not find a
 // schema to run. [niceyaml.IsInvalid] does not report it, even from a
@@ -254,7 +275,7 @@ func refBeside(doc *niceyaml.Node, ref string) (Ref, error) {
 		}
 	}
 
-	r, err := FileOrURL(baseDir, path)
+	r, err := fileOrURL(baseDir, path, false)
 	if relativeOnDisk && errors.Is(err, ErrNoBaseDir) {
 		return Ref{}, fmt.Errorf("%w: the document path %q is relative and names no file system", err, docPath)
 	}

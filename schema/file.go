@@ -13,6 +13,7 @@ import (
 
 	slashpath "path"
 
+	"go.jacobcolvin.com/niceyaml/internal/filepaths"
 	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 	"go.jacobcolvin.com/niceyaml/internal/limitread"
 )
@@ -73,13 +74,25 @@ const driveLen = 2
 // another resolver names by a bare path such as "schemas/config.json".
 //
 // File cleans the absolute path, so spellings of one path that differ
-// only in "." segments, ".." segments, or repeated separators resolve to
-// the same URL. For example, "schemas/config.json" and
-// "./schemas/config.json" from /srv, and
+// only in "." segments, repeated separators, or ".." segments that
+// follow no symbolic link resolve to the same URL. For example,
+// "schemas/config.json" and "./schemas/config.json" from /srv, and
 // "/srv/schemas/../schemas/config.json", all resolve to
 // file:///srv/schemas/config.json. The registry therefore reads the file
 // once and reuses the compiled schema for every document that names it.
-// The registry reads the file when the Ref loads, not when File runs.
+// The registry reads the file when the Ref loads, not when File runs. A
+// symbolic link and its target resolve to two URLs.
+//
+// A ".." element that follows a symbolic link steps up from the
+// directory that the link leads to, as the OS steps. File replaces the
+// path up to that link with its target, all of its links resolved, and
+// steps up from there. With link leading to /data/v1,
+// "/srv/link/../config.json" thus resolves to file:///data/config.json,
+// the file that [os.Open] opens for the path. File checks each element
+// before a ".." with [os.Lstat] when it runs. A path whose ".." elements
+// follow no link keeps every element as written, so a symlinked name or
+// working directory stays in the URL. On Windows, which drops each ".."
+// element as text, File cleans the path as text.
 //
 // # References
 //
@@ -156,7 +169,7 @@ const driveLen = 2
 // an [Access] from [AllowRoot], so a path outside the directories of its
 // roots does not name a file.
 func File(path string) Ref {
-	ref, err := file(path)
+	ref, err := file(path, true)
 	if err != nil {
 		panic("schema.File: " + err.Error())
 	}
@@ -168,7 +181,14 @@ func File(path string) Ref {
 // panicking. It serves [FileOrURL], which takes a reference from the
 // input. An empty path is [ErrEmptyPath]. A path that the process cannot
 // make absolute is not an error, and the read of its Ref reports why.
-func file(path string) (Ref, error) {
+//
+// With physical, file makes the path absolute with [filepaths.Abs], so
+// the Ref names the file that the OS opens for a path that a program or
+// a command line names. Without it, file uses [filepath.Abs], which
+// resolves a ".." as text, as a URI reference does, and never reads the
+// disk. A path that a document holds, or a path in a file system, takes
+// that form.
+func file(path string, physical bool) (Ref, error) {
 	if path == "" {
 		return Ref{}, ErrEmptyPath
 	}
@@ -183,7 +203,11 @@ func file(path string) (Ref, error) {
 		// The Ref keeps the absolute path rather than the working
 		// directory, so every read names the file the key does, wherever
 		// the process stands by then.
-		abs, absErr = filepath.Abs(path)
+		if physical {
+			abs, absErr = filepaths.Abs(path)
+		} else {
+			abs, absErr = filepath.Abs(path)
+		}
 
 	case len(path) > driveLen:
 		// A drive-letter path is absolute on every platform, but
@@ -274,7 +298,7 @@ func FileFS(fsys fs.FS, path string) Ref {
 		panic("schema.FileFS: fsys is nil")
 	}
 
-	ref, err := file(path)
+	ref, err := file(path, false)
 	if err != nil {
 		panic("schema.FileFS: " + err.Error())
 	}
@@ -315,13 +339,14 @@ type fsDir struct {
 }
 
 // newFSDir returns the [fsDir] for root. It makes the name of root
-// absolute against the working directory at the time of the call. It
-// returns an error when that path does not name the directory that root
-// holds.
+// absolute against the working directory at the time of the call, with
+// [filepaths.Abs], so a ".." climbs as the climb of [os.OpenRoot] does.
+// It returns an error when that path does not name the directory that
+// root holds.
 func newFSDir(root *os.Root) (*fsDir, error) {
 	name := root.Name()
 
-	abs, err := filepath.Abs(name)
+	abs, err := filepaths.Abs(name)
 	if err != nil {
 		return nil, fmt.Errorf("no absolute path for directory %s: %w", name, err)
 	}

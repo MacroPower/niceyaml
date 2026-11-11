@@ -2,6 +2,7 @@ package matcher_test
 
 import (
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -446,6 +447,84 @@ func TestFilePath_FileOnDisk(t *testing.T) {
 			assert.True(t, match(t, anyDepth, doc))
 			assert.False(t, match(t, elsewhere, doc))
 			assert.False(t, match(t, otherBase, doc))
+		})
+	}
+}
+
+// A ".." after a symbolic link gives the file a path with the links of
+// its prefix resolved. A base that a link names then does not hold the
+// path, and a base with its links resolved does. A base that climbs out
+// of a symlinked working directory climbs as the OS does, so it holds
+// the files that a path climbing the same way reads. The test changes
+// the process's working directory, so it does not run in parallel.
+//
+//nolint:paralleltest // See above.
+func TestFilePath_DotDotAfterSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows drops a .. element as text before it follows a symlink")
+	}
+
+	dir := t.TempDir()
+	yamltest.WriteFiles(t, dir, map[string]string{
+		"phys/proj/configs/sub/.keep": "",
+		"phys/proj/configs/app.yaml":  "kind: Test\n",
+		"phys/proj/work/.keep":        "",
+	})
+
+	proj := filepath.Join(dir, "proj")
+	yamltest.SymlinkOrSkip(t, filepath.Join("phys", "proj"), proj)
+	yamltest.SymlinkOrSkip(t, "sub", filepath.Join(dir, "phys", "proj", "configs", "link"))
+	yamltest.SymlinkOrSkip(t, filepath.Join("phys", "proj", "work"), filepath.Join(dir, "work"))
+
+	physical, err := filepath.EvalSymlinks(proj)
+	require.NoError(t, err)
+
+	tcs := map[string]struct {
+		// The working directory of the read.
+		dir  string
+		path string
+		base string
+		want bool
+	}{
+		"dot-dot after a plain directory": {
+			dir:  proj,
+			path: "configs/sub/../app.yaml",
+			base: proj,
+			want: true,
+		},
+		"dot-dot after a link under a base that a link names": {
+			dir:  proj,
+			path: "configs/link/../app.yaml",
+			base: proj,
+			want: false,
+		},
+		"dot-dot after a link under a base with its links resolved": {
+			dir:  proj,
+			path: "configs/link/../app.yaml",
+			base: physical,
+			want: true,
+		},
+		"base and path out of a symlinked working directory": {
+			dir:  filepath.Join(dir, "work"),
+			path: "../configs/app.yaml",
+			base: "..",
+			want: true,
+		},
+	}
+
+	for name, tc := range tcs {
+		//nolint:paralleltest // See above.
+		t.Run(name, func(t *testing.T) {
+			t.Chdir(tc.dir)
+
+			m := matcher.MustFilePath("configs/*.yaml", matcher.WithBaseDir(tc.base))
+
+			// The test builds each path as text, because filepath.Join
+			// cleans it.
+			source, err := niceyaml.NewSourceFromFile(tc.path)
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.want, match(t, m, yamltest.Document(t, source)))
 		})
 	}
 }

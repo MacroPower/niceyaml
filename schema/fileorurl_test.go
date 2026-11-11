@@ -307,6 +307,43 @@ func TestFileOrURL_BaseDir(t *testing.T) {
 	}
 }
 
+func TestFileOrURL_DotDotAfterSymlink(t *testing.T) {
+	t.Parallel()
+
+	dir, physical := linkedSchemas(t)
+	want := plainFileURL(filepath.Join(physical, "real", "schema.json"))
+
+	// The test builds each path as text, because filepath.Join cleans it.
+	tcs := map[string]struct {
+		baseDir string
+		ref     string
+	}{
+		"dot-dot after a symlink in the ref": {
+			baseDir: dir,
+			ref:     "link/../schema.json",
+		},
+		"dot-dot after a symlinked base directory": {
+			baseDir: dir + "/link",
+			ref:     "../schema.json",
+		},
+		"absolute ref": {
+			baseDir: "/elsewhere",
+			ref:     dir + "/link/../schema.json",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			url, data, err := load(t, fileOrURL(t, tc.baseDir, tc.ref))
+			require.NoError(t, err)
+			assert.Equal(t, want, url)
+			assert.JSONEq(t, `{"type": "string"}`, string(data))
+		})
+	}
+}
+
 func TestFileOrURL_FileURL(t *testing.T) {
 	t.Parallel()
 
@@ -650,6 +687,24 @@ func TestRefBeside(t *testing.T) {
 		_, err := schema.RefBeside(noPath, "./schema.json")
 		requireNoFault(t, err, schema.ErrNoBaseDir)
 	})
+}
+
+func TestRefBeside_DotDotAfterSymlink(t *testing.T) {
+	t.Parallel()
+
+	// A reference in a document resolves its ".." elements as text, as a
+	// URI reference does, so ../schema.json beside link/doc.yaml names the
+	// schema.json beside link.
+	dir, _ := linkedSchemas(t)
+	doc := yamltest.FirstDocumentWithPath(t, "hello\n", filepath.Join(dir, "link", "doc.yaml"))
+
+	ref, err := schema.RefBeside(doc, "../schema.json")
+	require.NoError(t, err)
+
+	data, err := schema.NewRegistry(schema.WithAccess(schema.Unrestricted)).Load(t.Context(), ref)
+	require.NoError(t, err)
+	assert.Equal(t, plainFileURL(filepath.Join(dir, "schema.json")), ref.Key())
+	assert.JSONEq(t, `{"type": "integer"}`, string(data))
 }
 
 // A relative file path with no file system names a file on disk only

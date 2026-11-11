@@ -16,6 +16,7 @@ require (
 )
 
 require (
+	github.com/bmatcuk/doublestar/v4 v4.10.3 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20261008173134-6b8d4baf91b4 // indirect
 	github.com/charmbracelet/x/ansi v0.11.9 // indirect
 	github.com/charmbracelet/x/exp/charmtone v0.1.0 // indirect

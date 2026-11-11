@@ -5,11 +5,11 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"slices"
 	"sync"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/filepaths"
 	"go.jacobcolvin.com/niceyaml/internal/inputhook"
 )
 
@@ -407,7 +407,7 @@ func (in Input) heading() string {
 	case d == nil:
 		return ""
 	case d.kind == inputPath:
-		return filepath.Clean(d.path)
+		return filepaths.Clean(d.path)
 	case d.kind == inputFS:
 		return cleanFSPath(d.path)
 	case d.kind == inputStream:

@@ -103,7 +103,11 @@
 //
 // A Path or FS input names each Source by the path of its file. A Path
 // input also gives the Source the absolute path of the file, as
-// [niceyaml.WithFilePath] does. An FS input gives it the path in the file
-// system and the file system, as [niceyaml.WithFS] does. A validator that
-// picks a schema by file path thus finds the file.
+// [niceyaml.WithFilePath] does. Both paths name the file that the read
+// opened. A ".." in a Path that follows a symbolic link steps up from the
+// directory that the link leads to, as the OS steps. A Path whose ".."
+// elements follow no link keeps every element as written. An FS input
+// gives the Source the path in the file system and the file system, as
+// [niceyaml.WithFS] does. A validator that picks a schema by file path
+// thus finds the file.
 package input

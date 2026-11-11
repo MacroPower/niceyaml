@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/filepaths"
 	"go.jacobcolvin.com/niceyaml/internal/inputhook"
 	"go.jacobcolvin.com/niceyaml/internal/rootpath"
 )
@@ -186,7 +187,9 @@ func writeFile(dir, name string, old, text []byte, app string) error {
 
 	defer root.Close() //nolint:errcheck // A directory has nothing to flush.
 
-	abs, err := filepath.Abs(dir)
+	// A ".." in dir climbs from the directory that a link before it leads
+	// to, as the climb of OpenRoot does, so abs names the directory of root.
+	abs, err := filepaths.Abs(dir)
 	if err == nil {
 		abs, err = filepath.EvalSymlinks(abs)
 	}

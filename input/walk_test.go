@@ -785,6 +785,185 @@ func onSourceBuild[C any](_ func(C), fn func()) func(C) {
 	return func(C) { fn() }
 }
 
+func TestPath_DotDotAfterSymlink(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows drops a .. element as text before it follows a symlink")
+	}
+
+	// With link leading to real/sub, the OS reads the directory that
+	// "link/.." names as real. The read takes the files there, and names
+	// and labels each one by its path in real. It does not use the path
+	// that cleaning "link/.." as text names.
+	dir := t.TempDir()
+	yamltest.WriteFiles(t, dir, map[string]string{
+		"real/sub/.keep": "",
+		"real/a.yaml":    "a: 1\n",
+		"b.yaml":         "b: 1\n",
+	})
+	yamltest.SymlinkOrSkip(t, filepath.Join("real", "sub"), filepath.Join(dir, "link"))
+
+	physical, err := filepath.EvalSymlinks(dir)
+	require.NoError(t, err)
+
+	want := filepath.Join(physical, "real", "a.yaml")
+
+	// The test builds each path as text, because filepath.Join cleans it.
+	tcs := map[string]struct {
+		path string
+	}{
+		"file":      {path: dir + "/link/../a.yaml"},
+		"directory": {path: dir + "/link/.."},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			files, err := input.Path(tc.path).Files(t.Context())
+			require.NoError(t, err)
+			require.Len(t, files, 1)
+			require.NoError(t, files[0].Err)
+
+			assert.Equal(t, want, files[0].Name)
+			assert.Equal(t, want, files[0].Source.FilePath())
+			assert.Equal(t, "a: 1\n", files[0].Source.Text())
+		})
+	}
+
+	// The stat of a missing path fails, and the error names the path that
+	// the OS looked for.
+	t.Run("missing file", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := input.Path(dir + "/link/../missing.yaml").Files(t.Context())
+		require.ErrorIs(t, err, fs.ErrNotExist)
+
+		want := filepath.Join(physical, "real", "missing.yaml") + ": " + notExistReason(t)
+		assert.Equal(t, want, err.Error())
+	})
+}
+
+// TestPath_DotDotAfterRelativeLink reads relative paths in a working
+// directory that holds a link named up. The link leads to "..", so the
+// OS reads "up/.." as the parent of the parent of the working directory.
+// The read names each file by a path that climbs there. The test
+// changes the working directory, so it does not run in parallel.
+//
+//nolint:paralleltest // See above.
+func TestPath_DotDotAfterRelativeLink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows drops a .. element as text before it follows a symlink")
+	}
+
+	dir := t.TempDir()
+	yamltest.WriteFiles(t, dir, map[string]string{
+		"d/x.yaml":     "grand: 1\n",
+		"p/c/d/x.yaml": "cwd: 1\n",
+	})
+
+	cwd := filepath.Join(dir, "p", "c")
+	yamltest.SymlinkOrSkip(t, "..", filepath.Join(cwd, "up"))
+
+	physical, err := filepath.EvalSymlinks(dir)
+	require.NoError(t, err)
+
+	t.Chdir(cwd)
+
+	// The test builds each path as text, because filepath.Join cleans it.
+	tcs := map[string]struct {
+		path string
+	}{
+		"file":      {path: "up/../d/x.yaml"},
+		"directory": {path: "up/../d"},
+	}
+
+	for name, tc := range tcs {
+		//nolint:paralleltest // See above.
+		t.Run(name, func(t *testing.T) {
+			files, err := input.Path(tc.path).Files(t.Context())
+			require.NoError(t, err)
+			require.Len(t, files, 1)
+			require.NoError(t, files[0].Err)
+
+			assert.Equal(t, filepath.Join("..", "..", "d", "x.yaml"), files[0].Name)
+			assert.Equal(t, filepath.Join(physical, "d", "x.yaml"), files[0].Source.FilePath())
+			assert.Equal(t, "grand: 1\n", files[0].Source.Text())
+		})
+	}
+}
+
+// TestPath_SymlinkedWorkDir reads relative paths in a working directory
+// that the shell names by cwdlink, a link to real/sub. The OS reads
+// "../d" from real, so the read takes real/d. A ".." that follows a
+// plain directory keeps the working directory as the shell names it.
+//
+//nolint:paralleltest // t.Chdir does not work in a parallel test.
+func TestPath_SymlinkedWorkDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows drops a .. element as text before it follows a symlink")
+	}
+
+	dir := t.TempDir()
+	yamltest.WriteFiles(t, dir, map[string]string{
+		"real/d/x.yaml":     "real: 1\n",
+		"real/sub/a/.keep":  "",
+		"real/sub/x.yaml":   "sub: 1\n",
+		"real/sub/d/x.yaml": "cwd: 1\n",
+	})
+
+	cwd := filepath.Join(dir, "cwdlink")
+	yamltest.SymlinkOrSkip(t, filepath.Join("real", "sub"), cwd)
+
+	physical, err := filepath.EvalSymlinks(dir)
+	require.NoError(t, err)
+
+	// Chdir sets PWD, so os.Getwd returns the name of the link.
+	t.Chdir(cwd)
+
+	// The test builds each path as text, because filepath.Join cleans it.
+	tcs := map[string]struct {
+		path         string
+		wantName     string
+		wantFilePath string
+		wantText     string
+	}{
+		"file out of the working directory": {
+			path:         "../d/x.yaml",
+			wantName:     filepath.Join("..", "d", "x.yaml"),
+			wantFilePath: filepath.Join(physical, "real", "d", "x.yaml"),
+			wantText:     "real: 1\n",
+		},
+		"directory out of the working directory": {
+			path:         "../d",
+			wantName:     filepath.Join("..", "d", "x.yaml"),
+			wantFilePath: filepath.Join(physical, "real", "d", "x.yaml"),
+			wantText:     "real: 1\n",
+		},
+		"file after a plain directory": {
+			path:         "a/../x.yaml",
+			wantName:     "x.yaml",
+			wantFilePath: filepath.Join(cwd, "x.yaml"),
+			wantText:     "sub: 1\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		//nolint:paralleltest // t.Chdir does not work in a parallel test.
+		t.Run(name, func(t *testing.T) {
+			files, err := input.Path(tc.path).Files(t.Context())
+			require.NoError(t, err)
+			require.Len(t, files, 1)
+			require.NoError(t, files[0].Err)
+
+			assert.Equal(t, tc.wantName, files[0].Name)
+			assert.Equal(t, tc.wantFilePath, files[0].Source.FilePath())
+			assert.Equal(t, tc.wantText, files[0].Source.Text())
+		})
+	}
+}
+
 func TestPath_ChangedEntry(t *testing.T) {
 	t.Parallel()
 

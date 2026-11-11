@@ -1,4 +1,5 @@
-// Package filepaths matches file paths against glob patterns.
+// Package filepaths matches file paths against glob patterns and
+// resolves the paths that a program or a command line names.
 //
 // This package wraps [github.com/bmatcuk/doublestar/v4] so the file path
 // matchers, the input patterns, and the SchemaStore catalog agree on
@@ -30,4 +31,15 @@
 //	*.{yml,yaml}   # Matches .yml and .yaml files in root only.
 //	**/k8s/*.yaml  # Matches YAML files in any k8s directory.
 //	config.yaml    # Matches exactly "config.yaml".
+//
+// # Path Resolution
+//
+// [filepath.Clean] and [filepath.Abs] drop a ".." element together with
+// the element before it, as text. On Unix, the OS instead steps up from
+// the directory that a symbolic link leads to. So "link/../config.yaml"
+// can name one file for [filepath.Abs] and another for [os.Open]. Use
+// [Abs] and [Clean] for a path that the program opens on disk, so the
+// label of a file names the file that the read opened. A path that a
+// document holds resolves as a URI reference does, as text, and does not
+// go through them.
 package filepaths

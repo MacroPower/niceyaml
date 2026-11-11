@@ -195,6 +195,46 @@ func TestPlan_Apply_RelativeLink(t *testing.T) {
 	}
 }
 
+// TestPlan_Apply_SymlinkedWorkDir applies a plan of "../d" in a working
+// directory that the shell names by cwdlink, a link to real/sub. The OS
+// reads "../d" as real/d, so the plan reads and rewrites the file there.
+// The test changes the working directory, so it cannot run in parallel.
+//
+//nolint:paralleltest // t.Chdir does not work in a parallel test.
+func TestPlan_Apply_SymlinkedWorkDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows drops a .. element as text before it follows a symlink")
+	}
+
+	dir := t.TempDir()
+
+	tree{
+		files: map[string]string{"real/d/hours.yaml": hoursDoc},
+		dirs:  []string{"real/sub"},
+		links: map[string]string{"cwdlink": "real/sub"},
+	}.write(t, dir)
+
+	physical, err := filepath.EvalSymlinks(dir)
+	require.NoError(t, err)
+
+	t.Chdir(filepath.Join(dir, "cwdlink"))
+
+	plan, err := newCafeRegistry(t).PlanMigration(t.Context(), input.Path("../d"))
+	require.NoError(t, err)
+	require.Len(t, plan.Files(), 1)
+	assert.Equal(t, filepath.Join(physical, "real", "d", "hours.yaml"), plan.Files()[0].Source().FilePath())
+
+	res, err := plan.Apply(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, res.Err())
+
+	assert.Equal(
+		t,
+		string(plan.Files()[0].After()),
+		yamltest.ReadFile(t, filepath.Join(dir, "real", "d", "hours.yaml")),
+	)
+}
+
 func TestPlan_Apply_Mode(t *testing.T) {
 	t.Parallel()
 
