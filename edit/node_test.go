@@ -45,12 +45,35 @@ func fill(path paths.Path, v any) edit.Func {
 			at = at.At(paths.Current().Child(sel.Name))
 		}
 
-		if at.Exists() && !null(ctx, at) {
+		ok, err := at.Exists()
+		if err != nil {
+			return err
+		}
+
+		if ok && !null(ctx, at) {
 			return nil
 		}
 
 		return at.Set(ctx, v)
 	}
+}
+
+// exists returns what [edit.Node.Exists] reports for n, and fails the test
+// when Exists returns an error.
+func exists(t *testing.T, n *edit.Node) bool {
+	t.Helper()
+
+	ok, err := n.Exists()
+	require.NoError(t, err)
+
+	return ok
+}
+
+// existsErr returns the error of [edit.Node.Exists] for n.
+func existsErr(n *edit.Node) error {
+	_, err := n.Exists()
+
+	return err
 }
 
 func TestNode_Read(t *testing.T) {
@@ -84,8 +107,8 @@ func TestNode_Read(t *testing.T) {
 			Key:     n.Key(),
 			Text:    n.Text(),
 			Kind:    n.Kind(),
-			Exists:  n.Exists(),
-			Missing: missing.Exists(),
+			Exists:  exists(t, n),
+			Missing: exists(t, missing),
 		})
 
 		return nil
@@ -99,19 +122,26 @@ func TestNode_Read(t *testing.T) {
 	}, got)
 }
 
-func TestNode_Err(t *testing.T) {
+func TestNode_Exists(t *testing.T) {
 	t.Parallel()
+
+	ref := niceyaml.NewSourceFromString("defaults: &d\n  cost: 5\n", niceyaml.WithName("ref.yaml"))
 
 	tcs := map[string]struct {
 		before string
-		// The node whose Err the test reads, from the root.
+		// The node whose Exists the test reads, from the root.
 		node func(ctx context.Context, root *edit.Node) *edit.Node
-		// The message of the error of Err, or "" for nil.
-		err string
+		// The sentinel that the error of Exists matches, or nil.
+		is error
+		// The message of the error of Exists, or "" for nil.
+		err  string
+		ref  bool
+		want bool
 	}{
 		"place that holds a value": {
 			before: "a: 1\n",
 			node:   func(_ context.Context, root *edit.Node) *edit.Node { return root.At(paths.Doc().Child("a")) },
+			want:   true,
 		},
 		"place that holds no value": {
 			before: "a: 1\n",
@@ -120,11 +150,19 @@ func TestNode_Err(t *testing.T) {
 		"root": {
 			before: "a: 1\n",
 			node:   func(_ context.Context, root *edit.Node) *edit.Node { return root },
+			want:   true,
+		},
+		"root of an empty document": {
+			before: "# only a comment\n",
+			node:   func(_ context.Context, root *edit.Node) *edit.Node { return root },
 		},
 		"path that selects more than one value": {
-			before: "a: 1\n",
-			node:   func(_ context.Context, root *edit.Node) *edit.Node { return root.At(paths.Doc().ChildAll()) },
-			err:    "test.yaml:1:1: $: the edit reads $.*, which selects more than one value",
+			before: "items: [1, 2]\n",
+			node: func(_ context.Context, root *edit.Node) *edit.Node {
+				return root.At(paths.MustParse("$.items[*]"))
+			},
+			is:  edit.ErrUsage,
+			err: "test.yaml:1:1: $: the edit reads $.items[*], which selects more than one value",
 		},
 		"node that lost its place": {
 			before: stringtest.LinesLF("m:", "  a: 1"),
@@ -134,7 +172,49 @@ func TestNode_Err(t *testing.T) {
 
 				return at
 			},
+			is:  edit.ErrDisplaced,
 			err: "test.yaml:1:1: $.m: the edit reads $.m.a through a node that lost its place to an earlier edit",
+		},
+		"node that lost its place to a Set of its parent": {
+			// The Set writes the place again, but the node does not take it
+			// back.
+			before: stringtest.LinesLF("m:", "  port: 1"),
+			node: func(ctx context.Context, root *edit.Node) *edit.Node {
+				port := root.At(paths.MustParse("$.m.port"))
+				require.NoError(t, root.At(paths.Doc().Child("m")).Set(ctx, map[string]int{"port": 2}))
+				assert.True(t, exists(t, root.At(paths.MustParse("$.m.port"))))
+
+				return port
+			},
+			is:  edit.ErrDisplaced,
+			err: "through a node that lost its place to an earlier edit",
+		},
+		"node whose path reads another value": {
+			// The rename gives the node the path $.m.a.d, which reads the
+			// value at $.other.d.
+			before: stringtest.LinesLF(
+				"other: &other {d: 5}",
+				"base: &base {b: {d: q}}",
+				"m: {<<: *base, a: *other}",
+			),
+			node: func(_ context.Context, root *edit.Node) *edit.Node {
+				held := root.At(paths.MustParse("$.m.b.d"))
+				require.NoError(t, root.At(paths.MustParse("$.base.b")).SetKey("a"))
+
+				return held
+			},
+			is:  edit.ErrDisplaced,
+			err: "the edit cannot read this value, because an earlier edit made $.m.a.d read another value",
+		},
+		"entry that a merge key of a reference document brings in": {
+			before: stringtest.LinesLF("svc:", "  <<: *d", "  name: web"),
+			ref:    true,
+			node: func(_ context.Context, root *edit.Node) *edit.Node {
+				return root.At(paths.MustParse("$.svc.cost"))
+			},
+			is: paths.ErrReferenceAlias,
+			err: "test.yaml:2:7: $.svc: the edit reads $.svc.cost, which goes through <<: *d at 2:3, " +
+				"a merge key that reads the reference document ref.yaml, so that document decides which names $.svc reads",
 		},
 	}
 
@@ -142,26 +222,53 @@ func TestNode_Err(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			d := newDoc(t, tc.before)
+			var opts []niceyaml.SourceOption
 
-			var got error
+			if tc.ref {
+				opts = append(opts, niceyaml.WithReferences(ref))
+			}
 
-			// Err is a read, so the Apply passes whatever it returns.
+			d := newDoc(t, tc.before, opts...)
+
+			var (
+				got       bool
+				gotErr    error
+				decodeErr error
+			)
+
+			// Exists is a read, so the Apply passes whatever it returns.
 			err := d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, root *edit.Node) error {
-				got = tc.node(ctx, root).Err()
+				n := tc.node(ctx, root)
+				got, gotErr = n.Exists()
+				_, decodeErr = n.Decode[any](ctx)
 
 				return nil
 			})
 			require.NoError(t, err)
 
+			assert.Equal(t, tc.want, got)
+
 			if tc.err == "" {
-				require.NoError(t, got)
+				require.NoError(t, gotErr)
 
 				return
 			}
 
-			require.EqualError(t, got, tc.err)
-			require.NotErrorIs(t, got, edit.ErrEnded)
+			require.ErrorContains(t, gotErr, tc.err)
+			require.NotErrorIs(t, gotErr, edit.ErrEnded)
+
+			// The problem names the read in its details, as the problem of a
+			// Decode through the node does.
+			assert.Contains(t, niceyaml.FormatError(gotErr), "`-- the edit reads ")
+			assert.Equal(t, niceyaml.FormatError(decodeErr), niceyaml.FormatError(gotErr))
+
+			if tc.is != nil {
+				require.ErrorIs(t, gotErr, tc.is)
+			}
+
+			if !errors.Is(tc.is, edit.ErrDisplaced) {
+				require.NotErrorIs(t, gotErr, edit.ErrDisplaced)
+			}
 		})
 	}
 
@@ -175,13 +282,112 @@ func TestNode_Err(t *testing.T) {
 		require.NoError(t, d.Apply(t.Context(), paths.Doc(), func(_ context.Context, root *edit.Node) error {
 			kept = root
 
-			require.NoError(t, kept.Err())
+			assert.True(t, exists(t, kept))
 
 			return nil
 		}))
 
-		require.ErrorIs(t, kept.Err(), edit.ErrEnded)
-		assert.False(t, niceyaml.IsInvalid(kept.Err()))
+		ok, err := kept.Exists()
+		assert.False(t, ok)
+		require.ErrorIs(t, err, edit.ErrEnded)
+		assert.False(t, niceyaml.IsInvalid(err))
+	})
+
+	t.Run("guarded Func returns the problem of the path", func(t *testing.T) {
+		t.Parallel()
+
+		d := newDoc(t, stringtest.LinesLF("svc:", "  <<: *d", "  name: web"), niceyaml.WithReferences(ref))
+
+		calls := 0
+
+		err := d.Apply(t.Context(), paths.MustParse("$.svc"), func(_ context.Context, n *edit.Node) error {
+			calls++
+
+			cost := n.At(paths.Current().Child("cost"))
+
+			ok, err := cost.Exists()
+			if err != nil || !ok {
+				return err
+			}
+
+			return cost.SetKey("price")
+		})
+		require.ErrorIs(t, err, paths.ErrReferenceAlias)
+		assert.Equal(t, 1, calls)
+	})
+
+	t.Run("calls through a node that lost its place", func(t *testing.T) {
+		t.Parallel()
+
+		lost := map[string]struct {
+			before string
+			// The path of the node.
+			node string
+			// The edit that takes the place of the node.
+			lose func(ctx context.Context, root *edit.Node) error
+			// The location and the path of each problem.
+			at string
+		}{
+			"place that an edit removed": {
+				before: stringtest.LinesLF("m:", "  a: 1"),
+				node:   "$.m.a",
+				lose: func(_ context.Context, root *edit.Node) error {
+					return root.At(paths.MustParse("$.m")).Remove()
+				},
+				at: "test.yaml:1:1: $.m:",
+			},
+			"path that an edit made read another value": {
+				before: stringtest.LinesLF(
+					"other: &other {d: 5}",
+					"base: &base {b: {d: q}}",
+					"m: {<<: *base, a: *other}",
+				),
+				node: "$.m.b.d",
+				lose: func(_ context.Context, root *edit.Node) error {
+					return root.At(paths.MustParse("$.base.b")).SetKey("a")
+				},
+				at: "test.yaml:2:21: $.base.b.d:",
+			},
+		}
+
+		for name, tc := range lost {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				d := newDoc(t, tc.before)
+
+				var errs map[string]error
+
+				err := d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, root *edit.Node) error {
+					n := root.At(paths.MustParse(tc.node))
+					require.NoError(t, tc.lose(ctx, root))
+
+					_, decodeErr := n.Decode[any](ctx)
+					_, existsErr := n.Exists()
+
+					errs = map[string]error{
+						"Decode": decodeErr,
+						"Set":    n.Set(ctx, 2),
+						"SetKey": n.SetKey("z"),
+						"Move":   n.Move(paths.MustParse("$.z")),
+						"Remove": n.Remove(),
+						"Exists": existsErr,
+					}
+
+					// A Func that guards its edits with Exists fails the
+					// Apply with the problem of the node.
+					return existsErr
+				})
+				require.ErrorIs(t, err, edit.ErrDisplaced)
+				require.ErrorContains(t, err, tc.at)
+				assert.True(t, niceyaml.IsInvalid(err))
+
+				for call, err := range errs {
+					require.ErrorIs(t, err, edit.ErrDisplaced, call)
+					require.ErrorContains(t, err, tc.at, call)
+				}
+			})
+		}
 	})
 }
 
@@ -543,10 +749,15 @@ func TestNode_Path(t *testing.T) {
 					assert.Equal(t, tc.path, held.Path().String())
 				}
 
-				assert.Equal(t, !tc.none, held.Exists())
+				ok, err := held.Exists()
+				assert.Equal(t, !tc.none, ok)
+
+				if !tc.none {
+					require.NoError(t, err)
+				}
 
 				if tc.again {
-					assert.True(t, root.At(paths.MustParse(tc.held)).Exists())
+					assert.True(t, exists(t, root.At(paths.MustParse(tc.held))))
 				}
 
 				if tc.none {
@@ -1211,7 +1422,7 @@ func TestNode_Own_Edited(t *testing.T) {
 			err := d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, root *edit.Node) error {
 				held := root.At(paths.MustParse(tc.held))
 				assert.Equal(t, tc.own, held.Own().String())
-				require.NoError(t, held.Err())
+				require.NoError(t, existsErr(held))
 
 				err := tc.fn(ctx, root, held)
 				if err != nil {
@@ -1222,13 +1433,13 @@ func TestNode_Own_Edited(t *testing.T) {
 				assert.Equal(t, tc.after, held.Own().String())
 
 				if tc.is != nil {
-					require.ErrorIs(t, held.Err(), tc.is)
+					require.ErrorIs(t, existsErr(held), tc.is)
 				}
 
 				if tc.err == "" {
-					assert.NoError(t, held.Err())
+					assert.NoError(t, existsErr(held))
 				} else {
-					assert.ErrorContains(t, held.Err(), tc.err)
+					assert.ErrorContains(t, existsErr(held), tc.err)
 				}
 
 				return nil
@@ -1256,7 +1467,7 @@ func TestNode_Own_FailedCall(t *testing.T) {
 		err := root.At(paths.Doc().Child("b")).Set(ctx, 9)
 		require.ErrorIs(t, err, edit.ErrEngine)
 
-		require.ErrorIs(t, held.Err(), edit.ErrEngine)
+		require.ErrorIs(t, existsErr(held), edit.ErrEngine)
 		assert.Equal(t, "$.c.k", held.Path().String())
 		assert.Equal(t, "$.c.k", held.Own().String())
 
@@ -1265,6 +1476,56 @@ func TestNode_Own_FailedCall(t *testing.T) {
 	require.ErrorIs(t, err, edit.ErrEngine)
 
 	assert.Equal(t, before, d.Text())
+}
+
+func TestNode_Own_UnresolvedAlias(t *testing.T) {
+	t.Parallel()
+
+	// Exists returns the problem of an alias that does not resolve, but Own
+	// still returns the path where the text writes the alias.
+	tcs := map[string]struct {
+		before string
+		path   string
+		want   string
+	}{
+		"alias at the place": {
+			before: "a: *nope\n",
+			path:   "$.a",
+			want:   "$.a",
+		},
+		"alias at the place, below an alias": {
+			before: stringtest.LinesLF("x: &x {b: *nope}", "y: *x"),
+			path:   "$.y.b",
+			want:   "$.x.b",
+		},
+		"alias at the place, below an alias of a block mapping": {
+			before: stringtest.LinesLF("x: &x", "  b: *nope", "y: *x"),
+			path:   "$.y.b",
+			want:   "$.x.b",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d := newDoc(t, tc.before)
+
+			// The decode of the document after the Func fails the Apply.
+			err := applyAt(t, d, paths.MustParse(tc.path), func(_ context.Context, n *edit.Node) error {
+				ok, err := n.Exists()
+				require.Error(t, err)
+				assert.False(t, ok)
+				assert.Contains(t, err.Error(), "*nope, an alias that does not resolve")
+
+				assert.Equal(t, tc.path, n.Path().String())
+				assert.Equal(t, tc.want, n.Own().String())
+
+				return nil
+			})
+			require.ErrorIs(t, err, niceyaml.ErrDecode)
+		})
+	}
 }
 
 func TestNode_Own_Reference(t *testing.T) {
@@ -1462,9 +1723,9 @@ func TestNode_Own_Reference(t *testing.T) {
 				assert.Equal(t, tc.want, own.String())
 
 				if tc.decided {
-					require.ErrorIs(t, root.At(own).Err(), paths.ErrReferenceAlias)
+					require.ErrorIs(t, existsErr(root.At(own)), paths.ErrReferenceAlias)
 				} else {
-					require.NoError(t, root.At(own).Err())
+					require.NoError(t, existsErr(root.At(own)))
 				}
 
 				return nil
@@ -1509,8 +1770,13 @@ func TestNode_Own_Shared(t *testing.T) {
 		return func(ctx context.Context, n *edit.Node) error {
 			at := n.At(rel)
 
+			ok, err := at.Exists()
+			if err != nil {
+				return err
+			}
+
 			own := at.Own().String()
-			if !at.Exists() || seen[own] {
+			if !ok || seen[own] {
 				return nil
 			}
 
@@ -1888,14 +2154,18 @@ func TestNode_Decode(t *testing.T) {
 		t.Parallel()
 
 		// No decode reads the alias, so the place holds no value, and the
-		// problem of the Decode binds at the alias.
+		// problems of Exists and of the Decode bind at the alias.
 		d := newDoc(t, stringtest.LinesLF("a: 1", "b: *q"))
 
 		err := applyAt(t, d, paths.Doc().Child("b"), func(ctx context.Context, n *edit.Node) error {
-			assert.False(t, n.Exists())
+			ok, err := n.Exists()
+			assert.False(t, ok)
+			assert.Contains(t, niceyaml.FormatError(err),
+				"test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 reads $.b, which goes through *q, "+
+					"an alias that does not resolve")
 			assert.Equal(t, niceyaml.NodeNone, n.Kind())
 
-			_, err := n.Decode[any](ctx)
+			_, err = n.Decode[any](ctx)
 
 			return err
 		})
@@ -2346,8 +2616,9 @@ func TestNode_At(t *testing.T) {
 			// Apply.
 			before: stringtest.LinesLF("spec:", "  tags: [a, b]"),
 			fn: func(_ context.Context, n *edit.Node) error {
-				if n.At(paths.MustParse("$.spec.tags[*]")).Exists() {
-					return errors.New("the path selects a value")
+				_, err := n.At(paths.MustParse("$.spec.tags[*]")).Exists()
+				if !errors.Is(err, edit.ErrUsage) {
+					return errors.New("the read takes the path")
 				}
 
 				return nil
@@ -2845,8 +3116,13 @@ func ExampleNode_Own() {
 		func(ctx context.Context, n *edit.Node) error {
 			timeout := n.At(paths.Current().Child("timeout"))
 
+			ok, err := timeout.Exists()
+			if err != nil {
+				return err
+			}
+
 			own := timeout.Own()
-			if !timeout.Exists() || done[own.String()] {
+			if !ok || done[own.String()] {
 				return nil
 			}
 
@@ -2993,7 +3269,7 @@ func TestNode_Len(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Zero(t, kept.Len())
-		require.ErrorIs(t, kept.Err(), edit.ErrEnded)
+		require.ErrorIs(t, existsErr(kept), edit.ErrEnded)
 	})
 }
 

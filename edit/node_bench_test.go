@@ -63,7 +63,12 @@ func BenchmarkNode_Exists(b *testing.B) {
 
 					require.NoError(b, d.Apply(b.Context(), paths.Doc(), func(_ context.Context, n *edit.Node) error {
 						for _, p := range missing {
-							if n.At(p).Exists() {
+							ok, err := n.At(p).Exists()
+							if err != nil {
+								return err
+							}
+
+							if ok {
 								return fmt.Errorf("%s exists", p)
 							}
 						}
