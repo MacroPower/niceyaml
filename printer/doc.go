@@ -118,6 +118,12 @@
 // starts with a gutter that shows line numbers and diff markers, and
 // [WithGutter] sets another.
 //
+// [FixedGutter] builds a gutter from a width and a function, such as a
+// marker column for a linter or a review that renders text on some rows
+// and nothing on others. [GutterFunc] measures its width from what the
+// function renders for the largest line number, so it fits a custom line
+// number format.
+//
 // # Overlays
 //
 // The printer renders the [line.Overlays] a view carries. An overlay

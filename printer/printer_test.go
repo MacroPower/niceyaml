@@ -1677,7 +1677,7 @@ func TestGutter(t *testing.T) {
 			wantWidth: 2,
 		},
 		"cuts a row that renders more than the width": {
-			gutter:    fixedGutter{width: 1, text: "abc"},
+			gutter:    printer.FixedGutter(1, func(printer.GutterContext) string { return "abc" }),
 			want:      stringtest.JoinLF("aa: 1", "ab: 2"),
 			wantWidth: 1,
 		},
@@ -1685,7 +1685,7 @@ func TestGutter(t *testing.T) {
 		// cell inside the width as a space, so the row reaches the width
 		// without a pad.
 		"fills a wide rune the width splits": {
-			gutter: fixedGutter{width: 1, text: "日"},
+			gutter: printer.FixedGutter(1, func(printer.GutterContext) string { return "日" }),
 			want: stringtest.JoinLF(
 				" a: 1",
 				" b: 2",
@@ -1695,7 +1695,10 @@ func TestGutter(t *testing.T) {
 		// Two keycaps take four cells, so a cut to three keeps the first
 		// and shows the cell of the second inside the width as a space.
 		"cuts a keycap by the two cells it takes": {
-			gutter:    fixedGutter{width: 3, text: strings.Repeat("1\ufe0f\u20e3", 2)},
+			gutter: printer.FixedGutter(
+				3,
+				func(printer.GutterContext) string { return strings.Repeat("1\ufe0f\u20e3", 2) },
+			),
 			want:      stringtest.JoinLF("1\ufe0f\u20e3 a: 1", "1\ufe0f\u20e3 b: 2"),
 			wantWidth: 3,
 		},
@@ -1703,12 +1706,34 @@ func TestGutter(t *testing.T) {
 		// column the gutter holds, so the cut drops it whether or not the
 		// text before it runs over.
 		"cuts a zero-width cluster at the edge from text that fits": {
-			gutter:    fixedGutter{width: 2, text: "ab\u200b"},
+			gutter:    printer.FixedGutter(2, func(printer.GutterContext) string { return "ab\u200b" }),
 			want:      stringtest.JoinLF("aba: 1", "abb: 2"),
 			wantWidth: 2,
 		},
+		"a fixed gutter renders a marker on some rows only": {
+			gutter: printer.FixedGutter(2, func(ctx printer.GutterContext) string {
+				if ctx.Flag == line.FlagInserted {
+					return "+ "
+				}
+
+				return ""
+			}),
+			want: stringtest.JoinLF(
+				"  a: 1",
+				"+ b: 2",
+			),
+			wantWidth: 2,
+		},
+		"a fixed gutter with a nil func renders a blank column": {
+			gutter: printer.FixedGutter(2, nil),
+			want: stringtest.JoinLF(
+				"  a: 1",
+				"  b: 2",
+			),
+			wantWidth: 2,
+		},
 		"a negative width counts as none": {
-			gutter:    fixedGutter{width: -3, text: "abc"},
+			gutter:    printer.FixedGutter(-3, func(printer.GutterContext) string { return "abc" }),
 			want:      stringtest.JoinLF("a: 1", "b: 2"),
 			wantWidth: 0,
 		},
@@ -1772,21 +1797,6 @@ func TestGutter(t *testing.T) {
 			}
 		}
 	})
-}
-
-// fixedGutter is a [printer.Gutter] that declares one width and renders
-// one text, whatever the row.
-type fixedGutter struct {
-	text  string
-	width int
-}
-
-func (g fixedGutter) Width(printer.GutterContext) int {
-	return g.width
-}
-
-func (g fixedGutter) Render(printer.GutterContext) string {
-	return g.text
 }
 
 func TestGutterFunctions(t *testing.T) {
@@ -5074,7 +5084,7 @@ func TestPrinter_WithGutter_Nil(t *testing.T) {
 
 	want := yamltest.NewPlainPrinter(printer.WithGutter(printer.DefaultGutter)).Print(view)
 
-	// A nil Gutter, or one holding a nil func or pointer, selects
+	// A nil Gutter, or one that is a nil func or nil pointer, selects
 	// DefaultGutter rather than panicking on the first Width or Render
 	// call. NoGutter turns the gutter off.
 	tcs := map[string]struct {
@@ -5082,7 +5092,7 @@ func TestPrinter_WithGutter_Nil(t *testing.T) {
 	}{
 		"nil":            {gutter: nil},
 		"nil GutterFunc": {gutter: printer.GutterFunc(nil)},
-		"nil pointer":    {gutter: (*fixedGutter)(nil)},
+		"nil pointer":    {gutter: (*prefixGutter)(nil)},
 	}
 
 	for name, tc := range tcs {
@@ -5101,6 +5111,18 @@ func TestPrinter_WithGutter_Nil(t *testing.T) {
 			), got)
 		})
 	}
+
+	// A FixedGutter with a nil func is a gutter of its own width, so it
+	// does not select DefaultGutter.
+	t.Run("FixedGutter with a nil func", func(t *testing.T) {
+		t.Parallel()
+
+		got := yamltest.NewPlainPrinter(printer.WithGutter(printer.FixedGutter(0, nil))).Print(view)
+		assert.Equal(t, stringtest.JoinLF(
+			"key: value",
+			"     ^ note",
+		), got)
+	})
 }
 
 func TestPrinter_WithStyles_Zero(t *testing.T) {
