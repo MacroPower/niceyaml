@@ -134,8 +134,8 @@ func TestTooLarge(t *testing.T) {
 func TestGet_ParseError(t *testing.T) {
 	t.Parallel()
 
-	// Get sends no request for a URL that does not parse, and its error
-	// names the URL as Redacted spells it. A password that starts with
+	// Get sends no request for a URL that does not parse. Its error is a
+	// URLError that names the URL as Redacted spells it. A password that starts with
 	// "/", "?" or "#" parses, but as an empty port and then a path, query
 	// or fragment, so Get refuses it too. A third slash after the scheme
 	// empties the host and turns the userinfo into a path, so Get refuses
@@ -199,6 +199,10 @@ func TestGet_ParseError(t *testing.T) {
 
 			_, err := httpfetch.Get(t.Context(), refusingClient(t), tc.url, limit)
 			require.ErrorContains(t, err, want)
+
+			urlErr, ok := errors.AsType[*httpfetch.URLError](err)
+			require.True(t, ok, "want a URLError, got %T", err)
+			assert.Equal(t, err.Error(), urlErr.Error())
 
 			// Each password holds "cret", and "s3/cret" also holds "s3", so
 			// no half of a password reaches the error.

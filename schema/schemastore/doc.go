@@ -57,8 +57,38 @@
 // later lookups reuse it until the cache time to live (TTL) expires. A
 // refresh that fails keeps the previous catalog in use. When a fetch fails
 // before any catalog has loaded, a lookup reports [ErrFetchCatalog]. The
-// store then waits the retry interval before it contacts SchemaStore.org
-// again.
+// store then waits the retry interval before it loads the catalog again.
+//
+// A [Store] reads the catalog from SchemaStore.org by default.
+// [WithCatalog] names another catalog with a
+// [go.jacobcolvin.com/niceyaml/schema.Ref], such as a mirror URL, a file
+// on disk, or a catalog that the program embeds. A [Catalog] marshaled to
+// JSON gives the bytes of such a catalog:
+//
+//	store := schemastore.New(schemastore.WithCatalog(schema.Embedded(catalogJSON)))
+//
+// Until a catalog loads, [ErrFetchCatalog] ends the lookup of the
+// registry. A program that should go on to the next resolver when the
+// catalog does not load wraps the store in a
+// [go.jacobcolvin.com/niceyaml/schema.ResolverFunc]:
+//
+//	store := schemastore.New()
+//
+//	failOpen := schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Node) (schema.Ref, error) {
+//	    ref, err := store.Resolve(ctx, doc)
+//	    if errors.Is(err, schemastore.ErrFetchCatalog) {
+//	        return schema.Ref{}, fmt.Errorf("%w: %v", schema.ErrNoMatch, err)
+//	    }
+//
+//	    return ref, err
+//	})
+//
+// The wrapper formats the error of the store with %v, not %w. The
+// registry ends the lookup on any error that matches
+// [go.jacobcolvin.com/niceyaml/schema.ErrLoad] even when it wraps
+// [go.jacobcolvin.com/niceyaml/schema.ErrNoMatch]. The error of a
+// [go.jacobcolvin.com/niceyaml/schema.Loadable] that loads the catalog
+// from another registry matches ErrLoad.
 //
 // A long-running program can take control of the catalog load. A call to
 // [Store.Entries] at startup fetches the catalog before the first

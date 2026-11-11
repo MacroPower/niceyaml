@@ -122,7 +122,8 @@ func (e *LoadError) Unwrap() error {
 // FetchError is the error of one schema document whose read or fetch
 // failed. The document is a file that the registry reads, a URL that it
 // fetches, or the catalog that a
-// [go.jacobcolvin.com/niceyaml/schema/schemastore.Store] fetches. A
+// [go.jacobcolvin.com/niceyaml/schema/schemastore.Store] reads or
+// fetches. A
 // [*LoadError] holds the FetchError of the schema that it names, or the
 // FetchError of each failed document that a $ref names. [errors.As] finds
 // one inside a join of several too.
