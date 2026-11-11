@@ -483,6 +483,10 @@ type Doc struct {
 	// The reach of the Set running, which [Doc.renderPayload] checks, or
 	// nil.
 	pending *reachCall
+	// The edits of values that [Node.Update] writes without a parse of
+	// each, while deferring is true, as [Doc.writeValue] adds them. The
+	// next [Doc.apply] makes them with its own edits.
+	deferred []edit
 	// The capture of the site of an error that the edit package binds again,
 	// as [Doc.sitePlace] fills it, or nil.
 	capture *capture
@@ -518,6 +522,9 @@ type Doc struct {
 	// Whether the check after the last call runs, whose problems name no
 	// call, as [Doc.callDetails] tells.
 	checking bool
+	// Whether [Doc.writeValue] adds its edits to deferred instead of
+	// making them.
+	deferring bool
 	// Whether the error that binds in the current text is a problem that the
 	// edit package found, as [Doc.bindOwn] binds it, and not an error that a
 	// caller binds by a path.

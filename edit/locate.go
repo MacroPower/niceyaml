@@ -426,9 +426,14 @@ func (e *placedError) Unwrap() error {
 	return e.err
 }
 
-// noRange is the range of a site of a problem without a place in the
-// user's text, which lies at no value.
-var noRange = position.NewRange(position.New(-1, 0), position.New(-1, 0))
+var (
+	// The range of a site of a problem without a place in the user's text,
+	// which lies at no value.
+	noRange = position.NewRange(position.New(-1, 0), position.New(-1, 0))
+
+	// The bug of edits that [Doc.apply] takes and that overlap.
+	errOverlap = errors.New("the edits overlap")
+)
 
 // placeOf gives the place of at as [Doc.sitePlace] describes, without its
 // details, and the note of the call that wrote the value there, or nil.
@@ -1407,26 +1412,55 @@ type edit struct {
 }
 
 // apply applies edits, which must not overlap, and parses the result once.
-// An insertion goes in front of an edit that replaces the bytes after it,
-// and insertions at one offset keep their order. When the new text does
-// not parse, apply leaves the text as it was.
+// It applies the deferred edits of the Doc with them, which the same text
+// placed. An insertion goes in front of an edit that replaces the bytes
+// after it, and insertions at one offset keep their order. When the edits
+// overlap, apply fails with errOverlap. When the new text does not parse,
+// apply leaves the text as it was.
 func (d *Doc) apply(edits ...edit) error {
 	cur, origin, src, node, lines := d.cur, d.origin, d.src, d.node, d.curLines
 
-	// The edits apply from the end of the text, so no edit moves the
-	// offsets of the edits before it. Among the edits that start at one
-	// offset, the one that ends later applies first. The reverse keeps the
-	// order of insertions at one offset.
-	edits = slices.Clone(edits)
-	slices.Reverse(edits)
+	edits = slices.Concat(d.deferred, edits)
+	d.deferred = nil
+
+	// The edits go in the order of their offsets. Among the edits that
+	// start at one offset, the one that ends sooner goes first, and
+	// insertions at one offset keep their order. Apply builds the new text
+	// and its origins in one pass. So its time grows with the size of the
+	// text plus the size of the edits.
 	slices.SortStableFunc(edits, func(a, b edit) int {
-		return cmp.Or(cmp.Compare(b.start, a.start), cmp.Compare(b.end, a.end))
+		return cmp.Or(cmp.Compare(a.start, b.start), cmp.Compare(a.end, b.end))
 	})
 
+	size := len(d.cur)
 	for _, e := range edits {
-		d.cur = d.cur[:e.start] + e.text + d.cur[e.end:]
-		d.origin = slices.Concat(d.origin[:e.start], e.origins, d.origin[e.end:])
+		size += len(e.text) - (e.end - e.start)
 	}
+
+	var text strings.Builder
+
+	text.Grow(size)
+
+	origins := make([]int, 0, size)
+	at := 0
+
+	for _, e := range edits {
+		if e.start < at {
+			return fmt.Errorf("%w: [%d, %d) after %d", errOverlap, e.start, e.end, at)
+		}
+
+		text.WriteString(d.cur[at:e.start])
+		text.WriteString(e.text)
+
+		origins = append(origins, d.origin[at:e.start]...)
+		origins = append(origins, e.origins...)
+		at = e.end
+	}
+
+	text.WriteString(d.cur[at:])
+
+	d.cur = text.String()
+	d.origin = append(origins, d.origin[at:]...)
 
 	err := d.parse()
 	if err != nil {

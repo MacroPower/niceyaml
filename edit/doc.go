@@ -70,6 +70,23 @@
 // except !!binary and !!timestamp, as [Node.MarshalYAML] describes.
 // [Node.Set] lists the values that a Set refuses.
 //
+// A Set replaces its value whole, so it drops the comments inside the old
+// value. [Node.Update] writes a value as a Set does, but it rewrites only
+// the text that must change. A Func thus decodes a section, changes a
+// field, and writes the section back with its comments:
+//
+//	cfg, err := n.Decode[Config](ctx)
+//	if err != nil {
+//		return err
+//	}
+//
+//	cfg.Port = 9090
+//
+//	return n.Update(ctx, cfg)
+//
+// Update also writes the root of a document that holds a value of the same
+// kind, where a Set fails.
+//
 // A Set writes a value of a type by the MarshalYAML or MarshalText method
 // of the type, and otherwise field by field. [WithMarshalers] gives the
 // types of the program a function or their MarshalJSON methods instead.
@@ -643,6 +660,8 @@
 //     path selects into, at its anchor when the path reads it through an
 //     alias. In an empty document, the Set replaces the root with the value
 //     inside the collections of its path.
+//   - [Node.Update] changes the model as the calls of Set, Insert, and
+//     Remove that it makes inside the value change it.
 //   - [Node.Insert] puts the value before the item at its place, or after
 //     the last item of the sequence when the place lies past it. Where the
 //     text lacks the place, the Insert creates it as a Set does.

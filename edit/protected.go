@@ -231,7 +231,7 @@ func (d *Doc) insertField(ctx context.Context, n *Node, p *place, text string) (
 		where.kind = placeFirst
 	}
 
-	_, place, err := n.set(ctx, text, true, setConfig{at: where})
+	_, place, err := n.set(ctx, text, true, setConfig{at: where}, "sets")
 
 	return fieldChange{at: &at, value: fieldScalar(text), place: place}, err
 }

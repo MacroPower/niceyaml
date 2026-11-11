@@ -34,6 +34,8 @@ type rendered struct {
 	// it.
 	value *value
 	tag   string
+	// The parse of the encoded text, whose nodes the value reads.
+	enc *Doc
 	// The text in flow style, on one line, which a flow collection holds.
 	flow string
 	// The header of each block scalar of the block lines, with its string.
@@ -160,7 +162,7 @@ func render(
 	g := newGraph(body, enc.node.DocumentResolver(), enc.keyReader(), enc.enclosedAliases(), 0)
 	r := rendered{
 		value: g.root, tag: g.tag, flow: enc.flowRunOf(body, 0, &flowStyle{encoded: true}).text,
-		refused: append(refused, found...),
+		refused: append(refused, found...), enc: enc,
 	}
 
 	// The text of a marshaler can write the properties of a block
