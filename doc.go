@@ -1215,7 +1215,10 @@
 // fill the value, and then calls SelfValidate. SelfValidate runs only the
 // functions of WithValueCheck that it gets, so the program passes them to
 // SelfValidate as well. A Validator does not see a value that the library
-// sets this way.
+// sets this way. A program that keeps its constraints in a schema checks
+// the final value with
+// [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] and places the
+// result with Node.Bind.
 //
 // The walk follows the value, and each error binds where its path resolves in
 // the document. An error under a field or an element that the document lacks

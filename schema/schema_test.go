@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/goccy/go-yaml"
 	"github.com/stretchr/testify/assert"
@@ -18,6 +20,7 @@ import (
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/encoder"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -1354,6 +1357,9 @@ var (
 
 	// A sentinel a caller wraps beside the error of a check.
 	errPlaceCheck = errors.New("check")
+
+	// The error of [failingMarshaler].
+	errMarshal = errors.New("marshal")
 )
 
 func TestSchema_ValidateValue(t *testing.T) {
@@ -1484,13 +1490,465 @@ func TestSchema_ValidateValue(t *testing.T) {
 		assert.NotSame(t, doc.Source(), bound.Source())
 	})
 
-	t.Run("a value the validator does not read is no fault", func(t *testing.T) {
+	t.Run("a value that does not encode is no fault", func(t *testing.T) {
 		t.Parallel()
 
-		// The validator reads maps, slices, and scalars alone, so the
-		// check of a struct cannot run.
-		err := v.ValidateValue(t.Context(), struct{ Port int }{Port: 80})
+		// The encoder does not write a channel, so the check cannot run.
+		err := v.ValidateValue(t.Context(), map[string]any{"port": 80, "name": make(chan int)})
 		requireNoFault(t, err, schema.ErrValidate)
+		require.ErrorIs(t, err, encoder.ErrEncode)
+	})
+}
+
+// typedConfig names its fields by yaml tags that differ from its json
+// tags.
+type typedConfig struct {
+	Mode   typedMode   `json:"MODE"   yaml:"mode,omitempty"`
+	Tags   []string    `json:"TAGS"   yaml:"tags,omitempty"`
+	Listen typedListen `json:"LISTEN" yaml:"listen"`
+}
+
+type typedListen struct {
+	Port int `json:"PORT" yaml:"port"`
+}
+
+type typedMode string
+
+// typedSlice and typedMap are typed containers that can hold themselves.
+type (
+	typedSlice []any
+	typedMap   map[string]any
+)
+
+// cycleNode can point to itself through an encoded field.
+type cycleNode struct {
+	Next *cycleNode `yaml:"next"`
+}
+
+// sharedFields can hold one pointer in both of its fields.
+type sharedFields struct {
+	A *string `yaml:"a"`
+	B *string `yaml:"b"`
+}
+
+// hiddenCycle can point to itself through a field the encoder does not
+// write.
+type hiddenCycle struct {
+	Self *hiddenCycle `yaml:"-"`
+	A    string       `yaml:"a"`
+}
+
+// typedWrapper holds any value under the key x.
+type typedWrapper struct {
+	X any `yaml:"x"`
+}
+
+// typedDAG can point to one node through both of its fields.
+type typedDAG struct {
+	Left  *typedDAG `yaml:"left"`
+	Right *typedDAG `yaml:"right"`
+}
+
+// newTypedDAG returns a chain of levels nodes, each of which points to
+// the node below it through both of its fields. The encoder writes 2^levels
+// copies of the last node.
+func newTypedDAG(levels int) *typedDAG {
+	var d *typedDAG
+
+	for range levels {
+		d = &typedDAG{Left: d, Right: d}
+	}
+
+	return d
+}
+
+// typedTree points back to its parent. Its MarshalYAML method writes the
+// name and the children alone, so the encoder does not follow the parent.
+type typedTree struct {
+	Parent   *typedTree   `yaml:"parent"`
+	Name     string       `yaml:"name"`
+	Children []*typedTree `yaml:"children"`
+}
+
+func (t *typedTree) MarshalYAML() (any, error) {
+	return map[string]any{"name": t.Name, "children": t.Children}, nil
+}
+
+// selfMarshaler returns itself from its MarshalYAML method.
+type selfMarshaler struct {
+	Name string `yaml:"name"`
+}
+
+func (s *selfMarshaler) MarshalYAML() (any, error) {
+	return []any{s}, nil
+}
+
+// endlessMarshaler returns a new value of its own type from each call of
+// its MarshalYAML method.
+type endlessMarshaler int
+
+func (e endlessMarshaler) MarshalYAML(context.Context) (any, error) {
+	return []any{e + 1}, nil
+}
+
+// sharedMarshaler writes the value it holds from its MarshalYAML method.
+type sharedMarshaler struct {
+	value any
+}
+
+func (s sharedMarshaler) MarshalYAML() (any, error) {
+	return s.value, nil
+}
+
+// levelsMarshaler writes the value that [nestedLevels] returns for its
+// depth from its MarshalYAML method. Its kind is int, so a slice of it
+// holds no pointer, map, or slice that the encoder follows.
+type levelsMarshaler int
+
+func (l levelsMarshaler) MarshalYAML() (any, error) {
+	return nestedLevels(int(l)), nil
+}
+
+// nestedLevels returns a []any with depth levels. Each level lists the
+// level below ten times, so the value expands to 10^depth scalars.
+func nestedLevels(depth int) any {
+	var levels any = []any{"x"}
+
+	for range depth {
+		level := make([]any, 10)
+		for i := range level {
+			level[i] = levels
+		}
+
+		levels = level
+	}
+
+	return levels
+}
+
+// taggedText writes itself as the YAML text it holds, such as a
+// tagged scalar.
+type taggedText string
+
+func (s taggedText) MarshalYAML() ([]byte, error) {
+	return []byte(s), nil
+}
+
+// redactedKey is a key that writes a short text in place of its bytes.
+type redactedKey []byte
+
+func (redactedKey) MarshalText() ([]byte, error) {
+	return []byte("k"), nil
+}
+
+// taggedFields holds the text of a !!timestamp and a !!binary.
+type taggedFields struct {
+	At   taggedText `yaml:"at"`
+	Data taggedText `yaml:"data"`
+}
+
+// typedTimeout holds a duration, which the encoder writes as its text.
+type typedTimeout struct {
+	Timeout time.Duration `yaml:"timeout"`
+}
+
+// failingMarshaler returns errMarshal from its MarshalYAML method.
+type failingMarshaler struct{}
+
+func (failingMarshaler) MarshalYAML() (any, error) {
+	return nil, errMarshal
+}
+
+// jsonHidden can point to itself through a field that only its json tag
+// hides from the encoder.
+type jsonHidden struct {
+	Self *jsonHidden `json:"-"`
+	A    string      `yaml:"a"`
+}
+
+// embeddedListen is an unexported type that [typedEmbedded] embeds.
+type embeddedListen struct {
+	Listen typedListen `yaml:"listen"`
+}
+
+// typedEmbedded writes the fields of an unexported embedded struct
+// inline.
+type typedEmbedded struct {
+	embeddedListen `yaml:",inline"` //nolint:unused // Only reflect reads the field.
+}
+
+// embeddedTags is an unexported named slice that [typedEmbeddedTags]
+// embeds.
+type embeddedTags []string
+
+// typedEmbeddedTags embeds an unexported named slice, which makes the
+// encoder panic.
+type typedEmbeddedTags struct {
+	embeddedTags `yaml:"tags"` //nolint:unused // Only reflect reads the field.
+}
+
+// typedRatio holds a float, which the encoder can write in exponent form.
+type typedRatio struct {
+	Ratio float64 `yaml:"ratio"`
+}
+
+func TestSchema_ValidateValue_Typed(t *testing.T) {
+	t.Parallel()
+
+	v := compileSchema(t, `{
+		"type": "object",
+		"properties": {
+			"listen": {
+				"type": "object",
+				"properties": {"port": {"type": "integer", "maximum": 65535}}
+			},
+			"mode": {"enum": ["fast", "slow"]},
+			"tags": {"type": "array", "items": {"type": "string", "minLength": 1}},
+			"at": {"type": "string", "pattern": "^2019-"},
+			"data": {"const": "aGk="},
+			"timeout": {"type": "string", "pattern": "^[0-9]+s$"},
+			"ratio": {"type": "number"}
+		}
+	}`)
+
+	at := time.Date(2020, 1, 2, 0, 0, 0, 0, time.UTC)
+
+	// Each typed value checks as the document that the encoder writes for
+	// it, so each path names a key by its yaml tag.
+	tcs := map[string]struct {
+		data any
+		want string
+	}{
+		"struct": {
+			data: typedConfig{Listen: typedListen{Port: 99999}},
+			want: "$.listen.port: 99999 is greater than 65535",
+		},
+		"pointer to a struct": {
+			data: &typedConfig{Listen: typedListen{Port: 99999}},
+			want: "$.listen.port: 99999 is greater than 65535",
+		},
+		"typed map": {
+			data: map[string]typedListen{"listen": {Port: 99999}},
+			want: "$.listen.port: 99999 is greater than 65535",
+		},
+		"struct inside a map": {
+			data: map[string]any{"listen": typedListen{Port: 99999}},
+			want: "$.listen.port: 99999 is greater than 65535",
+		},
+		"named scalar inside a map": {
+			data: map[string]any{"mode": typedMode("medium")},
+			want: "$.mode: value does not match any enum member",
+		},
+		"string slice inside a slice": {
+			data: map[string]any{"tags": []any{[]string{"x"}}},
+			want: `$.tags[0]: expected "string", got "array"`,
+		},
+		"string slice inside a map": {
+			data: map[string]any{"tags": []string{"x", ""}},
+			want: "$.tags[1]: string length 0 is less than 1",
+		},
+		"conforming struct": {
+			data: &typedConfig{Mode: "fast", Tags: []string{"x"}, Listen: typedListen{Port: 80}},
+		},
+		"nil pointer": {
+			data: (*typedConfig)(nil),
+			want: `$: expected "object", got "null"`,
+		},
+		"struct inside an ordered mapping": {
+			data: yaml.MapSlice{{Key: "listen", Value: typedListen{Port: 99999}}},
+			want: "$.listen.port: 99999 is greater than 65535",
+		},
+		// The decode of the encoded document yields a timestamp and a
+		// !!binary, which check as their text.
+		"timestamp and binary fields": {
+			data: taggedFields{At: "!!timestamp 2020-01-02", Data: "!!binary aGk="},
+			want: `$.at: string does not match pattern "^2019-"`,
+		},
+		// The encoder writes a duration and a time as one scalar of text.
+		"duration field": {
+			data: typedTimeout{Timeout: 1500 * time.Millisecond},
+			want: `$.timeout: string does not match pattern "^[0-9]+s$"`,
+		},
+		"time pointer inside a map": {
+			data: map[string]any{"at": &at},
+			want: `$.at: string does not match pattern "^2019-"`,
+		},
+		"unexported embedded struct": {
+			data: typedEmbedded{embeddedListen{Listen: typedListen{Port: 99999}}},
+			want: "$.listen.port: 99999 is greater than 65535",
+		},
+		// The encoder writes a []byte inside a typed value as a sequence
+		// of integers, not as base64 text.
+		"bytes inside a struct": {
+			data: struct {
+				Data any `yaml:"data"`
+			}{Data: []byte("hi")},
+			want: "$.data: value does not match const",
+		},
+		"bytes inside a map": {
+			data: map[string]any{"data": []byte("hi")},
+		},
+		// The encoder writes some floats in exponent form without a
+		// fraction, and the decode reads that text as a string.
+		"large float in exponent form": {
+			data: typedRatio{Ratio: 1000000.0},
+			want: `$.ratio: expected "number", got "string"`,
+		},
+		"small float in exponent form": {
+			data: typedRatio{Ratio: 0.00001},
+			want: `$.ratio: expected "number", got "string"`,
+		},
+		"float with a fraction": {
+			data: typedRatio{Ratio: 0.5},
+		},
+		"float in exponent form inside a map": {
+			data: map[string]any{"ratio": 0.00001},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := v.ValidateValue(t.Context(), tc.data)
+			if tc.want == "" {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.EqualError(t, err, tc.want)
+			assert.True(t, niceyaml.IsInvalid(err))
+			require.ErrorIs(t, err, schema.ErrViolation)
+			require.NotErrorIs(t, err, schema.ErrValidate)
+		})
+	}
+
+	t.Run("a document places the result", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"mode: fast",
+			"listen:",
+			"  port: 80",
+		), niceyaml.WithName("svc.yaml"))
+
+		var cfg typedConfig
+
+		require.NoError(t, doc.DecodeInto(t.Context(), &cfg))
+
+		// A program sets the port after the decode, such as from its
+		// environment.
+		cfg.Listen.Port = 99999
+
+		err := doc.Bind(v.ValidateValue(t.Context(), &cfg))
+		require.EqualError(t, err, "svc.yaml:3:9: $.listen.port: 99999 is greater than 65535")
+	})
+
+	t.Run("values that do not encode are no fault", func(t *testing.T) {
+		t.Parallel()
+
+		// The check cannot run on a value that the encoder does not
+		// write, and the error of the encoder is in the chain.
+		tcs := map[string]struct {
+			data any
+			err  error
+			want string
+		}{
+			"channel inside an ordered mapping": {
+				data: yaml.MapSlice{{Key: "mode", Value: make(chan int)}},
+				err:  encoder.ErrEncode,
+			},
+			"channel inside a slice": {
+				data: map[string]any{"tags": []any{make(chan int)}},
+				err:  encoder.ErrEncode,
+			},
+			"marshaler that fails": {
+				data: map[string]any{"listen": failingMarshaler{}},
+				err:  errMarshal,
+			},
+			// The encoder panics on this field, and the check returns the
+			// panic as an error.
+			"unexported embedded named slice": {
+				data: typedEmbeddedTags{embeddedTags{"a"}},
+				err:  schema.ErrValidate,
+				want: "validate schema: encode schema_test.typedEmbeddedTags: encoder panic: " +
+					"reflect.Value.Interface: cannot return value obtained from unexported field or method",
+			},
+			// The encoder writes text that the decode of the check does
+			// not read. The text of the error names the problem without
+			// the position of the encoded text.
+			"named scalar of text that is not UTF-8": {
+				data: map[string]any{"mode": typedMode("\xff")},
+				err:  schema.ErrValidate,
+				want: "validate schema: read the encoded schema_test.typedMode: byte 0xff is not UTF-8",
+			},
+			"marshaler writing a merge key of a scalar": {
+				data: map[string]any{"listen": taggedText("<<: 1")},
+				err:  schema.ErrValidate,
+				want: "validate schema: read the encoded schema_test.taggedText: expected mapping, got integer",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				err := v.ValidateValue(t.Context(), tc.data)
+				requireNoFault(t, err, schema.ErrValidate)
+				require.ErrorIs(t, err, tc.err)
+				assert.False(t, niceyaml.IsInvalid(err))
+
+				if tc.want != "" {
+					require.EqualError(t, err, tc.want)
+				}
+			})
+		}
+	})
+
+	// The value is not at fault when the context ended, so the error of
+	// the context is in the chain.
+	t.Run("values checked after the context ended", func(t *testing.T) {
+		t.Parallel()
+
+		canceled, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		expired, stop := context.WithDeadline(t.Context(), time.Unix(0, 0))
+		t.Cleanup(stop)
+
+		tcs := map[string]struct {
+			ctx  context.Context //nolint:containedctx // Each case ends its context.
+			data any
+			err  error
+		}{
+			"conforming struct after a cancel": {
+				ctx:  canceled,
+				data: &typedConfig{Mode: "fast", Listen: typedListen{Port: 80}},
+				err:  context.Canceled,
+			},
+			"struct breaking a constraint after a cancel": {
+				ctx:  canceled,
+				data: typedConfig{Listen: typedListen{Port: 99999}},
+				err:  context.Canceled,
+			},
+			"struct inside a map after a deadline": {
+				ctx:  expired,
+				data: map[string]any{"listen": typedListen{Port: 80}},
+				err:  context.DeadlineExceeded,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				err := v.ValidateValue(tc.ctx, tc.data)
+				requireNoFault(t, err, schema.ErrValidate)
+				require.ErrorIs(t, err, tc.err)
+				assert.False(t, niceyaml.IsInvalid(err))
+			})
+		}
 	})
 }
 
@@ -1928,18 +2386,21 @@ type placeConfig struct {
 // placeRequest checks itself against a schema the test sets before the
 // decode, and returns what ValidateValue returns. With invalid, it
 // returns that result inside [niceyaml.Invalid] with no option. With
-// rewrite, it returns that result inside a [yamltest.RewriteError].
+// rewrite, it returns that result inside a [yamltest.RewriteError]. The
+// encoder writes an empty name, so the request passes the required
+// keyword.
 type placeRequest struct {
 	schema *schema.Schema
 
-	Port int `yaml:"port"`
+	Name string `yaml:"name"`
+	Port int    `yaml:"port"`
 
 	invalid bool
 	rewrite bool
 }
 
 func (r placeRequest) Validate() error {
-	err := r.schema.ValidateValue(context.Background(), map[string]any{"port": r.Port, "name": "x"})
+	err := r.schema.ValidateValue(context.Background(), r)
 
 	switch {
 	case r.invalid:
@@ -2613,17 +3074,77 @@ func TestSchema_AliasExpansion(t *testing.T) {
 
 		bin := []byte("hi")
 
-		// Each level lists the level below ten times, so the last level
-		// expands to 10^6 scalars.
-		var shared any = []any{"x"}
+		selfNode := &cycleNode{}
+		selfNode.Next = selfNode
 
-		for range 6 {
-			level := make([]any, 10)
-			for i := range level {
-				level[i] = shared
-			}
+		selfTyped := typedSlice{nil}
+		selfTyped[0] = selfTyped
 
-			shared = level
+		selfTypedMap := typedMap{}
+		selfTypedMap["self"] = selfTypedMap
+
+		outerTyped := map[string]any{}
+		outerTyped["list"] = []map[string]any{outerTyped}
+
+		shared := "x"
+		hidden := &hiddenCycle{A: "x"}
+		hidden.Self = hidden
+
+		selfMarshal := &selfMarshaler{Name: "x"}
+
+		root := &typedTree{Name: "root"}
+		root.Children = []*typedTree{{Name: "kid", Parent: root}}
+
+		sharedLevels := nestedLevels(6)
+
+		jsonSelf := &jsonHidden{A: "x"}
+		jsonSelf.Self = jsonSelf
+
+		// A Node and a Source write their decoded value, which shares the
+		// value of each anchor among its aliases.
+		levels := yamltest.AliasLevels(7)
+		trustedSource := niceyaml.NewSourceFromString(levels, niceyaml.WithAliasLimit(false))
+
+		trustedNode, err := trustedSource.Document()
+		require.NoError(t, err)
+
+		// Each source from binarySource anchors size bytes as a !!binary
+		// and lists count aliases of it. The value of a Node writes the
+		// base64 text of the bytes at each alias.
+		binarySource := func(size, count int) *niceyaml.Source {
+			text := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xab}, size))
+
+			return niceyaml.NewSourceFromString(stringtest.LinesLF(
+				"bin: &bin !!binary "+text,
+				"list: "+yamltest.FlowSequence("*bin", count),
+			), niceyaml.WithAliasLimit(false))
+		}
+
+		binarySourceBomb := binarySource(16<<10, 1000)
+
+		binaryNodeBomb, err := binarySourceBomb.Document()
+		require.NoError(t, err)
+
+		binaryNodeFew, err := binarySource(4<<10, 10).Document()
+		require.NoError(t, err)
+
+		// Each element shares the bytes of one address, as an
+		// assignment of a net.IP shares them. Counted as base64 text, the
+		// uses would pass the limit.
+		gateways := make([]net.IP, 25000)
+		gateway := net.ParseIP("10.0.0.1")
+
+		for i := range gateways {
+			gateways[i] = gateway
+		}
+
+		// Each element shares the 4 KB of one key, but writes one
+		// character.
+		keys := make([]redactedKey, 300)
+		key := redactedKey(bytes.Repeat([]byte{0xab}, 4<<10))
+
+		for i := range keys {
+			keys[i] = key
 		}
 
 		tcs := map[string]struct {
@@ -2651,7 +3172,120 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				err:  schema.ErrValidate,
 			},
 			"ordered mapping key sharing a slice": {
-				data:      yaml.MapSlice{{Key: shared, Value: 1}},
+				data:      yaml.MapSlice{{Key: sharedLevels, Value: 1}},
+				excessive: true,
+			},
+			// The encoder writes a typed value in full, so the check
+			// refuses one that contains itself before the encode.
+			"pointer containing itself": {
+				data: selfNode,
+				err:  schema.ErrValidate,
+			},
+			"typed slice containing itself": {
+				data: map[string]any{"a": selfTyped},
+				err:  schema.ErrValidate,
+			},
+			"typed map containing itself": {
+				data: selfTypedMap,
+				err:  schema.ErrValidate,
+			},
+			"map containing itself through a typed slice": {
+				data: outerTyped,
+				err:  schema.ErrValidate,
+			},
+			"ordered mapping value containing itself": {
+				data: yaml.MapSlice{{Key: "a", Value: selfSlice}},
+				err:  schema.ErrValidate,
+			},
+			"typed map key containing itself": {
+				data: map[*cycleNode]string{selfNode: "x"},
+				err:  schema.ErrValidate,
+			},
+			"pointer under two fields": {data: sharedFields{A: &shared, B: &shared}},
+			// The encoder does not write a field tagged "-".
+			"skipped field containing the value": {data: hidden},
+			// The encoder writes each use of a shared value in full, so
+			// the check counts each use of one inside a typed value.
+			"struct holding a shared slice": {
+				data:      typedWrapper{X: sharedLevels},
+				excessive: true,
+			},
+			"struct holding a shared slice inside a map": {
+				data:      map[string]any{"x": []typedWrapper{{X: sharedLevels}}},
+				excessive: true,
+			},
+			"pointers sharing a node": {
+				data:      newTypedDAG(20),
+				excessive: true,
+			},
+			"a few pointers sharing a node": {data: newTypedDAG(4)},
+			// The check follows the value that a MarshalYAML method
+			// returns, as the encoder does.
+			"marshaler leaving out a parent": {data: root},
+			"marshaler returning itself": {
+				data: selfMarshal,
+				err:  schema.ErrValidate,
+			},
+			"marshaler returning a new value each time": {
+				data: endlessMarshaler(0),
+				err:  schema.ErrValidate,
+			},
+			"marshaler returning a shared slice": {
+				data:      sharedMarshaler{value: sharedLevels},
+				excessive: true,
+			},
+			// The check calls the method of each element of a slice of
+			// a scalar kind, as the encoder does.
+			"slice of a named int whose marshaler returns a shared slice": {
+				data:      map[string]any{"x": []levelsMarshaler{0, 6}},
+				excessive: true,
+			},
+			"slice of a named int whose marshaler returns a small slice": {
+				data: map[string]any{"x": []levelsMarshaler{1, 1}},
+			},
+			// The encoder reads the json tag of a field without a yaml
+			// tag, so it does not write this field.
+			"field that its json tag skips containing the value": {data: jsonSelf},
+			// The limit applies to a value of a source with the limit off.
+			"node of a source with the limit off": {
+				data:      trustedNode,
+				excessive: true,
+			},
+			"node of a source with the limit off inside a map": {
+				data:      map[string]any{"cfg": trustedNode},
+				excessive: true,
+			},
+			"node of a source with the limit off inside a struct": {
+				data:      typedWrapper{X: trustedNode},
+				excessive: true,
+			},
+			"source with the limit off": {
+				data:      trustedSource,
+				excessive: true,
+			},
+			// A binary counts one node per character of its base64 text
+			// at each alias, as it does in a decoded value.
+			"node of a source with the limit off aliasing a binary": {
+				data:      binaryNodeBomb,
+				excessive: true,
+			},
+			"node aliasing a binary inside a map": {
+				data:      map[string]any{"cfg": binaryNodeBomb},
+				excessive: true,
+			},
+			"source with the limit off aliasing a binary": {
+				data:      binarySourceBomb,
+				excessive: true,
+			},
+			"node aliasing a binary a few times": {data: binaryNodeFew},
+			// A byte slice that writes its text through a method counts
+			// as one node at each use, as a string does.
+			"shared address used many times":  {data: map[string]any{"gateways": gateways}},
+			"shared key writing a short text": {data: map[string]any{"keys": keys}},
+			// The text that a MarshalYAML method writes decodes under
+			// the limit.
+			"marshaler writing text past the limit": {
+				data:      map[string]any{"a": taggedText(levels)},
 				excessive: true,
 			},
 		}

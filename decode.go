@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"cmp"
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -26,6 +25,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/decodetree"
 	"go.jacobcolvin.com/niceyaml/internal/decodewalk"
 	"go.jacobcolvin.com/niceyaml/internal/rejection"
+	"go.jacobcolvin.com/niceyaml/internal/taggedscalar"
 	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -1586,7 +1586,9 @@ func (n *Node) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, erro
 //
 // MarshalYAML returns each mapping as a [yaml.MapSlice] and each sequence
 // as a []any. It returns the value of a !!binary or a !!timestamp scalar
-// as a value of an unexported type that marshals to the tagged scalar.
+// as a value of an internal type that marshals to the tagged scalar. The
+// result shares the MapSlice or []any of each anchor among its aliases,
+// as a decode does. A change to that value thus shows at every alias.
 //
 // MarshalYAML returns the error of the decode, such as the error that
 // [Node.Err] returns for a document that did not parse. A nil Node
@@ -1612,73 +1614,120 @@ func (n *Node) MarshalYAML(ctx context.Context) (any, error) {
 // holds each key once, at the place of its first item, with the value of
 // its last item. That value is the one that a decode into a map reads.
 //
-// A []byte becomes a [binaryScalar], because go-yaml's encoder writes a
-// []byte as a sequence of integers. A [time.Time] becomes a
-// [timestampScalar], because the encoder writes a time as a string. The
-// result holds a new MapSlice for each MapSlice of v and a new []any for
-// each []any.
+// A []byte becomes a [taggedscalar.Binary], because go-yaml's encoder
+// writes a []byte as a sequence of integers. A [time.Time] becomes a
+// [taggedscalar.Timestamp], because the encoder writes a time as a
+// string. The result holds a new MapSlice for each MapSlice of v and a
+// new []any for each []any.
+//
+// A decode shares the MapSlice or []any of an anchor among its aliases.
+// The result shares the new MapSlice or []any the same way, so the
+// conversion reads each shared value once. The alias limit of
+// [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] counts the
+// uses of each shared value of the result. It thus sees the aliases of
+// the document.
 func encodable(v any) any {
+	c := encodableConverter{done: map[encodableKey]any{}}
+
+	return c.convert(v)
+}
+
+// encodableKey names a MapSlice or []any that is not empty, by the
+// address of its first item and its length. A slice and a shorter slice
+// of it share an address, so the length is part of the key. The type of
+// the address tells the two kinds of slice apart.
+//
+//nolint:unused // The fields tell the keys of the map apart.
+type encodableKey struct {
+	first any
+	len   int
+}
+
+// encodableConverter converts a value for [encodable]. It holds the
+// result for each MapSlice and []any that it converted.
+type encodableConverter struct {
+	done map[encodableKey]any
+}
+
+// convert returns the result of [encodable] for v.
+func (c *encodableConverter) convert(v any) any {
+	var key encodableKey
+
 	switch x := v.(type) {
 	case yaml.MapSlice:
-		out := make(yaml.MapSlice, 0, len(x))
-		at := make(map[string]int, len(x))
-
-		for _, item := range x {
-			name := datapath.MemberName(item.Key)
-			value := encodable(item.Value)
-
-			if i, ok := at[name]; ok {
-				out[i].Value = value
-
-				continue
-			}
-
-			at[name] = len(out)
-			out = append(out, yaml.MapItem{Key: item.Key, Value: value})
+		if len(x) == 0 {
+			return c.convertMapSlice(x)
 		}
 
-		return out
+		key = encodableKey{first: &x[0], len: len(x)}
 
 	case []any:
-		out := make([]any, len(x))
-		for i, e := range x {
-			out[i] = encodable(e)
+		if len(x) == 0 {
+			return c.convertSlice(x)
 		}
 
-		return out
+		key = encodableKey{first: &x[0], len: len(x)}
 
 	case []byte:
-		return binaryScalar(x)
+		return taggedscalar.Binary(x)
 
 	case time.Time:
-		return timestampScalar(x)
+		return taggedscalar.Timestamp(x)
 
 	default:
 		return v
 	}
+
+	if out, ok := c.done[key]; ok {
+		return out
+	}
+
+	var out any
+
+	switch x := v.(type) {
+	case yaml.MapSlice:
+		out = c.convertMapSlice(x)
+	case []any:
+		out = c.convertSlice(x)
+	}
+
+	c.done[key] = out
+
+	return out
 }
 
-// binaryScalar is the value of a !!binary scalar in the value that
-// [Node.MarshalYAML] returns.
-type binaryScalar []byte
+// convertMapSlice returns a new MapSlice that holds each key of x once,
+// as [encodable] describes.
+func (c *encodableConverter) convertMapSlice(x yaml.MapSlice) yaml.MapSlice {
+	out := make(yaml.MapSlice, 0, len(x))
+	at := make(map[string]int, len(x))
 
-// MarshalYAML returns the bytes as a !!binary scalar, in base64 and in
-// double quotes, which also hold the empty text of no bytes.
-func (b binaryScalar) MarshalYAML() ([]byte, error) {
-	return []byte(`!!binary "` + base64.StdEncoding.EncodeToString(b) + `"`), nil
+	for _, item := range x {
+		name := datapath.MemberName(item.Key)
+		value := c.convert(item.Value)
+
+		if i, ok := at[name]; ok {
+			out[i].Value = value
+
+			continue
+		}
+
+		at[name] = len(out)
+		out = append(out, yaml.MapItem{Key: item.Key, Value: value})
+	}
+
+	return out
 }
 
-// timestampScalar is the value of a !!timestamp scalar in the value that
-// [Node.MarshalYAML] returns.
-type timestampScalar time.Time
+// convertSlice returns a new []any that holds the result of [encodable]
+// for each element of x.
+func (c *encodableConverter) convertSlice(x []any) []any {
+	out := make([]any, len(x))
+	for i, e := range x {
+		out[i] = c.convert(e)
+	}
 
-// MarshalYAML returns the time as a !!timestamp scalar, in the layout of
-// [time.RFC3339Nano] and in double quotes. Inside a flow mapping,
-// go-yaml's parser does not read a plain scalar that follows a tag and
-// holds a colon as one scalar. It reads the scalar in double quotes as the
-// time.
-func (t timestampScalar) MarshalYAML() ([]byte, error) {
-	return []byte(`!!timestamp "` + time.Time(t).Format(time.RFC3339Nano) + `"`), nil
+	return out
 }
 
 // YAMLComments returns the comments of the node in a new map, each under
