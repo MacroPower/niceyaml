@@ -202,8 +202,8 @@ type selfWalker struct {
 	// The warnings of the checks, which [selfWalker.report] takes out of
 	// their results.
 	warns []error
-	// The error of a context that ended, as [selfWalker.stopped]
-	// describes. It is nil until that error stops the walk.
+	// The error of ctx, which is nil until [selfWalker.stopped] finds that
+	// ctx ended.
 	ended error
 	// The places of the values that the walk is inside of and that decode
 	// themselves, the outermost first, as [selfWalker.enter] records them.
@@ -1060,7 +1060,8 @@ func implementsSelfValidator(t reflect.Type) bool {
 // whether v passed. Rebasing the error of Validate or of a function under
 // at presumes every problem invalid, unless an Error from [Unchecked] sits
 // on its cause chain. Each such problem matches [errInvalid] whether it
-// has a location or not.
+// has a location or not. [selfWalker.report] describes the errors that the
+// presumption skips.
 func (w *selfWalker) validate(v reflect.Value, at place) bool {
 	if !w.checked.validates(v.Type()) {
 		return true
@@ -1105,8 +1106,17 @@ func (w *selfWalker) validate(v reflect.Value, at place) bool {
 // report records the errors and the warnings of a check of one value, and
 // it reports whether the value passed. It rebases each one with d under the
 // place of that value. A check with warnings alone passes, so the values
-// above it still validate. The error of a context that ended stops the
-// walk, as [selfWalker.stopped] describes.
+// above it still validate. When the context of the walk ended, report drops
+// the failure, because the walk returns the error of that context alone.
+//
+// A failure that matches the error of a context when the context of the
+// walk is live comes from a context of the check, such as a deadline of
+// its own. The walk keeps it at the place of the value and validates the
+// values that remain. That failure rebases without a declaration, so a
+// timeout is not a fault of the document, as [Invalid] reads it. The test
+// reads the whole failure, as Invalid does. Each branch of a join with one
+// such branch thus rebases without a declaration, and only a branch that
+// declares its own fault stays one.
 func (w *selfWalker) report(failure, warnings error, at place, d declaration) bool {
 	m := move{base: at.path(), ambiguous: w.ambiguous, fallback: w.fallback()}
 
@@ -1118,10 +1128,12 @@ func (w *selfWalker) report(failure, warnings error, at place, d declaration) bo
 		return true
 	}
 
-	if contextEnded(failure) {
-		w.ended = failure
-
+	if w.stopped() {
 		return false
+	}
+
+	if contextEnded(failure) {
+		d = undeclared
 	}
 
 	w.errs = append(w.errs, rebase(failure, m, d))
@@ -1129,10 +1141,10 @@ func (w *selfWalker) report(failure, warnings error, at place, d declaration) bo
 	return false
 }
 
-// stopped reports whether the walk has stopped. The walk stops when its
-// context ends, or when a Validate or a function from [WithValueCheck]
-// returns the error of a context that ended. The first such error
-// replaces every other error of the walk.
+// stopped reports whether the walk has stopped. The walk stops only when
+// its context ends, as [MultiValidator] and [Each] do. The error of that
+// context then replaces every error of the walk. An error that a check
+// returns does not stop the walk, whatever it matches.
 func (w *selfWalker) stopped() bool {
 	if w.ended == nil {
 		w.ended = w.ctx.Err()
@@ -1479,9 +1491,19 @@ func (l *DataLocator) locate(names []string, key bool) (paths.Path, *token.Token
 // that does not declare a fault, a plain I/O error included. A check that
 // can fail for reasons outside the document returns such an error inside
 // [Unchecked]. Unchecked disables the presumption, as the Errors section
-// of the package documentation describes. The Validation section describes
-// the order the values validate in, the path of each value, and where
-// each error binds.
+// of the package documentation describes.
+//
+// The decode also does not presume a fault for a result of Validate that
+// matches [context.Canceled] or [context.DeadlineExceeded], such as the
+// timeout of a lookup. It reports that result at the value and validates
+// the values that remain, as the Cancellation section describes. A join
+// with one such branch matches as a whole, so the decode does not presume
+// a fault for any problem of that join. A Validate that returns other
+// problems beside a timeout should declare each of them with [NewError] or
+// [Invalid].
+//
+// The Validation section describes the order the values validate in, the
+// path of each value, and where each error binds.
 type SelfValidator interface {
 	Validate() error
 }

@@ -3603,7 +3603,51 @@ func TestWithValueCheck(t *testing.T) {
 		assert.Equal(t, []any{"decode"}, got)
 	})
 
-	t.Run("the error of a context that ended stops the walk", func(t *testing.T) {
+	t.Run("the error of another context is a problem at its value", func(t *testing.T) {
+		t.Parallel()
+
+		addr := paths.Current().Child("addr")
+
+		// The context of the decode stays live. The check of the second
+		// service times out under a deadline of its own.
+		probe := niceyaml.WithValueCheck(func(_ context.Context, s *checkedService) error {
+			if s.Addr.IsLoopback() {
+				return niceyaml.NewError("loopback address "+s.Addr.String(), niceyaml.AtPath(addr))
+			}
+
+			if s.Addr.IsPrivate() {
+				return niceyaml.Unchecked(
+					fmt.Errorf("probe %s: %w", s.Addr, context.DeadlineExceeded), niceyaml.AtPath(addr),
+				)
+			}
+
+			return nil
+		})
+
+		_, err := yamltest.FirstDocument(t, stringtest.Input(`
+			list:
+			  - addr: 127.0.0.1
+			  - addr: 10.0.0.2
+			  - addr: 127.0.0.3
+		`)).Decode[checkedServices](t.Context(), probe)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.EqualError(t, err, stringtest.JoinLF(
+			"2:11: $.list[0].addr: loopback address 127.0.0.1",
+			"3:11: $.list[1].addr: probe 10.0.0.2: context deadline exceeded",
+			"4:11: $.list[2].addr: loopback address 127.0.0.3",
+		))
+		assert.False(t, niceyaml.IsInvalid(err))
+
+		var invalid []bool
+
+		for problem := range niceyaml.Problems(err) {
+			invalid = append(invalid, problem.IsInvalid())
+		}
+
+		assert.Equal(t, []bool{true, false, true}, invalid)
+	})
+
+	t.Run("a plain error of another context is not a fault", func(t *testing.T) {
 		t.Parallel()
 
 		var calls int
@@ -3619,6 +3663,38 @@ func TestWithValueCheck(t *testing.T) {
 			  - addr: 10.0.0.1
 			  - addr: 10.0.0.2
 		`)).Decode[checkedServices](t.Context(), canceled)
+		require.ErrorIs(t, err, context.Canceled)
+		require.EqualError(t, err, stringtest.JoinLF(
+			"2:11: $.list[0].addr: context canceled",
+			"3:11: $.list[1].addr: context canceled",
+		))
+		assert.False(t, niceyaml.IsInvalid(err))
+		assert.Equal(t, 2, calls)
+	})
+
+	t.Run("the context of the decode stops the walk", func(t *testing.T) {
+		t.Parallel()
+
+		decodeCtx, cancel := context.WithCancel(t.Context())
+		t.Cleanup(cancel)
+
+		var calls int
+
+		// The check of the first address ends the context and fails, so
+		// the walk drops that failure and does not check the second.
+		ended := niceyaml.WithValueCheck(func(ctx context.Context, a *netip.Addr) error {
+			calls++
+
+			cancel()
+
+			return niceyaml.Unchecked(fmt.Errorf("probe %s: %w", a, ctx.Err()))
+		})
+
+		_, err := yamltest.FirstDocument(t, stringtest.Input(`
+			list:
+			  - addr: 10.0.0.1
+			  - addr: 10.0.0.2
+		`)).Decode[checkedServices](decodeCtx, ended)
 		require.ErrorIs(t, err, context.Canceled)
 		require.EqualError(t, err, "context canceled")
 		assert.False(t, niceyaml.IsInvalid(err))

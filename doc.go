@@ -350,6 +350,13 @@
 // chain, so NewError inside Unchecked and Unchecked inside Invalid are
 // faults.
 //
+// The result of a SelfValidator or a WithValueCheck function is an exception.
+// When any branch of that result matches [context.Canceled] or
+// [context.DeadlineExceeded], the decode does not presume a fault for any of
+// its branches, with Unchecked or without it. Only a branch that declares a
+// fault, as one from NewError or Invalid does, stays a fault. The Cancellation
+// section describes that rule.
+//
 // A wrapper that [fmt.Errorf] builds with several %w verbs heads the branches
 // that are problems, as a join does. Each other branch reads as a sentinel.
 // The wrapper shows the text of a sentinel, but a sentinel is not a problem
@@ -1040,7 +1047,9 @@
 // that does not declare anything, a decode presumes the document at fault for
 // it. A check thus keeps its faults when it moves from one to the other. Such
 // a check wraps an I/O error in Unchecked so that IsInvalid does not report
-// it.
+// it. A decode does not presume a fault for a result that matches
+// [context.Canceled] or [context.DeadlineExceeded], as the Cancellation
+// section describes.
 //
 // A decode calls Validate on every value in the result that implements
 // SelfValidator. It then calls the functions from WithValueCheck for the type
@@ -1193,9 +1202,7 @@
 //     decode returns the rejection alone.
 //   - The self-validation walk stops. It returns the error of the context in
 //     place of the errors it found, and it gives the warnings it found to the
-//     collector of the context. A Validate method or a function from
-//     WithValueCheck that returns the error of a context that ended stops the
-//     walk the same way.
+//     collector of the context.
 //   - [MultiValidator] does not run another validator. It returns the error
 //     of the context, or the error of the validator that saw the context end.
 //   - [Each] does not run its validator on another Node. It returns the error
@@ -1203,11 +1210,31 @@
 //     where the context ended.
 //   - [NewSourceFromLayers] returns the error of the context.
 //
+// Only the context of the call stops these steps. A check can hold a deadline
+// of its own, such as one that a function from WithValueCheck derives from
+// its context, or the Timeout of a [net/http.Client]. The error of that
+// deadline matches [context.DeadlineExceeded] when the context of the call is
+// still live.
+//
+// The self-validation walk reports such an error as it reports any other
+// error of a check, under the path of the value. It then validates the values
+// that remain. MultiValidator and Each keep such an error beside the other
+// failures of their run. A caller that wants the first timeout to stop the
+// call cancels the context that it passed.
+//
+// The walk does not presume the document at fault for the result of a check
+// that matches [context.Canceled] or [context.DeadlineExceeded]. That rule
+// reads the whole result, as [Invalid] does. One such branch in a join thus
+// turns the presumption off for each problem of the join. An [Unchecked]
+// around that branch does not keep the presumption for the other branches. A
+// check that returns other problems beside a timeout should declare each of
+// them with [NewError] or Invalid, and each declared problem stays a fault.
+//
 // The error of a context that ended matches [context.Canceled] or
-// [context.DeadlineExceeded], but not [ErrDecode]. A binding does not give it
-// a location, even through a scoped Node, so its message names at most the
-// source, as in "cfg.yaml: context canceled". [Invalid] does not declare a
-// fault for it, and [IsInvalid] does not report it.
+// [context.DeadlineExceeded], but not [ErrDecode]. Invalid does not declare
+// a fault for it, and [IsInvalid] does not report it. A binding does not give
+// it a location, even through a scoped Node. The error of the context of a
+// call thus names at most the source, as in "cfg.yaml: context canceled".
 //
 // # References
 //

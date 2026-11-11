@@ -2757,41 +2757,105 @@ func TestNode_Decode_SelfValidatorContext(t *testing.T) {
 	t.Parallel()
 
 	canceled := func(context.CancelFunc) error { return context.Canceled }
+	unknown := func(context.CancelFunc) error { return niceyaml.NewError("unknown name") }
+	passes := func(context.CancelFunc) error { return nil }
 
 	// Each of the four elements runs the next step of the probe when it
-	// validates. The error of a context that ended stops the walk and
-	// comes back alone, with no location.
+	// validates. Only the context of the decode stops the walk. Its error
+	// then comes back alone, with no location. The error of any other
+	// context is a problem at the value whose Validate returned it, and
+	// the document is not at fault for it. A join with such an error
+	// loses the presumed fault of each branch, and a branch that declares
+	// its own fault keeps it.
 	tcs := map[string]struct {
 		steps        []func(cancel context.CancelFunc) error
 		cancelBefore bool
 		calls        int32
 		is           error
 		err          string
+		// Whether the document is at fault for each problem, in the order
+		// of err. It is nil when the context of the decode ended.
+		invalid []bool
 	}{
-		"a Validate returns the error of a context": {
-			steps: []func(context.CancelFunc) error{canceled},
-			calls: 1,
-			is:    context.Canceled,
-			err:   "cfg.yaml: context canceled",
+		"a Validate returns the error of another context": {
+			steps:   []func(context.CancelFunc) error{canceled},
+			calls:   4,
+			is:      context.Canceled,
+			err:     "cfg.yaml:1:3: $[0]: context canceled",
+			invalid: []bool{false},
 		},
-		"a Validate wraps the error of a context": {
+		"a Validate wraps the error of another context": {
 			steps: []func(context.CancelFunc) error{
 				func(context.CancelFunc) error {
 					return fmt.Errorf("look up name: %w", context.DeadlineExceeded)
 				},
 			},
-			calls: 1,
-			is:    context.DeadlineExceeded,
-			err:   "cfg.yaml: look up name: context deadline exceeded",
+			calls:   4,
+			is:      context.DeadlineExceeded,
+			err:     "cfg.yaml:1:3: $[0]: look up name: context deadline exceeded",
+			invalid: []bool{false},
 		},
-		"a failure before the error of a context": {
-			steps: []func(context.CancelFunc) error{
-				func(context.CancelFunc) error { return niceyaml.NewError("unknown name") },
-				canceled,
-			},
-			calls: 2,
+		"failures around the error of another context": {
+			steps: []func(context.CancelFunc) error{unknown, canceled, unknown},
+			calls: 4,
 			is:    context.Canceled,
-			err:   "cfg.yaml: context canceled",
+			err: stringtest.JoinLF(
+				"cfg.yaml:1:3: $[0]: unknown name",
+				"cfg.yaml:2:3: $[1]: context canceled",
+				"cfg.yaml:3:3: $[2]: unknown name",
+			),
+			invalid: []bool{true, false, true},
+		},
+		"a Validate joins a plain error and the error of another context": {
+			steps: []func(context.CancelFunc) error{
+				func(context.CancelFunc) error {
+					return errors.Join(
+						errors.New("unknown name"),
+						fmt.Errorf("look up name: %w", context.DeadlineExceeded),
+					)
+				},
+			},
+			calls: 4,
+			is:    context.DeadlineExceeded,
+			err: stringtest.JoinLF(
+				"cfg.yaml:1:3: $[0]: unknown name",
+				"cfg.yaml:1:3: $[0]: look up name: context deadline exceeded",
+			),
+			invalid: []bool{false, false},
+		},
+		"a Validate joins a declared fault and the error of another context": {
+			steps: []func(context.CancelFunc) error{
+				func(context.CancelFunc) error {
+					return errors.Join(
+						niceyaml.NewError("unknown name"),
+						fmt.Errorf("look up name: %w", context.DeadlineExceeded),
+					)
+				},
+			},
+			calls: 4,
+			is:    context.DeadlineExceeded,
+			err: stringtest.JoinLF(
+				"cfg.yaml:1:3: $[0]: unknown name",
+				"cfg.yaml:1:3: $[0]: look up name: context deadline exceeded",
+			),
+			invalid: []bool{true, false},
+		},
+		"a Validate joins a plain error and an Unchecked error of another context": {
+			steps: []func(context.CancelFunc) error{
+				func(context.CancelFunc) error {
+					return errors.Join(
+						errors.New("unknown name"),
+						niceyaml.Unchecked(fmt.Errorf("look up name: %w", context.DeadlineExceeded)),
+					)
+				},
+			},
+			calls: 4,
+			is:    context.DeadlineExceeded,
+			err: stringtest.JoinLF(
+				"cfg.yaml:1:3: $[0]: unknown name",
+				"cfg.yaml:1:3: $[0]: look up name: context deadline exceeded",
+			),
+			invalid: []bool{false, false},
 		},
 		"the context ends during the walk": {
 			steps: []func(context.CancelFunc) error{
@@ -2802,6 +2866,46 @@ func TestNode_Decode_SelfValidatorContext(t *testing.T) {
 				},
 			},
 			calls: 1,
+			is:    context.Canceled,
+			err:   "cfg.yaml: context canceled",
+		},
+		"a Validate wraps the error of the context that ended": {
+			steps: []func(context.CancelFunc) error{
+				func(cancel context.CancelFunc) error {
+					cancel()
+
+					return fmt.Errorf("look up name: %w", context.Canceled)
+				},
+			},
+			calls: 1,
+			is:    context.Canceled,
+			err:   "cfg.yaml: context canceled",
+		},
+		"a failure before the context ends": {
+			steps: []func(context.CancelFunc) error{
+				unknown,
+				func(cancel context.CancelFunc) error {
+					cancel()
+
+					return niceyaml.NewError("unknown name")
+				},
+			},
+			calls: 2,
+			is:    context.Canceled,
+			err:   "cfg.yaml: context canceled",
+		},
+		"the last Validate ends the context and fails": {
+			steps: []func(context.CancelFunc) error{
+				unknown,
+				passes,
+				passes,
+				func(cancel context.CancelFunc) error {
+					cancel()
+
+					return niceyaml.NewError("unknown name")
+				},
+			},
+			calls: 4,
 			is:    context.Canceled,
 			err:   "cfg.yaml: context canceled",
 		},
@@ -2838,6 +2942,19 @@ func TestNode_Decode_SelfValidatorContext(t *testing.T) {
 			require.ErrorIs(t, err, tc.is)
 			require.EqualError(t, err, tc.err)
 			assert.Equal(t, tc.calls, p.calls.Load())
+			assert.False(t, niceyaml.IsInvalid(err))
+
+			if tc.invalid != nil {
+				var invalid []bool
+
+				for problem := range niceyaml.Problems(err) {
+					invalid = append(invalid, problem.IsInvalid())
+				}
+
+				assert.Equal(t, tc.invalid, invalid)
+
+				return
+			}
 
 			bound := yamltest.RequireSourceError(t, err)
 
