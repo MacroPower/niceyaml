@@ -59,6 +59,18 @@ var (
 	// even from a check that returns it as it is.
 	ErrSelfValidateTarget = errors.New("self-validation target is nil")
 
+	// ErrNoWarnings indicates a decode under [UnknownFieldsWarn] whose
+	// context does not carry a [Warnings] collector, so the decode has
+	// nowhere to report its unknown fields. [Node.Decode],
+	// [Node.DecodeInto], and the methods that call them return it before the
+	// decode runs a function of [WithDefaults], a [Validator], or the decoder.
+	// [Node.DecodeIfPresent] returns it before it resolves its path. Each
+	// returns the error bound to the source as a [SourceError] with no
+	// location. It is a mistake of the caller, so the error comes inside
+	// [Unchecked]. [IsInvalid] does not report it, even from a check that
+	// returns it as it is.
+	ErrNoWarnings = errors.New("no Warnings collector on the context")
+
 	// ErrDecode indicates that the go-yaml decoder did not decode a node into
 	// its target. [Node.Decode] and [Node.DecodeInto] return it, and so does a
 	// [Validator] that decodes the node it checks, as a
@@ -74,11 +86,12 @@ var (
 	//     such as a struct with two fields of one name.
 	//
 	// The error of a context that ended does not match, even when an
-	// unmarshaler wraps it. Neither does a [PanicError], [ErrDecodeTarget], or
-	// [ErrExcessiveAliasing]. An error from [Unchecked] that an unmarshaler or
-	// a [CustomUnmarshaler] function returns does not match either. Neither
-	// does an error that a [Validator], a [SelfValidator], or a function from
-	// [WithValueCheck] reports about the value it checks.
+	// unmarshaler wraps it. Neither does a [PanicError], [ErrDecodeTarget],
+	// [ErrNoWarnings], or [ErrExcessiveAliasing]. An error from [Unchecked]
+	// that an unmarshaler or a [CustomUnmarshaler] function returns does not
+	// match either. Neither does an error that a [Validator], a
+	// [SelfValidator], or a function from [WithValueCheck] reports about the
+	// value it checks.
 	//
 	// Text the parser rejects matches [ErrSyntax] instead. [ErrUnknownField],
 	// [ErrWrongKind], and [ErrOverflow] label some of the rejections, and a

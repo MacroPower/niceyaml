@@ -258,6 +258,8 @@ func WithVersionOnly(p paths.Path) RegistryOption {
 // of the matchers accepts. The load asks the matchers in the order given,
 // and stops at the first that accepts the document or returns an error. A
 // matcher that returns an error fails the document with that error.
+// The load adds the warnings of each match to the warnings of a document
+// that it keeps. It drops them for a document that it skips.
 // [NewRegistry] rejects a nil matcher.
 func WithIgnore(m matcher.Matcher) RegistryOption {
 	return func(c *registryConfig) {

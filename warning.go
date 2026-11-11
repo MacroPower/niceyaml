@@ -550,7 +550,14 @@ func countText(errs, warns int) string {
 //	}
 //
 // A call whose context does not carry a collector drops its warnings,
-// whether it passes or fails.
+// whether it passes or fails. A decode under [UnknownFieldsWarn] is the
+// exception. It returns an error that wraps [ErrNoWarnings] before
+// anything runs.
+//
+// [go.jacobcolvin.com/niceyaml/manifest.Registry.Load] and
+// [go.jacobcolvin.com/niceyaml/manifest.Registry.Check] hand each warning
+// that a load keeps to the collector as well. One collector thus gathers
+// the warnings of the decodes and the loads of a program.
 //
 // Of the warnings whose rows read alike, the collector keeps one. Two rows
 // read alike when they share a source, a place, and the message that the
@@ -816,6 +823,25 @@ func withoutWarnings(ctx context.Context) context.Context {
 	return context.WithValue(ctx, warningKey{}, (*warningScope)(nil))
 }
 
+// takesWarnings reports whether a call that runs with ctx hands its
+// warnings somewhere on purpose. That holds for a ctx that carries a
+// collector. It also holds for a copy from [withoutWarnings]. Such a copy
+// drops the warnings of a decode that niceyaml runs again. It does not
+// hold for a ctx that never carried a collector.
+func takesWarnings(ctx context.Context) bool {
+	// The copy from withoutWarnings holds a nil *warningScope, which reads
+	// as a value of the key, unlike a context without the key.
+	return ctx.Value(warningKey{}) != nil
+}
+
+// isolate returns a copy of ctx whose collector is w alone, marked as the
+// context of a call. The collectors of ctx do not get the warnings of a
+// call that runs with the copy. A collector that code derives from the
+// copy with [Warnings.Context] hands its warnings to w as well.
+func isolate(ctx context.Context, w *Warnings) context.Context {
+	return context.WithValue(ctx, warningKey{}, &warningScope{w: w, call: true})
+}
+
 // runHook runs a hook of a call and returns the errors and then the
 // warnings of the result. The hooks of a call include a [Validator] and a
 // function of [WithValueCheck]. The warnings include those that the hook
@@ -825,7 +851,7 @@ func withoutWarnings(ctx context.Context) context.Context {
 func runHook(ctx context.Context, run func(ctx context.Context) error) (error, error) {
 	held := NewWarnings()
 
-	failure, warnings := splitWarnings(run(context.WithValue(ctx, warningKey{}, &warningScope{w: held, call: true})))
+	failure, warnings := splitWarnings(run(isolate(ctx, held)))
 
 	handed := held.Err()
 	if handed == nil {

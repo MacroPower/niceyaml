@@ -460,12 +460,13 @@
 //	    `-- did you mean "MenuItem"?
 //
 // A load that passes returns its warnings from [Set.Warnings], which the app
-// prints with the renderers that it uses for errors. Each problem that a
-// check of this package finds matches its sentinel with [errors.Is], such
-// as [ErrUnknownKind] or [ErrDeprecated]. Every other problem keeps the
-// errors of its cause. A value that breaks a schema, for example, matches
-// [schema.ErrViolation]. [niceyaml.IsInvalid] reports each problem that the
-// files of the user cause.
+// prints with the renderers that it uses for errors. The Warnings section
+// describes how a load also hands them to a [niceyaml.Warnings] collector.
+// Each problem that a check of this package finds matches its sentinel with
+// [errors.Is], such as [ErrUnknownKind] or [ErrDeprecated]. Every other
+// problem keeps the errors of its cause. A value that breaks a schema, for
+// example, matches [schema.ErrViolation]. [niceyaml.IsInvalid] reports each
+// problem that the files of the user cause.
 //
 // Each problem of the [*LoadError] that a load returns wraps a [*Problem],
 // which names the file, the kind, the version, and the path. A tool that
@@ -561,9 +562,36 @@
 // marks the value, so a filter accepts one rule of a schema by that path.
 // The warning about a deprecated version or kind does not wrap one.
 //
-// A load collects the warnings of its checks itself. A [niceyaml.Warnings]
-// on the context of the load thus does not receive the warnings that the
-// load reports. Inside a call of niceyaml, such as in a
-// [niceyaml.Validator], the warnings also reach the collectors of that
-// call, as [niceyaml.Warnings.Context] describes.
+// [Registry.Load] and [Registry.Check] hand each warning that they keep to the
+// [niceyaml.Warnings] collector on their context. Each warning reaches the
+// collector as the result reports it. The functions of [WithWarningFilter] have
+// kept it, a [*Problem] wraps it, and it binds in the file of the user. A
+// warning that [WithWarningsAsErrors] turns into an error does not reach the
+// collector. One collector thus gathers the warnings of every load and every
+// decode of a program:
+//
+//	warnings := niceyaml.NewWarnings()
+//	ctx = warnings.Context(ctx)
+//
+//	set, err := config.Registry.Load(ctx, input.Path(dir))
+//	if err != nil {
+//		return warnings.Report(err)
+//	}
+//
+//	for w := range warnings.All() {
+//		emit(w)
+//	}
+//
+// The result holds the same warnings, so a program that prints both the result
+// and the collector shows each warning twice. [niceyaml.Warnings.Report] shows
+// a warning once when both the error and the collector hold it.
+//
+// Each check of a load collects its warnings apart from the collectors of the
+// context. A load inside a call of niceyaml, such as in a
+// [niceyaml.Validator], thus hands each warning that it keeps to the
+// collectors of that call once, after the filters.
+//
+// [Registry.PlanMigration] and [Plan.Apply] do not hand their warnings to a
+// collector. Their warnings describe the files before and after Apply writes
+// them, so [Plan.Warnings] and [Result.Warnings] return them.
 package manifest

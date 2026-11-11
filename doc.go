@@ -609,8 +609,11 @@
 // [SelfValidateValue] collect the warnings of the checks they run. Each such
 // call gives every warning to the [Warnings] collector on its context,
 // whether the call passes or fails. Without a collector on the context, the
-// call drops its warnings. The call returns only its errors, so a call that
-// returns nil passed, and [errors.Is] on its error does not match a warning.
+// call drops its warnings. A decode under [UnknownFieldsWarn] fails instead
+// with an error that wraps [ErrNoWarnings], because nothing receives the
+// warnings that the caller asked for. The call returns only its errors, so a
+// call that returns nil passed, and [errors.Is] on its error does not match a
+// warning.
 //
 // A decode stops at the first step that fails, as the Decoding section
 // describes, so its collector gets the warnings of the steps that ran. When
@@ -696,7 +699,9 @@
 // fails ends it:
 //
 //  1. The target must be a non-nil pointer, or the decode returns an error
-//     that wraps [ErrDecodeTarget].
+//     that wraps [ErrDecodeTarget]. A decode under [UnknownFieldsWarn] must
+//     carry a [Warnings] collector on its context, or it returns an error
+//     that wraps [ErrNoWarnings].
 //  2. For a document that did not parse, the decode returns the error of its
 //     parse.
 //  3. Each [Validator] from [WithValidator] checks the node, in the order the
