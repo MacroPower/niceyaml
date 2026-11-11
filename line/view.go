@@ -548,7 +548,10 @@ func (v *View) Slice(spans ...position.Span) *View {
 // recompute the header of a diff hunk, so the result does not have one.
 // [go.jacobcolvin.com/niceyaml/diff.Result.HunksOf] returns hunks of a
 // diff with a header above each. A separator below a line labels that line
-// and not a gap, so the result keeps it.
+// and not a gap, so the result keeps it. The hunks of one side-by-side pane
+// of a diff do not pair with the other pane, so
+// [go.jacobcolvin.com/niceyaml/diff.Result.PaneHunks] returns the hunks of
+// both panes.
 //
 // The result is a [View.Slice]. Its lines keep their indices, a range from
 // the content applies to it, and decoration that a caller adds later lands

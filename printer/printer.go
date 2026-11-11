@@ -1186,10 +1186,11 @@ func (p *Printer) Print(view *line.View) string {
 // PrintSideBySide renders left and right as two panes beside each other,
 // as a side-by-side diff shows the panes that
 // [go.jacobcolvin.com/niceyaml/diff.Result.Before] and
-// [go.jacobcolvin.com/niceyaml/diff.Result.After] return. The views pair
-// their lines by index, as the panes of a diff do, so line i of left sits
-// beside line i of right. A line that one view holds and the other does
-// not gets blank rows in the other pane.
+// [go.jacobcolvin.com/niceyaml/diff.Result.After] return, or the hunks
+// of both that [go.jacobcolvin.com/niceyaml/diff.Result.PaneHunks]
+// returns. The views pair their lines by index, as the panes of a diff
+// do, so line i of left sits beside line i of right. A line that one view
+// holds and the other does not gets blank rows in the other pane.
 //
 // The rows above the first content row of a line, such as the
 // annotations above it, end on one row in both panes. A pane with fewer

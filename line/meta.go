@@ -117,9 +117,10 @@ func annotationCol(col, width int) int {
 // [Annotation.Marks] reports false for them. Below the line, a renderer
 // draws the content of such an annotation on a row after the caret rows,
 // from the first column and without carets. [View.Clip] does not center a
-// window on it. [View.Hunks] and
-// [go.jacobcolvin.com/niceyaml/diff.Result.HunksOf] do not form a hunk
-// around it. Both drop the ones above a line before they add their own, so
+// window on it. [View.Hunks],
+// [go.jacobcolvin.com/niceyaml/diff.Result.HunksOf], and
+// [go.jacobcolvin.com/niceyaml/diff.Result.PaneHunksOf] do not form a hunk
+// around it. Each drops the ones above a line before it adds its own, so
 // a separator or a header never states a gap or a count that the result
 // does not have. A caller that wants a mark of its own to look like a
 // separator gives it a kind of its own. The caller then styles that kind

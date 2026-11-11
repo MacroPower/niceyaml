@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"iter"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1143,6 +1144,382 @@ func TestDiffResult_HunksOf_Panics(t *testing.T) {
 	other := niceyaml.NewSourceFromString("a: 1\n").View()
 
 	require.Panics(t, func() { result.HunksOf(other, 1) })
+}
+
+func TestDiffResult_PaneHunks(t *testing.T) {
+	t.Parallel()
+
+	// The func numbered returns n lines, "k1: 1" through "kn: n".
+	numbered := func(n int) []string {
+		lines := make([]string, 0, n)
+		for i := 1; i <= n; i++ {
+			lines = append(lines, fmt.Sprintf("k%d: %d", i, i))
+		}
+
+		return lines
+	}
+
+	twelve := numbered(12)
+
+	tcs := map[string]struct {
+		before, after         string
+		wantBefore, wantAfter string
+		context               int
+	}{
+		// The insertion flags only rows of the after pane and the deletion
+		// only rows of the before pane, so each pane alone loses the
+		// context of the other's change.
+		"insertion and deletion keep both panes aligned": {
+			before: stringtest.LinesLF(twelve...),
+			after: stringtest.LinesLF(slices.Concat(
+				twelve[:3], []string{"new1: x", "new2: y"}, twelve[3:8], twelve[9:],
+			)...),
+			context: 1,
+			wantBefore: stringtest.JoinLF(
+				"     | @@ -3,2 +3,4 @@",
+				"   3 | k3: 3",
+				"     | ",
+				"     | ",
+				"   4 | k4: 4",
+				"     | @@ -8,3 +10,2 @@",
+				"   8 | k8: 8",
+				"   9 - k9: 9",
+				"  10 | k10: 10",
+			),
+			wantAfter: stringtest.JoinLF(
+				"     | @@ -3,2 +3,4 @@",
+				"   3 | k3: 3",
+				"   4 + new1: x",
+				"   5 + new2: y",
+				"   6 | k4: 4",
+				"     | @@ -8,3 +10,2 @@",
+				"  10 | k8: 8",
+				"     | ",
+				"  11 | k10: 10",
+			),
+		},
+		"modified lines share rows": {
+			before:  stringtest.LinesLF(twelve...),
+			after:   stringtest.LinesLF(slices.Concat(twelve[:5], []string{"k6: x", "k7: y"}, twelve[7:])...),
+			context: 0,
+			wantBefore: stringtest.JoinLF(
+				"     | @@ -6,2 +6,2 @@",
+				"   6 - k6: 6",
+				"   7 - k7: 7",
+			),
+			wantAfter: stringtest.JoinLF(
+				"     | @@ -6,2 +6,2 @@",
+				"   6 + k6: x",
+				"   7 + k7: y",
+			),
+		},
+		"changes within twice the context share a hunk": {
+			before:  stringtest.LinesLF(twelve...),
+			after:   stringtest.LinesLF(slices.Concat(twelve[:3], twelve[4:6], twelve[7:])...),
+			context: 1,
+			wantBefore: stringtest.JoinLF(
+				"     | @@ -3,6 +3,4 @@",
+				"   3 | k3: 3",
+				"   4 - k4: 4",
+				"   5 | k5: 5",
+				"   6 | k6: 6",
+				"   7 - k7: 7",
+				"   8 | k8: 8",
+			),
+			wantAfter: stringtest.JoinLF(
+				"     | @@ -3,6 +3,4 @@",
+				"   3 | k3: 3",
+				"     | ",
+				"   4 | k5: 5",
+				"   5 | k6: 6",
+				"     | ",
+				"   6 | k8: 8",
+			),
+		},
+		"no changes": {
+			before: stringtest.LinesLF(twelve...),
+			after:  stringtest.LinesLF(twelve...),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			result := yamltest.Diff(tc.before, tc.after)
+
+			left, right := result.PaneHunks(tc.context)
+			assert.Equal(t, tc.wantBefore, left.String())
+			assert.Equal(t, tc.wantAfter, right.String())
+
+			// Both results hold the same rows and keep the indices of
+			// their panes.
+			assert.Equal(t, heldRows(left), heldRows(right))
+			assertSameContent(t, result.Before(), left)
+			assertSameContent(t, result.After(), right)
+
+			// Without a gap, the headers match the unified hunks.
+			assert.Equal(t, hunkHeaders(result.Hunks(tc.context)), hunkHeaders(left))
+			assert.Equal(t, hunkHeaders(left), hunkHeaders(right))
+		})
+	}
+}
+
+func TestDiffResult_PaneHunksOf(t *testing.T) {
+	t.Parallel()
+
+	// The diff changes l2 of fourteen lines, so row 1 of each pane shows
+	// l2 and row 11 shows l12.
+	lines := make([]string, 0, 14)
+	for n := 1; n <= 14; n++ {
+		lines = append(lines, fmt.Sprintf("l%d: %d", n, n))
+	}
+
+	before := stringtest.LinesLF(lines...)
+
+	lines[1] = "l2: changed"
+	after := stringtest.LinesLF(lines...)
+
+	// The func carried returns the panes with the marks of the inputs.
+	carried := func(result *diff.Result, beforeView, afterView *line.View) (*line.View, *line.View) {
+		left, right := result.Before(), result.After()
+		result.Carry(left, beforeView, afterView)
+		result.Carry(right, beforeView, afterView)
+
+		return left, right
+	}
+
+	tcs := map[string]struct {
+		mark                  func(beforeView, afterView *line.View)
+		panes                 func(result *diff.Result, beforeView, afterView *line.View) (*line.View, *line.View)
+		wantBefore, wantAfter string
+		context               int
+	}{
+		"panes give the hunks of the changes": {
+			panes: func(result *diff.Result, _, _ *line.View) (*line.View, *line.View) {
+				return result.Before(), result.After()
+			},
+			context: 1,
+			wantBefore: stringtest.JoinLF(
+				"     | @@ -1,3 +1,3 @@",
+				"   1 | l1: 1",
+				"   2 - l2: 2",
+				"   3 | l3: 3",
+			),
+			wantAfter: stringtest.JoinLF(
+				"     | @@ -1,3 +1,3 @@",
+				"   1 | l1: 1",
+				"   2 + l2: changed",
+				"   3 | l3: 3",
+			),
+		},
+		"error in the after pane gets a hunk in both panes": {
+			mark: func(_, afterView *line.View) {
+				afterView.AnnotateLine(11, yamltest.ErrorAnnotation(position.NewSpan(5, 7), "bad"))
+			},
+			panes: carried,
+			wantBefore: stringtest.JoinLF(
+				"     | @@ -2 +2 @@",
+				"   2 - l2: 2",
+				"     | @@ -12 +12 @@",
+				"  12 | l12: 12",
+			),
+			wantAfter: stringtest.JoinLF(
+				"     | @@ -2 +2 @@",
+				"   2 + l2: changed",
+				"     | @@ -12 +12 @@",
+				"  12 | l12: 12",
+				"     |      ^^ bad",
+			),
+		},
+		"error in the before pane gets a hunk in both panes": {
+			mark: func(beforeView, _ *line.View) {
+				beforeView.AnnotateLine(9, yamltest.ErrorAnnotation(position.NewSpan(0, 3), "bad"))
+			},
+			panes: carried,
+			wantBefore: stringtest.JoinLF(
+				"     | @@ -2 +2 @@",
+				"   2 - l2: 2",
+				"     | @@ -10 +10 @@",
+				"  10 | l10: 10",
+				"     | ^^^ bad",
+			),
+			wantAfter: stringtest.JoinLF(
+				"     | @@ -2 +2 @@",
+				"   2 + l2: changed",
+				"     | @@ -10 +10 @@",
+				"  10 | l10: 10",
+			),
+		},
+		"hunks of pane hunks match the pane hunks": {
+			mark: func(_, afterView *line.View) {
+				afterView.AnnotateLine(11, yamltest.ErrorAnnotation(position.NewSpan(5, 7), "bad"))
+			},
+			panes: func(result *diff.Result, beforeView, afterView *line.View) (*line.View, *line.View) {
+				left, right := carried(result, beforeView, afterView)
+
+				return result.PaneHunksOf(left, right, 1)
+			},
+			context: 1,
+			wantBefore: stringtest.JoinLF(
+				"     | @@ -1,3 +1,3 @@",
+				"   1 | l1: 1",
+				"   2 - l2: 2",
+				"   3 | l3: 3",
+				"     | @@ -11,3 +11,3 @@",
+				"  11 | l11: 11",
+				"  12 | l12: 12",
+				"  13 | l13: 13",
+			),
+			wantAfter: stringtest.JoinLF(
+				"     | @@ -1,3 +1,3 @@",
+				"   1 | l1: 1",
+				"   2 + l2: changed",
+				"   3 | l3: 3",
+				"     | @@ -11,3 +11,3 @@",
+				"  11 | l11: 11",
+				"  12 | l12: 12",
+				"     |      ^^ bad",
+				"  13 | l13: 13",
+			),
+		},
+		// The after pane leaves out row 0, so context stops there in both
+		// panes.
+		"a row that one pane leaves out is a gap": {
+			panes: func(result *diff.Result, _, _ *line.View) (*line.View, *line.View) {
+				return result.Before(), result.After().Slice(position.NewSpan(1, 14))
+			},
+			context: 1,
+			wantBefore: stringtest.JoinLF(
+				"     | @@ -2,2 +2,2 @@",
+				"   2 - l2: 2",
+				"   3 | l3: 3",
+			),
+			wantAfter: stringtest.JoinLF(
+				"     | @@ -2,2 +2,2 @@",
+				"   2 + l2: changed",
+				"   3 | l3: 3",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			beforeView := niceyaml.NewSourceFromString(before).View()
+			afterView := niceyaml.NewSourceFromString(after).View()
+			result := diff.Diff(beforeView, afterView)
+
+			if tc.mark != nil {
+				tc.mark(beforeView, afterView)
+			}
+
+			left, right := tc.panes(result, beforeView, afterView)
+			gotBefore, gotAfter := result.PaneHunksOf(left, right, tc.context)
+
+			assert.Equal(t, tc.wantBefore, gotBefore.String())
+			assert.Equal(t, tc.wantAfter, gotAfter.String())
+		})
+	}
+}
+
+func TestDiffResult_PaneHunksOf_KeepsClip(t *testing.T) {
+	t.Parallel()
+
+	long := "k: " + strings.Repeat("x", 60)
+	result := yamltest.Diff(stringtest.LinesLF("a: 1", long), stringtest.LinesLF("a: 2", long))
+
+	left, right := result.Before().Clip(20), result.After().Clip(30)
+	gotBefore, gotAfter := result.PaneHunksOf(left, right, 1)
+
+	assert.Equal(t, 20, gotBefore.ClipCols())
+	assert.Equal(t, 30, gotAfter.ClipCols())
+}
+
+func TestDiffResult_PaneHunks_HeldLines(t *testing.T) {
+	t.Parallel()
+
+	// Each side holds lines 1-2 and 6-7 of a seven-line file.
+	sevenLines := stringtest.LinesLF(
+		"a: 1",
+		"b: 2",
+		"c: 3",
+		"d: 4",
+		"e: 5",
+		"f: 6",
+		"g: 7",
+	)
+	gapped := []position.Span{position.NewSpan(0, 2), position.NewSpan(5, 7)}
+
+	tcs := map[string]struct {
+		after   string
+		context int
+		want    []string
+	}{
+		// The panes pair line 2 with line 2 and line 6 with line 6, so
+		// the gap splits them between two rows.
+		"changes on both sides of the gap": {
+			after: stringtest.LinesLF(
+				"a: 1",
+				"b: 9",
+				"c: 3",
+				"d: 4",
+				"e: 5",
+				"f: 9",
+				"g: 7",
+			),
+			want: []string{"@@ -2 +2 @@", "@@ -6 +6 @@"},
+		},
+		"context stops at the gap": {
+			after: stringtest.LinesLF(
+				"a: 1",
+				"b: 9",
+				"c: 3",
+				"d: 4",
+				"e: 5",
+				"f: 6",
+				"g: 8",
+			),
+			context: 1,
+			want:    []string{"@@ -1,2 +1,2 @@", "@@ -6,2 +6,2 @@"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			beforeView := niceyaml.NewSourceFromString(sevenLines).View().Slice(gapped...)
+			afterView := niceyaml.NewSourceFromString(tc.after).View().Slice(gapped...)
+
+			left, right := diff.Diff(beforeView, afterView).PaneHunks(tc.context)
+			assert.Equal(t, tc.want, hunkHeaders(left))
+			assert.Equal(t, tc.want, hunkHeaders(right))
+		})
+	}
+}
+
+func TestDiffResult_PaneHunksOf_Panics(t *testing.T) {
+	t.Parallel()
+
+	result := yamltest.Diff("a: 1\n", "a: 2\n")
+
+	tcs := map[string]struct {
+		before, after *line.View
+	}{
+		"panes swapped":    {before: result.After(), after: result.Before()},
+		"unified view":     {before: result.Unified(), after: result.After()},
+		"view of an input": {before: result.Before(), after: niceyaml.NewSourceFromString("a: 2\n").View()},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			require.Panics(t, func() { result.PaneHunksOf(tc.before, tc.after, 1) })
+		})
+	}
 }
 
 func TestDiffResult_HunksKeepUnifiedIndices(t *testing.T) {
@@ -3145,6 +3522,17 @@ func hunkHeaders(view *line.View) []string {
 	}
 
 	return headers
+}
+
+// heldRows returns the index of each line that view holds, in order.
+func heldRows(view *line.View) []int {
+	var rows []int
+
+	for i := range view.All() {
+		rows = append(rows, i)
+	}
+
+	return rows
 }
 
 // assertSameContent asserts that got is a view over the content unified
