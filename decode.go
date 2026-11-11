@@ -1456,7 +1456,7 @@ func decodeAtWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, 
 // A scalar decodes into a string whatever its type, so a Decode[string]
 // reads a discriminator such as kind. A number decodes into a string in
 // its canonical spelling, so 1.10 reads as "1.1" and 0x10 as "16".
-// [go.jacobcolvin.com/niceyaml/schema/matcher.Text] hands its function
+// [go.jacobcolvin.com/niceyaml/matcher.Text] hands its function
 // the text as the document wrote it, and the String method of
 // [Node.AST] gives the YAML text of any node.
 //
@@ -1808,7 +1808,7 @@ func (n *Node) DecodeAt[T any](ctx context.Context, path paths.Path, opts ...Dec
 // sets that pointer or interface to nil. A path is absent when it looks
 // up a key in a value that is not a mapping, or an index past the end of
 // a sequence. Every path with a selector in a document without content
-// is absent too. [go.jacobcolvin.com/niceyaml/schema/matcher.Exists]
+// is absent too. [go.jacobcolvin.com/niceyaml/matcher.Exists]
 // finds such paths absent as well.
 //
 // The decode runs on the scoped Node and drops it, as [Node.DecodeAt]

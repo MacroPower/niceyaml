@@ -1,10 +1,11 @@
 // Package filepaths matches file paths against glob patterns.
 //
-// This package wraps [github.com/bmatcuk/doublestar/v4] so the schema
-// matchers and the SchemaStore catalog agree on pattern syntax. Doublestar
-// patterns add `**` for recursive directory matching and `{a,b}`
-// alternatives to what [path/filepath.Match] offers. They do not support
-// extglob groups, so `!(config)` matches only its literal text.
+// This package wraps [github.com/bmatcuk/doublestar/v4] so the file path
+// matchers, the input patterns, and the SchemaStore catalog agree on
+// pattern syntax. Doublestar patterns add `**` for recursive directory
+// matching and `{a,b}` alternatives to what [path/filepath.Match]
+// offers. They do not support extglob groups, so `!(config)` matches
+// only its literal text.
 //
 // # Pattern Matching
 //

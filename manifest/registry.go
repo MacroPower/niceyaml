@@ -11,9 +11,9 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/encoder"
 	"go.jacobcolvin.com/niceyaml/internal/nilness"
+	"go.jacobcolvin.com/niceyaml/matcher"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/schema"
-	"go.jacobcolvin.com/niceyaml/schema/matcher"
 )
 
 // Registry holds the kinds of an app: their versions, schemas, and steps,

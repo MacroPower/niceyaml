@@ -8,10 +8,10 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/matcher"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/schema"
-	"go.jacobcolvin.com/niceyaml/schema/matcher"
 )
 
 // files holds the documents of the café and the schemas they use.

@@ -6,7 +6,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/nilness"
-	"go.jacobcolvin.com/niceyaml/schema/matcher"
+	"go.jacobcolvin.com/niceyaml/matcher"
 )
 
 // guarded applies a [Resolver] only to documents that a
@@ -44,7 +44,7 @@ type guarded struct {
 // decline. When every resolver declines a document, the error of the
 // lookup then lists a line such as `applies only when $.kind is
 // "Deployment"`. Each matcher of
-// [go.jacobcolvin.com/niceyaml/schema/matcher] describes itself, except
+// [go.jacobcolvin.com/niceyaml/matcher] describes itself, except
 // [matcher.Func], and [matcher.Described] gives any matcher a
 // description. When reads the description of m as it builds the guard,
 // not for each document. A matcher without a description declines with

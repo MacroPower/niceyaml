@@ -90,7 +90,7 @@ type contentMatcher[T Scalar] struct {
 // limit for its source. It refuses such a document before it decodes
 // anything, as a decode does. The error marks the document at fault, as
 // [niceyaml.IsInvalid] describes, and it matches
-// [go.jacobcolvin.com/niceyaml/schema.ErrExcessiveAliasing].
+// [niceyaml.ErrExcessiveAliasing].
 //
 // For several conditions, use [All] (AND) or [Any] (OR):
 //

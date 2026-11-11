@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
-	"go.jacobcolvin.com/niceyaml/schema/matcher"
+	"go.jacobcolvin.com/niceyaml/matcher"
 )
 
 func TestDescribed(t *testing.T) {

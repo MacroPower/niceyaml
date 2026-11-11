@@ -7,20 +7,17 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 )
 
-// Matcher determines whether a schema applies to a document.
+// Matcher reports whether a YAML document meets a condition.
 //
-// A Matcher guards a [go.jacobcolvin.com/niceyaml/schema.Resolver] through
-// [go.jacobcolvin.com/niceyaml/schema.When]. The guarded resolver reports
-// [go.jacobcolvin.com/niceyaml/schema.ErrNoMatch] for a document that the
-// Matcher declines, so a registry moves on to its next resolver. It
-// returns the error of a Matcher that cannot decide, so the registry stops
-// at the document.
+// [go.jacobcolvin.com/niceyaml/schema.When] guards a schema resolver with
+// a Matcher, [go.jacobcolvin.com/niceyaml/manifest.Claim] routes a
+// document to a kind with one, and
+// [go.jacobcolvin.com/niceyaml/manifest.WithIgnore] skips documents with
+// one. Each of them fails the document with the error of a Matcher that
+// cannot decide.
 //
 // A Matcher can describe the documents that it accepts by implementing
-// [Describer]. [go.jacobcolvin.com/niceyaml/schema.When] gives that
-// description as its reason when the Matcher declines a document. So the
-// error of a registry that no resolver applies to says what each guard
-// expected. Each matcher of this package describes itself, except
+// [Describer]. Each matcher of this package describes itself, except
 // [Func]. [Described] gives any Matcher a description.
 //
 // See [Content], [Text], [Exists], [FilePath], [Any], [All], [Described],
@@ -67,9 +64,15 @@ func (f Func) Match(ctx context.Context, doc *niceyaml.Node) (bool, error) {
 }
 
 // Describer describes the documents that a [Matcher] accepts.
-// [go.jacobcolvin.com/niceyaml/schema.When] reads the description of its
-// Matcher through Describer and gives it as the reason of each decline,
-// as the Descriptions section of the package documentation describes.
+//
+// [All] and [Any] read the descriptions of their matchers to build their
+// own. Of the APIs outside this package that take a Matcher, only
+// [go.jacobcolvin.com/niceyaml/schema.When] reads its description. It
+// gives the description as the reason of each decline, so the error of a
+// [go.jacobcolvin.com/niceyaml/schema.Registry] that no resolver applies
+// to says what each guard expected.
+// [go.jacobcolvin.com/niceyaml/manifest.Claim] and
+// [go.jacobcolvin.com/niceyaml/manifest.WithIgnore] do not read it.
 //
 // See [Content] for an implementation.
 type Describer interface {

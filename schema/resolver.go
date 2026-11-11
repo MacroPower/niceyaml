@@ -352,7 +352,7 @@ func (r Ref) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // document is never nil, so a resolver reads it without checking. A [Ref]
 // and a [*Schema] are resolvers that ignore the document, and each always
 // names its own schema. [When] guards any resolver with a
-// [go.jacobcolvin.com/niceyaml/schema/matcher.Matcher].
+// [go.jacobcolvin.com/niceyaml/matcher.Matcher].
 //
 // See [ResolverFunc], [Ref], [Schema], [Directive], [*Registry], and
 // [go.jacobcolvin.com/niceyaml/schema/schemastore.Store] for

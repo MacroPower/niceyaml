@@ -6,8 +6,8 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/matcher"
 	"go.jacobcolvin.com/niceyaml/paths"
-	"go.jacobcolvin.com/niceyaml/schema/matcher"
 )
 
 func TestAny(t *testing.T) {

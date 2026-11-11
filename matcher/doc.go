@@ -1,16 +1,23 @@
-// Package matcher provides predicates that decide whether a schema applies
-// to a YAML document.
+// Package matcher provides predicates over YAML documents. A [Matcher]
+// reports whether a document meets a condition, such as a field that holds
+// a given value or a source file whose path matches a pattern.
 //
-// A [Matcher] guards a [go.jacobcolvin.com/niceyaml/schema.Resolver] through
-// [go.jacobcolvin.com/niceyaml/schema.When]. The guarded resolver names its
-// schema only for documents that the matcher accepts. It reports
-// [go.jacobcolvin.com/niceyaml/schema.ErrNoMatch] for the rest, so a
-// [go.jacobcolvin.com/niceyaml/schema.Registry] moves on to its next
-// resolver. Matchers that cannot decide return an error. The causes
-// include a context that ended, an alias in the document that the path
-// cannot follow, and a file path pattern without a base directory. The
-// registry then stops at that document rather than routing it to a later
-// resolver.
+// Several APIs of the module take a Matcher:
+//
+//   - [go.jacobcolvin.com/niceyaml/schema.When] guards a schema resolver,
+//     which then names its schema only for the documents that the matcher
+//     accepts.
+//   - [go.jacobcolvin.com/niceyaml/manifest.Claim] loads each document
+//     that the matcher accepts as a kind, when the document does not have a
+//     kind field.
+//   - [go.jacobcolvin.com/niceyaml/manifest.WithIgnore] skips each document
+//     that the matcher accepts.
+//
+// A matcher that cannot decide returns an error. The causes include a
+// context that ended, an alias in the document that the path cannot
+// follow, and a file path pattern without a base directory. Each of these
+// APIs fails the document with that error rather than treating it as a
+// decline.
 //
 // # Matching Strategies
 //
@@ -33,7 +40,7 @@
 // Match documents by their source file using [FilePath], which tests the
 // file path of the document against a glob pattern. [FilePath] suits
 // directory conventions in which the location of a file implies its
-// schema.
+// schema or its kind.
 //
 // A relative pattern such as "configs/*.yaml" applies under a base
 // directory. Documents read from disk carry the absolute path of their
@@ -57,8 +64,8 @@
 // # Composing Matchers
 //
 // Combine matchers with [All] (AND) and [Any] (OR) to build conditions from
-// several matchers. For example, a schema for a Kubernetes resource applies
-// to one pair of apiVersion and kind:
+// several matchers. For example, a matcher for a Kubernetes Deployment
+// accepts one pair of apiVersion and kind:
 //
 //	apiVersion := paths.Doc().Child("apiVersion")
 //	kind := paths.Doc().Child("kind")
@@ -67,16 +74,31 @@
 //	    matcher.Content(kind, "Deployment"),
 //	)
 //
-// # Descriptions
+// # Schema Routing
 //
-// A matcher describes the documents that it accepts through [Describer].
-// [go.jacobcolvin.com/niceyaml/schema.When] gives that description as its
-// reason when the matcher declines a document. So the error of a
-// registry that no resolver applies to says what each guard expected:
+// A resolver that [go.jacobcolvin.com/niceyaml/schema.When] guards reports
+// [go.jacobcolvin.com/niceyaml/schema.ErrNoMatch] for each document that
+// the matcher declines, so a
+// [go.jacobcolvin.com/niceyaml/schema.Registry] moves on to its next
+// resolver. When the matcher returns an error, the registry stops at that
+// document rather than routing it to a later resolver.
+//
+// When the matcher declines a document,
+// [go.jacobcolvin.com/niceyaml/schema.When] gives the description of the
+// matcher as its reason, as the Descriptions section explains. So the
+// error of a registry that no resolver applies to says what each guard
+// expected:
 //
 //	app.yaml: no matching schema
 //	├── no schema directive
 //	└── applies only when $.kind is "Deployment"
+//
+// # Descriptions
+//
+// A matcher describes the documents that it accepts through [Describer].
+// Of the APIs outside this package that take a matcher, only
+// [go.jacobcolvin.com/niceyaml/schema.When] reads the description, as the
+// Schema Routing section shows.
 //
 // Each matcher of this package builds its description from its
 // arguments:
