@@ -403,10 +403,11 @@ type move struct {
 	// point an error at its base. A detail takes the base of the problem it
 	// explains.
 	movesOnly bool
-	// The move comes from a binding in a layer of a merged [Source], so its
-	// base replaces the root of a `$` path below it. A Rebase leaves such a
-	// path as it is.
-	reroots bool
+	// The move comes from a binding in a layer of a merged [Source]. Its
+	// base is the path of the bound error as that layer holds it, so the
+	// base replaces the `$` path below it. A Rebase leaves such a path as
+	// it is.
+	replaces bool
 	// The base names the entries of several keys of a decoded map, so it does
 	// not resolve in any document. [SourceError.Unresolved] reports
 	// ErrAmbiguousPath for every error below.
@@ -1172,16 +1173,15 @@ func (e *Error) locus() locus {
 	return locus{loc: e.loc, path: e.path, hasPath: e.hasPath}
 }
 
-// apply returns l moved as m moves the errors below it. A rerooting base
-// replaces the `$` root, because the base is where a layer holds the merged
-// value. An only fallback stands in for the path, so m alone sets
-// ambiguous.
+// apply returns l moved as m moves the errors below it. A base that
+// replaces stands in place of the path of l, because the base is that
+// path as a layer holds it. An only fallback stands in for the path, so m
+// alone sets ambiguous.
 func (m *move) apply(l locus) locus {
 	l.ambiguous = l.ambiguous || m.ambiguous
 
-	if m.reroots && l.hasPath {
-		rel, _ := l.path.CutPrefix(paths.Doc())
-		l.path = m.base.Join(rel)
+	if m.replaces && l.hasPath {
+		l.path = m.base
 
 		return l
 	}
@@ -1209,7 +1209,7 @@ func (m *move) at() locus {
 
 // then returns the move of a child below m and then inner, with the bases,
 // fallbacks, and marks joined as [move.apply] joins them from below. A nil
-// inner does not move anything, and the result never reroots.
+// inner does not move anything, and the result never replaces.
 func (m *move) then(inner *move) *move {
 	if inner == nil {
 		return m
@@ -1347,10 +1347,11 @@ type location struct {
 	rng        *position.Range
 	tk         *token.Token
 	near       *paths.Path
-	// The path of the merged root in the document of the layer, when the
-	// location resolved in a layer of a [NewSourceFromLayers] document.
-	layerRoot *paths.Path
-	pos       position.Position
+	// The path of the error as the layer that the location resolved in
+	// holds it. It is set when the location resolved in a layer of a
+	// [NewSourceFromLayers] document and the error carries a path.
+	held *paths.Path
+	pos  position.Position
 }
 
 // highlight returns the ranges to highlight for l in lines, as
@@ -1393,8 +1394,9 @@ func locate(b binder, l locus) (location, *Node, error) {
 }
 
 // locateBelow resolves the path of l, or else the first fallback path
-// that resolves, which becomes near unless it equals the path. When every
-// path fails to resolve, it returns the result of the first path it tried.
+// that resolves, which becomes near unless it equals the path. Near is
+// that path as the node it resolved in holds it. When every path fails to
+// resolve, it returns the result of the first path it tried.
 func locateBelow(b binder, l locus) (location, *Node, error) {
 	var (
 		loc   location
@@ -1404,7 +1406,7 @@ func locateBelow(b binder, l locus) (location, *Node, error) {
 	)
 
 	if !l.fallback.only {
-		loc, node, err = locatePath(b, l.path)
+		loc, node, _, err = locatePath(b, l.path, l)
 		if err == nil {
 			return loc, node, nil
 		}
@@ -1413,10 +1415,10 @@ func locateBelow(b binder, l locus) (location, *Node, error) {
 	}
 
 	for _, path := range l.fallback.at {
-		floc, fnode, ferr := locatePath(b, path)
+		floc, fnode, held, ferr := locatePath(b, path, l)
 		if ferr == nil {
 			if floc.near == nil && !path.Equal(l.path) {
-				floc.near = &path
+				floc.near = &held
 			}
 
 			return floc, fnode, nil
@@ -1432,31 +1434,42 @@ func locateBelow(b binder, l locus) (location, *Node, error) {
 
 // locatePath resolves path, which starts at `$`, in the document b binds
 // with, or the one document of the source when b routes. A merged document
-// resolves it in a layer, whose node belongs to another source than b.
-func locatePath(b binder, path paths.Path) (location, *Node, error) {
+// resolves it in a layer, whose node belongs to another source than b. It
+// picks that layer for the path of l, the location of the error, as
+// [layering.layer] describes. The location then holds the path of l as
+// that layer holds it. LocatePath also returns path as the node it returns
+// holds it.
+func locatePath(b binder, path paths.Path, l locus) (location, *Node, paths.Path, error) {
 	node := b.node
 
 	if node == nil && b.route {
 		doc, err := b.src.single()
 		if err != nil {
-			return location{}, nil, fmt.Errorf("%w: %s: %w", ErrPathNeedsDocument, path, err)
+			return location{}, nil, path, fmt.Errorf("%w: %s: %w", ErrPathNeedsDocument, path, err)
 		}
 
 		node = doc
 	}
 
 	if node == nil {
-		return location{}, nil, fmt.Errorf("%w: %s", ErrPathNeedsDocument, path)
+		return location{}, nil, path, fmt.Errorf("%w: %s", ErrPathNeedsDocument, path)
 	}
 
-	layer, base, path := node.source.layers.layer(node, path)
-
-	loc, err := layer.node.resolveLocation(path)
-	if layer.node != node {
-		loc.layerRoot = &base
+	through := path
+	if l.hasPath {
+		through = l.path
 	}
 
-	return loc, layer.node, err
+	layer, held := node.source.layers.layer(node, path, through)
+	at := held(path)
+
+	loc, err := layer.node.resolveLocation(at)
+	if layer.node != node && l.hasPath {
+		own := held(l.path)
+		loc.held = &own
+	}
+
+	return loc, layer.node, at, err
 }
 
 // locateMerged resolves the position at in node, a merged document. The
@@ -1468,15 +1481,18 @@ func locatePath(b binder, path paths.Path) (location, *Node, error) {
 func locateMerged(b binder, node *Node, at position.Position, l locus) (location, *Node, error) {
 	b.node = node
 
-	if path, ok := node.tokenPathAt(at); ok {
-		return locatePath(b, path)
+	path, ok := node.tokenPathAt(at)
+	if !ok && l.hasPath && !l.ambiguous {
+		path, ok = l.path, true
 	}
 
-	if l.hasPath && !l.ambiguous {
-		return locatePath(b, l.path)
+	if !ok {
+		return location{}, node, errUnlocated
 	}
 
-	return location{}, node, errUnlocated
+	loc, layer, _, err := locatePath(b, path, l)
+
+	return loc, layer, err
 }
 
 // SourceError is an error bound to the [*Source] it occurred in. Binding
@@ -2593,14 +2609,18 @@ func newSourceError(err error, b binder) *SourceError {
 		}
 
 		// The path of the error reads from the value the layers hold.
-		// The binding reports it from the root of the document of the
-		// layer it bound in, as a bind through that layer would.
-		if root := e.loc.layerRoot; root != nil && found.hasPath && !root.IsRoot() {
-			e.err = &Error{err: e.err, move: &move{base: *root, movesOnly: true, reroots: true}}
+		// The binding reports it as the layer it bound in holds it, as a
+		// bind through that layer would.
+		path := found.path
+
+		if held := e.loc.held; held != nil && !held.Equal(path) {
+			e.err = &Error{err: e.err, move: &move{base: *held, movesOnly: true, replaces: true}}
+			path = *held
 		}
 
 		// No error binds in a derived Source, which is no file of the caller.
-		relocated = e.relocateAll(found.path, found.hasPath)
+		// A derived layer takes the path as its text holds it.
+		relocated = e.relocateAll(path, found.hasPath)
 
 	case *SourceError:
 		// The error wraps a binding, so it takes over what the binding

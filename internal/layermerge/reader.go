@@ -224,11 +224,13 @@ func (r *Reader) content(content ast.Node, ref bool) (*Value, error) {
 	case *ast.SequenceNode:
 		v.kind = kindSequence
 
-		for _, elem := range n.Values {
+		for i, elem := range n.Values {
 			item, err := r.value(elem, ref)
 			if err != nil {
 				return nil, err
 			}
+
+			item.index = i
 
 			v.items = append(v.items, item)
 		}

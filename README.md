@@ -174,7 +174,7 @@ The resolvers of a registry run in order, and the first one that does not declin
 
 - [examples/layers](examples/layers)
 
-[`niceyaml.NewSourceFromLayers`][niceyaml.NewSourceFromLayers] merges several files into one document, such as a base file with the file of one environment over it. The example merges two files and traces each value to the file that set it. It then validates the merged document, overrides a value from the environment, skips a missing optional file, and decodes the result over defaults. The docs of `NewSourceFromLayers` list the merge rules.
+[`niceyaml.NewSourceFromLayers`][niceyaml.NewSourceFromLayers] merges several files into one document, such as a base file with the file of one environment over it. The example merges two files and traces each value to the file that set it. It appends a list of one file to the list of the other. It then validates the merged document, overrides a value from the environment, skips a missing optional file, and decodes the result over defaults. The docs of `NewSourceFromLayers` list the merge rules.
 
 ### Edits
 
