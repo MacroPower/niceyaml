@@ -210,8 +210,6 @@ func JSONMarshalers(enabled bool) Marshaler {
 //
 //	data, err := encoder.Marshal(ctx, cfg, encoder.WithMarshalers(cidr, encoder.JSONMarshalers(true)))
 //
-// A function that the marshalers give a type applies ahead of a
-// [yaml.CustomMarshaler] for that type from [WithYAMLOptions].
 // WithMarshalers copies the slice ms, so the option keeps its marshalers
 // when the caller changes the slice it passed.
 func WithMarshalers(ms ...Marshaler) Option {

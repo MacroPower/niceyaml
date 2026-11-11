@@ -1085,7 +1085,7 @@ func encodedString(ctx context.Context, s string, key, flow bool) string {
 	var opts []encoder.Option
 
 	if flow {
-		opts = append(opts, encoder.WithYAMLOptions(yaml.Flow(true)))
+		opts = append(opts, encoder.WithFlow(true))
 	}
 
 	var v any = []any{s}

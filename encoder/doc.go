@@ -29,8 +29,11 @@
 //
 //	data, err := encoder.Marshal(ctx, nodes)
 //
-// [Marshal] and [New] take the same options, which name the go-yaml
-// encoder settings this package supports. [Pretty] selects the layout that
+// [Marshal] and [New] take the same options. Each encoder setting that
+// this package supports has an option of its own, such as [WithIndent] or
+// [WithFlow]. The encoder rewrites parts of the go-yaml output so that the
+// YAML reads back as the value it encoded, and it takes only settings
+// whose effect on that output it knows. [Pretty] selects the layout that
 // prettier writes. That layout indents by two spaces, indents each sequence
 // below its parent key, and starts a sequence at the root of a document in
 // the first column. Options apply in order, so an option after [Pretty]
@@ -44,10 +47,9 @@
 // package and the migration steps of the manifest package take the same
 // marshalers.
 //
-// [WithYAMLOptions] passes go-yaml options through for settings that do
-// not have an option of their own. [WithYAMLComments] adds comments to
-// each document by YAML path. It skips a path of keys and indexes that
-// does not select a node in a document.
+// [WithYAMLComments] adds comments to each document by YAML path. It
+// skips a path of keys and indexes that does not select a node in a
+// document.
 //
 // Each error names its cause with a sentinel, so a caller sorts failures
 // with [errors.Is] and does not name the error types of go-yaml. A value

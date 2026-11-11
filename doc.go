@@ -2192,14 +2192,13 @@
 // go-yaml's comment map,
 // [go.jacobcolvin.com/niceyaml/encoder.WithYAMLComments] takes it, and a
 // decode under [WithYAMLOrderedMaps] yields its ordered map. The encoder
-// settings that do not have an option of their own pass through
-// [go.jacobcolvin.com/niceyaml/encoder.WithYAMLOptions], which takes
-// go-yaml's own options.
+// takes only named options too, because it rewrites the output of go-yaml
+// and a go-yaml option that it cannot inspect can undo that work.
 //
 // A test in this package checks every exported declaration. It fails when a
 // declaration names a go-yaml type outside the allowlist of the test. It also
-// fails when a declaration names the encoder option type or the comment map
-// and its identifier lacks the YAML prefix.
+// fails when a declaration names the comment map and its identifier lacks
+// the YAML prefix.
 //
 // The [go.jacobcolvin.com/niceyaml/schema] package follows the same rule for
 // the JSON Schema library it builds on.

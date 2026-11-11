@@ -4346,22 +4346,22 @@ func TestNode_MarshalYAML(t *testing.T) {
 		},
 		"timestamp scalar in a flow mapping": {
 			input: "a: !!timestamp 2001-12-14\n",
-			enc:   []encoder.Option{encoder.WithYAMLOptions(yaml.Flow(true))},
+			enc:   []encoder.Option{encoder.WithFlow(true)},
 			want:  "{a: !!timestamp \"2001-12-14T00:00:00Z\"}\n",
 		},
 		"timestamp scalar before another key of a flow mapping": {
 			input: "created: !!timestamp 2001-12-14\nname: x\n",
-			enc:   []encoder.Option{encoder.WithYAMLOptions(yaml.Flow(true))},
+			enc:   []encoder.Option{encoder.WithFlow(true)},
 			want:  "{created: !!timestamp \"2001-12-14T00:00:00Z\", name: x}\n",
 		},
 		"timestamp scalar in a flow sequence of a flow mapping": {
 			input: "a: [!!timestamp 2001-12-14]\n",
-			enc:   []encoder.Option{encoder.WithYAMLOptions(yaml.Flow(true))},
+			enc:   []encoder.Option{encoder.WithFlow(true)},
 			want:  "{a: [!!timestamp \"2001-12-14T00:00:00Z\"]}\n",
 		},
 		"binary scalar in a flow mapping": {
 			input: "a: !!binary aGk=\nname: x\n",
-			enc:   []encoder.Option{encoder.WithYAMLOptions(yaml.Flow(true))},
+			enc:   []encoder.Option{encoder.WithFlow(true)},
 			want:  "{a: !!binary \"aGk=\", name: x}\n",
 		},
 		"empty document": {

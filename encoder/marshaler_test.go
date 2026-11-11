@@ -235,16 +235,6 @@ func TestCustomMarshaler(t *testing.T) {
 			))},
 			want: "o: method\n",
 		},
-		"ahead of a function from WithYAMLOptions": {
-			input: tenNet,
-			opts: []encoder.Option{
-				encoder.WithMarshalers(cidr),
-				encoder.WithYAMLOptions(yaml.CustomMarshaler(func(net.IPNet) ([]byte, error) {
-					return []byte("yaml"), nil
-				})),
-			},
-			want: "10.0.0.0/8\n",
-		},
 		"an error of the function": {
 			input: tenNet,
 			opts: []encoder.Option{encoder.WithMarshalers(encoder.CustomMarshaler(
