@@ -78,7 +78,7 @@ func TestReader_Read(t *testing.T) {
 		cancel()
 
 		doc := yamltest.FirstDocument(t, "a: 1\n")
-		r := layermerge.Reader{Ctx: ctx, Resolver: doc.Resolver()}
+		r := layermerge.Reader{Ctx: ctx, Resolver: doc.DocumentResolver()}
 
 		_, err := r.Read(doc.AST())
 		require.ErrorIs(t, err, context.Canceled)

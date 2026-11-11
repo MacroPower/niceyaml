@@ -146,7 +146,7 @@ func render(ctx context.Context, v any, step int, seqIndent bool, ms []encoder.M
 	// it, as a move into a flow collection writes a string without quotes
 	// of its own. A flow collection cannot hold a block scalar, so the
 	// encoder writes a string with a line break in double quotes.
-	g := newGraph(body, enc.node.Resolver(), enc.keyReader(), enc.enclosedAliases(), 0)
+	g := newGraph(body, enc.node.DocumentResolver(), enc.keyReader(), enc.enclosedAliases(), 0)
 	r := rendered{
 		value: g.root, tag: g.tag, flow: enc.flowRunOf(body, 0, &flowStyle{encoded: true}).text,
 		refused: append(refused, found...),

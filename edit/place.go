@@ -146,7 +146,7 @@ func (d *Doc) aliasProblem(err error) (*aliasError, bool) {
 
 	alias := problem.Alias
 
-	_, derr := d.node.Resolver().Deref(alias)
+	_, derr := d.node.DocumentResolver().Deref(alias)
 	if derr == nil {
 		return nil, false
 	}
@@ -254,7 +254,7 @@ func (d *Doc) walk(
 	visit func(p *place, cur ast.Node) bool,
 ) (*place, error) {
 	p := &place{path: path, root: path.IsRoot(), index: -1}
-	res := d.node.Resolver()
+	res := d.node.DocumentResolver()
 	finder := res.EntryFinder()
 	cur := d.node.AST()
 
@@ -452,7 +452,7 @@ func (d *Doc) enclosedAliases() map[*ast.AliasNode]bool {
 // problem of another alias that the text does not resolve, as
 // [unresolved] gives it.
 func (d *Doc) readValue(node ast.Node) (ast.Node, []ast.Node, error) {
-	res := d.node.Resolver()
+	res := d.node.DocumentResolver()
 	content := astnode.Converted(node)
 
 	var (

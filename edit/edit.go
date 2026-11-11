@@ -517,10 +517,14 @@ type Removal struct {
 // [niceyaml.IsInvalid] reports the error of a document that does not hold
 // a value. The error of a nil doc or a Node below the root matches
 // [ErrUsage] instead. So does the error of a path of [WithProtected] that
-// is not a `$` path of names and indexes, which fails New too. New reads
-// the document as go-yaml reads it. It refuses some documents that
-// go-yaml's decoder reads otherwise than YAML does, with an error that
-// matches [ErrMisread]. The Supported YAML section of the package
+// is not a `$` path of names and indexes, which fails New too. The error
+// of a Node below the root also matches [niceyaml.ErrScopedNode]. A path
+// that selects the root, as [paths.Doc] does in [niceyaml.Node.At], gives
+// the root itself, so New takes that Node. So does a
+// [niceyaml.Node.NodeAt] that finds the root. New reads the document as
+// go-yaml reads it. It refuses some documents that go-yaml's decoder
+// reads otherwise than YAML does, with an error that matches
+// [ErrMisread]. The Supported YAML section of the package
 // documentation lists them. It then refuses a document that holds YAML
 // outside the subset that the engine edits, as that section lists it, with
 // an error that matches [ErrUnsupported].
@@ -529,7 +533,10 @@ func New(doc *niceyaml.Node, opts ...Option) (*Doc, error) {
 	case doc == nil:
 		return nil, fmt.Errorf("%w, not nil", errDocument)
 	case doc != doc.Document():
-		return nil, fmt.Errorf("%w, not the node at %s", errDocument, doc.Path())
+		return nil, &sentinelError{
+			sentinel: niceyaml.ErrScopedNode,
+			err:      fmt.Errorf("%w, not the node at %s", errDocument, doc.Path()),
+		}
 	}
 
 	var cfg config

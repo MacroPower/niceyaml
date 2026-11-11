@@ -51,7 +51,7 @@ func find(tb testing.TB, input string, steps ...any) (*datapath.Index, datapath.
 	tb.Helper()
 
 	doc := yamltest.FirstDocument(tb, input)
-	idx := datapath.NewIndex(doc.Resolver(), hook.Keys(doc))
+	idx := datapath.NewIndex(doc.DocumentResolver(), hook.Keys(doc))
 
 	return idx, walk(tb, idx, doc.AST(), steps...)
 }
@@ -936,7 +936,7 @@ func TestMemberName(t *testing.T) {
 func mappingAt(tb testing.TB, input, name string) (*paths.Resolver, *ast.MappingNode) {
 	tb.Helper()
 
-	r := yamltest.FirstDocument(tb, input).Resolver()
+	r := yamltest.FirstDocument(tb, input).DocumentResolver()
 
 	node, err := r.Node(paths.Doc().Child(name))
 	require.NoError(tb, err)
@@ -962,7 +962,7 @@ func TestDeref(t *testing.T) {
 	t.Parallel()
 
 	doc := yamltest.FirstDocument(t, stringtest.LinesLF("a: &a !!str x", "b: *a", "c: *missing"))
-	r := doc.Resolver()
+	r := doc.DocumentResolver()
 
 	b, err := r.Node(paths.Doc().Child("b"))
 	require.NoError(t, err)
@@ -1001,7 +1001,7 @@ func TestRead(t *testing.T) {
 	)
 
 	doc := yamltest.FirstDocument(t, input)
-	r := doc.Resolver()
+	r := doc.DocumentResolver()
 
 	mapping, ok := doc.AST().(*ast.MappingNode)
 	require.True(t, ok)
@@ -1043,7 +1043,7 @@ func TestParentAt(t *testing.T) {
 		"l: [x, y]",
 	)
 
-	r := yamltest.FirstDocument(t, input).Resolver()
+	r := yamltest.FirstDocument(t, input).DocumentResolver()
 
 	tcs := map[string]struct {
 		path  paths.Path
@@ -1278,7 +1278,7 @@ func TestMembers_Decode(t *testing.T) {
 				decodeOpts = append(decodeOpts, yaml.AllowDuplicateMapKey())
 			}
 
-			r := yamltest.FirstDocument(t, tc.input, opts...).Resolver()
+			r := yamltest.FirstDocument(t, tc.input, opts...).DocumentResolver()
 
 			node, err := r.Node(paths.Doc().Child("m"))
 			require.NoError(t, err)

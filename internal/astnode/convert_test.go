@@ -34,7 +34,7 @@ func TestConverted(t *testing.T) {
 
 			doc := yamltest.FirstDocument(t, tc.input)
 
-			node, err := doc.Resolver().Node(paths.MustParse("$.m"))
+			node, err := doc.DocumentResolver().Node(paths.MustParse("$.m"))
 			require.NoError(t, err)
 
 			got := astnode.Converted(node)
@@ -67,7 +67,7 @@ func TestConvertsCollection(t *testing.T) {
 
 			doc := yamltest.FirstDocument(t, "a: &k {p: 1}\nm: "+tc.tag+" *k\n")
 
-			node, err := doc.Resolver().Node(paths.MustParse("$.m"))
+			node, err := doc.DocumentResolver().Node(paths.MustParse("$.m"))
 			require.NoError(t, err)
 
 			tag, ok := node.(*ast.TagNode)

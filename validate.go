@@ -1298,7 +1298,7 @@ type DataLocator struct {
 func (n *Node) DataLocator() *DataLocator {
 	return &DataLocator{
 		root: n.AST(),
-		idx:  datapath.NewIndex(n.Resolver(), n.keyReader()),
+		idx:  datapath.NewIndex(n.DocumentResolver(), n.keyReader()),
 		base: n.base,
 	}
 }

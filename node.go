@@ -153,10 +153,12 @@ func (d *document) pastAliasLimit() bool {
 //
 // The Decoding section of the package documentation describes the steps
 // a decode runs. The Scoped Nodes section describes what a Node from
-// [Node.At] or [Node.Nodes] reports. [Node.DocumentAST],
-// [Node.DocumentIndex], [Node.Preamble], [Node.FilePath], and
-// [Node.PathAt] describe the document as a whole, whatever Node of it a
-// caller holds.
+// [Node.At] or [Node.Nodes] reports. A path that selects the root gives
+// the root itself, so a document has one Node at `$`, and only that Node
+// reports [paths.Doc] from [Node.Path]. [Node.DocumentAST],
+// [Node.DocumentIndex], [Node.DocumentResolver], [Node.Preamble], and
+// [Node.FilePath] describe the document as a whole, whatever Node of it a
+// caller holds. [Node.Document] returns the root.
 //
 // A document that did not parse does not have a tree. The methods that
 // [Node.Err] lists return the error that Err returns. The methods
@@ -174,8 +176,9 @@ type Node struct {
 	source *Source
 	// The enclosing document.
 	doc *document
-	// The tokens of the node: the tokens of the whole document for its
-	// root, and a sub-slice of them for a Node from At.
+	// The tokens of the node. The root holds the tokens of the whole
+	// document, and a Node that At scopes below the root holds a
+	// sub-slice of them.
 	content token.Tokens
 	// The scope: the `$` path from the document root to the node, which is
 	// paths.Doc for a whole document.
@@ -240,13 +243,17 @@ func (n *Node) Err() error {
 	return n.doc.err
 }
 
-// Resolver returns the [*paths.Resolver] of the whole document the Node
-// belongs to, which every Node of the document shares. It resolves every
-// path from the document root, whether it starts at `$` or `@`, as
-// [paths.Resolver] describes. A path below the Node therefore starts with
-// [Node.Path], which [paths.Path.Join] puts in front of an `@` path. The
-// resolver follows the aliases and merge keys of the go-yaml nodes that
-// [Node.AST] and [Node.DocumentAST] return.
+// DocumentResolver returns the [*paths.Resolver] of the whole document the
+// Node belongs to, which every Node of the document shares. It resolves
+// every path from the document root, whether it starts at `$` or `@`, as
+// [paths.Resolver] describes. An `@` path thus reads from the root, where
+// [Node.At] reads it from the Node. A path below the Node therefore starts
+// with [Node.Path], which [paths.Path.Join] puts in front of an `@` path:
+//
+//	c, err := b.DocumentResolver().Node(b.Path().Join(paths.Current().Child("c")))
+//
+// The resolver follows the aliases and merge keys of the go-yaml nodes
+// that [Node.AST] and [Node.DocumentAST] return.
 //
 // The document creates the resolver once, when the first of its Nodes
 // needs it. The resolver binds the aliases of the document once, when a
@@ -270,7 +277,7 @@ func (n *Node) Err() error {
 // [paths.ErrNoDocument]. In an empty document that parsed,
 // [paths.Resolver.Matches] instead returns an empty result and a nil
 // error.
-func (n *Node) Resolver() *paths.Resolver {
+func (n *Node) DocumentResolver() *paths.Resolver {
 	return n.doc.pathResolver()
 }
 
@@ -338,7 +345,10 @@ func (n *Node) AST() ast.Node {
 // document thus scopes the node it names. The Node shares the source and
 // the document with the receiver, and decodes, validates, and binds
 // errors as the Scoped Nodes section of the package documentation
-// describes.
+// describes. A path that selects the root, such as [paths.Doc], gives the
+// root that [Node.Document] returns rather than a Node scoped to its body.
+// That Node spans the whole document, its preamble and its comments
+// included. A function that takes only the root of a document takes it.
 //
 // A path that ends at an alias that reads a reference document of
 // [WithReferences] scopes the alias, and a decode of that Node reads the
@@ -386,7 +396,7 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 		return nil, n.bindUnresolved(path, err)
 	}
 
-	return n.scoped(base, node), nil
+	return n.scopedAt(base, node), nil
 }
 
 // Nodes returns a [*Node] scoped to each node that path selects, in
@@ -428,7 +438,8 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 // content, but Node.At returns an error wrapping [paths.ErrNoDocument]
 // for it. In such a document, the root path selects the null under the
 // "---" header. It does not select a node when the document lacks a
-// header.
+// header. Where the root path selects a node, Nodes gives the root that
+// [Node.Document] returns for it, as Node.At does.
 //
 // Nodes scopes an alias that reads a reference document of
 // [WithReferences] as Node.At does. A `[*]` thus scopes an element that
@@ -462,10 +473,22 @@ func (n *Node) Nodes(path paths.Path) ([]*Node, error) {
 	nodes := make([]*Node, 0, len(found))
 
 	for _, m := range found {
-		nodes = append(nodes, n.scoped(m.Path, m.Node))
+		nodes = append(nodes, n.scopedAt(m.Path, m.Node))
 	}
 
 	return nodes, nil
+}
+
+// scopedAt returns the Node that [Node.At] gives for path, a `$` path that
+// selects node. The root path gives the root of the document, so a
+// document has one Node at `$`. Any other path gives a copy of n that
+// [Node.scoped] scopes to node.
+func (n *Node) scopedAt(path paths.Path, node ast.Node) *Node {
+	if path.IsRoot() {
+		return n.doc.node
+	}
+
+	return n.scoped(path, node)
 }
 
 // scoped returns a copy of n scoped at path, a `$` path that selects node.
@@ -637,8 +660,10 @@ func (n *Node) DocumentIndex() int {
 // when the document does not have a token to anchor it, such as a
 // document with neither a header nor a body.
 //
-// For a Node from [Node.At], they run from the first token under the node
-// through the last, comments between them included. They are nil when the
+// A path that selects the root gives the root, so [Node.At] of such a
+// path returns the tokens of the root. For a Node that Node.At scopes
+// below the root, they run from the first token under the node through
+// the last, comments between them included. They are nil when the
 // scope does not select anything. The slice is a copy, so reordering it
 // does not affect the Node. Every Node shares the tokens themselves, so a
 // caller must not modify them.
@@ -695,8 +720,10 @@ func (n *Node) FS() fs.FS {
 // lines. A document without tokens, other than the first, does not cover
 // any line.
 //
-// A Node from [Node.At] or [Node.Nodes] covers the lines from the first
-// token under its node through the last. A scope that does not select
+// A path that selects the root gives the root, so [Node.At] and
+// [Node.Nodes] of such a path return the span of the whole document. A
+// Node that Node.At or Node.Nodes scopes below the root covers the lines
+// from the first token under its node through the last. A scope that does not select
 // anything does not cover any line. A scalar covers its own lines alone. A
 // mapping or a sequence also covers the line of the key or the "-" that
 // introduces it. The span thus holds the token that [Node.Ranges] and an
@@ -1307,12 +1334,20 @@ func spellingTexts(tks token.Tokens) []string {
 //	}
 //
 // A caller can pass the path back to [Node.At] or [Node.Ranges] of any
-// Node of the document. The innermost node is an entry of a mapping or an
-// element of a sequence. A position on the key of an entry gives a path
-// that ends in `~`, as [paths.Path.Key] writes one. A position on the ":"
-// or the value gives the path of the entry. The "-" of a block sequence
-// belongs to its element, and the "[", "{", ",", anchor, or tag of a
-// collection belongs to the collection.
+// Node of the document. PathAt answers within the scope of the Node, as
+// [Node.NodeAt] does. A Node from [Node.At] gives the paths of the nodes
+// it holds, its own key included, and reports false elsewhere in the
+// document. A caller that holds such a Node and wants the path anywhere in
+// the document asks the root:
+//
+//	path, ok := node.Document().PathAt(cursor)
+//
+// The innermost node is an entry of a mapping or an element of a
+// sequence. A position on the key of an entry gives a path that ends in
+// `~`, as [paths.Path.Key] writes one. A position on the ":" or the value
+// gives the path of the entry. The "-" of a block sequence belongs to its
+// element, and the "[", "{", ",", anchor, or tag of a collection belongs
+// to the collection.
 //
 // A position in the indentation of a line resolves to the token after it.
 // The lexer gives the spaces between two tokens on a line to one of them.
@@ -1326,13 +1361,12 @@ func spellingTexts(tks token.Tokens) []string {
 // alone, a "---" header, a "..." marker, or a directive. It also reports
 // false past the end of a line, as at the end of `y:`. [Node.NodeAt]
 // answers there with the node that encloses the position. PathAt reports
-// false outside the lines
-// of the source and in another document of the source. [Source.DocumentAt]
-// picks the document of a position. PathAt reports false for a document
-// that did not parse or that does not hold content. It reports false
-// inside an entry that paths cannot select, such as the earlier of two
-// entries with one key. Every path it returns selects the node at pos and
-// does not hold a wildcard selector.
+// false outside the lines of the source and in another document of the
+// source. [Source.DocumentAt] picks the document of a position. PathAt
+// reports false for a document that did not parse or that does not hold
+// content. It reports false inside an entry that paths cannot select,
+// such as the earlier of two entries with one key. Every path it returns
+// selects the node at pos and does not hold a wildcard selector.
 func (n *Node) PathAt(pos position.Position) (paths.Path, bool) {
 	if n == nil || n.doc.err != nil {
 		return paths.Path{}, false
@@ -1343,7 +1377,16 @@ func (n *Node) PathAt(pos position.Position) (paths.Path, bool) {
 		return paths.Path{}, false
 	}
 
-	return n.doc.pathIndex().PathAt(n.doc.pathResolver(), tk.Position.Offset)
+	path, ok := n.doc.pathIndex().PathAt(n.doc.pathResolver(), tk.Position.Offset)
+	if !ok {
+		return paths.Path{}, false
+	}
+
+	if _, under := path.CutPrefix(n.base); !under {
+		return paths.Path{}, false
+	}
+
+	return path, true
 }
 
 // NodeAt returns the innermost [*Node] of the document that holds pos,
@@ -1374,7 +1417,9 @@ func (n *Node) PathAt(pos position.Position) (paths.Path, bool) {
 // A position that lies inside an entry that paths cannot select, such as
 // the earlier of two entries with one key, gives the nearest node around
 // it that a path selects. A Node from [Node.At] answers for the positions
-// of the nodes it holds, and reports false elsewhere in the document.
+// of the nodes it holds, and reports false elsewhere in the document, as
+// Node.PathAt does. A position that the root path holds gives the root
+// that [Node.Document] returns, as Node.At gives it.
 //
 // NodeAt reports false for a nil Node, for a document that did not parse
 // or that does not hold content, and for a position outside the lines of

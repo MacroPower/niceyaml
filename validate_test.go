@@ -6475,7 +6475,7 @@ func TestValidator_DirectCall(t *testing.T) {
 		"Registry refuses a scoped Node": {
 			v:    reg,
 			path: itemPath,
-			want: "c.yaml: registry needs a whole document: node is scoped to $.items[1]",
+			want: "c.yaml: registry needs a whole document: node is not the root of its document: $.items[1]",
 		},
 		"Registry at the root": {
 			v:    reg,

@@ -105,7 +105,7 @@ type model struct {
 // values the model shares with the text. An alignment of the graph with
 // itself records where the text writes each value.
 func (d *Doc) startModel() *model {
-	g := newGraph(d.node.AST(), d.node.Resolver(), d.keyReader(), d.enclosedAliases(), len(d.curLines))
+	g := newGraph(d.node.AST(), d.node.DocumentResolver(), d.keyReader(), d.enclosedAliases(), len(d.curLines))
 	x := &model{top: &edge{val: g.root, tag: g.tag}, start: d.save(), synced: d.node, since: make(map[string]int)}
 	x.align(g, 0)
 
@@ -916,7 +916,7 @@ func (d *Doc) syncModel() *model {
 // alignModel aligns x with the current text, as [model.align] describes.
 func (d *Doc) alignModel(x *model) {
 	x.align(
-		newGraph(d.node.AST(), d.node.Resolver(), d.keyReader(), d.enclosedAliases(), len(d.curLines)),
+		newGraph(d.node.AST(), d.node.DocumentResolver(), d.keyReader(), d.enclosedAliases(), len(d.curLines)),
 		len(x.calls),
 	)
 

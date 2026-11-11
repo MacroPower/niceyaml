@@ -57,7 +57,7 @@ func referenceRules(tb testing.TB, doc, ref *niceyaml.Node, opts ...yaml.DecodeO
 	_ = dec.DecodeFromNode(doc.AST(), &sink) //nolint:errcheck // The walk sees what the decode saw.
 
 	return decodewalk.Rules{
-		Resolver: doc.Resolver(),
+		Resolver: doc.DocumentResolver(),
 		View:     func(node ast.Node) ast.Node { return node },
 		Decode: func(node ast.Node, v any) (err error) { //nolint:nonamedreturns // The recover sets it.
 			// The decoder panics on some nodes, as on an inline map under a

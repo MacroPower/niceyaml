@@ -1195,7 +1195,17 @@
 // [Node.Nodes] returns one for each node that a path with wildcards selects.
 // An `@` path resolves from the receiver, and a `$` path resolves from the
 // root of the document. A path from [Node.Path] thus scopes the same node
-// through any Node of the document.
+// through any Node of the document. A path that selects the root gives the
+// root itself, so a document has one Node at `$`. A function that takes the
+// root, such as [go.jacobcolvin.com/niceyaml/edit.New], thus takes it. A
+// function that needs the root refuses any other Node with an error that
+// matches [ErrScopedNode].
+//
+// A scoped Node reads from its scope. [Node.PathAt] and [Node.NodeAt] answer
+// for the positions inside the scope alone, and [Node.Document] returns the
+// root, which answers for the whole document. [Node.DocumentResolver]
+// belongs to the whole document, so an `@` path that it resolves reads from
+// the root, where an `@` path of [Node.At] reads from the Node.
 //
 // The decode steps run on a scoped Node as they run on a document. Decode
 // reads the one value, and a validator that the caller passes checks that

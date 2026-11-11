@@ -58,7 +58,7 @@ func TestState_Facts(t *testing.T) {
 	s := aliasing.NewState(true, aliasing.Budget{}, func() (ast.Node, *paths.Resolver) {
 		calls++
 
-		return doc.AST(), doc.Resolver()
+		return doc.AST(), doc.DocumentResolver()
 	}, nil)
 
 	first := s.Facts()

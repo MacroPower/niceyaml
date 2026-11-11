@@ -45,12 +45,6 @@ var (
 	// describes. The registry returns it as the Phase of a [*LoadError].
 	ErrLoad = errors.New("load schema")
 
-	// ErrScopedDocument indicates that a caller passed a [*niceyaml.Node]
-	// from [niceyaml.Node.At] to [Registry.Lookup] or [Registry.Check],
-	// which pick a schema for a whole document. Validate the document once
-	// at its root, then decode its nodes without the registry.
-	ErrScopedDocument = errors.New("registry needs a whole document")
-
 	// The reason that a [URL] Ref fails to load when its scheme is neither
 	// http nor https.
 	errNotHTTPURL = errors.New("not an HTTP or HTTPS URL")
@@ -430,8 +424,8 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 //
 // The resolvers pick a schema for a whole document, from its file path,
 // its preamble, or its content, so n must be the root [niceyaml.Node] of
-// a document. A Node from [niceyaml.Node.At] fails with
-// [ErrScopedDocument]. The schema that Lookup picks belongs to the
+// a document. A Node below the root fails with an error that matches
+// [niceyaml.ErrScopedNode]. The schema that Lookup picks belongs to the
 // document, so a caller who applies it to the node checks the node
 // against the wrong schema. Validate one node against a schema of its
 // own with a [Schema].
@@ -562,8 +556,8 @@ func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Node) (*Schema, boo
 
 // lookupSchema is [Registry.lookup] before lookup wraps the error.
 func (r *Registry) lookupSchema(ctx context.Context, doc *niceyaml.Node) (*Schema, bool, error) {
-	if !doc.Path().IsRoot() {
-		return nil, false, fmt.Errorf("%w: node is scoped to %s", ErrScopedDocument, doc.Path())
+	if doc != doc.Document() {
+		return nil, false, fmt.Errorf("registry needs a whole document: %w: %s", niceyaml.ErrScopedNode, doc.Path())
 	}
 
 	// A resolver that ignores its context, as a Ref does, would name a
@@ -758,11 +752,11 @@ func (e reasonError) Unwrap() error {
 // # Scoped Nodes
 //
 // The resolvers pick a schema for a whole document, so n must be the
-// root [niceyaml.Node] of one. A Node from [niceyaml.Node.At] fails with
-// [ErrScopedDocument], as it does in [Registry.Lookup]. A registry
-// therefore validates a document once, at its root. A loop that decodes
-// several nodes of that document runs without the registry, or with a
-// [Schema] for the node:
+// root [niceyaml.Node] of one. A Node below the root fails with an error
+// that matches [niceyaml.ErrScopedNode], as it does in [Registry.Lookup].
+// A registry therefore validates a document once, at its root. A loop
+// that decodes several nodes of that document runs without the registry,
+// or with a [Schema] for the node:
 //
 //	if err := doc.Validate(ctx, reg); err != nil {
 //		return err

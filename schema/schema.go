@@ -1053,7 +1053,7 @@ func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) ([]er
 	// as a decode of the document reads them.
 	resolver, keys := paths.NewResolver(nil), mapkey.NewKeys(nil, nil, nil)
 	if n != nil {
-		resolver, keys = n.Resolver(), hook.Keys(n)
+		resolver, keys = n.DocumentResolver(), hook.Keys(n)
 	}
 
 	// The timestamp lookups and every violation share one index, so each

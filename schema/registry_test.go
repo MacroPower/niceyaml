@@ -673,7 +673,7 @@ func TestRegistry_Resolve(t *testing.T) {
 		doc := yamltest.FirstDocument(t, "spec:\n  name: x\n")
 
 		_, err := inner.Resolve(t.Context(), yamltest.At(t, doc, paths.Current().Child("spec")))
-		require.ErrorIs(t, err, schema.ErrScopedDocument)
+		require.ErrorIs(t, err, niceyaml.ErrScopedNode)
 	})
 }
 
@@ -726,8 +726,9 @@ func TestRegistry_Check_ScopedNode(t *testing.T) {
 				t.Parallel()
 
 				err := tc.check(t.Context(), spec)
-				require.ErrorIs(t, err, schema.ErrScopedDocument)
-				require.EqualError(t, err, "registry needs a whole document: node is scoped to $.spec")
+				require.ErrorIs(t, err, niceyaml.ErrScopedNode)
+				require.EqualError(t, err,
+					"registry needs a whole document: node is not the root of its document: $.spec")
 
 				bound := yamltest.RequireSourceError(t, err)
 				assert.Same(t, doc.Source(), bound.Source())
@@ -750,7 +751,7 @@ func TestRegistry_Check_ScopedNode(t *testing.T) {
 		}
 
 		err := spec.DecodeInto(t.Context(), &v, niceyaml.WithValidator(reg))
-		require.ErrorIs(t, err, schema.ErrScopedDocument)
+		require.ErrorIs(t, err, niceyaml.ErrScopedNode)
 		assert.Zero(t, v.Replicas)
 	})
 
@@ -759,7 +760,7 @@ func TestRegistry_Check_ScopedNode(t *testing.T) {
 
 		lax := schema.NewRegistry(schema.WithRequireSchema(false))
 
-		require.ErrorIs(t, lax.Check(t.Context(), spec), schema.ErrScopedDocument)
+		require.ErrorIs(t, lax.Check(t.Context(), spec), niceyaml.ErrScopedNode)
 	})
 
 	t.Run("the root validates once and the nodes decode without it", func(t *testing.T) {

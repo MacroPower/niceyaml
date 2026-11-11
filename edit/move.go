@@ -1029,7 +1029,7 @@ func bareItemIn(doc *niceyaml.Node, path paths.Path) paths.Path {
 		return path
 	}
 
-	r := doc.Resolver()
+	r := doc.DocumentResolver()
 
 	node, err := r.Node(item)
 	if err != nil {

@@ -713,7 +713,7 @@ func (d *Doc) userDash(path paths.Path) (position.Position, bool) {
 
 	parent, _ := path.Parent()
 
-	node, err := d.user.Resolver().Node(parent)
+	node, err := d.user.DocumentResolver().Node(parent)
 	if err != nil {
 		return position.Position{}, false
 	}
@@ -779,7 +779,7 @@ func (d *Doc) userValue(path paths.Path) (ast.Node, bool) {
 	parent, _ := path.Parent()
 	last, _ := path.Last()
 
-	r := d.user.Resolver()
+	r := d.user.DocumentResolver()
 
 	holder, err := r.Node(parent)
 	if err != nil {

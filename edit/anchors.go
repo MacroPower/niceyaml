@@ -168,7 +168,7 @@ func (d *Doc) readRefs() *parseIndex {
 // the order of the text. Each alias reads the anchor that the resolver of
 // the current text binds it to, as a decode reads it.
 func (d *Doc) readersOf(name string, a *ast.AnchorNode) []ref {
-	res := d.node.Resolver()
+	res := d.node.DocumentResolver()
 
 	var out []ref
 
@@ -191,7 +191,7 @@ func (d *Doc) readersOf(name string, a *ast.AnchorNode) []ref {
 // alias that reads no anchor of the text, such as one of a reference
 // document.
 func (d *Doc) anchorOf(alias *ast.AliasNode) (ref, bool) {
-	anchor, err := d.node.Resolver().Anchor(alias)
+	anchor, err := d.node.DocumentResolver().Anchor(alias)
 	if err != nil {
 		return ref{}, false
 	}
@@ -252,7 +252,7 @@ func (d *Doc) pathIn(root, node ast.Node) (paths.Path, bool) {
 
 		switch x := up.(type) {
 		case *ast.MappingValueNode:
-			name, ok := d.node.Resolver().KeyName(x.Key)
+			name, ok := d.node.DocumentResolver().KeyName(x.Key)
 			if !ok || x.Value != child {
 				return paths.Path{}, false
 			}
