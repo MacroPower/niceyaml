@@ -34,6 +34,15 @@ import (
 // Verify shares the schemas with the loads of the registry, so a schema
 // that compiles here serves each load without a second compile.
 //
+// Verify does not compare the properties of a schema with the fields of
+// the kind type. When the gen tool of [go.jacobcolvin.com/x/jsonschema]
+// writes the schemas, the same test calls [schema.CheckFields] for each
+// kind type. CheckFields reports each field where gen and the decoder
+// disagree on the name of the field or on whether the field is inline:
+//
+//	require.NoError(t, schema.CheckFields[config.Cafe]())
+//	require.NoError(t, config.Registry.Verify(t.Context()))
+//
 // # Type Fields
 //
 // Verify also reports each type field that the schema of a version

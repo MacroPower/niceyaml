@@ -728,7 +728,6 @@ func (b *registryBuilder) checkKinds() {
 		b.checkWritten(entry)
 		b.checkLoosened(entry)
 		b.checkDeprecations(entry)
-		b.checkInline(entry)
 
 		reads := entry.removedUnversioned != nil ||
 			len(entry.versions) > 0 && entry.versions[0].cfg.unversioned
