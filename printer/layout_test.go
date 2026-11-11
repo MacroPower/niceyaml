@@ -422,6 +422,118 @@ func TestPrinter_Layout(t *testing.T) {
 	})
 }
 
+func TestPrinter_Layout_LineLead(t *testing.T) {
+	t.Parallel()
+
+	// The content wraps to 12 cells. The second line has two annotation
+	// rows above its first content row. The third has one above its
+	// second wrapped row, which is not a lead.
+	view := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"a: 1",
+		"b: one two three",
+		"c: one two three",
+		"d: 4",
+	)).View().Slice(position.NewSpan(0, 3))
+	view.AnnotateLine(0, yamltest.ErrorAnnotation(position.NewSpan(3, 4), "bad"))
+	view.AnnotateLine(1,
+		line.Annotation{Content: "one", Kind: kind.TextError, Placement: line.Above},
+		line.Annotation{Content: "two", Kind: kind.TextWarn, Placement: line.Above},
+	)
+	view.AnnotateLine(2, line.Annotation{
+		Content:   "late",
+		Placement: line.Above,
+		Cols:      position.NewSpan(11, 16),
+	})
+
+	layout := testPrinterWithGutter(printer.DefaultGutter).
+		With(printer.WithWrapWidth(18)).
+		Layout(view)
+
+	tcs := map[string]struct {
+		line int
+		want int
+	}{
+		"annotation below the line":            {line: 0, want: 0},
+		"two annotation rows above the line":   {line: 1, want: 2},
+		"annotation above a later wrapped row": {line: 2, want: 0},
+		"line the layout does not hold":        {line: 3, want: 0},
+		"line past the content":                {line: 9, want: 0},
+		"negative line":                        {line: -1, want: 0},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, layout.LineLead(tc.line))
+
+			// The lead is the distance from the first row of the line to
+			// its first content row.
+			first := layout.RowOf(position.New(tc.line, 0)) - layout.LineStart(tc.line)
+			assert.Equal(t, first, layout.LineLead(tc.line))
+		})
+	}
+
+	// The annotation above the later wrapped row still takes a row.
+	require.Equal(t, 3, layout.LineRows(2))
+}
+
+func TestPrinter_Layout_ContainerFrame(t *testing.T) {
+	t.Parallel()
+
+	// Only the top and the left of the container frame move the printed
+	// rows and cells past the rows and cells of the layout.
+	leftBorder := lipgloss.NewStyle().Border(lipgloss.NormalBorder(), false, false, false, true)
+
+	tcs := map[string]struct {
+		opt      printer.Option
+		wantTop  int
+		wantLeft int
+	}{
+		"box": {
+			opt: printer.WithBox(),
+		},
+		"right padding and bottom margin": {
+			opt: printer.WithContainerStyle(lipgloss.NewStyle().PaddingRight(2).MarginBottom(1)),
+		},
+		"top padding and left border": {
+			opt:      printer.WithContainerStyle(leftBorder.PaddingTop(1)),
+			wantTop:  1,
+			wantLeft: 1,
+		},
+		"border and padding on every side": {
+			opt:      printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(1, 2)),
+			wantTop:  2,
+			wantLeft: 3,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			view := niceyaml.NewSourceFromString(stringtest.LinesLF("a: one two three four", "b: 2")).View()
+			view.AnnotateLine(1, line.Annotation{Content: "a note", Placement: line.Above})
+
+			p := testPrinterWithGutter(printer.DefaultGutter).With(tc.opt, printer.WithWrapWidth(24))
+			got := p.Render(view)
+			rows := got.Rows()
+			printed := strings.Split(p.Print(view), "\n")
+
+			require.Greater(t, len(rows), view.Count()+1)
+			require.GreaterOrEqual(t, len(printed), tc.wantTop+len(rows))
+
+			for n, row := range rows {
+				cells := []rune(printed[tc.wantTop+n])
+
+				require.GreaterOrEqual(t, len(cells), tc.wantLeft)
+				assert.True(t, strings.HasPrefix(string(cells[tc.wantLeft:]), row),
+					"row %d: %q does not hold %q at cell %d", n, string(cells), row, tc.wantLeft)
+			}
+		})
+	}
+}
+
 func TestPrinter_Layout_GutterWidth(t *testing.T) {
 	t.Parallel()
 

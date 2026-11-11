@@ -57,6 +57,11 @@ const wrapOnCharacters = " " + breakpoints
 // [Printer.PrintSideBySide] renders two views as panes beside each other,
 // such as the two revisions of a side-by-side diff.
 //
+// A viewer that scrolls the output or maps a pointer to it needs rows and
+// their geometry, not one string. [Printer.Render] returns the rows of a
+// view with the [Layout] that measures them, and
+// [Printer.RenderSideBySide] returns the same for two panes.
+//
 // The output holds 24-bit color escape sequences whatever the destination
 // supports. The package documentation covers the functions that fit them
 // to a terminal, a pipe, or a file.
@@ -993,11 +998,14 @@ func flagKind(f line.Flag) kind.Kind {
 // Print renders view and wraps the result in the container style. Each
 // line takes one row for each wrapped piece of its content and one for
 // each row its styled annotations take. [Printer.Layout] counts the same
-// rows. To print part of a document, pass the view [line.View.Slice]
-// returns. An empty view renders as the container around one empty row.
-// The output ends with its last row and no line feed, as
-// [line.View.String] does. A program that writes it into a file or a
-// fenced block adds that line feed itself.
+// rows, and [Printer.Render] returns them without the container. Print
+// returns the [Rendered.String] of that render.
+//
+// To print part of a document, pass the view [line.View.Slice] returns.
+// An empty view renders as the container around one empty row. The
+// output ends with its last row and no line feed, as [line.View.String]
+// does. A program that writes it into a file or a fenced block adds that
+// line feed itself.
 //
 // A line the view clips, as a view from [line.View.Clip] does, renders as
 // the [line.Row] that [line.View.Row] returns: the windows
@@ -1010,12 +1018,8 @@ func flagKind(f line.Flag) kind.Kind {
 // every row to the widest one. [WithContainerWidth] instead pads every row
 // to the width it pins.
 func (p *Printer) Print(view *line.View) string {
-	return p.style.Render(strings.Join(p.padRows(p.renderRows(view)), "\n"))
+	return p.render(view, false).String()
 }
-
-// sideBySideSeparator is the divider between the panes that
-// [Printer.PrintSideBySide] renders.
-const sideBySideSeparator = " │ "
 
 // PrintSideBySide renders left and right as two panes beside each other,
 // as a side-by-side diff shows the panes that
@@ -1051,118 +1055,12 @@ const sideBySideSeparator = " │ "
 // [Printer.Print]. The output ends with its last row and no line feed, as
 // [Printer.Print] describes.
 //
-// PrintSideBySide has no [Layout] counterpart. A viewer that scrolls or
-// maps a pointer zips the panes itself by the same rule. For each line, it
-// pads the shorter block of rows above the first content row at the top,
-// and the rest of the shorter pane at the bottom. The block above the
-// first content row of line i takes [Layout.RowOf] of column 0 less
-// [Layout.LineStart] rows.
-//
-// The viewer takes the [Layout] of each pane from the printer that draws
-// that pane. PrintSideBySide draws each pane with a copy of p that has an
-// empty container style, no container width, and the larger MaxNumber of
-// the two views in [WithMaxNumber]. When p wraps, the copy wraps to the
-// pane width. A [Layout] by p itself counts the frame of the container and
-// wraps to the whole width, so its rows differ from the rows of the panes.
+// PrintSideBySide returns the [SideBySide.String] of
+// [Printer.RenderSideBySide]. A viewer that scrolls the panes or maps a
+// pointer to them takes the rows and their geometry from the
+// [*SideBySide] instead.
 func (p *Printer) PrintSideBySide(left, right *line.View) string {
-	maxNumber := max(p.MaxNumber(left), p.MaxNumber(right))
-
-	// Each pane renders without the container, which wraps the joined
-	// rows, and wraps to its half of the width.
-	pane := p.With(WithContainerStyle(lipgloss.NewStyle()), WithContainerWidth(0))
-
-	paneWidth := 0
-	if p.wrap > 0 {
-		paneWidth = max(1, (p.wrap-p.style.GetHorizontalFrameSize()-lipgloss.Width(sideBySideSeparator))/2)
-		pane = pane.With(WithWrapWidth(paneWidth))
-	}
-
-	gutterWidth := pane.gutterWidth(maxNumber)
-
-	var leftRows, rightRows []string
-
-	for _, i := range pairedLines(left, right) {
-		l, lLead := pane.paneLine(left, i, maxNumber, gutterWidth)
-		r, rLead := pane.paneLine(right, i, maxNumber, gutterWidth)
-
-		// The blocks above the first content rows end on one row, and the
-		// rest of the shorter pane fills to the bottom of the line.
-		lead := max(lLead, rLead)
-		rest := max(len(l)-lLead, len(r)-rLead)
-
-		leftRows = append(leftRows, pane.alignRows(left, i, l, lead-lLead, lead+rest, maxNumber, gutterWidth)...)
-		rightRows = append(rightRows, pane.alignRows(right, i, r, lead-rLead, lead+rest, maxNumber, gutterWidth)...)
-	}
-
-	leftWidth := paneWidth
-	for _, row := range leftRows {
-		leftWidth = max(leftWidth, lipgloss.Width(row))
-	}
-
-	separator := p.Style(kind.UISeparator).Render(sideBySideSeparator)
-	rows := make([]string, len(leftRows))
-
-	for k := range rows {
-		rows[k] = p.Pad(leftRows[k], leftWidth) + separator + rightRows[k]
-	}
-
-	return p.style.Render(strings.Join(p.padRows(rows), "\n"))
-}
-
-// pairedLines returns the indices in the content of the lines that left or
-// right holds, in ascending order and without repeats.
-func pairedLines(left, right *line.View) []int {
-	indices := make([]int, 0, max(left.Count(), right.Count()))
-
-	for i := range left.All() {
-		indices = append(indices, i)
-	}
-
-	for i := range right.All() {
-		indices = append(indices, i)
-	}
-
-	slices.Sort(indices)
-
-	return slices.Compact(indices)
-}
-
-// paneLine renders line i of view as the rows of one pane, and returns
-// them with the number of rows above the first content row. It returns
-// no rows for a line the view does not hold.
-func (p *Printer) paneLine(view *line.View, i, maxNumber, gutterWidth int) ([]string, int) {
-	if !view.Contains(i) {
-		return nil, 0
-	}
-
-	return p.renderLine(view, i, view.Line(i), maxNumber, gutterWidth)
-}
-
-// alignRows returns rows, the rows of line i in the pane of view, with top
-// blank rows above them and as many below as fill total rows. A blank row
-// holds the gutter of an annotation row of the line, so a gutter that
-// draws a border or a background keeps it down the pane.
-func (p *Printer) alignRows(view *line.View, i int, rows []string, top, total, maxNumber, gutterWidth int) []string {
-	ctx := GutterContext{Styles: p.styles, Index: i, MaxNumber: maxNumber, Annotation: true}
-	if view.Contains(i) {
-		ctx.Number = view.Line(i).Number()
-		ctx.Flag = view.Flag(i)
-	}
-
-	blank := p.renderGutter(ctx, gutterWidth)
-	out := make([]string, 0, total)
-
-	for range top {
-		out = append(out, blank)
-	}
-
-	out = append(out, rows...)
-
-	for len(out) < total {
-		out = append(out, blank)
-	}
-
-	return out
+	return p.renderSideBySide(left, right, false).String()
 }
 
 // Pad returns row with spaces in [kind.Text] after it, out to width
@@ -1183,10 +1081,10 @@ func (p *Printer) Pad(row string, width int) string {
 	return row + p.Style(kind.Text).Render(strings.Repeat(" ", pad))
 }
 
-// padRows pads each of rows with [Printer.Pad] out to the container
-// width, less the horizontal frame of the container. It returns rows
-// unchanged when the container width is 0, and it does not pad a row that
-// already reaches the width.
+// padRows returns rows, each padded with [Printer.Pad] out to the
+// container width, less the horizontal frame of the container. It returns
+// rows itself when the container width is 0, and it does not pad a row
+// that already reaches the width. It leaves rows as they are.
 func (p *Printer) padRows(rows []string) []string {
 	if p.containerWidth == 0 {
 		return rows
@@ -1199,12 +1097,13 @@ func (p *Printer) padRows(rows []string) []string {
 	}
 
 	width := max(0, p.containerWidth-p.style.GetHorizontalFrameSize())
+	padded := make([]string, len(rows))
 
 	for i, row := range rows {
-		rows[i] = p.Pad(row, width)
+		padded[i] = p.Pad(row, width)
 	}
 
-	return rows
+	return padded
 }
 
 // maxNumber returns the largest line number in view, or 0 when the view is
@@ -1261,46 +1160,53 @@ func firstRow(text string) string {
 	return first + cutText(rest, 0)
 }
 
-// renderRows renders the lines of view as rows, with the gutter sized for
-// [Printer.MaxNumber].
-func (p *Printer) renderRows(view *line.View) []string {
-	if view.Count() == 0 {
-		return nil
-	}
-
+// render renders the lines of view as rows, with the gutter sized for
+// [Printer.MaxNumber]. With measure set, it also computes the [Layout] of
+// the rows in the same pass. The rows are the same either way.
+func (p *Printer) render(view *line.View, measure bool) *Rendered {
 	maxNumber := p.MaxNumber(view)
 	gutterWidth := p.gutterWidth(maxNumber)
 
-	// A viewer prints one window of a long document at a time.
-	rows := make([]string, 0, view.Count())
+	// A viewer renders one window of a long document at a time.
+	r := &Rendered{printer: p, rows: make([]string, 0, view.Count())}
+	if measure {
+		r.layout = newLayout(view.Count(), gutterWidth)
+	}
 
 	for idx, ln := range view.All() {
-		lineRows, _ := p.renderLine(view, idx, ln, maxNumber, gutterWidth)
-		rows = append(rows, lineRows...)
+		lr := p.renderLine(view, idx, ln, maxNumber, gutterWidth, measure)
+
+		r.rows = append(r.rows, lr.rows...)
+		if measure {
+			r.layout = r.layout.withLine(idx, lr.layout)
+		}
 	}
 
-	return rows
+	return r
 }
 
-// renderLine renders ln, line idx of view, as rows. It wraps the content
-// to the printer width and puts the gutter in front of each row. Each
-// annotation row of the line sits above or below the wrapped row that
-// holds its column. It also returns the number of rows above the first
-// content row.
-func (p *Printer) renderLine(view *line.View, idx int, ln *line.Line, maxNumber, gutterWidth int) ([]string, int) {
-	vl := newViewLine(view, idx, ln)
+// lineRows is the rows of one line with the gutter in front of each, as
+// [Printer.renderLine] returns them. Its lead is the number of rows above
+// the first content row. Its layout is the row structure of the line. A
+// line that renders without its measures has the zero layout.
+type lineRows struct {
+	rows   []string
+	layout lineLayout
+	lead   int
+}
 
-	rendered, runs := p.renderRuns(vl)
-	w := wrappedLine{pieces: p.wrapContent(rendered, gutterWidth)}
-
-	// Only annotations read the columns each row shows, so a line without
-	// annotations leaves its rows unmapped.
-	if len(vl.row.Annotations) > 0 {
-		w = mapRows(vl.row.Width, rendered, runs, w.pieces)
-	}
-
-	above := p.annotationRows(vl, gutterWidth, line.Above, w)
-	below := p.annotationRows(vl, gutterWidth, line.Below, w)
+// renderLine renders ln, line idx of view, as rows. It puts the gutter in
+// front of each row that [Printer.layLine] lays out. With measure set, it
+// also returns the row structure of the line, which comes from the same
+// pass as the rows.
+func (p *Printer) renderLine(
+	view *line.View,
+	idx int,
+	ln *line.Line,
+	maxNumber, gutterWidth int,
+	measure bool,
+) lineRows {
+	laid := p.layLine(newViewLine(view, idx, ln), gutterWidth, measure)
 
 	gutterCtx := GutterContext{
 		Index:     idx,
@@ -1310,19 +1216,19 @@ func (p *Printer) renderLine(view *line.View, idx int, ln *line.Line, maxNumber,
 		Styles:    p.styles,
 	}
 
-	rows := make([]string, 0, len(w.pieces))
+	rows := make([]string, 0, len(laid.pieces))
 
-	for j, piece := range w.pieces {
-		rows = append(rows, p.annotationGutters(rowsAt(above, j), gutterCtx, gutterWidth)...)
+	for j, piece := range laid.pieces {
+		rows = append(rows, p.annotationGutters(rowsAt(laid.above, j), gutterCtx, gutterWidth)...)
 
 		ctx := gutterCtx
 		ctx.Soft = j > 0
 
 		rows = append(rows, p.renderGutter(ctx, gutterWidth)+piece)
-		rows = append(rows, p.annotationGutters(rowsAt(below, j), gutterCtx, gutterWidth)...)
+		rows = append(rows, p.annotationGutters(rowsAt(laid.below, j), gutterCtx, gutterWidth)...)
 	}
 
-	return rows, len(rowsAt(above, 0))
+	return lineRows{rows: rows, layout: laid.layout, lead: len(rowsAt(laid.above, 0))}
 }
 
 // viewLine is one line of a view as the printer shows it: the [line.Row]

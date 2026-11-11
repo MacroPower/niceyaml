@@ -2270,67 +2270,6 @@ func TestPrinter_PrintSideBySide(t *testing.T) {
 	}
 }
 
-func TestPrinter_PrintSideBySide_PaneLayout(t *testing.T) {
-	t.Parallel()
-
-	// A viewer zips the panes from a Layout of each pane by the printer
-	// that PrintSideBySide draws the pane with. Each line then starts on
-	// the row the zip gives it, and its first content row sits below the
-	// larger block of rows above it.
-	left := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: 2", "c: 3")).View()
-	left.AnnotateLine(0,
-		line.Annotation{Content: "one", Kind: kind.TextError, Placement: line.Above},
-		line.Annotation{Content: "two", Kind: kind.TextWarn, Placement: line.Above},
-	)
-
-	right := niceyaml.NewSourceFromString(stringtest.LinesLF("a: one two three four", "b: 2", "c: 3")).View()
-	right.AnnotateLine(2, line.Annotation{Content: "a note", Placement: line.Above})
-
-	p := testPrinterWithGutter(printer.DefaultGutter).With(
-		printer.WithWrapWidth(33),
-		printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())),
-	)
-
-	// The pane width is half of what the frame and the separator leave.
-	paneWidth := (p.WrapWidth() - p.ContainerStyle().GetHorizontalFrameSize() - 3) / 2
-	pane := p.With(
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-		printer.WithContainerWidth(0),
-		printer.WithMaxNumber(max(p.MaxNumber(left), p.MaxNumber(right))),
-		printer.WithWrapWidth(paneWidth),
-	)
-	layouts := [2]printer.Layout{pane.Layout(left), pane.Layout(right)}
-
-	// The rows inside the top and the bottom border.
-	rows := strings.Split(p.PrintSideBySide(left, right), "\n")
-	rows = rows[1 : len(rows)-1]
-
-	start := 0
-
-	for i := range 3 {
-		var above, after [2]int
-
-		for k, l := range layouts {
-			above[k] = l.RowOf(position.New(i, 0)) - l.LineStart(i)
-			after[k] = l.LineRows(i) - above[k]
-		}
-
-		top := max(above[0], above[1])
-		require.Less(t, start+top, len(rows))
-
-		leftHalf, rightHalf, ok := strings.Cut(rows[start+top], " │ ")
-		require.True(t, ok, "row %q", rows[start+top])
-
-		number := " " + strconv.Itoa(i+1) + "  "
-		assert.Contains(t, leftHalf, number, "line %d", i)
-		assert.Contains(t, rightHalf, number, "line %d", i)
-
-		start += top + max(after[0], after[1])
-	}
-
-	assert.Len(t, rows, start)
-}
-
 func TestPrinter_PrintSideBySide_Golden(t *testing.T) {
 	t.Parallel()
 
