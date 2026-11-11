@@ -87,7 +87,7 @@ type PlanFile struct {
 	f   *file
 	// The warnings of the values that the rewrite deletes, finished.
 	removals []error
-	after    []byte
+	after    string
 	docs     []migratedDoc
 	// The index of the file in the load.
 	index int
@@ -153,8 +153,11 @@ func (l *loader) newPlan() *Plan {
 // out each file that is up to date or that a problem blocks. It also
 // returns each file that [WriteAtomic] cannot write, so a dry run shows
 // its diff and a [WriteFunc] can write it.
+//
+// Every call returns the same files in a new slice, so a caller that
+// reorders or filters the slice does not change the plan.
 func (p *Plan) Files() []*PlanFile {
-	return p.files
+	return slices.Clone(p.files)
 }
 
 // Blocked returns the names of the files that a problem blocks, in load
@@ -162,14 +165,20 @@ func (p *Plan) Files() []*PlanFile {
 // returns it, so a program can match it against the names of
 // [Plan.Sources]. A name can hold control characters, so a renderer
 // passes each through [escape.Line] before it prints the name.
+//
+// Every call returns the same names in a new slice, so a caller that
+// reorders or filters the slice does not change the plan.
 func (p *Plan) Blocked() []string {
-	return p.blocked
+	return slices.Clone(p.blocked)
 }
 
 // Sources returns the Source of each file that the plan read, in load
 // order, as [Set.Sources] does.
+//
+// Every call returns the same Sources in a new slice, so a caller that
+// reorders or filters the slice does not change the plan.
 func (p *Plan) Sources() []*niceyaml.Source {
-	return p.sources
+	return slices.Clone(p.sources)
 }
 
 // Summary returns a line that counts the files of the plan, as in
@@ -209,7 +218,7 @@ func (f *PlanFile) Source() *niceyaml.Source {
 }
 
 // After returns the new text of the file.
-func (f *PlanFile) After() []byte {
+func (f *PlanFile) After() string {
 	return f.after
 }
 
@@ -273,7 +282,7 @@ func (f *PlanFile) Header() string {
 // large file. When ctx ends, Diff returns a nil view with the error of
 // ctx, which matches [context.Canceled] or [context.DeadlineExceeded].
 func (f *PlanFile) Diff(ctx context.Context, lines int) (*line.View, error) {
-	result, err := diff.Diff(ctx, f.f.src.Lines(), f.f.src.WithText(string(f.after)).Lines())
+	result, err := diff.Diff(ctx, f.f.src.Lines(), f.f.src.WithText(f.after).Lines())
 	if err != nil {
 		return nil, err //nolint:wrapcheck // The error of ctx, as Diff documents.
 	}
@@ -362,7 +371,7 @@ func (l *loader) planFile(i int, f *file) {
 		return
 	}
 
-	pf := &PlanFile{reg: l.reg, f: f, index: i, after: []byte(after), notMigrated: f.notMigrated}
+	pf := &PlanFile{reg: l.reg, f: f, index: i, after: after, notMigrated: f.notMigrated}
 
 	for _, d := range f.docs {
 		if d.after == "" {

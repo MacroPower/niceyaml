@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io/fs"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -81,7 +82,7 @@ func requireReloads(t *testing.T, reg *manifest.Registry, plan *manifest.Plan, i
 
 	after := make(map[string]string)
 	for _, f := range plan.Files() {
-		after[f.Source().Name()] = string(f.After())
+		after[f.Source().Name()] = f.After()
 	}
 
 	var (
@@ -131,7 +132,7 @@ func afters(plan *manifest.Plan) []string {
 	var got []string
 
 	for _, f := range plan.Files() {
-		got = append(got, string(f.After()))
+		got = append(got, f.After())
 	}
 
 	return got
@@ -661,7 +662,7 @@ func TestRegistry_PlanMigration_ReaderThenLoad(t *testing.T) {
 	plan, err := reg.PlanMigration(t.Context(), in)
 	require.NoError(t, err)
 	require.Len(t, plan.Files(), 1)
-	assert.Equal(t, menuV1Doc, string(plan.Files()[0].After()))
+	assert.Equal(t, menuV1Doc, plan.Files()[0].After())
 
 	set, err := reg.Load(t.Context(), in, manifest.WithSetChecks(false))
 	require.NoError(t, err)
@@ -1084,6 +1085,49 @@ func TestPlan_Sources(t *testing.T) {
 	}
 
 	assert.Equal(t, []string{"config/cafe.yaml", "config/hours.yaml"}, names)
+
+	// The plan keeps its order when a caller reorders the slice.
+	slices.Reverse(plan.Sources())
+	assert.Equal(t, "config/cafe.yaml", plan.Sources()[0].Name())
+}
+
+func TestPlan_Files(t *testing.T) {
+	t.Parallel()
+
+	plan, config := planDir(t, newCafeRegistry(t), exampleFiles)
+	require.NoError(t, plan.Err())
+	require.Len(t, plan.Files(), 2)
+
+	// A caller that filters the slice in place keeps the files of the plan.
+	shown := slices.DeleteFunc(plan.Files(), func(f *manifest.PlanFile) bool {
+		return filepath.Base(f.Source().Name()) != "menu.yaml"
+	})
+	require.Len(t, shown, 1)
+	require.Len(t, plan.Files(), 2)
+
+	res, err := plan.Apply(t.Context())
+	require.NoError(t, err)
+	assert.Len(t, res.Files(), 2)
+
+	for _, f := range plan.Files() {
+		assert.Equal(t, f.After(), yamltest.ReadFile(t, f.Source().Name()))
+	}
+
+	assert.Equal(t, cafeDoc, yamltest.ReadFile(t, filepath.Join(config, "cafe.yaml")))
+}
+
+func TestPlan_Blocked(t *testing.T) {
+	t.Parallel()
+
+	plan := planOf(t, cafeOptions(), map[string]string{"bad.yaml": "spec: [\n", "hours.yaml": hoursDoc})
+
+	blocked := plan.Blocked()
+	require.Equal(t, []string{"config/bad.yaml"}, blocked)
+
+	// The plan keeps its names when a caller changes the slice.
+	blocked[0] = "config/other.yaml"
+
+	assert.Equal(t, []string{"config/bad.yaml"}, plan.Blocked())
 }
 
 func TestPlanFile_Diff(t *testing.T) {
@@ -1281,7 +1325,7 @@ func TestPlanFile_After(t *testing.T) {
 				"  name: kaffe",
 				"spec:",
 				"  size: small",
-			), string(f.After()))
+			), f.After())
 
 			removals := niceyaml.FormatError(f.Removals())
 			if tc.hint {

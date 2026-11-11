@@ -96,7 +96,7 @@ func TestWriteAtomic_Fallback(t *testing.T) {
 
 		fallback = append(fallback, f.Source().Name())
 
-		return os.WriteFile(f.Source().Name(), f.After(), 0o600)
+		return os.WriteFile(f.Source().Name(), []byte(f.After()), 0o600)
 	}
 
 	res, err := plan.Apply(t.Context(), manifest.WithWriter(write))
@@ -106,5 +106,5 @@ func TestWriteAtomic_Fallback(t *testing.T) {
 		path+`: migrated Hours "weekday" to cafe.jacobcolvin.com/v1`,
 		"1 file migrated",
 	), res.Summary())
-	assert.Equal(t, string(plan.Files()[0].After()), yamltest.ReadFile(t, path))
+	assert.Equal(t, plan.Files()[0].After(), yamltest.ReadFile(t, path))
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"slices"
 	"testing"
 	"time"
 	"weak"
@@ -183,6 +184,24 @@ func TestSet_Objects(t *testing.T) {
 	assert.Equal(t, []string{"Cafe", "Hours"}, kinds)
 	assert.Len(t, set.Sources(), 3)
 	assert.Error(t, set.Warnings())
+}
+
+func TestSet_Sources(t *testing.T) {
+	t.Parallel()
+
+	set := loadExample(t)
+
+	var names []string
+
+	for _, src := range set.Sources() {
+		names = append(names, src.Name())
+	}
+
+	assert.Equal(t, []string{"config/cafe.yaml", "config/hours.yaml", "config/menu.yaml"}, names)
+
+	// The set keeps its order when a caller reorders the slice.
+	slices.Reverse(set.Sources())
+	assert.Equal(t, "config/cafe.yaml", set.Sources()[0].Name())
 }
 
 func TestObject_Bind(t *testing.T) {

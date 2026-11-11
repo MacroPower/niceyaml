@@ -53,7 +53,9 @@ type setObject struct {
 // Receive instances from [Set.One], [Set.All], [Set.Get], or
 // [Set.Objects].
 type Object[T any] struct {
-	// Value holds the decoded value of the current version.
+	// Value holds the decoded value of the current version. It is the
+	// value that the Set holds, so a change to a map, a slice, or the
+	// target of a pointer inside it reaches every later reader of the Set.
 	Value T
 	// Current holds the document in the layout of the current version,
 	// which is the document that Value decoded from. A function of
@@ -247,8 +249,11 @@ func (s *Set) Warnings() error {
 
 // Sources returns the Source of each file that the load read, in load
 // order, including a file without manifests.
+//
+// Every call returns the same Sources in a new slice, so a caller that
+// reorders or filters the slice does not change the set.
 func (s *Set) Sources() []*niceyaml.Source {
-	return s.sources
+	return slices.Clone(s.sources)
 }
 
 // typed returns o with its value as a T.

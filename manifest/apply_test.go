@@ -55,7 +55,7 @@ func TestPlan_Apply(t *testing.T) {
 		"2 files migrated, 1 up to date",
 	), res.Summary())
 
-	assert.Equal(t, string(plan.Files()[0].After()), yamltest.ReadFile(t, filepath.Join(config, "hours.yaml")))
+	assert.Equal(t, plan.Files()[0].After(), yamltest.ReadFile(t, filepath.Join(config, "hours.yaml")))
 	assert.Equal(t, cafeDoc, yamltest.ReadFile(t, filepath.Join(config, "cafe.yaml")))
 
 	entries, err := os.ReadDir(config)
@@ -321,7 +321,7 @@ func TestPlan_Apply_WithWriter(t *testing.T) {
 					return err
 				}
 
-				stored[name] = string(f.After())
+				stored[name] = f.After()
 
 				return nil
 			}
@@ -345,7 +345,7 @@ func TestPlan_Apply_WithWriter(t *testing.T) {
 
 			for _, f := range res.Files() {
 				names = append(names, f.Source().Name())
-				assert.Equal(t, string(f.After()), stored[f.Source().Name()])
+				assert.Equal(t, f.After(), stored[f.Source().Name()])
 			}
 
 			assert.Equal(t, tc.want, names)
@@ -501,7 +501,24 @@ func TestPlan_Apply_ContextEndsPartway(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	require.Len(t, res.Files(), 1)
 	assert.Equal(t, config+"/menu.yaml: context canceled", err.Error())
-	assert.Equal(t, string(plan.Files()[0].After()), yamltest.ReadFile(t, filepath.Join(config, "hours.yaml")))
+	assert.Equal(t, plan.Files()[0].After(), yamltest.ReadFile(t, filepath.Join(config, "hours.yaml")))
+}
+
+func TestResult_Files(t *testing.T) {
+	t.Parallel()
+
+	plan, _ := planDir(t, newCafeRegistry(t), exampleFiles)
+	require.NoError(t, plan.Err())
+
+	res, err := plan.Apply(t.Context())
+	require.NoError(t, err)
+
+	files := res.Files()
+	require.Len(t, files, 2)
+
+	// The result keeps its files when a caller changes the slice.
+	clear(files)
+	assert.Equal(t, plan.Files(), res.Files())
 }
 
 func TestResult_Summary(t *testing.T) {
