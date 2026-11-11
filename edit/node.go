@@ -197,7 +197,7 @@ func (d *Doc) matches(path paths.Path) ([]*Node, error) {
 // is the value of an entry that a later entry of its key hides, at base,
 // and rel is an `@` path below it.
 func (d *Doc) selectFrom(s *selection, from ast.Node, base paths.Path, hidden []hiddenEntry, rel paths.Path) error {
-	res := d.node.Resolver()
+	res := d.node.DocumentResolver()
 
 	matches, err := res.MatchesFrom(from, rel)
 	if err != nil {
@@ -354,7 +354,7 @@ func (d *Doc) hiddenAt(s *selection, path paths.Path, hidden []hiddenEntry) []*a
 // a `<<` merge key brings in is not an entry of the mapping that merges it,
 // so hiddenIn holds none for it.
 func (d *Doc) hiddenIn(content ast.Node) map[*ast.MappingValueNode][]*ast.MappingValueNode {
-	res := d.node.Resolver()
+	res := d.node.DocumentResolver()
 	entries, _ := astnode.Entries(content)
 
 	// The parser names each key by its path, and the path of the Apply by
@@ -627,7 +627,7 @@ func (d *Doc) pathTo(node ast.Node) (paths.Path, bool) {
 
 		switch x := up.(type) {
 		case *ast.MappingValueNode:
-			name, named := d.node.Resolver().KeyName(x.Key)
+			name, named := d.node.DocumentResolver().KeyName(x.Key)
 
 			switch merge := astnode.IsMergeKey(x.Key); {
 			case x.Value != child, !merge && !named:
@@ -753,7 +753,7 @@ func (d *Doc) guarded(g *guard, p *place) string {
 // readValues returns value, a value of the text, and each value of the
 // text that an alias inside value reads, or inside such a value in turn.
 func (d *Doc) readValues(value ast.Node) []ast.Node {
-	res := d.node.Resolver()
+	res := d.node.DocumentResolver()
 	out := []ast.Node{value}
 	seen := map[ast.Node]bool{value: true}
 
@@ -1367,7 +1367,7 @@ func (d *Doc) view(n *Node, p *place) (*niceyaml.Node, error) {
 
 	value := p.value
 
-	content, err := d.node.Resolver().Deref(value)
+	content, err := d.node.DocumentResolver().Deref(value)
 	if err == nil {
 		value = content
 	}

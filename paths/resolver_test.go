@@ -2606,7 +2606,7 @@ func TestResolver_Node_Converted(t *testing.T) {
 
 			doc := yamltest.FirstDocument(t, tc.input)
 
-			node, err := doc.Resolver().Node(tc.path)
+			node, err := doc.DocumentResolver().Node(tc.path)
 			if tc.want == "" {
 				require.ErrorIs(t, err, paths.ErrNotFound)
 

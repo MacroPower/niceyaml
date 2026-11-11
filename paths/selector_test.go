@@ -429,7 +429,7 @@ func TestPath_Last_Matches(t *testing.T) {
 
 			doc := yamltest.FirstDocument(t, tc.input)
 
-			matches, err := doc.Resolver().Matches(paths.MustParse(tc.expr))
+			matches, err := doc.DocumentResolver().Matches(paths.MustParse(tc.expr))
 			require.NoError(t, err)
 
 			got := make([]paths.Selector, 0, len(matches))
@@ -441,7 +441,7 @@ func TestPath_Last_Matches(t *testing.T) {
 				got = append(got, sel)
 
 				// The name of each match selects the node again.
-				node, err := doc.Resolver().Node(m.Path)
+				node, err := doc.DocumentResolver().Node(m.Path)
 				require.NoError(t, err)
 				assert.Same(t, m.Node, node)
 			}

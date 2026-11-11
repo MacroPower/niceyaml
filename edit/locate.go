@@ -444,7 +444,7 @@ func (d *Doc) placeOf(at niceyaml.Located) (niceyaml.Place, *note) {
 	var held ast.Node
 
 	if at.HasPath {
-		n, err := pointedNode(d.node.Resolver(), at.Path)
+		n, err := pointedNode(d.node.DocumentResolver(), at.Path)
 		if err == nil && !at.Path.IsRoot() && !d.holdsPath(at.Path) {
 			err = paths.ErrNotFound
 		}
@@ -909,7 +909,7 @@ func (d *Doc) emptyAfter(at niceyaml.Located, start, end int) (int, bool) {
 		return 0, false
 	}
 
-	n, err := pointedNode(d.node.Resolver(), at.Path)
+	n, err := pointedNode(d.node.DocumentResolver(), at.Path)
 	if err != nil || n == nil || !isImplicitNull(n) {
 		return 0, false
 	}
@@ -1006,7 +1006,7 @@ func (d *Doc) emptyNote(path paths.Path, before int) (note, bool) {
 // returns after, the offset past the ":" or "-" of the value, when the
 // user's text does not hold an empty value at path.
 func (d *Doc) userEmpty(path paths.Path, after int) int {
-	n, err := pointedNode(d.user.Resolver(), path)
+	n, err := pointedNode(d.user.DocumentResolver(), path)
 	if err != nil || n == nil || !isImplicitNull(n) {
 		return after
 	}
@@ -1230,7 +1230,7 @@ func (d *Doc) userPos(off int) position.Position {
 func (d *Doc) userPath(path paths.Path, pos position.Position) paths.Path {
 	// The resolver binds no error. A bound error locates itself through d,
 	// which then calls userPath again.
-	n, err := pointedNode(d.node.Resolver(), path)
+	n, err := pointedNode(d.node.DocumentResolver(), path)
 	if err != nil {
 		return path
 	}
@@ -1307,7 +1307,7 @@ func (d *Doc) keyBytes(path paths.Path) (span, bool) {
 		return span{}, false
 	}
 
-	tk, err := d.node.Resolver().Token(path.Key())
+	tk, err := d.node.DocumentResolver().Token(path.Key())
 	if err != nil || tk == nil {
 		return span{}, false
 	}

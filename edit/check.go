@@ -523,7 +523,7 @@ type apart struct {
 // finds it. A mapping that the two read with other keys stops the
 // walk. A key that only the decode reads names the alias in that key.
 func (d *Doc) apartAt(own, read any) apart {
-	res := d.node.Resolver()
+	res := d.node.DocumentResolver()
 	a := apart{own: own, read: read, node: d.node.AST(), path: paths.Doc()}
 
 	for node, seen := a.node, map[ast.Node]bool{}; !astnode.IsNil(node) && !seen[node]; {
@@ -628,7 +628,7 @@ func (d *Doc) apartEntry(a *apart, node ast.Node, own, read map[string]any) (ast
 			return nil, false
 		}
 
-		name, _ := d.node.Resolver().KeyName(e.Key)
+		name, _ := d.node.DocumentResolver().KeyName(e.Key)
 		a.path, a.own, a.read = a.path.Child(name), ov, read[k]
 
 		return e.Value, true
@@ -688,7 +688,7 @@ func (d *Doc) entryRead(node ast.Node, name string) (*ast.MappingValueNode, bool
 		return last, false, last != nil
 	}
 
-	e, err := d.node.Resolver().Entry(node, name)
+	e, err := d.node.DocumentResolver().Entry(node, name)
 	if err != nil {
 		return nil, false, false
 	}

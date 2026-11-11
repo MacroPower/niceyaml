@@ -22,6 +22,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/encoder"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml/position"
 )
 
 var (
@@ -146,15 +147,19 @@ func TestNew(t *testing.T) {
 		// Whether the error matches edit.ErrUsage, because the program is at
 		// fault.
 		usage bool
+		// Whether the error matches niceyaml.ErrScopedNode, because the
+		// program passed a Node below the root.
+		scoped bool
 	}{
 		"nil document": {
 			err:   "New takes the root of a document that holds a value, not nil",
 			usage: true,
 		},
 		"node below the root": {
-			doc:   below,
-			err:   "New takes the root of a document that holds a value, not the node at $.a",
-			usage: true,
+			doc:    below,
+			err:    "New takes the root of a document that holds a value, not the node at $.a",
+			usage:  true,
+			scoped: true,
 		},
 		"empty document": {
 			doc:     niceyaml.NewSourceFromString("# only a comment\n").AllDocuments()[0],
@@ -205,7 +210,38 @@ func TestNew(t *testing.T) {
 			assert.Equal(t, tc.err, err.Error())
 			assert.Equal(t, tc.invalid, niceyaml.IsInvalid(err))
 			assert.Equal(t, tc.usage, errors.Is(err, edit.ErrUsage))
+			assert.Equal(t, tc.scoped, errors.Is(err, niceyaml.ErrScopedNode))
 			require.NotErrorIs(t, err, edit.ErrEngine)
+		})
+	}
+}
+
+func TestNew_RootPath(t *testing.T) {
+	t.Parallel()
+
+	const text = "# hi\n---\na: 1\n\nb:\n  c: 2\n"
+
+	doc := yamltest.FirstDocument(t, text)
+
+	// A path that selects the root gives the root itself, so New takes
+	// the Node, and the Doc holds the whole text.
+	blank, ok := doc.NodeAt(position.New(3, 0))
+	require.True(t, ok)
+
+	tcs := map[string]struct {
+		node *niceyaml.Node
+	}{
+		"At":     {node: yamltest.At(t, doc, paths.Doc())},
+		"NodeAt": {node: blank},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d, err := edit.New(tc.node)
+			require.NoError(t, err)
+			assert.Equal(t, text, d.Text())
 		})
 	}
 }

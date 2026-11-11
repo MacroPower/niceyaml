@@ -29,8 +29,8 @@ func read(tb testing.TB, input string, layer int, refs ...string) (*layermerge.V
 
 	r := layermerge.Reader{
 		Ctx:        tb.Context(),
-		Resolver:   doc.Resolver(),
-		Enclosed:   aliasing.NewFacts(doc.AST(), doc.Resolver()).Enclosed,
+		Resolver:   doc.DocumentResolver(),
+		Enclosed:   aliasing.NewFacts(doc.AST(), doc.DocumentResolver()).Enclosed,
 		UnnamedKey: errUnnamed,
 		Layer:      layer,
 	}

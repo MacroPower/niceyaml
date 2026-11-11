@@ -1821,7 +1821,7 @@ func (d *Doc) kindOf(p *place, content ast.Node) string {
 
 	value := p.value
 
-	target, err := d.node.Resolver().Deref(value)
+	target, err := d.node.DocumentResolver().Deref(value)
 	if err == nil {
 		value = target
 	}

@@ -911,7 +911,7 @@ func (d *Doc) mergeName(key ast.Node) (string, bool) {
 		return name, true
 	}
 
-	return d.node.Resolver().KeyName(key)
+	return d.node.DocumentResolver().KeyName(key)
 }
 
 // emptyUnder reports whether node, the value under an anchor, is the null
@@ -1281,7 +1281,7 @@ func (d *Doc) referenceWords(name string) string {
 // document defines name too. The text aliases name with aliases, so an
 // alias can read the anchor of the reference document instead of anchor.
 func (d *Doc) referencedAnchor(anchor *ast.AnchorNode, name string, aliases []*ast.AliasNode) (instance, bool) {
-	_, err := d.node.Resolver().Anchor(mapkey.NewAlias(name))
+	_, err := d.node.DocumentResolver().Anchor(mapkey.NewAlias(name))
 	if !errors.Is(err, paths.ErrReferenceAlias) {
 		return instance{}, false
 	}
@@ -1804,7 +1804,7 @@ func (d *Doc) walkCall(path paths.Path, hidden []hiddenEntry) (*callWalk, error)
 		prev ast.Node
 	)
 
-	res := d.node.Resolver()
+	res := d.node.DocumentResolver()
 	sels := slices.Collect(path.Selectors())
 
 	p, err := d.walk(path, hidden, func(p *place, cur ast.Node) bool {
@@ -1932,7 +1932,7 @@ func (d *Doc) mergeChain(m ast.Node, entry *ast.MappingValueNode, name string, s
 // the anchored value of each alias of its value, or of the items of a
 // sequence there, and a mapping that its value writes itself.
 func (d *Doc) mergeSources(me *ast.MappingValueNode) []ast.Node {
-	res := d.node.Resolver()
+	res := d.node.DocumentResolver()
 
 	var out []ast.Node
 
@@ -2916,7 +2916,7 @@ func (d *Doc) mappingZones(
 		merges []*ast.MappingValueNode
 	)
 
-	res := d.node.Resolver()
+	res := d.node.DocumentResolver()
 
 	for _, e := range entries {
 		if _, ok := e.Key.(*ast.MappingKeyNode); ok {
@@ -3191,7 +3191,7 @@ func (d *Doc) keyTextZone(m ast.Node, g *keyTextGroup) *zone {
 		},
 	}
 
-	res := d.node.Resolver()
+	res := d.node.DocumentResolver()
 	held := []string{g.name}
 
 	hold := func(text string, ok bool) {
@@ -3286,7 +3286,7 @@ func (d *Doc) mergesMapping(m ast.Node, k zoneKeys) bool {
 // [Doc.mergedMappings] reads them. A key has a name by its text, and by the
 // name that a decode into a map gives it.
 func (d *Doc) mergesKey(m ast.Node, names []string) bool {
-	decoded, res := d.decodedKeys(), d.node.Resolver()
+	decoded, res := d.decodedKeys(), d.node.DocumentResolver()
 
 	for _, s := range d.mergedMappings(m) {
 		entries, _ := readEntries(s)
@@ -3443,7 +3443,7 @@ func (d *Doc) formOf(e *ast.MappingValueNode) mergeForm {
 func (d *Doc) mergeValueForm(value ast.Node) mergeForm {
 	const aliasFix = "merge an alias of a mapping"
 
-	res := d.node.Resolver()
+	res := d.node.DocumentResolver()
 
 	// The mapping that alias brings in, and the form of a merge key whose
 	// alias brings in none. The form of an alias of a reference document
@@ -3680,7 +3680,7 @@ func (d *Doc) mergeZone(m ast.Node, e, first *ast.MappingValueNode, heads bool) 
 			continue
 		}
 
-		anchor, err := d.node.Resolver().Anchor(alias)
+		anchor, err := d.node.DocumentResolver().Anchor(alias)
 		if err == nil {
 			sources = append(sources, d.nodeSite(anchor, false))
 		}
@@ -3947,7 +3947,7 @@ func (d *Doc) ownKeys(node ast.Node) []string {
 // readOwnKeys reads the keys of the mapping that node holds, as
 // [Doc.ownKeys] returns them.
 func (d *Doc) readOwnKeys(node ast.Node) []string {
-	res := d.node.Resolver()
+	res := d.node.DocumentResolver()
 	entries, _ := readEntries(astnode.Content(node))
 
 	out := make([]string, 0, len(entries))
@@ -4006,7 +4006,7 @@ func mergeText(k keptMerge) string {
 // of the merge key, or an item of the sequence that the merge key merges,
 // so a merge key in a refused form counts too.
 func (d *Doc) mergeReads() []keptMerge {
-	res := d.node.Resolver()
+	res := d.node.DocumentResolver()
 
 	var out []keptMerge
 
@@ -4146,7 +4146,7 @@ func (d *Doc) siteOf(e *ast.MappingValueNode) *site {
 // text, other than a << merge key, or nil.
 func (d *Doc) entryOf(m ast.Node, key string) *ast.MappingValueNode {
 	entries, _ := readEntries(astnode.Content(m))
-	res := d.node.Resolver()
+	res := d.node.DocumentResolver()
 
 	var at *ast.MappingValueNode
 
@@ -4177,7 +4177,7 @@ func (d *Doc) textPath(node ast.Node) paths.Path {
 // renames its key to key when renamed is true, as rule M2 of the merge
 // rules refuses it, or nil.
 func (d *Doc) ownKeysProblem(own *ast.MappingValueNode, m ast.Node, key string, renamed bool, named string) error {
-	name, ok := d.node.Resolver().KeyName(own.Key)
+	name, ok := d.node.DocumentResolver().KeyName(own.Key)
 	if !ok || astnode.IsMergeKey(own.Key) {
 		return nil
 	}
@@ -4605,7 +4605,7 @@ func (d *Doc) orderPart(
 	first, firstAt := place(ses[0], false)
 	last, lastAt := place(ses[len(ses)-1], true)
 
-	name, _ := d.node.Resolver().KeyName(ses[len(ses)-1].Key)
+	name, _ := d.node.DocumentResolver().KeyName(ses[len(ses)-1].Key)
 	at := d.nodeSite(e.Key, true)
 	mergeAt := placeText(at.at.Start)
 
@@ -4855,7 +4855,7 @@ func (d *Doc) precedencePart(e, own *ast.MappingValueNode, later bool) (misreadF
 		return misreadFound{}, false
 	}
 
-	name, _ := d.node.Resolver().KeyName(own.Key)
+	name, _ := d.node.DocumentResolver().KeyName(own.Key)
 	at := d.entrySite(own)
 
 	// No path names a mapping below a key without a name of its own, such
@@ -4925,7 +4925,7 @@ func (d *Doc) mergeState() mergeState {
 // must read a mapping (rule M5), and its mapping must hide the same keys
 // of its source (rule M2).
 func (d *Doc) mergeKept(h *Node, named string) error {
-	res := d.node.Resolver()
+	res := d.node.DocumentResolver()
 
 	for _, k := range d.mergeEntries() {
 		before, ok := d.mergesAt.kept[d.firstOrigin(k.entry.Key)]

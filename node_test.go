@@ -384,16 +384,65 @@ func TestNode_Kind(t *testing.T) {
 		// The root path of an empty document below a header selects the
 		// null at the header, and the Node there is the root.
 		empty := yamltest.FirstDocument(t, "---\n")
+		assert.Same(t, empty, yamltest.At(t, empty, paths.Doc()))
 		assert.True(t, yamltest.At(t, empty, paths.Doc()).IsEmpty())
 
 		nodes, err := empty.Nodes(paths.Doc())
 		require.NoError(t, err)
 		require.Len(t, nodes, 1)
+		assert.Same(t, empty, nodes[0])
 		assert.True(t, nodes[0].IsEmpty())
 
 		full := yamltest.FirstDocument(t, "a: 1\n")
 		assert.False(t, yamltest.At(t, full, paths.Doc()).IsEmpty())
 	})
+}
+
+func TestNode_At_Root(t *testing.T) {
+	t.Parallel()
+
+	// The preamble and the blank line keep the root apart from its body,
+	// whose lines start at "a: 1".
+	doc := yamltest.FirstDocument(t, stringtest.Input(`
+		# hi
+		---
+		a: 1
+
+		b:
+		  c: 2
+	`))
+	b := yamltest.At(t, doc, paths.Doc().Child("b"))
+
+	nodes, err := doc.Nodes(paths.Doc())
+	require.NoError(t, err)
+	require.Len(t, nodes, 1)
+
+	blank, ok := doc.NodeAt(position.New(3, 0))
+	require.True(t, ok)
+
+	tcs := map[string]struct {
+		node *niceyaml.Node
+	}{
+		"At $":            {node: yamltest.At(t, doc, paths.Doc())},
+		"At @":            {node: yamltest.At(t, doc, paths.Current())},
+		"At $ of a scope": {node: yamltest.At(t, b, paths.Doc())},
+		"Nodes $":         {node: nodes[0]},
+		"NodeAt":          {node: blank},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			// A document has one Node at `$`: the root, which spans the
+			// whole document and holds its preamble.
+			assert.Same(t, doc, tc.node)
+			assert.Same(t, tc.node, tc.node.Document())
+			assert.True(t, tc.node.Path().IsRoot())
+			assert.Equal(t, position.NewSpan(0, 6), tc.node.Span())
+			assert.Equal(t, doc.Tokens(), tc.node.Tokens())
+		})
+	}
 }
 
 // pathsAt lists what [niceyaml.Node.PathAt] reports for every position of
@@ -1067,13 +1116,15 @@ func TestNode_PathAt_ScopedNode(t *testing.T) {
 	hours := yamltest.At(t, doc, paths.Doc().Child("spec", "hours"))
 
 	tcs := map[string]struct {
+		want string
 		line int
 		col  int
-		want string
+		ok   bool
 	}{
-		"inside the scope":  {line: 2, col: 10, want: "$.spec.hours.open"},
-		"key of the scope":  {line: 1, col: 2, want: "$.spec.hours~"},
-		"outside the scope": {line: 3, col: 6, want: "$.name"},
+		"inside the scope":       {line: 2, col: 10, want: "$.spec.hours.open", ok: true},
+		"key of the scope":       {line: 1, col: 2, want: "$.spec.hours~", ok: true},
+		"outside the scope":      {line: 3, col: 6, want: "$.name"},
+		"parent outside a scope": {line: 0, col: 0, want: "$.spec~"},
 	}
 
 	for name, tc := range tcs {
@@ -1082,18 +1133,29 @@ func TestNode_PathAt_ScopedNode(t *testing.T) {
 
 			pos := position.New(tc.line, tc.col)
 
-			// A scoped Node answers for its document, from the root.
-			got, ok := hours.PathAt(pos)
-			require.True(t, ok)
-			assert.Equal(t, tc.want, got.String())
-
+			// The root answers for every position of the document.
 			want, ok := doc.PathAt(pos)
 			require.True(t, ok)
-			assert.Equal(t, want, got)
+			assert.Equal(t, tc.want, want.String())
 
 			fromRoot, ok := hours.Document().PathAt(pos)
 			require.True(t, ok)
 			assert.Equal(t, want, fromRoot)
+
+			// A scoped Node answers within its scope, as NodeAt does.
+			got, ok := hours.PathAt(pos)
+			_, nodeOK := hours.NodeAt(pos)
+			assert.Equal(t, tc.ok, nodeOK)
+
+			if !tc.ok {
+				assert.False(t, ok)
+				assert.Equal(t, paths.Path{}, got)
+
+				return
+			}
+
+			require.True(t, ok)
+			assert.Equal(t, want, got)
 
 			// The path starts at `$`, so it goes back through the scoped
 			// Node and selects the node at pos.
@@ -2908,7 +2970,7 @@ func TestDocument_At_Scope(t *testing.T) {
 			"root": {
 				input: stringtest.LinesLF("&x", "# c", "b: 1"),
 				path:  paths.Current(),
-				span:  position.NewSpan(1, 3),
+				span:  position.NewSpan(0, 3),
 			},
 			"anchor below the key and comment left of the key": {
 				input: stringtest.LinesLF(
@@ -5733,9 +5795,13 @@ func TestNode_At_Span(t *testing.T) {
 		assert.Equal(t, position.NewSpan(1, 4), docs[1].Span())
 		assert.Equal(t, position.NewSpan(4, 8), docs[2].Span())
 
-		// A Node that At scopes at the root covers the content alone.
-		assert.Equal(t, position.NewSpan(2, 4), yamltest.At(t, docs[1], paths.Current()).Span())
-		assert.Equal(t, position.NewSpan(5, 8), yamltest.At(t, docs[2], paths.Current()).Span())
+		// At gives the root itself for the root path, so the Node keeps
+		// the lines of the whole document.
+		for _, doc := range docs[1:] {
+			root := yamltest.At(t, doc, paths.Current())
+			assert.Same(t, doc, root)
+			assert.Equal(t, doc.Span(), root.Span())
+		}
 	})
 }
 
@@ -6852,7 +6918,7 @@ func TestNode_Nodes(t *testing.T) {
 	})
 }
 
-func TestNode_Resolver(t *testing.T) {
+func TestNode_DocumentResolver(t *testing.T) {
 	t.Parallel()
 
 	docs := yamltest.Documents(t, niceyaml.NewSourceFromString(stringtest.Input(`
@@ -6870,9 +6936,9 @@ func TestNode_Resolver(t *testing.T) {
 
 		item := yamltest.At(t, docs[0], paths.Current().Child("items").Index(1))
 
-		assert.Same(t, docs[0].Resolver(), item.Resolver())
-		assert.Same(t, docs[0].Resolver(), item.Document().Resolver())
-		assert.NotSame(t, docs[0].Resolver(), docs[1].Resolver())
+		assert.Same(t, docs[0].DocumentResolver(), item.DocumentResolver())
+		assert.Same(t, docs[0].DocumentResolver(), item.Document().DocumentResolver())
+		assert.NotSame(t, docs[0].DocumentResolver(), docs[1].DocumentResolver())
 	})
 
 	t.Run("paths resolve from the document root", func(t *testing.T) {
@@ -6880,7 +6946,7 @@ func TestNode_Resolver(t *testing.T) {
 
 		item := yamltest.At(t, docs[0], paths.Current().Child("items").Index(1))
 
-		got, err := item.Resolver().Node(item.Path())
+		got, err := item.DocumentResolver().Node(item.Path())
 		require.NoError(t, err)
 		assert.Same(t, item.AST(), got)
 	})
@@ -6890,7 +6956,7 @@ func TestNode_Resolver(t *testing.T) {
 
 		item := yamltest.At(t, docs[0], paths.Current().Child("items").Index(0))
 
-		got, err := item.Resolver().Deref(item.AST())
+		got, err := item.DocumentResolver().Deref(item.AST())
 		require.NoError(t, err)
 
 		want, err := paths.NewResolver(docs[0].DocumentAST()).Node(paths.Current().Child("base"))
@@ -6914,7 +6980,7 @@ func TestNode_Resolver(t *testing.T) {
 				doc := yamltest.UnparsedDocument(t, input)
 				require.ErrorIs(t, doc.Err(), niceyaml.ErrSyntax)
 
-				resolver := doc.Resolver()
+				resolver := doc.DocumentResolver()
 
 				for _, path := range []paths.Path{
 					paths.Doc(),

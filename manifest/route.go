@@ -79,7 +79,7 @@ func (c *registryConfig) fieldPaths() []paths.Path {
 // a mapping or a timestamp, is not text. The read also notes a scalar that
 // the decoder reads as another string than its text, such as 1.10 as "1.1".
 func readField(doc *niceyaml.Node, p paths.Path, reads []paths.Path) fieldRead {
-	res := doc.Resolver()
+	res := doc.DocumentResolver()
 	keys := hook.Keys(doc)
 	name := fieldName(p)
 	cur := doc.AST()

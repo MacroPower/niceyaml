@@ -70,7 +70,7 @@ func TestIndex_PathAt(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			path, ok := idx.PathAt(doc.Resolver(), find(t, tks, tc.text).Position.Offset)
+			path, ok := idx.PathAt(doc.DocumentResolver(), find(t, tks, tc.text).Position.Offset)
 			assert.True(t, ok)
 			assert.Equal(t, tc.want, path.String())
 		})
@@ -79,7 +79,7 @@ func TestIndex_PathAt(t *testing.T) {
 	t.Run("an offset past the body", func(t *testing.T) {
 		t.Parallel()
 
-		_, ok := idx.PathAt(doc.Resolver(), len(input))
+		_, ok := idx.PathAt(doc.DocumentResolver(), len(input))
 		assert.False(t, ok)
 	})
 }
@@ -91,7 +91,7 @@ func TestIndex_PathAt_Unselected(t *testing.T) {
 	doc := yamltest.FirstDocument(t, stringtest.LinesLF("base: &b {k: 1}", "m: {k: 2, <<: *b}"))
 	idx := pathindex.New(doc.AST())
 
-	_, ok := idx.PathAt(doc.Resolver(), find(t, doc.Tokens(), "2").Position.Offset)
+	_, ok := idx.PathAt(doc.DocumentResolver(), find(t, doc.Tokens(), "2").Position.Offset)
 	assert.False(t, ok)
 }
 
@@ -140,7 +140,7 @@ func TestIndex_SitePath(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			path, inKey := idx.SitePath(doc.Resolver(), find(t, tks, tc.text).Position.Offset, tc.key)
+			path, inKey := idx.SitePath(doc.DocumentResolver(), find(t, tks, tc.text).Position.Offset, tc.key)
 			assert.Equal(t, tc.want, path.String())
 			assert.Equal(t, tc.inKey, inKey)
 		})
@@ -149,7 +149,7 @@ func TestIndex_SitePath(t *testing.T) {
 	t.Run("an offset past the body", func(t *testing.T) {
 		t.Parallel()
 
-		path, inKey := idx.SitePath(doc.Resolver(), len(input)+10, false)
+		path, inKey := idx.SitePath(doc.DocumentResolver(), len(input)+10, false)
 		assert.Equal(t, "$", path.String())
 		assert.False(t, inKey)
 	})
@@ -185,7 +185,7 @@ func TestIndex_OwnerPath(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			path, selects, ok := idx.OwnerPath(doc.Resolver(), tc.tk)
+			path, selects, ok := idx.OwnerPath(doc.DocumentResolver(), tc.tk)
 			assert.Equal(t, tc.ok, ok)
 			assert.Equal(t, tc.selects, selects)
 
@@ -203,7 +203,7 @@ func TestIndex_OwnerPath(t *testing.T) {
 		doc := yamltest.FirstDocument(t, "a: !!str &k [x, 4]\n")
 		idx := pathindex.New(doc.AST())
 
-		path, selects, ok := idx.OwnerPath(doc.Resolver(), find(t, doc.Tokens(), "x"))
+		path, selects, ok := idx.OwnerPath(doc.DocumentResolver(), find(t, doc.Tokens(), "x"))
 		require.True(t, ok)
 		assert.False(t, selects)
 		assert.Equal(t, "$.a[0]", path.String())
@@ -238,11 +238,11 @@ func TestIndex_OwnerToken(t *testing.T) {
 			require.NotNil(t, got)
 			assert.Equal(t, tc.want, got.Value)
 
-			path, selects, ok := idx.OwnerPath(doc.Resolver(), tc.tk)
+			path, selects, ok := idx.OwnerPath(doc.DocumentResolver(), tc.tk)
 			require.True(t, ok)
 			require.True(t, selects)
 
-			want, err := doc.Resolver().Token(path)
+			want, err := doc.DocumentResolver().Token(path)
 			require.NoError(t, err)
 			assert.Same(t, want, got)
 		})
@@ -304,7 +304,7 @@ func TestIndex_MergedOwnerPath(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			path, ok := idx.MergedOwnerPath(doc.Resolver(), tc.tk)
+			path, ok := idx.MergedOwnerPath(doc.DocumentResolver(), tc.tk)
 			assert.Equal(t, tc.ok, ok)
 
 			if tc.ok {
@@ -319,6 +319,6 @@ func TestNew_Empty(t *testing.T) {
 
 	doc := yamltest.FirstDocument(t, "# only a comment\n")
 
-	_, ok := pathindex.New(doc.AST()).PathAt(doc.Resolver(), 0)
+	_, ok := pathindex.New(doc.AST()).PathAt(doc.DocumentResolver(), 0)
 	assert.False(t, ok)
 }

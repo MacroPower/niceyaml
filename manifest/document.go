@@ -889,7 +889,7 @@ func (b *objectBinder) leftOutDetail(problem niceyaml.ErrorTree) error {
 		return nil
 	}
 
-	res := b.work.Resolver()
+	res := b.work.DocumentResolver()
 	prefix := paths.Doc()
 
 	for sel := range p.Selectors() {
@@ -928,7 +928,7 @@ func (b *objectBinder) leftOutDetail(problem niceyaml.ErrorTree) error {
 
 // exists reports whether doc holds a value at p.
 func exists(doc *niceyaml.Node, p paths.Path) bool {
-	n, err := doc.Resolver().Node(p)
+	n, err := doc.DocumentResolver().Node(p)
 
 	return err == nil && !astnode.IsNil(n)
 }

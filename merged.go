@@ -343,8 +343,8 @@ func (n *Node) Origin() (*Node, error) {
 	layer, held := n.source.layers.layer(n, n.base, n.base)
 	path := held(n.base)
 
-	// The path names the Node of the layer itself. At would scope a root to
-	// its content alone, and fail on a document with no content.
+	// The path names the Node of the layer itself, which At fails to
+	// select in a layer with neither a header nor content.
 	if path.Equal(layer.node.base) {
 		return layer.node, nil
 	}

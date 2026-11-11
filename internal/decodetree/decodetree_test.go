@@ -27,7 +27,7 @@ func newTree(tb testing.TB, input string) (*decodetree.Tree, *niceyaml.Node) {
 
 	src := niceyaml.NewSourceFromString(input)
 	doc := yamltest.Document(tb, src)
-	facts := aliasing.NewFacts(doc.AST(), doc.Resolver())
+	facts := aliasing.NewFacts(doc.AST(), doc.DocumentResolver())
 
 	reparse := func() (ast.Node, map[*token.Token]int) {
 		r := docparse.Parse(src.Tokens())
@@ -162,7 +162,7 @@ func TestChanges(t *testing.T) {
 			t.Parallel()
 
 			tree, doc := newTree(t, tc.input)
-			facts := aliasing.NewFacts(doc.AST(), doc.Resolver())
+			facts := aliasing.NewFacts(doc.AST(), doc.DocumentResolver())
 
 			got := decodetree.Changes(doc.AST(), facts, false)
 			assert.Equal(t, tc.want, got)

@@ -240,6 +240,15 @@ var (
 	// wraps the error that [Node.Err] returns.
 	ErrPathNeedsDocument = errors.New("path needs a document to resolve in")
 
+	// ErrScopedNode indicates a [*Node] below the root of its document,
+	// passed to a function that takes only the root. Such a function reads
+	// the whole document, as [go.jacobcolvin.com/niceyaml/edit.New] and
+	// [go.jacobcolvin.com/niceyaml/schema.Registry] do. A Node is the root
+	// exactly when it is the Node that [Node.Document] returns, which is
+	// also the one Node whose [Node.Path] is [paths.Doc]. The program is at
+	// fault for the error, so [IsInvalid] does not report it.
+	ErrScopedNode = errors.New("node is not the root of its document")
+
 	// ErrAmbiguousPath indicates a path that names the entries of more than
 	// one key of a decoded map. Keys of different types that the document
 	// spells with one text share one path, such as 1 and "1" in a map[any]T.

@@ -106,7 +106,7 @@ func TestNewFacts(t *testing.T) {
 			t.Parallel()
 
 			doc := yamltest.FirstDocument(t, tc.input)
-			facts := aliasing.NewFacts(doc.AST(), doc.Resolver())
+			facts := aliasing.NewFacts(doc.AST(), doc.DocumentResolver())
 
 			var aliases, enclosed []string
 
