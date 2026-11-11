@@ -670,17 +670,10 @@ func DefaultAnnotation(ctx AnnotationContext) []AnnotationRow {
 }
 
 // labelsLine reports whether anns, the annotations of one kind, label
-// their line and not a column of it. The annotations of kind
-// [kind.UISeparator] and [kind.UIHunkHeader] do, as [line.Annotation]
-// describes.
+// their line and not a column of it. Annotations that do not
+// [line.Annotation.Marks] do, as [line.Annotation] describes.
 func labelsLine(anns line.Annotations) bool {
-	if len(anns) == 0 {
-		return false
-	}
-
-	k := anns[0].RenderKind()
-
-	return k == kind.UISeparator || k == kind.UIHunkHeader
+	return len(anns) > 0 && !anns[0].Marks()
 }
 
 // wrappedRows returns the columns of ctx.Content each wrapped row of the

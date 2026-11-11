@@ -1105,6 +1105,37 @@ func TestDiffResult_HunksOf_KeepsClip(t *testing.T) {
 	}
 }
 
+func TestDiffResult_HunksOf_MarksAgreeWithViewHunks(t *testing.T) {
+	t.Parallel()
+
+	// The diff changes k10 of twenty lines, so the hunks at context 3
+	// start with a header above the context row of k7.
+	lines := make([]string, 0, 20)
+	for n := 1; n <= 20; n++ {
+		lines = append(lines, fmt.Sprintf("k%d: %d", n, n))
+	}
+
+	before := stringtest.LinesLF(lines...)
+
+	lines[9] = "k10: changed"
+	after := stringtest.LinesLF(lines...)
+
+	result := yamltest.Diff(before, after)
+	hunks := result.Hunks(3)
+
+	// View.Hunks does not count the header as a mark, so it forms the
+	// same hunk as HunksOf. It cannot recompute the header, so it drops it.
+	assert.Equal(t, stringtest.JoinLF(
+		"  10 - k10: 10",
+		"  10 + k10: changed",
+	), hunks.Hunks(0).String())
+	assert.Equal(t, stringtest.JoinLF(
+		"     | @@ -10 +10 @@",
+		"  10 - k10: 10",
+		"  10 + k10: changed",
+	), result.HunksOf(hunks, 0).String())
+}
+
 func TestDiffResult_HunksOf_Panics(t *testing.T) {
 	t.Parallel()
 

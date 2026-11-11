@@ -485,9 +485,9 @@ func (r *Result) Hunks(context int) *line.View {
 // carries decoration, such as the marks that [Result.Carry] copies from
 // the inputs. A hunk forms around each row that view decorates: a row with
 // a [line.Flag] other than [line.FlagDefault], an overlay, or an
-// annotation of a kind other than [kind.UIHunkHeader] and
-// [kind.UISeparator]. The flags of the unified view mark the changes, so
-// an error on an unchanged row gets a hunk of its own:
+// annotation that [line.Annotation.Marks]. The flags of the unified view
+// mark the changes, so an error on an unchanged row gets a hunk of its
+// own:
 //
 //	view := result.Unified()
 //	result.Carry(view, before, after)
@@ -500,11 +500,11 @@ func (r *Result) Hunks(context int) *line.View {
 // lines of each side that its hunk holds.
 //
 // Each row of the result keeps the flag, the overlays, and the annotations
-// that view gives it, except the hunk headers and the separators that sit
-// above a row. HunksOf adds headers of its own, so the hunks of hunks match
-// the hunks. A separator below a row labels that row and not a gap, so it
-// stays. The row that counts the problems an error excerpt does not mark
-// on a line is such a separator.
+// that view gives it, except the annotations above a row that do not
+// mark, such as hunk headers and separators. HunksOf adds headers of its
+// own, so the hunks of hunks match the hunks. A separator below a row
+// labels that row and not a gap, so it stays. The row that counts the
+// problems an error excerpt does not mark on a line is such a separator.
 //
 // The result keeps the clip that [line.View.Clip] gave view, as
 // [line.View.Slice] does. HunksOf panics when view is not over the content
@@ -583,7 +583,7 @@ func (r *Result) HunksOf(view *line.View, context int) *line.View {
 		}
 
 		for _, a := range view.Annotations(i) {
-			if !isHunkMark(a) || a.Placement != line.Above {
+			if a.Marks() || a.Placement != line.Above {
 				hunks.AnnotateLine(i, a)
 			}
 		}
@@ -622,17 +622,10 @@ func heldRuns(view *line.View, ops position.Span) []position.Span {
 }
 
 // hunkMarked reports whether row i of view carries a flag, an overlay, or
-// an annotation of a kind other than the ones [isHunkMark] reports.
+// an annotation that [line.Annotation.Marks].
 func hunkMarked(view *line.View, i int) bool {
 	return view.Flag(i) != line.FlagDefault || len(view.Overlays(i)) > 0 ||
-		slices.ContainsFunc(view.Annotations(i), func(a line.Annotation) bool { return !isHunkMark(a) })
-}
-
-// isHunkMark reports whether a is a hunk header, of kind
-// [kind.UIHunkHeader], or a separator, of kind [kind.UISeparator], as a
-// view of hunks carries them.
-func isHunkMark(a line.Annotation) bool {
-	return a.Kind == kind.UIHunkHeader || a.Kind == kind.UISeparator
+		slices.ContainsFunc(view.Annotations(i), line.Annotation.Marks)
 }
 
 // consecutivePart is a run of a diff's ops within which each side's lines

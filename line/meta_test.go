@@ -100,6 +100,33 @@ func TestAnnotation_RenderKind(t *testing.T) {
 	}
 }
 
+func TestAnnotation_Marks(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		kind kind.Kind
+		want bool
+	}{
+		"zero kind":        {kind: "", want: true},
+		"annotation kind":  {kind: kind.UIAnnotation, want: true},
+		"error kind":       {kind: kind.TextError, want: true},
+		"own kind":         {kind: "mine", want: true},
+		"separator kind":   {kind: kind.UISeparator, want: false},
+		"hunk header kind": {kind: kind.UIHunkHeader, want: false},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			for _, p := range []line.Placement{line.Above, line.Below} {
+				ann := line.Annotation{Content: "note", Kind: tc.kind, Placement: p}
+				assert.Equal(t, tc.want, ann.Marks(), "placement %s", p)
+			}
+		})
+	}
+}
+
 func TestAnnotations_Start(t *testing.T) {
 	t.Parallel()
 

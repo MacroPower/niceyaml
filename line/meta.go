@@ -112,10 +112,19 @@ func annotationCol(col, width int) int {
 // at.
 //
 // An annotation of kind [kind.UISeparator] or [kind.UIHunkHeader] labels
-// its line and not a column of it. Below the line, a renderer draws the
-// content of such an annotation on a row after the caret rows, from the
-// first column and without carets. [View.Clip] does not center a window on
-// it.
+// the lines a view holds and not a column of its line. The "..." above a
+// gap and the header above a diff hunk are such annotations, and
+// [Annotation.Marks] reports false for them. Below the line, a renderer
+// draws the content of such an annotation on a row after the caret rows,
+// from the first column and without carets. [View.Clip] does not center a
+// window on it. [View.Hunks] and
+// [go.jacobcolvin.com/niceyaml/diff.Result.HunksOf] do not form a hunk
+// around it. Both drop the ones above a line before they add their own, so
+// a separator or a header never states a gap or a count that the result
+// does not have. A caller that wants a mark of its own to look like a
+// separator gives it a kind of its own. The caller then styles that kind
+// with [go.jacobcolvin.com/niceyaml/style.Inherit] from
+// [kind.UISeparator].
 //
 // Add annotations to a [View] with [View.Annotate], which sets Cols from a
 // [position.Range], or with [View.AnnotateLine], which keeps Cols as given.
@@ -157,6 +166,18 @@ func (a Annotation) RenderKind() kind.Kind {
 	}
 
 	return a.Kind
+}
+
+// Marks reports whether the annotation marks its line. It reports false
+// for the kinds that label the lines a view holds, [kind.UISeparator] and
+// [kind.UIHunkHeader], and true for every other kind, the zero Kind
+// included. A marked line carries a [Flag] other than [FlagDefault], an
+// [Overlay], or an annotation that marks. [View.Hunks] picks them so:
+//
+//	marked := view.Flag(i) != line.FlagDefault || len(view.Overlays(i)) > 0 ||
+//		slices.ContainsFunc(view.Annotations(i), line.Annotation.Marks)
+func (a Annotation) Marks() bool {
+	return a.Kind != kind.UISeparator && a.Kind != kind.UIHunkHeader
 }
 
 // Annotations is a slice of [Annotation] values with helper methods.

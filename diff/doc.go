@@ -108,7 +108,10 @@
 // interleaved lines of two revisions do not parse as one. Each line carries a
 // [line.Flag] that marks it as inserted, deleted, or unchanged. Each hunk
 // header is a [line.Annotation] that [Result.Hunks] places [line.Above] the
-// first line of its hunk.
+// first line of its hunk. A header does not mark its line, as
+// [line.Annotation.Marks] reports. [line.View.Hunks] cannot recompute a
+// header, so it drops the headers of a view. [Result.HunksOf] narrows a view
+// of hunks with a new header above each.
 //
 // A Differ is safe for concurrent use when its [lcs.Algorithm] and its line
 // key are, as [lcs.Hirschberg] and the default key are. A Result is safe
