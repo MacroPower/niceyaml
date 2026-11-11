@@ -871,10 +871,10 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 // document. The text of that error names the path of each violation, as
 // in "$.port: 0 is less than 1". When the check cannot run, such as for a
 // $ref the validator cannot resolve, ValidateValue returns an error
-// wrapping [ErrValidate] inside [niceyaml.Unchecked]. A Validate method or
-// a [niceyaml.WithValueCheck] function that calls ValidateValue thus
-// returns the result as it is, and a decode does not presume the document
-// at fault for that error.
+// wrapping [ErrValidate] inside [niceyaml.Unchecked]. A Validate method, a
+// ValidateContext method, or a [niceyaml.WithValueCheck] function thus
+// returns the result of ValidateValue as it is. A decode does not presume
+// the document at fault for that error.
 //
 // # Conversions
 //
@@ -952,9 +952,9 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 //	return doc.Bind(niceyaml.Rebase(err, paths.Doc().Child("request")))
 //
 // The bound error reads "app.yaml:2:9: $.request.port: 0 is less than 1".
-// The same holds for a result that a Validate method of a type or a
-// [niceyaml.Validator] returns. A decode places such a result at the
-// value it checked.
+// The same holds for a result that a Validate or ValidateContext method
+// of a type or a [niceyaml.Validator] returns. A decode places such a
+// result at the value it checked.
 //
 // A wrapper such as [fmt.Errorf] around the result keeps its text through
 // both calls, behind the position and the path, as in

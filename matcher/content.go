@@ -59,9 +59,9 @@ type contentMatcher[T Scalar] struct {
 // underlying type does. A type that decodes itself through an
 // UnmarshalYAML or UnmarshalText method matches the value that its own
 // decode gives. So does a [time.Duration], which reads from text such as
-// 5s but not from a number. When the type of want has a Validate method,
-// Match validates the value it reads, as a decode into that type does. It
-// returns the error of a value that fails.
+// 5s but not from a number. When the type of want has a Validate or
+// ValidateContext method, Match validates the value it reads, as a decode
+// into that type does. It returns the error of a value that fails.
 //
 // Nulls, mappings, and sequences do not match any want. Neither does a
 // document without the path, or a scalar that does not read as the type
@@ -240,7 +240,8 @@ func decodeScalar[T Scalar](ctx context.Context, node *niceyaml.Node) (T, error)
 
 	decoded := reflect.New(target)
 
-	// The basic type has no Validate method, so T validates below.
+	// The basic type has no Validate or ValidateContext method, so T
+	// validates below.
 	err := node.DecodeInto(ctx, decoded.Interface(), niceyaml.WithSelfValidation(false))
 	if err != nil {
 		//nolint:wrapcheck // The Node binds the error already.

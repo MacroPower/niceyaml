@@ -455,7 +455,7 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 // position. A [matcher.Content] or [matcher.Text] guard that refuses the
 // document for its aliases returns such an error, bound at the alias
 // that repeats the most. So does a matcher.Content guard whose want type
-// fails its Validate method, bound at the value.
+// fails its Validate or ValidateContext method, bound at the value.
 //
 // For most uses, prefer [Registry.Check], which combines lookup and
 // validation. Use Lookup when you need the validator for custom

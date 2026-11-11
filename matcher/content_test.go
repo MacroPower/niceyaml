@@ -1007,6 +1007,16 @@ func TestContent_SelfValidator(t *testing.T) {
 			input:   `version: bad`,
 			err:     errChecked,
 		},
+		"value with a ValidateContext method matches": {
+			matcher: versionIs(smallInt(2)),
+			input:   `version: 2`,
+			want:    true,
+		},
+		"value with a ValidateContext method is an error": {
+			matcher: versionIs(smallInt(2)),
+			input:   `version: 20`,
+			err:     errLarge,
+		},
 	}
 
 	for name, tc := range tcs {
@@ -1154,6 +1164,9 @@ var (
 	errOdd      = errors.New("odd")
 	errNegative = errors.New("negative")
 	errChecked  = errors.New("bad")
+
+	// The error smallInt reports from ValidateContext.
+	errLarge = errors.New("large")
 )
 
 // rejecting decodes itself and reports errRejecting, so the decoder
@@ -1199,6 +1212,18 @@ type evenInt int
 func (e evenInt) Validate() error {
 	if e%2 != 0 {
 		return errOdd
+	}
+
+	return nil
+}
+
+// smallInt is a plain integer that validates itself with the context of
+// the call, and accepts only a value less than 10.
+type smallInt int
+
+func (s smallInt) ValidateContext(context.Context) error {
+	if s >= 10 {
+		return errLarge
 	}
 
 	return nil

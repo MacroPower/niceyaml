@@ -2767,7 +2767,229 @@ func TestDocument_Decode_SelfValidatorAnchors(t *testing.T) {
 	}
 }
 
-func TestNode_Decode_SelfValidatorContext(t *testing.T) {
+// certsKey keys the [certs] that a [certCheck] reads from the context.
+type certsKey struct{}
+
+// certs is the table of known certificates that the context of a call
+// carries. It counts the checks that read it, and the check whose number
+// is cancelAt cancels the call.
+type certs struct {
+	cancel   context.CancelFunc
+	known    map[string]bool
+	calls    atomic.Int32
+	cancelAt int32
+}
+
+// certCheck validates itself with the context of the call. Its Validate
+// fails on every value, so a test sees when the walk calls Validate in
+// place of ValidateContext.
+type certCheck struct {
+	CertFile string `yaml:"certFile"`
+}
+
+func (c certCheck) ValidateContext(ctx context.Context) error {
+	table, ok := ctx.Value(certsKey{}).(*certs)
+	if !ok {
+		return errors.New("no certificates in the context")
+	}
+
+	if table.calls.Add(1) == table.cancelAt {
+		table.cancel()
+
+		return fmt.Errorf("look up certificate: %w", ctx.Err())
+	}
+
+	if !table.known[c.CertFile] {
+		return yamltest.ErrorAt("unknown certificate", "certFile")
+	}
+
+	return nil
+}
+
+func (certCheck) Validate() error {
+	return errors.New("the walk called Validate")
+}
+
+// certOnly is a [certCheck] that declares ValidateContext alone.
+type certOnly struct {
+	CertFile string `yaml:"certFile"`
+}
+
+func (c certOnly) ValidateContext(ctx context.Context) error {
+	return certCheck(c).ValidateContext(ctx)
+}
+
+// Cert is a [certOnly] that a struct can embed, because the decoder
+// sets only an exported embedded field.
+type Cert struct {
+	CertFile string `yaml:"certFile"`
+}
+
+func (c Cert) ValidateContext(ctx context.Context) error {
+	return certCheck(c).ValidateContext(ctx)
+}
+
+// certEmbed gets ValidateContext from the field it embeds.
+type certEmbed struct {
+	Cert `yaml:",inline"`
+
+	Name string `yaml:"name"`
+}
+
+// certNamed declares Validate and gets ValidateContext from the field it
+// embeds.
+type certNamed struct {
+	Cert `yaml:",inline"`
+
+	Name string `yaml:"name"`
+}
+
+func (c certNamed) Validate() error {
+	if c.Name != "ok" {
+		return yamltest.ErrorAt("bad name", "name")
+	}
+
+	return nil
+}
+
+func TestSelfValidatorContext(t *testing.T) {
+	t.Parallel()
+
+	input := stringtest.LinesLF(
+		"- certFile: a.pem",
+		"- certFile: b.pem",
+		"- certFile: c.pem",
+	)
+
+	tcs := map[string]struct {
+		run      func(t *testing.T, ctx context.Context) error
+		known    []string
+		cancelAt int32
+		calls    int32
+		is       error
+		err      string
+	}{
+		"a decode runs ValidateContext with its context": {
+			run: func(t *testing.T, ctx context.Context) error {
+				t.Helper()
+
+				_, err := yamltest.FirstDocument(t, input, niceyaml.WithName("tls.yaml")).Decode[[]certOnly](ctx)
+
+				return err
+			},
+			known: []string{"a.pem", "c.pem"},
+			calls: 3,
+			err:   "tls.yaml:2:13: $[1].certFile: unknown certificate",
+		},
+		"a decode runs ValidateContext alone on a type that declares both": {
+			run: func(t *testing.T, ctx context.Context) error {
+				t.Helper()
+
+				_, err := yamltest.FirstDocument(t, input, niceyaml.WithName("tls.yaml")).Decode[[]certCheck](ctx)
+
+				return err
+			},
+			known: []string{"a.pem", "b.pem", "c.pem"},
+			calls: 3,
+		},
+		"a decode runs a promoted ValidateContext once, on the field": {
+			run: func(t *testing.T, ctx context.Context) error {
+				t.Helper()
+
+				_, err := yamltest.FirstDocument(t, input, niceyaml.WithName("tls.yaml")).Decode[[]certEmbed](ctx)
+
+				return err
+			},
+			known: []string{"a.pem", "c.pem"},
+			calls: 3,
+			err:   "tls.yaml:2:13: $[1].certFile: unknown certificate",
+		},
+		"a decode runs Validate beside a promoted ValidateContext": {
+			run: func(t *testing.T, ctx context.Context) error {
+				t.Helper()
+
+				named := stringtest.LinesLF(
+					"- certFile: a.pem",
+					"  name: bad",
+					"- certFile: b.pem",
+					"  name: ok",
+				)
+
+				_, err := yamltest.FirstDocument(t, named, niceyaml.WithName("tls.yaml")).Decode[[]certNamed](ctx)
+
+				return err
+			},
+			known: []string{"a.pem"},
+			calls: 2,
+			err:   "tls.yaml:2:9: $[0].name: bad name\ntls.yaml:3:13: $[1].certFile: unknown certificate",
+		},
+		"Node.SelfValidate runs ValidateContext": {
+			run: func(t *testing.T, ctx context.Context) error {
+				t.Helper()
+
+				doc := yamltest.FirstDocument(t, input, niceyaml.WithName("tls.yaml"))
+				got := []certOnly{{CertFile: "a.pem"}, {CertFile: "b.pem"}, {CertFile: "d.pem"}}
+
+				return doc.SelfValidate(ctx, &got)
+			},
+			known: []string{"a.pem", "b.pem", "c.pem"},
+			calls: 3,
+			err:   "tls.yaml:3:13: $[2].certFile: unknown certificate",
+		},
+		"SelfValidateValue runs ValidateContext": {
+			run: func(_ *testing.T, ctx context.Context) error {
+				return niceyaml.SelfValidateValue(ctx, []certOnly{{CertFile: "a.pem"}, {CertFile: "d.pem"}})
+			},
+			known: []string{"a.pem"},
+			calls: 2,
+			err:   "$[1].certFile: unknown certificate",
+		},
+		"a ValidateContext that ends the context of the call stops the walk": {
+			run: func(t *testing.T, ctx context.Context) error {
+				t.Helper()
+
+				_, err := yamltest.FirstDocument(t, input, niceyaml.WithName("tls.yaml")).Decode[[]certOnly](ctx)
+
+				return err
+			},
+			cancelAt: 2,
+			calls:    2,
+			is:       context.Canceled,
+			err:      "tls.yaml: context canceled",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx, cancel := context.WithCancel(t.Context())
+			t.Cleanup(cancel)
+
+			table := &certs{cancel: cancel, known: map[string]bool{}, cancelAt: tc.cancelAt}
+			for _, name := range tc.known {
+				table.known[name] = true
+			}
+
+			err := tc.run(t, context.WithValue(ctx, certsKey{}, table))
+			assert.Equal(t, tc.calls, table.calls.Load())
+
+			if tc.err == "" {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.EqualError(t, err, tc.err)
+
+			if tc.is != nil {
+				require.ErrorIs(t, err, tc.is)
+			}
+		})
+	}
+}
+
+func TestNode_Decode_SelfValidatorEndedContext(t *testing.T) {
 	t.Parallel()
 
 	canceled := func(context.CancelFunc) error { return context.Canceled }

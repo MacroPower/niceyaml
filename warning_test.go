@@ -158,12 +158,54 @@ func (d heldSpecDoc) Validate() error {
 	return niceyaml.Rebase(errors.Join(err, warnings.Err()), paths.Current().Child("spec"))
 }
 
+// heldSpecContextDoc holds a spec that a decode does not reach. Its
+// ValidateContext checks the spec with SelfValidateValue and its own
+// context, through a struct that holds the spec under its name.
+type heldSpecContextDoc struct {
+	Spec  any    `yaml:"-"`
+	Extra string `yaml:"extra"`
+}
+
+func (d heldSpecContextDoc) ValidateContext(ctx context.Context) error {
+	//nolint:wrapcheck // The decode places the error as it is.
+	return niceyaml.SelfValidateValue(ctx, struct {
+		Spec any `yaml:"spec"`
+	}{d.Spec})
+}
+
+// contextSpec is a [warningSpec] whose check takes the context of the
+// call and returns its warnings beside its errors.
+type contextSpec struct {
+	Seats int `yaml:"seats"`
+}
+
+func (s contextSpec) ValidateContext(context.Context) error {
+	return warningSpec(s).Validate()
+}
+
+// contextCafeDoc is the parent of a [contextSpec].
+type contextCafeDoc struct {
+	Spec  contextSpec `yaml:"spec"`
+	Extra string      `yaml:"extra"`
+}
+
 // hookedDoc runs its hook with the context of the decode that fills it.
 type hookedDoc struct {
 	hook func(ctx context.Context) error
 }
 
 func (d *hookedDoc) UnmarshalYAML(ctx context.Context, _ func(any) error) error {
+	return d.hook(ctx)
+}
+
+// selfHookedDoc runs its hook with the context that its ValidateContext
+// gets.
+type selfHookedDoc struct {
+	hook  func(ctx context.Context) error
+	Extra string `yaml:"extra"`
+}
+
+func (d selfHookedDoc) ValidateContext(ctx context.Context) error {
 	return d.hook(ctx)
 }
 
@@ -872,6 +914,27 @@ func TestWarnings(t *testing.T) {
 				return doc.DecodeInto(ctx, &heldSpecDoc{Spec: mixedSpec{}})
 			},
 			err:      "cafe.yaml:2:10: $.spec.seats: seats must be even",
+			warnings: "cafe.yaml:2:10: warning: $.spec.seats: fewer than 10 seats",
+		},
+		"a ValidateContext whose value call passes": {
+			run: func(_ *testing.T, ctx context.Context) error {
+				return doc.DecodeInto(ctx, &heldSpecContextDoc{Spec: warningSpec{Seats: 3}})
+			},
+			warnings: "cafe.yaml:2:10: warning: $.spec.seats: fewer than 10 seats",
+		},
+		"a ValidateContext whose value call fails": {
+			run: func(_ *testing.T, ctx context.Context) error {
+				return doc.DecodeInto(ctx, &heldSpecContextDoc{Spec: mixedSpec{}})
+			},
+			err:      "cafe.yaml:2:10: $.spec.seats: seats must be even",
+			warnings: "cafe.yaml:2:10: warning: $.spec.seats: fewer than 10 seats",
+		},
+		"a ValidateContext that returns a warning": {
+			run: func(_ *testing.T, ctx context.Context) error {
+				var got contextCafeDoc
+
+				return doc.DecodeInto(ctx, &got)
+			},
 			warnings: "cafe.yaml:2:10: warning: $.spec.seats: fewer than 10 seats",
 		},
 		"a validator result of a wrapper around an error and a warning": {
@@ -1977,6 +2040,21 @@ func TestWarnings_Context(t *testing.T) {
 		"SelfValidateValue runs a value check": {
 			call: func(ctx context.Context, hook func(context.Context) error) error {
 				return niceyaml.SelfValidateValue(ctx, plainCafeDoc{}, checkOf(hook))
+			},
+		},
+		"Node.DecodeInto runs a ValidateContext method": {
+			call: func(ctx context.Context, hook func(context.Context) error) error {
+				return doc.DecodeInto(ctx, &selfHookedDoc{hook: hook})
+			},
+		},
+		"Node.SelfValidate runs a ValidateContext method": {
+			call: func(ctx context.Context, hook func(context.Context) error) error {
+				return doc.SelfValidate(ctx, &selfHookedDoc{hook: hook})
+			},
+		},
+		"SelfValidateValue runs a ValidateContext method": {
+			call: func(ctx context.Context, hook func(context.Context) error) error {
+				return niceyaml.SelfValidateValue(ctx, selfHookedDoc{hook: hook})
 			},
 		},
 	}
