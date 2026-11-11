@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -4666,6 +4668,254 @@ func TestSchema_Ref(t *testing.T) {
 
 	assert.Nil(t, schema.Embedded([]byte(`{}`)).Schema())
 	assert.Nil(t, schema.Ref{}.Schema())
+}
+
+// keysOf returns the [schema.Ref.Key] of each of refs, in order.
+func keysOf(refs []schema.Ref) []string {
+	keys := make([]string, 0, len(refs))
+	for i := range refs {
+		keys = append(keys, refs[i].Key())
+	}
+
+	return keys
+}
+
+func TestSchema_Dependencies(t *testing.T) {
+	t.Parallel()
+
+	const (
+		stringDefs  = `{"type": "string"}`
+		integerDefs = `{"type": "integer"}`
+		refDefs     = `{"properties": {"a": {"$ref": "defs.json"}}}`
+	)
+
+	notString := map[string]any{"a": 1}
+
+	t.Run("file", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		yamltest.WriteFiles(t, dir, map[string]string{
+			"svc/service.json":  `{"properties": {"a": {"$ref": "../shared/defs.json"}}}`,
+			"shared/defs.json":  stringDefs,
+			"shared/other.json": stringDefs,
+		})
+
+		service := schema.File(filepath.Join(dir, "svc", "service.json"))
+		defs := schema.File(filepath.Join(dir, "shared", "defs.json"))
+
+		reg := schema.NewRegistry()
+
+		s, err := reg.Schema(t.Context(), service)
+		require.NoError(t, err)
+
+		// The document of the schema comes first, whatever fragment the
+		// request named.
+		want := []string{service.Key(), defs.Key()}
+		assert.Equal(t, want, keysOf(s.Dependencies()))
+
+		whole, err := reg.Schema(t.Context(), service.WithFragment("/properties/a"))
+		require.NoError(t, err)
+		assert.Equal(t, want, keysOf(whole.Dependencies()))
+
+		// A change to defs.json outside the directory of the schema leaves
+		// the cached schema in place until the program passes the
+		// dependency to Invalidate.
+		yamltest.WriteFile(t, dir, "shared/defs.json", integerDefs)
+
+		again, err := reg.Schema(t.Context(), service)
+		require.NoError(t, err)
+		require.Same(t, s, again)
+
+		reg.Invalidate(s.Dependencies()[1])
+
+		again, err = reg.Schema(t.Context(), service)
+		require.NoError(t, err)
+		assert.NotSame(t, s, again)
+		require.NoError(t, again.ValidateValue(t.Context(), notString))
+	})
+
+	t.Run("file system", func(t *testing.T) {
+		t.Parallel()
+
+		fsys := yamltest.MapFS(map[string]string{
+			"schemas/s.json":    refDefs,
+			"schemas/defs.json": stringDefs,
+		})
+
+		ref := schema.FileFS(fsys, "schemas/s.json")
+		reg := schema.NewRegistry()
+
+		s, err := reg.Schema(t.Context(), ref)
+		require.NoError(t, err)
+
+		deps := s.Dependencies()
+		require.Len(t, deps, 2)
+		assert.Equal(t, "schemas/s.json", deps[0].Name())
+		assert.Equal(t, "schemas/defs.json", deps[1].Name())
+		assert.Equal(t, schema.FileFS(fsys, "schemas/defs.json").Key(), deps[1].Key())
+
+		// The Ref keeps the file system, so it drops the schema of fsys and
+		// not that of another file system with the same paths.
+		other := yamltest.MapFS(map[string]string{
+			"schemas/s.json":    refDefs,
+			"schemas/defs.json": stringDefs,
+		})
+
+		kept, err := reg.Schema(t.Context(), schema.FileFS(other, "schemas/s.json"))
+		require.NoError(t, err)
+
+		reg.Invalidate(deps[1])
+
+		again, err := reg.Schema(t.Context(), ref)
+		require.NoError(t, err)
+		assert.NotSame(t, s, again)
+
+		keptAgain, err := reg.Schema(t.Context(), schema.FileFS(other, "schemas/s.json"))
+		require.NoError(t, err)
+		assert.Same(t, kept, keptAgain)
+	})
+
+	t.Run("file system path with a doubled slash", func(t *testing.T) {
+		t.Parallel()
+
+		fsys := yamltest.MapFS(map[string]string{
+			"s.json":        `{"properties": {"a": {"$ref": "sub//defs.json"}}}`,
+			"sub/defs.json": stringDefs,
+		})
+
+		ref := schema.FileFS(fsys, "s.json")
+		defs := schema.FileFS(fsys, "sub/defs.json")
+
+		reg := schema.NewRegistry()
+
+		s, err := reg.Schema(t.Context(), ref)
+		require.NoError(t, err)
+		require.Error(t, s.ValidateValue(t.Context(), notString))
+
+		// The registry reads the cleaned path, and the Ref spells it so.
+		deps := s.Dependencies()
+		assert.Equal(t, []string{ref.Key(), defs.Key()}, keysOf(deps))
+
+		reg.Invalidate(deps[1])
+
+		again, err := reg.Schema(t.Context(), ref)
+		require.NoError(t, err)
+		assert.NotSame(t, s, again)
+
+		// A Ref that spells the cleaned path drops the schema too.
+		reg.Invalidate(defs)
+
+		third, err := reg.Schema(t.Context(), ref)
+		require.NoError(t, err)
+		assert.NotSame(t, again, third)
+	})
+
+	t.Run("URL", func(t *testing.T) {
+		t.Parallel()
+
+		docs := map[string]string{"/s.json": refDefs, "/defs.json": stringDefs}
+
+		client := yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
+			body, ok := docs[r.URL.Path]
+			if !ok {
+				return yamltest.Respond(http.StatusNotFound, "")(r)
+			}
+
+			return yamltest.Respond(http.StatusOK, body)(r)
+		}).Client()
+
+		reg := schema.NewRegistry(schema.WithHTTPClient(client))
+
+		s, err := reg.Schema(t.Context(), schema.URL("https://user:secret@schemas.test/s.json"))
+		require.NoError(t, err)
+
+		// The Refs leave out the userinfo of the URL.
+		deps := s.Dependencies()
+		assert.Equal(t, []string{"https://schemas.test/s.json", "https://schemas.test/defs.json"}, keysOf(deps))
+
+		reg.Invalidate(deps[1])
+
+		again, err := reg.Schema(t.Context(), schema.URL("https://user:secret@schemas.test/s.json"))
+		require.NoError(t, err)
+		assert.NotSame(t, s, again)
+	})
+
+	t.Run("Loadable", func(t *testing.T) {
+		t.Parallel()
+
+		var loads int
+
+		ref := schema.Loadable("loadable", func(context.Context) ([]byte, error) {
+			loads++
+
+			return []byte(stringDefs), nil
+		})
+
+		reg := schema.NewRegistry()
+
+		s, err := reg.Schema(t.Context(), ref)
+		require.NoError(t, err)
+
+		deps := s.Dependencies()
+		assert.Equal(t, []string{ref.Key()}, keysOf(deps))
+
+		reg.Invalidate(deps...)
+
+		_, err = reg.Schema(t.Context(), ref)
+		require.NoError(t, err)
+		assert.Equal(t, 2, loads)
+
+		// The Ref loads the schema too.
+		fromDep, err := reg.Schema(t.Context(), deps[0])
+		require.NoError(t, err)
+		assert.NotNil(t, fromDep)
+	})
+
+	t.Run("validation adds documents", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		yamltest.WriteFile(t, dir, "s.json", `{"properties": {"a": {"$ref": "mid.json"}}}`)
+
+		ref := schema.File(filepath.Join(dir, "s.json"))
+		reg := schema.NewRegistry(
+			schema.WithCompileOptions(schema.WithRequireRefs(false)),
+			schema.WithRetryAfter(time.Nanosecond),
+		)
+
+		s, err := reg.Schema(t.Context(), ref)
+		require.NoError(t, err)
+
+		// The compile did not load mid.json, but it reached the file.
+		mid := schema.File(filepath.Join(dir, "mid.json"))
+		assert.Equal(t, []string{ref.Key(), mid.Key()}, keysOf(s.Dependencies()))
+
+		yamltest.WriteFiles(t, dir, map[string]string{"mid.json": `{"$ref": "defs.json"}`, "defs.json": stringDefs})
+		require.NoError(t, s.ValidateValue(t.Context(), map[string]any{"a": "x"}))
+
+		defs := schema.File(filepath.Join(dir, "defs.json"))
+		assert.Equal(t, []string{ref.Key(), defs.Key(), mid.Key()}, keysOf(s.Dependencies()))
+	})
+
+	t.Run("derived schema", func(t *testing.T) {
+		t.Parallel()
+
+		ref := schema.FileFS(yamltest.MapFS(map[string]string{"s.json": refDefs, "defs.json": stringDefs}), "s.json")
+
+		s, err := schema.NewRegistry().Schema(t.Context(), ref)
+		require.NoError(t, err)
+
+		assert.Equal(t, s.Dependencies(), s.WithoutDeprecations().Dependencies())
+		assert.Equal(t, s.Dependencies(), s.WithoutFields(paths.Doc().Child("b")).Dependencies())
+	})
+
+	t.Run("schema no registry compiled", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Nil(t, compileSchema(t, stringDefs).Dependencies())
+		assert.Nil(t, schema.AcceptAll.Dependencies())
+	})
 }
 
 func TestSchema_JSONSchema(t *testing.T) {

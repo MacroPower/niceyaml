@@ -99,10 +99,11 @@ const defaultRetryAfter = 1 * time.Minute
 // A schema stays in the cache after the file or URL that it came from
 // changes, and so does each document that its $refs name. A program that
 // watches its schema files, such as an editor, passes each file that
-// changes to Invalidate. The next document that names a schema that
-// Invalidate dropped loads it again. A long-running program that
-// validates against remote schemas gives the registry
-// [WithRefreshAfter].
+// changes to Invalidate. [Schema.Dependencies] lists the files and URLs
+// that a schema read, which include each $ref target. The next document
+// that names a schema that Invalidate dropped loads it again. A
+// long-running program that validates against remote schemas gives the
+// registry [WithRefreshAfter].
 //
 // The registry compiles every schema with the options that
 // [WithCompileOptions] gave it. [Registry.Schema] returns the compiled
@@ -1116,8 +1117,10 @@ func (r *Registry) Check(ctx context.Context, n *niceyaml.Node) error {
 // # Concurrent Requests
 //
 // Concurrent requests for one cache key share a single load and compile.
-// A request that starts after [Registry.Invalidate] or [Registry.Purge]
-// returns does not share a load that started before the call.
+// A request that starts after [Registry.Purge] returns does not share a
+// load that started before the call. Neither does one that starts after
+// [Registry.Invalidate] returns, when the call named a document that the
+// registry knows.
 //
 // Each caller waits for the shared load only until its own context ends.
 // The shared load runs under the context of the caller that started it
@@ -1319,6 +1322,12 @@ func (r *Registry) Load(ctx context.Context, ref Ref) ([]byte, error) {
 //
 //	reg.Invalidate(schema.File(path))
 //
+// [Schema.Dependencies] lists the documents that a schema read, and the
+// Dependencies field of a [*LoadError] lists those of a failed attempt.
+// Those documents include each $ref target, which might lie outside the
+// files that the program watches. Each Ref in those lists names its
+// document as Invalidate matches it.
+//
 // Invalidate acts on every registry among the resolvers of the
 // registry too, as [Registry.Resolve] describes. So one call reaches
 // the schemas that a nested registry compiled for this one.
@@ -1345,10 +1354,11 @@ func (r *Registry) Load(ctx context.Context, ref Ref) ([]byte, error) {
 //
 // Invalidate matches a file by its path as the Ref spells it. A symbolic
 // link to the file, or its path in another letter case, names another
-// document. Invalidate ignores the zero Ref and a Ref that does not name
-// a file that the registry can read. A Ref from FileFS does not name
-// such a file when its path leaves the file system, or when the file
-// system does not have an identity, as FileFS describes.
+// document. The Refs of Schema.Dependencies spell each path as the
+// registry reads it. Invalidate ignores the zero Ref and a Ref that does
+// not name a file that the registry can read. A Ref from FileFS does not
+// name such a file when its path leaves the file system, or when the
+// file system does not have an identity, as FileFS describes.
 //
 // Invalidate ignores a Ref that carries a compiled schema, such as one
 // from [Schema.Ref] or [Registry.Resolve], even when its [Ref.Name]
@@ -1362,26 +1372,30 @@ func (r *Registry) Load(ctx context.Context, ref Ref) ([]byte, error) {
 // Ref from [File] for a file.
 //
 // Invalidate for a URL drops that document and each schema that reached
-// it. It does not drop the documents that its $refs name, which a
-// program cannot list. A program that needs fresh copies of its remote
-// schemas gives the registry [WithRefreshAfter]. The registry then loads
-// each URL document again after the interval of that option, with the
-// documents that its $refs name.
+// it. It does not drop the documents that its $refs name. A program
+// passes the Refs of Schema.Dependencies to drop those documents too.
+// A program that needs fresh copies of its remote schemas can instead
+// give the registry [WithRefreshAfter]. The registry then loads each URL
+// document again after the interval of that option, with the documents
+// that its $refs name.
 //
 // Invalidate acts only on the cache. A [*Schema] that the registry
 // returned before Invalidate stays unchanged, so a caller that holds one
-// asks the registry for the schema again. A load or compile that runs
-// when Invalidate starts still answers the requests that share it. The
-// registry does not keep anything from such a load, whatever documents
-// it names. A request that starts after Invalidate returns does not
-// share that load.
+// asks the registry for the schema again.
 //
-// So each call to Invalidate that names a document keeps every load in
-// flight out of the cache. A program that sees several files change at
-// once, such as an editor that waits for a burst of saves to end, passes
-// them all to one call. It passes only the files that the registry might
-// have read, such as its schema files. Otherwise a slow load might never
-// enter the cache, and every request loads it again.
+// When one of refs names a document that the registry knows, Invalidate
+// also discards the loads and compiles in flight. The registry knows a
+// document that it keeps, that a schema it keeps reached, or that a load
+// in flight reads or has read. A discarded load still answers the
+// requests that share it, but the registry keeps nothing from it,
+// whatever documents it names. A request that starts after Invalidate
+// returns does not share that load. A program that sees several files
+// change at once, such as an editor that waits for a burst of saves to
+// end, passes them all to one call.
+//
+// For any other document, Invalidate does not change the registry. A
+// program can therefore pass every file that changes, whether or not the
+// registry read it.
 func (r *Registry) Invalidate(refs ...Ref) {
 	ids := make(map[docID]struct{}, len(refs))
 
@@ -1700,6 +1714,8 @@ func (r *Registry) refDocument(
 		return doc, doc.err
 	}
 
+	defer r.cache.loaded(key)
+
 	loaded := time.Now()
 	doc, err := loadRefDoc(ctx, uri, load, r.loadLimit)
 
@@ -1834,9 +1850,13 @@ func (r *Registry) refOptions(
 		case httpfetch.IsHTTPURL(uri):
 			// The access judges the URL as the schema names it, before
 			// the registry adds the userinfo of the key. A loader serves
-			// the URLs under its prefix whatever the access allows.
+			// the URLs under its prefix whatever the access allows. The
+			// reach records a URL that the access refuses too, as it
+			// records a file that the access refuses.
 			err := r.checkFetch(uri)
 			if err != nil {
+				r.cache.record(cacheKey{kind: keyURL, uri: uri}, rc)
+
 				return nil, err
 			}
 
@@ -2094,10 +2114,15 @@ type failure struct {
 // answer returns what a request for ref gets from e, the entry for its
 // cache key. It returns the schema of the entry, or a [*LoadError] that
 // names ref and holds the sentinel and the cause of the failure of the
-// entry.
+// entry, with the documents that the failed attempt reached.
 func (r *Registry) answer(ref Ref, e cacheEntry) (*Schema, error) {
 	if e.failed != nil {
-		return nil, &LoadError{Ref: ref, Phase: e.failed.kind, Err: e.failed.cause}
+		return nil, &LoadError{
+			Ref:          ref,
+			Phase:        e.failed.kind,
+			Err:          e.failed.cause,
+			Dependencies: e.reach.dependencies(),
+		}
 	}
 
 	return e.schema, nil
@@ -2148,9 +2173,15 @@ func (r *Registry) compile(ctx context.Context, ref Ref, key cacheKey, gen uint6
 		return r.answer(ref, e)
 	}
 
-	rc := r.cache.newReach(key)
+	rc := r.cache.newReach(key, ref)
+	defer r.cache.settle(rc)
+
 	compiled, failed := r.attempt(ctx, ref, rc)
-	entry := cacheEntry{schema: compiled, failed: failed}
+	if compiled != nil {
+		compiled.reach = rc
+	}
+
+	entry := cacheEntry{schema: compiled, failed: failed, reach: rc}
 
 	var failedAt time.Time
 
@@ -2162,7 +2193,7 @@ func (r *Registry) compile(ctx context.Context, ref Ref, key cacheKey, gen uint6
 		failedAt = time.Now()
 	}
 
-	return r.answer(ref, r.cache.keepSchema(key, entry, failedAt, gen, rc))
+	return r.answer(ref, r.cache.keepSchema(key, entry, failedAt, gen))
 }
 
 // attempt loads and compiles the schema that ref names once, and returns

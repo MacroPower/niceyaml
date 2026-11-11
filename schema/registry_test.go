@@ -3055,6 +3055,10 @@ func TestRegistry_WithRefreshAfter(t *testing.T) {
 					held, err := reg.Schema(t.Context(), ref)
 					require.NoError(t, err)
 
+					other := loading("other", []byte(`{"type": "object"}`), nil)
+					_, err = reg.Schema(t.Context(), other)
+					require.NoError(t, err)
+
 					down.Store(true)
 					time.Sleep(time.Hour)
 
@@ -3067,11 +3071,11 @@ func TestRegistry_WithRefreshAfter(t *testing.T) {
 						got, err = reg.Schema(t.Context(), ref)
 					})
 
-					// The refresh waits on gate. An editor drops a file that
-					// the schema did not reach, which starts a new generation
-					// of the cache.
+					// The refresh waits on gate. The program drops another
+					// schema that the registry keeps, which starts a new
+					// generation of the cache.
 					synctest.Wait()
-					reg.Invalidate(schema.File("/tmp/unrelated.json"))
+					reg.Invalidate(other)
 
 					// A request after the release gets the held copy without
 					// waiting for the refresh.
@@ -3916,19 +3920,21 @@ func fileRef(t *testing.T, dir, name string) schema.Ref {
 	return fileOrURL(t, dir, plainFileURL(filepath.Join(dir, base))+"#"+fragment)
 }
 
-// A gatedFS is a file system that holds the first open of one file until
-// its gate closes, and counts the opens of that file. It has no method
-// but Open, so every read goes through the count.
+// A gatedFS is a file system that holds one open of one file until its
+// gate closes, and counts the opens of that file. It holds the first open
+// that follows the skipped ones. It has no method but Open, so every read
+// goes through the count.
 type gatedFS struct {
 	files   fstest.MapFS
-	started chan struct{} // gets a value when the first open of name starts to wait
+	started chan struct{} // gets a value when the held open of name starts to wait
 	gate    <-chan struct{}
 	name    string
 	opens   atomic.Int32
+	skip    int32 // the opens of name that pass before the held one
 }
 
 func (f *gatedFS) Open(name string) (fs.File, error) {
-	if name == f.name && f.opens.Add(1) == 1 {
+	if name == f.name && f.opens.Add(1) == f.skip+1 {
 		f.started <- struct{}{}
 
 		<-f.gate
@@ -4181,10 +4187,15 @@ func TestRegistry_Invalidate(t *testing.T) {
 		dir := t.TempDir()
 		files := map[string]string{"defs.json": stringDefs}
 
+		// Each registry keeps the schema of this Ref before the load.
+		known := loading("known", []byte(stringA), nil)
+
 		tcs := map[string]struct {
 			// The Refs the program passes to Invalidate during the load of
 			// another schema.
 			refs []schema.Ref
+			// Whether the program also passes the Ref of that load.
+			gated bool
 			// Whether the registry keeps the schema of that load.
 			wantKept bool
 		}{
@@ -4207,23 +4218,35 @@ func TestRegistry_Invalidate(t *testing.T) {
 				refs:     []schema.Ref{schema.URL(schema.File(filepath.Join(dir, "defs.json")).Key())},
 				wantKept: true,
 			},
-			"file": {
-				refs: []schema.Ref{schema.File(filepath.Join(dir, "defs.json"))},
+			// The registry did not read any of these documents, so the
+			// load cannot hold an old copy of one.
+			"file the registry did not read": {
+				refs:     []schema.Ref{schema.File(filepath.Join(dir, "defs.json"))},
+				wantKept: true,
 			},
-			"file in a file system": {
-				refs: []schema.Ref{schema.FileFS(yamltest.MapFS(files), "defs.json")},
+			"file in a file system the registry did not read": {
+				refs:     []schema.Ref{schema.FileFS(yamltest.MapFS(files), "defs.json")},
+				wantKept: true,
 			},
-			"URL": {
-				refs: []schema.Ref{schema.URL("http://schemas.test/defs.json")},
+			"URL the registry did not fetch": {
+				refs:     []schema.Ref{schema.URL("http://schemas.test/defs.json")},
+				wantKept: true,
 			},
-			"another Ref from Loadable": {
-				refs: []schema.Ref{loading("other", []byte(stringA), nil)},
+			"Ref from Loadable the registry did not load": {
+				refs:     []schema.Ref{loading("other", []byte(stringA), nil)},
+				wantKept: true,
 			},
-			"URL Ref with the key of a file, and the file": {
-				refs: []schema.Ref{
-					schema.URL(schema.File(filepath.Join(dir, "defs.json")).Key()),
-					schema.File(filepath.Join(dir, "defs.json")),
-				},
+			"the Ref of the load": {
+				gated: true,
+			},
+			"the Ref of the load among others": {
+				refs:  []schema.Ref{schema.File(filepath.Join(dir, "defs.json"))},
+				gated: true,
+			},
+			// A release of a schema that the registry keeps starts a new
+			// generation, which discards every load in flight.
+			"Ref of a schema the registry keeps": {
+				refs: []schema.Ref{known},
 			},
 		}
 
@@ -4253,6 +4276,9 @@ func TestRegistry_Invalidate(t *testing.T) {
 
 				reg := schema.NewRegistry()
 
+				_, err := reg.Schema(t.Context(), known)
+				require.NoError(t, err)
+
 				during := make(chan result, 1)
 
 				go func() {
@@ -4262,7 +4288,12 @@ func TestRegistry_Invalidate(t *testing.T) {
 
 				<-started
 
-				reg.Invalidate(tc.refs...)
+				refs := tc.refs
+				if tc.gated {
+					refs = append(slices.Clone(refs), ref)
+				}
+
+				reg.Invalidate(refs...)
 
 				close(gate)
 
@@ -4272,8 +4303,9 @@ func TestRegistry_Invalidate(t *testing.T) {
 				again, err := reg.Schema(t.Context(), ref)
 				require.NoError(t, err)
 
-				// A call that names a document keeps the load out of the
-				// cache, so the next request loads the schema again.
+				// A call that names a document the registry knows keeps the
+				// load out of the cache, so the next request loads the
+				// schema again.
 				if tc.wantKept {
 					assert.Same(t, fromDuring.s, again)
 					assert.Equal(t, int32(1), loads.Load())
@@ -4557,6 +4589,57 @@ func TestRegistry_Invalidate(t *testing.T) {
 		again, err = reg.Schema(t.Context(), ref)
 		require.NoError(t, err)
 		assert.NotSame(t, first, again)
+	})
+
+	t.Run("load of a document a dropped schema reached", func(t *testing.T) {
+		t.Parallel()
+
+		gate := make(chan struct{})
+
+		// The compile does not find mid.json. The second open of it is the
+		// load of a validation, which waits for gate.
+		fsys := &gatedFS{
+			files:   yamltest.MapFS(map[string]string{"s.json": `{"properties": {"a": {"$ref": "mid.json"}}}`}),
+			name:    "mid.json",
+			started: make(chan struct{}, 1),
+			gate:    gate,
+			skip:    1,
+		}
+
+		ref := schema.FileFS(fsys, "s.json")
+		reg := schema.NewRegistry(requireRefs(false), schema.WithRetryAfter(time.Nanosecond))
+
+		held, err := reg.Schema(t.Context(), ref)
+		require.NoError(t, err)
+
+		// The registry drops the schema, and so stops tracking what a
+		// validation with it reaches.
+		reg.Invalidate(ref)
+
+		fsys.files["mid.json"] = &fstest.MapFile{Data: []byte(stringDefs)}
+
+		done := make(chan error, 1)
+
+		go func() {
+			done <- held.ValidateValue(t.Context(), map[string]any{"a": "x"})
+		}()
+
+		<-fsys.started
+
+		// Only the load in flight reads mid.json, and the release finds it
+		// there.
+		reg.Invalidate(schema.FileFS(fsys, "mid.json"))
+
+		close(gate)
+		require.NoError(t, <-done)
+
+		opens := fsys.opens.Load()
+
+		// The registry did not keep the copy of mid.json that the load read
+		// across the release, so the compile reads mid.json again.
+		_, err = reg.Schema(t.Context(), ref)
+		require.NoError(t, err)
+		assert.Greater(t, fsys.opens.Load(), opens)
 	})
 
 	t.Run("concurrent use", func(t *testing.T) {

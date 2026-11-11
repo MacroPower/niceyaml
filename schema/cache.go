@@ -1,10 +1,17 @@
 package schema
 
 import (
+	"cmp"
 	"container/list"
+	"io/fs"
+	"maps"
+	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
+
+	slashpath "path"
 
 	"go.jacobcolvin.com/niceyaml/internal/capture"
 )
@@ -64,9 +71,10 @@ func WithCacheLimit(n int) RegistryOption {
 
 // A cache holds what a [Registry] keeps between requests: its compiled
 // schemas, the documents that $refs name, and an index of the documents
-// that each schema reached. One lock guards all of it, so a release such as
-// [Registry.Invalidate] drops a document and every schema that reached
-// it in one step. A cache is safe for concurrent use.
+// that each schema and each compile in flight reached. One lock guards
+// all of it, so a release such as [Registry.Invalidate] drops a document
+// and every schema that reached it in one step. A cache is safe for
+// concurrent use.
 //
 // The cache dates each schema and document that a URL served, when
 // [WithRefreshAfter] gave the registry an interval. A request for such
@@ -78,22 +86,27 @@ func WithCacheLimit(n int) RegistryOption {
 // reached falls due, so a refresh of the document reaches each schema
 // that reached it.
 //
-// The cache counts its generations. [cache.invalidate] and [cache.purge]
-// each start a new one. A load keeps its outcome only in the generation
-// that it started in. A load that ran across a release thus does not keep its
+// The cache counts its generations. [cache.purge] starts a new one, and
+// so does [cache.invalidate] when it names a document that the cache
+// knows. A load keeps its outcome only in the generation that it started
+// in. A load that ran across such a release thus does not keep its
 // outcome, whether or not the release meant to drop what the load
-// returns.
+// returns. A release of a document that the cache does not know leaves
+// the generation as it is, because no load in flight has read that
+// document.
 type cache struct {
 	schemas *lru[cacheKey, cacheEntry]
 	docs    *lru[cacheKey, refDoc]
-	// The reach of each schema that the cache keeps, by each document
-	// that it reached.
-	dependents map[docID]map[*reach]struct{}
+	// The reach of each schema that the cache keeps, and of each compile
+	// that runs, by each document that it reached.
+	reaches map[docID]map[*reach]struct{}
 	// The keys of the documents that a $ref names, by document. Several
 	// keys name one document when they spell its URL with different
 	// userinfo, or without userinfo, or when they spell one file in
 	// different ways, as [docOf] describes.
 	docKeys map[docID]map[cacheKey]struct{}
+	// The number of loads of each document that run for a $ref.
+	loading map[docID]int
 	gen     uint64
 	// How long after its load an entry from a URL falls due, or zero for
 	// never.
@@ -108,8 +121,9 @@ type cache struct {
 // zero.
 func newCache(limit int, retryAfter, refreshAfter time.Duration) *cache {
 	c := &cache{
-		dependents:   make(map[docID]map[*reach]struct{}),
+		reaches:      make(map[docID]map[*reach]struct{}),
 		docKeys:      make(map[docID]map[cacheKey]struct{}),
+		loading:      make(map[docID]int),
 		refreshAfter: refreshAfter,
 	}
 
@@ -153,19 +167,57 @@ const (
 )
 
 // newReach creates a new [reach] for a compile, which starts now, of the
-// schema that the registry keeps under key. The reach starts with the
-// document of the schema itself, which falls due as [cache.dueAfter]
-// says.
-func (c *cache) newReach(key cacheKey) *reach {
+// schema that ref names and that the registry keeps under key. The reach
+// starts with the document of the schema itself, which falls due as
+// [cache.dueAfter] says. The index of reaches holds it from the start,
+// so a release of the document during the compile finds it. The caller
+// passes the reach to [cache.settle] when the compile ends.
+func (c *cache) newReach(key cacheKey, ref Ref) *reach {
 	start := time.Now()
+	id := docOf(key)
 
-	return &reach{
+	rc := &reach{
+		cache: c,
 		key:   key,
+		fsys:  ref.fsys,
 		start: start,
 		due:   c.dueAfter(key, start),
-		docs:  map[docID]struct{}{docOf(key): {}},
+		docs:  map[docID]struct{}{id: {}},
 		state: reachPending,
 	}
+
+	if key.kind == keyNamed {
+		rc.named = Ref{key: ref.key, load: ref.load}
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	link(c.reaches, id, rc)
+
+	return rc
+}
+
+// settle drops rc, the reach of a compile that has ended, from the index
+// of reaches when the cache did not keep the outcome of the compile.
+func (c *cache) settle(rc *reach) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if rc.state == reachPending {
+		c.dropReach(rc)
+	}
+}
+
+// dropReach removes rc from the index of reaches. After the drop, a
+// release does not find rc, but rc still records the documents that its
+// schema reaches. The caller holds the lock of c.
+func (c *cache) dropReach(rc *reach) {
+	for id := range rc.docs {
+		unlink(c.reaches, id, rc)
+	}
+
+	rc.state = reachDropped
 }
 
 // dueAfter returns the time when an entry under key that loaded at
@@ -194,18 +246,21 @@ func (c *cache) reached(rc *reach, due time.Time) {
 	}
 }
 
-// keepSchema keeps e, with rc as its reach, under key for a compile that
-// started in generation gen. It returns the entry that c then holds under
-// key. For a compile from an earlier generation, keepSchema does not keep
-// e. It returns e as it is, or for a failure, the schema that c holds
-// under key. A release that started a new generation without dropping
-// that schema thus leaves the schema to answer a failed refresh.
-func (c *cache) keepSchema(key cacheKey, e cacheEntry, failedAt time.Time, gen uint64, rc *reach) cacheEntry {
+// keepSchema keeps e under key for a compile that started in generation
+// gen. The reach of e records what the compile reached. It returns the
+// entry that c then holds under key. For a compile from an earlier
+// generation, keepSchema does not keep e. It returns e as it is, or for
+// a failure, the schema that c holds under key. A release that started a
+// new generation without dropping that schema thus leaves the schema to
+// answer a failed refresh.
+func (c *cache) keepSchema(key cacheKey, e cacheEntry, failedAt time.Time, gen uint64) cacheEntry {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	rc := e.reach
+
 	if gen != c.gen {
-		rc.state = reachDropped
+		c.dropReach(rc)
 
 		if !failedAt.IsZero() {
 			held, _, ok := c.schemas.get(key)
@@ -217,8 +272,6 @@ func (c *cache) keepSchema(key cacheKey, e cacheEntry, failedAt time.Time, gen u
 		return e
 	}
 
-	e.reach = rc
-
 	var due time.Time
 
 	if failedAt.IsZero() {
@@ -227,16 +280,12 @@ func (c *cache) keepSchema(key cacheKey, e cacheEntry, failedAt time.Time, gen u
 
 	kept, _ := c.schemas.keep(key, e, failedAt, due)
 	if kept.reach != rc {
-		rc.state = reachDropped
+		c.dropReach(rc)
 
 		return kept
 	}
 
 	rc.state = reachKept
-
-	for id := range rc.docs {
-		link(c.dependents, id, rc)
-	}
 
 	return kept
 }
@@ -246,24 +295,22 @@ func (c *cache) keepSchema(key cacheKey, e cacheEntry, failedAt time.Time, gen u
 // key starts in after a miss. The record comes before the read, so a release
 // of the document that runs after doc returns finds the schema of rc. A
 // document that has fallen due is a miss, as it is in [cache.schema].
+//
+// After a miss, c counts the load of the document as one in flight, so a
+// release of the document finds it even when c has dropped rc. The
+// caller passes key to [cache.loaded] when the load ends.
 func (c *cache) doc(key cacheKey, rc *reach) (refDoc, uint64, bool) {
 	id := docOf(key)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if rc.state != reachDropped {
-		if _, ok := rc.docs[id]; !ok {
-			rc.docs[id] = struct{}{}
-
-			if rc.state == reachKept {
-				link(c.dependents, id, rc)
-			}
-		}
-	}
+	c.add(rc, id)
 
 	d, due, ok := c.docs.get(key)
 	if !ok || isDue(due) {
+		c.loading[id]++
+
 		return d, c.gen, false
 	}
 
@@ -272,6 +319,45 @@ func (c *cache) doc(key cacheKey, rc *reach) (refDoc, uint64, bool) {
 	}
 
 	return d, c.gen, true
+}
+
+// record records that the schema of rc reached the document that key
+// names, for a document that the registry refuses to read. The
+// dependencies of rc then name the document, as they name one that the
+// registry read.
+func (c *cache) record(key cacheKey, rc *reach) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.add(rc, docOf(key))
+}
+
+// add adds id to the documents of rc, and adds rc to the index of
+// reaches under id unless c dropped rc. The caller holds the lock of c.
+func (c *cache) add(rc *reach, id docID) {
+	if _, ok := rc.docs[id]; ok {
+		return
+	}
+
+	rc.docs[id] = struct{}{}
+
+	if rc.state != reachDropped {
+		link(c.reaches, id, rc)
+	}
+}
+
+// loaded ends the count of a load of the document that key names, which
+// [cache.doc] started.
+func (c *cache) loaded(key cacheKey) {
+	id := docOf(key)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.loading[id]--
+	if c.loading[id] <= 0 {
+		delete(c.loading, id)
+	}
 }
 
 // heldDoc returns the document that c holds under key, for a load of the
@@ -351,11 +437,17 @@ func (c *cache) keepDoc(key cacheKey, d refDoc, failedAt, loaded time.Time, gen 
 	return kept
 }
 
-// invalidate starts a new generation and drops each document of ids, and
-// each schema that reached one of them.
+// invalidate drops each document of ids, and each schema that reached
+// one of them. When c knows one of the documents, invalidate also starts
+// a new generation, so the loads in flight do not keep their outcome. A
+// document that c does not know leaves c as it is.
 func (c *cache) invalidate(ids map[docID]struct{}) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	if !slices.ContainsFunc(slices.Collect(maps.Keys(ids)), c.knows) {
+		return
+	}
 
 	c.gen++
 
@@ -363,8 +455,10 @@ func (c *cache) invalidate(ids map[docID]struct{}) {
 	var schemas, docs []cacheKey
 
 	for id := range ids {
-		for rc := range c.dependents[id] {
-			schemas = append(schemas, rc.key)
+		for rc := range c.reaches[id] {
+			if rc.state == reachKept {
+				schemas = append(schemas, rc.key)
+			}
 		}
 
 		for key := range c.docKeys[id] {
@@ -379,6 +473,13 @@ func (c *cache) invalidate(ids map[docID]struct{}) {
 	for _, key := range docs {
 		c.docs.discard(key)
 	}
+}
+
+// knows reports whether c keeps a schema or a document under id, whether
+// a schema that c keeps or a compile in flight reached id, and whether a
+// load of id runs for a $ref. The caller holds the lock of c.
+func (c *cache) knows(id docID) bool {
+	return len(c.reaches[id]) > 0 || len(c.docKeys[id]) > 0 || c.loading[id] > 0
 }
 
 // forget drops each schema and document from the file system that id
@@ -408,16 +509,9 @@ func (c *cache) purge() {
 }
 
 // releaseSchema removes e, an entry that c.schemas dropped, from the
-// index of dependents. After the release, the reach of e does not record
-// any further documents.
+// index of reaches.
 func (c *cache) releaseSchema(_ cacheKey, e cacheEntry) {
-	rc := e.reach
-
-	for id := range rc.docs {
-		unlink(c.dependents, id, rc)
-	}
-
-	rc.state = reachDropped
+	c.dropReach(e.reach)
 }
 
 // releaseDoc removes key, the key of a document that c.docs dropped,
@@ -429,16 +523,86 @@ func (c *cache) releaseDoc(key cacheKey, _ refDoc) {
 // A reach records the documents that one compile of a schema reached:
 // the document of the schema itself, and each document that a $ref
 // names. A validation with the compiled schema that loads a $ref document
-// adds that document. A [cache] guards it.
+// adds that document, whether or not the cache keeps the schema. The
+// [cache] of the reach guards it.
 type reach struct {
 	// When the compile started.
 	start time.Time
 	// When the first URL document that the schema used falls due, or the
 	// zero time for never.
 	due   time.Time
+	cache *cache
 	docs  map[docID]struct{}
+	// The file system that the files of the schema live in, or nil for
+	// files on disk.
+	fsys fs.FS
+	// The Ref of a schema from Loadable, which names its document, or
+	// the zero Ref for any other schema.
+	named Ref
 	key   cacheKey // the key the registry keeps the schema under
 	state reachState
+}
+
+// dependencies returns a [Ref] for each document that rc records. The
+// document of the schema itself comes first, and the rest follow in the
+// order of their keys.
+func (rc *reach) dependencies() []Ref {
+	rc.cache.mu.Lock()
+
+	ids := slices.Collect(maps.Keys(rc.docs))
+
+	rc.cache.mu.Unlock()
+
+	root := docOf(rc.key)
+
+	slices.SortFunc(ids, func(a, b docID) int {
+		switch {
+		case a == b:
+			return 0
+		case a == root:
+			return -1
+		case b == root:
+			return 1
+		default:
+			return cmp.Or(strings.Compare(a.uri, b.uri), cmp.Compare(a.kind, b.kind))
+		}
+	})
+
+	refs := make([]Ref, 0, len(ids))
+	for _, id := range ids {
+		refs = append(refs, rc.refOf(id))
+	}
+
+	return refs
+}
+
+// refOf returns the [Ref] that names the document id, a document that rc
+// records. [Registry.Invalidate] reads the Ref as id again. A file on
+// disk keeps the path that the registry reads, without any change, so a
+// path that a $ref spells with a doubled slash keeps it too. A file in a
+// file system takes the cleaned path of id, which [docOf] gives and the
+// registry reads.
+func (rc *reach) refOf(id docID) Ref {
+	switch id.kind {
+	case keyNamed:
+		return rc.named
+
+	case keyURL:
+		return Ref{key: id.uri, url: true}
+
+	default:
+		path, _ := fileURLPath(id.uri)
+		if rc.fsys == nil {
+			return Ref{key: id.uri, file: path, abs: path}
+		}
+
+		name := strings.TrimPrefix(filepath.ToSlash(path), "/")
+		if name == "" {
+			name = "."
+		}
+
+		return Ref{key: id.uri, file: name, fsys: rc.fsys}
+	}
 }
 
 // A reachState says whether a [cache] keeps the outcome of the compile
@@ -446,12 +610,14 @@ type reach struct {
 type reachState int
 
 const (
-	// The compile runs, and the cache does not keep its outcome yet.
+	// The compile runs, and the cache does not keep its outcome yet. The
+	// index of reaches holds the reach under each of its documents, as it
+	// does for a kept reach.
 	reachPending reachState = iota
-	// The cache keeps the outcome, and the index of dependents holds the
-	// reach under each of its documents.
+	// The cache keeps the outcome.
 	reachKept
-	// The cache does not keep the outcome, and never will.
+	// The cache does not keep the outcome, and never will. The index of
+	// reaches does not hold the reach.
 	reachDropped
 )
 
@@ -478,20 +644,41 @@ type docID struct {
 // [fileURLPath] finds in it. That path leaves out a query and a localhost
 // authority, so every URL that reads one file gets one docID. Windows
 // reads a drive letter in either case, so docOf spells it in upper case.
+// The registry cleans the path of a file in a file system before it
+// reads the file, as [Registry.readFile] describes, so docOf cleans that
+// path too. A $ref that spells sub//defs.json in a file system thus
+// names the document of sub/defs.json.
 func docOf(key cacheKey) docID {
-	if isFileURL(key.uri) {
-		if path, ok := fileURLPath(key.uri); ok {
-			if hasDriveLetter(path) {
-				path = strings.ToUpper(path[:1]) + path[1:]
-			}
-
-			return docID{kind: key.kind, fs: key.fs, uri: fileURL(path)}
-		}
+	if path, ok := docPath(key); ok {
+		return docID{kind: key.kind, fs: key.fs, uri: fileURL(path)}
 	}
 
 	uri, _ := splitUserinfo(key.uri)
 
 	return docID{kind: key.kind, fs: key.fs, uri: canonicalURL(uri)}
+}
+
+// docPath returns the path of the file that key names, in the form that
+// [docOf] describes, and false when key does not name a file.
+func docPath(key cacheKey) (string, bool) {
+	if !isFileURL(key.uri) {
+		return "", false
+	}
+
+	path, ok := fileURLPath(key.uri)
+	if !ok {
+		return "", false
+	}
+
+	if hasDriveLetter(path) {
+		path = strings.ToUpper(path[:1]) + path[1:]
+	}
+
+	if key.fs.v != nil {
+		path = filepath.FromSlash(slashpath.Clean(filepath.ToSlash(path)))
+	}
+
+	return path, true
 }
 
 // link adds v to the set that m holds under k.

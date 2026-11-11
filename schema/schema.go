@@ -539,6 +539,9 @@ func FromJSONSchema(v *jsonschema.Validator) *Schema {
 // [MustCompile], or [FromJSONSchema]. [AcceptAll] passes every document.
 type Schema struct {
 	compiled *jsonschema.Validator
+	// The documents that the compile of a registry, and each validation
+	// since, reached, or nil for a schema that no registry compiled.
+	reach *reach
 	// The fields that a check removes from the value before the
 	// validator reads it, as [Schema.WithoutFields] sets. Each holds the
 	// selectors of its path.
@@ -711,6 +714,44 @@ func withoutField(data any, sels []paths.Selector) (any, bool) {
 	}
 
 	return data, false
+}
+
+// Dependencies returns a [Ref] for each document that s reads: its own
+// document first, then each document that a $ref of s reached during its
+// compile or during a validation since. A program that watches its schema
+// files, such as an editor, watches each of these documents. It passes
+// each one that changes to [Registry.Invalidate]:
+//
+//	for _, dep := range s.Dependencies() {
+//	    w.watch(dep) // service.json, and ../shared/defs.json beside it
+//	}
+//
+// Each Ref spells its document as the registry reads it, so
+// Registry.Invalidate drops the schema for it whatever path or URL the
+// request named. A Ref from [File] holds the absolute path that the
+// registry reads, a Ref from [FileFS] holds the file system and the
+// path in it, and a Ref from [URL] holds the URL without its userinfo.
+// The schema of a Ref from [Loadable] or [Embedded] depends on that Ref
+// alone.
+//
+// The result is a snapshot. When [WithRequireRefs] is false, a
+// validation can load a $ref document that the compile could not, and a
+// $ref in that document can reach further documents. So a program reads
+// Dependencies again after each check. The result holds a document that
+// did not load too, so a program watches a file that a $ref names before
+// the file exists.
+//
+// Dependencies returns nil for a schema that no [Registry] compiled, such
+// as one from [Compile] or [FromJSONSchema]. A schema that a registry
+// returned keeps the registry state that Dependencies reads, and for a
+// schema from FileFS its file system, for as long as the program holds
+// the schema.
+func (s *Schema) Dependencies() []Ref {
+	if s.reach == nil {
+		return nil
+	}
+
+	return s.reach.dependencies()
 }
 
 // Ref returns the [Ref] that carries the compiled schema, which
