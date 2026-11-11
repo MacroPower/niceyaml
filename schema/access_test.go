@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -113,10 +114,6 @@ func TestNewAccess(t *testing.T) {
 			"nil root": {
 				opts: []schema.AccessOption{schema.AllowRoot(nil)},
 				want: []string{"schema.AllowRoot: root is nil"},
-			},
-			"second root": {
-				opts: []schema.AccessOption{allowRoot(t, t.TempDir()), allowRoot(t, t.TempDir())},
-				want: []string{"schema.AllowRoot: ", "the access holds a root already"},
 			},
 			"closed root": {
 				opts: []schema.AccessOption{schema.AllowRoot(closed)},
@@ -468,6 +465,495 @@ func TestAllowRoot(t *testing.T) {
 		// Under Unrestricted, the same schema reads the file outside.
 		disk := schema.NewRegistry(schema.WithResolvers(schema.File(filepath.Join(tenant, "out.json"))))
 		requireRejects(t, disk, "out: 5\n", `$.out: expected "string", got "integer"`)
+	})
+
+	t.Run("several roots allow the files under each directory", func(t *testing.T) {
+		t.Parallel()
+
+		base := t.TempDir()
+		tenant := filepath.Join(base, "tenant")
+		shared := filepath.Join(base, "shared")
+		yamltest.WriteFiles(t, base, map[string]string{
+			"tenant/app.yaml": yamltest.SchemaDirective("./t.json", "name: 5\n"),
+			"tenant/other.yaml": yamltest.SchemaDirective(
+				filepath.Join(shared, "s.json"), "name: 5\n",
+			),
+			"tenant/t.json": `{"properties": {"name": {"$ref": "` + plainFileURL(
+				filepath.Join(shared, "defs.json"),
+			) + `"}}}`,
+			"shared/defs.json": `{"type": "string"}`,
+			"shared/s.json":    nameSchema,
+			"other/s.json":     nameSchema,
+		})
+
+		reg := schema.NewRegistry(
+			withAccess(t, allowRoot(t, tenant), allowRoot(t, shared)),
+			schema.WithResolvers(schema.Directive()),
+		)
+
+		// The schema reads through the root of tenant, and its $ref reads
+		// through the root of shared.
+		for _, name := range []string{"app.yaml", "other.yaml"} {
+			source, err := niceyaml.NewSourceFromFile(filepath.Join(tenant, name))
+			require.NoError(t, err)
+
+			err = source.ValidateDocuments(t.Context(), reg)
+			require.ErrorContains(t, err, `expected "string", got "integer"`, name)
+		}
+
+		// A path under neither directory names both.
+		outside := filepath.Join(base, "other", "s.json")
+
+		_, err := reg.Load(t.Context(), schema.File(outside))
+		requireLoadError(t, err, schema.ErrFileNotAllowed)
+		require.ErrorContains(t, err,
+			"read "+outside+": file not allowed: not under "+tenant+" or "+shared+
+				", the directories of the registry's roots",
+		)
+	})
+
+	t.Run("a refusal names every directory", func(t *testing.T) {
+		t.Parallel()
+
+		a, b, c := t.TempDir(), t.TempDir(), t.TempDir()
+		outside := yamltest.WriteFile(t, t.TempDir(), "s.json", nameSchema)
+
+		tcs := map[string]struct {
+			dirs []string
+			want string
+		}{
+			"one root": {
+				dirs: []string{a},
+				want: "not under " + a + ", the directory of the registry's root",
+			},
+			"two roots": {
+				dirs: []string{a, b},
+				want: "not under " + a + " or " + b + ", the directories of the registry's roots",
+			},
+			"three roots": {
+				dirs: []string{a, b, c},
+				want: "not under " + a + ", " + b + ", or " + c + ", the directories of the registry's roots",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				opts := make([]schema.AccessOption, 0, len(tc.dirs))
+				for _, dir := range tc.dirs {
+					opts = append(opts, allowRoot(t, dir))
+				}
+
+				reg := schema.NewRegistry(withAccess(t, opts...))
+
+				_, err := reg.Load(t.Context(), schema.File(outside))
+				requireLoadError(t, err, schema.ErrFileNotAllowed)
+				require.ErrorContains(t, err, tc.want)
+			})
+		}
+	})
+
+	t.Run("the first root that holds a path decides its read", func(t *testing.T) {
+		t.Parallel()
+
+		// The link in inner leads out of inner but stays in outer.
+		outer := t.TempDir()
+		inner := filepath.Join(outer, "inner")
+		yamltest.WriteFile(t, outer, "s.json", nameSchema)
+		yamltest.WriteFile(t, inner, "keep.json", nameSchema)
+		yamltest.SymlinkOrSkip(t, filepath.Join("..", "s.json"), filepath.Join(inner, "link.json"))
+
+		link := filepath.Join(inner, "link.json")
+
+		// The same link, named through a link to the parent of outer and
+		// through a directory link in inner that leads out of it.
+		via := filepath.Join(t.TempDir(), "via")
+		yamltest.SymlinkOrSkip(t, filepath.Dir(outer), via)
+		yamltest.SymlinkOrSkip(t, "..", filepath.Join(inner, "up"))
+
+		viaOuter := filepath.Join(via, filepath.Base(outer))
+		viaInner := filepath.Join(viaOuter, "inner")
+		viaLink := filepath.Join(viaInner, "link.json")
+		viaUp := filepath.Join(viaInner, "up", "s.json")
+
+		// The roots can name their directories through the link too. The
+		// order of the roots decides, whichever way the roots and the path
+		// name the directories.
+		tcs := map[string]struct {
+			path string
+			dirs []string
+			err  error
+		}{
+			"inner first": {path: link, dirs: []string{inner, outer}, err: schema.ErrLoad},
+			"outer first": {path: link, dirs: []string{outer, inner}},
+			"inner first, outer named through a link": {
+				path: link,
+				dirs: []string{inner, viaOuter},
+				err:  schema.ErrLoad,
+			},
+			"inner first, outer and path named through a link": {
+				path: viaLink,
+				dirs: []string{inner, viaOuter},
+				err:  schema.ErrLoad,
+			},
+			"inner first, inner named through a link": {
+				path: link,
+				dirs: []string{viaInner, outer},
+				err:  schema.ErrLoad,
+			},
+			"inner first, inner and path named through a link": {
+				path: viaLink,
+				dirs: []string{viaInner, outer},
+				err:  schema.ErrLoad,
+			},
+			"outer first, outer named through a link": {path: link, dirs: []string{viaOuter, inner}},
+			"outer first, outer and path named through a link": {
+				path: viaLink,
+				dirs: []string{viaOuter, inner},
+			},
+			"outer first, inner named through a link": {path: link, dirs: []string{outer, viaInner}},
+			"outer first, inner and path named through a link": {
+				path: viaLink,
+				dirs: []string{outer, viaInner},
+			},
+			"inner first, through a link": {
+				path: viaLink,
+				dirs: []string{inner, outer},
+				err:  schema.ErrLoad,
+			},
+			"outer first, through a link": {path: viaLink, dirs: []string{outer, inner}},
+			"inner first, directory link through a link": {
+				path: viaUp,
+				dirs: []string{inner, outer},
+				err:  schema.ErrLoad,
+			},
+			"outer first, directory link through a link": {path: viaUp, dirs: []string{outer, inner}},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				opts := make([]schema.AccessOption, 0, len(tc.dirs))
+				for _, dir := range tc.dirs {
+					opts = append(opts, allowRoot(t, dir))
+				}
+
+				reg := schema.NewRegistry(withAccess(t, opts...))
+
+				data, err := reg.Load(t.Context(), schema.File(tc.path))
+				if tc.err != nil {
+					// The root of inner refuses the link, and the root of
+					// outer does not get the path.
+					require.ErrorIs(t, err, tc.err)
+					require.NotErrorIs(t, err, schema.ErrFileNotAllowed)
+
+					return
+				}
+
+				require.NoError(t, err)
+				assert.JSONEq(t, nameSchema, string(data))
+			})
+		}
+	})
+
+	t.Run("a link outside every root resolves one name at a time", func(t *testing.T) {
+		t.Parallel()
+
+		base := t.TempDir()
+		root := filepath.Join(base, "root")
+		out := filepath.Join(base, "out")
+
+		yamltest.WriteFile(t, root, "s.json", nameSchema)
+		yamltest.WriteFile(t, out, "keep.json", nameSchema)
+
+		// Relative links whose targets step up with ".." and stay with ".",
+		// and two links that lead to each other.
+		yamltest.SymlinkOrSkip(t, "..", filepath.Join(out, "up"))
+		yamltest.SymlinkOrSkip(t, "./../.", filepath.Join(out, "up2"))
+		yamltest.SymlinkOrSkip(t, "b", filepath.Join(out, "a"))
+		yamltest.SymlinkOrSkip(t, "a", filepath.Join(out, "b"))
+
+		tcs := map[string]struct {
+			path string
+			err  error
+		}{
+			"parent link": {path: filepath.Join(out, "up", "root", "s.json")},
+			"parent link with current names": {
+				path: filepath.Join(out, "up2", "root", "s.json"),
+			},
+			"link loop": {
+				path: filepath.Join(out, "a", "root", "s.json"),
+				err:  schema.ErrFileNotAllowed,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				reg := schema.NewRegistry(withAccess(t, allowRoot(t, root)))
+
+				data, err := reg.Load(t.Context(), schema.File(tc.path))
+				if tc.err != nil {
+					requireLoadError(t, err, tc.err)
+
+					return
+				}
+
+				require.NoError(t, err)
+				assert.JSONEq(t, nameSchema, string(data))
+			})
+		}
+	})
+
+	t.Run("a parent name after a link steps up from its target", func(t *testing.T) {
+		t.Parallel()
+
+		base := t.TempDir()
+		a := filepath.Join(base, "a")
+		b := filepath.Join(base, "b")
+		out := filepath.Join(base, "out")
+
+		yamltest.WriteFiles(t, base, map[string]string{
+			"a/d1/t/s.json": `{"title": "a/d1/t"}`,
+			"a/t/s.json":    `{"title": "a/t"}`,
+			"a/x/y/keep":    ``,
+			"a/b/s.json":    `{"title": "a/b"}`,
+			"b/s.json":      `{"title": "b"}`,
+			"out/keep":      ``,
+		})
+		require.NoError(t, os.MkdirAll(filepath.Join(a, "d1", "d2"), 0o750))
+
+		// Links inside a: a relative link, which the root follows, and an
+		// absolute one, which it refuses.
+		yamltest.SymlinkOrSkip(t, filepath.Join("d1", "d2"), filepath.Join(a, "sub"))
+		yamltest.SymlinkOrSkip(t, filepath.Join(a, "d1", "d2"), filepath.Join(a, "abs"))
+		yamltest.SymlinkOrSkip(t, filepath.Join("x", "y"), filepath.Join(a, "xy"))
+
+		// Links outside every root whose targets step up after a name in a.
+		// The targets join their names by hand, because filepath.Join
+		// removes each "..".
+		link := func(name string, target ...string) string {
+			yamltest.SymlinkOrSkip(t, strings.Join(target, string(filepath.Separator)), filepath.Join(out, name))
+
+			return filepath.Join(out, name)
+		}
+
+		sub := link("sub", a, "sub", "..")
+		abs := link("abs", a, "abs", "..")
+		xy := link("xy", a, "xy", "..", "..")
+		d1 := link("d1", a, "d1", "d2", "..")
+		up := link("up", a, "..")
+
+		tcs := map[string]struct {
+			path string
+			dirs []string
+			err  error
+		}{
+			"link in the root": {path: filepath.Join(sub, "t", "s.json"), dirs: []string{a}},
+			"absolute link in a root": {
+				path: filepath.Join(abs, "t", "s.json"),
+				dirs: []string{a},
+				err:  schema.ErrLoad,
+			},
+			"link in the first root":  {path: filepath.Join(xy, "b", "s.json"), dirs: []string{a, b}},
+			"link in the second root": {path: filepath.Join(xy, "b", "s.json"), dirs: []string{b, a}},
+			"directory in the root":   {path: filepath.Join(d1, "t", "s.json"), dirs: []string{a}},
+			"out of the first root":   {path: filepath.Join(up, "b", "s.json"), dirs: []string{a, b}},
+			"out of the second root":  {path: filepath.Join(up, "b", "s.json"), dirs: []string{b, a}},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				opts := make([]schema.AccessOption, 0, len(tc.dirs))
+				for _, dir := range tc.dirs {
+					opts = append(opts, allowRoot(t, dir))
+				}
+
+				reg := schema.NewRegistry(withAccess(t, opts...))
+
+				data, err := reg.Load(t.Context(), schema.File(tc.path))
+				if tc.err != nil {
+					// The root of a refuses its absolute link.
+					require.ErrorIs(t, err, tc.err)
+					require.NotErrorIs(t, err, schema.ErrFileNotAllowed)
+
+					return
+				}
+
+				require.NoError(t, err)
+
+				// The registry reads the file that the OS names.
+				want, err := os.ReadFile(tc.path)
+				require.NoError(t, err)
+				assert.JSONEq(t, string(want), string(data))
+			})
+		}
+	})
+
+	t.Run("a root named through a link in another root", func(t *testing.T) {
+		t.Parallel()
+
+		base := t.TempDir()
+		a := filepath.Join(base, "a")
+		out := filepath.Join(base, "out")
+
+		yamltest.WriteFiles(t, base, map[string]string{
+			"a/real/s.json":   nameSchema,
+			"a/real/b/c/keep": ``,
+			"out/keep":        ``,
+		})
+
+		// The inner root opens a/real/b through the link lnkb in a. The link
+		// up in a/real/b leads out of the inner root but stays in a.
+		inner := filepath.Join(a, "lnkb")
+		yamltest.SymlinkOrSkip(t, filepath.Join("real", "b"), inner)
+		yamltest.SymlinkOrSkip(t, "..", filepath.Join(a, "real", "b", "up"))
+
+		// Links outside every root that lead to inner, one of them with a
+		// ".." after a name in it. The target joins its names by hand,
+		// because filepath.Join removes each "..".
+		yamltest.SymlinkOrSkip(t, inner, filepath.Join(out, "l"))
+		yamltest.SymlinkOrSkip(t,
+			strings.Join([]string{inner, "c", ".."}, string(filepath.Separator)),
+			filepath.Join(out, "p"),
+		)
+
+		// Each spelling names a/real/s.json through up.
+		paths := map[string]string{
+			"inner as written":          filepath.Join(inner, "up", "s.json"),
+			"inner with links resolved": filepath.Join(a, "real", "b", "up", "s.json"),
+			"link outside every root":   filepath.Join(out, "l", "up", "s.json"),
+			"link with a parent name":   filepath.Join(out, "p", "up", "s.json"),
+		}
+
+		// The root of inner refuses up, and the root of a follows it,
+		// whichever way the path names inner.
+		tcs := map[string]struct {
+			dirs []string
+			err  error
+		}{
+			"inner first": {dirs: []string{inner, a}, err: schema.ErrLoad},
+			"outer first": {dirs: []string{a, inner}},
+		}
+
+		for name, tc := range tcs {
+			for spelling, path := range paths {
+				t.Run(name+", "+spelling, func(t *testing.T) {
+					t.Parallel()
+
+					opts := make([]schema.AccessOption, 0, len(tc.dirs))
+					for _, dir := range tc.dirs {
+						opts = append(opts, allowRoot(t, dir))
+					}
+
+					reg := schema.NewRegistry(withAccess(t, opts...))
+
+					data, err := reg.Load(t.Context(), schema.File(path))
+					if tc.err != nil {
+						require.ErrorIs(t, err, tc.err)
+						require.NotErrorIs(t, err, schema.ErrFileNotAllowed)
+
+						return
+					}
+
+					require.NoError(t, err)
+					assert.JSONEq(t, nameSchema, string(data))
+				})
+			}
+		}
+	})
+
+	t.Run("a link into another root stays refused", func(t *testing.T) {
+		t.Parallel()
+
+		base := t.TempDir()
+		tenant := filepath.Join(base, "tenant")
+		shared := filepath.Join(base, "shared")
+		target := yamltest.WriteFile(t, shared, "s.json", nameSchema)
+		yamltest.WriteFile(t, tenant, "keep.json", nameSchema)
+		yamltest.SymlinkOrSkip(t, target, filepath.Join(tenant, "link.json"))
+		yamltest.SymlinkOrSkip(t, shared, filepath.Join(tenant, "dirlink"))
+
+		// A link to base, so a path can reach tenant through it, and a link
+		// outside every root that leads to the directory link.
+		outside := t.TempDir()
+		via := filepath.Join(outside, "via")
+		yamltest.SymlinkOrSkip(t, base, via)
+		yamltest.SymlinkOrSkip(t, filepath.Join(tenant, "dirlink"), filepath.Join(outside, "todirlink"))
+
+		tcs := map[string]struct {
+			dirs []string
+			path string
+		}{
+			"file link through a link, tenant first": {
+				dirs: []string{tenant, shared},
+				path: filepath.Join(via, "tenant", "link.json"),
+			},
+			"file link through a link, shared first": {
+				dirs: []string{shared, tenant},
+				path: filepath.Join(via, "tenant", "link.json"),
+			},
+			"directory link through a link, tenant first": {
+				dirs: []string{tenant, shared},
+				path: filepath.Join(via, "tenant", "dirlink", "s.json"),
+			},
+			"directory link through a link, shared first": {
+				dirs: []string{shared, tenant},
+				path: filepath.Join(via, "tenant", "dirlink", "s.json"),
+			},
+			"link to a directory link, tenant first": {
+				dirs: []string{tenant, shared},
+				path: filepath.Join(outside, "todirlink", "s.json"),
+			},
+			"link to a directory link, shared first": {
+				dirs: []string{shared, tenant},
+				path: filepath.Join(outside, "todirlink", "s.json"),
+			},
+			"file link, tenant first": {
+				dirs: []string{tenant, shared},
+				path: filepath.Join(tenant, "link.json"),
+			},
+			"file link, shared first": {
+				dirs: []string{shared, tenant},
+				path: filepath.Join(tenant, "link.json"),
+			},
+			"directory link, tenant first": {
+				dirs: []string{tenant, shared},
+				path: filepath.Join(tenant, "dirlink", "s.json"),
+			},
+			"directory link, shared first": {
+				dirs: []string{shared, tenant},
+				path: filepath.Join(tenant, "dirlink", "s.json"),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				opts := make([]schema.AccessOption, 0, len(tc.dirs))
+				for _, dir := range tc.dirs {
+					opts = append(opts, allowRoot(t, dir))
+				}
+
+				reg := schema.NewRegistry(withAccess(t, opts...))
+
+				// The root of tenant holds the path as written and refuses
+				// the link, whatever the order of the roots.
+				_, err := reg.Load(t.Context(), schema.File(tc.path))
+				require.ErrorIs(t, err, schema.ErrLoad)
+				require.NotErrorIs(t, err, schema.ErrFileNotAllowed)
+
+				data, err := reg.Load(t.Context(), schema.File(target))
+				require.NoError(t, err)
+				assert.JSONEq(t, nameSchema, string(data))
+			})
+		}
 	})
 
 	t.Run("a fragment selects a subschema", func(t *testing.T) {

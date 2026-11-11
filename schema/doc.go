@@ -428,9 +428,10 @@
 //
 // An [Access] from [WithAccess] decides which files a registry reads
 // from disk and which URLs it fetches. [AllowRoot] confines the reads to
-// the directory of an [os.Root], and a path outside that directory fails
-// to load. The Untrusted Documents section pairs the Access with the
-// other options that confine a registry for documents from another trust
+// the directory of an [os.Root], and a program can give it once for each
+// of several directories. A path outside those directories fails to
+// load. The Untrusted Documents section pairs the Access with the other
+// options that confine a registry for documents from another trust
 // domain.
 //
 // A registry built without WithAccess loads only the schemas that the
@@ -557,6 +558,13 @@
 // the tree. The program must keep the Root open while it uses the
 // registry. An Access allows files on disk only through AllowRoot or
 // [AllowAnyFile].
+//
+// A tenant whose schemas reference a shared directory of definitions
+// takes a second AllowRoot for that directory in the same Access. A
+// $ref from tenantDir then reads the shared file, and a directive can
+// name it too. Every tenant that shares an Access can read the files of
+// the others, so a program that keeps tenants apart builds one Access
+// and one confined registry for each tenant.
 //
 // The Access confines every document on disk.
 // [go.jacobcolvin.com/niceyaml.NewSourceFromFile] gives each document
