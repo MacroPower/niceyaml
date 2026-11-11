@@ -74,6 +74,19 @@
 //	    matcher.Content(kind, "Deployment"),
 //	)
 //
+// Negate a matcher with [Not] (NOT) to match the absence of a field, or
+// to exclude a pattern:
+//
+//	m := matcher.All(
+//	    matcher.MustFilePath("k8s/**"),
+//	    matcher.Not(matcher.MustFilePath("k8s/vendor/**")),
+//	)
+//
+// Not accepts every document that its matcher declines. [Content] and
+// [Text] decline a document without the path, so a Not of either accepts
+// such a document. Pair the Not with [Exists] in an All to require the
+// field.
+//
 // # Schema Routing
 //
 // A resolver that [go.jacobcolvin.com/niceyaml/schema.When] guards reports
@@ -112,12 +125,15 @@
 //   - [All] and [Any] join the descriptions of their matchers with "and"
 //     and "or". A child that joins two or more descriptions of its own
 //     goes in parentheses.
+//   - [Not] reads `not ($.metadata exists)`, with the description of its
+//     matcher in parentheses.
 //
 // A [Func] does not have a description. An All or an Any does not have
 // one either when it holds no matcher, or when one of its matchers does
-// not have one. [Described] gives any matcher a description in the words
-// of the caller, and it replaces the description of a matcher of this
-// package. A custom matcher describes itself by implementing Describer.
+// not have one. A Not does not have one when its matcher does not.
+// [Described] gives any matcher a description in the words of the
+// caller, and it replaces the description of a matcher of this package.
+// A custom matcher describes itself by implementing Describer.
 //
 // A description holds only the text that the program wrote: the path,
 // the want, and the pattern. The base directory of [FilePath] does not

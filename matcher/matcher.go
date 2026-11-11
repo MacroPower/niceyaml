@@ -20,8 +20,8 @@ import (
 // [Describer]. Each matcher of this package describes itself, except
 // [Func]. [Described] gives any Matcher a description.
 //
-// See [Content], [Text], [Exists], [FilePath], [Any], [All], [Described],
-// and [Func] for implementations.
+// See [Content], [Text], [Exists], [FilePath], [Any], [All], [Not],
+// [Described], and [Func] for implementations.
 type Matcher interface {
 	// Match reports whether the document satisfies the matcher. Match
 	// returns an error only when it cannot decide, such as when its context
@@ -65,8 +65,8 @@ func (f Func) Match(ctx context.Context, doc *niceyaml.Node) (bool, error) {
 
 // Describer describes the documents that a [Matcher] accepts.
 //
-// [All] and [Any] read the descriptions of their matchers to build their
-// own. Of the APIs outside this package that take a Matcher, only
+// [All], [Any], and [Not] read the descriptions of their matchers to
+// build their own. Of the APIs outside this package that take a Matcher, only
 // [go.jacobcolvin.com/niceyaml/schema.When] reads its description. It
 // gives the description as the reason of each decline, so the error of a
 // [go.jacobcolvin.com/niceyaml/schema.Registry] that no resolver applies

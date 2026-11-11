@@ -131,6 +131,10 @@ func TestWhen(t *testing.T) {
 				matcher: matcher.Any(deployment, service),
 				want:    `no matching schema: applies only when $.kind is "Deployment" or $.kind is "Service"`,
 			},
+			"not guard": {
+				matcher: matcher.All(deployment, matcher.Not(matcher.MustFilePath("k8s/vendor/**"))),
+				want:    `no matching schema: applies only when $.kind is "Deployment" and not (file path matches "k8s/vendor/**")`,
+			},
 			"described guard": {
 				matcher: matcher.Described(isPod, "the file holds a pod"),
 				want:    "no matching schema: applies only when the file holds a pod",
