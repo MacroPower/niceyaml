@@ -3,7 +3,6 @@ package niceyaml
 import (
 	"context"
 	"fmt"
-	"math"
 	"reflect"
 	"slices"
 	"strings"
@@ -122,7 +121,9 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error 
 //	return niceyaml.Rebase(errors.Join(err, warnings.Err()), paths.Current().Child("upstreams"))
 //
 // A Validate must not pass its own receiver to SelfValidateValue, because
-// the call then runs that Validate again without end.
+// the call then runs that Validate again without end. A Validate that
+// passes a field the decode reaches reports each error of that field
+// twice, because the walk validates that field too.
 //
 // Any v works except nil and a nil pointer, for which SelfValidateValue
 // returns an error wrapping [ErrSelfValidateTarget]. The walk stops when
@@ -148,7 +149,7 @@ func SelfValidateValue(ctx context.Context, v any, opts ...DecodeOption) error {
 // it returns the failures and then the warnings. A nil n stands for a
 // value outside any document. The warnings are those that each check
 // returns and those that each function hands to its context, whether the
-// check passes or fails. A check whose result holds warnings alone passes.
+// check passes or fails.
 func walkSelfValidators(ctx context.Context, v any, n *Node, cfg decodeConfig) (error, error) {
 	w := selfWalker{
 		ctx:      ctx,
@@ -156,8 +157,7 @@ func walkSelfValidators(ctx context.Context, v any, n *Node, cfg decodeConfig) (
 		node:     n,
 		cfg:      cfg,
 		checked:  checkedTypesOf(cfg.checks),
-		walked:   map[visit]walkResult{},
-		reach:    math.MaxInt,
+		walked:   map[visit]bool{},
 		scanning: map[visit]bool{},
 		scanned:  map[visit]bool{},
 	}
@@ -171,9 +171,11 @@ func walkSelfValidators(ctx context.Context, v any, n *Node, cfg decodeConfig) (
 }
 
 // selfWalker collects the errors of the [SelfValidator] values in a decoded
-// value, and of the functions from [WithValueCheck]. It walks each pointer,
-// map, and slice once. A value that two paths share thus reports its
-// errors under the first path, and a back edge of a cycle passes.
+// value, and of the functions from [WithValueCheck]. It runs every check on
+// every value it reaches, whatever the other checks return. It walks each
+// pointer, map, and slice once. A value that two paths share thus reports
+// its errors under the first path, and the walk does not follow a back edge
+// of a cycle.
 type selfWalker struct {
 	ctx context.Context
 	// The context of the decodes that spell the map keys, which drops
@@ -185,12 +187,8 @@ type selfWalker struct {
 	// that does not hold a validator, and it counts these types as
 	// validators for that test.
 	checked *checkedTypes
-	// The result of the walk through each pointer, map, and slice that the
-	// walk has entered, as [walkResult] describes.
-	walked map[visit]walkResult
-	// The values that finished inside a cycle whose first value the walk
-	// is still inside of, in the order they finished.
-	pending []visit
+	// The pointers, maps, and slices that the walk has entered.
+	walked map[visit]bool
 	// The pointers, maps, and slices that the current scan has reached, so
 	// the scan reads each once however many paths lead to it.
 	scanning map[visit]bool
@@ -214,13 +212,6 @@ type selfWalker struct {
 	// The settings of the decode, which name the types its options give
 	// an unmarshaler and hold the functions from [WithValueCheck].
 	cfg decodeConfig
-	// The count of pointers, maps, and slices that the walk has entered.
-	// The walk gives each one the count as its number.
-	entered int
-	// The lowest number of a value the walk is inside of that the values
-	// below the current one lead back to. It is math.MaxInt when they do
-	// not lead back to such a value.
-	reach int
 	// Whether the walk is below a map entry whose path names the entries
 	// of several keys, as [selfWalker.walkEntries] finds one. The path of
 	// each error the walk collects there is ambiguous.
@@ -239,19 +230,6 @@ type visit struct {
 	typ reflect.Type
 	ptr unsafe.Pointer
 	len int
-}
-
-// walkResult is the result of the walk through a pointer, map, or slice.
-// While the walk is inside the value, the result passes with the number of
-// the value as its reach. A value below it that leads back to it thus
-// joins its cycle.
-type walkResult struct {
-	// Whether everything under the value passed.
-	ok bool
-
-	// The lowest number of a value the walk is inside of that the value
-	// leads back to, or math.MaxInt when the result is final.
-	reach int
 }
 
 // place is where a value of the walk lies, held as the last [step] below
@@ -310,66 +288,62 @@ func (p place) path() paths.Path {
 	return paths.Current().Join(selectors...)
 }
 
-// walk validates v and everything below it at the place at, and reports
-// whether everything under v passed. For an inline struct, or a pointer to
-// one, shadowed names the fields of its parent that are not inline.
-func (w *selfWalker) walk(v reflect.Value, at place, shadowed map[string]bool) bool {
+// walk validates v and everything below it at the place at. For an inline
+// struct, or a pointer to one, shadowed names the fields of its parent that
+// are not inline.
+func (w *selfWalker) walk(v reflect.Value, at place, shadowed map[string]bool) {
 	if !v.IsValid() {
-		return true
+		return
 	}
 
 	v = exposed(v)
 
-	// A value whose type holds no validator, itself included, passes
-	// without a look at the values below it.
-	if !w.checked.mayHold(v.Type()) {
-		return true
-	}
-
-	if w.stopped() {
-		return false
+	// The walk skips a value whose type holds no validator, itself
+	// included, without a look at the values below it.
+	if !w.checked.mayHold(v.Type()) || w.stopped() {
+		return
 	}
 
 	switch v.Kind() {
 	case reflect.Interface:
-		if v.IsNil() {
-			return true
+		if !v.IsNil() {
+			w.walk(v.Elem(), at, nil)
 		}
 
-		return w.walk(v.Elem(), at, nil)
+		return
 
 	case reflect.Pointer, reflect.Map, reflect.Slice:
-		// A nil map or slice validates here rather than through walked,
-		// where every nil value of its type would share one record.
-		if v.IsNil() {
-			if v.Kind() == reflect.Pointer {
-				return true
+		switch {
+		case v.IsNil():
+			// A nil map or slice validates here rather than through walked,
+			// where every nil value of its type would share one record.
+			if v.Kind() != reflect.Pointer {
+				w.validate(v, at)
 			}
 
-			return w.validate(v, at)
+		case !ownsAddress(v) && v.Kind() == reflect.Pointer:
+			w.walk(v.Elem(), at, shadowed)
+
+		case !ownsAddress(v):
+			w.walkValue(v, at, shadowed)
+
+		default:
+			w.walkOwned(v, at, shadowed)
 		}
 
-		if !ownsAddress(v) {
-			if v.Kind() == reflect.Pointer {
-				return w.walk(v.Elem(), at, shadowed)
-			}
-
-			return w.walkValue(v, at, shadowed)
-		}
-
-		return w.walkOwned(v, at, shadowed)
+		return
 
 	default:
 	}
 
-	return w.walkValue(v, at, shadowed)
+	w.walkValue(v, at, shadowed)
 }
 
 // walkValue walks v, which is neither a pointer nor an interface, as
 // [selfWalker.walk] does. A struct that it cannot address walks as a copy,
 // so [exposed] can read its fields. A struct that an embedded field
-// decodes walks that field alone.
-func (w *selfWalker) walkValue(v reflect.Value, at place, shadowed map[string]bool) bool {
+// decodes walks that field alone. The values below v validate before v.
+func (w *selfWalker) walkValue(v reflect.Value, at place, shadowed map[string]bool) {
 	if v.Kind() == reflect.Struct {
 		v = addressable(v)
 	}
@@ -381,19 +355,15 @@ func (w *selfWalker) walkValue(v reflect.Value, at place, shadowed map[string]bo
 		w.enter(v.Kind(), at)
 	}
 
-	var ok bool
-
 	if field >= 0 {
-		ok = w.walk(v.Field(field), at, nil)
+		w.walk(v.Field(field), at, nil)
 	} else {
-		ok = w.children(v, at, shadowed)
+		w.children(v, at, shadowed)
 	}
 
-	ok = ok && w.validate(v, at)
+	w.validate(v, at)
 
 	w.within, w.sealed = w.within[:mark], sealed
-
-	return ok
 }
 
 // enter records the value at at, which decodes itself, as where an error
@@ -460,53 +430,21 @@ func addressable(v reflect.Value) reflect.Value {
 	return c
 }
 
-// walkOwned walks v once. It takes a non-nil pointer, map, or slice that
-// owns its address. It finds cycles as Tarjan's algorithm does. The values
-// of a cycle wait on pending until its first value finishes and sets all
-// their results.
-func (w *selfWalker) walkOwned(v reflect.Value, at place, shadowed map[string]bool) bool {
+// walkOwned walks v unless the walk has entered it already. It takes a
+// non-nil pointer, map, or slice that owns its address.
+func (w *selfWalker) walkOwned(v reflect.Value, at place, shadowed map[string]bool) {
 	key := visitOf(v)
-	if r, seen := w.walked[key]; seen {
-		w.reach = min(w.reach, r.reach)
-
-		return r.ok
+	if w.walked[key] {
+		return
 	}
 
-	w.entered++
-	n := w.entered
-	outer, mark := w.reach, len(w.pending)
-
-	w.walked[key] = walkResult{ok: true, reach: n}
-	w.reach = math.MaxInt
-
-	var ok bool
+	w.walked[key] = true
 
 	if v.Kind() == reflect.Pointer {
-		ok = w.walk(v.Elem(), at, shadowed)
+		w.walk(v.Elem(), at, shadowed)
 	} else {
-		ok = w.walkValue(v, at, shadowed)
+		w.walkValue(v, at, shadowed)
 	}
-
-	reach := w.reach
-	if reach < n {
-		w.walked[key] = walkResult{ok: ok, reach: reach}
-		w.pending = append(w.pending, key)
-		w.reach = min(outer, reach)
-
-		return ok
-	}
-
-	// Every value of a cycle reaches every other, so each one takes the
-	// result of v.
-	for _, p := range w.pending[mark:] {
-		w.walked[p] = walkResult{ok: ok, reach: math.MaxInt}
-	}
-
-	w.pending = w.pending[:mark]
-	w.walked[key] = walkResult{ok: ok, reach: math.MaxInt}
-	w.reach = outer
-
-	return ok
 }
 
 // ownsAddress reports whether the address of v names v alone. It takes a
@@ -651,23 +589,20 @@ func (c *checkedTypes) mayHold(t reflect.Type) bool {
 	})
 }
 
-// children walks the values below v and reports whether each passed. It
-// skips the fields of an inline struct that shadowed names, because
-// go-yaml zeroes an inline field that shares its name with a field of the
-// parent.
-func (w *selfWalker) children(v reflect.Value, at place, shadowed map[string]bool) bool {
+// children walks the values below v. It skips the fields of an inline
+// struct that shadowed names, because go-yaml zeroes an inline field that
+// shares its name with a field of the parent.
+func (w *selfWalker) children(v reflect.Value, at place, shadowed map[string]bool) {
 	switch v.Kind() {
 	case reflect.Slice, reflect.Array, reflect.Map:
-		// Entries whose types hold no validator pass at once, as does a map
-		// whose entries hold none, so the walk reads no key of such a map.
+		// The walk skips entries whose types hold no validator, and a map
+		// whose entries hold none, so it reads no key of such a map.
 		if !w.checked.entriesMayHold(v.Type()) || v.Kind() == reflect.Map && !w.holdsBelow(v) {
-			return true
+			return
 		}
 
 	default:
 	}
-
-	ok := true
 
 	switch v.Kind() {
 	case reflect.Struct:
@@ -685,16 +620,12 @@ func (w *selfWalker) children(v reflect.Value, at place, shadowed map[string]boo
 				child = at.child(field.name)
 			}
 
-			if !w.walk(v.Field(field.index), child, fieldShadowed) {
-				ok = false
-			}
+			w.walk(v.Field(field.index), child, fieldShadowed)
 		}
 
 	case reflect.Slice, reflect.Array:
 		for i := range v.Len() {
-			if !w.walk(v.Index(i), at.index(i), nil) {
-				ok = false
-			}
+			w.walk(v.Index(i), at.index(i), nil)
 		}
 
 	case reflect.Map:
@@ -705,25 +636,19 @@ func (w *selfWalker) children(v reflect.Value, at place, shadowed map[string]boo
 		// Keys that share a segment share a path, which can locate one of
 		// their entries at most, so the errors under it bind with no position.
 		for _, group := range datapath.MapGroups(v, names) {
-			if !w.walkEntries(at.child(group.Seg), group.Entries, group.Ambiguous) {
-				ok = false
-			}
+			w.walkEntries(at.child(group.Seg), group.Entries, group.Ambiguous)
 		}
 
 	default:
 	}
-
-	return ok
 }
 
-// walkEntries walks entries, which share the place at, and reports whether
-// everything under them passed. It sorts the errors of each entry as a group
-// by their text, because the keys share a text and formatting a value might
-// not end. A value that several entries share walks once, under the first
-// entry that the map yields. When ambiguous is true, it binds the errors
-// first so the text names paths.
-func (w *selfWalker) walkEntries(at place, entries []datapath.MapEntry, ambiguous bool) bool {
-	ok := true
+// walkEntries walks entries, which share the place at. It sorts the errors
+// of each entry as a group by their text, because the keys share a text and
+// formatting a value might not end. A value that several entries share
+// walks once, under the first entry that the map yields. When ambiguous is
+// true, it binds the errors first so the text names paths.
+func (w *selfWalker) walkEntries(at place, entries []datapath.MapEntry, ambiguous bool) {
 	start := len(w.errs)
 	groups := make([][]error, 0, len(entries))
 
@@ -733,13 +658,8 @@ func (w *selfWalker) walkEntries(at place, entries []datapath.MapEntry, ambiguou
 	w.ambiguous = outer || (ambiguous && !w.sealed)
 
 	for _, e := range entries {
-		if !w.walk(e.Key, at.key(), nil) {
-			ok = false
-		}
-
-		if !w.walk(e.Value, at, nil) {
-			ok = false
-		}
+		w.walk(e.Key, at.key(), nil)
+		w.walk(e.Value, at, nil)
 
 		errs := w.errs[start:]
 		if ambiguous {
@@ -763,8 +683,6 @@ func (w *selfWalker) walkEntries(at place, entries []datapath.MapEntry, ambiguou
 	for _, group := range groups {
 		w.errs = append(w.errs, group...)
 	}
-
-	return ok
 }
 
 // bind binds err as the walk binds an error before it returns. When the
@@ -1058,19 +976,15 @@ func implementsSelfValidator(t reflect.Type) bool {
 
 // validate runs Validate on v, through a copy when v is not addressable.
 // It then runs each function of the walk from [WithValueCheck] for the
-// type of v, in order. It stops at the first check that fails and reports
-// whether v passed. Rebasing the error of Validate or of a function under
-// at presumes every problem invalid, unless an Error from [Unchecked] sits
-// on its cause chain. Each such problem matches [errInvalid] whether it
-// has a location or not. [selfWalker.report] describes the errors that the
-// presumption skips.
-func (w *selfWalker) validate(v reflect.Value, at place) bool {
-	if !w.checked.validates(v.Type()) {
-		return true
-	}
-
-	if w.stopped() {
-		return false
+// type of v, in order. Every check runs and reports its own failure,
+// whatever the checks before it return. Rebasing the error of Validate or
+// of a function under at presumes every problem invalid, unless an Error
+// from [Unchecked] sits on its cause chain. Each such problem matches
+// [errInvalid] whether it has a location or not. [selfWalker.report]
+// describes the errors that the presumption skips.
+func (w *selfWalker) validate(v reflect.Value, at place) {
+	if !w.checked.validates(v.Type()) || w.stopped() {
+		return
 	}
 
 	v = addressable(v)
@@ -1079,9 +993,7 @@ func (w *selfWalker) validate(v reflect.Value, at place) bool {
 		validator, ok := reflect.TypeAssert[SelfValidator](v.Addr())
 		if ok {
 			failure, warnings := splitWarnings(validator.Validate())
-			if !w.report(failure, warnings, at, presumed) {
-				return false
-			}
+			w.report(failure, warnings, at, presumed)
 		}
 	}
 
@@ -1091,25 +1003,20 @@ func (w *selfWalker) validate(v reflect.Value, at place) bool {
 		}
 
 		if w.stopped() {
-			return false
+			return
 		}
 
 		failure, warnings := runHook(w.ctx, func(ctx context.Context) error {
 			return check.run(ctx, v.Addr())
 		})
-		if !w.report(failure, warnings, at, presumed) {
-			return false
-		}
+		w.report(failure, warnings, at, presumed)
 	}
-
-	return true
 }
 
-// report records the errors and the warnings of a check of one value, and
-// it reports whether the value passed. It rebases each one with d under the
-// place of that value. A check with warnings alone passes, so the values
-// above it still validate. When the context of the walk ended, report drops
-// the failure, because the walk returns the error of that context alone.
+// report records the errors and the warnings of a check of one value. It
+// rebases each one with d under the place of that value. When the context
+// of the walk ended, report drops the failure, because the walk returns the
+// error of that context alone.
 //
 // A failure that matches the error of a context when the context of the
 // walk is live comes from a context of the check, such as a deadline of
@@ -1121,19 +1028,15 @@ func (w *selfWalker) validate(v reflect.Value, at place) bool {
 // declares its own fault stays one. A failure that holds a [PanicError]
 // rebases without a declaration the same way. A panic is a bug in code,
 // not a fault of the document.
-func (w *selfWalker) report(failure, warnings error, at place, d declaration) bool {
+func (w *selfWalker) report(failure, warnings error, at place, d declaration) {
 	m := move{base: at.path(), ambiguous: w.ambiguous, fallback: w.fallback()}
 
 	if warnings != nil {
 		w.warns = append(w.warns, rebase(warnings, m, d))
 	}
 
-	if failure == nil {
-		return true
-	}
-
-	if w.stopped() {
-		return false
+	if failure == nil || w.stopped() {
+		return
 	}
 
 	if contextEnded(failure) || holdsPanic(failure) {
@@ -1141,8 +1044,6 @@ func (w *selfWalker) report(failure, warnings error, at place, d declaration) bo
 	}
 
 	w.errs = append(w.errs, rebase(failure, m, d))
-
-	return false
 }
 
 // stopped reports whether the walk has stopped. The walk stops only when
@@ -1506,6 +1407,12 @@ func (l *DataLocator) locate(names []string, key bool) (paths.Path, *token.Token
 // a fault for any problem of that join. A Validate that returns other
 // problems beside a timeout should declare each of them with [NewError] or
 // [Invalid].
+//
+// The walk calls Validate on a value after the values below it, whatever
+// their checks return, so Validate guards each precondition that it reads.
+// For example, it returns nil when a field that it depends on is empty,
+// and the check of that field reports the problem. Validate must not
+// dereference or index state that only a check below it guarantees.
 //
 // The Validation section describes the order the values validate in, the
 // path of each value, and where each error binds.

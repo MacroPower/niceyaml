@@ -58,7 +58,7 @@ func (s warningSpec) Validate() error {
 }
 
 // warningCafeDoc is the parent of a [warningSpec], whose Validate runs
-// after the spec passes.
+// after the spec.
 type warningCafeDoc struct {
 	Spec  warningSpec `yaml:"spec"`
 	Ran   *bool       `yaml:"-"`
@@ -993,7 +993,7 @@ func TestWarnings(t *testing.T) {
 		})
 	}
 
-	t.Run("a Validate whose values below it warned still runs", func(t *testing.T) {
+	t.Run("a parent validates after a child warns, and the decode passes", func(t *testing.T) {
 		t.Parallel()
 
 		ran := false

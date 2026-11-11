@@ -647,10 +647,9 @@
 // [Warnings.Err] returns them.
 //
 // Wherever niceyaml reads a result to decide whether a check passed, a result
-// in which every problem is a warning counts as a pass. The self-validation
-// walk thus runs the Validate method of a value when the values below it gave
-// only warnings, and [ChainValidator] continues to the next validator. The
-// decoder step reports each problem as an error, whatever it wraps, except
+// in which every problem is a warning counts as a pass. [ChainValidator] thus
+// continues to the next validator after a validator that gave only warnings.
+// The decoder step reports each problem as an error, whatever it wraps, except
 // the unknown fields that [UnknownFieldsWarn] reports as warnings. A value
 // that decodes itself thus warns from its Validate method rather than from
 // its unmarshaler.
@@ -1099,11 +1098,40 @@
 // A decode calls Validate on every value in the result that implements
 // SelfValidator. It then calls the functions from WithValueCheck for the type
 // of the value, in the order the caller gives them. The values below a value
-// validate first, and the value validates only when every value below it
-// passed. A Validate method or a function whose result holds only warnings
-// passes, as the Warnings section describes. The functions for a value run
-// only after its Validate passes, and the first function that fails stops the
-// rest.
+// validate first. Every check runs on every value of its type, whatever any
+// other check returns, and the decode reports the failure of each check. A
+// document with a problem at several depths thus reports all of them in one
+// decode, the checks of a parent among them.
+//
+// A check therefore guards each precondition that it reads, because a check
+// below it or before it might have failed. A Validate method returns nil
+// when a field that it depends on is empty, and lets the check of that field
+// report the problem:
+//
+//	func (d Database) Validate() error {
+//		if len(d.Replicas) == 0 {
+//			return nil
+//		}
+//
+//		...
+//	}
+//
+// A function from WithValueCheck that must not run on a value that fails its
+// own Validate calls Validate first and returns nil when [HasErrors] reports
+// an error in the result:
+//
+//	func(ctx context.Context, d *Database) error {
+//		if niceyaml.HasErrors(d.Validate()) {
+//			return nil
+//		}
+//
+//		...
+//	}
+//
+// The result of a Validate that only warns is not nil. A guard that tests it
+// against nil thus skips the function on every value that only warns. A
+// check that repeats a check below it reports a second error for the same
+// problem, so each check reports only what it checks itself.
 //
 // A Validate that an embedded field promotes runs once, on that field. A
 // Validate that an UnmarshalYAML method already called runs again in the

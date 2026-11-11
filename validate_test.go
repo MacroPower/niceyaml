@@ -930,7 +930,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		}
 	})
 
-	t.Run("children validate before the parent, which runs only when they pass", func(t *testing.T) {
+	t.Run("children validate before the parent, which runs whatever they return", func(t *testing.T) {
 		t.Parallel()
 
 		dd := yamltest.FirstDocument(t, stringtest.Input(`
@@ -938,9 +938,13 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			backup: {open: "09:00", close: "17:00"}
 		`))
 
-		// The parent reports the child that failed, and nothing of its own.
+		// The parent runs after the child that failed, and its error sorts
+		// beside the error of the child by position.
 		_, err := dd.Decode[ordered](t.Context())
-		require.EqualError(t, err, "1:31: $.hours.close: closes before it opens")
+		require.EqualError(t, err, stringtest.JoinLF(
+			"1:1: $: parent ran last",
+			"1:31: $.hours.close: closes before it opens",
+		))
 		require.NotErrorIs(t, err, errOrder)
 
 		dd = yamltest.FirstDocument(t, stringtest.Input(`
@@ -1010,14 +1014,13 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		require.ErrorIs(t, dd.DecodeInto(t.Context(), ring), errRing)
 	})
 
-	t.Run("a value two paths share fails the parent on each", func(t *testing.T) {
+	t.Run("a value two paths share reports once, and the parent on each path runs", func(t *testing.T) {
 		t.Parallel()
 
 		// The alias makes the child of p2 the same pointer as the child
 		// of p1. The value reports under the first path alone, and the
-		// parent on the second path still does not run, since its child
-		// failed. DecodeInto keeps the decoded value on an error, so the
-		// test can compare the pointers.
+		// parent on each path runs. DecodeInto keeps the decoded value on
+		// an error, so the test can compare the pointers.
 		type shared struct {
 			P1 sharedParent `yaml:"p1"`
 			P2 sharedParent `yaml:"p2"`
@@ -1031,7 +1034,11 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		var got shared
 
 		err := dd.DecodeInto(t.Context(), &got)
-		require.EqualError(t, err, "1:29: $.p1.x.price: negative price")
+		require.EqualError(t, err, stringtest.JoinLF(
+			"1:1: $.p1: parent ran",
+			"1:29: $.p1.x.price: negative price",
+			"2:1: $.p2: parent ran",
+		))
 		require.NotNil(t, got.P1.X)
 		require.Same(t, got.P1.X, got.P2.X)
 	})
@@ -1126,12 +1133,12 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		}
 	})
 
-	t.Run("a value that leads back to a failed validator fails", func(t *testing.T) {
+	t.Run("a value that leads back to a failed validator does not hide the values above it", func(t *testing.T) {
 		t.Parallel()
 
 		// The loop holds no validator below it but itself, so its scan
-		// stops. The stop below it still leads back to the loop, which
-		// failed, so the stops that hold it do not run.
+		// stops. The stop below it leads back to the loop, which failed,
+		// and the stops that hold it still run.
 		type withLoop struct {
 			Loop  loop  `yaml:"loop"`
 			Stops stops `yaml:"stops"`
@@ -1143,17 +1150,20 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		dd := yamltest.FirstDocument(t, "name: x\n")
 
 		err := dd.DecodeInto(t.Context(), &withLoop{Loop: s.Back, Stops: stops{s}})
+		require.EqualError(t, err, stringtest.JoinLF(
+			"1:1: $.loop: loop",
+			"1:1: $.stops: stops ran",
+		))
 		require.ErrorIs(t, err, errLoop)
-		assert.NotContains(t, err.Error(), "stops ran")
 	})
 
-	t.Run("a value in a cycle takes the result of the cycle", func(t *testing.T) {
+	t.Run("the parent of a value in a cycle runs whichever field the walk enters first", func(t *testing.T) {
 		t.Parallel()
 
 		// The link leads back to the head, so the walk of the link stops
-		// there and passes before the port of the head fails. The parent
-		// that holds the link still runs only when the whole cycle
-		// passed, whichever field the walk enters first.
+		// there before the port of the head fails. The parent that holds
+		// the link runs either way, and the port reports once, under the
+		// path the walk reaches it by first.
 		type headFirst struct {
 			Head   *cycleHead  `yaml:"head"`
 			Parent cycleParent `yaml:"parent"`
@@ -1171,12 +1181,18 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		}{
 			"the head walks first": {
 				port: -1,
-				err:  "1:1: $.head.port: port out of range",
+				err: stringtest.JoinLF(
+					"1:1: $.head.port: port out of range",
+					"1:1: $.parent: parent ran",
+				),
 			},
 			"the parent walks first": {
 				port:        -1,
 				parentFirst: true,
-				err:         "1:1: $.parent.link.back.port: port out of range",
+				err: stringtest.JoinLF(
+					"1:1: $.parent.link.back.port: port out of range",
+					"1:1: $.parent: parent ran",
+				),
 			},
 			"a cycle that passes": {
 				port: 80,
@@ -2474,8 +2490,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		t.Parallel()
 
 		// The join holds two nil pointers, which is not a nil error, so
-		// the value fails at the root and under a field alike, and the
-		// parent of the field does not run.
+		// the value fails at the root and under a field alike.
 		dd := yamltest.FirstDocument(t, "open: x\n")
 
 		_, err := dd.Decode[nothingJoined](t.Context())
@@ -2488,7 +2503,6 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		_, err = dd.Decode[withNothingJoined](t.Context())
 		require.Error(t, err)
-		assert.NotContains(t, err.Error(), "parent ran")
 
 		assert.Equal(t, "$.hours", yamltest.PathOf(t, yamltest.RequireError(t, err)).String())
 	})
@@ -2507,15 +2521,15 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		// Each unmarshaler fills its hours with a close before its open.
 		// The document holds no node at the path of that close, so each
-		// error binds at the value that decodes itself. That value does
-		// not validate, since a value below it failed.
+		// error binds at the value that decodes itself. That value
+		// validates too, after the values below it.
 		err := dd.DecodeInto(t.Context(), &got)
 		require.EqualError(t, err, stringtest.JoinLF(
 			"1:8: $.bytes.inner.close: closes before it opens",
 			"2:7: $.text.inner.close: closes before it opens",
 		))
-		assert.False(t, got.Bytes.validated)
-		assert.False(t, got.Text.validated)
+		assert.True(t, got.Bytes.validated)
+		assert.True(t, got.Text.validated)
 		assert.Equal(t, hours{Open: "17:00", Close: "09:00"}, got.Bytes.Inner)
 		assert.Equal(t, hours{Open: "17:00", Close: "09:00"}, got.Text.Inner)
 
@@ -4242,10 +4256,19 @@ func TestNode_Decode_SelfDecoding(t *testing.T) {
 			input:  fleetInput,
 			err:    fleetErr,
 		},
-		"a Validate that walks the fields of its struct reports each once": {
+		"a Validate that walks the fields the decode walks reports each again": {
 			target: func() any { return new(map[string][]rewalkedServer) },
 			input:  fleetInput,
-			err:    fleetErr,
+			err: stringtest.JoinLF(
+				"app.yaml:2:26: $.servers[0].limit.n: negative -1",
+				"app.yaml:2:26: $.servers[0].limit.n: negative -1",
+				"app.yaml:4:11: $.servers[1].port: port out of range",
+				"app.yaml:4:11: $.servers[1].port: port out of range",
+				"app.yaml:6:10: $.servers[1].limit.n: negative -2",
+				"app.yaml:6:10: $.servers[1].limit.n: negative -2",
+				"app.yaml:10:14: $.servers[2].hours.close: closes before it opens",
+				"app.yaml:10:14: $.servers[2].hours.close: closes before it opens",
+			),
 		},
 		"values that pass": {
 			target: func() any { return new(nestedFleet) },
@@ -4380,7 +4403,7 @@ func TestNode_Decode_SelfDecoding(t *testing.T) {
 				"$.hours[0].1.n":     "$.hours",
 			},
 		},
-		"a store in a field with no tag binds at the box, once": {
+		"a store in a field with no tag binds at the box": {
 			target:  func() any { return new(map[string][]storeBox) },
 			input:   storesInput,
 			err:     boxErr,
@@ -4529,8 +4552,8 @@ type registeredHours struct {
 	Inner hours `yaml:"inner"`
 }
 
-// failingSelfDecoding decodes itself and rejects itself. The hours it
-// fills pass, so its own Validate runs, at its own path.
+// failingSelfDecoding decodes itself and rejects itself, so its own
+// Validate reports at its own path.
 type failingSelfDecoding struct {
 	Inner hours
 }
@@ -4566,13 +4589,9 @@ func (nothingJoined) Validate() error {
 	return errors.Join(openErr, closeErr)
 }
 
-// withNothingJoined holds a nothingJoined, and reports that it ran.
+// withNothingJoined holds a nothingJoined under a field.
 type withNothingJoined struct {
 	Hours nothingJoined `yaml:"hours"`
-}
-
-func (withNothingJoined) Validate() error {
-	return errors.New("parent ran")
 }
 
 // ordered validates after its fields, and reports errOrder when a field
@@ -4911,11 +4930,13 @@ func (k *onceKey) UnmarshalYAML(ctx context.Context, b []byte) error {
 type probeCtxKey struct{}
 
 // probe runs one step for each Validate of a [probed] that holds it, in
-// order, and counts the calls. A call past the last step passes.
+// order, and counts the calls. A call past the last step passes. It also
+// counts the Validate calls of each [probedParent] above such a value.
 type probe struct {
-	cancel context.CancelFunc
-	steps  []func(cancel context.CancelFunc) error
-	calls  atomic.Int32
+	cancel  context.CancelFunc
+	steps   []func(cancel context.CancelFunc) error
+	calls   atomic.Int32
+	parents atomic.Int32
 }
 
 // probed takes the [probe] of the decode context, so its Validate runs a
@@ -4942,6 +4963,18 @@ func (p probed) Validate() error {
 	}
 
 	return p.probe.steps[n-1](p.probe.cancel)
+}
+
+// probedParent holds a [probed] and counts its own Validate calls on the
+// [probe] of that value.
+type probedParent struct {
+	Child probed `yaml:"child"`
+}
+
+func (p probedParent) Validate() error {
+	p.Child.probe.parents.Add(1)
+
+	return nil
 }
 
 // database requires a password, which a layer after the file may set.
@@ -5058,7 +5091,7 @@ func (s *defaultedServer) UnmarshalYAML(unmarshal func(any) error) error {
 }
 
 // rewalkedServer is a defaultedServer whose Validate walks its own
-// fields, which a decode walks too.
+// fields, which a decode walks too, so each of their errors reports twice.
 type rewalkedServer server
 
 func (s *rewalkedServer) UnmarshalYAML(unmarshal func(any) error) error {
@@ -5332,7 +5365,6 @@ func decodeStore(unmarshal func(any) error) (any, error) {
 
 // storeBox holds the store its mapping names in a field with no tag, so
 // a decode looks for the store under a key the mapping does not hold.
-// Its Validate walks the store, which the decode walks too.
 type storeBox struct {
 	Store any
 }
@@ -5342,11 +5374,6 @@ func (b *storeBox) UnmarshalYAML(unmarshal func(any) error) error {
 	b.Store = store
 
 	return err
-}
-
-func (b storeBox) Validate() error {
-	//nolint:wrapcheck // The decode places the error as it is.
-	return niceyaml.SelfValidateValue(context.Background(), b.Store)
 }
 
 // inlineStoreBox holds its store in a field tagged inline, so a decode
@@ -5362,8 +5389,9 @@ func (b *inlineStoreBox) UnmarshalYAML(unmarshal func(any) error) error {
 	return err
 }
 
-// skippedStoreBox is storeBox with its field tagged `-`, so a decode
-// leaves the store to the Validate of the box.
+// skippedStoreBox holds its store in a field tagged `-`, so a decode
+// leaves the store to its Validate, which validates the store with
+// [niceyaml.SelfValidateValue].
 type skippedStoreBox struct {
 	Store any `yaml:"-"`
 }

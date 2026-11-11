@@ -3445,25 +3445,30 @@ func TestWithValueCheck(t *testing.T) {
 		assert.False(t, found)
 	})
 
-	t.Run("the checks of a value run in order and stop at the first that fails", func(t *testing.T) {
+	t.Run("the checks of a value run in order and each reports its failure", func(t *testing.T) {
 		t.Parallel()
 
 		var order []string
 
-		stop := niceyaml.NewError("second check failed")
+		second := niceyaml.NewError("second check failed")
+		third := niceyaml.NewError("third check failed")
 
 		_, err := yamltest.FirstDocument(t, "mirror: {url: http://a}\n").Decode[checkedService](
 			t.Context(),
 			recordCheck[checkedMirror](&order, "first", nil),
-			recordCheck[checkedMirror](&order, "second", stop),
-			recordCheck[checkedMirror](&order, "third", nil),
+			recordCheck[checkedMirror](&order, "second", second),
+			recordCheck[checkedMirror](&order, "third", third),
 		)
-		require.EqualError(t, err, "1:1: $.mirror: second check failed")
-		require.ErrorIs(t, err, stop)
-		assert.Equal(t, []string{"first", "second"}, order)
+		require.EqualError(t, err, stringtest.JoinLF(
+			"1:1: $.mirror: second check failed",
+			"1:1: $.mirror: third check failed",
+		))
+		require.ErrorIs(t, err, second)
+		require.ErrorIs(t, err, third)
+		assert.Equal(t, []string{"first", "second", "third"}, order)
 	})
 
-	t.Run("a value runs its checks once the values below it pass", func(t *testing.T) {
+	t.Run("a value runs its checks after the values below it, whatever they return", func(t *testing.T) {
 		t.Parallel()
 
 		tcs := map[string]struct {
@@ -3477,7 +3482,7 @@ func TestWithValueCheck(t *testing.T) {
 			"the value below fails": {
 				mirror: niceyaml.NewError("mirror failed"),
 				err:    "1:1: $.mirror: mirror failed",
-				want:   []string{"mirror"},
+				want:   []string{"mirror", "service"},
 			},
 		}
 
@@ -3503,7 +3508,7 @@ func TestWithValueCheck(t *testing.T) {
 		}
 	})
 
-	t.Run("a value runs its checks once its Validate passes", func(t *testing.T) {
+	t.Run("a value runs its checks after its Validate, whatever it returns", func(t *testing.T) {
 		t.Parallel()
 
 		tcs := map[string]struct {
@@ -3518,6 +3523,7 @@ func TestWithValueCheck(t *testing.T) {
 			"Validate fails": {
 				input: "value: 1\n",
 				err:   "1:1: $.name~: name is required",
+				want:  []bool{true},
 			},
 		}
 
@@ -3716,6 +3722,71 @@ func TestWithValueCheck(t *testing.T) {
 		require.EqualError(t, err, "context canceled")
 		assert.False(t, niceyaml.IsInvalid(err))
 		assert.Equal(t, 1, calls)
+	})
+
+	t.Run("a check that ends the context of the decode stops the checks after it", func(t *testing.T) {
+		t.Parallel()
+
+		passes := func(context.CancelFunc) error { return nil }
+		endsAndFails := func(cancel context.CancelFunc) error {
+			cancel()
+
+			return niceyaml.NewError("probe failed")
+		}
+
+		// The child runs its Validate, then each of its value checks in
+		// order. The parent above it runs its Validate and a value check.
+		// No check after the one that ends the context runs, on the child
+		// or on the parent.
+		tcs := map[string]struct {
+			validate []func(context.CancelFunc) error
+			checks   []func(context.CancelFunc) error
+			want     []string
+		}{
+			"the Validate of the child": {
+				validate: []func(context.CancelFunc) error{endsAndFails},
+				checks:   []func(context.CancelFunc) error{passes, passes},
+			},
+			"the first value check of the child": {
+				checks: []func(context.CancelFunc) error{endsAndFails, passes},
+				want:   []string{"child 0"},
+			},
+			"the last value check of the child": {
+				checks: []func(context.CancelFunc) error{passes, endsAndFails},
+				want:   []string{"child 0", "child 1"},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				ctx, cancel := context.WithCancel(t.Context())
+				t.Cleanup(cancel)
+
+				p := &probe{steps: tc.validate, cancel: cancel}
+				ctx = context.WithValue(ctx, probeCtxKey{}, p)
+
+				var order []string
+
+				opts := []niceyaml.DecodeOption{recordCheck[probedParent](&order, "parent", nil)}
+				for i, step := range tc.checks {
+					opts = append(opts, niceyaml.WithValueCheck(func(context.Context, *probed) error {
+						order = append(order, fmt.Sprintf("child %d", i))
+
+						return step(cancel)
+					}))
+				}
+
+				_, err := yamltest.FirstDocument(t, "child: x\n").Decode[probedParent](ctx, opts...)
+				require.ErrorIs(t, err, context.Canceled)
+				require.EqualError(t, err, "context canceled")
+				assert.False(t, niceyaml.IsInvalid(err))
+				assert.Equal(t, tc.want, order)
+				assert.Equal(t, int32(1), p.calls.Load())
+				assert.Zero(t, p.parents.Load())
+			})
+		}
 	})
 
 	t.Run("WithSelfValidation off runs no check", func(t *testing.T) {
