@@ -68,20 +68,22 @@ func (d *Doc) endCalls() {
 
 // endCall ends one call of a [Func] on the node n, and takes err, the
 // error that the Func returned. It returns the problem that fails the
-// Apply. A read can record a problem that matches [ErrEngine], such as
-// the error of a difference. That problem came before err, so it fails
-// the Apply whatever the Func returns. Otherwise endCall binds err at n
-// and returns it, or else returns the problem of a method that could not
-// make its edit. Without either, it returns nil.
+// Apply. A method of the call can record a problem that matches
+// [ErrEngine], such as the error of a difference. That problem came
+// before err, so it fails the Apply whatever the Func returns. Otherwise
+// endCall binds err at n and returns it, or returns nil for a nil err.
 func (d *Doc) endCall(n *Node, err error) error {
 	callErr := d.callErr
 	d.callErr = nil
 
-	if err != nil && !errors.Is(callErr, ErrEngine) {
+	switch {
+	case callErr != nil:
+		return callErr
+	case err != nil:
 		return n.bind(err)
+	default:
+		return nil
 	}
-
-	return callErr
 }
 
 // check checks the text after the calls of an Apply return. The text must
@@ -1043,7 +1045,7 @@ func (d *Doc) lexedAt(tks token.Tokens, tk *token.Token) (*token.Token, bool) {
 // past the limit, at the site that [Doc.bindAt] gives the token. Each
 // problem has the message of the Source, and it matches [niceyaml.ErrLimit].
 // The user's text keeps the limits, so [niceyaml.IsInvalid] does not report
-// the problem. The Apply records it.
+// the problem.
 func (d *Doc) limitProblem(start string) error {
 	if d.cur == start {
 		return nil
@@ -1062,10 +1064,6 @@ func (d *Doc) limitProblem(start string) error {
 		problem = d.bindAt(d.offset(position.NewFromToken(tk)), 1, func(opts ...niceyaml.ErrorOption) error {
 			return niceyaml.Unchecked(&limitError{msg: msg}, opts...)
 		})
-	}
-
-	if problem != nil {
-		d.record(problem)
 	}
 
 	return problem
@@ -1255,9 +1253,9 @@ var (
 )
 
 // userDecode returns the error of a decode of the user's text, or nil when
-// that text decodes. The error binds in the user's text, and the Apply
-// records it. The user's text is not at fault for a panic of the decoder
-// of go-yaml, so the problem of such a panic matches [ErrEngine]. Either
+// that text decodes. The error binds in the user's text. The user's text
+// is not at fault for a panic of the decoder of go-yaml, so the problem of
+// such a panic matches [ErrEngine], and the Apply records it. Either
 // takes the details that name calls at its site, as [Doc.callDetails]
 // gives them.
 func (d *Doc) userDecode(ctx context.Context) error {

@@ -109,7 +109,7 @@
 // [go.jacobcolvin.com/niceyaml.Node.Nodes] binds it, under the path of the
 // value that holds the alias.
 //
-// Each edit through such a path fails the Apply. [Node.Decode] there returns
+// Each edit through such a path fails. [Node.Decode] there returns
 // the error of the path, and [Node.Exists], [Node.Kind], [Node.Len], and
 // [Node.Text] answer as at a place that does not hold a value. A Func tells
 // such a place from a place without a value by the error of Decode. It reads
@@ -486,20 +486,31 @@
 // # Transactions
 //
 // Each call of Apply is one transaction. The calls of its Func see the
-// edits of the calls before them. When a method of Node cannot make its
-// edit, the Apply fails, even when the Func ignores the error. A method that
-// fails leaves the Doc as the method found it, whichever check fails, so a
-// later read of the Func reads the text before the failed edit. So do
-// [Doc.Text] and [Doc.Removals].
+// edits of the calls before them. Apply fails with the error that the Func
+// returns. A problem of a call that matches [ErrEngine] fails the Apply
+// too, whatever the Func returns.
+//
+// A method of Node that cannot make its edit returns its problem to the
+// Func. The method leaves the Doc as it found it, whichever check fails.
+// So a later read of the Func reads the text before the failed edit, and
+// so do [Doc.Text] and [Doc.Removals]. A problem of the method that does
+// not match [ErrEngine] fails the Apply only when the Func returns it. The
+// Func can skip the edit, make another edit instead, or make the edit
+// again after it changes the text.
+//
+// For example, a Remove of an anchored value that an alias reads fails with
+// an [*UnsupportedError] whose Related field names each alias. The Func
+// can set each alias to the value that it reads, and the Remove then
+// passes in the same Apply.
 //
 // [Node.At], [Node.Exists], [Node.Decode], [Node.Text], [Node.Kind], and
 // [Node.Len] are reads. A read that cannot answer returns its problem to
 // the Func, or answers as it does for a place that does not hold a value.
-// Such a problem belongs to the Func. The Decode of a place that does not
-// hold a value has one, and so does a read at a path that selects more
-// than one value or a key. So does a read at a path that a reference
-// document decides, as the Edits section describes. The Apply fails with
-// such a problem only when the Func returns it.
+// The Decode of a place that does not hold a value has a problem. So does
+// a read at a path that selects more than one value or a key. So does a
+// read at a path that a reference document decides, as the Edits section
+// describes. A problem of a read that does not match [ErrEngine] fails the
+// Apply only when the Func returns it, as for the problem of an edit.
 //
 // The calls of an Apply act in order. Each call edits the text that the
 // calls before it left, through any path, alias, or `<<` merge key, and the

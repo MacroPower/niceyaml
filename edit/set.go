@@ -583,7 +583,8 @@ func (d *Doc) insertHolder(n *Node, p *place, holderPath paths.Path) (*place, *a
 // Set replaces the value that the alias or the merge key reads, and the
 // anchor of the value stays, so such a node loses its place too. A
 // wildcard then skips it, as it skips each node whose place an earlier
-// call took away.
+// call took away. The call keeps each such node as it found it, which
+// [Doc.undoCall] restores when the Set fails.
 func (d *Doc) readersInside(s *spot, at *reached, p *place) []*Node {
 	if !s.shared || !p.exists || astnode.IsNil(p.value) {
 		return nil
@@ -598,6 +599,8 @@ func (d *Doc) readersInside(s *spot, at *reached, p *place) []*Node {
 
 		mp, err := d.nodePlace(m)
 		if err == nil && mp.exists && d.liesIn(placeNode(mp), p.value) {
+			d.keepNode(m)
+
 			out = append(out, m)
 		}
 	}

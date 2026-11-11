@@ -1287,8 +1287,7 @@ func (u use) verb() string {
 // the model. It binds at the place of n when the text still holds the
 // value there, and at the value that the path of n reads otherwise. Its
 // message names the last call that renamed, moved, created, or removed the
-// entry at the path or the entry of the place. The Apply records the
-// problem.
+// entry at the path or the entry of the place.
 func (d *Doc) displacedProblem(n *Node, u use) error {
 	x := d.model
 
@@ -1312,7 +1311,6 @@ func (d *Doc) displacedProblem(n *Node, u use) error {
 
 		err := d.user.Bind(niceyaml.NewError(msg, niceyaml.AtPath(s.path), niceyaml.AtRange(s.at),
 			niceyaml.WithDetails(d.callDetails(s)...)))
-		d.record(err)
 
 		return err //nolint:wrapcheck // The binding is the problem of the edit.
 	}

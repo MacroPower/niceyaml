@@ -47,14 +47,13 @@ import (
 // not hold a value takes the value that a later edit writes there.
 //
 // When a method cannot make its edit, it returns an error that names the
-// problem. [Doc.Apply] then fails with that error, even when the [Func]
-// continues and returns nil. A read that fails returns its error to the
-// Func, and the Apply fails with that error only when the Func returns it or
-// when the error matches [ErrEngine]. A node takes edits until the Apply
-// that gave it returns. After that, each method that edits or decodes
-// returns [ErrEnded]. Exists, Kind, Len, and Text then answer as they do
-// for a place that does not hold a value, and [Node.Err] tells the two
-// apart.
+// problem and leaves the Doc as it found it. A read that fails returns its
+// error too. [Doc.Apply] fails with such an error only when the [Func]
+// returns it or when the error matches [ErrEngine]. A node takes edits
+// until the Apply that gave it returns. After that, each method that edits
+// or decodes returns [ErrEnded]. Exists, Kind, Len, and Text then answer as
+// they do for a place that does not hold a value, and [Node.Err] tells the
+// two apart.
 //
 // The methods that run code of the caller take a context. Set and Insert
 // run marshalers, and Decode runs unmarshalers, so each takes one. SetKey,
@@ -864,7 +863,6 @@ func (d *Doc) guardChanged(path paths.Path, texts []string) error {
 		msg := fmt.Sprintf("%s %s, which %s the protected value %s", d.subject(), rec.named, verb, g.path)
 		err := d.user.Bind(niceyaml.NewError(msg, niceyaml.AtPath(rec.holder()), niceyaml.AtRange(rec.at),
 			niceyaml.WithDetails(d.callDetails(rec.site())...)))
-		d.record(err)
 
 		return err //nolint:wrapcheck // The binding is the problem of the call.
 	}
@@ -985,12 +983,11 @@ func (n *Node) Key() string {
 // place returns the place of n, or the error that each method that edits
 // or decodes returns for a node that cannot take the call. The call uses
 // the place as u says, and a problem of its path names verb, the word for
-// what the call does, as [pathProblem] names it. A node whose place an earlier call
-// took away fails before any other check of the call, as
-// [Doc.goneProblem] tells. The error of the path that At took
-// fails the Apply for a call that edits, so the Apply records it then.
-// A call that edits fails at a zone of the Apply that a step of the path
-// before that error reaches instead, as [Doc.stepProblem] tells. After a
+// what the call does, as [pathProblem] names it. A node whose place an
+// earlier call took away fails before any other check of the call, as
+// [Doc.goneProblem] tells. A call fails with the error of the path that At
+// took. A call that edits fails at a zone of the Apply that a step of the
+// path before that error reaches instead, as [Doc.stepProblem] tells. After a
 // call of the Apply that left the text apart from the model of the calls,
 // each call returns the problem of that call, as [Doc.modelEnd] gives it.
 func (n *Node) place(u use, verb string) (*place, error) {
@@ -1165,14 +1162,10 @@ func (n *Node) Append(ctx context.Context, v any) error {
 // differed from the model too, which matches [ErrEngine].
 // Exists, Kind, Len, and Text answer as they do for a place that does not
 // hold a value in each of those cases. Err tells such a node from a node
-// on a place that holds no value, because Err returns nil there. Err is a
-// read, so the Apply fails with its error only when the Func returns it.
+// on a place that holds no value, because Err returns nil there. The Apply
+// fails with the error of Err only when the Func returns it or when the
+// error matches [ErrEngine].
 func (n *Node) Err() error {
-	// A problem of the place that a read finds belongs to the Func, so the
-	// Apply keeps the problem that it recorded before the read.
-	callErr := n.d.callErr
-	defer func() { n.d.callErr = callErr }()
-
 	_, err := n.place(useRead, "reads")
 
 	return err
@@ -1315,8 +1308,6 @@ func (n *Node) MarshalYAML(ctx context.Context) (any, error) {
 // decode, it does not call fn, and it returns the error that [Node.doc]
 // returns.
 func (n *Node) withValue(fn func(doc *niceyaml.Node) error) error {
-	recorded := n.d.callErr
-
 	// A read is a call, so each problem of the read names it, as
 	// [Doc.callDetails] names the call that runs. A read can run inside
 	// another call, as a Decode in the MarshalYAML method of the value of a
@@ -1330,10 +1321,6 @@ func (n *Node) withValue(fn func(doc *niceyaml.Node) error) error {
 
 	doc, err := n.doc()
 	if err != nil {
-		if !errors.Is(err, ErrEngine) {
-			n.d.callErr = recorded
-		}
-
 		return err
 	}
 
@@ -1416,8 +1403,7 @@ func (d *Doc) view(n *Node, p *place) (*niceyaml.Node, error) {
 // decides the names of its mapping. So a path through a name that the
 // mapping writes before the merge key fails too. So does a path through a
 // name that it does not write after every such merge key, as the package
-// documentation describes. An edit through the node fails the Apply. At
-// records nothing on the Apply.
+// documentation describes.
 //
 // A path through an alias or a `<<` merge key reaches the anchored value.
 // Two nodes with different paths can thus edit the same text. [Doc.Apply]
@@ -1592,18 +1578,14 @@ func (d *Doc) subject() string {
 }
 
 // fail returns the problem that format describes, bound at the place of
-// n, and records it as the problem of the call.
+// n.
 func (d *Doc) fail(n *Node, format string, args ...any) error {
-	err := n.bindOwn(niceyaml.NewError(fmt.Sprintf(format, args...)))
-
-	d.record(err)
-
-	return err
+	return n.bindOwn(niceyaml.NewError(fmt.Sprintf(format, args...)))
 }
 
 // readFail returns problem, the problem of an edit of n on a path whose
-// lookup failed, bound as [Doc.readProblem] binds it. It records the
-// problem as fail does.
+// lookup failed, bound as [Doc.readProblem] binds it. It records a problem
+// that matches [ErrEngine], as [Doc.record] does.
 func (d *Doc) readFail(n *Node, problem error) error {
 	bound := d.readProblem(n, problem)
 
@@ -1643,10 +1625,11 @@ func (d *Doc) aliasSite(alias *ast.AliasNode) (site, bool) {
 	return d.nodeSite(alias, false), true
 }
 
-// record keeps err as the problem of the call, unless the call already has
-// one.
+// record keeps err as the problem of the call when err matches
+// [ErrEngine], unless the call already has one. The Func owns every other
+// problem, because the method that met it leaves the Doc as it found it.
 func (d *Doc) record(err error) {
-	if d.callErr == nil {
+	if d.callErr == nil && errors.Is(err, ErrEngine) {
 		d.callErr = err
 	}
 }
@@ -1785,8 +1768,7 @@ func (d *Doc) takenBy() *editRecord {
 // says that n lost its place. It binds where an error at the place of that
 // earlier call binds, under the path of that place, as the record of the
 // call holds them. A place that an earlier call created binds at the site
-// that [Doc.placeSite] gives, under the path of that site. The Apply
-// records the problem.
+// that [Doc.placeSite] gives, under the path of that site.
 func (d *Doc) goneProblem(n *Node, verb string) error {
 	msg := fmt.Sprintf("%s %s %s through a node that lost its place to an earlier edit", d.subject(), verb, n.path)
 
@@ -1797,7 +1779,6 @@ func (d *Doc) goneProblem(n *Node, verb string) error {
 
 	err := d.user.Bind(niceyaml.NewError(msg, niceyaml.AtPath(rec.holder()), niceyaml.AtRange(rec.at),
 		niceyaml.WithDetails(d.callDetails(rec.site())...)))
-	d.record(err)
 
 	return err //nolint:wrapcheck // The binding is the problem of the edit.
 }
