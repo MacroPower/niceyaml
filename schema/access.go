@@ -3,8 +3,10 @@ package schema
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 )
 
 var (
@@ -148,11 +150,9 @@ type AccessOption func(*accessConfig) error
 // option takes it in place of the [Access] that embeds it, so only
 // [NewAccess] can apply one.
 type accessConfig struct {
-	// The file system of the root of AllowRoot. The registry reads each
-	// file on disk through it. It stays nil until AllowRoot sets it.
-	fsys fs.FS
-	// The directory on disk that the root of fsys stands for.
-	dir *fsDir
+	// The roots of AllowRoot, in the order given. The registry reads each
+	// file on disk through the first root whose directory holds it.
+	roots []accessRoot
 	// The prefixes of AllowURLPrefixes. The Access allows each URL under
 	// them.
 	prefixes []urlPrefix
@@ -161,6 +161,14 @@ type accessConfig struct {
 	// Whether the registry fetches any HTTP or HTTPS URL, as AllowAnyURL
 	// allows.
 	anyURL bool
+}
+
+// An accessRoot is one root of [AllowRoot].
+type accessRoot struct {
+	// The root. The registry reads each file under dir through it.
+	root *os.Root
+	// The directory on disk that root stands for.
+	dir *fsDir
 }
 
 // NewAccess creates a new [*Access] that allows what opts allow and
@@ -206,10 +214,35 @@ func NewAccess(opts ...AccessOption) (*Access, error) {
 // [WithLoadLimit], as [File] describes. The registry reads through root,
 // so the program must keep root open while a registry uses the Access.
 //
-// [NewAccess] returns an error for a nil root, a closed root, a second
-// root in one Access, and a root beside [AllowAnyFile]. It also returns
-// one for a root whose name names another directory, as Directory Paths
-// describes.
+// [NewAccess] returns an error for a nil root, a closed root, and a root
+// beside [AllowAnyFile]. It also returns one for a root whose name names
+// another directory, as Directory Paths describes.
+//
+// # Several Roots
+//
+// Given more than once, AllowRoot adds a root each time, as
+// [AllowURLPrefixes] adds prefixes. The Access then allows the files
+// under each directory. A schema in one directory can name a file in
+// another through a $ref, such as a tenant schema that references a
+// shared directory of definitions:
+//
+//	access, err := schema.NewAccess(
+//	    schema.AllowRoot(tenantRoot),
+//	    schema.AllowRoot(sharedRoot),
+//	)
+//
+// The registry reads each path through the first root, in the order
+// given, whose directory holds the path. That root decides the read. A
+// path that the root refuses, such as a symbolic link that leads out of
+// it, does not fall through to a later root. One directory can lie under
+// another, and the root given first decides for the paths that both
+// hold. A path under none of the directories fails with
+// [ErrFileNotAllowed], and the error names every directory. Directory
+// Paths says how the registry compares a path with a directory.
+//
+// A document in any of the directories can name the files in all of
+// them. A program that keeps tenants apart from each other therefore
+// builds one Access, and one registry, for each tenant.
 //
 // # Symbolic Links
 //
@@ -218,6 +251,12 @@ func NewAccess(opts ...AccessOption) (*Access, error) {
 // does not name one either. The error of such a link is the error of the
 // [os.Root], which does not match [ErrFileNotAllowed]. A link that stays
 // inside the directory reads the file that it leads to.
+//
+// Under several roots, the registry reads each path through the one root
+// that decides it. A link out of the directory of that root stays
+// refused, even when it leads into the directory of another root. A link
+// that stays inside the directory reads, even when it leads into a root
+// nested under it or out of one.
 //
 // # Directory Paths
 //
@@ -230,12 +269,31 @@ func NewAccess(opts ...AccessOption) (*Access, error) {
 // directory, NewAccess cannot make a relative name absolute, so it
 // returns an error too.
 //
-// The registry compares each path with the directory as written. When
-// the path is not under the directory that way, the registry resolves
-// the symbolic links in the directories of both and compares them again.
-// A program that entered its working directory through a link therefore
-// still reads the files under a root that it opened by its physical
-// path.
+// The registry compares each path with the directory of each root, in
+// the order given. It first compares the path as written with the
+// directory as written. It then resolves the symbolic links that lead to
+// a directory in the path. It compares the result with the directory as
+// written and with the directory with its links resolved. The first root
+// that holds the path any of these ways decides the read. A program that
+// entered its working directory through a link therefore still reads the
+// files under a root that it opened by its physical path.
+//
+// The registry resolves the links in a path one name at a time and stops
+// at the first directory of a root, with its links resolved, that it
+// reaches. It does not follow a link under that directory, so the rest
+// of the path stays as written. The registry then reads the path as it
+// reads a path that names the directory directly. A link outside every
+// directory therefore does not change which root decides a read,
+// whichever directory it leads to.
+//
+// The target of a link outside every directory can hold a ".." after a
+// name under a directory, as in a link to dir/sub/../x. The OS steps up
+// from the directory that the name leads to, so the registry does not
+// remove the ".." by name. It goes on through the directories under dir
+// up to the first link. The first root that holds the path up to the
+// first ".." decides the read. That root follows the link and the ".."
+// after it, as the OS does, or refuses the path as it refuses a link
+// that leads out of its directory.
 //
 // # Keys and URLs
 //
@@ -247,10 +305,6 @@ func AllowRoot(root *os.Root) AccessOption {
 			return errors.New("schema.AllowRoot: root is nil")
 		}
 
-		if c.fsys != nil {
-			return fmt.Errorf("schema.AllowRoot: %s: the access holds a root already", root.Name())
-		}
-
 		if c.anyFile {
 			return fmt.Errorf("schema.AllowRoot: %s: the access allows every file already", root.Name())
 		}
@@ -260,7 +314,7 @@ func AllowRoot(root *os.Root) AccessOption {
 			return fmt.Errorf("schema.AllowRoot: %w", err)
 		}
 
-		c.fsys, c.dir = root.FS(), dir
+		c.roots = append(c.roots, accessRoot{root: root, dir: dir})
 
 		return nil
 	}
@@ -277,7 +331,7 @@ func AllowRoot(root *os.Root) AccessOption {
 // every file.
 func AllowAnyFile() AccessOption {
 	return func(c *accessConfig) error {
-		if c.fsys != nil {
+		if len(c.roots) > 0 {
 			return errors.New("schema.AllowAnyFile: the access holds a root already")
 		}
 
@@ -361,8 +415,9 @@ func WithAccess(a *Access) RegistryOption {
 
 // readFile returns the bytes of the file at path, an absolute path on
 // disk, within limit, when c allows the file. Under [AllowAnyFile], it
-// reads path from disk. Under [AllowRoot], it reads path relative to the
-// directory of the root through the root, and a path outside that
+// reads path from disk. Under [AllowRoot], it reads path through the
+// first root whose directory holds it, either as written or with the
+// symbolic links that lead to a directory resolved. A path outside every
 // directory fails with [ErrFileNotAllowed]. For an Access that does not
 // have either option, every path fails with ErrFileNotAllowed. Each
 // error is a [*FetchError] that names path.
@@ -371,17 +426,127 @@ func (c *accessConfig) readFile(path string, limit int) ([]byte, error) {
 	case c.anyFile:
 		return readDisk(path, limit)
 
-	case c.fsys == nil:
+	case len(c.roots) == 0:
 		return nil, readError(path, fmt.Errorf(
 			"%w: the access of the registry allows no file on disk", ErrFileNotAllowed,
 		))
 
-	default:
-		name, err := c.dir.rel(path)
-		if err != nil {
-			return nil, readError(path, err)
+	case hasDriveLetter(path) && !onWindows:
+		// Off Windows, a drive letter is an ordinary directory name, so the
+		// path is relative there, but its key names the drive. Such a path
+		// never names a file under a directory.
+		return nil, readError(path, fmt.Errorf(
+			"%w: a drive letter names no file under %s", ErrFileNotAllowed, c.rootDirs(),
+		))
+	}
+
+	// Each root in turn compares the path as written with its directory.
+	// It then compares the path with the links that lead to a directory
+	// resolved, both with its directory as written and with its directory
+	// with its links resolved. The first root that holds the path any of
+	// these ways decides the read. A link outside every directory
+	// therefore does not change which root decides. The links resolve one
+	// name at a time and stop at the first directory that they reach. The
+	// names under that directory stay as written. The root that decides
+	// follows or refuses the links among them, as for a path written that
+	// way.
+	var (
+		onVolume, dir string
+		rest          []string
+	)
+
+	for _, root := range c.roots {
+		name, ok := root.dir.rel(path)
+		if ok {
+			return readFS(root.root.FS(), name, path, limit)
 		}
 
-		return readFS(c.fsys, name, path, limit)
+		abs := root.dir.onVolume(path)
+		if !filepath.IsAbs(abs) {
+			continue
+		}
+
+		if abs != onVolume {
+			onVolume = abs
+			dir, rest = resolveLinksTo(abs, c.holdsPhysical)
+		}
+
+		// The rest can start at a link and hold a ".." after it. Removing
+		// the ".." by name steps up from the link and not from its target,
+		// so the root compares only the names before the first "..". The
+		// root that decides resolves the names from there itself.
+		before, after := rest, []string(nil)
+		if i := slices.Index(rest, ".."); i >= 0 {
+			before, after = rest[:i], rest[i:]
+		}
+
+		joined := filepath.Join(append([]string{dir}, before...)...)
+
+		name, ok = root.dir.rel(joined)
+		if !ok {
+			name, ok = root.dir.relPhysical(joined)
+		}
+
+		if !ok {
+			continue
+		}
+
+		if len(after) == 0 {
+			return readFS(root.root.FS(), name, path, limit)
+		}
+
+		return readFS(rootFiles{root: root.root}, joinNames(name, after), path, limit)
+	}
+
+	return nil, readError(path, fmt.Errorf("%w: not under %s", ErrFileNotAllowed, c.rootDirs()))
+}
+
+// joinNames returns name, a path in slash form, with the names in rest
+// after it. Unlike [path.Join], it keeps each ".." in rest.
+func joinNames(name string, rest []string) string {
+	names := make([]string, 0, len(rest)+1)
+	if name != "." {
+		names = append(names, name)
+	}
+
+	for _, n := range rest {
+		if n != "." {
+			names = append(names, n)
+		}
+	}
+
+	return strings.Join(names, "/")
+}
+
+// holdsPhysical reports whether the directory of a root of c, with its
+// symbolic links resolved, holds path.
+func (c *accessConfig) holdsPhysical(path string) bool {
+	for _, root := range c.roots {
+		if root.dir.holds(path) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// rootDirs returns the directories of the roots of c for an error, such
+// as "/a, the directory of the registry's root" or "/a or /b, the
+// directories of the registry's roots".
+func (c *accessConfig) rootDirs() string {
+	dirs := make([]string, len(c.roots))
+	for i, root := range c.roots {
+		dirs[i] = root.dir.dir
+	}
+
+	switch len(dirs) {
+	case 1:
+		return dirs[0] + ", the directory of the registry's root"
+	case 2:
+		return dirs[0] + " or " + dirs[1] + ", the directories of the registry's roots"
+	default:
+		last := len(dirs) - 1
+
+		return strings.Join(dirs[:last], ", ") + ", or " + dirs[last] + ", the directories of the registry's roots"
 	}
 }

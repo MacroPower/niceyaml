@@ -1183,7 +1183,7 @@ func (r *Registry) Invalidate(refs ...Ref) {
 // The next request for a schema in fsys loads it again. Forget acts on
 // the file system of a Ref from [FileFS], or of a document in a file
 // system, as [RefBeside] describes. The registry knows every file that
-// it reads through the root of [AllowRoot] as a file on disk, so Forget
+// it reads through a root of [AllowRoot] as a file on disk, so Forget
 // leaves those schemas in place. For a nil fsys, or a file system that
 // the registry does not keep anything from, Forget does not change the
 // registry.

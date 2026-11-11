@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 
 	slashpath "path"
@@ -24,7 +25,7 @@ var (
 	// ErrFileNotAllowed indicates that a registry refused to read a file
 	// and did not read anything for it. The file is a path on disk that
 	// the [Access] of the registry does not allow, such as one outside the
-	// directory of [AllowRoot]. It can also be a path that leads out of the
+	// directories of [AllowRoot]. It can also be a path that leads out of the
 	// file system of a document or of a [Ref] from [FileFS], such as an
 	// absolute path or one that starts with "..". The program set the
 	// Access and picked the file system, so the document that names the
@@ -55,8 +56,8 @@ const driveLen = 2
 // [FileFS] instead. The registry reads the path of such a Ref from that
 // file system, never as a path on disk. The [Access] of the registry decides
 // which files on disk it reads. Under [AllowRoot], the registry reads the
-// path through an [os.Root], so a path outside the directory of the root
-// does not name a file. See that option for details.
+// path through an [os.Root], so a path outside the directories of the
+// roots does not name a file. See that option for details.
 //
 // # Cache Key
 //
@@ -145,8 +146,8 @@ const driveLen = 2
 // File uses the path as written, so a path built from a document can
 // name any file that the registry can read. Check such a path before you
 // pass it to File, as the example does. You can instead give the registry
-// an [Access] from [AllowRoot], so a path outside the directory of the
-// root does not name a file.
+// an [Access] from [AllowRoot], so a path outside the directories of its
+// roots does not name a file.
 func File(path string) Ref {
 	ref, err := file(path)
 	if err != nil {
@@ -291,7 +292,7 @@ func inFS(ref Ref, fsys fs.FS) Ref {
 	return ref
 }
 
-// An fsDir is the directory on disk that the root of [AllowRoot] holds.
+// An fsDir is the directory on disk that a root of [AllowRoot] holds.
 type fsDir struct {
 	// The directory as an absolute path.
 	dir string
@@ -329,44 +330,49 @@ func newFSDir(root *os.Root) (*fsDir, error) {
 }
 
 // rel returns the path in the file system that names path, an absolute
-// path on disk, in slash form. A path names a file there when it is the
-// directory or lies under it as written. Otherwise rel resolves the
-// symbolic links in the directories of both and compares them again.
-// That second comparison finds a path made absolute against a working
-// directory that a link led to. For any other path, and for a
-// drive-letter path off Windows, rel returns an error that matches
-// [ErrFileNotAllowed].
-func (d *fsDir) rel(path string) (string, error) {
-	// Off Windows, a drive letter is an ordinary directory name, so the
-	// path is relative there, but its key names the drive. Such a path
-	// never names a file under the directory.
-	if hasDriveLetter(path) && !onWindows {
-		return "", fmt.Errorf("%w: a drive letter names no file under %s, the directory of the registry's root",
-			ErrFileNotAllowed, d.dir)
-	}
-
-	// Windows reads a rooted path without a volume, such as \proj\x.json,
-	// as relative. A $ref can name one, and it can lie only on the drive
-	// of the directory. Off Windows, a rooted path is absolute already.
-	if os.IsPathSeparator(path[0]) && filepath.VolumeName(path) == "" && !filepath.IsAbs(path) {
-		path = filepath.VolumeName(d.dir) + path
-	}
-
-	// The path as written comes first, so a link under the directory
-	// reaches the file system, which decides whether to follow it.
-	rel, ok := under(d.dir, path)
-	if !ok && filepath.IsAbs(path) {
-		// Resolve the directory of the file and keep its name, so a file
-		// that is itself a link counts where it stands.
-		physical := filepath.Join(resolveLinks(filepath.Dir(path)), filepath.Base(path))
-		rel, ok = under(d.physical, physical)
-	}
-
+// path on disk, in slash form. It also reports whether the directory
+// holds path as written, which is when path is the directory or lies
+// under it.
+func (d *fsDir) rel(path string) (string, bool) {
+	rel, ok := under(d.dir, d.onVolume(path))
 	if !ok {
-		return "", fmt.Errorf("%w: not under %s, the directory of the registry's root", ErrFileNotAllowed, d.dir)
+		return "", false
 	}
 
-	return filepath.ToSlash(rel), nil
+	return filepath.ToSlash(rel), true
+}
+
+// relPhysical is [fsDir.rel] for a path whose links lead to the
+// directory, as [resolveLinksTo] returns it. It compares that path with
+// the directory with its symbolic links resolved.
+func (d *fsDir) relPhysical(path string) (string, bool) {
+	rel, ok := under(d.physical, path)
+	if !ok {
+		return "", false
+	}
+
+	return filepath.ToSlash(rel), true
+}
+
+// holds reports whether path, a path with its symbolic links resolved,
+// is the directory of d with its links resolved or lies under it.
+func (d *fsDir) holds(path string) bool {
+	_, ok := under(d.physical, path)
+
+	return ok
+}
+
+// onVolume returns path with the volume of d before it when path is
+// rooted but has no volume. Windows reads such a path, as in
+// \proj\x.json, as relative. A $ref can name one, and it can lie only on
+// the drive of the directory. Off Windows, a rooted path is absolute
+// already, so onVolume returns it unchanged.
+func (d *fsDir) onVolume(path string) string {
+	if os.IsPathSeparator(path[0]) && filepath.VolumeName(path) == "" && !filepath.IsAbs(path) {
+		return filepath.VolumeName(d.dir) + path
+	}
+
+	return path
 }
 
 // under returns path relative to dir, and whether path is dir or lies
@@ -400,6 +406,112 @@ func resolveLinks(path string) string {
 
 		dir, rest = parent, filepath.Join(filepath.Base(dir), rest)
 	}
+}
+
+// maxLinks is the number of symbolic links that [resolveLinksTo] follows
+// for one path, as [filepath.EvalSymlinks] does.
+const maxLinks = 255
+
+// resolveLinksTo returns the directory of path, an absolute path, with
+// the symbolic links that lead to stop resolved. It also returns the
+// names of path after that directory as written. It resolves one name at
+// a time from the top of the path. It stops at the first resolved part
+// for which stop reports true, and it never follows a link under such a
+// part.
+//
+// The names after the stop can hold a ".." from the target of a link. A
+// ".." after a link steps up from the target of the link, not from the
+// link. While a ".." remains, resolveLinksTo therefore goes on past the
+// stop through the directories up to the first link. The returned names
+// then start at that link, and the file system of the caller resolves
+// them.
+//
+// The name of path stays as written, so a file that is itself a link
+// counts where it stands. Where a name does not name anything on disk,
+// resolveLinksTo keeps it and the names after it as written. When the
+// links loop, it returns the directory and name of path.
+func resolveLinksTo(path string, stop func(string) bool) (string, []string) {
+	dir := filepath.Dir(path)
+	vol := filepath.VolumeName(dir)
+	resolved := vol + string(filepath.Separator)
+	names := splitNames(dir[len(vol):])
+	links := 0
+
+	for len(names) > 0 {
+		held := stop(resolved)
+		if held && !slices.Contains(names, "..") {
+			break
+		}
+
+		name := names[0]
+
+		// The resolved part holds no link, so a ".." steps up from the
+		// directory that the OS steps up from.
+		if name == "." || name == ".." {
+			names = names[1:]
+
+			if name == ".." {
+				resolved = filepath.Dir(resolved)
+			}
+
+			continue
+		}
+
+		next := filepath.Join(resolved, name)
+
+		info, err := os.Lstat(next)
+		if err != nil {
+			break
+		}
+
+		if info.Mode()&fs.ModeSymlink == 0 {
+			names = names[1:]
+			resolved = next
+
+			continue
+		}
+
+		// A link inside a directory of stop stays for the caller to follow
+		// or refuse.
+		if held {
+			break
+		}
+
+		links++
+		if links > maxLinks {
+			return filepath.Dir(path), []string{filepath.Base(path)}
+		}
+
+		target, err := os.Readlink(next)
+		if err != nil {
+			break
+		}
+
+		names = names[1:]
+
+		// A link that starts at a root, with or without a volume, leads
+		// from the top of the disk. Any other link leads from resolved.
+		if targetVol := filepath.VolumeName(target); targetVol != "" ||
+			(target != "" && os.IsPathSeparator(target[0])) {
+			if targetVol == "" {
+				targetVol = filepath.VolumeName(resolved)
+			}
+
+			resolved = targetVol + string(filepath.Separator)
+			target = target[len(filepath.VolumeName(target)):]
+		}
+
+		names = append(splitNames(target), names...)
+	}
+
+	return resolved, append(names, filepath.Base(path))
+}
+
+// splitNames returns the names in path between its separators.
+func splitNames(path string) []string {
+	return strings.FieldsFunc(path, func(r rune) bool {
+		return r == '/' || r == filepath.Separator
+	})
 }
 
 // isRelative reports whether path, as given to [File], is relative. Such
@@ -550,6 +662,35 @@ func readFS(fsys fs.FS, fsPath, name string, limit int) ([]byte, error) {
 	defer f.Close() //nolint:errcheck // Best-effort close.
 
 	return readBounded(f, name, limit)
+}
+
+// rootFiles is an [fs.FS] over an [*os.Root] that takes a name with ".."
+// in it, which [os.Root.FS] refuses. It passes the name to the root as
+// written, so the root follows each link before a ".." and refuses a
+// name that leads out of its directory.
+type rootFiles struct {
+	root *os.Root
+}
+
+// Open opens the file at name, a path in slash form, through the root.
+func (f rootFiles) Open(name string) (fs.File, error) {
+	file, err := f.root.Open(filepath.FromSlash(name))
+	if err != nil {
+		return nil, err //nolint:wrapcheck // The error of the root names the file.
+	}
+
+	return file, nil
+}
+
+// Stat returns the [fs.FileInfo] of the file at name, a path in slash
+// form, through the root.
+func (f rootFiles) Stat(name string) (fs.FileInfo, error) {
+	info, err := f.root.Stat(filepath.FromSlash(name))
+	if err != nil {
+		return nil, err //nolint:wrapcheck // The error of the root names the file.
+	}
+
+	return info, nil
 }
 
 // readBounded returns the bytes of f, the file at name. The file at the
