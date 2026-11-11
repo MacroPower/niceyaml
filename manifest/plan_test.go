@@ -2,6 +2,7 @@ package manifest_test
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/manifest"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/printer"
+	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
 )
 
@@ -608,7 +610,7 @@ func TestRegistry_PlanMigration_WarningFilter(t *testing.T) {
 
 	// The filter gets the version that each document declares once
 	// Apply writes it.
-	keep := manifest.WithWarningFilter(func(w *manifest.Warning) bool {
+	keep := manifest.WithWarningFilter(func(w *manifest.Problem) bool {
 		mu.Lock()
 		defer mu.Unlock()
 
@@ -626,6 +628,66 @@ func TestRegistry_PlanMigration_WarningFilter(t *testing.T) {
 	want := "MenuItem cafe.jacobcolvin.com/v1"
 	assert.Equal(t, []string{want, want}, versions)
 	requireReloads(t, reg, plan, nil, keep)
+}
+
+func TestRegistry_PlanMigration_WarningFilterSkipsErrors(t *testing.T) {
+	t.Parallel()
+
+	var seen []error
+
+	// A filter that drops every row it gets keeps each error, because it
+	// sees only warnings.
+	dropAll := manifest.WithWarningFilter(func(p *manifest.Problem) bool {
+		seen = append(seen, p.Err)
+
+		return false
+	})
+
+	reg := manifest.MustNewRegistry(deprecationOptions()...)
+
+	_, err := reg.PlanMigration(t.Context(), configFS(map[string]string{
+		"menu.yaml": deprecatedMenu,
+		"zimtschnecke.yaml": stringtest.LinesLF(
+			"apiVersion: cafe.jacobcolvin.com/v1",
+			"kind: MenuItem",
+			"metadata:",
+			"  name: zimtschnecke",
+			"spec:",
+			"  price: 0",
+		),
+	}), dropAll)
+	require.ErrorIs(t, err, schema.ErrViolation)
+	assert.Equal(t, "config/zimtschnecke.yaml:6:10: $.spec.price: 0 is less than 1", err.Error())
+	assert.Len(t, seen, 2)
+
+	for _, w := range seen {
+		assert.False(t, niceyaml.HasErrors(w), "filter got error %q", w)
+	}
+}
+
+func TestRegistry_PlanMigration_Problems(t *testing.T) {
+	t.Parallel()
+
+	plan, err := newCafeRegistry(t).PlanMigration(t.Context(), configFS(map[string]string{
+		"menu.yaml":     strings.Replace(menuDoc, "price: 65", "price: 0", 1),
+		"specials.yaml": specialsDoc,
+	}))
+	require.Error(t, err)
+	require.NotNil(t, plan)
+
+	var got []string
+
+	for row := range niceyaml.Problems(err) {
+		p, ok := errors.AsType[*manifest.Problem](row.Err)
+		require.True(t, ok, "row %q", row.Message())
+
+		got = append(got, p.File+" "+p.Kind+" "+p.Version+": "+row.Message())
+	}
+
+	assert.Equal(t, []string{
+		"config/menu.yaml MenuItem cafe.jacobcolvin.com/v1: 0 is less than 1",
+		`config/specials.yaml  : unknown kind "Menuitem"`,
+	}, got)
 }
 
 func TestRegistry_PlanMigration_VersionText(t *testing.T) {
@@ -995,7 +1057,7 @@ func TestPlanFile_Removals(t *testing.T) {
 	t.Parallel()
 
 	plan := planOf(t, drinkOptions(false), map[string]string{"drink.yaml": colorDrinkDoc},
-		manifest.WithWarningsAsErrors(true), manifest.WithWarningFilter(func(*manifest.Warning) bool { return false }))
+		manifest.WithWarningsAsErrors(true), manifest.WithWarningFilter(func(*manifest.Problem) bool { return false }))
 	require.Len(t, plan.Files(), 1)
 
 	removals := plan.Files()[0].Removals()
@@ -1010,7 +1072,7 @@ func TestPlanFile_Removals(t *testing.T) {
 		"     |   ^^^^^",
 	), niceyaml.FormatError(removals))
 
-	var w *manifest.Warning
+	var w *manifest.Problem
 
 	require.ErrorAs(t, removals, &w)
 	assert.Equal(t, "Drink", w.Kind)

@@ -147,9 +147,9 @@ func main() {
 	// version. Every other warning about the hours stays, such as one about
 	// a deprecated field. The filter runs before strict mode, so the strict
 	// load passes and reads the hours from v1alpha1.
-	acceptV1alpha1 := manifest.WithWarningFilter(func(w *manifest.Warning) bool {
-		accepted := errors.Is(w, manifest.ErrDeprecatedVersion) && w.Kind == "Hours" &&
-			w.Version == "cafe.jacobcolvin.com/v1alpha1"
+	acceptV1alpha1 := manifest.WithWarningFilter(func(problem *manifest.Problem) bool {
+		accepted := errors.Is(problem, manifest.ErrDeprecatedVersion) && problem.Kind == "Hours" &&
+			problem.Version == "cafe.jacobcolvin.com/v1alpha1"
 
 		return !accepted
 	})

@@ -2,6 +2,7 @@ package manifest_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -130,28 +131,40 @@ func TestPlan_Apply_ReadOnly(t *testing.T) {
 	top := niceyaml.NewSourceFromString(stringtest.LinesLF("spec:", `  closes: "20:00"`), niceyaml.WithName("top.yaml"))
 
 	tcs := map[string]struct {
-		in      manifest.Input
+		in   manifest.Input
+		file string
+		// Kind and version hold the kind and the version of the document
+		// that the reason binds in, and are empty for a reason of the
+		// whole file.
+		kind    string
+		version string
 		err     string
 		summary string
 	}{
 		"file of a file system": {
-			in:  configFS(map[string]string{"hours.yaml": hoursDoc}),
-			err: "config/hours.yaml: cannot rewrite a file of a file system that cafe only reads",
+			in:   configFS(map[string]string{"hours.yaml": hoursDoc}),
+			file: "config/hours.yaml",
+			err:  "config/hours.yaml: cannot rewrite a file of a file system that cafe only reads",
 			summary: stringtest.JoinLF(
 				"config/hours.yaml: not written, cannot rewrite a file of a file system that cafe only reads",
 				"1 file not written",
 			),
 		},
 		"reader": {
-			in:  manifest.Reader("hours.yaml", strings.NewReader(hoursDoc)),
-			err: "hours.yaml: cannot rewrite a file that cafe read from a stream",
+			in:   manifest.Reader("hours.yaml", strings.NewReader(hoursDoc)),
+			file: "hours.yaml",
+			err:  "hours.yaml: cannot rewrite a file that cafe read from a stream",
 		},
 		"source": {
-			in:  manifest.Sources(niceyaml.NewSourceFromString(hoursDoc, niceyaml.WithName("hours.yaml"))),
-			err: "hours.yaml: cannot rewrite a file that cafe built in memory",
+			in:   manifest.Sources(niceyaml.NewSourceFromString(hoursDoc, niceyaml.WithName("hours.yaml"))),
+			file: "hours.yaml",
+			err:  "hours.yaml: cannot rewrite a file that cafe built in memory",
 		},
 		"merged layers": {
-			in: manifest.Sources(yamltest.Layers(t, base, top)),
+			in:      manifest.Sources(yamltest.Layers(t, base, top)),
+			file:    "base.yaml",
+			kind:    "Hours",
+			version: "cafe.jacobcolvin.com/v1alpha1",
 			err: stringtest.JoinLF(
 				"base.yaml:1:13: $.apiVersion: cannot rewrite a document that merges layers",
 				"",
@@ -178,11 +191,59 @@ func TestPlan_Apply_ReadOnly(t *testing.T) {
 			assert.False(t, niceyaml.IsInvalid(err))
 			assert.Equal(t, tc.err, niceyaml.FormatError(err))
 
+			// Apply did not write the file, so the version is the one
+			// that the file still declares.
+			p, ok := errors.AsType[*manifest.Problem](err)
+			require.True(t, ok)
+			assert.Equal(t, tc.file, p.File)
+			assert.Equal(t, tc.kind, p.Kind)
+			assert.Equal(t, tc.version, p.Version)
+
 			if tc.summary != "" {
 				assert.Equal(t, tc.summary, res.Summary())
 			}
 		})
 	}
+}
+
+func TestPlan_Apply_Problems(t *testing.T) {
+	t.Parallel()
+
+	reg := manifest.MustNewRegistry(drinkOptions(false)...)
+
+	// Apply leaves a.yaml as it is, so its row comes from the plan. Apply
+	// writes b.yaml and reads it again, so its row comes from that read.
+	plan, config := planDir(t, reg, map[string]string{
+		"a.yaml": drinkDoc + "  size: XL\n",
+		"b.yaml": drinkDoc + stringtest.LinesLF(
+			"  size: S",
+			"---",
+			"apiVersion: cafe.jacobcolvin.com/v9",
+			"kind: Drink",
+		),
+	})
+
+	res, err := plan.Apply(t.Context())
+	require.Error(t, err)
+	require.Len(t, res.Files(), 1)
+
+	var got []string
+
+	for row := range niceyaml.Problems(res.Err()) {
+		p, ok := errors.AsType[*manifest.Problem](row.Err)
+		require.True(t, ok, "row %q", row.Message())
+
+		file, err := filepath.Rel(config, p.File)
+		require.NoError(t, err)
+
+		got = append(got, file+" "+p.Kind+" "+p.Version+" "+p.Path.String()+": "+row.Message())
+	}
+
+	// The second document of b.yaml routes to Drink and to no version.
+	assert.Equal(t, []string{
+		`a.yaml Drink cafe.jacobcolvin.com/v1beta1 $.spec.size: no cafe.jacobcolvin.com/v1 size for "XL"`,
+		`b.yaml Drink  $.apiVersion: unknown version "cafe.jacobcolvin.com/v9" for Drink`,
+	}, got)
 }
 
 func TestPlan_Apply_Changed(t *testing.T) {

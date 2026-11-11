@@ -1040,7 +1040,7 @@ func TestRegistry_Load(t *testing.T) {
 			files: map[string]string{"cafe.yaml": cafeDoc, "hours.yaml": hoursDoc},
 			load: []manifest.LoadOption{
 				manifest.WithWarningsAsErrors(true),
-				manifest.WithWarningFilter(func(w *manifest.Warning) bool {
+				manifest.WithWarningFilter(func(w *manifest.Problem) bool {
 					allowed := errors.Is(w, manifest.ErrDeprecatedVersion) && w.Kind == "Hours" &&
 						w.Version == "cafe.jacobcolvin.com/v1alpha1" && w.File == "config/hours.yaml"
 
@@ -1351,7 +1351,7 @@ func TestRegistry_Check(t *testing.T) {
 			files: map[string]string{"cafe.yaml": cafeDoc, "hours.yaml": hoursDoc},
 			load: []manifest.LoadOption{
 				manifest.WithWarningsAsErrors(true),
-				manifest.WithWarningFilter(func(*manifest.Warning) bool { return false }),
+				manifest.WithWarningFilter(func(*manifest.Problem) bool { return false }),
 			},
 			want: []string{
 				`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`,
@@ -3033,7 +3033,7 @@ func TestRegistry_Load_Checks(t *testing.T) {
 		set, err := reg.Load(t.Context(), configFS(map[string]string{"cafe.yaml": "---\n---\n" + cafeDoc}))
 		require.NoError(t, err)
 
-		w, ok := errors.AsType[*manifest.Warning](set.Warnings())
+		w, ok := errors.AsType[*manifest.Problem](set.Warnings())
 		require.True(t, ok)
 		assert.Equal(t, "Cafe cafe.jacobcolvin.com/v1", w.Kind+" "+w.Version)
 	})
@@ -3101,7 +3101,7 @@ func TestRegistry_Load_Deprecations(t *testing.T) {
 	for problem := range niceyaml.Problems(set.Warnings()) {
 		require.ErrorIs(t, problem.Err, manifest.ErrDeprecated)
 
-		w, ok := errors.AsType[*manifest.Warning](problem.Err)
+		w, ok := errors.AsType[*manifest.Problem](problem.Err)
 		require.True(t, ok)
 
 		// The warning of a schema check also wraps its deprecation, which
@@ -3161,7 +3161,7 @@ func TestRegistry_Load_DeprecationMarks(t *testing.T) {
 
 	// A filter that accepts the deprecated version 1 of Config and the
 	// deprecated version x/v1alpha1 of Hours.
-	accept := manifest.WithWarningFilter(func(w *manifest.Warning) bool {
+	accept := manifest.WithWarningFilter(func(w *manifest.Problem) bool {
 		accepted := errors.Is(w, manifest.ErrDeprecatedVersion) &&
 			(w.Kind == "Config" && w.Version == "1" || w.Kind == "Hours" && w.Version == "x/v1alpha1")
 
@@ -3170,7 +3170,7 @@ func TestRegistry_Load_DeprecationMarks(t *testing.T) {
 
 	// A filter that accepts each deprecation of the schema at
 	// /properties/spec/properties/legacy.
-	acceptSchema := manifest.WithWarningFilter(func(w *manifest.Warning) bool {
+	acceptSchema := manifest.WithWarningFilter(func(w *manifest.Problem) bool {
 		d, ok := errors.AsType[*schema.Deprecation](w)
 		if !ok {
 			return true
@@ -3268,7 +3268,7 @@ func TestRegistry_Load_DeprecationMarks(t *testing.T) {
 			var got []string
 
 			for problem := range niceyaml.Problems(set.Warnings()) {
-				w, ok := errors.AsType[*manifest.Warning](problem.Err)
+				w, ok := errors.AsType[*manifest.Problem](problem.Err)
 				require.True(t, ok)
 
 				var matched []string
@@ -3338,7 +3338,7 @@ func TestRegistry_Load_WarningFilters(t *testing.T) {
 			var opts []manifest.LoadOption
 
 			for i, keep := range tc.keeps {
-				opts = append(opts, manifest.WithWarningFilter(func(w *manifest.Warning) bool {
+				opts = append(opts, manifest.WithWarningFilter(func(w *manifest.Problem) bool {
 					assert.ErrorIs(t, w, manifest.ErrDeprecatedVersion)
 
 					calls[i]++
@@ -3358,6 +3358,32 @@ func TestRegistry_Load_WarningFilters(t *testing.T) {
 			}
 		})
 	}
+
+	// A filter sees only warnings, so one that drops every row it gets
+	// keeps each error and the load still fails.
+	t.Run("error beside a warning", func(t *testing.T) {
+		t.Parallel()
+
+		var seen []error
+
+		dropAll := manifest.WithWarningFilter(func(p *manifest.Problem) bool {
+			seen = append(seen, p.Err)
+
+			return false
+		})
+
+		_, err := reg.Load(t.Context(), configFS(map[string]string{
+			"cafe.yaml":  cafeDoc,
+			"hours.yaml": hoursDoc,
+			"menu.yaml":  strings.Replace(menuDoc, "price: 65", "price: 0", 1),
+		}), dropAll)
+		require.ErrorIs(t, err, schema.ErrViolation)
+		require.NotErrorIs(t, err, manifest.ErrDeprecatedVersion)
+		assert.Equal(t, "config/menu.yaml:15:10: $.spec.price: 0 is less than 1", err.Error())
+
+		require.Len(t, seen, 1)
+		require.ErrorIs(t, seen[0], manifest.ErrDeprecatedVersion)
+	})
 }
 
 func TestRegistry_Load_Defaults(t *testing.T) {
@@ -3688,18 +3714,16 @@ func TestLoadError(t *testing.T) {
 			level = "warning"
 		}
 
-		w, isWarning := errors.AsType[*manifest.Warning](row.Err)
-		if isWarning {
-			level += " " + w.Kind + " " + w.Version + " " + w.Path.String()
-		}
+		p, ok := errors.AsType[*manifest.Problem](row.Err)
+		require.True(t, ok, "row %q", row.Message())
 
-		rows = append(rows, level+": "+row.Message())
+		rows = append(rows, level+" "+p.File+" "+p.Kind+" "+p.Version+" "+p.Path.String()+": "+row.Message())
 	}
 
 	assert.Equal(t, []string{
-		`warning Hours cafe.jacobcolvin.com/v1alpha1 $.apiVersion: deprecated version "cafe.jacobcolvin.com/v1alpha1"`,
-		`error: 0 is less than 1`,
-		`error: unknown kind "Menuitem"`,
+		`warning config/hours.yaml Hours cafe.jacobcolvin.com/v1alpha1 $.apiVersion: deprecated version "cafe.jacobcolvin.com/v1alpha1"`,
+		`error config/menu.yaml MenuItem cafe.jacobcolvin.com/v1 $.spec.price: 0 is less than 1`,
+		`error config/specials.yaml   $.kind: unknown kind "Menuitem"`,
 	}, rows)
 
 	strict := niceyaml.AsErrors(err)
@@ -3708,16 +3732,144 @@ func TestLoadError(t *testing.T) {
 	assert.Equal(t, "config: 3 errors", firstLine(strict.Error()))
 	assert.True(t, niceyaml.IsInvalid(err))
 
-	assert.ErrorAs(t, strict, new(*manifest.Warning))
+	assert.ErrorAs(t, strict, new(*manifest.Problem))
 }
 
-func TestWarning(t *testing.T) {
+func TestRegistry_Load_Problems(t *testing.T) {
 	t.Parallel()
 
-	w := &manifest.Warning{Err: manifest.ErrDeprecated}
-	assert.Equal(t, "deprecated", w.Error())
-	require.ErrorIs(t, w, manifest.ErrDeprecated)
-	assert.Empty(t, (&manifest.Warning{}).Error())
+	// The options of a registry of one kind, Hours, with versions.
+	hours := func(versions ...manifest.KindOption) []manifest.RegistryOption {
+		return withKinds(manifest.NewKind[Hours]("Hours", versions...))
+	}
+
+	tcs := map[string]struct {
+		files map[string]string
+		opts  []manifest.RegistryOption
+		load  []manifest.LoadOption
+		want  []string
+	}{
+		"decode error under an old kind name": {
+			opts: hours(
+				manifest.Version("x/v1beta1", manifest.KindName("Times")),
+				manifest.Version("x/v1"),
+			),
+			files: map[string]string{
+				"hours.yaml": stringtest.LinesLF("apiVersion: x/v1beta1", "kind: Times", "spec:", "  open: [7]"),
+			},
+			want: []string{`error "config/hours.yaml" "Hours" "x/v1beta1" $.spec.open: expected string, got sequence`},
+		},
+		"decode error of an unversioned document": {
+			opts: hours(manifest.Unversioned()),
+			files: map[string]string{
+				"hours.yaml": stringtest.LinesLF("kind: Hours", "spec:", "  open: [7]"),
+			},
+			want: []string{`error "config/hours.yaml" "Hours" "" $.spec.open: expected string, got sequence`},
+		},
+		"decode error under a version field alone": {
+			opts: []manifest.RegistryOption{
+				manifest.WithVersionOnly(paths.Doc().Child("version")),
+				manifest.WithKinds(manifest.NewKind[Hours]("Config", manifest.Version("1"))),
+			},
+			files: map[string]string{
+				"config.yaml": stringtest.LinesLF("version: 1", "spec:", "  open: [7]"),
+			},
+			want: []string{`error "config/config.yaml" "Config" "1" $.spec.open: expected string, got sequence`},
+		},
+		"unknown version of a kind": {
+			opts: hours(manifest.Version("x/v1")),
+			files: map[string]string{
+				"hours.yaml": stringtest.LinesLF("apiVersion: x/v9", "kind: Hours"),
+			},
+			want: []string{`error "config/hours.yaml" "Hours" "" $.apiVersion: unknown version "x/v9" for Hours`},
+		},
+		"unknown kind": {
+			opts: hours(manifest.Version("x/v1")),
+			files: map[string]string{
+				"hours.yaml": stringtest.LinesLF("apiVersion: x/v1", "kind: Hour"),
+			},
+			want: []string{`error "config/hours.yaml" "" "" $.kind: unknown kind "Hour"`},
+		},
+		"syntax error": {
+			opts: hours(manifest.Version("x/v1")),
+			files: map[string]string{
+				"hours.yaml": "spec: [\n",
+			},
+			want: []string{`error "config/hours.yaml" "" "" $: sequence end token ']' not found`},
+		},
+		"required kind that the set lacks": {
+			opts: withKinds(
+				manifest.NewKind[Hours]("Hours", manifest.Version("x/v1"), manifest.Required()),
+				manifest.NewKind[map[string]any]("Times", manifest.Version("x/v1")),
+			),
+			files: map[string]string{
+				"times.yaml": stringtest.LinesLF("apiVersion: x/v1", "kind: Times"),
+			},
+			want: []string{`error "" "" "" $: missing Hours`},
+		},
+		"error of a check": {
+			opts: append(hours(manifest.Version("x/v1")),
+				manifest.WithCheck(func(context.Context, *manifest.Set) error {
+					return errors.New("dangling reference")
+				})),
+			files: map[string]string{
+				"hours.yaml": stringtest.LinesLF("apiVersion: x/v1", "kind: Hours"),
+			},
+			want: []string{`error "" "" "" $: dangling reference`},
+		},
+		"warning in strict mode": {
+			opts: hours(manifest.Version("x/v1", manifest.Deprecated())),
+			load: []manifest.LoadOption{manifest.WithWarningsAsErrors(true)},
+			files: map[string]string{
+				"hours.yaml": stringtest.LinesLF("apiVersion: x/v1", "kind: Hours"),
+			},
+			want: []string{
+				`error of a warning "config/hours.yaml" "Hours" "x/v1" $.kind: deprecated kind "Hours"`,
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			reg := manifest.MustNewRegistry(tc.opts...)
+
+			_, err := reg.Load(t.Context(), configFS(tc.files), tc.load...)
+			require.Error(t, err)
+
+			var got []string
+
+			for row := range niceyaml.Problems(err) {
+				p, ok := errors.AsType[*manifest.Problem](row.Err)
+				require.True(t, ok, "row %q", row.Message())
+
+				// In strict mode, a row that is an error can hold the
+				// Problem of a warning.
+				level := "error"
+				switch {
+				case row.Warning:
+					level = "warning"
+				case !niceyaml.HasErrors(p):
+					level = "error of a warning"
+				}
+
+				got = append(got, fmt.Sprintf("%s %q %q %q %s: %s",
+					level, p.File, p.Kind, p.Version, p.Path, row.Message()))
+			}
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestProblem(t *testing.T) {
+	t.Parallel()
+
+	p := &manifest.Problem{Err: manifest.ErrDeprecated}
+	assert.Equal(t, "deprecated", p.Error())
+	require.ErrorIs(t, p, manifest.ErrDeprecated)
+	assert.Empty(t, (&manifest.Problem{}).Error())
 }
 
 // firstLine returns the first line of s.

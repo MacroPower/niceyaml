@@ -365,7 +365,7 @@ func (l *loader) planFile(i int, f *file) {
 		})
 
 		for _, w := range d.removed {
-			pf.removals = append(pf.removals, l.wrapWarning(&row{err: w, doc: d, file: i, index: d.index}))
+			pf.removals = append(pf.removals, l.wrapProblem(&row{err: w, doc: d, file: i, index: d.index}))
 		}
 	}
 
