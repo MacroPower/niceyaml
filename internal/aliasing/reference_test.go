@@ -183,7 +183,7 @@ func TestReferenceWeights(t *testing.T) {
 		"text of many aliases to a scalar": {
 			refs:    []string{"s: &s " + strings.Repeat("x", 2000) + "\n"},
 			input:   "v: " + yamltest.FlowSequence("*s", 500) + "\n",
-			opts:    []niceyaml.SourceOption{niceyaml.WithByteLimit(niceyaml.NoLimit)},
+			opts:    []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(niceyaml.NoLimit)},
 			text:    true,
 			want:    "1:5: " + ratio,
 			oneFile: true,
@@ -194,7 +194,7 @@ func TestReferenceWeights(t *testing.T) {
 			// 150 aliases then repeat too large a share of that text.
 			refs:    []string{wide},
 			input:   "v: " + yamltest.FlowSequence("*d", 150) + "\n",
-			opts:    []niceyaml.SourceOption{niceyaml.WithByteLimit(niceyaml.NoLimit)},
+			opts:    []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(niceyaml.NoLimit)},
 			text:    true,
 			want:    "1:5: " + ratio,
 			oneFile: true,
@@ -434,17 +434,17 @@ func TestReferenceWeights(t *testing.T) {
 		},
 		"text of an alias to a loop of names": {
 			// The text of a loop does not end, so one alias passes the
-			// default byte limit.
+			// default document byte limit.
 			refs:  []string{loop},
 			input: "v: *x\n",
 			text:  true,
 			want:  "1:4: aliases repeat more than 256 KiB of text",
 		},
-		"text of an alias to a loop of names without the byte and depth limits": {
+		"text of an alias to a loop of names without the document byte limit and the depth limit": {
 			refs:  []string{loop},
 			input: "v: *x\n",
 			opts: []niceyaml.SourceOption{
-				niceyaml.WithByteLimit(niceyaml.NoLimit),
+				niceyaml.WithDocumentByteLimit(niceyaml.NoLimit),
 				niceyaml.WithDepthLimit(niceyaml.NoLimit),
 			},
 			text: true,
@@ -484,20 +484,20 @@ func TestReferenceWeights(t *testing.T) {
 			input: "v: *a\n",
 			want:  "1:4: " + ratio,
 		},
-		"text of aliases past the byte limit": {
+		"text of aliases past the document byte limit": {
 			// Each alias writes each of the 100 scalars of d on a line of
 			// its own, so the text passes 4 KiB at the sixth alias.
 			refs:    []string{"d: &d " + yamltest.FlowSequence("x", 100) + "\n"},
 			input:   "v: " + yamltest.FlowSequence("*d", 20) + "\n",
-			opts:    []niceyaml.SourceOption{niceyaml.WithByteLimit(4096)},
+			opts:    []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(4096)},
 			text:    true,
 			want:    "1:25: aliases repeat more than 4 KiB of text",
 			oneFile: true,
 		},
-		"text of aliases within the byte limit": {
+		"text of aliases within the document byte limit": {
 			refs:  []string{"d: &d " + yamltest.FlowSequence("x", 100) + "\n"},
 			input: "v: " + yamltest.FlowSequence("*d", 3) + "\n",
-			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(4096)},
+			opts:  []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(4096)},
 			text:  true,
 		},
 		"text of an alias past the depth limit": {
@@ -537,7 +537,7 @@ func TestReferenceWeights(t *testing.T) {
 			// the alias does, so the alias repeats half of the read.
 			refs:    []string{"d: &d " + yamltest.FlowSequence(strings.Repeat("x", 200), 10) + "\n"},
 			input:   "v: *d\n",
-			opts:    []niceyaml.SourceOption{niceyaml.WithByteLimit(niceyaml.NoLimit)},
+			opts:    []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(niceyaml.NoLimit)},
 			text:    true,
 			oneFile: true,
 		},
@@ -558,19 +558,19 @@ func TestReferenceWeights(t *testing.T) {
 			input: "v: " + yamltest.FlowSequence("{? *d : 1}", 300) + "\n",
 			want:  "1:8: " + ratio,
 		},
-		"text of aliases to an anchor on an alias past the byte limit": {
+		"text of aliases to an anchor on an alias past the document byte limit": {
 			refs:    []string{"d: &d " + yamltest.FlowSequence("x", 100) + "\nk: &k\n  *d\n"},
 			input:   "v: " + yamltest.FlowSequence("*k", 20) + "\n",
-			opts:    []niceyaml.SourceOption{niceyaml.WithByteLimit(4096)},
+			opts:    []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(4096)},
 			text:    true,
 			want:    "1:25: aliases repeat more than 4 KiB of text",
 			oneFile: true,
 		},
 		"text of aliases to an anchor inside another before the last of its name": {
-			// The byte limit bounds the text of the larger anchor d.
+			// The document byte limit bounds the text of the larger anchor d.
 			refs:  []string{"o: &o {d: &d " + yamltest.FlowSequence("x", 100) + "}\ne: &d x\n"},
 			input: "v: " + yamltest.FlowSequence("*d", 20) + "\n",
-			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(4096)},
+			opts:  []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(4096)},
 			text:  true,
 			want:  "1:25: aliases repeat more than 4 KiB of text",
 		},
@@ -603,7 +603,7 @@ func TestReferenceWeights(t *testing.T) {
 			// of each alias copies them.
 			refs:    []string{"a: &a {b: &b " + yamltest.FlowSequence(strings.Repeat("x", 200), 10) + "}\n"},
 			input:   "v: " + yamltest.FlowSequence("*a", 500) + "\n",
-			opts:    []niceyaml.SourceOption{niceyaml.WithByteLimit(niceyaml.NoLimit)},
+			opts:    []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(niceyaml.NoLimit)},
 			text:    true,
 			want:    "1:5: " + ratio,
 			oneFile: true,
@@ -620,27 +620,27 @@ func TestReferenceWeights(t *testing.T) {
 				"o: &o\n  d: &d\n" + yamltest.GenerateLines(50, "    k%d: v # "+strings.Repeat("c", 30)),
 			},
 			input:   "v: " + yamltest.FlowSequence("*o", 20) + "\n",
-			opts:    []niceyaml.SourceOption{niceyaml.WithByteLimit(16384)},
+			opts:    []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(16384)},
 			text:    true,
 			want:    "1:33: aliases repeat more than 16 KiB of text",
 			oneFile: true,
 		},
-		"text of aliases to a mapping with comments past the byte limit": {
+		"text of aliases to a mapping with comments past the document byte limit": {
 			// Each alias copies the 50 lines of d as the reference
 			// document spells them, comments included. That text passes
 			// 16 KiB at the eighth alias. The block style text of the 20
 			// aliases, without the comments, does not.
 			refs:    []string{"d: &d\n" + yamltest.GenerateLines(50, "  k%d: v # "+strings.Repeat("c", 30))},
 			input:   "v: " + yamltest.FlowSequence("*d", 20) + "\n",
-			opts:    []niceyaml.SourceOption{niceyaml.WithByteLimit(16384)},
+			opts:    []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(16384)},
 			text:    true,
 			want:    "1:33: aliases repeat more than 16 KiB of text",
 			oneFile: true,
 		},
-		"text of aliases to a mapping with comments within the byte limit": {
+		"text of aliases to a mapping with comments within the document byte limit": {
 			refs:    []string{"d: &d\n" + yamltest.GenerateLines(50, "  k%d: v # "+strings.Repeat("c", 30))},
 			input:   "v: " + yamltest.FlowSequence("*d", 7) + "\n",
-			opts:    []niceyaml.SourceOption{niceyaml.WithByteLimit(16384)},
+			opts:    []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(16384)},
 			text:    true,
 			oneFile: true,
 		},
@@ -649,7 +649,7 @@ func TestReferenceWeights(t *testing.T) {
 			// 2 KiB together, and the second alias *b passes the limit.
 			refs:    []string{insideSmall},
 			input:   "v: [*a, *b, *b, *b, *b, *b, *b, *b, *b]\n",
-			opts:    []niceyaml.SourceOption{niceyaml.WithByteLimit(2048)},
+			opts:    []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(2048)},
 			text:    true,
 			want:    "1:13: aliases repeat more than 2 KiB of text",
 			oneFile: true,
@@ -660,7 +660,7 @@ func TestReferenceWeights(t *testing.T) {
 			// the limit.
 			refs:    []string{insideSmall},
 			input:   "v: [*b, *a, *a, *a, *a, *a, *a, *a]\n",
-			opts:    []niceyaml.SourceOption{niceyaml.WithByteLimit(2048)},
+			opts:    []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(2048)},
 			text:    true,
 			want:    "1:13: aliases repeat more than 2 KiB of text",
 			oneFile: true,
@@ -688,7 +688,7 @@ func TestReferenceWeights(t *testing.T) {
 			// line of the alias, 60 columns in.
 			refs:    []string{"d: &d\n" + commented("  ")},
 			input:   indented(60),
-			opts:    []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			opts:    []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
 			text:    true,
 			want:    "3:64: aliases repeat more than 1 KiB of text",
 			oneFile: true,
@@ -698,7 +698,7 @@ func TestReferenceWeights(t *testing.T) {
 			// indentation of 2 columns.
 			refs:    []string{"d: &d\n" + commented("  ")},
 			input:   indented(2),
-			opts:    []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			opts:    []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
 			text:    true,
 			oneFile: true,
 		},
@@ -706,7 +706,7 @@ func TestReferenceWeights(t *testing.T) {
 			// The text of d holds the 40 lines of the anchor e inside it.
 			refs:    []string{"d: &d\n  e: &e\n" + commented("    ")},
 			input:   indented(60),
-			opts:    []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			opts:    []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
 			text:    true,
 			want:    "3:64: aliases repeat more than 1 KiB of text",
 			oneFile: true,
@@ -714,7 +714,7 @@ func TestReferenceWeights(t *testing.T) {
 		"text of an alias at a small indent to a mapping around an anchor with comments": {
 			refs:    []string{"d: &d\n  e: &e\n" + commented("    ")},
 			input:   indented(2),
-			opts:    []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			opts:    []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
 			text:    true,
 			oneFile: true,
 		},
@@ -732,13 +732,13 @@ func TestReferenceWeights(t *testing.T) {
 		},
 		"text of aliases to a longer scalar inside another before the last of its name": {
 			// The anchor x inside o holds one scalar of 400 bytes, and the
-			// last anchor x holds 100 short scalars. The byte limit bounds
+			// last anchor x holds 100 short scalars. The document byte limit bounds
 			// the larger scalar text of the two.
 			refs: []string{
 				"o: &o {x: &x [" + strings.Repeat("y", 400) + "]}\nx: &x " + yamltest.FlowSequence("b", 100) + "\n",
 			},
 			input: "v: [*x, *x]\n",
-			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			opts:  []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
 			text:  true,
 			want:  "1:5: aliases repeat more than 1 KiB of text",
 		},
@@ -755,7 +755,7 @@ func TestReferenceWeights(t *testing.T) {
 				"x: &x [b]",
 			)},
 			input: "v: [*x, *x]\n",
-			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			opts:  []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
 			text:  true,
 			want:  "1:9: aliases repeat more than 1 KiB of text",
 		},
@@ -765,7 +765,7 @@ func TestReferenceWeights(t *testing.T) {
 			// spelling to the line of the alias, 60 columns in.
 			refs:  []string{"o: &o\n  d: &d\n" + commented("    ") + "d: &d 1\n"},
 			input: indented(60),
-			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			opts:  []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
 			text:  true,
 			want:  "3:64: aliases repeat more than 1 KiB of text",
 		},
@@ -777,7 +777,7 @@ func TestReferenceWeights(t *testing.T) {
 				"o: &o {x: &x " + yamltest.FlowSequence("a", 200) + "}\nm: &m {k: *x}\nx: &x 1\n",
 			},
 			input: "v: *m\n",
-			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			opts:  []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
 			text:  true,
 			want:  "1:4: aliases repeat more than 1 KiB of text",
 		},
@@ -798,7 +798,7 @@ func TestReferenceWeights(t *testing.T) {
 			// so each alias copies the 300 bytes of that anchor name.
 			refs:    []string{"d: &d\n  &" + strings.Repeat("n", 300) + " key: v\n"},
 			input:   "v: [*d, *d, *d, *d]\n",
-			opts:    []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			opts:    []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
 			text:    true,
 			want:    "1:17: aliases repeat more than 1 KiB of text",
 			oneFile: true,

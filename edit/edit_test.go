@@ -4781,6 +4781,153 @@ func TestDoc_Apply_Limits(t *testing.T) {
 			requireEdit(t, d, err, tc.err, tc.want)
 		})
 	}
+
+	t.Run("the document byte limit counts the edited document", func(t *testing.T) {
+		t.Parallel()
+
+		// The other document holds 46 bytes, so the file passes 64 bytes
+		// with each edit. The document byte limit counts the edited
+		// document alone, and its error binds where an error at the path
+		// $ binds.
+		other := "---\nb: " + strings.Repeat("y", 40) + "\n"
+
+		tcs := map[string]struct {
+			value string
+			want  string
+			err   string
+		}{
+			"value within the document byte limit": {
+				value: strings.Repeat("x", 40),
+				want:  "a: " + strings.Repeat("x", 40) + "\n",
+			},
+			"value past the document byte limit": {
+				value: strings.Repeat("x", 64),
+				err:   "test.yaml:1:1: $: document is larger than 64 bytes\n\n",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				d := newDoc(t, "a: 1\n"+other, niceyaml.WithDocumentByteLimit(64))
+
+				err := d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, root *edit.Node) error {
+					return root.At(paths.Doc().Child("a")).Set(ctx, tc.value)
+				})
+				if tc.err != "" {
+					require.ErrorIs(t, err, niceyaml.ErrLimit)
+					require.NotErrorIs(t, err, edit.ErrEngine)
+					assert.False(t, niceyaml.IsInvalid(err))
+				}
+
+				requireEdit(t, d, err, tc.err, tc.want)
+			})
+		}
+	})
+
+	t.Run("the document byte limit counts the run of the document", func(t *testing.T) {
+		t.Parallel()
+
+		// The parse counts each run of documents against the document
+		// byte limit. A run ends before the "---" that opens the next
+		// document, and after a "..." marker. The comments below the
+		// marker open the next run. A "---" after an anchor without a
+		// value stays in the run of the anchor, so the window of the count
+		// opens one document earlier.
+		tcs := map[string]struct {
+			text  string
+			key   string
+			value string
+			want  string
+			err   string
+			doc   int
+			limit int
+		}{
+			"next header, value at the limit": {
+				text:  "a: xxxxx\n---\nb: 2\n",
+				limit: len("a: xxxxx\n"),
+				key:   "a",
+				value: "yyyyy",
+				want:  "a: yyyyy\n",
+			},
+			"next header, value past the limit": {
+				text:  "a: xxxxx\n---\nb: 2\n",
+				limit: len("a: xxxxx\n"),
+				key:   "a",
+				value: "yyyyyy",
+				err:   "test.yaml:1:1: $: document is larger than 9 bytes\n\n",
+			},
+			"comments below a marker, value at the limit": {
+				text:  "a: xxxxx\n...\n# c\n---\nb: 2\n",
+				limit: len("a: xxxxx\n..."),
+				key:   "a",
+				value: "yyyyy",
+				want:  "a: yyyyy\n...\n# c\n",
+			},
+			"comments below a marker, value past the limit": {
+				text:  "a: xxxxx\n...\n# c\n---\nb: 2\n",
+				limit: len("a: xxxxx\n..."),
+				key:   "a",
+				value: "yyyyyy",
+				err:   "test.yaml:1:1: $: document is larger than 12 bytes\n\n",
+			},
+			"comments above the document, value at the limit": {
+				text:  "a: 1\n...\n# cccccccccc\n---\nb: x\n",
+				doc:   1,
+				limit: len("\n# cccccccccc\n---\nb: x\n"),
+				key:   "b",
+				value: "z",
+				want:  "---\nb: z\n",
+			},
+			"comments above the document, value past the limit": {
+				text:  "a: 1\n...\n# cccccccccc\n---\nb: x\n",
+				doc:   1,
+				limit: len("\n# cccccccccc\n---\nb: x\n"),
+				key:   "b",
+				value: "zz",
+				err:   "document is larger than 23 bytes",
+			},
+			"anchor before the header, value at the limit": {
+				text:  "c: 3\n---\na: &x\n---\nb: x\n",
+				doc:   2,
+				limit: len("---\na: &x\n---\nb: x\n"),
+				key:   "b",
+				value: "z",
+				want:  "---\nb: z\n",
+			},
+			"anchor before the header, value past the limit": {
+				text:  "c: 3\n---\na: &x\n---\nb: x\n",
+				doc:   2,
+				limit: len("---\na: &x\n---\nb: x\n"),
+				key:   "b",
+				value: "zz",
+				err:   "document is larger than 19 bytes",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				src := niceyaml.NewSourceFromString(tc.text, niceyaml.WithName("test.yaml"),
+					niceyaml.WithDocumentByteLimit(tc.limit))
+				require.NoError(t, src.AllDocuments()[tc.doc].Err())
+
+				d, err := edit.New(src.AllDocuments()[tc.doc])
+				require.NoError(t, err)
+
+				err = d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, root *edit.Node) error {
+					return root.At(paths.Doc().Child(tc.key)).Set(ctx, tc.value)
+				})
+				if tc.err != "" {
+					require.ErrorIs(t, err, niceyaml.ErrLimit)
+				}
+
+				requireEdit(t, d, err, tc.err, tc.want)
+			})
+		}
+	})
 }
 
 func TestDoc_Locate(t *testing.T) {

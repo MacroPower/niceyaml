@@ -67,8 +67,8 @@ type Place struct {
 //
 //	niceyaml.WithUnmarshalers(slices.Concat(defaults, doc.Source().Unmarshalers())...)
 //
-// The byte limit and the depth limit stay those of home, as
-// [Source.ByteLimit] and [Source.DepthLimit] report them. A text that
+// The limits stay those of home, as [Source.ByteLimit],
+// [Source.DocumentByteLimit], and [Source.DepthLimit] report them. A text that
 // grows past them fails as the text of home fails. [WithoutLimits] turns
 // them off for a copy that passed them already. Such a Source keeps the
 // bounds that the limits of home put on its aliases, because the text

@@ -32,7 +32,7 @@ type blockLevel struct {
 
 // TooDeep returns the first token of run that opens a level past limit,
 // and true, or nil and false when the documents of run do not nest that
-// deep. A limit of [math.MaxInt] disables the check. [ParseDepth] runs the
+// deep. A limit of [math.MaxInt] disables the check. [ParseLimits] runs the
 // check on each run of documents.
 //
 // A flow collection opens a level at its "[" or "{". A block collection

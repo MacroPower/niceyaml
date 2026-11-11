@@ -415,12 +415,12 @@ func TestCheckDecode(t *testing.T) {
 			path:  paths.Current().Child("kind"),
 			text:  true,
 		},
-		"text past the byte limit read into a value": {
+		"text past the document byte limit read into a value": {
 			// A read into a value shares the scalar between the aliases,
-			// so the byte limit does not refuse it.
+			// so the document byte limit does not refuse it.
 			input: yamltest.AliasedScalar(100, 20),
 			path:  paths.Current().Child("l"),
-			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			opts:  []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
 		},
 		"text of a source with the limit off": {
 			input: stringtest.LinesLF(longScalar, "kind: "+yamltest.FlowSequence("*a", 500)),
@@ -468,24 +468,24 @@ func TestCheckDecodeText(t *testing.T) {
 		input string
 		opts  []niceyaml.SourceOption
 	}{
-		"aliases past the byte limit": {
+		"aliases past the document byte limit": {
 			// Each alias writes the 100 bytes of a on a line of its own,
 			// which "  - " and a newline make 105 bytes long, so the tenth
 			// alias brings the text to 1050 bytes.
 			input: yamltest.AliasedScalar(100, 20),
-			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			opts:  []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
 			err:   &aliasing.ExpansionError{Limit: 1024},
 			alias: "12:5",
 		},
-		"aliases within the byte limit": {
+		"aliases within the document byte limit": {
 			input: yamltest.AliasedScalar(100, 9),
-			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			opts:  []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
 		},
-		"aliases with the byte limit off": {
+		"aliases with the document byte limit off": {
 			input: yamltest.AliasedScalar(100, 20),
-			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(niceyaml.NoLimit)},
+			opts:  []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(niceyaml.NoLimit)},
 		},
-		"aliases that repeat aliases past the byte limit": {
+		"aliases that repeat aliases past the document byte limit": {
 			// Each *b repeats both copies of a, so the second *b brings
 			// the text past 512 bytes.
 			input: stringtest.LinesLF(
@@ -493,29 +493,29 @@ func TestCheckDecodeText(t *testing.T) {
 				"b: &b [*a, *a]",
 				"l: [*b, *b, *b, *b]",
 			),
-			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(512)},
+			opts:  []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(512)},
 			err:   &aliasing.ExpansionError{Limit: 512},
 			alias: "3:9",
 		},
-		"aliases of deep content past the byte limit": {
+		"aliases of deep content past the document byte limit": {
 			// Each alias repeats 20 nodes. Block style indents the line of
 			// each x by 22 spaces, so the fourth alias brings the text past
 			// 1 KiB.
 			input: stringtest.LinesLF("a: &a "+deep, "l:") + strings.Repeat("  - *a\n", 20),
-			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			opts:  []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
 			err:   &aliasing.ExpansionError{Limit: 1024},
 			alias: "6:5",
 		},
-		"aliases of spaced content past the byte limit": {
+		"aliases of spaced content past the document byte limit": {
 			// A copy of the text of a repeats the 300 spaces between its
 			// scalars at each alias, so the fourth alias brings the text
 			// past 1 KiB.
 			input: stringtest.LinesLF("a: &a [x,"+strings.Repeat(" ", 300)+"x]", "l: [*a, *a, *a, *a]"),
-			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			opts:  []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
 			err:   &aliasing.ExpansionError{Limit: 1024},
 			alias: "2:17",
 		},
-		"aliases of commented content past the byte limit": {
+		"aliases of commented content past the document byte limit": {
 			// A copy of the text of a repeats its comment at each alias, so
 			// the fourth alias brings the text past 1 KiB.
 			input: stringtest.LinesLF(
@@ -524,17 +524,17 @@ func TestCheckDecodeText(t *testing.T) {
 				"  - x",
 				"l: [*a, *a, *a, *a]",
 			),
-			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			opts:  []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
 			err:   &aliasing.ExpansionError{Limit: 1024},
 			alias: "4:17",
 		},
-		"aliases on indented lines past the byte limit": {
+		"aliases on indented lines past the document byte limit": {
 			// A copy of the text of a indents each line of a to the line of
 			// the alias, 60 spaces deep, so the second alias brings the text
 			// past 1 KiB.
 			input: "a: &a\n" + strings.Repeat("  - x\n", 10) + "l:\n" +
 				strings.Repeat(strings.Repeat(" ", 60)+"- *a\n", 4),
-			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			opts:  []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
 			err:   &aliasing.ExpansionError{Limit: 1024},
 			alias: "14:63",
 		},
@@ -633,7 +633,7 @@ func TestExpansionError(t *testing.T) {
 		err  *aliasing.ExpansionError
 		want string
 	}{
-		"byte limit": {
+		"document byte limit": {
 			err:  &aliasing.ExpansionError{Limit: 256 << 10},
 			want: "aliases repeat more than 256 KiB of text",
 		},
@@ -711,10 +711,10 @@ func TestRatioError(t *testing.T) {
 			want:  "13:11",
 		},
 		"text of many aliases to a long scalar": {
-			// With the byte limit off, the text of the aliases still makes
+			// With the document byte limit off, the text of the aliases still makes
 			// up too much of the read.
 			input: stringtest.LinesLF(longScalar, "kind: "+yamltest.FlowSequence("*a", 500)),
-			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(niceyaml.NoLimit)},
+			opts:  []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(niceyaml.NoLimit)},
 			want:  "2:8",
 			text:  true,
 		},

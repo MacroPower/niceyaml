@@ -123,6 +123,10 @@ func TestViewCmdLimitFlags(t *testing.T) {
 			args: []string{"--byte-limit", "-1"},
 			msg:  "--byte-limit -1: limit is negative",
 		},
+		"a negative document byte limit": {
+			args: []string{"--document-byte-limit", "-1"},
+			msg:  "--document-byte-limit -1: limit is negative",
+		},
 		"a negative depth limit": {
 			args: []string{"--depth-limit", "-1"},
 			msg:  "--depth-limit -1: limit is negative",

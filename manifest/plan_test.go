@@ -887,6 +887,14 @@ func TestRegistry_PlanMigration_Limits(t *testing.T) {
 			limit: niceyaml.WithByteLimit(21),
 			want:  "config/config.yaml:1:1: $: file is larger than 21 bytes",
 		},
+		// The rename makes the 20 bytes of the document two bytes longer, so
+		// the edit of the document fails, and the error binds at the site
+		// of the root.
+		"new text past the document byte limit": {
+			opts:  configOptions(),
+			limit: niceyaml.WithDocumentByteLimit(21),
+			want:  "config/config.yaml:1:1: $: document is larger than 21 bytes",
+		},
 		// Each rename makes the 44 bytes of the file two bytes longer, so the
 		// edit of each document keeps the limit, and the file does not.
 		"new texts of two documents that together pass the byte limit": {

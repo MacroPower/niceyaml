@@ -154,7 +154,7 @@ func References(inputs ...string) niceyaml.SourceOption {
 }
 
 // NoSizeLimits returns [niceyaml.WithoutLimits], followed by opts. The
-// option turns off the byte limit and the depth limit of a
+// option turns off each byte limit and the depth limit of a
 // [*niceyaml.Source]. A test or a benchmark that reads a large or deeply
 // nested document passes it:
 //

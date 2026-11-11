@@ -29,6 +29,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/quantity"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
+	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 // begin starts the calls of an Apply that messages name label, or the
@@ -1039,26 +1040,30 @@ func (d *Doc) lexedAt(tks token.Tokens, tk *token.Token) (*token.Token, bool) {
 // of the user's text. The edits read the text through a Source without the
 // limits, so the check reads the limits after the last call. The byte
 // limit counts the bytes of the whole file, with the current text in place
-// of the document. Its problem is a problem of the whole file, so it binds
-// where a problem at the path $ binds. The depth limit counts the levels of
-// the document. Its problem binds at the token that opens the first level
-// past the limit, at the site that [Doc.bindAt] gives the token. Each
-// problem has the message of the Source, and it matches [niceyaml.ErrLimit].
-// The user's text keeps the limits, so [niceyaml.IsInvalid] does not report
-// the problem.
+// of the document. The document byte limit counts the bytes of the run of
+// documents that holds the document, as [Doc.runSize] counts them. The
+// problem of either byte limit binds where a problem at the path $ binds.
+// The depth limit counts the levels of the document. Its problem binds at
+// the token that opens the first level past the limit, at the site that
+// [Doc.bindAt] gives the token. Each problem has the message of the
+// Source, and it matches [niceyaml.ErrLimit]. The user's text keeps the
+// limits, so [niceyaml.IsInvalid] does not report the problem.
 func (d *Doc) limitProblem(start string) error {
 	if d.cur == start {
 		return nil
 	}
 
 	src := d.user.Source()
-	bytes, depth := src.ByteLimit(), src.DepthLimit()
+	bytes, docBytes, depth := src.ByteLimit(), src.DocumentByteLimit(), src.DepthLimit()
 
 	var problem error
 
 	if size := len(src.Text()) - (d.end - d.start) + len(d.cur); size > bytes {
 		problem = d.bindOwn(niceyaml.Unchecked(&limitError{msg: "file is larger than " + quantity.Bytes(bytes)},
 			niceyaml.AtPath(paths.Doc())))
+	} else if docBytes < niceyaml.NoLimit && d.runSize() > docBytes {
+		msg := (&docparse.SizeError{Limit: docBytes}).Error()
+		problem = d.bindOwn(niceyaml.Unchecked(&limitError{msg: msg}, niceyaml.AtPath(paths.Doc())))
 	} else if tk, deep := docparse.TooDeep(d.src.Tokens(), depth); deep && tk.Position != nil {
 		msg := (&docparse.DepthError{Token: tk, Limit: depth}).Error()
 		problem = d.bindAt(d.offset(position.NewFromToken(tk)), 1, func(opts ...niceyaml.ErrorOption) error {
@@ -1067,6 +1072,71 @@ func (d *Doc) limitProblem(start string) error {
 	}
 
 	return problem
+}
+
+// runSize returns the number of bytes of the run of documents that holds
+// the current text. It counts as a load of the file counts, with the
+// current text in place of the document. The load cuts the file into the
+// runs of [docparse.Runs] and checks each run against the document byte
+// limit. A run can hold the comments below a "..." marker at the end of
+// the document before. A document that parses together with the document
+// before it shares a run with that document.
+//
+// The count tokenizes a window of the file around the document, so its
+// cost does not grow with the other documents of the file. The window
+// opens at the start of the document before and closes at the start of
+// the second document after. A run at the start of the window can go on
+// before it. The window then opens one document earlier, and the count
+// starts again. [New] refuses a document that ends with an anchor without
+// a value, so the run ends before the document after it.
+func (d *Doc) runSize() int {
+	src := d.user.Source()
+	text := src.Text()
+	docs := src.AllDocuments()
+	i := d.user.DocumentIndex()
+
+	// The window holds the documents from first up to the second after
+	// the document, exclusive.
+	first := i - 1
+
+	end := len(text)
+	if i+2 < len(docs) {
+		if off, ok := src.Offset(position.New(docs[i+2].Span().Start, 0)); ok {
+			end = lineStart(text, off)
+		}
+	}
+
+	for {
+		open, line := 0, 0
+		if first > 0 {
+			line = docs[first].Span().Start
+			if off, ok := src.Offset(position.New(line, 0)); ok {
+				open = off
+			} else {
+				line = 0
+			}
+		}
+
+		window := text[open:d.start] + d.cur + text[d.end:end]
+		runs := docparse.Runs(tokens.Tokenize(window))
+
+		// The lines of the window count from the line it opens at, and the
+		// document opens at its base line.
+		r := slices.IndexFunc(runs, func(run docparse.Run) bool {
+			return slices.ContainsFunc(run.Tokens, func(tk *token.Token) bool {
+				return tk.Type != token.CommentType && position.NewFromToken(tk).Line >= d.base-line
+			})
+		})
+
+		switch {
+		case r < 0:
+			return 0
+		case r == 0 && open > 0:
+			first--
+		default:
+			return runs[r].Size
+		}
+	}
 }
 
 // printableProblem returns the problem of the current text when it differs

@@ -215,10 +215,11 @@
 // input directory.
 //
 // A load applies the limits of each Source, as [niceyaml.WithByteLimit],
-// [niceyaml.WithDepthLimit], and [niceyaml.WithAliasLimit] describe. The
-// migration of a document fails with an error that matches
-// [niceyaml.ErrLimit] when its steps take the file past the byte limit or
-// the document past the depth limit. [niceyaml.IsInvalid] does not report
+// [niceyaml.WithDocumentByteLimit], [niceyaml.WithDepthLimit], and
+// [niceyaml.WithAliasLimit] describe. The migration of a document fails
+// with an error that matches [niceyaml.ErrLimit] when its steps take the
+// file past the byte limit, or the document past the document byte limit
+// or the depth limit. [niceyaml.IsInvalid] does not report
 // that error, because the text that the user wrote keeps the limits.
 //
 // [WithUnmarshalers] sets how the Go types of the kinds read YAML, such

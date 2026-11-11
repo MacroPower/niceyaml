@@ -96,7 +96,8 @@
 //
 // Each Source that a read builds takes the options of [WithSourceOptions],
 // such as the limits of [niceyaml.WithByteLimit],
-// [niceyaml.WithDepthLimit], and [niceyaml.WithAliasLimit]. A file longer
+// [niceyaml.WithDocumentByteLimit], [niceyaml.WithDepthLimit], and
+// [niceyaml.WithAliasLimit]. A file longer
 // than the byte limit gets a [File] with an error that matches
 // [niceyaml.ErrLimit].
 //

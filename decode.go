@@ -539,7 +539,8 @@ func (u Unmarshaler) applyTo(o *unmarshaler.Options) {
 //
 // The decoder writes the value out as text for the decode function. A
 // decode of a node that holds an alias then fails when the aliases of
-// the document repeat more text than the byte limit of the Source allows.
+// the document repeat more text than the document byte limit of the Source
+// allows.
 // It also fails when they nest the document past its depth limit. Each
 // error matches [ErrLimit], as the Limits section of the package
 // documentation describes.
@@ -752,8 +753,9 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // reading its content in full. When aliases make up too much of that count,
 // DecodeInto returns an error that matches [ErrExcessiveAliasing], bound at
 // the alias of the document that repeats the most. For a v whose type reads
-// text anywhere, the error for aliases past the bounds that the byte limit
-// and the depth limit of the [Source] set on them matches [ErrLimit] too.
+// text anywhere, the error for aliases past the bounds that the document
+// byte limit and the depth limit of the [Source] set on them matches
+// [ErrLimit] too.
 //
 // A step that fails before the go-yaml decoder runs leaves v as it is. A
 // field the document leaves out keeps its value. The Decoding section
@@ -1034,7 +1036,7 @@ func (n *Node) decodeValue(ctx context.Context, text []byte, dst any, cfg decode
 		// The decoder wrote the text from a node that passed the limits of
 		// its own Source. The decode checked the aliases of that node
 		// against the bounds of those limits before the decoder wrote it.
-		c.byteLimit, c.depthLimit = NoLimit, NoLimit
+		c.noLimits()
 	})
 
 	doc, err := source.Document()

@@ -190,14 +190,16 @@ func serve(ctx context.Context, p *printer.Printer, shared *niceyaml.Source, s s
 // decode reads an order from the body of an upload.
 func decode(ctx context.Context, shared *niceyaml.Source, s stock, name string, body io.Reader) (order, error) {
 	// An order nests three levels and fits in far less than 4 KiB. The
-	// server thus sets the byte and depth limits far lower than their
-	// defaults. The alias limit measures what the aliases make a decode
-	// read against what the upload holds, so it does not take a size. The
-	// byte and depth limits also bound the text that the aliases write
-	// out. The server thus sizes those two and keeps the alias limit on.
+	// server thus sets the byte limit, the document byte limit, and the
+	// depth limit far lower than their defaults. The alias limit measures
+	// what the aliases make a decode read against what the upload holds,
+	// so it does not take a size. The document byte limit and the depth
+	// limit also bound the text that the aliases write out. The server
+	// thus sizes each limit and keeps the alias limit on.
 	source, err := niceyaml.NewSourceFromReader(body,
 		niceyaml.WithName(name),
 		niceyaml.WithByteLimit(4<<10),
+		niceyaml.WithDocumentByteLimit(4<<10),
 		niceyaml.WithDepthLimit(8),
 		niceyaml.WithAliasLimit(true),
 		niceyaml.WithReferences(shared),

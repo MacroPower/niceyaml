@@ -303,7 +303,7 @@ func TestNewSourceFromDerived(t *testing.T) {
 		home := niceyaml.NewSourceFromString("a: *x\n",
 			niceyaml.WithName("h.yaml"), niceyaml.WithFilePath("/h.yaml"),
 			yamltest.References("x: &x 1\n"), niceyaml.WithAllowDuplicateKeys(true),
-			niceyaml.WithByteLimit(100), niceyaml.WithDepthLimit(3))
+			niceyaml.WithByteLimit(100), niceyaml.WithDocumentByteLimit(50), niceyaml.WithDepthLimit(3))
 		doc := yamltest.Document(t, home)
 
 		work := niceyaml.NewSourceFromDerived("b: *x\n", doc, nil)
@@ -313,6 +313,7 @@ func TestNewSourceFromDerived(t *testing.T) {
 		assert.Equal(t, home.References(), work.References())
 		assert.True(t, work.AllowsDuplicateKeys())
 		assert.Equal(t, 100, work.ByteLimit())
+		assert.Equal(t, 50, work.DocumentByteLimit())
 		assert.Equal(t, 3, work.DepthLimit())
 
 		got, err := work.Decode[map[string]int](t.Context())
@@ -376,9 +377,9 @@ func TestNewSourceFromDerived(t *testing.T) {
 		t.Parallel()
 
 		// The two aliases repeat 1200 bytes of text, past the 1 KiB that the
-		// byte limit of the first home allows.
+		// document byte limit of the first home allows.
 		text := "a: &a " + strings.Repeat("x", 600) + "\nb: *a\nc: *a\n"
-		home := niceyaml.NewSourceFromString(text, niceyaml.WithByteLimit(1024))
+		home := niceyaml.NewSourceFromString(text, niceyaml.WithDocumentByteLimit(1024))
 		middle := niceyaml.NewSourceFromDerived(text, yamltest.Document(t, home), nil, niceyaml.WithoutLimits())
 
 		work := niceyaml.NewSourceFromDerived(text, yamltest.Document(t, middle), nil)

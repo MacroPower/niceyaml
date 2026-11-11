@@ -366,7 +366,9 @@ func decodeYAML(ctx context.Context, data []byte, limit int) (any, error) {
 		return nil, fmt.Errorf("YAML decode: %w", httpfetch.TooLarge("text", limit))
 	}
 
-	source := niceyaml.NewSourceFromBytes(data, niceyaml.WithByteLimit(limit))
+	// The text is one document, so the document byte limit takes the
+	// limit too.
+	source := niceyaml.NewSourceFromBytes(data, niceyaml.WithByteLimit(limit), niceyaml.WithDocumentByteLimit(limit))
 
 	doc, err := source.Decode[any](context.WithoutCancel(ctx))
 	if err != nil {

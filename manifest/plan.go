@@ -433,8 +433,9 @@ func newText(text string, docs []*docState) string {
 
 // checkLimits returns the problem of after, the new text of the file of
 // src, when it holds more bytes than the byte limit of src. The edits of
-// each document keep the limits of src, but the documents of one file can
-// each grow within the byte limit and hold more bytes together. The check
+// each document keep the limits of src, the document byte limit among
+// them. The documents of one file can still each grow within those limits
+// and hold more bytes together than the byte limit allows. The check
 // keeps every file that Apply writes readable by the next load. The
 // problem matches [niceyaml.ErrLimit]. A load of the file passes, so
 // [niceyaml.IsInvalid] does not report the problem.

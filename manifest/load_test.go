@@ -3721,16 +3721,16 @@ func TestRegistry_Load_AliasExpansion(t *testing.T) {
 		err  string
 		opts []niceyaml.SourceOption
 	}{
-		"aliases past the byte limit": {
+		"aliases past the document byte limit": {
 			// The ninth alias brings the text past 1 KiB.
-			opts: []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			opts: []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
 			err:  "config/alarm.yaml:15:9: aliases repeat more than 1 KiB of text",
 		},
-		"aliases within a raised byte limit": {
-			opts: []niceyaml.SourceOption{niceyaml.WithByteLimit(4096)},
+		"aliases within a raised document byte limit": {
+			opts: []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(4096)},
 		},
 		"aliases with the alias limit off": {
-			opts: []niceyaml.SourceOption{niceyaml.WithByteLimit(1024), niceyaml.WithAliasLimit(false)},
+			opts: []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024), niceyaml.WithAliasLimit(false)},
 		},
 	}
 

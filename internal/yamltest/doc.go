@@ -104,7 +104,7 @@
 //
 //	doc := yamltest.FirstDocument(t, "server: *base\n", yamltest.References("base: &base {port: 80}\n"))
 //
-// [NoSizeLimits] returns the options that turn off the byte limit and the
+// [NoSizeLimits] returns the options that turn off each byte limit and the
 // depth limit, for a test or a benchmark that reads a large document.
 //
 // Tests that check how a bound error reads use [Bind]. It binds an error to

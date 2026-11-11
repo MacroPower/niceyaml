@@ -23,8 +23,8 @@
 // runs [CheckDecodeText] as well.
 //
 // The text that the decoder writes out must also fit the [Budget] of the
-// document. The niceyaml package takes the Budget from the byte limit and
-// the depth limit of the source. Those limits bound the text that the
+// document. The niceyaml package takes the Budget from the document byte
+// limit and the depth limit of the source. Those limits bound the text that the
 // parser reads. The aliases of a document within those limits can still
 // write out far more text, or nest it far deeper.
 //
