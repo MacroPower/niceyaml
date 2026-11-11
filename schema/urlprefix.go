@@ -46,11 +46,14 @@ var ErrURLNotAllowed = errors.New("URL not under an allowed prefix")
 // [go.jacobcolvin.com/niceyaml/schema/schemastore.Store] must pass the
 // hosts of the catalog's schemas to AllowURLPrefixes, or those schemas
 // fail to load. Those hosts include https://json.schemastore.org/,
-// https://www.schemastore.org/, and https://raw.githubusercontent.com/. A
-// program that confines only the schemas that its documents name gives
-// the Store a registry of its own, as [Registry.Resolve] describes. The
-// Store fetches the catalog with a client of its own, so the prefixes do
-// not reach the catalog.
+// https://www.schemastore.org/, and https://raw.githubusercontent.com/.
+// Otherwise, the program can keep the Store inside its prefixes with a
+// [go.jacobcolvin.com/niceyaml/schema/schemastore.WithFilter] function
+// that keeps only the entries whose URL falls under them. A program that
+// confines only the schemas that its documents name gives the Store a
+// registry of its own, as [Registry.Resolve] describes. The Store fetches
+// the catalog with a client of its own, so the prefixes do not reach the
+// catalog.
 //
 // # Matching
 //

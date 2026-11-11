@@ -31,8 +31,9 @@ const (
 
 var (
 	// ErrFetchCatalog indicates that the store could not fetch the
-	// SchemaStore catalog and does not hold an earlier one to match
-	// against.
+	// SchemaStore catalog. A lookup reports it only when the store does
+	// not hold an earlier catalog to match against. [Store.Refresh]
+	// reports it for every fetch that fails.
 	ErrFetchCatalog = errors.New("fetch schema catalog")
 
 	// ErrNoCatalogMatch indicates that the file path of the document does
@@ -58,8 +59,13 @@ var (
 	}
 )
 
-// Catalog represents the SchemaStore.org catalog structure that the
-// catalog API returns.
+// Catalog represents the SchemaStore.org catalog as the catalog API
+// returns it. You can marshal a Catalog to JSON to serve a catalog of your
+// own, such as one for a test or one that a program embeds.
+//
+// A Catalog holds every entry as the catalog lists it. The store drops
+// some entries and patterns when it loads the catalog, and
+// [Store.Entries] returns what the store matches against.
 type Catalog struct {
 	Schemas []CatalogEntry `json:"schemas"`
 }
@@ -103,6 +109,12 @@ type CatalogEntry struct {
 // [ErrFetchCatalog]. After a failed fetch, the store waits the retry
 // interval before it contacts the catalog URL again. So an unreachable
 // catalog costs one timeout per interval rather than one per lookup.
+//
+// [Store.Entries] loads the catalog as a lookup does, so a program can
+// call it at startup to fetch the catalog before the first document.
+// [Store.Refresh] fetches the catalog at once and reports the error of
+// each failed fetch. Lookups report that error only before any catalog
+// has loaded.
 //
 // The TTL covers only the catalog. The registry keeps each schema that it
 // fetched for an entry, even after a refresh of the catalog. To fetch the
@@ -213,7 +225,7 @@ func WithCacheTTL(ttl time.Duration) Option {
 // timeout. If the fetch fails or times out, the lookup uses the previous
 // catalog when one exists. So a temporarily unreachable SchemaStore.org
 // degrades to stale matches rather than errors. The fetch does not inherit
-// the cancellation or deadline of the lookup that started it, so only this
+// the cancellation or deadline of the call that started it, so only this
 // timeout bounds how long it runs. The registry fetches a matched schema
 // itself, and its client and the context of the lookup bound that fetch.
 //
@@ -232,7 +244,8 @@ func WithRefreshTimeout(timeout time.Duration) Option {
 //
 // Until the interval passes, lookups do not contact the catalog URL. They
 // use the previous catalog when one exists, and otherwise report
-// [ErrFetchCatalog] with the last fetch error.
+// [ErrFetchCatalog] with the last fetch error. The interval does not
+// apply to [Store.Refresh], which fetches at once.
 //
 // The default is 1 minute. An interval of zero or less keeps the default,
 // so the store does not retry on every lookup.
@@ -269,7 +282,8 @@ func WithLoadLimit(n int) Option {
 // The store matches only the entries for which the filter returns true.
 // It calls the filter during catalog refresh, so the filter should avoid
 // expensive or stateful operations. A panic or a call to [runtime.Goexit]
-// in the filter repeats in each lookup that waits for the refresh.
+// in the filter repeats in each call that waits for the refresh. Lookups,
+// [Store.Entries], and [Store.Refresh] all wait for it.
 //
 // Example:
 //
@@ -286,7 +300,8 @@ func WithFilter(fn func(CatalogEntry) bool) Option {
 // New creates a new [*Store].
 //
 // New does not perform I/O. The store fetches the catalog on the first
-// lookup and caches it for the configured TTL. Pass options to configure
+// lookup, or on the first call to [Store.Entries] or [Store.Refresh], and
+// caches it for the configured TTL. Pass options to configure
 // the store:
 //
 //	store := schemastore.New(
@@ -395,13 +410,80 @@ func (s *Store) FindMatch(ctx context.Context, filePath string) (CatalogEntry, e
 		return CatalogEntry{}, fmt.Errorf("%w: %q", ErrNoCatalogMatch, filePath)
 	}
 
-	// The cached entry shares its pattern slice with s.entries, so hand
-	// the caller a copy it can write to. The prepared globs serve lookups
-	// alone, so the caller gets none.
-	best.FileMatch = slices.Clone(best.FileMatch)
-	best.globs = filepaths.AnyDepthPatterns{}
+	return best.detach(), nil
+}
 
-	return best, nil
+// Entries returns the catalog entries that the store matches against, in
+// catalog order. The store keeps only the entries that have an HTTP or
+// HTTPS URL, pass the filter of [WithFilter], and keep at least one
+// pattern. Each entry holds only the patterns that the store matches, as
+// [CatalogEntry] describes for FileMatch.
+//
+// Entries loads the catalog as a lookup does. Before any catalog has
+// loaded, it returns [ErrFetchCatalog] when the fetch fails or when ctx
+// ends before the fetch finishes. After a failed refresh, it returns the
+// previous entries. So a program can call Entries at startup to fetch the
+// catalog before the first lookup, and to report a failed fetch there.
+//
+// Each returned entry owns its FileMatch patterns, so a write to them does
+// not change the cached catalog. Entries copies the catalog on each call.
+func (s *Store) Entries(ctx context.Context) ([]CatalogEntry, error) {
+	entries, err := s.catalog(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]CatalogEntry, len(entries))
+	for i, entry := range entries {
+		out[i] = entry.detach()
+	}
+
+	return out, nil
+}
+
+// Refresh fetches the catalog now, whatever the cache TTL and the retry
+// interval. When a fetch is already in flight, Refresh waits for that
+// fetch and does not start another. A fetch that succeeds replaces the
+// catalog and restarts the TTL.
+//
+// Refresh returns the error of the fetch wrapped in [ErrFetchCatalog],
+// even when the store keeps an earlier catalog in use. Lookups still
+// match against that earlier catalog. So a long-running service can call
+// Refresh on a ticker and log the error to learn that its catalog went
+// stale. Refresh does not wait out the retry interval, so the ticker sets
+// how often the store contacts the catalog URL.
+//
+// When ctx ends before the fetch finishes, Refresh returns
+// [ErrFetchCatalog] wrapping the error of ctx, and the fetch keeps
+// running. When ctx has ended before the call, Refresh does not start a
+// fetch.
+//
+// Refresh raises a panic or a call to [runtime.Goexit] from the fetch
+// again in its caller, such as one in the function of [WithFilter]. A
+// service that calls Refresh on a goroutine of its own must recover such
+// a panic there to keep running.
+func (s *Store) Refresh(ctx context.Context) error {
+	err := ctx.Err()
+	if err == nil {
+		err = s.start(ctx).wait(ctx)
+	}
+
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrFetchCatalog, err)
+	}
+
+	return nil
+}
+
+// detach returns a copy of e for a caller. The cached entry shares its
+// pattern slice with the catalog of the store. So the copy gets a slice of
+// its own, which the caller can write to. The prepared globs serve lookups
+// alone, so the copy gets none.
+func (e CatalogEntry) detach() CatalogEntry {
+	e.FileMatch = slices.Clone(e.FileMatch)
+	e.globs = filepaths.AnyDepthPatterns{}
+
+	return e
 }
 
 // bestMatch returns the entry whose pattern matches cleanPath most
@@ -454,28 +536,35 @@ func (s *Store) catalog(ctx context.Context) ([]CatalogEntry, error) {
 		return entries, err
 	}
 
+	err = call.wait(ctx)
+	if err != nil {
+		return s.stale(err)
+	}
+
+	return call.entries, nil
+}
+
+// wait waits for the fetch to finish or for ctx to end, and returns the
+// error of the fetch or of ctx. The fetch hands back a panic or a call to
+// [runtime.Goexit] as an error, and each caller that waited for it raises
+// it again here.
+func (call *fetchCall) wait(ctx context.Context) error {
 	select {
 	case <-call.done:
 	case <-ctx.Done():
-		// The fetch may have finished in the same instant the context
+		// The fetch might have finished in the same instant the context
 		// ended. Its outcome counts when it is ready, so the result does
 		// not depend on which case the select picks.
 		select {
 		case <-call.done:
 		default:
-			return s.stale(ctx.Err())
+			return ctx.Err() //nolint:wrapcheck // Each caller wraps the error.
 		}
 	}
 
-	// The fetch hands back a panic or a call to runtime.Goexit as an error,
-	// and each lookup that waited for it raises it again here.
 	capture.Reraise(call.err)
 
-	if call.err != nil {
-		return s.stale(call.err)
-	}
-
-	return call.entries, nil
+	return call.err
 }
 
 // join decides under the lock whether a lookup can answer without waiting
@@ -511,22 +600,37 @@ func (s *Store) join(ctx context.Context) (*fetchCall, []CatalogEntry, error) {
 		return nil, s.entries, nil
 	}
 
+	return s.startLocked(ctx), nil, nil
+}
+
+// start returns the fetch in flight, and starts one first when the store
+// is not fetching.
+func (s *Store) start(ctx context.Context) *fetchCall {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.startLocked(ctx)
+}
+
+// startLocked is start for a caller that already holds mu.
+func (s *Store) startLocked(ctx context.Context) *fetchCall {
 	if s.inflight == nil {
 		s.inflight = &fetchCall{done: make(chan struct{})}
 
 		go s.refresh(ctx, s.inflight)
 	}
 
-	return s.inflight, nil, nil
+	return s.inflight
 }
 
 // refresh fetches the catalog for call, records the outcome, and closes
-// call.done. The ctx argument belongs to the lookup that started the
-// fetch. The fetch drops the cancellation and deadline of ctx, so a lookup
-// that stops waiting does not cancel a fetch that other lookups share. The
-// refresh timeout bounds the fetch instead.
+// call.done. The ctx argument belongs to the call that started the fetch,
+// which is a lookup, Entries, or Refresh. The fetch drops the cancellation
+// and deadline of ctx, so a caller that stops waiting does not cancel a
+// fetch that other callers share. The refresh timeout bounds the fetch
+// instead.
 //
-// Lookups cannot recover a panic on the refresh goroutine. So refresh
+// No caller can recover a panic on the refresh goroutine. So refresh
 // records a panic or a call to [runtime.Goexit] as the error of the fetch,
 // whether it comes from the filter, the HTTP transport, or the catalog
 // parsing.

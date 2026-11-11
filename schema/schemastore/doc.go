@@ -59,4 +59,26 @@
 // before any catalog has loaded, a lookup reports [ErrFetchCatalog]. The
 // store then waits the retry interval before it contacts SchemaStore.org
 // again.
+//
+// A long-running program can take control of the catalog load. A call to
+// [Store.Entries] at startup fetches the catalog before the first
+// document and returns the entries that the store matches against. Calls
+// to [Store.Refresh] on a ticker fetch the catalog at once and report
+// each failed fetch. Lookups hide such a failure while an earlier catalog
+// stays in use:
+//
+//	store := schemastore.New()
+//
+//	entries, err := store.Entries(ctx)
+//	if err != nil {
+//	    return err
+//	}
+//	for _, e := range entries {
+//	    fmt.Println(e.Name, e.URL, e.FileMatch)
+//	}
+//
+//	// Later, on a ticker:
+//	if err := store.Refresh(ctx); err != nil {
+//	    log.Printf("schema catalog is stale: %v", err)
+//	}
 package schemastore

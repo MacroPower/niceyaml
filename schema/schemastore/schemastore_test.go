@@ -436,6 +436,264 @@ func TestStore_FindMatchAfterRefresh(t *testing.T) {
 	assert.Equal(t, int32(3), requests.Load())
 }
 
+func TestStore_Entries(t *testing.T) {
+	t.Parallel()
+
+	t.Run("lists the entries the store matches against", func(t *testing.T) {
+		t.Parallel()
+
+		catalog := schemastore.Catalog{
+			Schemas: []schemastore.CatalogEntry{
+				{Name: "Kept", URL: "https://example.com/kept.json", FileMatch: []string{"kept.yaml"}},
+				{Name: "File URL", URL: "file:///schemas/local.json", FileMatch: []string{"local.yaml"}},
+				{Name: "TOML only", URL: "https://example.com/toml.json", FileMatch: []string{"*.toml"}},
+				{Name: "Filtered", URL: "https://example.com/filtered.json", FileMatch: []string{"filtered.yaml"}},
+				{
+					Name:      "Trimmed",
+					URL:       "https://example.com/trimmed.json",
+					FileMatch: []string{"app.toml", "app.yaml", "!(config).yml"},
+				},
+				{Name: "No patterns", URL: "https://example.com/none.json"},
+			},
+		}
+
+		store := newCatalogStore(t, catalog, schemastore.WithFilter(func(e schemastore.CatalogEntry) bool {
+			return e.Name != "Filtered"
+		}))
+
+		entries, err := store.Entries(t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, []schemastore.CatalogEntry{
+			{Name: "Kept", URL: "https://example.com/kept.json", FileMatch: []string{"kept.yaml"}},
+			{Name: "Trimmed", URL: "https://example.com/trimmed.json", FileMatch: []string{"app.yaml"}},
+		}, entries)
+	})
+
+	t.Run("lists an empty catalog", func(t *testing.T) {
+		t.Parallel()
+
+		store := newCatalogStore(t, schemastore.Catalog{Schemas: []schemastore.CatalogEntry{}})
+
+		entries, err := store.Entries(t.Context())
+		require.NoError(t, err)
+		assert.Empty(t, entries)
+	})
+
+	t.Run("does not alias the catalog", func(t *testing.T) {
+		t.Parallel()
+
+		store := newCatalogStore(t, layeredCatalog)
+
+		entries, err := store.Entries(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, layeredCatalog.Schemas, entries)
+
+		entries[0].FileMatch[0] = "*.json"
+		entries[1] = schemastore.CatalogEntry{}
+
+		entries, err = store.Entries(t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, layeredCatalog.Schemas, entries)
+
+		entry, err := store.FindMatch(t.Context(), "/x/other.yaml")
+		require.NoError(t, err)
+		assert.Equal(t, "Generic", entry.Name)
+	})
+
+	t.Run("loads the catalog for later lookups", func(t *testing.T) {
+		t.Parallel()
+
+		synctest.Test(t, func(t *testing.T) {
+			store, fetchCount := newCountingStore(respondCatalog(t, testCatalog))
+
+			_, err := store.Entries(t.Context())
+			require.NoError(t, err)
+
+			synctest.Wait()
+			assert.Equal(t, int32(1), fetchCount.Load())
+
+			// The lookup matches against the catalog that Entries loaded.
+			requireEntry(t, store, "Test")
+
+			synctest.Wait()
+			assert.Equal(t, int32(1), fetchCount.Load())
+		})
+	})
+
+	t.Run("reports a failed fetch before any catalog has loaded", func(t *testing.T) {
+		t.Parallel()
+
+		store := newStore(serverError.Client())
+
+		entries, err := store.Entries(t.Context())
+		require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
+		require.NotErrorIs(t, err, schema.ErrNoMatch)
+		assert.Nil(t, entries)
+	})
+
+	t.Run("returns the previous entries after a failed refresh", func(t *testing.T) {
+		t.Parallel()
+
+		synctest.Test(t, func(t *testing.T) {
+			store, requests := newFailingRefreshStore(t, schemastore.WithCacheTTL(10*time.Millisecond))
+
+			requireEntry(t, store, "Test")
+
+			// Let the cache expire, so Entries refreshes and the refresh
+			// fails.
+			time.Sleep(20 * time.Millisecond)
+
+			entries, err := store.Entries(t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, testCatalog.Schemas, entries)
+			assert.Equal(t, int32(2), requests.Load())
+		})
+	})
+}
+
+func TestStore_Refresh(t *testing.T) {
+	t.Parallel()
+
+	t.Run("replaces the catalog before the TTL expires", func(t *testing.T) {
+		t.Parallel()
+
+		store, requests, _ := newHeldStore(t, 2)
+
+		requireEntry(t, store, "Catalog 1")
+
+		require.NoError(t, store.Refresh(t.Context()))
+		assert.Equal(t, int32(2), requests.Load())
+
+		// The refresh restarted the TTL, so this lookup does not fetch.
+		requireEntry(t, store, "Catalog 2")
+		assert.Equal(t, int32(2), requests.Load())
+	})
+
+	t.Run("loads the first catalog", func(t *testing.T) {
+		t.Parallel()
+
+		store, requests := newCountingStore(respondCatalog(t, testCatalog))
+
+		require.NoError(t, store.Refresh(t.Context()))
+
+		requireEntry(t, store, "Test")
+		assert.Equal(t, int32(1), requests.Load())
+	})
+
+	t.Run("reports a failed refresh that lookups do not", func(t *testing.T) {
+		t.Parallel()
+
+		store, requests := newFailingRefreshStore(t)
+
+		requireEntry(t, store, "Test")
+
+		err := store.Refresh(t.Context())
+		require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
+
+		fetchErr, ok := errors.AsType[*schema.FetchError](err)
+		require.True(t, ok, "want a *schema.FetchError, got %v", err)
+		assert.Equal(t, http.StatusServiceUnavailable, fetchErr.StatusCode)
+
+		// Lookups keep the previous catalog.
+		requireEntry(t, store, "Test")
+		assert.Equal(t, int32(2), requests.Load())
+	})
+
+	t.Run("fetches inside the retry interval", func(t *testing.T) {
+		t.Parallel()
+
+		store, requests := newCountingStore(serverError)
+
+		requireFetchError(t, store)
+		assert.Equal(t, int32(1), requests.Load())
+
+		require.ErrorIs(t, store.Refresh(t.Context()), schemastore.ErrFetchCatalog)
+		assert.Equal(t, int32(2), requests.Load())
+	})
+
+	t.Run("joins a fetch in flight", func(t *testing.T) {
+		t.Parallel()
+
+		synctest.Test(t, func(t *testing.T) {
+			store, requests, release := newHeldStore(t, 0)
+
+			// This lookup starts the first fetch, which the transport holds.
+			lookup := findMatchAsync(t.Context(), store)
+
+			synctest.Wait()
+			require.Equal(t, int32(1), requests.Load())
+
+			refreshed := make(chan error, 1)
+
+			go func() {
+				refreshed <- store.Refresh(t.Context())
+			}()
+
+			synctest.Wait()
+			release()
+
+			require.NoError(t, receive(t, refreshed))
+			requireFound(t, lookup, "Catalog 1")
+			assert.Equal(t, int32(1), requests.Load())
+		})
+	})
+
+	t.Run("stops waiting when the context ends", func(t *testing.T) {
+		t.Parallel()
+
+		synctest.Test(t, func(t *testing.T) {
+			store, requests, release := newHeldStore(t, 0)
+
+			ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+			defer cancel()
+
+			err := store.Refresh(ctx)
+			require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+
+			// The fetch outlives the call that started it and records its
+			// catalog.
+			release()
+			synctest.Wait()
+
+			requireEntry(t, store, "Catalog 1")
+			assert.Equal(t, int32(1), requests.Load())
+		})
+	})
+
+	t.Run("does not fetch with an ended context", func(t *testing.T) {
+		t.Parallel()
+
+		synctest.Test(t, func(t *testing.T) {
+			store, requests := newCountingStore(respondCatalog(t, testCatalog))
+
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+
+			err := store.Refresh(ctx)
+			require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
+			require.ErrorIs(t, err, context.Canceled)
+
+			synctest.Wait()
+			assert.Equal(t, int32(0), requests.Load())
+		})
+	})
+
+	t.Run("raises a panic of the fetch", func(t *testing.T) {
+		t.Parallel()
+
+		store := newStore(yamltest.RoundTripFunc(panicTransport).Client())
+
+		err := capturedRun(t, func() error {
+			//nolint:errcheck // Only a panic counts here.
+			_ = store.Refresh(t.Context())
+
+			return errLookupReturned
+		})
+		assert.Equal(t, &capture.PanicError{Value: "transport bug"}, err)
+	})
+}
+
 func TestStore_LazyLoading(t *testing.T) {
 	t.Parallel()
 
@@ -1502,6 +1760,26 @@ func newCountingStore(rt http.RoundTripper, opts ...schemastore.Option) (*schema
 	client, requests := yamltest.CountingClient(rt)
 
 	return newStore(client, opts...), requests
+}
+
+// newFailingRefreshStore creates a [*schemastore.Store] whose transport
+// answers the first request with testCatalog and every later one with
+// status 503, with opts applied after. It also returns a count of the
+// requests the store has sent.
+func newFailingRefreshStore(tb testing.TB, opts ...schemastore.Option) (*schemastore.Store, *atomic.Int32) {
+	tb.Helper()
+
+	first, later := respondCatalog(tb, testCatalog), yamltest.Respond(http.StatusServiceUnavailable, "")
+
+	var calls atomic.Int32
+
+	return newCountingStore(yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if calls.Add(1) > 1 {
+			return later(r)
+		}
+
+		return first(r)
+	}), opts...)
 }
 
 // respondCatalog returns a transport function that answers every URL
