@@ -12,6 +12,7 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/edit"
+	"go.jacobcolvin.com/niceyaml/escape"
 	"go.jacobcolvin.com/niceyaml/input"
 	"go.jacobcolvin.com/niceyaml/internal/quantity"
 	"go.jacobcolvin.com/niceyaml/line"
@@ -156,8 +157,11 @@ func (p *Plan) Files() []*PlanFile {
 	return p.files
 }
 
-// Blocked returns the names of the files that a problem blocks, as
-// messages show them, in load order.
+// Blocked returns the names of the files that a problem blocks, in load
+// order. Each name is as the input gives it, as [niceyaml.Source.Name]
+// returns it, so a program can match it against the names of
+// [Plan.Sources]. A name can hold control characters, so a renderer
+// passes each through [escape.Line] before it prints the name.
 func (p *Plan) Blocked() []string {
 	return p.blocked
 }
@@ -226,17 +230,22 @@ func (f *PlanFile) Removals() error {
 // its step. When the file holds documents that fail to route, which the
 // rewrite leaves as they are, a last line counts them as not migrated. A
 // document that is up to date does not get a line.
+//
+// Each line takes one row of a terminal. Header passes the name of the
+// file and the reason of each removal through [escape.Line], as an error
+// of the load draws them. [PlanFile.Source] holds the name as the input
+// gives it.
 func (f *PlanFile) Header() string {
 	var b strings.Builder
 
 	for _, d := range f.docs {
-		fmt.Fprintf(&b, "%s: %s from %s to %s\n", f.f.name, d.name, d.from, d.to)
+		fmt.Fprintf(&b, "%s: %s from %s to %s\n", f.f.label(), d.name, d.from, d.to)
 
 		for _, rm := range d.removals {
 			b.WriteString("  removes " + removalPath(rm))
 
 			if rm.Reason != "" {
-				b.WriteString(": " + rm.Reason)
+				b.WriteString(": " + escape.Line(rm.Reason))
 			}
 
 			b.WriteByte('\n')
@@ -244,7 +253,7 @@ func (f *PlanFile) Header() string {
 	}
 
 	if f.notMigrated > 0 {
-		fmt.Fprintf(&b, "%s: %s not migrated\n", f.f.name, quantity.Plural(f.notMigrated, "document"))
+		fmt.Fprintf(&b, "%s: %s not migrated\n", f.f.label(), quantity.Plural(f.notMigrated, "document"))
 	}
 
 	return strings.TrimSuffix(b.String(), "\n")

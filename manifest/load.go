@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/escape"
 	"go.jacobcolvin.com/niceyaml/input"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/internal/inputhook"
@@ -349,7 +350,7 @@ type file struct {
 	plan *PlanFile
 	// The name of the directory input whose walk found the file, or "".
 	dir string
-	// The name of the file, as messages show it.
+	// The name of the file, as the input gives it.
 	name string
 	// The documents of the file that the load checked, in order.
 	docs []*docState
@@ -376,6 +377,13 @@ func newFile(f inputhook.File) *file {
 			outside: f.Target.Outside,
 		},
 	}
+}
+
+// label returns the name of f as the lines of a header or a summary show
+// it. It escapes the name for one row, as a [*niceyaml.SourceError] draws
+// the name of its source.
+func (f *file) label() string {
+	return escape.Line(f.name)
 }
 
 // namedSource returns an empty Source that messages name name, where a

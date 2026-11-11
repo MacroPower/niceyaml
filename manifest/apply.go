@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/escape"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/internal/inputhook"
 	"go.jacobcolvin.com/niceyaml/internal/quantity"
@@ -144,6 +145,10 @@ func (r *Result) Files() []*PlanFile {
 // a file that Apply wrote holds documents that fail to route, a line
 // counts them as not migrated. The last line counts the files, as in
 // "2 files migrated, 1 up to date", and the documents that fail to route.
+//
+// Each line takes one row of a terminal. Summary passes the name of each
+// file and the reason of each file that Apply did not write through
+// [escape.Line], as an error of the load draws them.
 func (r *Result) Summary() string {
 	var b strings.Builder
 
@@ -165,16 +170,16 @@ func (r *Result) Summary() string {
 				}
 			}
 
-			fmt.Fprintf(&b, "%s: not migrated, %s\n", f.name, quantity.Plural(errs, "error"))
+			fmt.Fprintf(&b, "%s: not migrated, %s\n", f.label(), quantity.Plural(errs, "error"))
 
 		case r.failed[i].err != nil:
-			fmt.Fprintf(&b, "%s: not written, %s\n", f.name, r.failed[i].reason)
+			fmt.Fprintf(&b, "%s: not written, %s\n", f.label(), escape.Line(r.failed[i].reason))
 
 		case written[i] != nil:
 			wf := written[i]
 
 			for _, d := range wf.docs {
-				fmt.Fprintf(&b, "%s: migrated %s to %s\n", f.name, d.name, d.to)
+				fmt.Fprintf(&b, "%s: migrated %s to %s\n", f.label(), d.name, d.to)
 
 				for _, rm := range d.removals {
 					b.WriteString("  removed " + removalPath(rm) + "\n")
@@ -182,7 +187,7 @@ func (r *Result) Summary() string {
 			}
 
 			if wf.notMigrated > 0 {
-				fmt.Fprintf(&b, "%s: %s not migrated\n", f.name, quantity.Plural(wf.notMigrated, "document"))
+				fmt.Fprintf(&b, "%s: %s not migrated\n", f.label(), quantity.Plural(wf.notMigrated, "document"))
 			}
 		}
 	}
