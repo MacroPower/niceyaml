@@ -140,7 +140,8 @@ func New(opts ...Option) *Differ {
 // The result shares the lines of its inputs and carries the flags of the
 // diff itself. Those lines never change. Each rendering method returns a
 // fresh [line.View] that shares those lines. The rendering methods are
-// [Result.Unified], [Result.Hunks], [Result.Before], and [Result.After].
+// [Result.Unified], [Result.Hunks], [Result.Before], [Result.After], and
+// [Result.PaneHunks].
 //
 // The revisions should hold distinct lines, as two parsed Source values
 // do. When both hold the same [*line.Line], such as two [line.Collect] values
@@ -334,9 +335,11 @@ type Origin struct {
 //     decorated view marks, with context.
 //   - [Result.Before] and [Result.After] return aligned views
 //     for side-by-side rendering.
+//   - [Result.PaneHunks] and [Result.PaneHunksOf] return the hunks of the
+//     side-by-side panes, aligned as Before and After are.
 //
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintSideBySide] prints the
-// panes of Before and After beside each other.
+// panes of Before and After, or the pane hunks, beside each other.
 //
 // Every row of a rendering shows a line of an input or, in a side-by-side
 // pane, an empty placeholder. [Result.UnifiedOrigin] and
@@ -509,72 +512,194 @@ func (r *Result) Hunks(context int) *line.View {
 // The result keeps the clip that [line.View.Clip] gave view, as
 // [line.View.Slice] does. HunksOf panics when view is not over the content
 // of Result.Unified, as [line.View.Over] reports.
+//
+// [Result.PaneHunksOf] returns the hunks of two side-by-side panes.
 func (r *Result) HunksOf(view *line.View, context int) *line.View {
 	if !view.Over(r.unified) {
 		panic("diff: HunksOf: view is not a view of this Result")
 	}
 
+	rows := func(row int) [2]int { return r.ops[row].pos }
+	marked := func(row int) bool { return hunkMarked(view, row) }
+
+	spans, parts := hunkSpans(r.consecutiveParts(len(r.ops), rows), context, marked, view)
+
+	return hunksOf(r.Unified(), view, spans, r.hunkHeaders(spans, parts, rows))
+}
+
+// PaneHunks returns the hunks of the side-by-side panes, the hunks of
+// [Result.Before] first and the hunks of [Result.After] second. Both
+// hold the rows of each run of changes, with context rows around each run.
+// Both thus hold the same rows and pair them as the panes do:
+//
+//	left, right := result.PaneHunks(3)
+//	lipgloss.Println(p.PrintSideBySide(left, right))
+//
+// The hunks of one pane alone, such as [line.View.Hunks] of
+// Result.Before, do not pair with the other pane. A pure insertion
+// decorates only the rows of [Result.After], so the hunks of
+// Result.Before leave out its rows and the context rows around it.
+//
+// PaneHunks returns PaneHunksOf(r.Before(), r.After(), context). See
+// [Result.PaneHunksOf] for the rows, the headers, and the gaps.
+func (r *Result) PaneHunks(context int) (*line.View, *line.View) {
+	return r.PaneHunksOf(r.Before(), r.After(), context)
+}
+
+// PaneHunksOf returns the hunks of two side-by-side panes, as
+// [Result.HunksOf] does for the unified view. The before argument is a
+// view of [Result.Before], and after is a view of [Result.After]. Each
+// carries decoration, such as the marks that [Result.Carry] copies from
+// the inputs:
+//
+//	left, right := result.Before(), result.After()
+//	result.Carry(left, beforeView, afterView)
+//	result.Carry(right, beforeView, afterView)
+//	left, right = result.PaneHunksOf(left, right, 2)
+//
+// A hunk forms around each row that holds a change and around each row
+// that either view decorates, as [Result.HunksOf] states. A row that
+// holds a change marks a hunk even in the pane that shows a placeholder
+// there, so both results hold the same rows. Each result is a
+// [line.View.Slice] of its pane over the same spans, so a row keeps its
+// index, and [Result.PaneOrigin], [Result.PaneRow], [Result.Carry], and
+// [go.jacobcolvin.com/niceyaml/printer.Printer.PrintSideBySide] take the
+// results as they take the panes.
+//
+// The hunks follow the rules of [Result.Hunks]: context rows around each
+// marked row, a header above each hunk, and no hunk across a gap in
+// either side's numbering. A row that either view does not hold is a gap
+// too. The first row of each hunk carries the same header in both
+// results, and the header names the lines of each side that the hunk
+// holds. Without a gap, a hunk holds the lines that the hunk of
+// [Result.Hunks] at the same context holds, so its header reads the same.
+// A gap splits the panes between two rows, but it can split the unified
+// view inside a run of changes, so the hunks next to a gap can differ.
+//
+// Each result keeps the flags, the overlays, the annotations, and the clip
+// of its view, except the annotations above a row that do not mark, as
+// [Result.HunksOf] states. PaneHunksOf panics when before is not over the
+// content of Result.Before, or after is not over the content of
+// Result.After, as [line.View.Over] reports.
+func (r *Result) PaneHunksOf(before, after *line.View, context int) (*line.View, *line.View) {
+	p := r.getPanes()
+
+	if !before.Over(p.content[Before]) {
+		panic("diff: PaneHunksOf: before is not a view of the before pane of this Result")
+	}
+
+	if !after.Over(p.content[After]) {
+		panic("diff: PaneHunksOf: after is not a view of the after pane of this Result")
+	}
+
+	rows := func(row int) [2]int { return p.rows[row].pos }
+	marked := func(row int) bool {
+		return p.rows[row].changed || hunkMarked(before, row) || hunkMarked(after, row)
+	}
+
+	spans, parts := hunkSpans(r.consecutiveParts(len(p.rows), rows), context, marked, before, after)
+	headers := r.hunkHeaders(spans, parts, rows)
+
+	return hunksOf(r.pane(Before), before, spans, headers), hunksOf(r.pane(After), after, spans, headers)
+}
+
+// hunkSpans returns the spans of the hunks within parts, and the part that
+// holds each span. A hunk forms around each row that marked reports, with
+// context rows around it. Each marked row takes its context rows from its
+// own run of rows that every view holds, in its own part. No hunk thus
+// reaches across a row that a view does not hold or a gap in either side's
+// numbering.
+func hunkSpans(
+	parts []consecutivePart,
+	context int,
+	marked func(row int) bool,
+	views ...*line.View,
+) (position.Spans, []consecutivePart) {
 	var (
-		spans position.Spans
-		parts []consecutivePart // The part that holds each span.
+		spans     position.Spans
+		spanParts []consecutivePart // The part that holds each span.
 	)
 
-	for _, part := range r.consecutiveParts() {
-		for _, run := range heldRuns(view, part.ops) {
-			var marked []int
+	for _, part := range parts {
+		for _, run := range heldRuns(part.rows, views...) {
+			var rows []int
 
 			for i := run.Start; i < run.End; i++ {
-				if hunkMarked(view, i) {
-					marked = append(marked, i)
+				if marked(i) {
+					rows = append(rows, i)
 				}
 			}
 
-			// Each marked row takes its context lines from its own run of
-			// held rows in its own part. No hunk thus reaches across a row
-			// the view does not hold or a gap in either side's numbering.
-			for _, span := range position.ContextSpans(marked, context, run.End).Clamp(run.Start, run.End) {
+			for _, span := range position.ContextSpans(rows, context, run.End).Clamp(run.Start, run.End) {
 				spans = append(spans, span)
-				parts = append(parts, part)
+				spanParts = append(spanParts, part)
 			}
 		}
 	}
 
-	hunks := r.Unified().Slice(spans...).Clip(view.ClipCols())
+	return spans, spanParts
+}
 
-	// The spans come in order, so one pass over the ops counts the lines
+// hunkHeaders returns the header of each hunk that spans holds. The parts
+// argument gives the part that holds each span, and rows gives the
+// position on each side of the line that a row shows, or -1, as lineOp
+// and alignedRow hold them.
+func (r *Result) hunkHeaders(spans position.Spans, parts []consecutivePart, rows func(row int) [2]int) []string {
+	headers := make([]string, len(spans))
+
+	// The spans come in order, so one pass over the rows counts the lines
 	// each side holds before each hunk and within it.
-	var beforeIdx, afterIdx, pos int
+	var idx [2]int
+
+	row := 0
 
 	for i, span := range spans {
-		for ; pos < span.Start; pos++ {
-			b, a := opKindDeltas(r.ops[pos].kind)
-			beforeIdx += b
-			afterIdx += a
+		for ; row < span.Start; row++ {
+			idx = addHeld(idx, rows(row))
 		}
 
-		var beforeCount, afterCount int
+		var count [2]int
 
-		for ; pos < span.End; pos++ {
-			b, a := opKindDeltas(r.ops[pos].kind)
-			beforeCount += b
-			afterCount += a
+		for ; row < span.End; row++ {
+			count = addHeld(count, rows(row))
 		}
 
-		// The hunk header goes above the first line of each hunk.
+		headers[i] = r.formatHunkHeader(parts[i], idx[Before], count[Before], idx[After], count[After])
+		idx[Before] += count[Before]
+		idx[After] += count[After]
+	}
+
+	return headers
+}
+
+// addHeld adds to each count of n the line that pos holds on that side,
+// if any.
+func addHeld(n, pos [2]int) [2]int {
+	for s, p := range pos {
+		if p >= 0 {
+			n[s]++
+		}
+	}
+
+	return n
+}
+
+// hunksOf returns the slice of base by spans with each header above the
+// first row of its span. Each row then takes the decoration of view, so
+// the header stays above the marks, as Carry keeps it. The headers and the
+// separators that a view of hunks carries above its rows need not match
+// the new hunks, so they stay out. The result keeps the clip of view.
+func hunksOf(base, view *line.View, spans position.Spans, headers []string) *line.View {
+	hunks := base.Slice(spans...).Clip(view.ClipCols())
+
+	for i, span := range spans {
 		hunks.AnnotateLine(span.Start, line.Annotation{
-			Content:   r.formatHunkHeader(parts[i], beforeIdx, beforeCount, afterIdx, afterCount),
+			Content:   headers[i],
 			Kind:      kind.UIHunkHeader,
 			Placement: line.Above,
 		})
-
-		beforeIdx += beforeCount
-		afterIdx += afterCount
 	}
 
-	// Each row takes the decoration of view after the header, so the
-	// header stays above the marks, as Carry keeps it. The headers and the
-	// separators that a view of hunks carries above its rows need not match
-	// the hunks of the result, so they stay out.
 	for i := range hunks.All() {
 		hunks.SetFlag(i, view.Flag(i))
 
@@ -592,26 +717,26 @@ func (r *Result) HunksOf(view *line.View, context int) *line.View {
 	return hunks
 }
 
-// heldRuns returns the runs of consecutive rows within ops that view
-// holds, in order.
-func heldRuns(view *line.View, ops position.Span) []position.Span {
+// heldRuns returns the runs of consecutive rows within rows that every
+// view holds, in order.
+func heldRuns(rows position.Span, views ...*line.View) []position.Span {
 	var (
 		runs []position.Span
-		run  = position.NewSpan(ops.Start, ops.Start)
+		run  = position.NewSpan(rows.Start, rows.Start)
 	)
 
-	for i := ops.Start; i < ops.End; i++ {
-		if !view.Contains(i) {
-			if run.End > run.Start {
-				runs = append(runs, run)
-			}
-
-			run = position.NewSpan(i+1, i+1)
+	for i := rows.Start; i < rows.End; i++ {
+		if !slices.ContainsFunc(views, func(v *line.View) bool { return !v.Contains(i) }) {
+			run.End = i + 1
 
 			continue
 		}
 
-		run.End = i + 1
+		if run.End > run.Start {
+			runs = append(runs, run)
+		}
+
+		run = position.NewSpan(i+1, i+1)
 	}
 
 	if run.End > run.Start {
@@ -628,70 +753,73 @@ func hunkMarked(view *line.View, i int) bool {
 		slices.ContainsFunc(view.Annotations(i), line.Annotation.Marks)
 }
 
-// consecutivePart is a run of a diff's ops within which each side's lines
-// carry consecutive [line.Line.Number] values. The ops field spans the
-// positions of the run in the diff's ops. The before and after fields span
-// the positions in each side of the lines the run holds.
+// consecutivePart is a run of rows within which each side's lines carry
+// consecutive [line.Line.Number] values. The rows field spans the rows of
+// the run, in the unified view or in the panes. The before and after
+// fields span the positions in each side of the lines the run holds.
 type consecutivePart struct {
-	ops, before, after position.Span
+	rows, before, after position.Span
 }
 
-// consecutiveParts splits the ops into parts within which each side's
-// lines carry consecutive [line.Line.Number] values. The header of a hunk
-// gives its first number and its count on each side. A hunk within one
-// part thus has a header that names the lines that it holds. A part ends
-// before the op whose line on either side does not follow that side's
-// last line in the part. A line that does not have a number follows any
-// line, because [hunkStart] counts it by its position instead. When each
-// side holds a run of consecutive lines, such as a whole file or one
-// document, the result is one part over every op.
-func (r *Result) consecutiveParts() []consecutivePart {
+// consecutiveParts splits n rows into parts within which each side's lines
+// carry consecutive [line.Line.Number] values. The rows argument gives the
+// position on each side of the line that a row shows, or -1. The positions
+// of each side ascend from row to row, as they do in the unified view and
+// in the panes. The header of a hunk gives its first number and its count
+// on each side. A hunk within one part thus has a header that names the
+// lines that it holds. A part ends before the row whose line on either
+// side does not follow that side's last line in the part. A line that
+// does not have a number follows any line, because [hunkStart] counts it
+// by its position instead. When each side holds a run of consecutive
+// lines, such as a whole file or one document, the result is one part over
+// every row.
+func (r *Result) consecutiveParts(n int, rows func(row int) [2]int) []consecutivePart {
 	var (
 		parts                 []consecutivePart
-		part                  consecutivePart // The current part, whose ends give the next op's positions.
+		part                  consecutivePart // The current part, whose ends give the next row's positions.
 		lastBefore, lastAfter int             // The number of each side's last line in the part, or 0.
 	)
 
-	for _, op := range r.ops {
-		b, a := opKindDeltas(op.kind)
-		nextBefore := sideNumber(r.inputs[Before].lines, part.before.End, b)
-		nextAfter := sideNumber(r.inputs[After].lines, part.after.End, a)
+	for row := range n {
+		pos := rows(row)
+		nextBefore := sideNumber(r.inputs[Before].lines, pos[Before])
+		nextAfter := sideNumber(r.inputs[After].lines, pos[After])
 
 		if skipsLines(lastBefore, nextBefore) || skipsLines(lastAfter, nextAfter) {
 			parts = append(parts, part)
 			part = consecutivePart{
-				ops:    position.NewSpan(part.ops.End, part.ops.End),
+				rows:   position.NewSpan(part.rows.End, part.rows.End),
 				before: position.NewSpan(part.before.End, part.before.End),
 				after:  position.NewSpan(part.after.End, part.after.End),
 			}
 			lastBefore, lastAfter = 0, 0
 		}
 
-		if b > 0 {
+		if pos[Before] >= 0 {
 			lastBefore = nextBefore
+			part.before.End++
 		}
 
-		if a > 0 {
+		if pos[After] >= 0 {
 			lastAfter = nextAfter
+			part.after.End++
 		}
 
-		part.ops.End++
-		part.before.End += b
-		part.after.End += a
+		part.rows.End++
 	}
 
 	return append(parts, part)
 }
 
-// sideNumber returns the [line.Line.Number] of the line at idx in side
-// when delta shows that an op holds a line of that side. It returns 0
-// when the op does not hold a line of side.
-func sideNumber(side line.Lines, idx, delta int) int {
-	if delta == 0 {
+// sideNumber returns the [line.Line.Number] of the line at position p in
+// side. It returns 0 when p is negative, for a row that does not hold a
+// line of side.
+func sideNumber(side line.Lines, p int) int {
+	if p < 0 {
 		return 0
 	}
 
-	return side.Line(idx).Number()
+	return side.Line(p).Number()
 }
 
 // skipsLines reports whether a line numbered next does not follow one
@@ -1002,6 +1130,8 @@ func (r *Result) getPanes() *panes {
 //
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintSideBySide] prints
 // the two panes beside each other and keeps their lines side by side.
+// The hunks of this pane alone do not pair with the After pane, so
+// [Result.PaneHunks] returns the hunks of both panes.
 func (r *Result) Before() *line.View {
 	return r.pane(Before)
 }
@@ -1024,6 +1154,8 @@ func (r *Result) Before() *line.View {
 //
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintSideBySide] prints
 // the two panes beside each other and keeps their lines side by side.
+// The hunks of this pane alone do not pair with the Before pane, so
+// [Result.PaneHunks] returns the hunks of both panes.
 func (r *Result) After() *line.View {
 	return r.pane(After)
 }
@@ -1094,7 +1226,8 @@ func (r *Result) origin(s Side, p int, ok bool) (Origin, bool) {
 // pane of [After] is [Result.After]. The Origin names a line of side s.
 // PaneOrigin reports false for a row outside the pane, for a Side that
 // does not name either revision, and for an empty placeholder. A
-// placeholder does not show a line of an input.
+// placeholder does not show a line of an input. [Result.PaneHunks] keeps
+// the rows of the panes, so a row of the pane hunks has the same Origin.
 func (r *Result) PaneOrigin(s Side, row int) (Origin, bool) {
 	return r.origin(r.paneShows(s, row))
 }
@@ -1127,6 +1260,9 @@ func (r *Result) UnifiedRow(o Origin) (int, bool) {
 // [Result.After] shows every line of [After]. The panes align, so the same
 // row of the other pane shows the paired line or an empty placeholder.
 // PaneRow reports false when o does not name a line of an input.
+//
+// [Result.PaneHunks] keeps the rows of the panes and holds a row when a
+// hunk covers it, as [line.View.Contains] reports.
 func (r *Result) PaneRow(o Origin) (int, bool) {
 	if o.Side > After {
 		return 0, false
@@ -1143,12 +1279,12 @@ func (r *Result) PaneRow(o Origin) (int, bool) {
 }
 
 // Carry copies the overlays and annotations of the input views onto dst,
-// a view that [Result.Unified], [Result.Hunks], [Result.Before], or
-// [Result.After] returned, or a slice, clone, or clip of one. Each row
-// that dst holds takes the marks of the line its [Origin] names. A line of
-// [Before] takes them from before, and a line of [After] from after. The
-// marks follow the annotations each row carries already, so a hunk header
-// stays above them.
+// a view that [Result.Unified], [Result.Hunks], [Result.Before],
+// [Result.After], or [Result.PaneHunks] returned, or a slice, clone, or
+// clip of one. Each row that dst holds takes the marks of the line its
+// [Origin] names. A line of [Before] takes them from before, and a line of
+// [After] from after. The marks follow the annotations each row carries
+// already, so a hunk header stays above them.
 //
 //	result := diff.Diff(before, after)
 //	view := result.Unified()
@@ -1266,21 +1402,6 @@ func nextOfKind(ops []lineOp, k lcs.OpKind, from, end int) int {
 	}
 
 	return from
-}
-
-// opKindDeltas returns the line count deltas that k contributes to the
-// before and after revisions.
-func opKindDeltas(k lcs.OpKind) (int, int) {
-	switch k {
-	case lcs.OpEqual:
-		return 1, 1
-	case lcs.OpDelete:
-		return 1, 0
-	case lcs.OpInsert:
-		return 0, 1
-	default:
-		return 0, 0
-	}
 }
 
 // opKindFlag returns the [line.Flag] that marks a line that k produces.

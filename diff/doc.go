@@ -25,11 +25,16 @@
 //   - [Result.Before] and [Result.After] return aligned views for
 //     side-by-side rendering, which
 //     [go.jacobcolvin.com/niceyaml/printer.Printer.PrintSideBySide] prints.
+//   - [Result.PaneHunks] keeps only the changes of both panes, with the
+//     same context rows and hunk headers in each, so the panes stay
+//     aligned.
 //
 // Each call returns a fresh [line.View], so overlays that a caller adds to
-// one rendering do not affect another. The hunks are a slice of the
-// unified view and keep its line indices, so one index marks the same line
-// in both.
+// one rendering do not affect another. The hunks that [Result.Hunks]
+// returns are a slice of the unified view and keep its line indices. The
+// pane hunks are slices of [Result.Before] and [Result.After] and keep the
+// pane row indices. In each case, one index marks the same line in the
+// hunks and in the full view.
 //
 // A program that writes a diff to a log or a golden file renders the view
 // with [line.View.String]. The plain text holds a "-" beside each deleted
@@ -86,6 +91,17 @@
 //
 //	hunks := result.HunksOf(view, 3)
 //
+// The hunks of one side-by-side pane alone do not pair with the other
+// pane, because a pure insertion or deletion marks the rows of one pane
+// only. [Result.PaneHunksOf] forms each hunk from the marks of both panes
+// and slices both by the same rows:
+//
+//	left, right := result.Before(), result.After()
+//	result.Carry(left, beforeView, afterView)
+//	result.Carry(right, beforeView, afterView)
+//	left, right = result.PaneHunksOf(left, right, 3)
+//	lipgloss.Println(p.PrintSideBySide(left, right))
+//
 // A diff compares lines by their content without line endings, so a change
 // from LF to CRLF endings or a missing final newline is not a difference.
 //
@@ -111,7 +127,8 @@
 // first line of its hunk. A header does not mark its line, as
 // [line.Annotation.Marks] reports. [line.View.Hunks] cannot recompute a
 // header, so it drops the headers of a view. [Result.HunksOf] narrows a view
-// of hunks with a new header above each.
+// of hunks with a new header above each, and [Result.PaneHunksOf] does the
+// same for the panes.
 //
 // A Differ is safe for concurrent use when its [lcs.Algorithm] and its line
 // key are, as [lcs.Hirschberg] and the default key are. A Result is safe
