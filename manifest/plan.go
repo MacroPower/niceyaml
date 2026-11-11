@@ -28,10 +28,15 @@ import (
 // still migrate. The plan reports each problem in [Plan.Err], so the other
 // files still migrate.
 //
-// PlanMigration returns a nil plan and an error only in two cases. One is
-// a ctx that ends. The other is a load of the same input that fails before
-// it reads a file. A pattern that Load rejects and an input path that
-// does not exist each fail a load that way.
+// The error that PlanMigration returns is the one that [Plan.Err] returns.
+// When a document holds a problem, PlanMigration returns a non-nil plan
+// beside that error, and [Plan.Apply] still writes the files that the
+// problem does not block. A program that migrates the other files thus
+// tests the plan for nil, not the error. PlanMigration returns a nil plan
+// only when it cannot finish. One such case is a ctx that ends. The other
+// is a load of the same input that fails before it reads a file. A
+// pattern that Load rejects and an input path that does not exist each
+// fail a load that way.
 func (r *Registry) PlanMigration(ctx context.Context, in Input, opts ...LoadOption) (*Plan, error) {
 	cfg := newLoadConfig(opts)
 	cfg.plan = true
@@ -42,7 +47,9 @@ func (r *Registry) PlanMigration(ctx context.Context, in Input, opts ...LoadOpti
 		return nil, err
 	}
 
-	return l.newPlan(), nil
+	p := l.newPlan()
+
+	return p, p.err
 }
 
 // Plan is the rewrite that [Registry.PlanMigration] computes. It holds the
@@ -177,7 +184,8 @@ func (p *Plan) Warnings() error {
 // Err returns the problems that fail the plan as a [*LoadError] that holds
 // the warnings too, or nil. It holds each problem that blocks a file, the
 // problem of each document that fails to route, and each warning that
-// [WithWarningsAsErrors] makes an error.
+// [WithWarningsAsErrors] makes an error. It is the error that
+// [Registry.PlanMigration] returns.
 func (p *Plan) Err() error {
 	return p.err
 }

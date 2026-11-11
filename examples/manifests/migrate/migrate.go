@@ -125,9 +125,11 @@ func main() {
 	fmt.Println("\nPlan the rewrite:")
 
 	// A plan runs the checks of a load and computes the new text of each
-	// file, but it does not write a file.
+	// file, but it does not write a file. PlanMigration returns the problems
+	// of the plan as its error beside the plan, so a nil plan alone stops the
+	// example.
 	plan, err := registry.PlanMigration(ctx, manifest.Path("config"))
-	if err != nil {
+	if plan == nil {
 		lipgloss.Println(p.PrintError(err))
 
 		return

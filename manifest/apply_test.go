@@ -26,7 +26,8 @@ func planDir(t *testing.T, reg *manifest.Registry, files map[string]string) (*ma
 	yamltest.WriteFiles(t, config, files)
 
 	plan, err := reg.PlanMigration(t.Context(), manifest.Path(config))
-	require.NoError(t, err)
+	require.NotNil(t, plan)
+	require.Equal(t, plan.Err(), err)
 	requireReloads(t, reg, plan, nil)
 
 	return plan, config
