@@ -554,6 +554,22 @@ func TestNewErrorHandler_WithExcerptOptions(t *testing.T) {
 		want := report(niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
 		assert.Equal(t, want, handleAs(handler, colorprofile.ASCII, err))
 	})
+
+	t.Run("a problem limit cuts both outputs", func(t *testing.T) {
+		t.Parallel()
+
+		many := yamltest.Bind(t, src, errors.Join(errAt("bad a", "$.a"), errAt("bad e", "$.e"), errAt("bad i", "$.i")))
+		limit := niceyaml.WithProblemLimit(1)
+		handler := fangs.NewErrorHandler(fangs.WithPrinter(p), fangs.WithExcerptOptions(limit))
+
+		plain := handleAs(handler, colorprofile.ASCII, many)
+
+		assert.Equal(t, report(p.PrintError(many, limit)), handleAs(handler, colorprofile.TrueColor, many))
+		assert.Equal(t, report(niceyaml.FormatError(many, limit)), plain)
+		assert.Contains(t, plain, "and 2 more")
+		assert.NotContains(t, plain, "bad e")
+		assert.NotContains(t, plain, "bad i")
+	})
 }
 
 func TestErrorHandler_UnwritableWriter(t *testing.T) {

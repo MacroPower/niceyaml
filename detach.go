@@ -63,8 +63,10 @@ import (
 // uses those options for a detached error, whatever options the renderer
 // receives, so a detached error renders as err renders with opts. Those
 // options hold for [FormatError], [NewErrorReport], [SourceError.Excerpt],
-// and the %+v verb. The lines of a detached binding are not part of any
-// view of a source, so [Annotate] does not mark anything for it.
+// and the %+v verb. Detach ignores [WithProblemLimit] and keeps every
+// problem, so a renderer applies its own limit to a detached error. The
+// lines of a detached binding are not part of any view of a source, so
+// [Annotate] does not mark anything for it.
 //
 // The bindings of one source share the copy that one call of Detach
 // keeps, so they render together as they did in err. A program might join

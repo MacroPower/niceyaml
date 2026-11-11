@@ -1935,9 +1935,8 @@ type treeCut struct {
 	budget int
 }
 
-// limitTree returns t with its first limit problems and a last root child
-// that counts the rest, as "and 490 more", along with the problems it
-// left out. A heading stays when any problem below it stays.
+// limitTree returns t with its first limit problems, along with the
+// problems it left out. A heading stays when any problem below it stays.
 func limitTree(t ErrorTree, limit int) (ErrorTree, []ErrorTree) {
 	c := &treeCut{budget: limit}
 
@@ -1946,9 +1945,21 @@ func limitTree(t ErrorTree, limit int) (ErrorTree, []ErrorTree) {
 		return t, nil
 	}
 
-	cut.Children = append(cut.Children, ErrorTree{Label: "and " + strconv.Itoa(len(c.left)) + " more"})
-
 	return cut, c.left
+}
+
+// withOmitted returns t with a last root child that counts omitted
+// problems, as "and 490 more", for a renderer to draw. It returns t as it
+// is when omitted is 0. The children of the result do not share an array
+// with those of t.
+func withOmitted(t ErrorTree, omitted int) ErrorTree {
+	if omitted <= 0 {
+		return t
+	}
+
+	t.Children = append(slices.Clip(t.Children), ErrorTree{Label: "and " + strconv.Itoa(omitted) + " more"})
+
+	return t
 }
 
 // skippedBindings returns the bindings of left, the problems that
@@ -2064,9 +2075,16 @@ func (t ErrorTree) eachNode(yield func(ErrorTree) bool) bool {
 //
 //	drawTree(rep.Tree)
 //
+//	if rep.Omitted > 0 {
+//		drawMore(rep.Omitted)
+//	}
+//
 //	for _, excerpt := range rep.Excerpts {
 //		drawView(excerpt.View)
 //	}
+//
+// A renderer draws [ErrorReport.Omitted] after the tree, because the tree
+// does not have a row for the problems that [WithProblemLimit] leaves out.
 //
 // The report holds every text as the error or the source wrote it. The
 // messages from the unmarshalers and validators of a program can hold
@@ -2090,7 +2108,10 @@ type ErrorReport struct {
 	// bindings reach the sources in the order that [Bindings] yields them,
 	// and the bindings below each one come before the next. Excerpts
 	// holds an excerpt of a source only when a location in it resolves and
-	// its excerpts are on, as [WithExcerpts] sets them.
+	// its excerpts are on, as [WithExcerpts] sets them. With
+	// [WithProblemLimit], that location must belong to a problem that Tree
+	// keeps. A source whose problems all fall past the limit thus does not
+	// get an excerpt.
 	Excerpts []ErrorExcerpt
 	// Unresolved holds the bindings that get a reason in place of an
 	// excerpt, in the order that [Bindings] yields them. Each is a binding
@@ -2103,7 +2124,8 @@ type ErrorReport struct {
 	// its own, because [SourceError.Unresolved] returns nil for it. It also
 	// leaves out each binding whose reason wraps [paths.ErrNoDocument],
 	// because a path resolves only in a document with content, and the
-	// tree names the path already.
+	// tree names the path already. With [WithProblemLimit], it leaves out
+	// the bindings of the problems that Tree leaves out.
 	Unresolved []*SourceError
 	// Tree is the [ErrorTree] of the error. Under one heading, a warning
 	// whose message and details match those of an earlier warning keeps
@@ -2126,7 +2148,18 @@ type ErrorReport struct {
 	// Unresolved are then empty too, Tree is one node with the message of
 	// the error as its Label and a nil Err. A renderer then draws that
 	// message in place of an empty report.
+	//
+	// With [WithProblemLimit], Tree holds the first problems of the error
+	// and the headings above them, and Omitted counts the rest. Tree
+	// itself does not have a row for them, so each node that
+	// [ErrorTree.Problems] yields holds a problem of the error. The
+	// excerpts then mark only the problems that Tree keeps.
 	Tree ErrorTree
+	// Omitted is the number of problems that Tree leaves out, as
+	// [WithProblemLimit] cuts them. It is 0 without that option. A
+	// renderer draws the count after the tree, as [FormatError] draws
+	// "and 1950 more" as the last row of the root.
+	Omitted int
 }
 
 // ErrorExcerpt is the excerpt of one source in an [ErrorReport]. It keeps
@@ -2161,19 +2194,16 @@ type ErrorExcerpt struct {
 // NewErrorReport creates a new [ErrorReport] from err. Each excerpt keeps
 // the context lines, the width, and the marks on one line that the options
 // set, as [ExcerptOption] describes. An excerpt of a detached binding keeps
-// those of the options [Detach] received instead. A nil err yields the zero
-// ErrorReport.
+// those of the options [Detach] received instead. [WithProblemLimit] cuts
+// the tree to its first problems, and the report then ignores the bindings
+// of the rest, so it shows what the tree shows. The limit holds for the
+// detached bindings too. A nil err yields the zero ErrorReport.
 func NewErrorReport(err error, opts ...ExcerptOption) ErrorReport {
-	return newErrorReport(err, newExcerptConfig(opts), 0)
-}
-
-// newErrorReport builds the report that [NewErrorReport] documents. A
-// limit greater than zero cuts the tree to that many problems. The report
-// then ignores the bindings of the rest, so it shows what the tree shows.
-func newErrorReport(err error, cfg excerptConfig, limit int) ErrorReport {
 	if err == nil {
 		return ErrorReport{}
 	}
+
+	cfg := newExcerptConfig(opts)
 
 	// A repeated warning still names its source, so the excerpts of a
 	// report that reaches several sources keep their names.
@@ -2181,12 +2211,13 @@ func newErrorReport(err error, cfg excerptConfig, limit int) ErrorReport {
 	full := NewErrorTree(err)
 	tree := dropRepeats(full, quiet)
 
-	var skipped map[*SourceError]bool
+	var (
+		skipped map[*SourceError]bool
+		left    []ErrorTree
+	)
 
-	if limit > 0 {
-		var left []ErrorTree
-
-		tree, left = limitTree(tree, limit)
+	if cfg.problems > 0 {
+		tree, left = limitTree(tree, cfg.problems)
 		skipped = skippedBindings(tree, left)
 	}
 
@@ -2230,6 +2261,7 @@ func newErrorReport(err error, cfg excerptConfig, limit int) ErrorReport {
 	}
 
 	rep.Tree = tree
+	rep.Omitted = len(left)
 
 	// A bound join whose branches all carry nothing has an empty tree and
 	// nothing else to draw, so the message stands in for it.

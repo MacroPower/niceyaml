@@ -1731,10 +1731,15 @@ const DefaultExcerptMarks = ErrorListLimit
 // and with bounded rows in a log. Detach chooses them in place of the
 // renderer, as [Detach] describes.
 //
+// [WithProblemLimit] cuts the whole report instead, the tree and the
+// excerpts together. [FormatError] and [NewErrorReport] apply it.
+// SourceError.Excerpt and Detach ignore it, because neither builds a tree.
+//
 // Available options:
 //   - [WithContextLines]
 //   - [WithExcerptWidth]
 //   - [WithExcerptMarks]
+//   - [WithProblemLimit]
 //
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] takes the same
 // options for the excerpts it draws with styles, and
@@ -1753,6 +1758,9 @@ type excerptConfig struct {
 	// The problems an excerpt marks on one line, where 0 marks every
 	// problem.
 	marks int
+	// The problems a report keeps, where 0 and [NoLimit] keep every
+	// problem.
+	problems int
 }
 
 // defaultExcerptConfig returns the settings an excerpt has when no
@@ -1834,10 +1842,10 @@ func WithExcerptWidth(cols int) ExcerptOption {
 //	     |    ^ expected "string", got "integer"
 //	     | and 2 more on this line
 //
-// The tree above the excerpt still shows every problem with its position
-// and its path, so the option cuts only carets. A problem counts on the
-// line of its position, and so does each detail of a problem. An n of 0
-// marks every problem, and a negative n counts as 0:
+// The tree above the excerpt still shows every problem that the report
+// keeps with its position and its path, so the option cuts only carets.
+// A problem counts on the line of its position, and so does each detail of
+// a problem. An n of 0 marks every problem, and a negative n counts as 0:
 //
 //	fmt.Print(niceyaml.FormatError(err, niceyaml.WithExcerptMarks(0)))
 //
@@ -1854,6 +1862,49 @@ func WithExcerptMarks(n int) ExcerptOption {
 	}
 }
 
+// WithProblemLimit is an [ExcerptOption] that sets how many problems a
+// report keeps. With a positive n, [NewErrorReport] keeps the first n
+// problems of the tree, each with its details, and the headings above
+// them. It counts the rest in [ErrorReport.Omitted]. The excerpts then
+// mark only the problems that the tree keeps, and
+// [ErrorReport.Unresolved] leaves out the bindings of the rest. With an n
+// of 3, [FormatError] renders an error with five problems as:
+//
+//	app.yaml: 5 schema violations
+//	|-- 1:4: $.a: expected "string", got "integer"
+//	|-- 2:4: $.b: expected "string", got "integer"
+//	|-- 3:4: $.c: expected "string", got "integer"
+//	`-- and 2 more
+//
+// The excerpt below the tree marks only lines 1, 2, and 3.
+//
+// By default a report keeps every problem, as [NoLimit] sets. A limit of
+// zero or less keeps the limit as it is. Given more than once, the last
+// option with a positive limit wins, so a program that forwards options
+// turns the limit off with NoLimit:
+//
+//	opts = append(opts, niceyaml.WithProblemLimit(niceyaml.NoLimit))
+//	fmt.Print(niceyaml.FormatError(err, opts...))
+//
+// The limit counts the problems in the order of the tree, the warnings
+// among them, and it counts them across every source of the error. A
+// file whose first n problems are warnings thus shows those warnings and
+// counts its errors in Omitted. A program that wants the errors first
+// collects the warnings apart from err with [Warnings], renders err with
+// the limit, and renders [Warnings.Err] after it.
+//
+// [SourceError.Excerpt] and [Detach] ignore the option, because neither
+// builds a tree. A renderer applies its own limit to a detached error. The
+// %+v verb of an [*Error] or a [*SourceError] does not take an option, so
+// it renders with a limit of [ErrorListLimit].
+func WithProblemLimit(n int) ExcerptOption {
+	return func(c *excerptConfig) {
+		if n > 0 {
+			c.problems = n
+		}
+	}
+}
+
 // ErrorListLimit is the number of errors [SourceError.Error] lists below
 // its first line. A message that holds more ends with a line that counts
 // the rest.
@@ -1864,8 +1915,9 @@ func WithExcerptMarks(n int) ExcerptOption {
 // error with thousands of problems reaches a log as a short text.
 // [FormatError] and
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] show every
-// problem in the tree. Their excerpts mark [DefaultExcerptMarks] problems
-// on one line, as [WithExcerptMarks] describes.
+// problem in the tree unless [WithProblemLimit] sets a limit. Their
+// excerpts mark [DefaultExcerptMarks] problems on one line, as
+// [WithExcerptMarks] describes.
 const ErrorListLimit = 10
 
 // boundTexts holds the texts that the methods of a [SourceError] return,
@@ -4234,12 +4286,14 @@ func (e *SourceError) LogValue() slog.Value {
 // an excerpt or a line in its place.
 //
 // FormatError looks through the wrappers and joins around a [SourceError]
-// and renders every problem in the tree, however many err holds. An excerpt
-// marks the first problems of one line and counts the rest of that line, as
-// [WithExcerptMarks] describes. An error that is not bound to a source
-// renders as its tree alone, with the path of its [*Error] in front, as
-// "@.open: closes before it opens". An error whose tree renders as empty
-// text renders its message instead.
+// and renders every problem in the tree, however many err holds. With
+// [WithProblemLimit], it renders the first problems of the tree. A last
+// row counts the rest from [ErrorReport.Omitted], as "and 1950 more". An
+// excerpt marks the first problems of one line and counts the rest of that
+// line, as [WithExcerptMarks] describes. An error that is not bound to a
+// source renders as its tree alone, with the path of its [*Error] in
+// front, as "@.open: closes before it opens". An error whose tree renders
+// as empty text renders its message instead.
 //
 // Each message of the tree renders as
 // [go.jacobcolvin.com/niceyaml/escape.Message] draws it, so a tab renders
@@ -4253,16 +4307,10 @@ func (e *SourceError) LogValue() slog.Value {
 // program that writes it into a file or a fenced block adds that line feed
 // itself. A nil err renders as "".
 func FormatError(err error, opts ...ExcerptOption) string {
-	return formatError(err, newExcerptConfig(opts), 0)
-}
-
-// formatError renders err as [FormatError] documents it, from the report
-// [newErrorReport] builds with cfg and limit.
-func formatError(err error, cfg excerptConfig, limit int) string {
-	rep := newErrorReport(err, cfg, limit)
+	rep := NewErrorReport(err, opts...)
 
 	parts := make([]string, 0, 1+len(rep.Excerpts)+len(rep.Unresolved))
-	parts = append(parts, renderErrorTree(rep.Tree))
+	parts = append(parts, renderErrorTree(withOmitted(rep.Tree, rep.Omitted)))
 
 	for _, shown := range rep.Excerpts {
 		part := shown.View.String()
@@ -4305,7 +4353,7 @@ func renderErrorTree(t ErrorTree) string {
 func formatVerb(f fmt.State, verb rune, err error) {
 	switch {
 	case verb == 'v' && f.Flag('+'):
-		writeString(f, formatError(err, defaultExcerptConfig(), ErrorListLimit))
+		writeString(f, FormatError(err, WithProblemLimit(ErrorListLimit)))
 
 	default:
 		//nolint:errcheck // Formatter has no error channel.
@@ -4317,9 +4365,9 @@ func formatVerb(f fmt.State, verb rune, err error) {
 // returns the [messageTree] of err instead when the tree does not have a
 // row, such as for a bound join of typed-nil errors.
 func logValue(err error) slog.Value {
-	tree, _ := limitTree(NewErrorTree(err), ErrorListLimit)
+	tree, left := limitTree(NewErrorTree(err), ErrorListLimit)
 
-	return slog.StringValue(renderErrorTree(messageTree(tree, err)))
+	return slog.StringValue(renderErrorTree(messageTree(withOmitted(tree, len(left)), err)))
 }
 
 // writeErrorBranches writes children behind their connectors, indented
@@ -4583,7 +4631,9 @@ func Annotate(err error, view *line.View) bool {
 // [ExcerptOption] describes. On a line that holds more problems than opts
 // sets, the view marks the first of them, as [WithExcerptMarks] describes.
 // An annotation of kind [kind.UISeparator] below that line counts the rest.
-// The lines keep their numbers in the source, so any
+// Excerpt does not build a report, so it ignores [WithProblemLimit] and
+// marks the locations of the whole tree. The lines keep their numbers in
+// the source, so any
 // [go.jacobcolvin.com/niceyaml/printer.Printer] renders the excerpt with
 // the line numbers of the file.
 //

@@ -1,6 +1,8 @@
 package printer
 
 import (
+	"slices"
+	"strconv"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -50,6 +52,13 @@ const errorConnectorWidth = 4
 //	├── 6:8: $.spec.sla: string does not match pattern
 //	└── 22:11: $.spec.hours.days: expected "array", got "string"
 //
+// The tree shows every problem of err unless [niceyaml.WithProblemLimit]
+// sets a limit. With a limit, the tree shows the first problems and a
+// last branch of the root that counts the rest, as "and 1950 more". The
+// excerpts then mark only the problems that the tree shows:
+//
+//	lipgloss.Fprintln(os.Stderr, p.PrintError(err, niceyaml.WithProblemLimit(50)))
+//
 // An error without errors below it prints as a tree of one node that holds
 // its whole message. The context that a wrapper around a binding added
 // follows the position and the path, as [niceyaml.NewErrorTree] describes.
@@ -89,9 +98,9 @@ const errorConnectorWidth = 4
 // [niceyaml.WithExcerptMarks] sets, [niceyaml.DefaultExcerptMarks] without
 // that option. A line that holds more gets a row below its carets that
 // counts the rest, such as "and 5 more on this line", in
-// [kind.UISeparator]. The tree still shows every problem, so a document
-// minified onto one line prints a bounded excerpt however many problems
-// that line holds.
+// [kind.UISeparator]. The tree still shows each problem that it keeps, so
+// a document minified onto one line prints a bounded excerpt however many
+// problems that line holds.
 //
 // When the bindings touch more than one source, the name of its source
 // leads each excerpt on a row of its own. Blank lines separate the parts.
@@ -160,16 +169,26 @@ func (p *Printer) PrintError(err error, opts ...niceyaml.ExcerptOption) string {
 // PrintReport renders rep as [Printer.PrintError] renders the report it
 // builds for an error. The tree comes first, then each excerpt below the
 // name of its source when the report names it, then each "no excerpt:"
-// line. PrintReport draws them with the styles and the width of the
-// printer and puts a blank line between the parts. A program that builds
-// a report once with [niceyaml.NewErrorReport], such as one that reads
-// its parts or also renders it as plain text, prints that same report
-// with PrintReport. The output ends with its last row and no line feed, as
-// [Printer.Print] describes. The zero ErrorReport prints as "".
+// line. A report with [niceyaml.ErrorReport.Omitted] set gets a last
+// branch of the root that counts the problems the tree leaves out, as
+// "and 1950 more". PrintReport draws the parts with the styles and the
+// width of the printer and puts a blank line between them. A program that
+// builds a report once with [niceyaml.NewErrorReport], such as one that
+// reads its parts or also renders it as plain text, prints that same
+// report with PrintReport. The output ends with its last row and no line
+// feed, as [Printer.Print] describes. The zero ErrorReport prints as "".
 func (p *Printer) PrintReport(rep niceyaml.ErrorReport) string {
 	parts := make([]string, 0, 1+len(rep.Excerpts)+len(rep.Unresolved))
 
-	if msg := p.renderErrorTree(rep.Tree); msg != "" {
+	tree := rep.Tree
+	if rep.Omitted > 0 {
+		// The report shares its children with its caller, so the count
+		// goes on a copy of them.
+		more := niceyaml.ErrorTree{Label: "and " + strconv.Itoa(rep.Omitted) + " more"}
+		tree.Children = append(slices.Clip(tree.Children), more)
+	}
+
+	if msg := p.renderErrorTree(tree); msg != "" {
 		parts = append(parts, msg)
 	}
 
