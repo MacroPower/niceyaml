@@ -225,7 +225,7 @@ func Schema(ref schema.Ref) VersionOption {
 // SchemaTypeFields is a [VersionOption] that states whether the schema of
 // the version reads the type fields. With true, the check of the schema
 // sees every type field as the document writes it, with the names of the
-// version. With false, the check sees every type field blank.
+// version. With false, the check does not see any type field.
 //
 // Without the option, the registry reads the answer for each type field
 // from the schema, as the Checks section of the package documentation

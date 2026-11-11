@@ -69,9 +69,9 @@ func TestRegistry_Verify_TypeFields(t *testing.T) {
 		)
 	}
 
-	blanked := func(p string) string {
+	hidden := func(p string) string {
 		return stringtest.JoinLF(
-			"MenuItem v1: "+p+": required, but manifest.SchemaTypeFields(false) blanks it",
+			"MenuItem v1: "+p+": required, but manifest.SchemaTypeFields(false) hides it",
 			"`-- remove "+p+" from required, or pass manifest.SchemaTypeFields(true)",
 		)
 	}
@@ -93,7 +93,7 @@ func TestRegistry_Verify_TypeFields(t *testing.T) {
   "meta": {"required": ["kind"], "properties": {"kind": {"type": "string"}}}}}`}
 
 	visible := []manifest.VersionOption{manifest.SchemaTypeFields(true)}
-	blank := []manifest.VersionOption{manifest.SchemaTypeFields(false)}
+	hiding := []manifest.VersionOption{manifest.SchemaTypeFields(false)}
 
 	tags := paths.Doc().Child("tags").Index(1).Child("kind")
 
@@ -235,42 +235,42 @@ func TestRegistry_Verify_TypeFields(t *testing.T) {
 			schema:  branch,
 			version: visible,
 		},
-		"declared in a branch with blank type fields": {
+		"declared in a branch with hidden type fields": {
 			schema:  branch,
-			version: blank,
+			version: hiding,
 		},
 		"$ref to another document with visible type fields": {
 			schema:  outside,
 			files:   defs,
 			version: visible,
 		},
-		"$ref to another document with blank type fields": {
+		"$ref to another document with hidden type fields": {
 			schema:  outside,
 			files:   defs,
-			version: blank,
+			version: hiding,
 		},
 		"required and not declared with visible type fields": {
 			schema:  `{"required": ["kind"], "properties": {"metadata": {"type": "object"}}}`,
 			version: visible,
 		},
-		"required and not declared with blank type fields": {
+		"required and not declared with hidden type fields": {
 			schema:  `{"required": ["kind"], "properties": {"metadata": {"type": "object"}}}`,
-			version: blank,
-			want:    blanked("$.kind"),
+			version: hiding,
+			want:    hidden("$.kind"),
 		},
-		"declared and required with blank type fields": {
+		"declared and required with hidden type fields": {
 			schema:  brewSchema("v1", "MenuItem"),
-			version: blank,
+			version: hiding,
 			want: stringtest.JoinLF(
-				"|-- MenuItem v1: $.apiVersion: required, but manifest.SchemaTypeFields(false) blanks it",
+				"|-- MenuItem v1: $.apiVersion: required, but manifest.SchemaTypeFields(false) hides it",
 				"|   `-- remove $.apiVersion from required, or pass manifest.SchemaTypeFields(true)",
-				"`-- MenuItem v1: $.kind: required, but manifest.SchemaTypeFields(false) blanks it",
+				"`-- MenuItem v1: $.kind: required, but manifest.SchemaTypeFields(false) hides it",
 				"    `-- remove $.kind from required, or pass manifest.SchemaTypeFields(true)",
 			),
 		},
 		"required and not declared on the unversioned layout": {
 			// A document of the layout might write the kind field, which
-			// the check then sees blank.
+			// the check then does not see.
 			schema:      `{"required": ["kind"]}`,
 			unversioned: true,
 			want: stringtest.JoinLF(
@@ -308,17 +308,17 @@ func TestRegistry_Verify_TypeFields(t *testing.T) {
 			version:     visible,
 			unversioned: true,
 		},
-		"branch on the unversioned layout with blank type fields": {
+		"branch on the unversioned layout with hidden type fields": {
 			schema:      branch,
-			version:     blank,
+			version:     hiding,
 			unversioned: true,
 		},
-		"required and not declared on the unversioned layout with blank type fields": {
+		"required and not declared on the unversioned layout with hidden type fields": {
 			schema:      `{"required": ["kind"], "properties": {"metadata": {"type": "object"}}}`,
-			version:     blank,
+			version:     hiding,
 			unversioned: true,
 			want: stringtest.JoinLF(
-				"MenuItem the unversioned layout: $.kind: required, but manifest.SchemaTypeFields(false) blanks it",
+				"MenuItem the unversioned layout: $.kind: required, but manifest.SchemaTypeFields(false) hides it",
 				"`-- remove $.kind from required, or pass manifest.SchemaTypeFields(true)",
 			),
 		},

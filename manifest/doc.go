@@ -393,6 +393,16 @@
 // each schema that requires a type field and does not declare it, because
 // such a schema fails every document.
 //
+// The load removes each other type field that the document writes in
+// place from the value that the schema reads, as
+// [schema.Schema.WithoutFields] does. The lines of the document stay as
+// they are, so an anchor on a type field still defines its alias, and
+// every other problem of the check keeps its place. A mapping that holds
+// only such type fields reads as an empty mapping. The type field of the
+// document also takes with it each value of its name that a `<<` merge
+// key before it brings in. A type field that only a merge key brings in
+// stays in the value.
+//
 // A schema might read a type field that it does not declare there, inside
 // a branch or behind a $ref to another document. A load cannot tell
 // whether the check of such a schema sees the field. It fails each
@@ -401,7 +411,7 @@
 //
 // The schema of the layout of [Unversioned] fails that way only the
 // documents that write the field. The check of every other document sees
-// the same lines whether or not the schema reads the field. A document of
+// the same value whether or not the schema reads the field. A document of
 // that layout does not write the version field, so only its kind field
 // fails it that way. Verify thus reports the kind field alone. The schema
 // of a plain file that an app adopts checks each document without a kind
@@ -410,7 +420,7 @@
 //
 // [SchemaTypeFields] on a version or on Unversioned states the answer for
 // every type field. With true, the check sees each type field as the
-// document writes it. With false, the check sees each type field blank.
+// document writes it. With false, the check does not see any type field.
 //
 // The decode admits the type fields, and by default rejects every other key
 // that the Go type does not declare. A [niceyaml.WithUnknownFields] among
