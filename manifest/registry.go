@@ -99,7 +99,6 @@ type removal struct {
 //
 // Available options:
 //   - [WithKinds]
-//   - [WithNameField]
 //   - [WithAppName]
 //   - [WithMigrateHint]
 //   - [WithDecodeOptions]
@@ -128,8 +127,6 @@ type registryConfig struct {
 	schemas         *schema.Registry
 	versionField    paths.Path
 	kindField       paths.Path
-	nameField       paths.Path
-	hasNameField    bool
 	versionFieldSet bool
 	kindFieldSet    bool
 	versionOnly     bool
@@ -141,16 +138,6 @@ type registryConfig struct {
 func WithKinds(kinds ...*Kind) RegistryOption {
 	return func(c *registryConfig) {
 		c.kinds = append(c.kinds, kinds...)
-	}
-}
-
-// WithNameField is a [RegistryOption] that gives each manifest a name, read
-// from the `$` path p, such as `$.metadata.name`. The path names the field
-// as the current version spells it. Two manifests of one kind must not
-// share a name, and [Set.Get] finds a manifest by its name.
-func WithNameField(p paths.Path) RegistryOption {
-	return func(c *registryConfig) {
-		c.nameField, c.hasNameField = p, true
 	}
 }
 
@@ -404,7 +391,7 @@ func (b *registryBuilder) failf(format string, args ...any) {
 	b.errs = append(b.errs, fmt.Errorf(format, args...))
 }
 
-// checkFields checks the paths of the type fields and the name field.
+// checkFields checks the paths of the type fields.
 func (b *registryBuilder) checkFields() {
 	cfg := &b.r.cfg
 
@@ -423,22 +410,7 @@ func (b *registryBuilder) checkFields() {
 		}
 	}
 
-	type field struct {
-		option string
-		path   paths.Path
-	}
-
-	fields := []field{{"manifest.WithVersionField", cfg.versionField}}
-
-	if cfg.versionOnly {
-		fields[0].option = "manifest.WithVersionOnly"
-	} else {
-		fields = append(fields, field{"manifest.WithKindField", cfg.kindField})
-	}
-
-	if cfg.hasNameField {
-		fields = append(fields, field{"manifest.WithNameField", cfg.nameField})
-	}
+	fields := cfg.typeFields()
 
 	for i, f := range fields {
 		if !plainPath(f.path) {
@@ -449,6 +421,45 @@ func (b *registryBuilder) checkFields() {
 			if f.path.Equal(g.path) {
 				b.failf("%s and %s name the same path %s", g.option, f.option, f.path)
 			}
+		}
+	}
+}
+
+// optionField is the path of a field that an option names, as a message of
+// [NewRegistry] gives it.
+type optionField struct {
+	option string
+	path   paths.Path
+}
+
+// typeFields returns the paths of the type fields, each with the option
+// that names it.
+func (c *registryConfig) typeFields() []optionField {
+	fields := []optionField{{"manifest.WithVersionField", c.versionField}}
+
+	if c.versionOnly {
+		fields[0].option = "manifest.WithVersionOnly"
+	} else {
+		fields = append(fields, optionField{"manifest.WithKindField", c.kindField})
+	}
+
+	return fields
+}
+
+// checkNameField checks the path of the [NameField] of k.
+func (b *registryBuilder) checkNameField(k *Kind) {
+	if !k.cfg.hasNameField {
+		return
+	}
+
+	p := k.cfg.nameField
+	if !plainPath(p) {
+		b.failf("kind %s: manifest.NameField takes a $ path of names and indexes, not %s", k.name, p)
+	}
+
+	for _, f := range b.r.cfg.typeFields() {
+		if p.Equal(f.path) {
+			b.failf("kind %s: %s and manifest.NameField name the same path %s", k.name, f.option, p)
 		}
 	}
 }
@@ -525,6 +536,7 @@ func (b *registryBuilder) addKind(k *Kind) {
 		}
 	}
 
+	b.checkNameField(k)
 	b.addVersions(entry)
 
 	r.kinds = append(r.kinds, entry)

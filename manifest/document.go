@@ -762,30 +762,30 @@ func (d *docState) decode(ctx context.Context) bool {
 }
 
 // readName reads the name of a document that reached the layout of the
-// current version, when the registry reads names. The name must be a
+// current version, when its kind has a [NameField]. The name must be a
 // non-empty string, as a decode into an any value reads it.
 func (d *docState) readName(ctx context.Context) {
-	cfg := &d.l.reg.cfg
-	if !cfg.hasNameField {
+	kc := &d.route.kind.kind.cfg
+	if !kc.hasNameField {
 		return
 	}
 
-	d.nameRead = readField(d.work, cfg.nameField, cfg.fieldPaths())
+	d.nameRead = readField(d.work, kc.nameField, append(d.l.reg.cfg.fieldPaths(), kc.nameField))
 	if d.nameRead.err != nil || !d.nameRead.found {
 		return
 	}
 
-	v, err := d.work.DecodeAt[any](ctx, cfg.nameField, niceyaml.WithSelfValidation(false))
+	v, err := d.work.DecodeAt[any](ctx, kc.nameField, niceyaml.WithSelfValidation(false))
 	if s, ok := v.(string); err == nil && ok && s != "" {
 		d.name, d.hasName = s, true
 	}
 }
 
-// checkName reports whether the document holds a name, when the registry
-// reads names, and adds the problem of one that does not.
+// checkName reports whether the document holds a name, when its kind has
+// a [NameField], and adds the problem of one that does not.
 func (d *docState) checkName() bool {
-	cfg := &d.l.reg.cfg
-	if !cfg.hasNameField {
+	kc := &d.route.kind.kind.cfg
+	if !kc.hasNameField {
 		return true
 	}
 
@@ -797,7 +797,7 @@ func (d *docState) checkName() bool {
 
 	case !d.hasName:
 		d.problems = append(d.problems, d.work.Bind(newProblem(ErrMissingName, "name must be a non-empty string",
-			niceyaml.AtPath(cfg.nameField))))
+			niceyaml.AtPath(kc.nameField))))
 
 		return false
 	}

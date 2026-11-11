@@ -131,18 +131,17 @@ func tagList(ctx context.Context, n *edit.Node) error {
 // with, followed by extra.
 func cafeOptions(extra ...manifest.RegistryOption) []manifest.RegistryOption {
 	return append([]manifest.RegistryOption{
-		manifest.WithNameField(meta.Child("name")),
 		manifest.WithAppName("cafe"),
 		manifest.WithMigrateHint(migrateHint),
 		manifest.WithRemoved("cafe.jacobcolvin.com/v1alpha1", "Dish",
 			"cafe 3.0 removed Dish v1alpha1, see https://jacobcolvin.com/cafe/upgrade/3"),
 		manifest.WithKinds(
-			manifest.NewKind[Cafe]("Cafe",
+			manifest.NewKind[Cafe]("Cafe", manifest.NameField(meta.Child("name")),
 				manifest.Required(),
 				manifest.Singleton(),
 				manifest.Version("cafe.jacobcolvin.com/v1"),
 			),
-			manifest.NewKind[Hours]("Hours",
+			manifest.NewKind[Hours]("Hours", manifest.NameField(meta.Child("name")),
 				manifest.Version("cafe.jacobcolvin.com/v1alpha1",
 					manifest.Deprecated("cafe 4.0 removes cafe.jacobcolvin.com/v1alpha1"),
 				),
@@ -151,7 +150,7 @@ func cafeOptions(extra ...manifest.RegistryOption) []manifest.RegistryOption {
 					manifest.Migrate(spec.Child("closes"), rename("close")),
 				),
 			),
-			manifest.NewKind[MenuItem]("MenuItem",
+			manifest.NewKind[MenuItem]("MenuItem", manifest.NameField(meta.Child("name")),
 				manifest.Version("cafe.jacobcolvin.com/v1beta1", manifest.KindName("Dish")),
 				manifest.Version("cafe.jacobcolvin.com/v1",
 					manifest.Schema(schema.Embedded([]byte(itemSchema))),
@@ -435,19 +434,29 @@ func TestNewRegistry(t *testing.T) {
 			},
 			err: "kind Cafe: manifest.WithVersionOnly names the only type field, so it takes no manifest.Claim",
 		},
-		"one path for two fields": {
-			opts: []manifest.RegistryOption{
-				manifest.WithNameField(paths.Doc().Child("kind")),
-				manifest.WithKinds(manifest.NewKind[Cafe]("Cafe", v1)),
-			},
-			err: "manifest.WithKindField and manifest.WithNameField name the same path $.kind",
+		"name at the kind field": {
+			opts: withKinds(manifest.NewKind[Cafe]("Cafe", manifest.NameField(paths.Doc().Child("kind")), v1)),
+			err:  "kind Cafe: manifest.WithKindField and manifest.NameField name the same path $.kind",
 		},
-		"field path with a wildcard": {
+		"name at the version field": {
+			opts: withKinds(
+				manifest.NewKind[Cafe]("Cafe", manifest.NameField(meta.Child("name")), v1),
+				manifest.NewKind[Hours]("Hours", manifest.NameField(paths.Doc().Child("apiVersion")), v1),
+			),
+			err: "kind Hours: manifest.WithVersionField and manifest.NameField name the same path $.apiVersion",
+		},
+		"name at the field of version only": {
 			opts: []manifest.RegistryOption{
-				manifest.WithNameField(paths.Doc().Child("metadata").ChildAll()),
-				manifest.WithKinds(manifest.NewKind[Cafe]("Cafe", v1)),
+				manifest.WithVersionOnly(paths.Doc().Child("version")),
+				manifest.WithKinds(
+					manifest.NewKind[Cafe]("Cafe", manifest.NameField(paths.Doc().Child("version")), v1),
+				),
 			},
-			err: "manifest.WithNameField takes a $ path of names and indexes, not $.metadata.*",
+			err: "kind Cafe: manifest.WithVersionOnly and manifest.NameField name the same path $.version",
+		},
+		"name path with a wildcard": {
+			opts: withKinds(manifest.NewKind[Cafe]("Cafe", manifest.NameField(meta.ChildAll()), v1)),
+			err:  "kind Cafe: manifest.NameField takes a $ path of names and indexes, not $.metadata.*",
 		},
 		"nil claim": {
 			opts: withKinds(manifest.NewKind[Cafe]("Cafe", manifest.Claim(nil), v1)),
@@ -1016,9 +1025,8 @@ func TestWithMarshalers(t *testing.T) {
 
 			level := spec.Child("level")
 			reg := manifest.MustNewRegistry(append([]manifest.RegistryOption{
-				manifest.WithNameField(meta.Child("name")),
 				manifest.WithUnmarshalers(niceyaml.CustomUnmarshaler(decodeAlarmLevel)),
-				manifest.WithKinds(manifest.NewKind[Alarm]("Alarm",
+				manifest.WithKinds(manifest.NewKind[Alarm]("Alarm", manifest.NameField(meta.Child("name")),
 					manifest.Version("alarm.jacobcolvin.com/v1"),
 					manifest.Version("alarm.jacobcolvin.com/v2",
 						// The step decodes the level through the unmarshalers of

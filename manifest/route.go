@@ -49,16 +49,11 @@ func fieldName(p paths.Path) string {
 	return p.String()
 }
 
-// fieldPaths returns the paths of the type fields and of the name that a
-// load reads.
+// fieldPaths returns the paths of the type fields that a load reads.
 func (c *registryConfig) fieldPaths() []paths.Path {
 	fields := []paths.Path{c.versionField}
 	if !c.versionOnly {
 		fields = append(fields, c.kindField)
-	}
-
-	if c.hasNameField {
-		fields = append(fields, c.nameField)
 	}
 
 	return fields

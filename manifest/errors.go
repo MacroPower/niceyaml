@@ -114,7 +114,7 @@ var (
 	ErrRemovedVersion = errors.New("removed version")
 
 	// ErrMissingName indicates a manifest without a name that is a
-	// non-empty string, in a registry that reads names.
+	// non-empty string, of a kind with a [NameField].
 	ErrMissingName = errors.New("missing name")
 
 	// ErrDuplicateName indicates two manifests of one kind with one name.

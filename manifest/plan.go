@@ -384,7 +384,7 @@ func (d *docState) blocks() bool {
 }
 
 // label returns the document as a header names it. The label is the kind
-// and the name when the registry reads names. Otherwise it is the kind,
+// and the name when the kind has a [NameField]. Otherwise it is the kind,
 // after the place of the document when the file holds several.
 func (d *docState) label() string {
 	name := d.route.kind.kind.name
