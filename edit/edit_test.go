@@ -10062,6 +10062,9 @@ func TestFileText(t *testing.T) {
 		docs func(t *testing.T) (*niceyaml.Source, []*edit.Doc)
 		want string
 		err  string
+		// Limit reports whether err matches [niceyaml.ErrLimit] rather
+		// than [edit.ErrUsage].
+		limit bool
 	}{
 		"one document": {
 			docs: func(t *testing.T) (*niceyaml.Source, []*edit.Doc) {
@@ -10154,6 +10157,40 @@ func TestFileText(t *testing.T) {
 			},
 			want: stringtest.LinesLF("a: 20", "k: 20", "---", "b: 20", "---", "\ufeffc: 3"),
 		},
+		"documents at the byte limit": {
+			// The text holds 48 bytes, and each Doc adds one.
+			docs: func(t *testing.T) (*niceyaml.Source, []*edit.Doc) {
+				t.Helper()
+
+				src := niceyaml.NewSourceFromString(text, niceyaml.WithByteLimit(50))
+
+				return src, edited(t, src, 0, 2)
+			},
+			want: stringtest.LinesLF("a: 20 # first", "---", "b: 2 # second", "---", "c: 20 # third"),
+		},
+		"documents that each keep the byte limit and together break it": {
+			// Each Apply counts the other document as the user wrote it.
+			docs: func(t *testing.T) (*niceyaml.Source, []*edit.Doc) {
+				t.Helper()
+
+				src := niceyaml.NewSourceFromString(text, niceyaml.WithByteLimit(49))
+
+				return src, edited(t, src, 0, 2)
+			},
+			err:   "file is larger than 49 bytes",
+			limit: true,
+		},
+		"documents of a named source that break the byte limit": {
+			docs: func(t *testing.T) (*niceyaml.Source, []*edit.Doc) {
+				t.Helper()
+
+				src := niceyaml.NewSourceFromString(text, niceyaml.WithByteLimit(49), niceyaml.WithName("app.yaml"))
+
+				return src, edited(t, src, 0, 2)
+			},
+			err:   "app.yaml: file is larger than 49 bytes",
+			limit: true,
+		},
 		"no doc": {
 			// A program that edits the documents that match a test passes
 			// no Doc for a file without a match.
@@ -10167,6 +10204,14 @@ func TestFileText(t *testing.T) {
 				return niceyaml.NewSourceFromString("\ufeff# top\r\na: 1\r\n# c\r\n---\r\nb: 2"), nil
 			},
 			want: "\ufeff# top\r\na: 1\r\n# c\r\n---\r\nb: 2",
+		},
+		"no doc of a file past the byte limit": {
+			// New refuses each document of the file, so a program that
+			// edits the documents that match a test passes no Doc.
+			docs: func(*testing.T) (*niceyaml.Source, []*edit.Doc) {
+				return niceyaml.NewSourceFromString(text, niceyaml.WithByteLimit(10)), nil
+			},
+			want: text,
 		},
 		"two docs of one document": {
 			docs: func(t *testing.T) (*niceyaml.Source, []*edit.Doc) {
@@ -10206,8 +10251,16 @@ func TestFileText(t *testing.T) {
 
 			got, err := edit.FileText(src, docs...)
 			if tc.err != "" {
-				require.ErrorIs(t, err, edit.ErrUsage)
+				if tc.limit {
+					require.ErrorIs(t, err, niceyaml.ErrLimit)
+					require.NotErrorIs(t, err, edit.ErrUsage)
+					assert.False(t, niceyaml.IsInvalid(err))
+				} else {
+					require.ErrorIs(t, err, edit.ErrUsage)
+				}
+
 				assert.Equal(t, tc.err, err.Error())
+				assert.Empty(t, got)
 
 				return
 			}

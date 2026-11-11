@@ -1040,7 +1040,8 @@ func (d *Doc) lexedAt(tks token.Tokens, tk *token.Token) (*token.Token, bool) {
 // of the user's text. The edits read the text through a Source without the
 // limits, so the check reads the limits after the last call. The byte
 // limit counts the bytes of the whole file, with the current text in place
-// of the document. The document byte limit counts the bytes of the run of
+// of the document and the other documents as the user wrote them. The
+// document byte limit counts the bytes of the run of
 // documents that holds the document, as [Doc.runSize] counts them. The
 // problem of either byte limit binds where a problem at the path $ binds.
 // The depth limit counts the levels of the document. Its problem binds at
