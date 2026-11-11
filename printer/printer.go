@@ -188,6 +188,7 @@ func containerFrame(s lipgloss.Style) lipgloss.Style {
 //   - [WithAnnotation]
 //   - [WithWrapWidth]
 //   - [WithMaxNumber]
+//   - [WithFlagBlend]
 type Option func(*config)
 
 // config holds the settings an [Option] configures, and the cache of
@@ -213,6 +214,9 @@ type config struct {
 	// Whether apply fills the container with the kind.Text style, as
 	// WithBox sets it.
 	box bool
+	// Whether a flagged line keeps the kind of each segment and tints it
+	// with the diff kind of the flag, as WithFlagBlend sets it.
+	flagBlend bool
 }
 
 // GutterContext describes the current row for gutter rendering. The
@@ -998,6 +1002,42 @@ func WithMaxNumber(n int) Option {
 	}
 }
 
+// WithFlagBlend is an [Option] that sets how the printer draws a line
+// that carries [line.FlagInserted] or [line.FlagDeleted]. By default, and
+// with WithFlagBlend(false), each segment of such a line takes the style
+// of [kind.GenericInserted] or [kind.GenericDeleted] in place of the
+// style of its own Kind. The line thus loses the colors of its keys,
+// strings, and comments.
+//
+// With WithFlagBlend(true), each segment keeps the style of its own Kind,
+// and the diff kind of the flag tints it before the overlays of the
+// segment apply. The tint mixes the foreground and underline colors of
+// the diff kind into those of the token, so the line keeps its token
+// colors. The background of the diff kind replaces the background of the
+// token. The line thus keeps the full diff fill, even under a theme that
+// gives every kind the background of its surface.
+//
+// Like a blending overlay, the tint also turns on each text attribute the
+// diff kind sets, such as bold or italic. It composes the transform of
+// the diff kind with the one of the token as well. A theme with a bold
+// [kind.GenericInserted] thus draws every token of an inserted line in
+// bold. The overlays of the view apply over the tint, as they apply over
+// the diff kind by default. The option does not change the gutter, so
+// [DefaultGutter] draws the marker of the flag in the diff kind. The
+// marker sits on the same fill as the line.
+//
+// The tint suits a theme that gives the two diff kinds a background,
+// such as [style.Default]. A theme that sets only a foreground for them
+// mixes that color into each token color and keeps the token background,
+// so changed lines look much like the lines around them. A program that
+// wants the token colors unmixed sets each diff kind to a style with only
+// a background.
+func WithFlagBlend(enabled bool) Option {
+	return func(c *config) {
+		c.flagBlend = enabled
+	}
+}
+
 // WrapWidth returns the width the output of the printer fits, as
 // [WithWrapWidth] sets it, or 0 when the printer does not wrap.
 func (p *Printer) WrapWidth() int {
@@ -1043,10 +1083,13 @@ func (p *Printer) Style(s kind.Kind) lipgloss.Style {
 // draws it in. The style starts from the style of the Kind of the
 // segment. On a line that carries [line.FlagInserted] or
 // [line.FlagDeleted], it starts from [kind.GenericInserted] or
-// [kind.GenericDeleted] instead. Each overlay of the segment then applies
-// in order. A replacing overlay sets the properties its style sets. A
-// blending overlay mixes its colors with the style under it, so a search
-// highlight keeps the token color it covers.
+// [kind.GenericDeleted] instead. With [WithFlagBlend] enabled, it keeps
+// the style of the Kind and mixes the foreground of the diff kind into it.
+// It then takes the background of the diff kind and turns on the text
+// attributes the diff kind sets, such as bold. Each overlay of the segment
+// then applies in order. A replacing overlay sets the properties its
+// style sets. A blending overlay mixes its colors with the style under
+// it, so a search highlight keeps the token color it covers.
 //
 // A renderer that writes another format, such as HTML with inline colors,
 // reads the colors of each segment from its style. Its output then shows
@@ -1073,22 +1116,18 @@ func (p *Printer) Segments(view *line.View, i int) iter.Seq2[line.Segment, lipgl
 
 	return func(yield func(line.Segment, lipgloss.Style) bool) {
 		for _, seg := range segs {
-			styled := seg
-			if base != "" {
-				styled.Kind = base
-			}
-
-			if !yield(seg, p.blended(blendKey(styled), styled)) {
+			styled, tint := p.flagged(seg, base)
+			if !yield(seg, p.blended(blendKey(styled, tint), styled, tint)) {
 				return
 			}
 		}
 	}
 }
 
-// flagKind returns the kind that every segment of a line with flag f
-// renders in. That kind is [kind.GenericDeleted] or [kind.GenericInserted]
-// for a line a diff changed. It is "" for a line whose segments each
-// render in their own kind.
+// flagKind returns the diff kind of flag f. That kind is
+// [kind.GenericDeleted] or [kind.GenericInserted] for a line a diff
+// changed, and "" for any other line. [Printer.flagged] decides whether
+// the diff kind replaces the kind of each segment or tints it.
 func flagKind(f line.Flag) kind.Kind {
 	switch f {
 	case line.FlagDeleted:
@@ -1097,6 +1136,24 @@ func flagKind(f line.Flag) kind.Kind {
 		return kind.GenericInserted
 	default:
 		return ""
+	}
+}
+
+// flagged returns seg as the printer styles it on a line whose flag has
+// the kind base, which [flagKind] returns. It also returns the kind that
+// tints seg ahead of its overlays, as [Printer.blended] applies it. A
+// base of "" leaves seg unchanged with no tint. Otherwise base replaces
+// the Kind of seg, or with [WithFlagBlend] it becomes the tint.
+func (p *Printer) flagged(seg line.Segment, base kind.Kind) (line.Segment, kind.Kind) {
+	switch {
+	case base == "":
+		return seg, ""
+	case p.flagBlend:
+		return seg, base
+	default:
+		seg.Kind = base
+
+		return seg, ""
 	}
 }
 
@@ -1385,14 +1442,13 @@ type runSpan struct {
 }
 
 // renderRuns renders the content of vl with its overlays, one styled run
-// per run of its segments that style the same. A deleted or inserted line
-// takes the diff style for its flag, and any other line takes the kind of
-// each segment. On either kind of line, the overlays that cover a segment
-// apply over that style. A run never ends inside a grapheme cluster, so
-// an escape sequence never splits one. A cluster that segments of
-// different styles share renders in the style of the segment holding its
-// first rune, the one [cells.Row] measures it by. It returns the rendered
-// content and a [runSpan] for each run, in order.
+// per run of its segments that style the same. Each segment takes the
+// kind and the tint that [Printer.flagged] gives it for the flag of the
+// line. A run never ends inside a grapheme cluster, so an escape sequence
+// never splits one. A cluster that segments of different styles share
+// renders in the style of the segment holding its first rune, the one
+// [cells.Row] measures it by. It returns the rendered content and a
+// [runSpan] for each run, in order.
 func (p *Printer) renderRuns(vl viewLine) (string, []runSpan) {
 	base := flagKind(vl.view.Flag(vl.idx))
 
@@ -1401,6 +1457,7 @@ func (p *Printer) renderRuns(vl viewLine) (string, []runSpan) {
 		run     strings.Builder
 		runKey  string
 		runSeg  line.Segment
+		runTint kind.Kind
 		started bool
 		spans   []runSpan
 		col     int
@@ -1415,7 +1472,7 @@ func (p *Printer) renderRuns(vl viewLine) (string, []runSpan) {
 		// The escape keeps one rune per rune of the content, so the escaped
 		// text counts the columns of the run.
 		text := escape.Control(run.String())
-		rendered := p.blended(runKey, runSeg).Render(text)
+		rendered := p.blended(runKey, runSeg, runTint).Render(text)
 		runShown := ansi.Strip(rendered)
 		span := runSpan{
 			text:     text,
@@ -1442,9 +1499,7 @@ func (p *Printer) renderRuns(vl viewLine) (string, []runSpan) {
 	at := 0 // The column of the content the next rune takes.
 
 	for _, seg := range vl.row.Segments {
-		if base != "" {
-			seg.Kind = base
-		}
+		seg, tint := p.flagged(seg, base)
 
 		// The runes at the start of the segment that continue the last
 		// cluster of the run stay in that run, whatever their style.
@@ -1469,11 +1524,11 @@ func (p *Printer) renderRuns(vl viewLine) (string, []runSpan) {
 			continue
 		}
 
-		key := blendKey(seg)
+		key := blendKey(seg, tint)
 		if !started || key != runKey {
 			flush()
 
-			runKey, runSeg, started = key, seg, true
+			runKey, runSeg, runTint, started = key, seg, tint, true
 		}
 
 		run.WriteString(text)
@@ -1690,16 +1745,22 @@ func widestWord(text string) int {
 	return widest
 }
 
-// blendKey returns the cache key of the effective style of seg. The key
-// holds the kind of seg, then each overlay that covers seg, in order. A
-// marker in front of each overlay tells whether it blends with or
-// replaces the style underneath. Two segments with the same key render
-// with the same style. The key quotes each name, so a name that contains
-// a marker cannot collide with a different overlay sequence.
-func blendKey(seg line.Segment) string {
+// blendKey returns the cache key of the effective style of seg under
+// tint, the kind [Printer.flagged] returns for it. The key holds the kind
+// of seg, then the tint when there is one, then each overlay that covers
+// seg, in order. A marker in front of the tint and of each overlay tells
+// how it layers over the style underneath. Two segments with the same key
+// render with the same style. The key quotes each name, so a name that
+// contains a marker cannot collide with a different layer sequence.
+func blendKey(seg line.Segment, tint kind.Kind) string {
 	var sb strings.Builder
 
 	sb.WriteString(strconv.Quote(string(seg.Kind)))
+
+	if tint != "" {
+		sb.WriteString("~")
+		sb.WriteString(strconv.Quote(string(tint)))
+	}
 
 	for _, ov := range seg.Overlays {
 		if ov.Blend {
@@ -1714,16 +1775,32 @@ func blendKey(seg line.Segment) string {
 	return sb.String()
 }
 
-// blended returns the style for key, which [blendKey] built from seg. It
-// computes the style on the first request for key and returns the cached
-// style after that. The overlays apply in order. A blending overlay mixes
-// with the result so far, and any other replaces it.
-func (p *Printer) blended(key string, seg line.Segment) lipgloss.Style {
+// blended returns the style for key, which [blendKey] built from seg and
+// tint. It computes the style on the first request for key and returns
+// the cached style after that. A tint other than "" applies first. It
+// blends its foreground and underline colors with the style of the kind
+// of seg, and its background replaces the one of that style. The diff
+// fill of a flagged line thus stays the fill the gutter marker sits on,
+// even under a theme that gives every kind the background of its surface.
+// Like a blending overlay, the tint also adds the text attributes it sets
+// and composes its transform with the one of that style. The overlays
+// then apply in order. A blending overlay mixes with the result so far,
+// and any other replaces it.
+func (p *Printer) blended(key string, seg line.Segment, tint kind.Kind) lipgloss.Style {
 	if st, ok := p.blends.get(key); ok {
 		return st
 	}
 
 	result := p.styles.Style(seg.Kind)
+
+	if tint != "" {
+		over := p.styles.Style(tint)
+
+		result = colors.BlendStyles(result, over)
+		if bg := colors.Override(nil, over.GetBackground()); bg != nil {
+			result = result.Background(bg)
+		}
+	}
 
 	for _, ov := range seg.Overlays {
 		if ov.Blend {

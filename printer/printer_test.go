@@ -2,7 +2,9 @@ package printer_test
 
 import (
 	"cmp"
+	"image/color"
 	"math"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -20,6 +22,7 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/finder"
+	"go.jacobcolvin.com/niceyaml/internal/colors"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -2564,6 +2567,7 @@ func TestPrinter_Segments(t *testing.T) {
 		decorate func(view *line.View)
 		// The kind each segment of the line renders in, by its text.
 		want map[string]kind.Kind
+		opts []printer.Option
 	}{
 		"plain line takes the kind of each segment": {
 			want: map[string]kind.Kind{
@@ -2589,6 +2593,10 @@ func TestPrinter_Segments(t *testing.T) {
 				"kaffe": kind.GenericDeleted,
 			},
 		},
+		"inserted line with flag blend keeps the view's segments": {
+			decorate: func(view *line.View) { view.SetFlag(0, line.FlagInserted) },
+			opts:     []printer.Option{printer.WithFlagBlend(true)},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -2600,10 +2608,10 @@ func TestPrinter_Segments(t *testing.T) {
 				tc.decorate(view)
 			}
 
-			p := printer.New(printer.WithStyles(theme.Charm))
+			p := printer.New(append([]printer.Option{printer.WithStyles(theme.Charm)}, tc.opts...)...)
 
 			// The segments come as line.View.Segments yields them, with
-			// their own kinds.
+			// their own kinds and overlays.
 			var segs []line.Segment
 
 			for seg, st := range p.Segments(view, 0) {
@@ -2632,6 +2640,7 @@ func TestPrinter_Segments_MatchPrint(t *testing.T) {
 		// The foreground the value takes, or "" when the case does not
 		// check it.
 		wantForeground kind.Kind
+		opts           []printer.Option
 	}{
 		"blended highlight": {
 			decorate: func(view *line.View) { view.BlendOverlay(kind.GenericHighlight, value) },
@@ -2653,6 +2662,17 @@ func TestPrinter_Segments_MatchPrint(t *testing.T) {
 				view.BlendOverlay(kind.GenericHighlight, value)
 			},
 		},
+		"inserted line with flag blend": {
+			decorate: func(view *line.View) { view.SetFlag(0, line.FlagInserted) },
+			opts:     []printer.Option{printer.WithFlagBlend(true)},
+		},
+		"blended highlight on an inserted line with flag blend": {
+			decorate: func(view *line.View) {
+				view.SetFlag(0, line.FlagInserted)
+				view.BlendOverlay(kind.GenericHighlight, value)
+			},
+			opts: []printer.Option{printer.WithFlagBlend(true)},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -2662,7 +2682,7 @@ func TestPrinter_Segments_MatchPrint(t *testing.T) {
 			view := niceyaml.NewSourceFromString("name: kaffe # x\n").View()
 			tc.decorate(view)
 
-			p := printer.New(printer.WithStyles(theme.Charm))
+			p := printer.New(append([]printer.Option{printer.WithStyles(theme.Charm)}, tc.opts...)...)
 			printed := p.Print(view)
 
 			var found bool
@@ -3352,6 +3372,215 @@ func TestPrinter_With(t *testing.T) {
 	styled := base.With(printer.WithStyles(yamltest.NewXMLStyles()))
 	assert.Contains(t, styled.Print(source.View()), "<nameTag>key</nameTag>")
 	assert.NotContains(t, base.Print(source.View()), "<nameTag>")
+}
+
+func TestWithFlagBlend(t *testing.T) {
+	t.Parallel()
+
+	// The value "1" takes column 3.
+	value := yamltest.LineRange(0, 3, 4)
+
+	tcs := map[string]struct {
+		decorate func(view *line.View)
+		opts     []printer.Option
+		want     string
+	}{
+		"default replaces each kind on an inserted line": {
+			decorate: func(view *line.View) { view.SetFlag(0, line.FlagInserted) },
+			want:     "<genericInserted>a: 1</genericInserted>",
+		},
+		"disabled replaces each kind on a deleted line": {
+			decorate: func(view *line.View) { view.SetFlag(0, line.FlagDeleted) },
+			opts:     []printer.Option{printer.WithFlagBlend(false)},
+			want:     "<genericDeleted>a: 1</genericDeleted>",
+		},
+		"enabled blends over each kind on an inserted line": {
+			decorate: func(view *line.View) { view.SetFlag(0, line.FlagInserted) },
+			opts:     []printer.Option{printer.WithFlagBlend(true)},
+			want:     "<genericInserted><nameTag>a</nameTag></genericInserted><genericInserted><punctuationMappingValue>:</punctuationMappingValue></genericInserted><genericInserted><text> </text></genericInserted><genericInserted><literalNumberInteger>1</literalNumberInteger></genericInserted>",
+		},
+		"enabled blends over each kind on a deleted line": {
+			decorate: func(view *line.View) { view.SetFlag(0, line.FlagDeleted) },
+			opts:     []printer.Option{printer.WithFlagBlend(true)},
+			want:     "<genericDeleted><nameTag>a</nameTag></genericDeleted><genericDeleted><punctuationMappingValue>:</punctuationMappingValue></genericDeleted><genericDeleted><text> </text></genericDeleted><genericDeleted><literalNumberInteger>1</literalNumberInteger></genericDeleted>",
+		},
+		"enabled applies overlays over the blend": {
+			decorate: func(view *line.View) {
+				view.SetFlag(0, line.FlagInserted)
+				view.AddOverlay(kind.GenericError, value)
+			},
+			opts: []printer.Option{printer.WithFlagBlend(true)},
+			want: "<genericInserted><nameTag>a</nameTag></genericInserted><genericInserted><punctuationMappingValue>:</punctuationMappingValue></genericInserted><genericInserted><text> </text></genericInserted><genericError>1</genericError>",
+		},
+		"enabled leaves a line without a flag unchanged": {
+			opts: []printer.Option{printer.WithFlagBlend(true)},
+			want: "<nameTag>a</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>1</literalNumberInteger>",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			view := niceyaml.NewSourceFromString("a: 1").View()
+			if tc.decorate != nil {
+				tc.decorate(view)
+			}
+
+			assert.Equal(t, tc.want, yamltest.NewXMLPrinter(tc.opts...).Print(view))
+		})
+	}
+}
+
+func TestWithFlagBlend_Colors(t *testing.T) {
+	t.Parallel()
+
+	// Rgba returns the channels of c, or nil for a color that is absent.
+	rgba := func(c color.Color) []uint32 {
+		if c == nil {
+			return nil
+		}
+
+		if _, ok := c.(lipgloss.NoColor); ok {
+			return nil
+		}
+
+		r, g, b, a := c.RGBA()
+
+		return []uint32{r, g, b, a}
+	}
+
+	// The token kinds set backgrounds of their own, and the diff kinds set
+	// a foreground and a text attribute but no background.
+	text := lipgloss.NewStyle().Foreground(lipgloss.Color("#d0d0d0")).Background(lipgloss.Color("#202020"))
+	fgOnly := style.New(
+		text,
+		style.Set(kind.NameTag, text.Foreground(lipgloss.Color("#c080ff")).Background(lipgloss.Color("#302040"))),
+		style.Set(kind.LiteralString, text.Foreground(lipgloss.Color("#e0c040"))),
+		style.Set(kind.GenericInserted, lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff00")).Bold(true)),
+		style.Set(kind.GenericDeleted, lipgloss.NewStyle().Foreground(lipgloss.Color("#ff0000")).Italic(true)),
+	)
+
+	stylers := map[string]style.Styler{
+		"default dark":  style.Default(true),
+		"default light": style.Default(false),
+		// Charm gives every kind the background of its surface.
+		"charm":                           theme.Charm,
+		"charm light":                     theme.CharmLight,
+		"diff kinds without a background": fgOnly,
+	}
+
+	for name, styles := range stylers {
+		for _, flag := range []line.Flag{line.FlagInserted, line.FlagDeleted} {
+			t.Run(name+"/"+flag.String(), func(t *testing.T) {
+				t.Parallel()
+
+				view := niceyaml.NewSourceFromString("name: kaffe\n").View()
+				view.SetFlag(0, flag)
+
+				diffKind := kind.GenericInserted
+				if flag == line.FlagDeleted {
+					diffKind = kind.GenericDeleted
+				}
+
+				diffStyle := styles.Style(diffKind)
+				p := printer.New(printer.WithStyles(styles), printer.WithFlagBlend(true))
+
+				fg := map[string]any{}
+
+				for seg, st := range p.Segments(view, 0) {
+					// Each segment mixes the foreground of the diff kind
+					// into its own. It takes the background of the diff
+					// kind as it is, whatever background its own kind has.
+					// When the diff kind sets no background, the segment
+					// keeps its own.
+					tokenStyle := styles.Style(seg.Kind)
+					want := colors.Blend(tokenStyle.GetForeground(), diffStyle.GetForeground())
+					assert.Equal(t, want, st.GetForeground(), "segment %q", seg.Text)
+
+					wantBg := diffStyle.GetBackground()
+					if _, ok := wantBg.(lipgloss.NoColor); ok {
+						wantBg = tokenStyle.GetBackground()
+						require.NotEqual(t, lipgloss.NoColor{}, wantBg, "segment %q", seg.Text)
+					}
+
+					assert.Equal(t, rgba(wantBg), rgba(st.GetBackground()), "segment %q", seg.Text)
+
+					// Each text attribute the diff kind sets turns on, as
+					// it does under a blending overlay.
+					wantBold := tokenStyle.GetBold() || diffStyle.GetBold()
+					assert.Equal(t, wantBold, st.GetBold(), "segment %q", seg.Text)
+
+					wantItalic := tokenStyle.GetItalic() || diffStyle.GetItalic()
+					assert.Equal(t, wantItalic, st.GetItalic(), "segment %q", seg.Text)
+
+					fg[seg.Text] = st.GetForeground()
+				}
+
+				// The key and the value keep different token colors.
+				assert.NotEqual(t, fg["name"], fg["kaffe"])
+
+				// A copy with other options keeps the tint.
+				for seg, st := range p.With(printer.WithWrapWidth(40)).Segments(view, 0) {
+					assert.Equal(t, fg[seg.Text], st.GetForeground(), "segment %q", seg.Text)
+				}
+
+				// A copy without the option draws the line in the diff kind.
+				for seg, st := range p.With(printer.WithFlagBlend(false)).Segments(view, 0) {
+					assert.Equal(t, diffStyle.GetForeground(), st.GetForeground(), "segment %q", seg.Text)
+				}
+			})
+		}
+	}
+}
+
+func TestWithFlagBlend_MarkerFill(t *testing.T) {
+	t.Parallel()
+
+	sgr := regexp.MustCompile(`\x1b\[([0-9;]*)m`)
+
+	// Backgrounds returns the background each SGR sequence of row sets,
+	// as the parameters that follow 48;2.
+	backgrounds := func(row string) []string {
+		var bgs []string
+
+		for _, m := range sgr.FindAllStringSubmatch(row, -1) {
+			if _, bg, ok := strings.Cut(m[1], "48;2;"); ok {
+				parts := strings.SplitN(bg, ";", 4)
+				bgs = append(bgs, strings.Join(parts[:3], ";"))
+			}
+		}
+
+		return bgs
+	}
+
+	rgb := func(c interface{ RGBA() (r, g, b, a uint32) }) string {
+		r, g, b, _ := c.RGBA()
+
+		return strconv.Itoa(int(r>>8)) + ";" + strconv.Itoa(int(g>>8)) + ";" + strconv.Itoa(int(b>>8))
+	}
+
+	before := niceyaml.NewSourceFromString("a: 1\nb: 2 # old\n")
+	after := niceyaml.NewSourceFromString("a: 1\nb: 3 # new\n")
+	view := diff.Diff(before.Lines(), after.Lines()).Unified()
+
+	p := printer.New(printer.WithStyles(theme.Charm), printer.WithFlagBlend(true))
+	rows := strings.Split(p.Print(view), "\n")
+	require.Len(t, rows, 3)
+
+	for i, k := range map[int]kind.Kind{1: kind.GenericDeleted, 2: kind.GenericInserted} {
+		want := rgb(p.Style(k).GetBackground())
+		bgs := backgrounds(rows[i])
+		require.Greater(t, len(bgs), 2, "row %d", i)
+
+		// The line number keeps the surface. The marker and every run of
+		// content after it share the fill of the diff kind.
+		assert.NotEqual(t, want, bgs[0], "row %d", i)
+
+		for _, bg := range bgs[1:] {
+			assert.Equal(t, want, bg, "row %d: %q", i, rows[i])
+		}
+	}
 }
 
 func TestPrinter_Golden(t *testing.T) {

@@ -125,6 +125,24 @@
 // function renders for the largest line number, so it fits a custom line
 // number format.
 //
+// # Diff Lines
+//
+// A diff marks each changed line with [line.FlagInserted] or
+// [line.FlagDeleted]. By default the printer draws every token of such a
+// line in [kind.GenericInserted] or [kind.GenericDeleted], the classic
+// look of a terminal diff. [WithFlagBlend] keeps the color of each token
+// instead, mixes the foreground of the diff kind into it, and fills the
+// line with the background of the diff kind. It also turns on each text
+// attribute the diff kind sets, such as bold, the same way a blending
+// overlay does. A changed line then keeps its syntax highlighting on the
+// diff background:
+//
+//	p := printer.New(printer.WithFlagBlend(true))
+//	lipgloss.Println(p.Print(diff.Diff(before, after).Unified()))
+//
+// Either way, [DefaultGutter] draws the marker of the flag in the diff
+// kind, on the same background as the line.
+//
 // # Overlays
 //
 // The printer renders the [line.Overlays] a view carries. An overlay

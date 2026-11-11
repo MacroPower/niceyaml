@@ -28,18 +28,21 @@ type Segment struct {
 	Text string
 	// Kind is the kind of the token the text belongs to, as [Line.Kind]
 	// reads it, or [kind.Text] for the whitespace a token carries before
-	// or after its text. The printer draws a flagged line in the kind of
-	// its flag instead, as [View.Segments] describes.
+	// or after its text. By default the printer draws a flagged line in
+	// the kind of its flag instead, as [View.Segments] describes.
 	Kind kind.Kind
 	// Overlays are the overlays of the view that cover Cols, in the order
 	// the view took them in. The printer applies them in that order over
-	// the style of Kind, or over [kind.GenericInserted] or
+	// the style of Kind, or by default over [kind.GenericInserted] or
 	// [kind.GenericDeleted] on a line that carries [FlagInserted] or
-	// [FlagDeleted]. Where two of them set the same property, the one the
+	// [FlagDeleted]. Where two overlays set the same property, the one the
 	// caller added last thus wins. A blending overlay mixes its colors with
-	// the style under it instead, as [Overlay.Blend] describes. The slice
-	// belongs to the segment and holds copies of the view's overlays, so
-	// changing it does not change the view or the other segments.
+	// the style under it instead, as [Overlay.Blend] describes. A printer
+	// with [go.jacobcolvin.com/niceyaml/printer.WithFlagBlend] keeps Kind
+	// on a flagged line and tints it with the kind of the flag before it
+	// applies these overlays. The slice belongs to the segment and holds
+	// copies of the view's overlays, so changing it does not change the
+	// view or the other segments.
 	Overlays Overlays
 	// Cols are the columns of the line the segment covers, counted in
 	// runes.
@@ -102,7 +105,13 @@ type Segment struct {
 // On a line that carries [FlagInserted] or [FlagDeleted], the printer
 // draws each segment in [kind.GenericInserted] or [kind.GenericDeleted] in
 // place of its Kind, with its overlays over that. The snippet reads
-// [View.Flag] for each line and does the same. A renderer that writes the
+// [View.Flag] for each line and does the same. A printer with
+// [go.jacobcolvin.com/niceyaml/printer.WithFlagBlend] keeps the Kind
+// instead and tints it with the diff kind. A renderer that matches it
+// keeps the token span and mixes the foreground of the diff kind into
+// the token color. It fills the span with the background of the diff
+// kind and applies each text attribute the diff kind sets, such as bold.
+// The overlays apply over all of these. A renderer that writes the
 // colors themselves, blends included, reads each segment with the style
 // the printer draws it in from
 // [go.jacobcolvin.com/niceyaml/printer.Printer.Segments].

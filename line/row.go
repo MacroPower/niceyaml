@@ -33,8 +33,10 @@ type Row struct {
 	// columns of Content, and the texts of them all concatenate to
 	// Content. A clipped line keeps the part of each segment its windows
 	// hold, and each "..." is a segment of its own in [kind.UISeparator]
-	// without overlays. The printer draws every segment of a flagged line
-	// in the kind of its flag, the "..." included.
+	// without overlays. By default the printer draws every segment of a
+	// flagged line in the kind of its flag, the "..." included. A printer
+	// with [go.jacobcolvin.com/niceyaml/printer.WithFlagBlend] keeps the
+	// kind of each segment and tints it with the kind of the flag.
 	Segments []Segment
 	// Overlays are the overlays of the line, in the order the View took
 	// them in, each on the columns of Content that show its columns. A
