@@ -5,6 +5,7 @@ import (
 	"errors"
 	"iter"
 	"slices"
+	"strings"
 	"sync"
 	"weak"
 
@@ -267,6 +268,51 @@ func AsErrors(err error) error {
 	}
 
 	return remark(err, severityError)
+}
+
+// WithoutWarnings returns the errors of err without its warnings, as a
+// check boundary returns them. [Node.Validate], a decode, and the other
+// calls that collect warnings apply it to the result of each check they
+// run, and hand the warnings to the [Warnings] collector on the context.
+// WithoutWarnings returns an err that does not hold a warning as it is,
+// and nil for an err that holds only warnings or for a nil err.
+//
+// For an err that holds both, WithoutWarnings keeps each join that
+// [errors.Join] builds and each wrapper of one %w verb that [fmt.Errorf]
+// builds. It removes the warnings below them. It calls the
+// WithoutWarnings method of an error that holds both and has one, so the
+// result of such an error keeps its type. WithoutWarnings looks for the
+// method on err itself, on each branch of those joins, and on the error
+// that each of those wrappers wraps:
+//
+//	func (e *RuleSetError) WithoutWarnings() error {
+//		var fails []error
+//		for _, f := range e.Errs {
+//			if f = niceyaml.WithoutWarnings(f); f != nil {
+//				fails = append(fails, f)
+//			}
+//		}
+//
+//		return &RuleSetError{Set: e.Set, Errs: fails}
+//	}
+//
+// The method applies WithoutWarnings to the errors it holds, not to its
+// receiver, because WithoutWarnings calls the method again. WithoutWarnings
+// uses the result of the method only when that result holds an error and
+// does not hold a warning. For a result that does not hold an error or
+// that still holds a warning, such as nil or the receiver, WithoutWarnings
+// splits the error as it splits an error without the method.
+//
+// Any other error that holds both becomes the join of its errors. Such
+// errors include a summary from [NewSummary] and an error that [Node.Bind]
+// or a [Source] has bound, even when the bound error has the method. That
+// join drops the heading and the type of the error, so [errors.As] does
+// not find that type in the result. Each error of the join keeps the text
+// of the wrappers above it as its [ErrorTree.Context].
+func WithoutWarnings(err error) error {
+	failure, _ := splitWarnings(err) //nolint:errcheck // The warnings are the second error, which the call drops.
+
+	return failure
 }
 
 // remark returns err with sev marked above each of its problems that
@@ -895,10 +941,13 @@ func deliver(ctx context.Context, err error) {
 // splitWarnings returns the errors and then the warnings among the
 // problems of err. When err does not hold a warning, splitWarnings
 // returns it whole as the errors. When err does not hold an error, it
-// returns err whole as the warnings. For an err that holds both,
-// [splitBelow] keeps the join or the wrapper on top of the errors when it
-// can split err. Otherwise splitWarnings returns each severity as the
-// join of its problems, as [splitProblems] returns them.
+// returns err whole as the warnings. For an err that holds both and has a
+// WithoutWarnings method, the errors are the result of that method when
+// [splitSelf] accepts it. The warnings are those that [splitProblems]
+// finds in err. For any other err that holds both, [splitBelow] keeps
+// the join or the wrapper on top of the errors when it can split err.
+// Otherwise splitWarnings returns each severity as the join of its
+// problems, as splitProblems returns them.
 //
 // The warnings of a branch that does not hold an error thus stay below
 // the headings of that branch, as they do in a result that holds warnings
@@ -915,6 +964,13 @@ func splitWarnings(err error) (error, error) {
 	case !HasErrors(err):
 		warnings = err
 	default:
+		failure = splitSelf(err)
+		if failure != nil {
+			_, warnings = splitProblems(err) //nolint:errcheck // The method gives the errors.
+
+			return failure, warnings
+		}
+
 		failure, warnings = splitBelow(err)
 		if failure == nil {
 			failure, warnings = splitProblems(err)
@@ -922,6 +978,25 @@ func splitWarnings(err error) (error, error) {
 	}
 
 	return failure, warnings
+}
+
+// splitSelf returns the result of the WithoutWarnings method of err, for
+// an err that holds both errors and warnings. It returns nil when err does
+// not have the method, or when the result of the method does not hold an
+// error or still holds a warning. The split of err then goes on as for an
+// error without the method.
+func splitSelf(err error) error {
+	x, ok := err.(interface{ WithoutWarnings() error }) //nolint:errorlint // The node itself, not a chain search.
+	if !ok {
+		return nil
+	}
+
+	failure := x.WithoutWarnings()
+	if !HasErrors(failure) || holdsWarning(failure) {
+		return nil
+	}
+
+	return failure //nolint:wrapcheck // The error rebuilds itself and keeps its type.
 }
 
 // splitProblems returns the join of the errors and then the join of the
@@ -946,20 +1021,22 @@ func splitProblems(err error) (error, error) {
 }
 
 // splitBelow splits err below its top, for an err that holds both errors
-// and warnings. It splits a join branch by branch, as [splitJoin] does,
-// and a wrapper of one error below the wrapper, as [splitWrapper] does.
-// It does not split an [*Error], a [*SourceError], a [*markedError], or a
-// [*PanicError]. For an err that does not split, splitBelow returns a nil
+// and warnings. It splits a join that [errors.Join] builds and a join of
+// a wrapper with several %w verbs branch by branch, as [splitJoin] does.
+// It splits a wrapper that [fmt.Errorf] builds with one %w verb, and the
+// copy of one that [Detach] builds, below the wrapper, as [splitWrapper]
+// does. It does not split an error of any other type. Any stand-in for
+// such an error matches the error as the check wrote it, with its warnings.
+// For such an err, splitBelow thus builds no stand-in and returns a nil
 // failure.
 func splitBelow(err error) (error, error) {
 	var failure, warnings error
 
-	switch x := err.(type) { //nolint:errorlint // The node itself, not a chain search.
-	case *Error, *SourceError, *markedError, *PanicError:
-	case interface{ Unwrap() []error }:
+	switch {
+	case multierr.IsJoin(err), multierr.IsWrapErrors(err):
 		failure, warnings = splitJoin(err)
-	case interface{ Unwrap() error }:
-		failure, warnings = splitWrapper(err, x.Unwrap())
+	case multierr.IsWrap(err):
+		failure, warnings = splitWrapper(err, errors.Unwrap(err))
 	}
 
 	return failure, warnings
@@ -1009,13 +1086,12 @@ func splitWrapper(err, below error) (error, error) {
 		return nil, nil //nolint:nilnil // A nil failure means that the wrapper does not split.
 	}
 
-	msg := err.Error()
-
-	text := replaceText(msg, below.Error(), failure.Error())
-	if text == msg {
+	msg, inner := err.Error(), below.Error()
+	if inner == "" || strings.Count(msg, inner) != 1 {
 		return nil, nil //nolint:nilnil // A nil failure means that the wrapper does not split.
 	}
 
+	text := replaceText(msg, inner, failure.Error())
 	added := wrapperText{}.around([]wrapper{{err: err, next: below}})
 
 	return multierr.Replace(err, failure, text, nil), underHeadings(warnings, added)

@@ -216,6 +216,79 @@ func (e *lintError) Error() string { return errors.Join(e.errs...).Error() }
 
 func (e *lintError) Unwrap() []error { return e.errs }
 
+// ruleSetError is an aggregate under a heading that names its rule set.
+// Its WithoutWarnings method keeps its type and its heading.
+type ruleSetError struct {
+	set  string
+	errs []error
+}
+
+func (e *ruleSetError) Error() string {
+	return "ruleset " + e.set
+}
+
+func (e *ruleSetError) Unwrap() []error { return e.errs }
+
+func (e *ruleSetError) WithoutWarnings() error {
+	var fails []error
+
+	for _, f := range e.errs {
+		f = niceyaml.WithoutWarnings(f)
+		if f != nil {
+			fails = append(fails, f)
+		}
+	}
+
+	return &ruleSetError{set: e.set, errs: fails}
+}
+
+// strayRuleSetError is a [ruleSetError] whose WithoutWarnings method
+// returns what split returns, such as nil or the receiver.
+type strayRuleSetError struct {
+	split func(e *strayRuleSetError) error
+	errs  []error
+}
+
+func (e *strayRuleSetError) Error() string {
+	return "ruleset stray"
+}
+
+func (e *strayRuleSetError) Unwrap() []error { return e.errs }
+
+func (e *strayRuleSetError) WithoutWarnings() error { return e.split(e) }
+
+// plainRuleSetError is a [ruleSetError] without the WithoutWarnings
+// method.
+type plainRuleSetError struct {
+	set  string
+	errs []error
+}
+
+func (e *plainRuleSetError) Error() string {
+	return "ruleset " + e.set + ":\n" + errors.Join(e.errs...).Error()
+}
+
+func (e *plainRuleSetError) Unwrap() []error { return e.errs }
+
+// ruleSetSpec is a type whose Validate method returns a [ruleSetError]
+// over an error and a warning.
+type ruleSetSpec struct {
+	Seats int `yaml:"seats"`
+}
+
+func (ruleSetSpec) Validate() error {
+	return &ruleSetError{set: "net", errs: []error{
+		niceyaml.NewWarning("fewer than 10 seats", niceyaml.AtPath(paths.Current().Child("seats"))),
+		yamltest.ErrorAt("seats must be even", "seats"),
+	}}
+}
+
+// ruleSetCafeDoc is the parent of a [ruleSetSpec].
+type ruleSetCafeDoc struct {
+	Spec  ruleSetSpec `yaml:"spec"`
+	Extra string      `yaml:"extra"`
+}
+
 // warningRows returns a row for each warning that w holds, with its
 // source, its position, its message, and the number of its details.
 func warningRows(w *niceyaml.Warnings) []string {
@@ -689,6 +762,111 @@ func TestAsErrors_Tally(t *testing.T) {
 	), niceyaml.AsErrors(report).Error())
 }
 
+func TestWithoutWarnings(t *testing.T) {
+	t.Parallel()
+
+	fail := errors.New("bad seats")
+	other := errors.New("bad table")
+	warn := niceyaml.NewWarning("few seats")
+	old := niceyaml.NewWarning("old layout")
+
+	tcs := map[string]struct {
+		err error
+		// The message of the result, or "" for a nil result.
+		want string
+		// Whether the result is a [*ruleSetError].
+		ruleSet bool
+	}{
+		"nil": {},
+		"error alone": {
+			err:  fail,
+			want: "bad seats",
+		},
+		"warnings alone": {
+			err: errors.Join(warn, old),
+		},
+		"join of an error and a warning": {
+			err:  errors.Join(warn, fail),
+			want: "bad seats",
+		},
+		"wrapper around an error and a warning": {
+			err:  fmt.Errorf("check: %w", errors.Join(fail, warn)),
+			want: "check: bad seats",
+		},
+		"type with a WithoutWarnings method": {
+			// The method splits each finding, and the type keeps its
+			// heading over the error that a finding holds beside a warning.
+			err:     &ruleSetError{set: "net", errs: []error{old, errors.Join(warn, fail)}},
+			want:    "ruleset net",
+			ruleSet: true,
+		},
+		"wrapper around a type with a WithoutWarnings method": {
+			// The method keeps the text of the type, so the wrapper keeps
+			// its text too.
+			err:     fmt.Errorf("check: %w", &ruleSetError{set: "net", errs: []error{warn, fail}}),
+			want:    "check: ruleset net",
+			ruleSet: true,
+		},
+		"join branch with a WithoutWarnings method": {
+			err:     errors.Join(&ruleSetError{set: "net", errs: []error{warn, fail}}, other),
+			want:    "ruleset net\nbad table",
+			ruleSet: true,
+		},
+		"type without a WithoutWarnings method": {
+			err:  &plainRuleSetError{set: "net", errs: []error{old, fail}},
+			want: "bad seats",
+		},
+		"method that returns nil": {
+			err: &strayRuleSetError{
+				split: func(*strayRuleSetError) error { return nil },
+				errs:  []error{old, fail},
+			},
+			want: "bad seats",
+		},
+		"method that returns its receiver": {
+			err: &strayRuleSetError{
+				split: func(e *strayRuleSetError) error { return e },
+				errs:  []error{old, fail},
+			},
+			want: "bad seats",
+		},
+		"method that returns only warnings": {
+			err: &strayRuleSetError{
+				split: func(*strayRuleSetError) error { return old },
+				errs:  []error{old, fail},
+			},
+			want: "bad seats",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := niceyaml.WithoutWarnings(tc.err)
+			if tc.want == "" {
+				require.NoError(t, got)
+
+				return
+			}
+
+			require.EqualError(t, got, tc.want)
+			require.ErrorIs(t, got, fail)
+			require.NotErrorIs(t, got, warn)
+			require.NotErrorIs(t, got, old)
+			assert.NotErrorAs(t, got, new(*plainRuleSetError))
+			assert.NotErrorAs(t, got, new(*strayRuleSetError))
+
+			rs, ok := errors.AsType[*ruleSetError](got)
+			require.Equal(t, tc.ruleSet, ok)
+
+			if ok {
+				assert.Equal(t, []error{fail}, rs.errs)
+			}
+		})
+	}
+}
+
 func TestWarnings(t *testing.T) {
 	t.Parallel()
 
@@ -1083,20 +1261,184 @@ func TestWarnings(t *testing.T) {
 		assert.Equal(t, "cafe.yaml:1:1: warning: $.spec~: old spec", warnings.Err().Error())
 	})
 
-	t.Run("a failure that holds a warning keeps its type", func(t *testing.T) {
+	t.Run("a failure of a caller's type that holds a warning", func(t *testing.T) {
 		t.Parallel()
 
-		lint := returns(&lintError{errs: []error{
-			yamltest.ErrorAt("bad extra", "extra"),
-			niceyaml.NewWarning("old spec", niceyaml.AtPath(paths.Current().Child("spec").Key())),
-		}})
+		problems := func() []error {
+			return []error{
+				yamltest.ErrorAt("bad extra", "extra"),
+				niceyaml.NewWarning("old spec", niceyaml.AtPath(paths.Current().Child("spec").Key())),
+			}
+		}
+
+		// Only a type with a WithoutWarnings method keeps its type. Any
+		// other type becomes the join of its errors, whatever its message,
+		// so errors.As never finds a value that still holds the warning.
+		tcs := map[string]struct {
+			run  func(ctx context.Context) error
+			err  string
+			kept bool
+		}{
+			"aggregate with the message of a join": {
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, returns(&lintError{errs: problems()}))
+				},
+				err: "cafe.yaml:3:8: $.extra: bad extra",
+			},
+			"aggregate under a heading": {
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, returns(&plainRuleSetError{set: "net", errs: problems()}))
+				},
+				err: "cafe.yaml:3:8: $.extra: bad extra",
+			},
+			"wrapper that shows the text it wraps": {
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, returns(&yamltest.CheckError{Err: errors.Join(problems()...)}))
+				},
+				err: "cafe.yaml:3:8: $.extra: bad extra",
+			},
+			"aggregate with a WithoutWarnings method": {
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, returns(&ruleSetError{set: "net", errs: problems()}))
+				},
+				err:  "cafe.yaml: ruleset net\ncafe.yaml:3:8: $.extra: bad extra",
+				kept: true,
+			},
+			"wrapper around an aggregate with a WithoutWarnings method": {
+				run: func(ctx context.Context) error {
+					rs := &ruleSetError{set: "net", errs: problems()}
+
+					return doc.Validate(ctx, returns(fmt.Errorf("ctx: %w", rs)))
+				},
+				err:  "cafe.yaml: ctx: ruleset net\ncafe.yaml:3:8: $.extra: bad extra",
+				kept: true,
+			},
+			"bound aggregate with a WithoutWarnings method": {
+				// Node.Bind puts a SourceError on top, which does not split
+				// itself, so the type is lost.
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
+						return n.Bind(&ruleSetError{set: "net", errs: problems()})
+					}))
+				},
+				err: "cafe.yaml:3:8: $.extra: bad extra",
+			},
+			"detached wrapper around bound problems": {
+				// The copy that Detach builds of a wrapper of one %w verb
+				// splits as the wrapper does, so it keeps its text.
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
+						bound := make([]error, 0, len(problems()))
+						for _, p := range problems() {
+							bound = append(bound, n.Bind(p))
+						}
+
+						return niceyaml.Detach(fmt.Errorf("ctx: %w", errors.Join(bound...)))
+					}))
+				},
+				err: "ctx: cafe.yaml:3:8: $.extra: bad extra",
+			},
+			"aggregate whose WithoutWarnings method returns nil": {
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, returns(&strayRuleSetError{
+						split: func(*strayRuleSetError) error { return nil },
+						errs:  problems(),
+					}))
+				},
+				err: "cafe.yaml:3:8: $.extra: bad extra",
+			},
+			"aggregate whose WithoutWarnings method returns its receiver": {
+				run: func(ctx context.Context) error {
+					return doc.Validate(ctx, returns(&strayRuleSetError{
+						split: func(e *strayRuleSetError) error { return e },
+						errs:  problems(),
+					}))
+				},
+				err: "cafe.yaml:3:8: $.extra: bad extra",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				warnings := niceyaml.NewWarnings()
+
+				err := tc.run(warnings.Context(t.Context()))
+				require.EqualError(t, err, tc.err)
+				assert.Equal(t, "cafe.yaml:1:1: warning: $.spec~: old spec", warnings.Err().Error())
+
+				for problem := range niceyaml.Problems(err) {
+					assert.False(t, problem.Warning, problem.Message())
+				}
+
+				// The type that errors.As finds holds the problems of err.
+				for _, target := range []any{
+					new(*lintError), new(*plainRuleSetError), new(*strayRuleSetError), new(*yamltest.CheckError),
+				} {
+					assert.NotErrorAs(t, err, target)
+				}
+
+				rs, ok := errors.AsType[*ruleSetError](err)
+				require.Equal(t, tc.kept, ok)
+
+				if ok {
+					assert.Equal(t, "net", rs.set)
+					assert.Len(t, rs.errs, 1)
+					assert.False(t, niceyaml.HasErrors(warnings.Err()))
+				}
+			})
+		}
+	})
+
+	t.Run("a Validate method keeps the type of a failure that splits itself", func(t *testing.T) {
+		t.Parallel()
+
 		warnings := niceyaml.NewWarnings()
 
-		err := doc.Validate(warnings.Context(t.Context()), lint)
-		require.EqualError(t, err, "cafe.yaml:3:8: $.extra: bad extra")
+		var got ruleSetCafeDoc
 
-		require.ErrorAs(t, err, new(*lintError))
-		assert.Equal(t, "cafe.yaml:1:1: warning: $.spec~: old spec", warnings.Err().Error())
+		err := doc.DecodeInto(warnings.Context(t.Context()), &got)
+		require.Error(t, err)
+
+		rs, ok := errors.AsType[*ruleSetError](err)
+		require.True(t, ok)
+		assert.Equal(t, "net", rs.set)
+		require.Len(t, rs.errs, 1)
+		assert.True(t, niceyaml.HasErrors(rs))
+
+		for problem := range niceyaml.Problems(err) {
+			assert.False(t, problem.Warning, problem.Message())
+		}
+
+		assert.Equal(t, "cafe.yaml:2:10: warning: $.spec.seats: fewer than 10 seats", warnings.Err().Error())
+	})
+
+	t.Run("a value check keeps the type of a failure that splits itself", func(t *testing.T) {
+		t.Parallel()
+
+		warnings := niceyaml.NewWarnings()
+
+		var got checkedCafeDoc
+
+		err := doc.DecodeInto(warnings.Context(t.Context()), &got,
+			niceyaml.WithValueCheck(func(context.Context, *seatsOnly) error {
+				return &ruleSetError{set: "net", errs: []error{
+					niceyaml.NewWarning("few seats", niceyaml.AtPath(paths.Current().Child("seats"))),
+					yamltest.ErrorAt("bad seats", "seats"),
+				}}
+			}))
+		require.Error(t, err)
+
+		rs, ok := errors.AsType[*ruleSetError](err)
+		require.True(t, ok)
+		require.Len(t, rs.errs, 1)
+
+		for problem := range niceyaml.Problems(err) {
+			assert.False(t, problem.Warning, problem.Message())
+		}
+
+		assert.Equal(t, "cafe.yaml:2:10: warning: $.spec.seats: few seats", warnings.Err().Error())
 	})
 
 	t.Run("each problem of a hook keeps the context of the wrapper above it", func(t *testing.T) {

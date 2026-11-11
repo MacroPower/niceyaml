@@ -63,8 +63,14 @@ func IsWrapErrors(err error) bool {
 }
 
 // IsWrap reports whether err is a wrapper that [fmt.Errorf] builds with
-// one %w verb.
+// one %w verb, or a copy of one that [Wrap] returns. A stand-in that
+// [Replace] returns does not count, because the error it stands in for
+// can be of any type.
 func IsWrap(err error) bool {
+	if p, ok := err.(*placedError); ok { //nolint:errorlint // The error itself, not a chain search.
+		return p.like == nil
+	}
+
 	return reflect.TypeOf(err) == wrapType
 }
 
@@ -156,9 +162,10 @@ func Replace(wrapper, err error, msg string, beside []error) error {
 }
 
 // Wrap returns an error whose message is msg and which unwraps to err, as
-// a wrapper that [fmt.Errorf] builds with one %w verb does. The error
-// does not keep a reference to the wrapper it replaces, so it does not
-// match anything itself, unlike the stand-in [Replace] returns.
+// a wrapper that [fmt.Errorf] builds with one %w verb does. [IsWrap]
+// reports it as such a wrapper. The error does not keep a reference to
+// the wrapper it replaces, so it does not match anything itself, unlike
+// the stand-in [Replace] returns.
 func Wrap(err error, msg string) error {
 	return &placedError{err: err, msg: msg}
 }

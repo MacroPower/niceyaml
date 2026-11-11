@@ -127,7 +127,7 @@ func TestIsJoin(t *testing.T) {
 			err:   multierr.Replace(fmt.Errorf("x: %w", errA), errC, "x: c", nil),
 			built: true,
 		},
-		"rebuilt one verb": {err: multierr.Wrap(errC, "x: c"), built: true},
+		"rebuilt one verb": {err: multierr.Wrap(errC, "x: c"), wrap: true, built: true},
 		"other type":       {err: &listError{msg: "a\nb", errs: []error{errA, errB}}},
 		"nil":              {err: nil},
 	}

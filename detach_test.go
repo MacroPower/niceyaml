@@ -536,18 +536,13 @@ func TestDetach_Detached(t *testing.T) {
 		assert.Same(t, source, bound.Source())
 	})
 
-	t.Run("error of another type that a validation splits stays for errors.As", func(t *testing.T) {
+	t.Run("error of another type that AsErrors rebuilds stays for errors.As", func(t *testing.T) {
 		t.Parallel()
 
-		v := niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
-			return &keepingError{err: errors.Join(
-				niceyaml.NewWarning("old a", niceyaml.AtPath(paths.Doc().Child("a"))),
-				n.Bind(yamltest.ErrorAt("bad b", "b")),
-			)}
-		})
-
-		err := source.ValidateDocuments(t.Context(), v)
-		require.Error(t, err)
+		err := niceyaml.AsErrors(&keepingError{err: errors.Join(
+			doc.Bind(niceyaml.NewWarning("old a", niceyaml.AtPath(paths.Doc().Child("a")))),
+			doc.Bind(yamltest.ErrorAt("bad b", "b")),
+		)})
 
 		wrapper, ok := errors.AsType[*keepingError](err)
 		require.True(t, ok)
@@ -574,6 +569,12 @@ func (e *fileError) Unwrap() error { return e.err }
 
 func (e *fileError) DetachErrors(detach func(error) error) error {
 	return &fileError{path: e.path, err: detach(e.err)}
+}
+
+// WithoutWarnings keeps the wrapper when a check boundary splits off the
+// warnings of the error it wraps.
+func (e *fileError) WithoutWarnings() error {
+	return &fileError{path: e.path, err: niceyaml.WithoutWarnings(e.err)}
 }
 
 func TestDetach_DetachErrors(t *testing.T) {
