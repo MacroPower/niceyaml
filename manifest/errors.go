@@ -128,12 +128,17 @@ var (
 	// [Singleton] marks.
 	ErrExtraManifest = errors.New("more than one manifest")
 
-	// ErrReadOnly indicates a file that Apply cannot rewrite, or cannot
-	// replace whole. Apply cannot replace a file whole when the file has more
-	// than one hard link. The same holds when the system refuses to give the
-	// replacement the owner, the group, the access control list, or the
-	// SELinux label of the file. The problem of such a refusal also keeps
-	// the error that the system returned.
+	// ErrReadOnly indicates a file that [WriteAtomic] cannot rewrite, or
+	// cannot replace whole. On unix systems, WriteAtomic cannot replace a
+	// file whole when the file has more than one hard link. It also cannot
+	// replace a file whole when the system refuses to give the replacement
+	// the owner, the group, the access control list, or the SELinux label
+	// of the file. The problem of such a refusal also keeps the error that
+	// the system returned. The doc comment of WriteAtomic lists its rules
+	// on each platform. [Plan.Apply] also fails each document that merges
+	// layers with an error that matches ErrReadOnly. A [WriteFunc] can thus
+	// store a file another way when the error of WriteAtomic matches
+	// ErrReadOnly.
 	ErrReadOnly = errors.New("read-only file")
 
 	// ErrChanged indicates a file that changed or disappeared after the
