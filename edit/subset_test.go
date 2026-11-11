@@ -3490,7 +3490,7 @@ func TestDoc_Apply_Unsupported(t *testing.T) {
 			// Control.
 			before: stringtest.LinesLF("a: &x", "  k: 1", "c: &y {}", "b: *x"),
 			fn:     move("$.b", "$.c.z"),
-			want:   stringtest.LinesLF("a: &x", "  k: 1", "c: &y {z: *x}"),
+			want:   stringtest.LinesLF("a: &x", "  k: 1", "c: &y", "  z: *x"),
 		},
 	}
 

@@ -2039,7 +2039,7 @@ func TestNode_MarshalYAML(t *testing.T) {
 			before: stringtest.LinesLF("src: {k: 1, j: 2}", "dst: old"),
 			from:   "$.src",
 			to:     "$.dst",
-			want:   stringtest.LinesLF("src: {k: 1, j: 2}", "dst: {k: 1, j: 2}"),
+			want:   stringtest.LinesLF("src: {k: 1, j: 2}", "dst:", "  k: 1", "  j: 2"),
 		},
 		"block mapping into a new entry": {
 			before: stringtest.LinesLF("src:", "  k: 1 # one", "  j: [a, b]"),
@@ -2061,7 +2061,7 @@ func TestNode_MarshalYAML(t *testing.T) {
 			from:   "$.src",
 			to:     "$.dst",
 			want: stringtest.LinesLF(
-				"base: &base {x: 1}", "src: {k: *base, <<: *base}", "dst: {k: {x: 1}, x: 1}",
+				"base: &base {x: 1}", "src: {k: *base, <<: *base}", "dst:", "  k:", "    x: 1", "  x: 1",
 			),
 		},
 		"key after the merge key that holds it": {
@@ -2069,7 +2069,7 @@ func TestNode_MarshalYAML(t *testing.T) {
 			from:   "$.src",
 			to:     "$.dst",
 			want: stringtest.LinesLF(
-				"base: &base {x: 1, w: 2}", "src: {<<: *base, x: 9}", "dst: {x: 9, w: 2}",
+				"base: &base {x: 1, w: 2}", "src: {<<: *base, x: 9}", "dst:", "  x: 9", "  w: 2",
 			),
 		},
 		"block mapping with a key after its merge key": {
@@ -2085,7 +2085,7 @@ func TestNode_MarshalYAML(t *testing.T) {
 			before: stringtest.LinesLF("src: {a: !!binary aGk=}", "dst: old"),
 			from:   "$.src",
 			to:     "$.dst",
-			want:   stringtest.LinesLF("src: {a: !!binary aGk=}", `dst: {a: !!binary "aGk="}`),
+			want:   stringtest.LinesLF("src: {a: !!binary aGk=}", "dst:", `  a: !!binary "aGk="`),
 		},
 		"timestamp scalar keeps its tag": {
 			before: stringtest.LinesLF("src: !!timestamp 2001-12-14", "dst: old"),
@@ -2099,7 +2099,7 @@ func TestNode_MarshalYAML(t *testing.T) {
 			to:     "$.backup",
 			want: stringtest.LinesLF(
 				"meta:", "  created: !!timestamp 2001-12-14", "  name: x",
-				`backup: {created: !!timestamp "2001-12-14T00:00:00Z", name: x}`,
+				"backup:", `  created: !!timestamp "2001-12-14T00:00:00Z"`, "  name: x",
 			),
 		},
 		"flow mapping with a timestamp entry": {
@@ -2107,7 +2107,7 @@ func TestNode_MarshalYAML(t *testing.T) {
 			from:   "$.src",
 			to:     "$.dst",
 			want: stringtest.LinesLF(
-				"src: {a: !!timestamp 2001-12-14}", `dst: {a: !!timestamp "2001-12-14T00:00:00Z"}`,
+				"src: {a: !!timestamp 2001-12-14}", "dst:", `  a: !!timestamp "2001-12-14T00:00:00Z"`,
 			),
 		},
 		"timestamp scalar over an entry of a flow mapping": {
@@ -2185,7 +2185,7 @@ func TestNode_MarshalYAML(t *testing.T) {
 			return root.At(paths.Doc().Child("dst")).Set(ctx, from)
 		}, label)
 
-		requireEdit(t, d, err, "", stringtest.LinesLF("src: [a, b]", "dst: [a, b]"))
+		requireEdit(t, d, err, "", stringtest.LinesLF("src:", "  - a", "  - b", "dst:", "  - a", "  - b"))
 	})
 
 	t.Run("node that lost its place to an earlier edit", func(t *testing.T) {
@@ -2253,7 +2253,7 @@ func TestNode_MarshalYAML(t *testing.T) {
 			})
 		}, label)
 
-		requireEdit(t, d, err, "", stringtest.LinesLF("a: 1", "b: [x]", "dst: [1, [x], null]"))
+		requireEdit(t, d, err, "", stringtest.LinesLF("a: 1", "b: [x]", "dst:", "  - 1", "  - - x", "  - null"))
 	})
 
 	t.Run("encode outside a Set", func(t *testing.T) {
@@ -2786,10 +2786,12 @@ func TestNode_Append(t *testing.T) {
 			want:   "args: [a, b, c]\n",
 		},
 		"empty flow sequence": {
+			// An empty sequence has no style of its own, so the item goes on
+			// a block line.
 			before: "args: []\n",
 			path:   paths.Doc().Child("args"),
 			value:  "a",
-			want:   "args: [a]\n",
+			want:   stringtest.LinesLF("args:", "  - a"),
 		},
 		"mapping value": {
 			before: stringtest.LinesLF("steps:", "  - run: a"),

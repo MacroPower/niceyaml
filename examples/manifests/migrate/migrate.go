@@ -177,14 +177,16 @@ func main() {
 
 // dietaryList turns the single value of v1beta1 into the list of v1. A
 // later change to MenuItem must not change what this step writes, so the
-// step sets a []string and not a type of the app.
+// step sets a []string and not a type of the app. The files of the menu
+// write their lists in flow style, so [edit.Flow] keeps the new list in
+// that style.
 func dietaryList(ctx context.Context, n *edit.Node) error {
 	value, err := n.Decode[string](ctx)
 	if err != nil {
 		return err
 	}
 
-	return n.Set(ctx, []string{value})
+	return n.Set(ctx, []string{value}, edit.Flow())
 }
 
 // listMenu prints each item of set with the version that its file declares.

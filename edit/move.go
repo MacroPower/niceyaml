@@ -32,8 +32,9 @@ import (
 // moves, with [First], [Before], or [After], puts the entry at that place
 // in its own mapping. The key keeps its text, so a key such as 1 or 3.9
 // still reads as a number. A [Before] or an [After] that names the key of
-// the entry that moves fails the move. So does an option at a target in a
-// sequence, because the option places an entry.
+// the entry that moves fails the move. So does a placement option at a
+// target in a sequence, because the option places an entry. Move ignores
+// [Flow] and keeps the style of the value that it moves.
 //
 // A move to the path of its own entry keeps the keys of the mapping. So a
 // `<<` merge key that brings in the key of the entry does not refuse the

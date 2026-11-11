@@ -98,8 +98,19 @@ type renderedHeader struct {
 // because a construct there can make go-yaml fail on the text, as an alias
 // whose anchor the YAML lacks does.
 //
+// The value goes in flow style from the depth fd on, as [flowDepth]
+// describes. The block lines then end with the flow text of the value at
+// that depth, on the line of its key.
+//
 //nolint:contextcheck // The flow text encodes the strings of the encode, which reads no state that a context carries.
-func render(ctx context.Context, v any, step int, seqIndent bool, ms []encoder.Marshaler) (rendered, error) {
+func render(
+	ctx context.Context,
+	v any,
+	step int,
+	seqIndent bool,
+	fd flowDepth,
+	ms []encoder.Marshaler,
+) (rendered, error) {
 	data, meant, refused, err := encode(ctx, v,
 		encoder.WithIndent(step), encoder.WithIndentSequence(seqIndent), encoder.WithMarshalers(ms...))
 	if err != nil {
@@ -169,7 +180,10 @@ func render(ctx context.Context, v any, step int, seqIndent bool, ms []encoder.M
 
 	r.empty = r.flow == "{}" || r.flow == "[]"
 
-	if (r.collection || strings.Contains(text, "\n")) && !r.empty {
+	// A collection that the encode writes in flow style, as the YAML of a
+	// marshaler or a flow struct tag can write it, keeps that style, so it
+	// has no block lines.
+	if (r.collection || strings.Contains(text, "\n")) && !r.empty && !isFlow(content) {
 		r.block = strings.Split(text, "\n")
 
 		if lit := endScalar(body); lit != nil {
@@ -181,7 +195,58 @@ func render(ctx context.Context, v any, step int, seqIndent bool, ms []encoder.M
 		r.headers = enc.scalarHeaders()
 	}
 
+	if fd != noFlow {
+		r.flowFrom(enc, body, int(fd))
+	}
+
 	return r, nil
+}
+
+// flowDepth is the depth in a value from which an edit writes it in flow
+// style: the number of mappings of one entry each above the part that goes
+// in flow style. A Set that creates mappings above its value encodes the
+// value inside them, and [Flow] writes the value alone in flow style. At
+// the depth noFlow, the encode decides the style of each part.
+type flowDepth int
+
+// noFlow is the [flowDepth] of a value whose encode decides its style.
+const noFlow flowDepth = -1
+
+// flowFrom writes the value at depth in r, the text of body, the parse of
+// an encode in enc, in flow style. Depth counts the mappings of one entry
+// each above that value. The value at depth 0 is r itself, which then
+// has no block lines. Otherwise the block lines end on the line of the key
+// of the value, with its flow text after the ":".
+func (r *rendered) flowFrom(enc *Doc, body ast.Node, depth int) {
+	if depth == 0 {
+		r.block, r.head = nil, false
+		r.headers, r.scalar, r.keeps, r.tail = nil, false, false, tailScalar{}
+
+		return
+	}
+
+	var entry *ast.MappingValueNode
+
+	node := body
+
+	for range depth {
+		entries, _ := readEntries(astnode.Content(node))
+		if len(entries) != 1 {
+			return
+		}
+
+		entry = entries[0]
+		node = entry.Value
+	}
+
+	end, _, ok := enc.colonEnd(entry)
+	if !ok {
+		return
+	}
+
+	inner := enc.flowRunOf(node, 0, &flowStyle{encoded: true}).text
+	r.block = strings.Split(enc.cur[:end]+" "+inner, "\n")
+	r.headers, r.scalar, r.keeps, r.tail = nil, false, false, tailScalar{}
 }
 
 // lineBreaks reports whether found, the instances of the finder in the
@@ -1076,7 +1141,7 @@ func fieldText(ctx context.Context, text string, old *token.Token, flow bool) (s
 		return text, nil
 	}
 
-	r, err := render(ctx, text, 2, false, nil)
+	r, err := render(ctx, text, 2, false, noFlow, nil)
 	if err != nil {
 		return "", err
 	}

@@ -33,7 +33,8 @@ var menuV1Doc = stringtest.LinesLF(
 	"  name: kanelbulle",
 	"spec:",
 	"  price: 45 # kr",
-	"  tags: [vegan]",
+	"  tags:",
+	"    - vegan",
 	"---",
 	"apiVersion: cafe.jacobcolvin.com/v1",
 	"kind: MenuItem",
@@ -340,7 +341,7 @@ func TestRegistry_PlanMigration(t *testing.T) {
 			opts:    metaVersion,
 			files:   map[string]string{"cafe.yaml": stringtest.LinesLF("meta: {}", "x: 1")},
 			headers: []string{`config/cafe.yaml: Cafe from the unversioned layout of Cafe to v2`},
-			afters:  []string{stringtest.LinesLF("kind: Cafe", "meta: {version: v2}", "x: 1")},
+			afters:  []string{stringtest.LinesLF("kind: Cafe", "meta:", "  version: v2", "x: 1")},
 			summary: "1 file to migrate, nothing written",
 		},
 		"step error blocks the file": {

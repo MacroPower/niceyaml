@@ -1186,9 +1186,13 @@ func TestDoc_Apply(t *testing.T) {
 			want: stringtest.LinesLF(
 				"drinks:",
 				"  - item: K",
-				"    milk: {cost: 5, name: x}",
+				"    milk:",
+				"      cost: 5",
+				"      name: x",
 				"  - item: L",
-				"    milk: {cost: 5, name: x}",
+				"    milk:",
+				"      cost: 5",
+				"      name: x",
 			),
 		},
 		"refused set over a value that a merge key brings in, which the func ignores": {
@@ -1871,7 +1875,7 @@ func TestDoc_Apply(t *testing.T) {
 				at(firstCost.Child("a"), set(5)),
 				at(firstCost.Child("b"), set(6)),
 			),
-			want: strings.Replace(drinks, "cost: 5", "cost: {a: 5, b: 6}", 1),
+			want: strings.Replace(drinks, "cost: 5", "cost:\n    a: 5\n    b: 6", 1),
 		},
 		"value that an alias shares changes twice, block mapping": {
 			// The calls act in order, so the Set through the alias wins.
@@ -2039,7 +2043,9 @@ func TestDoc_Apply(t *testing.T) {
 			earlier: at(paths.MustParse("$.base.z"), move("$.svc.w0")),
 			path:    paths.MustParse("$.base.x"),
 			fn:      move("$.base.w0"),
-			want:    stringtest.LinesLF("base: &b {w0: 1}", "svc: {<<: *b, z: 3, w0: 2}"),
+			// The moves leave base empty, so the new entry opens it to block
+			// lines.
+			want: stringtest.LinesLF("base: &b", "  w0: 1", "svc: {<<: *b, z: 3, w0: 2}"),
 		},
 		"rename to a key that a later merge key brings in": {
 			before: stringtest.LinesLF(
@@ -3155,15 +3161,15 @@ func TestDoc_Apply(t *testing.T) {
 			before: stringtest.LinesLF("r0: &x {c: 1}", "<<: *x"),
 			path:   paths.MustParse("$.*"),
 			fn:     set(map[string]any{"z": 1}),
-			want:   stringtest.LinesLF("r0: &x", "  z: 1", "<<: *x"),
+			want:   stringtest.LinesLF("r0: &x {z: 1}", "<<: *x"),
 		},
 		"move into a flow sequence of a block scalar that a set wrote under the anchor of the user": {
 			// The set keeps the anchor and writes the block scalar, so the
 			// move writes the scalar in flow style.
-			before: stringtest.LinesLF("a: &x 1", "f: []", "b: *x"),
+			before: stringtest.LinesLF("a: &x 1", "f: [0]", "b: *x"),
 			path:   paths.Doc(),
 			fn:     both(at(paths.Doc().Child("a"), set("p\nq")), at(paths.Doc().Child("a"), move("$.f[0]"))),
-			want:   stringtest.LinesLF(`f: [&x "p\nq"]`, "b: *x"),
+			want:   stringtest.LinesLF(`f: [&x "p\nq", 0]`, "b: *x"),
 		},
 		"new key after a block scalar whose last line of spaces ends a text without a final newline": {
 			before: stringtest.JoinLF("a: |+", "  x", "", "   "),
@@ -3279,11 +3285,11 @@ func TestDoc_Apply(t *testing.T) {
 			want:   stringtest.LinesLF("m:", "  k:", "    a: |+", "      x", "", "  c: 1", "n: 1"),
 		},
 		"move in flow style of a block scalar that an earlier call changed": {
-			before: stringtest.JoinLF("f: {}", "s: 1"),
+			before: stringtest.JoinLF("f: {t: 0}", "s: 1"),
 			path:   paths.Doc(),
 			fn:     both(at(paths.Doc().Child("s"), set(spaced)), at(paths.Doc().Child("s"), move("$.f.s"))),
 			// The text ends without a final newline, as the user's text does.
-			want: stringtest.JoinLF("f: {s: \"a\\n \\nb\\n\"}"),
+			want: stringtest.JoinLF("f: {t: 0, s: \"a\\n \\nb\\n\"}"),
 		},
 		"copy in flow style of a block scalar that an earlier call changed": {
 			before: stringtest.LinesLF("a: &a", "  s: 1", "", "b: [*a]"),
@@ -3646,7 +3652,9 @@ func TestDoc_Apply(t *testing.T) {
 			"Set replaces the alias": {
 				path: first,
 				fn:   set(map[string]any{"item": "Kaka", "price": 20}),
-				want: stringtest.LinesLF("items:", "  - {item: Kaka, price: 20} # shared", "  - {item: Te, price: 30}"),
+				want: stringtest.LinesLF(
+					"items:", "  - # shared", "    item: Kaka", "    price: 20", "  - {item: Te, price: 30}",
+				),
 			},
 			"Remove removes the item of the alias": {
 				path: first,
@@ -10210,7 +10218,16 @@ func TestWithMarshalers(t *testing.T) {
 
 				return n.At(paths.Doc().Child("cpu")).Set(ctx, milli{n: 1000})
 			},
-			want: "net: {ip: 10.0.0.0, mask: [255, 0, 0, 0]}\ncpu: {}\n",
+			want: stringtest.LinesLF(
+				"net:",
+				"  ip: 10.0.0.0",
+				"  mask:",
+				"    - 255",
+				"    - 0",
+				"    - 0",
+				"    - 0",
+				"cpu: {}",
+			),
 		},
 		"a JSON method without JSONMarshalers": {
 			before:     "cpu: 500m\n",
@@ -10307,7 +10324,7 @@ func TestWithMarshalers(t *testing.T) {
 			fn: func(ctx context.Context, n *edit.Node) error {
 				return n.At(paths.Doc().Child("hops")).Set(ctx, map[hop]int{{name: "x"}: 1})
 			},
-			want: "hops: {x: 1}\n",
+			want: stringtest.LinesLF("hops:", "  x: 1"),
 		},
 		"a nil function removes the function before it": {
 			before:     "net: x\n",
@@ -10315,7 +10332,7 @@ func TestWithMarshalers(t *testing.T) {
 			fn: func(ctx context.Context, n *edit.Node) error {
 				return n.At(paths.Doc().Child("net")).Set(ctx, tenNet)
 			},
-			want: "net: {ip: 10.0.0.0, mask: [255, 0, 0, 0]}\n",
+			want: stringtest.LinesLF("net:", "  ip: 10.0.0.0", "  mask:", "    - 255", "    - 0", "    - 0", "    - 0"),
 		},
 		"a function that returns a value that holds its value": {
 			before: "hop: x\n",
@@ -10712,7 +10729,7 @@ func TestWithProtected(t *testing.T) {
 			protected: []paths.Path{paths.MustParse("$.m.x")},
 			path:      paths.MustParse("$.m"),
 			fn:        func(ctx context.Context, n *edit.Node) error { return n.Set(ctx, map[string]int{"a": 1}) },
-			want:      stringtest.LinesLF("h: &h", "  <<: *r", "  a: 1", "m: {a: 1}"),
+			want:      stringtest.LinesLF("h: &h", "  <<: *r", "  a: 1", "m:", "  a: 1"),
 		},
 		"removal of an alias that reads a mapping whose merge key of a reference document decides the protected path": {
 			before:    stringtest.LinesLF("h: &h", "  <<: *r", "  a: 1", "m: *h", "k: 1"),
