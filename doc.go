@@ -678,11 +678,26 @@
 //
 // The call returns a failure that does not hold a warning as the check wrote
 // it. In a result that holds both, the call removes the warnings from the
-// joins and from the wrappers of one %w verb that [fmt.Errorf] builds. It
-// keeps those joins and wrappers. Any other error in the result that holds
-// both, such as a summary from [NewSummary], becomes the join of its errors.
-// That join drops the heading and the type of the error, so [errors.As] does
-// not find that type.
+// joins that [errors.Join] builds and from the wrappers of one %w verb that
+// [fmt.Errorf] builds. It keeps those joins and wrappers. An error of another
+// type that holds both keeps its type only through a WithoutWarnings method.
+// The method returns the error without its warnings, as [WithoutWarnings]
+// describes. The call looks for the method on the error that the check
+// returns, on the branches of those joins, and on the errors that those
+// wrappers wrap. It uses the result of the method only when that result
+// holds an error and does not hold a warning. Any other error that holds
+// both becomes the join of its errors. Such errors include a summary from
+// [NewSummary], an error whose method returns nil or its receiver, and an
+// error that [Node.Bind] has bound. That join drops the heading and the type
+// of the error, so [errors.As] does not find that type.
+//
+// A [Validator] keeps the type of its failure without such a method. It
+// reports its warnings with Node.Warn and returns a failure that holds only
+// errors, which the call returns as the validator wrote it. A failure that
+// the validator binds with Node.Bind and that still holds a warning loses
+// its type, even with the method. A Validate method and a function of
+// [WithValueCheck] do not get a [*Node]. They return their warnings beside
+// their errors, so a type of their own that holds both needs the method.
 //
 // Each problem keeps its [ErrorTree.Context] through that split. A warning
 // that the call removes from a wrapper still reports the text of that
