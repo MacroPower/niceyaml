@@ -7,9 +7,29 @@ import (
 	"go.jacobcolvin.com/x/jsonschema"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/inputhook"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 )
+
+// startWork sets the working copy of a document that routed, and reports
+// whether the document can go on to its checks. The working copy is the
+// document itself unless the registry has unmarshalers and the Source
+// came from [input.Sources]. Only such a Source lacks the unmarshalers
+// of the registry. A Source that the load built holds them already, and
+// a registry without [WithUnmarshalers] has none to add. For a Source
+// from [input.Sources] under [WithUnmarshalers], the working copy is a
+// copy that puts them under the unmarshalers of that Source, as
+// prepareWork builds it.
+func (d *docState) startWork() bool {
+	if len(d.l.reg.cfg.unmarshalers) > 0 && d.f.target.kind == inputhook.Source {
+		return d.prepareWork(d.doc, nil)
+	}
+
+	d.work = d.doc
+
+	return true
+}
 
 // prepareWork sets the working copy to a copy of doc, the document or a
 // migrated copy of it. Every line and column of the copy matches doc, so
