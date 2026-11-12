@@ -106,22 +106,22 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error 
 // check passes.
 //
 // The walk names a field as a YAML decode names it, by its yaml tag, its
-// json tag, or its lowercased name. A map key takes the text of its Go
-// value. The path of each value holds these names as names of decoded
-// data, as [AtData] sets them. A document that places the error reads them
-// as it reads the names of AtData. An entry whose key the document spells
-// another way, such as 0x10 for 16, thus binds at that entry. The names
-// that a check writes with AtData follow the names of its value, at any
-// depth. A check can put them under an `@` base of [Rebase] that holds
-// `.name` and `[n]` selectors alone. The document then reads that base as a
-// path between the two lists of names, as a decode reads it. Below a value
-// that decodes itself, the names read as Decode[any] of the document gives
-// them, as AtData describes. Every error below a slice, an array, or a map
-// that decodes itself binds at that value. So the names end there, and the
-// steps below it stay a path. The names that a check of such a value or of
-// a value below it writes with AtData stay a path too. Several keys of one
-// map that share a text, such as 1 and "1", bind without a position, as
-// [ErrAmbiguousPath] describes.
+// json tag, or its lowercased name, as [FieldKey] returns it. A map key
+// takes the text of its Go value. The path of each value holds these names
+// as names of decoded data, as [AtData] sets them. A document that places
+// the error reads them as it reads the names of AtData. An entry whose key
+// the document spells another way, such as 0x10 for 16, thus binds at that
+// entry. The names that a check writes with AtData follow the names of its
+// value, at any depth. A check can put them under an `@` base of [Rebase]
+// that holds `.name` and `[n]` selectors alone. The document then reads
+// that base as a path between the two lists of names, as a decode reads
+// it. Below a value that decodes itself, the names read as Decode[any] of
+// the document gives them, as AtData describes. Every error below a slice,
+// an array, or a map that decodes itself binds at that value. So the names
+// end there, and the steps below it stay a path. The names that a check of
+// such a value or of a value below it writes with AtData stay a path too.
+// Several keys of one map that share a text, such as 1 and "1", bind
+// without a position, as [ErrAmbiguousPath] describes.
 //
 // SelfValidateValue runs each function of [WithValueCheck] in opts on the
 // values of its type, as Node.SelfValidate does. A server thus checks the
