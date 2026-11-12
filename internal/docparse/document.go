@@ -12,7 +12,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/lineend"
 	"go.jacobcolvin.com/niceyaml/internal/preamble"
 	"go.jacobcolvin.com/niceyaml/position"
-	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 // Document is one YAML document of a parsed file.
@@ -272,19 +271,18 @@ func documentSpans(groups []token.Tokens, total int) []position.Span {
 }
 
 // alignDocumentTokens returns the tokens of each document of file, from
-// the groups [tokens.SplitDocuments] cuts tks into. It pairs them by
-// offset, because the parser and the splitter might disagree on bounds,
-// such as on a leading "..." marker. A document anchors at the offset
-// that [documentOffset] or its stand-in gives. It takes the groups that
-// earlier documents did not take, up to the one the next document anchors
-// in.
+// the groups [SplitGroups] cuts tks into. It pairs them by offset, because
+// the parser and the splitter might disagree on bounds, such as on a
+// leading "..." marker. A document anchors at the offset that
+// [documentOffset] or its stand-in gives. It takes the groups that earlier
+// documents did not take, up to the one the next document anchors in.
 func alignDocumentTokens(file *ast.File, tks token.Tokens, standIns map[*ast.DocumentNode]standIn) []token.Tokens {
 	var (
 		groups []token.Tokens
 		starts []int
 	)
 
-	for _, group := range tokens.SplitDocuments(tks) {
+	for _, group := range SplitGroups(tks) {
 		if len(group) == 0 || group[0].Position == nil {
 			continue
 		}

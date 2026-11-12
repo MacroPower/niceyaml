@@ -10,7 +10,6 @@ import (
 	"testing"
 	"weak"
 
-	"github.com/goccy/go-yaml/lexer"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -165,9 +164,9 @@ func TestParseDirective(t *testing.T) {
 func TestParseDocumentDirective(t *testing.T) {
 	t.Parallel()
 
-	// Each case is a token stream that tokens.SplitDocuments divides into
-	// documents, and want maps a document index to the schema its directive
-	// names.
+	// Each case is a source whose documents each pass their tokens to
+	// ParseDocumentDirective, and want maps a document index to the schema
+	// its directive names.
 	tcs := map[string]struct {
 		input string
 		want  map[int]string
@@ -287,6 +286,26 @@ func TestParseDocumentDirective(t *testing.T) {
 			`),
 			want: map[int]string{0: "./schema.json"},
 		},
+		"directive above a later header": {
+			input: stringtest.Input(`
+				doc1: data
+				# yaml-language-server: $schema=./schema.json
+				---
+				doc2: data
+			`),
+			want: map[int]string{1: "./schema.json"},
+		},
+		"directive above the first header with a later document": {
+			input: stringtest.Input(`
+				# yaml-language-server: $schema=./a.json
+				---
+				a: 1
+				---
+				# yaml-language-server: $schema=./b.json
+				b: 2
+			`),
+			want: map[int]string{0: "./a.json", 1: "./b.json"},
+		},
 		"comment between header and content": {
 			input: stringtest.Input(`
 				key1: value1
@@ -305,13 +324,13 @@ func TestParseDocumentDirective(t *testing.T) {
 
 			got := make(map[int]string)
 
-			for docIdx, docTokens := range tokens.SplitDocuments(lexer.Tokenize(tc.input)) {
-				directive := schema.ParseDocumentDirective(docTokens)
+			for _, doc := range niceyaml.NewSourceFromString(tc.input).AllDocuments() {
+				directive := schema.ParseDocumentDirective(doc.Tokens())
 				if directive == nil {
 					continue
 				}
 
-				got[docIdx] = directive.Schema
+				got[doc.DocumentIndex()] = directive.Schema
 			}
 
 			assert.Equal(t, tc.want, got)

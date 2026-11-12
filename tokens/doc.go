@@ -1,6 +1,6 @@
 // Package tokens is the module's entry point to the go-yaml lexer. It also
-// provides utilities for working with the lexer's token streams: document
-// splitting and line ending handling.
+// provides utilities for working with the lexer's token streams: position
+// resets and line ending handling.
 //
 // # Tokenizing
 //
@@ -18,16 +18,20 @@
 //
 // # Multi-Document YAML
 //
-// [SplitDocuments] splits a token stream at document headers ("---") and
-// document end markers ("..."). It returns an iterator over the token
-// stream of each YAML document. The tokens keep the positions they have in
-// the whole stream. [ResetPositions] clones a document's tokens with
-// positions that count from line 1, as a fresh tokenize of its text does:
+// This package does not split a stream into documents, because the
+// bounds of a document depend on the parse. The root package builds the
+// documents from the parse. It moves the comments and directives above a
+// "---" header into the document that the header opens. A cut at the
+// markers alone gives different documents.
+// [go.jacobcolvin.com/niceyaml.Source.AllDocuments] returns each document,
+// including the documents the parser rejects. The
+// [go.jacobcolvin.com/niceyaml.Node.Tokens] of a document hold its tokens
+// with the positions they have in the whole stream. [ResetPositions]
+// clones them with positions that count from line 1, as a fresh tokenize
+// of their text does:
 //
-//	for idx, doc := range tokens.SplitDocuments(tokens.Tokenize(src)) {
-//		standalone := tokens.ResetPositions(doc)
+//	src := niceyaml.NewSourceFromString(text)
+//	for _, doc := range src.AllDocuments() {
+//		standalone := tokens.ResetPositions(doc.Tokens())
 //	}
-//
-// The first document can start with or without a header. See
-// [SplitDocuments] for the rest of the boundary rules.
 package tokens

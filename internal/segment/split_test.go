@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
 
+	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/segment"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/tokens"
@@ -727,15 +728,10 @@ func TestSplit_ResetDocument(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			var docs []token.Tokens
-
-			for _, doc := range tokens.SplitDocuments(tokens.Tokenize(tc.input)) {
-				docs = append(docs, doc)
-			}
-
+			docs := niceyaml.NewSourceFromString(tc.input).AllDocuments()
 			require.Len(t, docs, 2)
 
-			lines := segment.Split(tokens.ResetPositions(docs[1]))
+			lines := segment.Split(tokens.ResetPositions(docs[1].Tokens()))
 
 			assert.Equal(t, tc.wantContent, lineContents(lines))
 			assert.Equal(t, tc.wantNumbers, lineNumbers(lines))
