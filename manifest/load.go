@@ -12,7 +12,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/input"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/internal/inputhook"
-	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
@@ -607,12 +606,10 @@ func compareBool(a, b bool) int {
 // that it does not write as it was, so the check after Apply gives the
 // version that the file declares.
 func (l *loader) problemOf(r *row) *Problem {
-	p := &Problem{Path: paths.Doc()}
+	p := &Problem{}
 
 	tree := niceyaml.NewErrorTree(r.err)
-	if path, ok := tree.Path(); ok {
-		p.Path = path
-	}
+	p.Path, p.HasPath = tree.Path()
 
 	if src := tree.Source(); src != nil && r.file < len(l.files) {
 		p.File = src.Name()

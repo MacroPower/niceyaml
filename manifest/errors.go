@@ -308,15 +308,22 @@ type Problem struct { //nolint:errname // A Problem describes a row, and wraps t
 	// Apply. In the result of Apply, it is the version that the file
 	// holds. A file that Apply did not write keeps its old version.
 	Version string
-	// Path is the path that the message shows, such as
-	// `$.spec.legacyPricing~`, or `$` for a row without a path. A `~` at
-	// its end marks a problem about a key. The warning of a decode or a
-	// schema names the value by its path in the current version, in a load
-	// and in a plan. The warning of a value that a step removes names the
-	// value as the text that the load or the plan read spells it. A step
-	// that renames a key above such a value thus changes the path that a
-	// load after Apply shows.
+	// Path is the path that the message shows when HasPath is true, such
+	// as `$.spec.legacyPricing~`. It is the zero Path when HasPath is
+	// false. A `~` at its end marks a problem about a key. The warning of a
+	// decode or a schema names the value by its path in the current
+	// version, in a load and in a plan. The warning of a value that a step
+	// removes names the value as the text that the load or the plan read
+	// spells it. A step that renames a key above such a value thus changes
+	// the path that a load after Apply shows.
 	Path paths.Path
+	// HasPath reports whether the row names a path. The zero Path is also
+	// the `@` path, so Path alone does not tell a row about a value from a
+	// row without a path. Rows without a path include a syntax error, a
+	// problem of the whole set, and a warning that binds to a document
+	// without a location. A problem about the root value has HasPath set
+	// and a Path of `$`.
+	HasPath bool
 }
 
 // Error returns the message of Err, or an empty string for a nil Err.
