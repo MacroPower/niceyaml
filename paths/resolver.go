@@ -625,12 +625,12 @@ func (r *Resolver) Nodes(p Path) ([]ast.Node, error) {
 // node and follows an alias to the content of the anchor it refers to, as
 // [Resolver.Node] does. It stops at a tag on node or on that content, and
 // keeps any anchor or alias under the tag. The result thus reads as the
-// decoder reads node. A caller that walks the document itself can follow
-// aliases with Deref to reach the node that a path through the same alias
-// resolves to. That caller should look through each tag it reaches on the
-// way. Deref gives an untyped nil for a nil node and for an anchor or
-// alias whose content is nil, including a typed nil that a hand-built
-// tree might hold.
+// decoder reads node, and a caller can learn from the tag how the decoder
+// types a scalar. A caller that walks the document itself should read the
+// node that selectors apply to with [Resolver.Content], which also looks
+// through the tags. Deref gives an untyped nil for a nil node and for an
+// anchor or alias whose content is nil, including a typed nil that a
+// hand-built tree might hold.
 //
 // Returns an error wrapping [ErrAlias] for an alias that does not name an
 // anchor or that leads back to itself, such as one inside the content of
@@ -646,6 +646,35 @@ func (r *Resolver) Deref(node ast.Node) (ast.Node, error) {
 	content, err := r.resolver.deref(node)
 	if err != nil {
 		return nil, fmt.Errorf("deref: %w", err)
+	}
+
+	return content, nil
+}
+
+// Content returns the node that selectors apply to at node. That node is
+// the mapping, sequence, or scalar under every anchor, alias, and tag on
+// node. The one exception is a tag that converts a collection, such as
+// `!!str` or `!!null` on a mapping or on an alias of one. The decoder
+// reads a scalar there, so Content returns that [*ast.TagNode]. A
+// selector selects nothing below such a tag, as the package documentation
+// describes. A tag on a scalar, such as `!!str 5`, gives the scalar.
+//
+// A caller that walks the document itself can thus branch on the type of
+// the result. The result is an [*ast.MappingNode] exactly where `.name`
+// and `.*` apply to the entries below node. It is an [*ast.SequenceNode]
+// exactly where `[n]` and `[*]` apply to the items below node. An empty
+// mapping still gives a mapping, though `.*` matches nothing in it. Any
+// other result means that no selector selects below node. Content gives
+// an untyped nil where [Resolver.Deref] does, such as for a nil node.
+//
+// Returns the errors that [Resolver.Deref] returns for node: an
+// [*AliasError] wrapping [ErrAlias] for an alias that does not resolve,
+// and an error wrapping [ErrReferenceAlias] for an alias that reads a
+// reference document.
+func (r *Resolver) Content(node ast.Node) (ast.Node, error) {
+	content, err := r.resolver.collectionContent(node)
+	if err != nil {
+		return nil, fmt.Errorf("content: %w", err)
 	}
 
 	return content, nil
