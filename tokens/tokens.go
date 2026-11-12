@@ -1,7 +1,6 @@
 package tokens
 
 import (
-	"iter"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -18,9 +17,8 @@ import (
 // Origins. The joined Origins then match the source without its byte
 // order marks, except in a few places Tokenize leaves as the lexer made
 // them. Every token's Line, Column, and Offset name the rune where its
-// text starts, counted from 1. [SplitDocuments] cuts the stream into one
-// stream per document, and [ForParser] returns the stream to hand the
-// go-yaml parser.
+// text starts, counted from 1. [ForParser] returns the stream to hand
+// the go-yaml parser.
 //
 // # Restored Text
 //
@@ -1781,11 +1779,12 @@ func TrimLineEnding(s string) string {
 
 // ResetPositions clones tks and shifts the positions of the clones. A
 // stream cut from a longer one, such as the tokens of one document from
-// [SplitDocuments], then counts its lines from 1 as [Tokenize] does. Every
-// token moves by the same number of lines and the same offset distance,
-// and tokens on the first line also move by the same number of columns. A
-// stream whose text starts at line 1, column 1, offset 1, such as a whole
-// stream from [Tokenize], comes back as clones with the same positions.
+// [go.jacobcolvin.com/niceyaml.Node.Tokens], then counts its lines from 1
+// as [Tokenize] does. Every token moves by the same number of lines and
+// the same offset distance, and tokens on the first line also move by the
+// same number of columns. A stream whose text starts at line 1, column 1,
+// offset 1, such as a whole stream from [Tokenize], comes back as clones
+// with the same positions.
 // The exception is a stream whose first text the lexer swallowed, such as
 // a "-" or ":" after a tab that indents the first line (see [Tokenize]).
 // ResetPositions counts from the joined Origins, which lack that text, so
@@ -1976,70 +1975,6 @@ func endTrailing(tks token.Tokens) {
 	for _, tk := range tks[last+1:] {
 		if tk.Position != nil {
 			tk.Position.Line, tk.Position.Column, tk.Position.Offset = line, col, offset
-		}
-	}
-}
-
-// SplitDocuments splits a token stream into multiple token streams, one for
-// each YAML document.
-//
-// A document header token ('---') starts a new document and belongs to the
-// start of it. A document end token ('...') closes the current document and
-// belongs to the end of it, so content that follows without a header forms
-// a new document. These are the boundaries the go-yaml parser uses for
-// well-formed streams. The parser might produce fewer documents than
-// SplitDocuments yields, for example when a "..." marker opens the stream.
-// Pair the two by token offset rather than by index.
-//
-// Each returned slice holds the tokens of one document in their original
-// order and with their original positions. The tokens are the caller's, not
-// copies, and they keep the Next and Prev links of the whole stream, so a
-// document's first token still links back to the previous document. Pass a
-// document to [ResetPositions] for clones that count lines from 1.
-// SplitDocuments skips nil tokens in the stream.
-func SplitDocuments(tks token.Tokens) iter.Seq2[int, token.Tokens] {
-	return func(yield func(int, token.Tokens) bool) {
-		var (
-			docIdx int
-			// The index of tks where the document starts, and the number of
-			// its tokens that are not nil.
-			start, n int
-		)
-
-		// A cut yields the tokens of tks before end that the document holds.
-		cut := func(end int) bool {
-			doc := make(token.Tokens, 0, n)
-
-			for _, tk := range tks[start:end] {
-				if tk != nil {
-					doc = append(doc, tk)
-				}
-			}
-
-			start, n = end, 0
-			docIdx++
-
-			return yield(docIdx-1, doc)
-		}
-
-		for i, tk := range tks {
-			if tk == nil {
-				continue
-			}
-
-			if tk.Type == token.DocumentHeaderType && n > 0 && !cut(i) {
-				return
-			}
-
-			n++
-
-			if tk.Type == token.DocumentEndType && !cut(i+1) {
-				return
-			}
-		}
-
-		if n > 0 {
-			cut(len(tks))
 		}
 	}
 }

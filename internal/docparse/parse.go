@@ -219,8 +219,8 @@ func Fail(tks token.Tokens, err error) *Result {
 }
 
 // fail records f, a run that did not parse. It adds a stand-in to the
-// file for each token group of the run, as [tokens.SplitDocuments] splits
-// it. The documents of the run thus keep their places and tokens. The
+// file for each token group of the run, as [SplitGroups] splits it. The
+// documents of the run thus keep their places and tokens. The
 // stand-in of a group that [isDocumentGroup] reports carries f. Any other
 // stand-in folds into a document, as a node that the parser separates
 // from its document does. A run without a document group carries f on its
@@ -232,7 +232,7 @@ func (r *Result) fail(f Failure) {
 
 	var groups []token.Tokens
 
-	for _, group := range tokens.SplitDocuments(f.Run) {
+	for _, group := range SplitGroups(f.Run) {
 		groups = append(groups, group)
 	}
 
@@ -259,7 +259,7 @@ func (r *Result) fail(f Failure) {
 		if isDocumentGroup(group) || !holdsDocument && i == 0 {
 			in.failure = failure
 
-			// SplitDocuments starts a group at each header, so a header
+			// SplitGroups starts a group at each header, so a header
 			// is the first token of its group.
 			if len(group) > 0 && group[0].Type == token.DocumentHeaderType {
 				node.Start = group[0]
@@ -302,10 +302,10 @@ func parseRun(run token.Tokens, mode parser.Mode, opts []parser.Option) (*ast.Fi
 	return f, failure
 }
 
-// isDocumentGroup reports whether group, a token group of
-// [tokens.SplitDocuments], holds a YAML document. A group holds one when
-// it opens with a "---" header or holds content. A group of comments,
-// directives, and "..." markers alone does not hold one.
+// isDocumentGroup reports whether group, a token group of [SplitGroups],
+// holds a YAML document. A group holds one when it opens with a "---"
+// header or holds content. A group of comments, directives, and "..."
+// markers alone does not hold one.
 func isDocumentGroup(group token.Tokens) bool {
 	if len(group) > 0 && group[0].Type == token.DocumentHeaderType {
 		return true
@@ -391,8 +391,7 @@ func splitDocumentRuns(tks token.Tokens) []token.Tokens {
 // name, it drops only the comments after a directive. Outside a flow
 // collection, [breaksAnchor] and [takesNull] decide below an anchor
 // without a value. The dropped comments stay among the tokens of the
-// input, where [tokens.SplitDocuments] still hands them to their
-// documents.
+// input, where [SplitGroups] still hands them to their documents.
 func dropStrandedComments(run token.Tokens) token.Tokens {
 	kept := make(token.Tokens, 0, len(run))
 

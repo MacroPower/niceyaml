@@ -18,12 +18,14 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
 
+	"go.jacobcolvin.com/niceyaml/internal/docparse"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
-func collectDocs(seq iter.Seq2[int, token.Tokens]) []token.Tokens {
+// collectGroups collects the groups of seq.
+func collectGroups(seq iter.Seq2[int, token.Tokens]) []token.Tokens {
 	var result []token.Tokens
 
 	for _, tks := range seq {
@@ -33,7 +35,7 @@ func collectDocs(seq iter.Seq2[int, token.Tokens]) []token.Tokens {
 	return result
 }
 
-// collectReset collects the documents of seq with their positions reset.
+// collectReset collects the groups of seq with their positions reset.
 func collectReset(seq iter.Seq2[int, token.Tokens]) []token.Tokens {
 	var result []token.Tokens
 
@@ -2500,7 +2502,7 @@ func TestForParser_Links(t *testing.T) {
 
 	// The clones of a document cut from a longer stream link to nothing
 	// outside the result, and ForParser drops nil tokens.
-	docs := collectDocs(tokens.SplitDocuments(tokens.Tokenize(stringtest.LinesLF(
+	docs := collectGroups(docparse.SplitGroups(tokens.Tokenize(stringtest.LinesLF(
 		"a: 1",
 		"---",
 		"b: 2",
@@ -2512,175 +2514,6 @@ func TestForParser_Links(t *testing.T) {
 	require.Len(t, got, len(docs[1]))
 
 	require.NoError(t, yamltest.ValidateTokenLinks(got))
-}
-
-func TestSplitDocuments(t *testing.T) {
-	t.Parallel()
-
-	tkb := yamltest.NewTokenBuilder()
-	str := func(value string) *token.Token {
-		return tkb.Clone().Type(token.StringType).Value(value).Build()
-	}
-	colon := func() *token.Token {
-		return tkb.Clone().Type(token.MappingValueType).Value(":").Build()
-	}
-	header := func() *token.Token {
-		return tkb.Clone().Type(token.DocumentHeaderType).Value("---").Build()
-	}
-	end := func() *token.Token {
-		return tkb.Clone().Type(token.DocumentEndType).Value("...").Build()
-	}
-
-	// RequireDocs requires each of docs to hold the next tokens of input,
-	// as many as want gives for it, and returns the tokens of input after
-	// them.
-	requireDocs := func(t *testing.T, input token.Tokens, want []int, docs []token.Tokens) token.Tokens {
-		t.Helper()
-
-		require.Len(t, docs, len(want))
-
-		for i, n := range want {
-			yamltest.RequireTokensEqual(t, input[:n], docs[i])
-
-			input = input[n:]
-		}
-
-		return input
-	}
-
-	tcs := map[string]struct {
-		input token.Tokens
-		want  []int // Number of tokens in each document.
-	}{
-		"nil input":   {input: nil},
-		"empty slice": {input: token.Tokens{}},
-		"single doc no header": {
-			input: token.Tokens{str("key"), colon(), str("value")},
-			want:  []int{3},
-		},
-		"single doc with header": {
-			input: token.Tokens{header(), str("key"), colon(), str("value")},
-			want:  []int{4},
-		},
-		"doc with end marker": {
-			input: token.Tokens{str("key"), colon(), str("value"), end()},
-			want:  []int{4},
-		},
-		"end marker closes a document": {
-			input: token.Tokens{str("a"), colon(), str("1"), end(), str("b"), colon(), str("2")},
-			want:  []int{4, 3},
-		},
-		"end marker followed by header": {
-			input: token.Tokens{str("a"), end(), header(), str("b")},
-			want:  []int{2, 2},
-		},
-		"two docs": {
-			input: token.Tokens{str("key1"), colon(), str("v1"), header(), str("key2"), colon(), str("v2")},
-			want:  []int{3, 4},
-		},
-		"three docs with headers": {
-			input: token.Tokens{header(), str("doc1"), header(), str("doc2"), header(), str("doc3")},
-			want:  []int{2, 2, 2},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			got := collectDocs(tokens.SplitDocuments(tc.input))
-
-			rest := requireDocs(t, tc.input, tc.want, got)
-			assert.Empty(t, rest, "every token belongs to a document")
-		})
-	}
-
-	t.Run("stops when the caller does", func(t *testing.T) {
-		t.Parallel()
-
-		tcs := map[string]struct {
-			input token.Tokens
-			want  []int // Number of tokens in each document the caller reads.
-		}{
-			"at the first doc": {
-				input: token.Tokens{str("doc1"), header(), str("doc2")},
-				want:  []int{1},
-			},
-			"at the second doc": {
-				input: token.Tokens{str("doc1"), header(), str("doc2"), header(), str("doc3")},
-				want:  []int{1, 2},
-			},
-			"single doc": {
-				input: token.Tokens{str("only")},
-				want:  []int{1},
-			},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				var got []token.Tokens
-
-				for _, tks := range tokens.SplitDocuments(tc.input) {
-					got = append(got, tks)
-
-					if len(got) == len(tc.want) {
-						break
-					}
-				}
-
-				requireDocs(t, tc.input, tc.want, got)
-			})
-		}
-	})
-
-	t.Run("nil tokens are skipped", func(t *testing.T) {
-		t.Parallel()
-
-		// Positions start at 1:1 so a reset leaves them unchanged.
-		tkb := yamltest.NewTokenBuilder().PositionLine(1).PositionColumn(1)
-		want := token.Tokens{
-			tkb.Clone().Type(token.StringType).Value("key").Origin("key").PositionOffset(1).Build(),
-			tkb.Clone().Type(token.MappingValueType).Value(":").Origin(":").PositionOffset(4).Build(),
-			tkb.Clone().Type(token.StringType).Value("value").Origin(" value").PositionOffset(6).Build(),
-		}
-		input := token.Tokens{nil, want[0], want[1], nil, want[2], nil}
-
-		for name, collect := range map[string]func(iter.Seq2[int, token.Tokens]) []token.Tokens{
-			"shared": collectDocs,
-			"reset":  collectReset,
-		} {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				got := collect(tokens.SplitDocuments(input))
-
-				require.Len(t, got, 1)
-
-				yamltest.RequireTokensEqual(t, want, got[0])
-			})
-		}
-	})
-
-	t.Run("yields the tokens passed in as they are", func(t *testing.T) {
-		t.Parallel()
-
-		input := token.Tokens{
-			tkb.Clone().Type(token.StringType).Value("key").
-				PositionLine(5).PositionColumn(3).PositionOffset(100).Build(),
-		}
-
-		got := collectDocs(tokens.SplitDocuments(input))
-
-		require.Len(t, got, 1)
-		require.Len(t, got[0], 1)
-
-		// The document holds the same pointer, not a clone, and the
-		// token keeps its position.
-		assert.Same(t, input[0], got[0][0])
-		assert.Equal(t, []string{"5:3:100"}, positionsOf(got[0]))
-	})
 }
 
 func TestResetPositions(t *testing.T) {
@@ -2744,7 +2577,7 @@ func TestResetPositions(t *testing.T) {
 				t.Parallel()
 
 				before := positionsOf(tc.input)
-				docs := collectReset(tokens.SplitDocuments(tc.input))
+				docs := collectReset(docparse.SplitGroups(tc.input))
 
 				got := make([][]string, 0, len(docs))
 				for _, doc := range docs {
@@ -2823,7 +2656,7 @@ func TestResetPositions(t *testing.T) {
 			&token.Token{Type: token.StringType, Value: "test", Position: nil},
 		}
 
-		got := collectReset(tokens.SplitDocuments(input))
+		got := collectReset(docparse.SplitGroups(input))
 
 		require.Len(t, got, 1)
 		require.Len(t, got[0], 1)
@@ -2909,7 +2742,7 @@ func TestResetPositions(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				for i, doc := range tokens.SplitDocuments(lexer.Tokenize(tc.input)) {
+				for i, doc := range docparse.SplitGroups(lexer.Tokenize(tc.input)) {
 					doc = tokens.ResetPositions(doc)
 					// A document's text is the Origins of its tokens.
 					fresh := lexer.Tokenize(yamltest.DumpTokenOrigins(doc))
@@ -2971,7 +2804,7 @@ func TestResetPositions(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				for i, doc := range tokens.SplitDocuments(tokens.Tokenize(tc.input)) {
+				for i, doc := range docparse.SplitGroups(tokens.Tokenize(tc.input)) {
 					doc = tokens.ResetPositions(doc)
 					fresh := withText(tokens.Tokenize(yamltest.DumpTokenOrigins(doc)))
 
@@ -3050,7 +2883,7 @@ func TestResetPositions(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				docs := collectReset(tokens.SplitDocuments(tokens.Tokenize(tc.input)))
+				docs := collectReset(docparse.SplitGroups(tokens.Tokenize(tc.input)))
 				require.Len(t, docs, 2)
 
 				doc := docs[0]
@@ -3151,7 +2984,7 @@ func TestResetPositions(t *testing.T) {
 			"...",
 			"b: 2",
 		))
-		docs := collectReset(tokens.SplitDocuments(orig))
+		docs := collectReset(docparse.SplitGroups(orig))
 		require.Len(t, docs, 2)
 
 		// The clones link to each other inside a document, and the chain
@@ -3218,7 +3051,7 @@ func TestResetPositions(t *testing.T) {
 
 				var got token.Tokens
 
-				for i, doc := range tokens.SplitDocuments(tokens.Tokenize(tc.input)) {
+				for i, doc := range docparse.SplitGroups(tokens.Tokenize(tc.input)) {
 					if i == tc.doc {
 						got = tokens.ResetPositions(doc)
 					}
@@ -3289,11 +3122,11 @@ func TestResetPositionsInPlace(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			want := collectReset(tokens.SplitDocuments(tokens.Tokenize(tc.input)))
+			want := collectReset(docparse.SplitGroups(tokens.Tokenize(tc.input)))
 
 			var got []token.Tokens
 
-			for _, doc := range tokens.SplitDocuments(tokens.Tokenize(tc.input)) {
+			for _, doc := range docparse.SplitGroups(tokens.Tokenize(tc.input)) {
 				reset := tokens.ResetPositionsInPlace(doc)
 
 				// The result holds the tokens of the document.
