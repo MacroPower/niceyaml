@@ -278,7 +278,7 @@ type row struct {
 
 // check reads the files of in and runs the checks of each document.
 func (r *Registry) check(ctx context.Context, in input.Input, cfg loadConfig) (*loader, error) {
-	rd, err := inputhook.Read(ctx, in, r.cfg.unmarshalers)
+	rd, err := inputhook.Read(ctx, in, r.cfg.typeRules)
 	if err != nil {
 		return nil, err //nolint:wrapcheck // The input names the problem.
 	}

@@ -38,7 +38,7 @@ type setObject struct {
 // version, the steps of the later versions edit a copy of the document,
 // and the file stays as it is. Current then holds the copy. For a file
 // that declares the current version, Current is Original, except for a
-// Source that [input.Sources] reads under [WithUnmarshalers]. Value, Name,
+// Source that [input.Sources] reads under [WithTypeRules]. Value, Name,
 // Current, and Bind follow the layout of the current version, whatever
 // version the file declares. A `$` path of that version thus resolves in
 // Current and in Bind. Only Original follows the layout of Version.
@@ -46,7 +46,7 @@ type setObject struct {
 // Current, Original, and Bind keep the [niceyaml.Source] of the file in
 // memory. Current and Bind keep a second copy of the document only for a
 // migrated document, and for a Source that [input.Sources] reads under
-// [WithUnmarshalers]. For a migrated document, they keep the edits of the
+// [WithTypeRules]. For a migrated document, they keep the edits of the
 // migration too. They read the edits to bind each error at the line that
 // the user wrote. Copy Value to keep the value alone.
 //
@@ -61,13 +61,13 @@ type Object[T any] struct {
 	// which is the document that Value decoded from. A function of
 	// [WithCheck] reads it to decode another Go type, to run a
 	// [niceyaml.Validator], or to resolve a path of the current version.
-	// Its decodes apply the unmarshalers of [WithUnmarshalers].
+	// Its decodes apply the rules of [WithTypeRules].
 	//
 	// Current is a copy of the document in a Source of its own, as
 	// [niceyaml.NewSourceFromDerived] builds one, in two cases. The first
 	// is a migrated document. The second is a document of a Source that
-	// [input.Sources] reads under [WithUnmarshalers], because only the
-	// copy holds the unmarshalers of the registry. Current is Original for
+	// [input.Sources] reads under [WithTypeRules], because only the
+	// copy holds the rules of the registry. Current is Original for
 	// every other document. The copy holds the lines of this document
 	// alone. Each error that binds through Current lands on the line that
 	// the user wrote in the file. Such errors include those of
@@ -87,7 +87,7 @@ type Object[T any] struct {
 	// the name and the text of the file, and the index of the document in
 	// the file. A path of the current version might not resolve in
 	// Original. From a Source that [input.Sources] reads, Original keeps
-	// the unmarshalers of that Source alone.
+	// the rules of that Source alone.
 	Original *niceyaml.Node
 	// The function that binds an error with the paths of the current
 	// version.

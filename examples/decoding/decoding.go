@@ -23,26 +23,32 @@ var (
 	//go:embed demo.yaml
 	example string
 
-	// Every decode in the program takes these options, so each call reads
-	// the documents by the same rules.
-	decoding = niceyaml.DecodeOptions(
-		niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject),
+	// The Source gives these rules to every decode of its documents, so
+	// each value of these types starts from the same defaults wherever the
+	// program decodes it.
+	rules = []niceyaml.TypeRule{
 		// The decode builds each field of a config from the defaults of its
 		// own type, and then this function runs. The function of the parent
 		// thus decides each value it writes, so the kitchen printer listens
 		// on 9101 and every other printer listens on 9100.
-		niceyaml.WithDefaults(func(c *config) {
+		niceyaml.TypeDefaults(func(c *config) {
 			c.Cafe.Seats = 20
 			c.Kitchen.Port = 9101
 			c.Wifi = guestWifi
 		}),
-		niceyaml.WithDefaults(func(p *receiptPrinter) {
+		niceyaml.TypeDefaults(func(p *receiptPrinter) {
 			p.Host = "localhost"
 			p.Port = 9100
 		}),
-		niceyaml.WithDefaults(func(i *item) {
+		niceyaml.TypeDefaults(func(i *item) {
 			i.Available = true
 		}),
+	}
+
+	// Every decode in the program takes these options, so each call reads
+	// the documents by the same settings.
+	decoding = niceyaml.DecodeOptions(
+		niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject),
 	)
 )
 
@@ -73,7 +79,7 @@ type config struct {
 
 func main() {
 	ctx := context.Background()
-	source := niceyaml.NewSourceFromString(example, niceyaml.WithName("demo.yaml"))
+	source := niceyaml.NewSourceFromString(example, niceyaml.WithName("demo.yaml"), niceyaml.WithTypeRules(rules...))
 	docs := source.Documents()
 	p := printer.New()
 
@@ -108,14 +114,14 @@ func main() {
 	// DecodeInto starts from the value that the caller passes, so a zero
 	// config keeps the seats, wifi, and kitchen port at zero. Each menu item
 	// and printer that the decode creates still starts from its defaults.
-	// Defaults returns the value that Decode starts from with the same
-	// options, and DecodeInto from that value matches Decode.
+	// Source.Defaults returns the value that Decode starts from with the
+	// same options, and DecodeInto from that value matches Decode.
 	starts := []struct {
 		name string
 		cfg  config
 	}{
 		{"zero value", config{}},
-		{"Defaults", niceyaml.Defaults[config](decoding)},
+		{"Defaults", source.Defaults[config](decoding)},
 	}
 
 	for _, start := range starts {

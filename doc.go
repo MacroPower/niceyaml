@@ -919,17 +919,17 @@
 //     "m: {<<: *b}", go-yaml reads m as {"map[null:1]": 1}, and niceyaml
 //     reads m as {null: 1}.
 //
-// The [Unmarshaler] values from [CustomUnmarshaler] and [JSONUnmarshalers]
-// set how the types of the program read YAML, so a program gives them to the
-// Source with [WithUnmarshalers]. Every decode of the documents then applies
+// The [TypeRule] values from [CustomUnmarshaler] and [JSONUnmarshalers] set
+// how the types of the program read YAML, so a program gives them to the
+// Source with [WithTypeRules]. Every decode of the documents then applies
 // them, wherever it runs. That rule covers a decode inside a [Validator], the
 // decode function that a CustomUnmarshaler function gets, and the map keys
 // that [Node.SelfValidate] spells. It also covers a decode in code that did
 // not build the Source, such as a library that the program passes the Source
-// to. The unmarshalers of [WithUnmarshaler] in a call take precedence over
-// them, so a call can replace or remove the function of a type and turn the
-// JSON methods off. A program gives the unmarshalers of a Source from
-// [NewSourceFromLayers] to [MergeUnmarshalers], as the Layers section
+// to. The rules of [OverrideTypeRules] in a call take precedence over them, so
+// a call can replace or remove the function of a type and turn the JSON
+// methods off. A program gives the rules of a Source from
+// [NewSourceFromLayers] to [MergeTypeRules], as the Layers section
 // describes. The [go.jacobcolvin.com/niceyaml/encoder.Marshaler] values set
 // how the same types write YAML, for an encode and for the edits of the
 // edit package.
@@ -1050,34 +1050,48 @@
 //
 // # Defaults
 //
-// [Node.Decode] starts from the value that [Defaults] returns, and
+// [Node.Decode] starts from the value that [Source.Defaults] returns, and
 // [Node.DecodeInto] starts from the value that the caller passes. A caller
-// fills that value with Defaults, or with [DefaultsInto] for a type that it
-// holds as a [reflect.Type]. A decode
-// also creates values: each element of a slice or an array, each value of a
-// map, and the target of each pointer that the document fills. Each starts
-// from the defaults of its type, which [WithDefaults] sets:
+// fills that value with Source.Defaults, or with [Source.DefaultsInto] for a
+// type that it holds as a [reflect.Type]. A decode also creates values: each
+// element of a slice or an array, each value of a map, and the target of each
+// pointer that the document fills. Each starts from the defaults of its type,
+// which [TypeDefaults] sets:
 //
-//	var decoding = niceyaml.DecodeOptions(
-//		niceyaml.WithDefaults(func(s *CafeSpec) {
+//	var rules = []niceyaml.TypeRule{
+//		niceyaml.TypeDefaults(func(s *CafeSpec) {
 //			s.Seats = 20
 //			s.Kitchen.Port = 9101
 //		}),
-//		niceyaml.WithDefaults(func(p *Printer) {
+//		niceyaml.TypeDefaults(func(p *Printer) {
 //			p.Port = 9100
 //		}),
-//	)
+//	}
 //
 // The defaults of a type start from its zero value, and each struct field
 // takes the defaults of its own type. Then the function of the type runs, so
-// a parent wins where its function writes. With the `decoding` options, each
-// Printer defaults to port 9100, and the kitchen printer of a CafeSpec
-// defaults to port 9101.
+// a parent wins where its function writes. With these rules, each Printer
+// defaults to port 9100, and the kitchen printer of a CafeSpec defaults to
+// port 9101.
+//
+// A call takes the rules with [OverrideTypeRules], and a Source with
+// [WithTypeRules]. Defaults on the Source reach every decode of its
+// documents, such as the decode inside a [Validator] and one in a library
+// that the program passes the Source to. Give defaults to the Source only
+// when every such decode must see them. A [Validator] that checks whether
+// the document writes a key reads a default as if the document wrote it, and
+// a step that writes decoded values back writes the defaults into the file.
+// TypeDefaults[T](nil) in OverrideTypeRules removes the function of T alone,
+// and each struct field of T still takes the defaults of its own type. A call
+// that must see the document without the defaults of the Source removes the
+// function of each type that its value holds. A rule about the value that a
+// decode returns, defaults included, belongs in [WithValueCheck] or in a
+// Validate method, which run on that value.
 //
 // A value that the decode creates fills from its defaults, as the Decoding
 // section describes. A null element or map value holds the defaults of its
 // type, and a null sets a pointer to nil. The target of a pointer that
-// already points to a value, such as one that a function of WithDefaults
+// already points to a value, such as one that a function of TypeDefaults
 // sets, starts from that value. The value it pointed to stays as it was.
 //
 // A value that decodes itself, through an unmarshaler method or a
@@ -1104,7 +1118,7 @@
 // that aliases of one anchor fill share one value when they start from equal
 // values. Two pointer fields with equal defaults thus share one target, and
 // two maps or slices share their contents. A program that changes one of
-// them in place changes the others too. A decode without WithDefaults gives
+// them in place changes the others too. A decode without TypeDefaults gives
 // each place a value of its own. A place that starts from another value
 // builds a value of its own. An interface value at an alias holds the value
 // of its anchor.
@@ -1123,18 +1137,18 @@
 // first, so the unmarshalers inside it run a second time.
 //
 // Each key of a map keeps the value that the decoder gives it. A panic in a
-// function of WithDefaults makes the decode return an error that holds a
+// function of TypeDefaults makes the decode return an error that holds a
 // [PanicError].
 //
 // The decode reads each key of a map again to find its entry in these cases:
 //
 //   - The map starts from a map that is not nil.
 //   - The map type, the key type, the value type, or a type inside them has a
-//     function of WithDefaults.
+//     function of TypeDefaults.
 //   - A struct holds the map inline, directly or through inline structs, and
 //     that struct starts from a value other than zero.
 //   - A struct holds the map inline, directly or through inline structs, and
-//     its type or a type inside it has a function of WithDefaults.
+//     its type or a type inside it has a function of TypeDefaults.
 //
 // Each such read calls again the unmarshaler of each key that decodes itself.
 // The decode reads the keys once for a map below a value that decodes itself.
@@ -1222,8 +1236,8 @@
 //
 // A validator that reads decoded data decodes the node itself with
 // [Node.Decode], and a decode does not pass its options to the validators it
-// runs. The decode of the validator still applies the unmarshalers of
-// [WithUnmarshalers], which belong to the Source. A check that runs after
+// runs. The decode of the validator still applies the rules of
+// [WithTypeRules], which belong to the Source. A check that runs after
 // Decode returns, such as one that runs its I/O in parallel, locates each
 // finding with [AtData] and binds the findings with Node.Bind. The decoder
 // respells some keys, so the key 0x10 sets the member 16. The binding reads
@@ -1696,7 +1710,7 @@
 // Node.Decode does. A decode of the document starts the value at such an
 // alias from the defaults of its place. The defaults of a place can differ
 // from the defaults of its type, such as for a field that the function of
-// [WithDefaults] for its parent sets. A validator that decodes the scoped
+// [TypeDefaults] for its parent sets. A validator that decodes the scoped
 // Node thus might see a default that the decode of the document does not
 // hold. Inside the anchor, each value that the decoder creates keeps the
 // value of the decoder in both decodes, as the Defaults section describes.
@@ -1808,9 +1822,9 @@
 // [WithByteLimit], [WithDocumentByteLimit], and [WithDepthLimit] options,
 // and every Source that reads it shares the parse. A reference document that
 // does not parse fails every decode of the Source that reads it, with the
-// error of the parse. The
-// unmarshalers and the [WithAliasLimit] option of its Source do not reach any
-// decode of a Source that reads it.
+// error of the parse. The type rules of its Source, defaults included, and
+// its [WithAliasLimit] option do not reach any decode of a Source that reads
+// it.
 //
 // # Layers
 //
@@ -1909,8 +1923,8 @@
 // becomes one double-quoted line.
 //
 // The Source takes its name, its file path, and its file system from the
-// Source of that layer. It also takes the unmarshalers of that Source, unless
-// a [MergeUnmarshalers] option sets them. Its text holds the values of every
+// Source of that layer. It also takes the type rules of that Source, unless
+// a [MergeTypeRules] option sets them. Its text holds the values of every
 // layer. The Source thus does not show an excerpt when the Source of a layer,
 // or of a reference document that a layer reads, has excerpts off, by
 // [WithExcerpts] or [WithPositions].
@@ -1927,13 +1941,12 @@
 // len(src.Layers()) > 0.
 //
 // A program that embeds its defaults below the file of the user passes
-// MergeAs with the Source of that file. It gives its unmarshalers, such as
-// the cidr [Unmarshaler] that [CustomUnmarshaler] shows, to
-// [MergeUnmarshalers]:
+// MergeAs with the Source of that file. It gives its type rules, such as
+// the cidr [TypeRule] that [CustomUnmarshaler] shows, to [MergeTypeRules]:
 //
 //	merged, err := niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{defaults, user},
 //		niceyaml.MergeAs(user),
-//		niceyaml.MergeUnmarshalers(cidr),
+//		niceyaml.MergeTypeRules(cidr),
 //	)
 //
 // The directive of the file then picks the schema, and a
@@ -1942,18 +1955,18 @@
 // defaults. Every decode of the merged Source applies cidr, including the
 // decode inside a [Validator].
 //
-// A merge without MergeUnmarshalers takes the unmarshalers that
-// [WithUnmarshalers] gives the Source of the layer that the merged Source
-// stands for. When the file that MergeAs names is missing, the merged Source
-// stands for the lowest layer instead. Unmarshalers that a program gives to
-// that file alone thus apply only when it exists. A program gives its
-// unmarshalers to MergeUnmarshalers, or the same unmarshalers to the Source
-// of every layer. Every decode of the merged Source then reads the types of
-// the program the same way whichever files exist.
+// A merge without MergeTypeRules takes the rules that [WithTypeRules]
+// gives the Source of the layer that the merged Source stands for. When
+// the file that MergeAs names is missing, the merged Source stands for the
+// lowest layer instead. Rules that a program gives to that file alone thus
+// apply only when it exists. A program gives its rules to MergeTypeRules,
+// or the same rules to the Source of every layer. Every decode of the
+// merged Source then reads the types of the program the same way whichever
+// files exist.
 //
-// A Node that [Node.Origin] returns decodes with the unmarshalers of its
-// layer. A program that decodes origins thus gives the same unmarshalers to
-// the Source of every layer.
+// A Node that [Node.Origin] returns decodes with the rules of its layer,
+// defaults included. A program that decodes origins thus gives the same
+// rules to the Source of every layer.
 //
 // Each error of the merged Source binds in the file of a layer and never in
 // the merged text, so it names the line that a user edits:
@@ -2336,7 +2349,7 @@
 // does not match any of those sentinels.
 //
 // The go-yaml settings that niceyaml supports have named options, such as
-// [WithAllowDuplicateKeys], [WithUnmarshaler], or
+// [WithAllowDuplicateKeys], [CustomUnmarshaler], or
 // [go.jacobcolvin.com/niceyaml/encoder.WithIndent]. A parse and a decode take
 // only named options, so niceyaml knows what each one changes and applies it
 // to every decoder that a call runs. An option or a method that takes or

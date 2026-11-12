@@ -13418,7 +13418,7 @@ type licenseRef string
 // function of the value, so its error can wrap a rejection of that
 // function.
 func withLicenseCheck(check func(decode func(any) error) error) niceyaml.DecodeOption {
-	return niceyaml.WithUnmarshaler(
+	return niceyaml.OverrideTypeRules(
 		niceyaml.CustomUnmarshaler(func(_ context.Context, _ *licenseRef, decode func(any) error) error {
 			return check(decode)
 		}),
@@ -15000,7 +15000,7 @@ func TestPanicError_Recovered(t *testing.T) {
 		"function from CustomUnmarshaler": {
 			input:  "name: x\n",
 			source: []niceyaml.SourceOption{niceyaml.WithName("c.yaml")},
-			decode: decodeAs[config](niceyaml.WithUnmarshaler(niceyaml.CustomUnmarshaler(
+			decode: decodeAs[config](niceyaml.OverrideTypeRules(niceyaml.CustomUnmarshaler(
 				func(context.Context, *config, func(any) error) error { panic(errRegistry) },
 			))),
 			is:   errRegistry,

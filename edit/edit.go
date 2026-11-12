@@ -316,7 +316,7 @@ type Func func(ctx context.Context, n *Node) error
 //   - [WithApp]
 //   - [WithMarshalers]
 //   - [WithProtected]
-//   - [WithUnmarshalers]
+//   - [WithTypeRules]
 type Option func(*config)
 
 // config holds the settings that each [Option] gives a [Doc].
@@ -325,9 +325,9 @@ type config struct {
 	app string
 	// The paths of the values that [WithProtected] protects.
 	protected []paths.Path
-	// The unmarshalers that each decode applies ahead of those of the
+	// The type rules that each decode applies ahead of those of the
 	// Source of the document.
-	unmarshalers []niceyaml.Unmarshaler
+	typeRules []niceyaml.TypeRule
 	// The marshalers that each Set and Insert encodes its value with.
 	marshalers []encoder.Marshaler
 }
@@ -366,14 +366,19 @@ func WithProtected(ps ...paths.Path) Option {
 	}
 }
 
-// WithUnmarshalers is an [Option] that gives each decode of the document
-// the unmarshalers us, ahead of those of its [niceyaml.Source], as though
-// [niceyaml.WithUnmarshalers] gave them first. [Node.Decode] applies
-// them, and so does each decode of the Node that [Doc.Node] returns. Each
-// WithUnmarshalers adds to the ones before it.
-func WithUnmarshalers(us ...niceyaml.Unmarshaler) Option {
+// WithTypeRules is an [Option] that gives each decode of the document the
+// rules, ahead of those of its [niceyaml.Source], as though
+// [niceyaml.WithTypeRules] gave them first. [Node.Decode] applies them,
+// and so does each decode of the Node that [Doc.Node] returns. Each
+// WithTypeRules adds to the ones before it.
+//
+// The defaults of a [niceyaml.TypeDefaults] among the rules reach each
+// such decode too. A [Func] that decodes a value, changes it, and sets it
+// back then writes the defaults into the document. A program whose Funcs
+// set decoded values back keeps its defaults out of these rules.
+func WithTypeRules(rules ...niceyaml.TypeRule) Option {
 	return func(c *config) {
-		c.unmarshalers = append(c.unmarshalers, us...)
+		c.typeRules = append(c.typeRules, rules...)
 	}
 }
 

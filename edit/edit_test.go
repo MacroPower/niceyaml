@@ -11895,7 +11895,7 @@ func removalString(rm edit.Removal) string {
 		rm.Key, rm.Item, rm.Range.Start.Line, rm.Range.Start.Col, rm.Range.End.Line, rm.Range.End.Col)
 }
 
-func TestWithUnmarshalers(t *testing.T) {
+func TestWithTypeRules(t *testing.T) {
 	t.Parallel()
 
 	type level int
@@ -11927,7 +11927,7 @@ func TestWithUnmarshalers(t *testing.T) {
 			want: 2,
 		},
 		"the unmarshalers of the Source apply over them": {
-			opts: []niceyaml.SourceOption{niceyaml.WithUnmarshalers(fixed)},
+			opts: []niceyaml.SourceOption{niceyaml.WithTypeRules(fixed)},
 			want: 7,
 		},
 	}
@@ -11938,7 +11938,7 @@ func TestWithUnmarshalers(t *testing.T) {
 
 			doc := yamltest.FirstDocument(t, "alarm: loud!!\n", tc.opts...)
 
-			d, err := edit.New(doc, edit.WithUnmarshalers(names))
+			d, err := edit.New(doc, edit.WithTypeRules(names))
 			require.NoError(t, err)
 
 			var got level
@@ -11958,6 +11958,46 @@ func TestWithUnmarshalers(t *testing.T) {
 			assert.Equal(t, map[string]level{"alarm": tc.want}, read)
 		})
 	}
+}
+
+func TestWithTypeRules_Defaults(t *testing.T) {
+	t.Parallel()
+
+	type alarm struct {
+		Sound  string `yaml:"sound"`
+		Volume int    `yaml:"volume"`
+	}
+
+	loud := niceyaml.TypeDefaults(func(a *alarm) { a.Volume = 11 })
+
+	doc := yamltest.FirstDocument(t, "alarm: {sound: bell}\n")
+
+	d, err := edit.New(doc, edit.WithTypeRules(loud))
+	require.NoError(t, err)
+
+	var got, raw alarm
+
+	decode := func(ctx context.Context, n *edit.Node) error {
+		got, err = n.Decode[alarm](ctx)
+		if err != nil {
+			return err
+		}
+
+		raw, err = n.Decode[alarm](ctx, niceyaml.OverrideTypeRules(niceyaml.TypeDefaults[alarm](nil)))
+
+		return err
+	}
+
+	require.NoError(t, d.Apply(t.Context(), paths.Doc().Child("alarm"), decode))
+
+	// The defaults reach each decode of the document, and a call that
+	// removes them reads the document as written.
+	assert.Equal(t, alarm{Sound: "bell", Volume: 11}, got)
+	assert.Equal(t, alarm{Sound: "bell"}, raw)
+
+	read, err := d.Node().Decode[map[string]alarm](t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, map[string]alarm{"alarm": {Sound: "bell", Volume: 11}}, read)
 }
 
 // milli is a quantity that writes JSON alone, such as a Kubernetes
@@ -12050,7 +12090,7 @@ func TestWithMarshalers(t *testing.T) {
 		return h.name, nil
 	})
 
-	reads := niceyaml.WithUnmarshalers(cidrRead, niceyaml.JSONUnmarshalers(true))
+	reads := niceyaml.WithTypeRules(cidrRead, niceyaml.JSONUnmarshalers(true))
 
 	tcs := map[string]struct {
 		fn         edit.Func

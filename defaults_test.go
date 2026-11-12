@@ -35,18 +35,25 @@ type defaultsPrinter struct {
 	Port int    `yaml:"port"`
 }
 
-// defaultsDecoding gives the café and each printer their defaults, and
-// sets the port of the kitchen printer and the target of spare.
-var defaultsDecoding = niceyaml.DecodeOptions(
-	niceyaml.WithDefaults(func(c *defaultsCafe) {
-		c.Seats = 20
-		c.Currency = "SEK"
-		c.Kitchen.Port = 9101
-		c.Spare = &defaultsPrinter{Host: "spare", Port: 9200}
-	}),
-	niceyaml.WithDefaults(func(p *defaultsPrinter) {
-		p.Port = 9100
-	}),
+var (
+	// The rules of defaultsRules give the café and each printer their
+	// defaults, and set the port of the kitchen printer and the target of
+	// spare.
+	defaultsRules = []niceyaml.TypeRule{
+		niceyaml.TypeDefaults(func(c *defaultsCafe) {
+			c.Seats = 20
+			c.Currency = "SEK"
+			c.Kitchen.Port = 9101
+			c.Spare = &defaultsPrinter{Host: "spare", Port: 9200}
+		}),
+		niceyaml.TypeDefaults(func(p *defaultsPrinter) {
+			p.Port = 9100
+		}),
+	}
+
+	// The option defaultsDecoding gives a decode the rules of
+	// defaultsRules.
+	defaultsDecoding = niceyaml.OverrideTypeRules(defaultsRules...)
 )
 
 // defaultedCafe returns the café that [defaultsDecoding] builds from its
@@ -70,28 +77,37 @@ func defaultedCafe(edits ...func(*defaultsCafe)) defaultsCafe {
 func TestDefaults(t *testing.T) {
 	t.Parallel()
 
-	got := niceyaml.Defaults[defaultsCafe](defaultsDecoding)
+	got := niceyaml.Defaults[defaultsCafe](defaultsRules...)
 
 	assert.Equal(t, defaultedCafe(), got)
 
-	assert.Equal(t, defaultsPrinter{Port: 9100}, niceyaml.Defaults[defaultsPrinter](defaultsDecoding))
+	assert.Equal(t, defaultsPrinter{Port: 9100}, niceyaml.Defaults[defaultsPrinter](defaultsRules...))
 	assert.Equal(t, defaultsCafe{}, niceyaml.Defaults[defaultsCafe]())
-	assert.Nil(t, niceyaml.Defaults[*defaultsPrinter](defaultsDecoding))
+	assert.Nil(t, niceyaml.Defaults[*defaultsPrinter](defaultsRules...))
 
-	// A later WithDefaults for a type replaces an earlier one.
-	later := niceyaml.Defaults[defaultsPrinter](defaultsDecoding,
-		niceyaml.WithDefaults(func(p *defaultsPrinter) { p.Host = "lp" }))
+	// A later TypeDefaults for a type replaces an earlier one.
+	later := niceyaml.Defaults[defaultsPrinter](append(defaultsRules,
+		niceyaml.TypeDefaults(func(p *defaultsPrinter) { p.Host = "lp" }))...)
 	assert.Equal(t, defaultsPrinter{Host: "lp"}, later)
+
+	// A nil function removes the function of the type, and keeps those of
+	// the other types.
+	removed := niceyaml.Defaults[defaultsCafe](append(defaultsRules, niceyaml.TypeDefaults[defaultsCafe](nil))...)
+	assert.Equal(t, defaultsCafe{Receipts: defaultsPrinter{Port: 9100}, Kitchen: defaultsPrinter{Port: 9100}}, removed)
+
+	// The rules of other kinds do not change the defaults.
+	assert.Equal(t, defaultsPrinter{Port: 9100}, niceyaml.Defaults[defaultsPrinter](append(defaultsRules,
+		niceyaml.JSONUnmarshalers(true), niceyaml.CustomUnmarshaler[defaultsPrinter](nil), niceyaml.TypeRule{})...))
 
 	// Each call builds new values, so a map the function sets belongs to
 	// one value.
-	labels := niceyaml.WithDefaults(func(c *defaultsCafe) { c.Labels = map[string]string{"floor": "1"} })
+	labels := niceyaml.TypeDefaults(func(c *defaultsCafe) { c.Labels = map[string]string{"floor": "1"} })
 	first := niceyaml.Defaults[defaultsCafe](labels)
 	first.Labels["floor"] = "2"
 	assert.Equal(t, "1", niceyaml.Defaults[defaultsCafe](labels).Labels["floor"])
 
 	assert.PanicsWithValue(t, "boom", func() {
-		niceyaml.Defaults[defaultsPrinter](niceyaml.WithDefaults(func(*defaultsPrinter) { panic("boom") }))
+		niceyaml.Defaults[defaultsPrinter](niceyaml.TypeDefaults(func(*defaultsPrinter) { panic("boom") }))
 	})
 }
 
@@ -101,25 +117,25 @@ func TestDefaultsInto(t *testing.T) {
 	tcs := map[string]struct {
 		target any
 		want   any
-		opts   []niceyaml.DecodeOption
+		rules  []niceyaml.TypeRule
 	}{
 		"struct": {
 			target: &defaultsCafe{},
-			opts:   []niceyaml.DecodeOption{defaultsDecoding},
+			rules:  defaultsRules,
 			want:   new(defaultedCafe()),
 		},
 		"replaces what the target held": {
 			target: &defaultsPrinter{Host: "held", Port: 1},
-			opts:   []niceyaml.DecodeOption{defaultsDecoding},
+			rules:  defaultsRules,
 			want:   &defaultsPrinter{Port: 9100},
 		},
-		"without options": {
+		"without rules": {
 			target: &defaultsPrinter{Host: "held", Port: 1},
 			want:   &defaultsPrinter{},
 		},
 		"pointer to a pointer": {
 			target: new(&defaultsPrinter{Port: 1}),
-			opts:   []niceyaml.DecodeOption{defaultsDecoding},
+			rules:  defaultsRules,
 			want:   new((*defaultsPrinter)(nil)),
 		},
 	}
@@ -128,7 +144,7 @@ func TestDefaultsInto(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			require.NoError(t, niceyaml.DefaultsInto(tc.target, tc.opts...))
+			require.NoError(t, niceyaml.DefaultsInto(tc.target, tc.rules...))
 			assert.Equal(t, tc.want, tc.target)
 		})
 	}
@@ -140,8 +156,8 @@ func TestDefaultsInto_MatchesDefaults(t *testing.T) {
 	// A target built from a reflect.Type gets what Defaults returns.
 	v := reflect.New(reflect.TypeFor[defaultsCafe]()).Interface()
 
-	require.NoError(t, niceyaml.DefaultsInto(v, defaultsDecoding))
-	assert.Equal(t, new(niceyaml.Defaults[defaultsCafe](defaultsDecoding)), v)
+	require.NoError(t, niceyaml.DefaultsInto(v, defaultsRules...))
+	assert.Equal(t, new(niceyaml.Defaults[defaultsCafe](defaultsRules...)), v)
 }
 
 func TestDefaultsInto_Target(t *testing.T) {
@@ -161,7 +177,7 @@ func TestDefaultsInto_Target(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := niceyaml.DefaultsInto(tc.target, defaultsDecoding)
+			err := niceyaml.DefaultsInto(tc.target, defaultsRules...)
 			require.ErrorIs(t, err, niceyaml.ErrDecodeTarget)
 			require.ErrorAs(t, err, new(*niceyaml.Error))
 			assert.NotErrorAs(t, err, new(*niceyaml.SourceError))
@@ -177,8 +193,94 @@ func TestDefaultsInto_Panic(t *testing.T) {
 
 	assert.PanicsWithValue(t, "boom", func() {
 		//nolint:errcheck // The call panics before it returns.
-		_ = niceyaml.DefaultsInto(&p, niceyaml.WithDefaults(func(*defaultsPrinter) { panic("boom") }))
+		_ = niceyaml.DefaultsInto(&p, niceyaml.TypeDefaults(func(*defaultsPrinter) { panic("boom") }))
 	})
+}
+
+func TestSource_Defaults(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		source *niceyaml.Source
+		opts   []niceyaml.DecodeOption
+		want   defaultsCafe
+	}{
+		"rules of the Source": {
+			source: niceyaml.NewSourceFromString("", niceyaml.WithTypeRules(defaultsRules...)),
+			want:   defaultedCafe(),
+		},
+		"rules of the options": {
+			source: niceyaml.NewSourceFromString(""),
+			opts:   []niceyaml.DecodeOption{defaultsDecoding},
+			want:   defaultedCafe(),
+		},
+		"options apply over the Source": {
+			source: niceyaml.NewSourceFromString("", niceyaml.WithTypeRules(defaultsRules...)),
+			opts: []niceyaml.DecodeOption{
+				niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(c *defaultsCafe) { c.Seats = 4 })),
+			},
+			want: defaultsCafe{
+				Seats:    4,
+				Receipts: defaultsPrinter{Port: 9100},
+				Kitchen:  defaultsPrinter{Port: 9100},
+			},
+		},
+		"options remove a function of the Source": {
+			source: niceyaml.NewSourceFromString("", niceyaml.WithTypeRules(defaultsRules...)),
+			opts: []niceyaml.DecodeOption{
+				niceyaml.OverrideTypeRules(niceyaml.TypeDefaults[defaultsPrinter](nil)),
+			},
+			want: defaultedCafe(func(c *defaultsCafe) {
+				c.Receipts.Port = 0
+			}),
+		},
+		"nil Source": {
+			opts: []niceyaml.DecodeOption{defaultsDecoding},
+			want: defaultedCafe(),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.source.Defaults[defaultsCafe](tc.opts...))
+
+			v := &defaultsCafe{Seats: 1}
+			require.NoError(t, tc.source.DefaultsInto(v, tc.opts...))
+			assert.Equal(t, &tc.want, v)
+		})
+	}
+}
+
+func TestSource_Defaults_MatchesDecode(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("receipts: {host: r}\n", niceyaml.WithTypeRules(defaultsRules...))
+
+	want, err := source.Decode[defaultsCafe](t.Context())
+	require.NoError(t, err)
+
+	// A caller that starts DecodeInto from the defaults of the Source gets
+	// what Decode returns.
+	start := source.Defaults[defaultsCafe]()
+	require.NoError(t, source.DecodeInto(t.Context(), &start))
+	assert.Equal(t, want, start)
+
+	// A caller that holds its type as a runtime value and starts from
+	// DefaultsInto gets the same.
+	v := reflect.New(reflect.TypeFor[defaultsCafe]()).Interface()
+	require.NoError(t, source.DefaultsInto(v))
+	require.NoError(t, source.DecodeInto(t.Context(), v))
+	assert.Equal(t, &want, v)
+
+	// DefaultsInto reads no document, so its error comes back unbound.
+	err = source.DefaultsInto(defaultsCafe{})
+	require.ErrorIs(t, err, niceyaml.ErrDecodeTarget)
+
+	var sourceErr *niceyaml.SourceError
+
+	assert.NotErrorAs(t, err, &sourceErr)
 }
 
 func TestNode_DecodeInto_DefaultsIntoStart(t *testing.T) {
@@ -204,7 +306,7 @@ func TestNode_DecodeInto_DefaultsIntoStart(t *testing.T) {
 			// A caller that starts from DefaultsInto gets what Decode
 			// returns.
 			v := reflect.New(reflect.TypeFor[defaultsCafe]()).Interface()
-			require.NoError(t, niceyaml.DefaultsInto(v, defaultsDecoding))
+			require.NoError(t, niceyaml.DefaultsInto(v, defaultsRules...))
 			require.NoError(t, doc.DecodeInto(t.Context(), v, defaultsDecoding))
 			assert.Equal(t, &want, v)
 		})
@@ -398,7 +500,7 @@ func TestNode_DecodeInto_Defaults(t *testing.T) {
 	assert.Equal(t, &defaultsPrinter{Port: 7}, spare)
 
 	// A caller that starts from Defaults gets what Decode returns.
-	start := niceyaml.Defaults[defaultsCafe](defaultsDecoding)
+	start := niceyaml.Defaults[defaultsCafe](defaultsRules...)
 	require.NoError(t, doc.DecodeInto(t.Context(), &start, defaultsDecoding))
 
 	want, err := doc.Decode[defaultsCafe](t.Context(), defaultsDecoding)
@@ -425,7 +527,7 @@ func TestNode_Decode_DefaultsAtAliases(t *testing.T) {
 		"y: *m",
 	))
 
-	set := niceyaml.WithDefaults(func(p *pair) { p.C = &defaultsPrinter{Port: 1} })
+	set := niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(p *pair) { p.C = &defaultsPrinter{Port: 1} }))
 
 	got, err := doc.Decode[pair](t.Context(), defaultsDecoding, set)
 	require.NoError(t, err)
@@ -504,7 +606,7 @@ func TestNode_Decode_DefaultsAtReferenceAliases(t *testing.T) {
 
 		ints, err := yamltest.FirstDocument(t, "ints: [*nul]\n", nulls).Decode[struct {
 			Ints []int `yaml:"ints"`
-		}](t.Context(), niceyaml.WithDefaults(func(i *int) { *i = 7 }))
+		}](t.Context(), niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(i *int) { *i = 7 })))
 		require.NoError(t, err)
 		assert.Equal(t, []int{7}, ints.Ints)
 	})
@@ -627,10 +729,10 @@ func TestNode_Decode_DefaultsInline(t *testing.T) {
 	}
 
 	opts := niceyaml.DecodeOptions(
-		niceyaml.WithDefaults(func(c *Common) {
+		niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(c *Common) {
 			c.Name = "inner"
 			c.Tier = 2
-		}),
+		})),
 	)
 
 	doc := yamltest.FirstDocument(t, "- {name: a}\n- {tier: 3}\n")
@@ -695,7 +797,7 @@ func TestNode_Decode_DefaultsOfValueThatDecodesItself(t *testing.T) {
 	doc := yamltest.FirstDocument(t, "[info, debug]\n")
 
 	got, err := doc.Decode[[]defaultsLevel](t.Context(),
-		niceyaml.WithDefaults(func(l *defaultsLevel) { l.Level = 3 }))
+		niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(l *defaultsLevel) { l.Level = 3 })))
 	require.NoError(t, err)
 	assert.Equal(t, []defaultsLevel{{Name: "info", Level: 3}, {Name: "debug", Level: 3}}, got)
 }
@@ -703,14 +805,18 @@ func TestNode_Decode_DefaultsOfValueThatDecodesItself(t *testing.T) {
 func TestNode_Decode_DefaultsPanic(t *testing.T) {
 	t.Parallel()
 
-	boom := niceyaml.WithDefaults(func(*defaultsPrinter) { panic("boom") })
+	boom := niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(*defaultsPrinter) { panic("boom") }))
 
 	t.Run("a value the decode creates", func(t *testing.T) {
 		t.Parallel()
 
 		doc := yamltest.FirstDocument(t, "stations: [{host: a}]\n")
 
-		_, err := doc.Decode[defaultsCafe](t.Context(), niceyaml.WithDefaults(func(*defaultsCafe) {}), boom)
+		_, err := doc.Decode[defaultsCafe](
+			t.Context(),
+			niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(*defaultsCafe) {})),
+			boom,
+		)
 		require.ErrorAs(t, err, new(*niceyaml.PanicError))
 		require.NotErrorIs(t, err, niceyaml.ErrDecode)
 	})

@@ -975,7 +975,7 @@ func TestNewSourceFromLayers_Decode_Options(t *testing.T) {
 		Backup plainLevel `yaml:"backup"`
 	}
 
-	levels := niceyaml.WithUnmarshaler(niceyaml.CustomUnmarshaler(decodeLevel))
+	levels := niceyaml.OverrideTypeRules(niceyaml.CustomUnmarshaler(decodeLevel))
 
 	// The options reach the one decode of the merged document, so the
 	// function decodes a level whichever layer holds it, and its error
@@ -2295,7 +2295,7 @@ tags: [prod]
 	//    4 | tags: [prod]
 }
 
-func ExampleMergeUnmarshalers() {
+func ExampleMergeTypeRules() {
 	ctx := context.Background()
 
 	// The program embeds its defaults below an optional file of the user.
@@ -2326,7 +2326,7 @@ func ExampleMergeUnmarshalers() {
 	// network whichever files exist.
 	merged, err := niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{defaults, user},
 		niceyaml.MergeAs(user),
-		niceyaml.MergeUnmarshalers(cidr),
+		niceyaml.MergeTypeRules(cidr),
 	)
 	if err != nil {
 		log.Fatal(err)
@@ -3173,7 +3173,7 @@ func TestMergeAs(t *testing.T) {
 	})
 
 	t.Run(
-		"with no MergeUnmarshalers the merged Source takes the unmarshalers of the layer it stands for",
+		"with no MergeTypeRules the merged Source takes the rules of the layer it stands for",
 		func(t *testing.T) {
 			t.Parallel()
 
@@ -3182,7 +3182,7 @@ func TestMergeAs(t *testing.T) {
 				Level plainLevel `yaml:"level"`
 			}
 
-			levels := niceyaml.WithUnmarshalers(niceyaml.CustomUnmarshaler(decodeLevel))
+			levels := niceyaml.WithTypeRules(niceyaml.CustomUnmarshaler(decodeLevel))
 
 			// The level lies in the lowest layer, and decodes from its name
 			// only through the function.
@@ -4545,7 +4545,7 @@ func TestMergeAppend(t *testing.T) {
 	})
 }
 
-func TestMergeUnmarshalers(t *testing.T) {
+func TestMergeTypeRules(t *testing.T) {
 	t.Parallel()
 
 	type config struct {
@@ -4563,10 +4563,10 @@ func TestMergeUnmarshalers(t *testing.T) {
 	// through the function.
 	base := niceyaml.NewSourceFromString("level: low\n", niceyaml.WithName("base.yaml"))
 	levelsBase := niceyaml.NewSourceFromString("level: low\n",
-		niceyaml.WithName("base.yaml"), niceyaml.WithUnmarshalers(levels))
+		niceyaml.WithName("base.yaml"), niceyaml.WithTypeRules(levels))
 	user := niceyaml.NewSourceFromString("name: api\n", niceyaml.WithName("user.yaml"))
 	levelsUser := niceyaml.NewSourceFromString("name: api\n",
-		niceyaml.WithName("user.yaml"), niceyaml.WithUnmarshalers(levels))
+		niceyaml.WithName("user.yaml"), niceyaml.WithTypeRules(levels))
 
 	// An optional file that does not exist.
 	var missing *niceyaml.Source
@@ -4586,45 +4586,53 @@ func TestMergeUnmarshalers(t *testing.T) {
 		}{
 			"with the optional file": {
 				layers: []*niceyaml.Source{base, user},
-				opts:   []niceyaml.MergeOption{niceyaml.MergeAs(user), niceyaml.MergeUnmarshalers(levels)},
+				opts:   []niceyaml.MergeOption{niceyaml.MergeAs(user), niceyaml.MergeTypeRules(levels)},
 				want:   config{Name: "api", Level: levelLow},
 			},
 			"without the optional file": {
 				layers: []*niceyaml.Source{base, missing},
-				opts:   []niceyaml.MergeOption{niceyaml.MergeAs(missing), niceyaml.MergeUnmarshalers(levels)},
+				opts:   []niceyaml.MergeOption{niceyaml.MergeAs(missing), niceyaml.MergeTypeRules(levels)},
 				want:   config{Level: levelLow},
 			},
 			"with no MergeAs": {
 				layers: []*niceyaml.Source{base, user},
-				opts:   []niceyaml.MergeOption{niceyaml.MergeUnmarshalers(levels)},
+				opts:   []niceyaml.MergeOption{niceyaml.MergeTypeRules(levels)},
 				want:   config{Name: "api", Level: levelLow},
+			},
+			"with defaults": {
+				layers: []*niceyaml.Source{base, missing},
+				opts: []niceyaml.MergeOption{niceyaml.MergeAs(missing), niceyaml.MergeTypeRules(
+					levels,
+					niceyaml.TypeDefaults(func(c *config) { c.Name = "anon" }),
+				)},
+				want: config{Name: "anon", Level: levelLow},
 			},
 			"in place of those of the layer MergeAs names": {
 				layers: []*niceyaml.Source{base, levelsUser},
-				opts:   []niceyaml.MergeOption{niceyaml.MergeAs(levelsUser), niceyaml.MergeUnmarshalers(plain)},
+				opts:   []niceyaml.MergeOption{niceyaml.MergeAs(levelsUser), niceyaml.MergeTypeRules(plain)},
 				err:    rejected,
 			},
 			"in place of those of the lowest layer": {
 				layers: []*niceyaml.Source{levelsBase, user},
-				opts:   []niceyaml.MergeOption{niceyaml.MergeUnmarshalers(plain)},
+				opts:   []niceyaml.MergeOption{niceyaml.MergeTypeRules(plain)},
 				err:    rejected,
 			},
 			"none from any layer when the option holds none": {
 				layers: []*niceyaml.Source{levelsBase, user},
-				opts:   []niceyaml.MergeOption{niceyaml.MergeUnmarshalers()},
+				opts:   []niceyaml.MergeOption{niceyaml.MergeTypeRules()},
 				err:    rejected,
 			},
 			"a later option adds to an earlier one": {
 				layers: []*niceyaml.Source{base, user},
 				opts: []niceyaml.MergeOption{
-					niceyaml.MergeUnmarshalers(levels),
-					niceyaml.MergeUnmarshalers(niceyaml.JSONUnmarshalers(true)),
+					niceyaml.MergeTypeRules(levels),
+					niceyaml.MergeTypeRules(niceyaml.JSONUnmarshalers(true)),
 				},
 				want: config{Name: "api", Level: levelLow},
 			},
 			"a later function for a type replaces an earlier one": {
 				layers: []*niceyaml.Source{base, user},
-				opts:   []niceyaml.MergeOption{niceyaml.MergeUnmarshalers(levels), niceyaml.MergeUnmarshalers(plain)},
+				opts:   []niceyaml.MergeOption{niceyaml.MergeTypeRules(levels), niceyaml.MergeTypeRules(plain)},
 				err:    rejected,
 			},
 		}
@@ -4678,7 +4686,7 @@ func TestMergeUnmarshalers(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				lower, err := niceyaml.NewSourceFromLayers(t.Context(), inner, niceyaml.MergeUnmarshalers(levels))
+				lower, err := niceyaml.NewSourceFromLayers(t.Context(), inner, niceyaml.MergeTypeRules(levels))
 				require.NoError(t, err)
 
 				merged, err := niceyaml.NewSourceFromLayers(t.Context(), []*niceyaml.Source{lower, base, user})
@@ -4695,7 +4703,7 @@ func TestMergeUnmarshalers(t *testing.T) {
 		t.Parallel()
 
 		merged, err := niceyaml.NewSourceFromLayers(t.Context(),
-			[]*niceyaml.Source{base, user}, niceyaml.MergeUnmarshalers(levels))
+			[]*niceyaml.Source{base, user}, niceyaml.MergeTypeRules(levels))
 		require.NoError(t, err)
 
 		level, err := yamltest.Document(t, merged).At(levelPath)
@@ -4715,8 +4723,8 @@ func TestMergeUnmarshalers(t *testing.T) {
 	t.Run("the option keeps its unmarshalers when the caller changes the slice", func(t *testing.T) {
 		t.Parallel()
 
-		us := []niceyaml.Unmarshaler{levels}
-		opt := niceyaml.MergeUnmarshalers(us...)
+		us := []niceyaml.TypeRule{levels}
+		opt := niceyaml.MergeTypeRules(us...)
 		us[0] = plain
 
 		merged, err := niceyaml.NewSourceFromLayers(t.Context(), []*niceyaml.Source{base, user}, opt)

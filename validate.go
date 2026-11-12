@@ -51,13 +51,13 @@ import (
 // On a value that did not change after the decode, SelfValidate returns what
 // the decode with the walk on returns, given the same functions of
 // WithValueCheck and WithNodeCheck. To spell each map key as the document does,
-// the walk decodes the keys with the settings of the [Source], the unmarshalers
-// of [WithUnmarshalers] among them. A program that gives its unmarshalers to
-// the Source thus does not pass them here. The decodes of the keys drop the
+// the walk decodes the keys with the settings of the [Source], the rules of
+// [WithTypeRules] among them. A program that gives its rules to the Source
+// thus does not pass them here. The decodes of the keys drop the
 // warnings that every unmarshaler they run hands to its context.
 //
 // The walk also applies the options in opts that say how a value decodes:
-// [WithUnmarshaler], [WithUnknownFields], [WithAllowedFieldPrefixes], and
+// [OverrideTypeRules], [WithUnknownFields], [WithAllowedFieldPrefixes], and
 // [WithYAMLOrderedMaps]. It skips the methods of each type that
 // [WithSelfValidationOf] turns off. It does not read any other option.
 // The walk does not report an unknown field, even under
@@ -128,13 +128,13 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error 
 // values of its type, as Node.SelfValidate does. A server thus checks the
 // body of a request with the functions it gives a decode. Each function of
 // [WithNodeCheck] gets a nil Node, because the value does not have a
-// document. SelfValidateValue
-// recognizes a type that decodes itself through its own unmarshaler
-// method or through an unmarshaler of [WithUnmarshaler] in opts. It skips
-// the methods of each type that [WithSelfValidationOf] in opts turns off.
+// document. SelfValidateValue recognizes a type that decodes itself
+// through its own unmarshaler method or through a [CustomUnmarshaler] of
+// [OverrideTypeRules] in opts. It skips the methods of each type that
+// [WithSelfValidationOf] in opts turns off.
 // It does not read any other option. The value does not have a [Source],
-// so the unmarshalers of [WithUnmarshalers] do not reach the walk. A
-// caller passes them in opts with WithUnmarshaler instead.
+// so the rules of [WithTypeRules] do not reach the walk. A caller passes
+// them in opts with OverrideTypeRules instead.
 //
 // A ValidateContext method of a [SelfValidatorContext] whose value holds
 // fields a decode does not reach, such as one tagged `yaml:"-"`,

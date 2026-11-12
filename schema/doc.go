@@ -65,26 +65,26 @@
 // A program that decodes a type whole through a
 // [go.jacobcolvin.com/niceyaml.CustomUnmarshaler] or through
 // [go.jacobcolvin.com/niceyaml.JSONUnmarshalers] passes CheckFields the
-// unmarshalers that it gives its Source. The check then skips each such
-// type, as it skips a type with an UnmarshalYAML method, and still checks
-// the fields of every other struct:
+// type rules that it decodes with. The check then skips each such type,
+// as it skips a type with an UnmarshalYAML method, and still checks the
+// fields of every other struct:
 //
-//	require.NoError(t, schema.CheckFields[Config](unmarshalers...))
+//	require.NoError(t, schema.CheckFields[Config](rules...))
 //
 // The generator requires each field without the omitempty or omitzero
-// option. A default from [go.jacobcolvin.com/niceyaml.WithDefaults] on
+// option. A default from [go.jacobcolvin.com/niceyaml.TypeDefaults] on
 // such a field never applies, because every document must write the
 // field. [CheckType] reads the compiled schema beside the type and the
-// decode options that the program decodes with. It reports each such
+// type rules that the program decodes with. It reports each such
 // default, and each property that the schema requires and deprecates:
 //
 //	func TestConfigSchema(t *testing.T) {
-//	    require.NoError(t, schema.CheckFields[Config]())
-//	    require.NoError(t, schema.CheckType[Config](configSchema, decoding))
+//	    require.NoError(t, schema.CheckFields[Config](rules...))
+//	    require.NoError(t, schema.CheckType[Config](configSchema, rules...))
 //	}
 //
 // The test fails for a Config whose schema requires a deprecated old
-// field and a seats field that decoding defaults to 20:
+// field and a seats field that the rules default to 20:
 //
 //	$.old: required and deprecated
 //	$.seats: required, so its default 20 never applies

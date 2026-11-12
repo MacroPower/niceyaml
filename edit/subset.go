@@ -1280,9 +1280,9 @@ func (d *Doc) misnestedAliases() map[[2]int]bool {
 
 	b.WriteString(d.cur[last:] + d.tail)
 
-	us := slices.Concat(d.cfg.unmarshalers, d.user.Source().Unmarshalers())
+	rules := slices.Concat(d.cfg.typeRules, d.user.Source().TypeRules())
 	src := niceyaml.NewSourceFromDerived(lexed(b.String()), d.user, d.locate,
-		niceyaml.WithUnmarshalers(us...), niceyaml.WithoutLimits())
+		niceyaml.WithTypeRules(rules...), niceyaml.WithoutLimits())
 
 	for _, n := range src.AllDocuments() {
 		if n.Err() != nil {

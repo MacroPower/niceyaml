@@ -144,7 +144,7 @@ func (l *lazy[T]) get(f func() T) T {
 //   - [WithAllowDuplicateKeys]
 //   - [WithAliasLimit]
 //   - [WithReferences]
-//   - [WithUnmarshalers]
+//   - [WithTypeRules]
 //   - [WithExcerpts]
 //   - [WithPositions]
 //   - [WithByteLimit]
@@ -154,11 +154,12 @@ func (l *lazy[T]) get(f func() T) T {
 //
 // [WithAllowDuplicateKeys], [WithReferences], and [WithAliasLimit]
 // describe the documents themselves, so the Source applies them to every
-// decode and every validation of its documents. [WithUnmarshalers]
-// states how the types of the program read the documents of this Source.
-// Every decode of those documents applies it too, wherever the decode
-// runs. Every setting that depends on the target of one decode, such as
-// [WithUnknownFields], stays a [DecodeOption] of each call.
+// decode and every validation of its documents. [WithTypeRules] states how
+// the types of the program read the documents of this Source and what
+// their values start from. Every decode of those documents applies it too,
+// wherever the decode runs. Every setting that depends on the target of
+// one decode, such as [WithUnknownFields], stays a [DecodeOption] of each
+// call.
 //
 // [WithExcerpts] sets whether errors show the text in excerpts, for
 // every renderer of the errors of the Source. [WithPositions] sets
@@ -181,10 +182,9 @@ type sourceConfig struct {
 	// Holds each Source that WithReferences gave, in the order given.
 	// Each of them holds its own references.
 	references []*Source
-	// Holds the unmarshalers of WithUnmarshalers, in the order given.
-	// Every decode of the documents applies them ahead of its own
-	// options.
-	unmarshalers []Unmarshaler
+	// Holds the rules of WithTypeRules, in the order given. Every decode
+	// of the documents applies them ahead of its own options.
+	typeRules []TypeRule
 	// The bounds on the text that aliases write out for a Source whose
 	// text holds the aliases of another document, such as a Source of
 	// [NewSourceFromDerived]. Each applies in place of a limit of the
@@ -723,44 +723,49 @@ func WithReferences(refs ...*Source) SourceOption {
 	}
 }
 
-// WithUnmarshalers is a [SourceOption] that gives every decode of the
-// documents of the [Source] the unmarshalers us. The unmarshalers set how
-// the types of the program read YAML. With the cidr [Unmarshaler] that
-// [CustomUnmarshaler] shows, every decode of the file reads a
-// [net.IPNet] from its CIDR text:
+// WithTypeRules is a [SourceOption] that gives every decode of the
+// documents of the [Source] the rules. The rules set how the types of the
+// program read YAML and what their values start from. With the cidr
+// [TypeRule] that [CustomUnmarshaler] shows, every decode of the file
+// reads a [net.IPNet] from its CIDR text:
 //
-//	source, err := niceyaml.NewSourceFromFile(path, niceyaml.WithUnmarshalers(cidr))
+//	source, err := niceyaml.NewSourceFromFile(path, niceyaml.WithTypeRules(cidr))
 //
 // Every decode of the documents applies them, wherever it runs. Those
 // decodes include [Node.Decode], [Node.DecodeInto], [Node.DecodeAt],
 // [Node.DecodeIfPresent], [Source.Decode], [Source.DecodeInto], the
 // decode a [Validator] runs on the Node it gets, and the decode function
 // that a CustomUnmarshaler function gets. [Node.SelfValidate] and
-// [Source.SelfValidate] spell each map key with them. The unmarshalers
-// also reach a decode in code that did not build the Source, such as a
-// library that the program passes the Source to. [SelfValidateValue]
-// does not read a Source, so the unmarshalers do not reach it.
+// [Source.SelfValidate] spell each map key with them, and
+// [Source.Defaults] starts from them. The rules also reach a decode in
+// code that did not build the Source, such as a library that the
+// program passes the Source to. [SelfValidateValue] does not read a
+// Source, so the rules do not reach it.
 //
-// Each decode applies the unmarshalers us first, and the unmarshalers of
-// [WithUnmarshaler] in the call apply over them. A call can thus replace
-// the function the Source gives a type, or remove it with a nil
-// function. It can also turn the UnmarshalJSON methods off with
+// The defaults of [TypeDefaults] reach each of those decodes too. Give
+// them to the Source only when every decode of the documents must see
+// them, as TypeDefaults describes.
+//
+// Each decode applies the rules first, and the rules of
+// [OverrideTypeRules] in the call apply over them. A call can thus
+// replace a function that the Source gives a type, or remove it with a
+// nil function. It can also turn the UnmarshalJSON methods off with
 // JSONUnmarshalers(false). Each such change holds for that call alone.
 //
-// Each WithUnmarshalers adds to the ones before it, as the options of one
-// call do. A later function for a type thus replaces an earlier one, and
-// the last [JSONUnmarshalers] applies. WithUnmarshalers copies the slice
-// us, so the option keeps its unmarshalers when the caller changes the
-// slice it passed.
+// Each WithTypeRules adds to the ones before it, as the options of one
+// call do. A later function for a type thus replaces an earlier one of
+// its kind, and the last [JSONUnmarshalers] applies. WithTypeRules copies
+// the slice rules, so the option keeps its rules when the caller changes
+// the slice it passed.
 //
-// A Source from [NewSourceFromLayers] applies the unmarshalers of
-// [MergeUnmarshalers]. A merge without that option takes the unmarshalers
-// of the layer [MergeAs] names, or else of the lowest layer.
-func WithUnmarshalers(us ...Unmarshaler) SourceOption {
-	us = slices.Clone(us)
+// A Source from [NewSourceFromLayers] applies the rules of
+// [MergeTypeRules]. A merge without that option takes the rules of the
+// layer [MergeAs] names, or else of the lowest layer.
+func WithTypeRules(rules ...TypeRule) SourceOption {
+	rules = slices.Clone(rules)
 
 	return func(c *sourceConfig) {
-		c.unmarshalers = slices.Concat(c.unmarshalers, us)
+		c.typeRules = slices.Concat(c.typeRules, rules)
 	}
 }
 
@@ -1002,7 +1007,7 @@ func newStringSource(src string, cfg sourceConfig) *Source {
 
 // WithText returns a new [*Source] of text that holds every setting of
 // the [Source], with opts applied over them. The settings are its name,
-// its file path, its file system, its references, its unmarshalers, its
+// its file path, its file system, its references, its type rules, its
 // limits, and its excerpts. A program that rewrites the file of the
 // Source parses the new text through it, as the next read of the file
 // does:
@@ -1418,23 +1423,23 @@ func (s *Source) Layers() []*Node {
 	return nodes
 }
 
-// Unmarshalers returns the unmarshalers that every decode of the
-// documents of the [Source] applies, those of each [WithUnmarshalers], in
-// the order given. A Source of [NewSourceFromLayers] returns those that
-// its merge takes. A program that derives a Source from this one, through
-// [Source.WithText] or [NewSourceFromDerived], puts defaults of its own
-// under these by passing both lists in that order:
+// TypeRules returns the rules that every decode of the documents of the
+// [Source] applies, those of each [WithTypeRules], in the order given. A
+// Source of [NewSourceFromLayers] returns those that its merge takes. A
+// program that derives a Source from this one, through [Source.WithText]
+// or [NewSourceFromDerived], puts rules of its own under these by passing
+// both lists in that order:
 //
-//	niceyaml.WithUnmarshalers(slices.Concat(defaults, src.Unmarshalers())...)
+//	niceyaml.WithTypeRules(slices.Concat(own, src.TypeRules())...)
 //
-// Each call returns a new slice, and Unmarshalers returns nil for a
-// Source without unmarshalers and for a nil Source.
-func (s *Source) Unmarshalers() []Unmarshaler {
+// Each call returns a new slice, and TypeRules returns nil for a Source
+// without rules and for a nil Source.
+func (s *Source) TypeRules() []TypeRule {
 	if s == nil {
 		return nil
 	}
 
-	return slices.Clone(s.unmarshalers)
+	return slices.Clone(s.typeRules)
 }
 
 // Text returns the text the [Source] read, byte for byte. It keeps the

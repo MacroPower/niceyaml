@@ -405,7 +405,7 @@ func TestNewSourceFromDerived(t *testing.T) {
 			return nil
 		})
 
-		home := niceyaml.NewSourceFromString("p: 0\n", niceyaml.WithUnmarshalers(ofHome))
+		home := niceyaml.NewSourceFromString("p: 0\n", niceyaml.WithTypeRules(ofHome))
 		doc := yamltest.Document(t, home)
 
 		tcs := map[string]struct {
@@ -416,16 +416,16 @@ func TestNewSourceFromDerived(t *testing.T) {
 				want: 1,
 			},
 			"a function of opts replaces the one of home": {
-				opts: []niceyaml.SourceOption{niceyaml.WithUnmarshalers(ofOpts)},
+				opts: []niceyaml.SourceOption{niceyaml.WithTypeRules(ofOpts)},
 				want: 2,
 			},
 			"a nil function of opts removes the one of home": {
-				opts: []niceyaml.SourceOption{niceyaml.WithUnmarshalers(niceyaml.CustomUnmarshaler[port](nil))},
+				opts: []niceyaml.SourceOption{niceyaml.WithTypeRules(niceyaml.CustomUnmarshaler[port](nil))},
 				want: 0,
 			},
 			"defaults under the unmarshalers of home keep the function of home": {
 				opts: []niceyaml.SourceOption{
-					niceyaml.WithUnmarshalers(slices.Concat([]niceyaml.Unmarshaler{ofOpts}, home.Unmarshalers())...),
+					niceyaml.WithTypeRules(slices.Concat([]niceyaml.TypeRule{ofOpts}, home.TypeRules())...),
 				},
 				want: 1,
 			},

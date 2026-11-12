@@ -3672,12 +3672,16 @@ func TestRegistry_Load_Defaults(t *testing.T) {
 	t.Parallel()
 
 	reg := manifest.MustNewRegistry(
-		manifest.WithDecodeOptions(niceyaml.WithDefaults(func(s *CafeSpec) {
+		manifest.WithDecodeOptions(niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(s *CafeSpec) {
 			s.Seats = 20
 			s.Currency = "SEK"
-		})),
-		manifest.WithKinds(manifest.NewKind[Cafe]("Cafe", manifest.NameField(meta.Child("name")),
-			manifest.DecodeOptions(niceyaml.WithDefaults(func(s *CafeSpec) { s.Currency = "EUR" })),
+		}))),
+		manifest.WithKinds(manifest.NewKind[Cafe](
+			"Cafe",
+			manifest.NameField(meta.Child("name")),
+			manifest.DecodeOptions(
+				niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(s *CafeSpec) { s.Currency = "EUR" })),
+			),
 			manifest.Version("cafe.jacobcolvin.com/v1"),
 		)),
 	)
@@ -3779,7 +3783,7 @@ func TestRegistry_Load_NodeCheckLayers(t *testing.T) {
 			top:  stringtest.LinesLF("metadata:", "  name: top"),
 			path: "$.metadata.name",
 			opts: []manifest.RegistryOption{
-				manifest.WithUnmarshalers(niceyaml.CustomUnmarshaler(decodeAlarmLevel)),
+				manifest.WithTypeRules(niceyaml.CustomUnmarshaler(decodeAlarmLevel)),
 			},
 			// The decode reads a copy that holds the unmarshalers of the
 			// registry. The copy is not merged, so its origin is the Node
@@ -3930,7 +3934,7 @@ func TestRegistry_Load_Unmarshalers(t *testing.T) {
 	// Neither the validator nor the step passes an option to its decode,
 	// so each reads a level name only through the unmarshalers of the
 	// load.
-	options := func(us []niceyaml.Unmarshaler, decodeOpts []niceyaml.DecodeOption) []manifest.RegistryOption {
+	options := func(us []niceyaml.TypeRule, decodeOpts []niceyaml.DecodeOption) []manifest.RegistryOption {
 		readLevel := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
 			_, err := n.DecodeAt[AlarmLevel](ctx, levelPath)
 
@@ -3938,7 +3942,7 @@ func TestRegistry_Load_Unmarshalers(t *testing.T) {
 		})
 
 		return []manifest.RegistryOption{
-			manifest.WithUnmarshalers(us...),
+			manifest.WithTypeRules(us...),
 			manifest.WithDecodeOptions(niceyaml.WithValidator(readLevel)),
 			manifest.WithDecodeOptions(decodeOpts...),
 			manifest.WithKinds(manifest.NewKind[Alarm]("Alarm", manifest.NameField(meta.Child("name")),
@@ -3977,52 +3981,52 @@ func TestRegistry_Load_Unmarshalers(t *testing.T) {
 
 	tcs := map[string]struct {
 		in         input.Input
-		us         []niceyaml.Unmarshaler
+		us         []niceyaml.TypeRule
 		decodeOpts []niceyaml.DecodeOption
 		err        string
 		want       AlarmLevel
 	}{
 		"a file the load reads": {
 			in:   configFS(map[string]string{"alarm.yaml": current}),
-			us:   []niceyaml.Unmarshaler{levelNames},
+			us:   []niceyaml.TypeRule{levelNames},
 			want: alarmHigh,
 		},
 		"a Source the program built": {
 			in:   input.Sources(niceyaml.NewSourceFromString(current, niceyaml.WithName("alarm.yaml"))),
-			us:   []niceyaml.Unmarshaler{levelNames},
+			us:   []niceyaml.TypeRule{levelNames},
 			want: alarmHigh,
 		},
 		"the step of a file the load reads": {
 			in:   configFS(map[string]string{"alarm.yaml": older}),
-			us:   []niceyaml.Unmarshaler{levelNames},
+			us:   []niceyaml.TypeRule{levelNames},
 			want: alarmHigh,
 		},
 		"the step of a Source the program built": {
 			in:   input.Sources(niceyaml.NewSourceFromString(older, niceyaml.WithName("alarm.yaml"))),
-			us:   []niceyaml.Unmarshaler{levelNames},
+			us:   []niceyaml.TypeRule{levelNames},
 			want: alarmHigh,
 		},
 		"the source options of an input apply over them": {
 			in: configFS(map[string]string{"alarm.yaml": current},
-				input.WithSourceOptions(niceyaml.WithUnmarshalers(seven))),
-			us:   []niceyaml.Unmarshaler{levelNames},
+				input.WithSourceOptions(niceyaml.WithTypeRules(seven))),
+			us:   []niceyaml.TypeRule{levelNames},
 			want: 7,
 		},
 		"the unmarshalers of a Source the program built apply over them": {
 			in: input.Sources(niceyaml.NewSourceFromString(current,
-				niceyaml.WithName("alarm.yaml"), niceyaml.WithUnmarshalers(seven))),
-			us:   []niceyaml.Unmarshaler{levelNames},
+				niceyaml.WithName("alarm.yaml"), niceyaml.WithTypeRules(seven))),
+			us:   []niceyaml.TypeRule{levelNames},
 			want: 7,
 		},
 		"a later function for a type replaces an earlier one": {
 			in:   configFS(map[string]string{"alarm.yaml": current}),
-			us:   []niceyaml.Unmarshaler{levelNames, seven},
+			us:   []niceyaml.TypeRule{levelNames, seven},
 			want: 7,
 		},
 		"the decode options of the registry apply over them": {
 			in:         configFS(map[string]string{"alarm.yaml": current}),
-			us:         []niceyaml.Unmarshaler{levelNames},
-			decodeOpts: []niceyaml.DecodeOption{niceyaml.WithUnmarshaler(seven)},
+			us:         []niceyaml.TypeRule{levelNames},
+			decodeOpts: []niceyaml.DecodeOption{niceyaml.OverrideTypeRules(seven)},
 			want:       7,
 		},
 		"without them, a level reads as an integer": {
@@ -4076,7 +4080,7 @@ func TestRegistry_Load_AliasExpansion(t *testing.T) {
 	) + yamltest.GenerateLines(20, "    l%d: *a") + stringtest.LinesLF("spec:", "  level: high")
 
 	reg := manifest.MustNewRegistry(
-		manifest.WithUnmarshalers(niceyaml.CustomUnmarshaler(decodeAlarmLevel)),
+		manifest.WithTypeRules(niceyaml.CustomUnmarshaler(decodeAlarmLevel)),
 		manifest.WithKinds(manifest.NewKind[Alarm]("Alarm",
 			manifest.NameField(meta.Child("name")), manifest.Version("alarm.jacobcolvin.com/v1"))),
 	)
@@ -4144,7 +4148,7 @@ func TestRegistry_Load_ByteOrderMark(t *testing.T) {
 	stream := alarm("a") + "\uFEFF---\n" + alarm("b")
 
 	reg := manifest.MustNewRegistry(
-		manifest.WithUnmarshalers(niceyaml.CustomUnmarshaler(decodeAlarmLevel)),
+		manifest.WithTypeRules(niceyaml.CustomUnmarshaler(decodeAlarmLevel)),
 		manifest.WithKinds(manifest.NewKind[Alarm]("Alarm",
 			manifest.NameField(meta.Child("name")), manifest.Version("alarm.jacobcolvin.com/v1"))),
 	)
@@ -6254,7 +6258,9 @@ func TestRegistry_Load_DefaultsReferenceMerge(t *testing.T) {
 	reg := manifest.MustNewRegistry(
 		manifest.WithVersionOnly(paths.Doc().Child("meta", "version")),
 		manifest.WithKinds(manifest.NewKind[config]("Config", manifest.Singleton(), manifest.Version("1"))),
-		manifest.WithDecodeOptions(niceyaml.WithDefaults(func(m *configMeta) { m.Size = "M" })),
+		manifest.WithDecodeOptions(
+			niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(m *configMeta) { m.Size = "M" })),
+		),
 	)
 
 	ref := niceyaml.NewSourceFromString("base: &base {size: L}\n")
@@ -6295,7 +6301,9 @@ func TestRegistry_Load_DefaultsBelowTypeField(t *testing.T) {
 	reg := manifest.MustNewRegistry(
 		manifest.WithVersionOnly(paths.Doc().Child("meta", "version")),
 		manifest.WithKinds(manifest.NewKind[config]("Config", manifest.Singleton(), manifest.Version("1"))),
-		manifest.WithDecodeOptions(niceyaml.WithDefaults(func(m *selfMeta) { m.Size = "M" })),
+		manifest.WithDecodeOptions(
+			niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(m *selfMeta) { m.Size = "M" })),
+		),
 	)
 
 	// The decoder creates the metadata from zero, so it decodes again from
@@ -6366,7 +6374,7 @@ func TestRegistry_Load_SelfDecodingTypes(t *testing.T) {
 			kind: "Cafe",
 			opts: func(calls *atomic.Int32) []manifest.RegistryOption {
 				return []manifest.RegistryOption{
-					manifest.WithUnmarshalers(niceyaml.CustomUnmarshaler(
+					manifest.WithTypeRules(niceyaml.CustomUnmarshaler(
 						func(_ context.Context, c *Cafe, decode func(any) error) error {
 							calls.Add(1)
 
@@ -6388,7 +6396,7 @@ func TestRegistry_Load_SelfDecodingTypes(t *testing.T) {
 			kind: "Brew",
 			opts: func(calls *atomic.Int32) []manifest.RegistryOption {
 				return []manifest.RegistryOption{
-					manifest.WithUnmarshalers(niceyaml.CustomUnmarshaler(
+					manifest.WithTypeRules(niceyaml.CustomUnmarshaler(
 						func(_ context.Context, b *Brew, decode func(any) error) error {
 							calls.Add(1)
 
@@ -6411,7 +6419,7 @@ func TestRegistry_Load_SelfDecodingTypes(t *testing.T) {
 			kind: "Brew",
 			opts: func(calls *atomic.Int32) []manifest.RegistryOption {
 				return []manifest.RegistryOption{
-					manifest.WithUnmarshalers(niceyaml.CustomUnmarshaler(
+					manifest.WithTypeRules(niceyaml.CustomUnmarshaler(
 						func(_ context.Context, m *Metadata, decode func(any) error) error {
 							calls.Add(1)
 
@@ -6433,7 +6441,7 @@ func TestRegistry_Load_SelfDecodingTypes(t *testing.T) {
 			kind: "Cafe",
 			opts: func(*atomic.Int32) []manifest.RegistryOption {
 				return []manifest.RegistryOption{
-					manifest.WithUnmarshalers(niceyaml.JSONUnmarshalers(true)),
+					manifest.WithTypeRules(niceyaml.JSONUnmarshalers(true)),
 					manifest.WithKinds(manifest.NewKind[jsonCafe]("Cafe", named, manifest.Version("v1"))),
 				}
 			},

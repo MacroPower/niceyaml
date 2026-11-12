@@ -36,15 +36,14 @@ import (
 //	require.NoError(t, schema.CheckFields[config.Cafe]())
 //	require.NoError(t, config.Registry.Verify(t.Context()))
 //
-// The test passes CheckFields the unmarshalers that the decodes of the
-// kind apply, in the order that they apply them. The unmarshalers of
-// [WithUnmarshalers] come first, and the unmarshalers of the Source of
-// the document follow. Last come the unmarshalers that each
-// [niceyaml.WithUnmarshaler] in [WithDecodeOptions] or in the
-// [DecodeOptions] of the kind holds. The check then skips each type that
-// those decodes read whole:
+// The test passes CheckFields the type rules that the decodes of the kind
+// apply, in the order that they apply them. The rules of [WithTypeRules]
+// come first, and the rules of the Source of the document follow. Last
+// come the rules that each [niceyaml.OverrideTypeRules] in
+// [WithDecodeOptions] or in the [DecodeOptions] of the kind holds. The
+// check then skips each type that those decodes read whole:
 //
-//	require.NoError(t, schema.CheckFields[config.Cafe](unmarshalers...))
+//	require.NoError(t, schema.CheckFields[config.Cafe](rules...))
 //
 // [niceyaml.Problems] yields each row of the error, and each row matches
 // one sentinel. A row of a schema that fails matches [schema.ErrLoad] or
@@ -151,7 +150,8 @@ import (
 //
 // The report matches [ErrUnusedDefault].
 //
-// The defaults come from the [niceyaml.WithDefaults] options among the
+// The defaults come from each [niceyaml.TypeDefaults] among the rules of
+// [WithTypeRules], and then among the [niceyaml.OverrideTypeRules] in the
 // decode options of the registry and the kind. A document replaces every
 // value whole, except a struct and a pointer to a struct, which a mapping
 // merges into field by field. The walk follows properties, items, and
@@ -164,12 +164,12 @@ import (
 // function of CafeSpec sets the port of its kitchen Printer. A detail then
 // names the default that the child type gives itself, when the default at
 // the place differs. The omitzero option on the field makes it optional
-// at each place of the child type. A panic in a function of WithDefaults
+// at each place of the child type. A panic in a function of TypeDefaults
 // reaches the caller.
 //
 // [schema.CheckType] runs the same check for one schema and one Go type,
-// without a registry. A test passes it the decode options that the
-// program decodes with. Its report leaves out the kind and the version.
+// without a registry. A test passes it the type rules that the program
+// decodes with. Its report leaves out the kind and the version.
 func (r *Registry) Verify(ctx context.Context) error {
 	var errs []error
 
@@ -326,10 +326,13 @@ func (r *Registry) verifyDefaults(entry *kindEntry, compiled map[*versionEntry]*
 		return nil
 	}
 
+	// A decode applies the rules of the registry first, through the Source
+	// of the document, and then the options of the registry and the kind.
+	src := niceyaml.NewSourceFromString("", niceyaml.WithTypeRules(r.cfg.typeRules...))
 	opts := slices.Concat(r.cfg.decodeOptions, entry.kind.cfg.decodeOptions)
 	defaults := func(t reflect.Type) reflect.Value {
 		p := reflect.New(t)
-		_ = niceyaml.DefaultsInto(p.Interface(), opts...) //nolint:errcheck // p is a non-nil pointer.
+		_ = src.DefaultsInto(p.Interface(), opts...) //nolint:errcheck // p is a non-nil pointer.
 
 		return p.Elem()
 	}

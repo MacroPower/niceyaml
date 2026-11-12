@@ -97,11 +97,11 @@ var (
 	// Rebase below it, as niceyaml.Locate describes.
 	Replacing any
 
-	// Unmarshalers returns the unmarshalers that us, a
-	// []niceyaml.Unmarshaler, give a decode when it applies them in order
-	// to the zero unmarshaler.Options, as niceyaml.WithUnmarshalers
-	// applies them.
-	Unmarshalers func(us any) unmarshaler.Options
+	// Unmarshalers returns the unmarshalers that rules, a
+	// []niceyaml.TypeRule, give a decode when it applies them, in order,
+	// to the zero unmarshaler.Options, as niceyaml.WithTypeRules applies
+	// them.
+	Unmarshalers func(rules any) unmarshaler.Options
 
 	// Marshal returns v as encoder.Marshal returns it under opts, a
 	// []encoder.Option, with the node that go-yaml's encoder made for v

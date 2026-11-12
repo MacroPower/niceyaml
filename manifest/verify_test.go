@@ -551,24 +551,43 @@ func TestRegistry_Verify_Defaults(t *testing.T) {
 
 	tcs := map[string]struct {
 		defaults []niceyaml.DecodeOption
+		rules    []niceyaml.TypeRule
 		schema   string
 		want     string
 	}{
-		"required with a default": {
-			defaults: []niceyaml.DecodeOption{niceyaml.WithDefaults(func(s *verifySpec) { s.Seats = 20 })},
+		"required with a default of the registry rules": {
+			rules:  []niceyaml.TypeRule{niceyaml.TypeDefaults(func(s *verifySpec) { s.Seats = 20 })},
+			schema: `{"properties": {"spec": {"required": ["seats", "currency"]}}}`,
+			want:   "Cafe v1: $.spec.seats: required, so its default 20 never applies",
+		},
+		"decode options apply over the registry rules": {
+			rules:    []niceyaml.TypeRule{niceyaml.TypeDefaults(func(s *verifySpec) { s.Seats = 20 })},
+			defaults: []niceyaml.DecodeOption{niceyaml.OverrideTypeRules(niceyaml.TypeDefaults[verifySpec](nil))},
 			schema:   `{"properties": {"spec": {"required": ["seats", "currency"]}}}`,
-			want:     "Cafe v1: $.spec.seats: required, so its default 20 never applies",
+		},
+		"required with a default": {
+			defaults: []niceyaml.DecodeOption{
+				niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(s *verifySpec) { s.Seats = 20 })),
+			},
+			schema: `{"properties": {"spec": {"required": ["seats", "currency"]}}}`,
+			want:   "Cafe v1: $.spec.seats: required, so its default 20 never applies",
 		},
 		"optional with a default": {
-			defaults: []niceyaml.DecodeOption{niceyaml.WithDefaults(func(s *verifySpec) { s.Seats = 20 })},
-			schema:   `{"properties": {"spec": {"properties": {"seats": {"type": "integer"}}}}}`,
+			defaults: []niceyaml.DecodeOption{
+				niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(s *verifySpec) { s.Seats = 20 })),
+			},
+			schema: `{"properties": {"spec": {"properties": {"seats": {"type": "integer"}}}}}`,
 		},
 		"required struct that merges": {
-			defaults: []niceyaml.DecodeOption{niceyaml.WithDefaults(func(s *verifySpec) { s.Kitchen.Port = 1 })},
-			schema:   `{"properties": {"spec": {"required": ["kitchen"]}}}`,
+			defaults: []niceyaml.DecodeOption{
+				niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(s *verifySpec) { s.Kitchen.Port = 1 })),
+			},
+			schema: `{"properties": {"spec": {"required": ["kitchen"]}}}`,
 		},
 		"default that a parent sets": {
-			defaults: []niceyaml.DecodeOption{niceyaml.WithDefaults(func(s *verifySpec) { s.Kitchen.Port = 9101 })},
+			defaults: []niceyaml.DecodeOption{
+				niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(s *verifySpec) { s.Kitchen.Port = 9101 })),
+			},
 			schema: `{"properties": {"spec": {"properties": {
   "kitchen": {"$ref": "#/$defs/printer"},
   "stations": {"items": {"$ref": "#/$defs/printer"}}}}}, ` + printer + `}`,
@@ -578,7 +597,9 @@ func TestRegistry_Verify_Defaults(t *testing.T) {
 			),
 		},
 		"default of an item and a map value": {
-			defaults: []niceyaml.DecodeOption{niceyaml.WithDefaults(func(p *verifyPrinter) { p.Port = 9100 })},
+			defaults: []niceyaml.DecodeOption{
+				niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(p *verifyPrinter) { p.Port = 9100 })),
+			},
 			schema: `{"properties": {"spec": {"properties": {
   "stations": {"items": {"$ref": "#/$defs/printer"}},
   "printers": {"additionalProperties": {"$ref": "#/$defs/printer"}}}}}, ` + printer + `}`,
@@ -588,9 +609,9 @@ func TestRegistry_Verify_Defaults(t *testing.T) {
 			),
 		},
 		"pointer that a parent sets": {
-			defaults: []niceyaml.DecodeOption{niceyaml.WithDefaults(func(s *verifySpec) {
+			defaults: []niceyaml.DecodeOption{niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(s *verifySpec) {
 				s.Spare = &verifyPrinter{Port: 9200}
-			})},
+			}))},
 			schema: `{"properties": {"spec": {"properties": {
   "spare": {"anyOf": [{"$ref": "#/$defs/printer"}, {"type": "null"}]}}}}, ` + printer + `}`,
 			want: stringtest.JoinLF(
@@ -599,8 +620,10 @@ func TestRegistry_Verify_Defaults(t *testing.T) {
 			),
 		},
 		"required under a branch": {
-			defaults: []niceyaml.DecodeOption{niceyaml.WithDefaults(func(s *verifySpec) { s.Seats = 20 })},
-			schema:   `{"properties": {"spec": {"anyOf": [{"required": ["seats"]}, {"required": ["currency"]}]}}}`,
+			defaults: []niceyaml.DecodeOption{
+				niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(s *verifySpec) { s.Seats = 20 })),
+			},
+			schema: `{"properties": {"spec": {"anyOf": [{"required": ["seats"]}, {"required": ["currency"]}]}}}`,
 		},
 	}
 
@@ -608,10 +631,13 @@ func TestRegistry_Verify_Defaults(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			reg := manifest.MustNewRegistry(manifest.WithKinds(manifest.NewKind[verifyCafe]("Cafe",
-				manifest.DecodeOptions(tc.defaults...),
-				manifest.Version("v1", manifest.Schema(schema.Embedded([]byte(tc.schema)))),
-			)))
+			reg := manifest.MustNewRegistry(
+				manifest.WithTypeRules(tc.rules...),
+				manifest.WithKinds(manifest.NewKind[verifyCafe]("Cafe",
+					manifest.DecodeOptions(tc.defaults...),
+					manifest.Version("v1", manifest.Schema(schema.Embedded([]byte(tc.schema)))),
+				)),
+			)
 
 			err := reg.Verify(t.Context())
 			if tc.want == "" {

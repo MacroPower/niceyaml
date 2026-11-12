@@ -1072,7 +1072,7 @@ func TestWithMarshalers(t *testing.T) {
 
 			level := spec.Child("level")
 			reg := manifest.MustNewRegistry(append([]manifest.RegistryOption{
-				manifest.WithUnmarshalers(niceyaml.CustomUnmarshaler(decodeAlarmLevel)),
+				manifest.WithTypeRules(niceyaml.CustomUnmarshaler(decodeAlarmLevel)),
 				manifest.WithKinds(manifest.NewKind[Alarm]("Alarm", manifest.NameField(meta.Child("name")),
 					manifest.Version("alarm.jacobcolvin.com/v1"),
 					manifest.Version("alarm.jacobcolvin.com/v2",
