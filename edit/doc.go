@@ -163,21 +163,49 @@
 // replacements of ranges of the user's text, which a program hands to an
 // editor or a review as text edits.
 //
-// The engine reads each document as go-yaml's parser reads it in its file.
-// The comment lines between a document and the "---" header of the next
-// document belong to the document, as the comment lines at the end of a
-// file do. The edits thus treat the end of each document alike, and
-// [Doc.Text] holds those comment lines. The parser reads a document before
-// a "---" header with that header after it, and so do the checks of an
-// Apply. FileText returns the text of the whole file, which go-yaml reads
-// as the edits leave it. The text of the other documents stays as it is.
-// FileText also keeps each byte order mark in the prefix of a document,
-// such as one at the start of the file or after the comment lines of a
-// document. A program that reads that text with go-yaml directly, without
-// the Source, does not drop such a mark. Go-yaml reads the mark as text,
-// such as part of the key after it, or refuses the file. It refuses a file
-// that holds a mark in front of a comment line or a "---" header. The
-// edits can change which key the mark joins.
+// A Doc holds the lines of its document as the Documents section of
+// [go.jacobcolvin.com/niceyaml] gives them, the lines of
+// [go.jacobcolvin.com/niceyaml.Node.Span]. The comment lines above a "---"
+// header thus belong to the document below the header, with a schema
+// directive among them. For a Doc that no Apply changed, [Doc.Text] is the
+// text of the lines of the span. FileText writes the text of each Doc in
+// place of exactly those lines. [Doc.Node] reads the text as a reparse of
+// the text of FileText reads the document. So its lines, its view, and its
+// preamble match those of the document there. A program can write the
+// Doc.Text of each document to a file of its own, or in place of the lines
+// of the span of its document.
+//
+// The parser reads a document before a "---" header with the comment lines
+// above the header and the header after it. So do the checks of an Apply.
+// Those lines belong to the next document, so no edit writes them. The
+// entry above them does not own a comment line among them, even one
+// indented past its key. A removal of the entry leaves such a line, and a
+// new last entry goes above it. A block scalar at the end of the document
+// indents its lines past such a comment line. So the scalar does not read
+// the comment line as text. That holds for a scalar that an edit writes.
+// It also holds for a scalar of the user's text that an edit leaves at the
+// end, such as by a removal of the entries after it. The lines of such a
+// scalar move, and its string stays as it was. An indentation
+// indicator grows by as many spaces as the lines. The scalar still reads
+// the comment line as text in two cases. The Apply then fails with
+// [ErrUnsupported], as for any edit that changes the string of a scalar of
+// the user's text:
+//
+//   - The scalar needs an indicator past 9, the largest that the parser
+//     takes.
+//   - The scalar is empty, as in "a: |" with no lines of text. It has no
+//     lines to move, and go-yaml's parser refuses an indicator on an empty
+//     scalar above a comment line indented past its key.
+//
+// FileText returns the text of the whole file, which go-yaml reads as the
+// edits leave it. The text of the other documents stays as it is. FileText
+// also keeps each byte order mark in the prefix of a document, such as one
+// at the start of the file or after the comment lines of a document. A
+// program that reads that text with go-yaml directly, without the Source,
+// does not drop such a mark. Go-yaml reads the mark as text, such as part
+// of the key after it, or refuses the file. It refuses a file that holds a
+// mark in front of a comment line or a "---" header. The edits can change
+// which key the mark joins.
 //
 // # Empty Documents
 //
@@ -204,7 +232,8 @@
 //
 // The first value goes on block lines at the end of the text of the
 // document. Those lines go after its comment lines and before a "..."
-// marker or the "---" header of the next document. They take the line
+// marker, or before the comment lines that belong to the next document
+// above its "---" header. They take the line
 // break of the file, or "\n" in a file without one. A text without a final
 // newline ends without one again, as for any line that an edit adds, and
 // an empty text takes the lines with their final newline. So the template

@@ -27,10 +27,8 @@ var (
 	// edit.FileText writes edit.Doc.Text in place of those bytes. A caller
 	// that keeps the Doc.Text of one moment writes that text in place of
 	// the same bytes. Its file then reads as FileText returned it at that
-	// moment. The bytes hold the comment lines between the document and
-	// the "---" header of the next document. The comment lines between the
-	// document before d and the "---" header of d lie outside the bytes. So
-	// does a byte order mark at the start of the first line of d.
+	// moment. The bytes hold the lines of niceyaml.Node.Span of the
+	// document, without a byte order mark at the start of its first line.
 	Bounds func(d any) (start, end int)
 
 	// SetField sets the protected type field at path of d, a *edit.Doc, to

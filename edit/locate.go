@@ -1221,6 +1221,32 @@ func (d *Doc) userRange(start, end int) position.Range {
 	return position.NewRange(from, to)
 }
 
+// tailRange returns rng, a range of the current text with its tail, in
+// the user's text, when rng starts in the tail. The tail starts a line
+// after the last line of the current text, as it does in the user's text
+// after the last line of the document. It reports false for a range that
+// starts in the current text.
+func (d *Doc) tailRange(rng position.Range) (position.Range, bool) {
+	last := len(d.curLines) - 1
+	if d.tail == "" || d.curLines[last] != len(d.cur) || rng.Start.Line < last {
+		return position.Range{}, false
+	}
+
+	// The lines of the tail follow the last line of the document in the
+	// user's text, whose text ends with a line break before a tail.
+	shift := d.base + len(d.origLines) - 1 - last
+	end := rng.End
+
+	if end.Line < rng.Start.Line || end.Line == rng.Start.Line && end.Col < rng.Start.Col {
+		end = rng.Start
+	}
+
+	return position.NewRange(
+		position.New(rng.Start.Line+shift, rng.Start.Col),
+		position.New(end.Line+shift, end.Col),
+	), true
+}
+
 // userPos returns the position in the user's text of the byte at off of
 // the current text, or of the nearest byte before it that an edit kept.
 func (d *Doc) userPos(off int) position.Position {

@@ -11,6 +11,7 @@ import (
 	"github.com/goccy/go-yaml/ast"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/lineend"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -263,6 +264,27 @@ func (d *Doc) scalarTail(node ast.Node, last int) tailScalar {
 	return t
 }
 
+// indentAfter returns the number of spaces that start the first line from
+// line on that is not blank, or -1 when no such line follows. The comment
+// lines of the tail come after the last line of the current text, so a
+// comment line above the "---" of the next document counts too, though no
+// edit writes it.
+func (d *Doc) indentAfter(line int) int {
+	for l := line; l < len(d.curLines) && d.lineStart(l) < len(d.cur); l++ {
+		if !d.isBlankLine(l) {
+			return d.indentOf(l)
+		}
+	}
+
+	for l := range lineend.Lines(d.tailContext()) {
+		if strings.TrimSpace(l) != "" {
+			return len(l) - len(strings.TrimLeft(l, " "))
+		}
+	}
+
+	return -1
+}
+
 // indentPast returns text, lines that an edit writes, whose last lines
 // hold the text of t, a block scalar. A block scalar reads each line after
 // it that indents as deep as the scalar does. The first line from line on
@@ -273,13 +295,8 @@ func (d *Doc) scalarTail(node ast.Node, last int) tailScalar {
 // with any line break, as the lines of a scalar that keep their own do.
 func (d *Doc) indentPast(text run, t tailScalar, line int) run {
 	next := -1
-
-	for l := line; t.lines > 0 && l < len(d.curLines) && d.lineStart(l) < len(d.cur); l++ {
-		if !d.isBlankLine(l) {
-			next = d.indentOf(l)
-
-			break
-		}
+	if t.lines > 0 {
+		next = d.indentAfter(line)
 	}
 
 	body := text.text
@@ -580,8 +597,10 @@ func (d *Doc) keepStrings(ctx context.Context, h *Node) error {
 // folded scalar in another way without its line break. Each such scalar
 // takes as many line breaks after its text as its string lacks, or one at
 // the end of the text, when that keeps its string. Its header and its lines
-// keep their bytes. A scalar whose string changes in any other way keeps
-// the text that the edits gave it, as [Doc.scalarProblem] tells. Go-yaml's
+// keep their bytes. A scalar at the end of the text can also read a
+// comment line of the tail, which [Doc.indentTail] tells how to keep out.
+// A scalar whose string changes in any other way keeps the text that the
+// edits gave it, as [Doc.scalarProblem] tells. Go-yaml's
 // parser refuses some texts with such line breaks, such as a text that
 // ends with an empty line after a scalar with an indentation indicator, as
 // in "|+2". The call of h then fails with [ErrEngine], which names the
@@ -602,7 +621,16 @@ func (d *Doc) restoreBreaks(h *Node) error {
 		lack := trailingBreaks(str) - trailingBreaks(lit.Value.Value)
 		lacks := lack > 0 && strings.TrimRight(str, "\n") == strings.TrimRight(lit.Value.Value, "\n")
 
-		if !ok || lit.Value.Value == str || !lacks && strings.TrimSpace(d.cur[s.end:]) != "" {
+		if !ok || lit.Value.Value == str {
+			continue
+		}
+
+		kept, err := d.indentTail(lit, s, str)
+		if err != nil {
+			return d.bug(h, err)
+		}
+
+		if kept || !lacks && strings.TrimSpace(d.cur[s.end:]) != "" {
 			continue
 		}
 
@@ -610,7 +638,7 @@ func (d *Doc) restoreBreaks(h *Node) error {
 		text := strings.Repeat(d.breakBefore(d.lineOf(s.end)+1), max(lack, 1))
 		origin := d.addNote(d.keptNote(s.end, s.end))
 
-		err := d.apply(edit{start: s.end, end: s.end, text: text, origins: written(text, origin)})
+		err = d.apply(edit{start: s.end, end: s.end, text: text, origins: written(text, origin)})
 		if err != nil {
 			return d.bug(h, err)
 		}
@@ -621,6 +649,83 @@ func (d *Doc) restoreBreaks(h *Node) error {
 
 		d.restore(saved)
 	}
+}
+
+// indentTail moves the lines of lit past the first comment line of the
+// tail, when lit ends the current text and reads that line as text. Lit is
+// a block scalar of the user's text, whose string is str and whose span is
+// s. A removal or a move of the entries after the scalar can leave it at
+// the end of a document above a comment line of the next document. No
+// edit writes that line. So the lines of the scalar go one space past the
+// comment line, and its indentation indicator grows by as many spaces.
+// [Doc.indentPast] writes the lines of a scalar that an edit writes in
+// the same way. The string of the scalar stays as it was. The new spaces
+// and the new digit bind where the bytes that they stand before bind.
+// IndentTail reports whether the scalar reads str after that. It leaves
+// the text as it was otherwise, such as for an indicator that grows past
+// 9. It also leaves an empty scalar, which has no lines to move. Go-yaml's
+// parser refuses an indicator on such a scalar above a comment line
+// indented past its key. So the scalar reads the line as text.
+func (d *Doc) indentTail(lit *ast.LiteralNode, s span, str string) (bool, error) {
+	if s.end < len(d.cur) || d.cur == "" {
+		return false, nil
+	}
+
+	hs, ok := d.tokenSpan(lit.Start)
+	if !ok {
+		return false, nil
+	}
+
+	header, last := d.lineOf(hs.start), d.lineOf(len(d.cur)-1)
+	next := d.indentAfter(len(d.curLines))
+	indent := d.scalarIndent(lit, last)
+
+	if next < 0 || indent < 0 || indent > next {
+		return false, nil
+	}
+
+	shift := next + 1 - indent
+	saved := d.save()
+
+	var edits []edit
+
+	if digit, i := indentDigit(lit.Start.Value); digit > 0 {
+		at := hs.start + i
+		if digit+shift > 9 || at >= len(d.cur) || d.cur[at] != lit.Start.Value[i] {
+			return false, nil
+		}
+
+		text := strconv.Itoa(digit + shift)
+		origin := d.addNote(d.keptNote(at, at+1))
+		edits = append(edits, edit{start: at, end: at + 1, text: text, origins: written(text, origin)})
+	}
+
+	// A line of spaces alone that holds more spaces than the scalar indents
+	// by holds text of the scalar, so it moves too.
+	pad := strings.Repeat(" ", shift)
+
+	for l := header + 1; l <= last; l++ {
+		if len(d.lineText(l)) <= indent && d.isBlankLine(l) {
+			continue
+		}
+
+		at := d.lineStart(l)
+		origin := d.addNote(d.keptNote(at, at))
+		edits = append(edits, edit{start: at, end: at, text: pad, origins: written(pad, origin)})
+	}
+
+	err := d.apply(edits...)
+	if err != nil {
+		return false, err
+	}
+
+	if again := d.literalAt(hs.start); again != nil && again.Value != nil && again.Value.Value == str {
+		return true, nil
+	}
+
+	d.restore(saved)
+
+	return false, nil
 }
 
 // nextUserScalar returns the first block scalar of the current text whose

@@ -910,7 +910,9 @@ func (d *Doc) readSpan(node ast.Node) (span, bool) {
 // belong to the scalar too. The parser reads a line of spaces alone after
 // that line as text of the scalar when the line holds more spaces than the
 // lines of the scalar indent by. [Doc.scalarIndent] tells that indent. The
-// text then ends with the last such line, before its line break.
+// text then ends with the last such line, before its line break. A scalar
+// that reads a comment line of the tail as text, as before
+// [Doc.indentTail] moves its lines, ends at the end of the current text.
 func (d *Doc) scalarEnd(lit *ast.LiteralNode, end int) int {
 	if end <= 0 {
 		return end
@@ -918,7 +920,7 @@ func (d *Doc) scalarEnd(lit *ast.LiteralNode, end int) int {
 
 	last := d.lineOf(end - 1)
 
-	if hs, ok := d.tokenSpan(lit.Start); ok && d.lineOf(hs.start) < last &&
+	if hs, ok := d.tokenSpan(lit.Start); ok && d.lineOf(hs.start) < last && end <= d.lineEnd(last) &&
 		strings.Trim(d.cur[end:d.lineEnd(last)], " \t") == "" {
 		end = d.lineEnd(last)
 	}

@@ -187,11 +187,17 @@ func TestNode_Move(t *testing.T) {
 			err:   "test.yaml:7:1: $: cafe.jacobcolvin.com/v1 moves $.a to $.k.n, which goes through a merge key that merges a sequence of aliases, and cafe does not edit through such a merge key",
 		},
 		"block scalar to the end of a document before a comment line deeper than its text": {
-			// The comment line between the document and the next "---" belongs
-			// to k, as at the end of a file, so the moved entry goes after it.
+			// The comment line above the next "---" belongs to the next
+			// document, so the moved entry goes above it. The lines of the
+			// block scalar go one space past the comment line.
 			before: stringtest.LinesLF("m: |", "  x", "z:", "  k: 1", "    # d", "---", "y: 3"),
 			moves:  [][2]paths.Path{{paths.Doc().Child("m"), paths.MustParse("$.z.n")}},
-			want:   stringtest.LinesLF("z:", "  k: 1", "    # d", `  "n": |`, "    x"),
+			want:   stringtest.LinesLF("z:", "  k: 1", `  "n": |`, "     x"),
+		},
+		"block scalar to the end of a sequence before a comment line of the next document deeper than its text": {
+			before: stringtest.LinesLF("m: |", "  x", "s:", "  - 1", "      # d", "---", "y: 3"),
+			moves:  [][2]paths.Path{{paths.Doc().Child("m"), paths.MustParse("$.s[1]")}},
+			want:   stringtest.LinesLF("s:", "  - 1", "  - |", "       x"),
 		},
 		"entry that hides a merged key": {
 			// After the move, the mapping reads the a that the merge key brings
