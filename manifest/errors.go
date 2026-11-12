@@ -125,17 +125,20 @@ var (
 
 	// ErrUnfollowableDeprecation indicates a deprecated keyword in the
 	// schema of the current version whose warning a user cannot follow,
-	// such as one on a property that the schema also requires. Only
+	// such as one on a property that the schema also requires.
 	// [Registry.Verify] reports the problem, as its Deprecations section
-	// describes.
-	ErrUnfollowableDeprecation = errors.New("deprecation that a user cannot follow")
+	// describes. It is the same error value as
+	// [schema.ErrUnfollowableDeprecation], which [schema.CheckType]
+	// reports.
+	ErrUnfollowableDeprecation = schema.ErrUnfollowableDeprecation
 
 	// ErrUnusedDefault indicates a property that the schema of the current
 	// version requires, and whose default from [niceyaml.WithDefaults] is
 	// not zero. Every file must write such a property, so the default never
-	// applies. Only [Registry.Verify] reports the problem, as its Defaults
-	// section describes.
-	ErrUnusedDefault = errors.New("default that never applies")
+	// applies. [Registry.Verify] reports the problem, as its Defaults
+	// section describes. It is the same error value as
+	// [schema.ErrUnusedDefault], which [schema.CheckType] reports.
+	ErrUnusedDefault = schema.ErrUnusedDefault
 
 	// ErrUnknownKind indicates a kind that the registry does not hold.
 	ErrUnknownKind = errors.New("unknown kind")

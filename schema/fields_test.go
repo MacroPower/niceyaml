@@ -3,13 +3,16 @@ package schema_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/jsonschema"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -462,4 +465,163 @@ func TestCheckFieldsUnmarshalersMatchDecode(t *testing.T) {
 		Endpoint: endpoint{Host: "a.test", Port: 80},
 		Memory:   quantity{Value: 64, Unit: "Mi"},
 	}, got)
+}
+
+// typeConfig is the type of [TestCheckType]. Gen requires each field
+// without omitzero.
+type typeConfig struct {
+	Kitchen typePrinter   `json:"kitchen"`
+	Spare   *typePrinter  `json:"spare,omitzero"`
+	Name    string        `json:"name"`
+	Old     string        `json:"old"             jsonschema:"deprecated=true"`
+	Seats   int           `json:"seats"`
+	Tables  []typePrinter `json:"tables,omitzero"`
+}
+
+// typePrinter is a printer of [typeConfig].
+type typePrinter struct {
+	Port int `json:"port"`
+}
+
+func TestCheckType(t *testing.T) {
+	t.Parallel()
+
+	generated := func(t *testing.T) *schema.Schema {
+		t.Helper()
+
+		doc, err := jsonschema.GenerateFor[typeConfig](t.Context())
+		require.NoError(t, err)
+
+		return schema.FromJSONSchema(jsonschema.MustCompile(doc))
+	}
+
+	written := func(text string) func(t *testing.T) *schema.Schema {
+		return func(t *testing.T) *schema.Schema {
+			t.Helper()
+
+			s, err := schema.Compile(t.Context(), []byte(text))
+			require.NoError(t, err)
+
+			return s
+		}
+	}
+
+	tcs := map[string]struct {
+		schema   func(t *testing.T) *schema.Schema
+		defaults []niceyaml.DecodeOption
+		want     []string
+		marks    []error
+	}{
+		"generated schema": {
+			schema:   generated,
+			defaults: []niceyaml.DecodeOption{niceyaml.WithDefaults(func(c *typeConfig) { c.Seats = 20 })},
+			want: []string{
+				"$.old: required and deprecated",
+				"$.seats: required, so its default 20 never applies",
+			},
+			marks: []error{schema.ErrUnfollowableDeprecation, schema.ErrUnusedDefault},
+		},
+		"optional with a default": {
+			schema:   written(`{"properties": {"seats": {"type": "integer"}}}`),
+			defaults: []niceyaml.DecodeOption{niceyaml.WithDefaults(func(c *typeConfig) { c.Seats = 20 })},
+		},
+		"required with a zero default": {
+			schema: written(`{"required": ["seats"]}`),
+		},
+		"required struct that merges": {
+			schema:   written(`{"required": ["kitchen"]}`),
+			defaults: []niceyaml.DecodeOption{niceyaml.WithDefaults(func(c *typeConfig) { c.Kitchen.Port = 9100 })},
+		},
+		"default that a parent sets": {
+			schema: written(`{"properties": {"kitchen": {"$ref": "#/$defs/printer"}},
+  "$defs": {"printer": {"required": ["port"]}}}`),
+			defaults: []niceyaml.DecodeOption{niceyaml.WithDefaults(func(c *typeConfig) { c.Kitchen.Port = 9101 })},
+			want: []string{
+				stringtest.JoinLF(
+					"$.kitchen.port: required, so its default 9101 never applies",
+					"`-- typePrinter defaults port to 0 on its own, so omitzero makes port optional with 0 at its other places",
+				),
+			},
+			marks: []error{schema.ErrUnusedDefault},
+		},
+		"default of an item": {
+			schema:   written(`{"properties": {"tables": {"items": {"required": ["port"]}}}}`),
+			defaults: []niceyaml.DecodeOption{niceyaml.WithDefaults(func(p *typePrinter) { p.Port = 9100 })},
+			want:     []string{"$.tables[*].port: required, so its default 9100 never applies"},
+			marks:    []error{schema.ErrUnusedDefault},
+		},
+		"default of a nil pointer": {
+			schema:   written(`{"properties": {"spare": {"anyOf": [{"type": "null"}, {"required": ["port"]}]}}}`),
+			defaults: []niceyaml.DecodeOption{niceyaml.WithDefaults(func(p *typePrinter) { p.Port = 9100 })},
+			want:     []string{"$.spare.port: required, so its default 9100 never applies"},
+			marks:    []error{schema.ErrUnusedDefault},
+		},
+		"required under a branch": {
+			schema:   written(`{"anyOf": [{"required": ["seats"]}, {"required": ["name"]}]}`),
+			defaults: []niceyaml.DecodeOption{niceyaml.WithDefaults(func(c *typeConfig) { c.Seats = 20 })},
+		},
+		"deprecated behind a $ref": {
+			schema: written(`{"required": ["old"], "properties": {"old": {"$ref": "#/$defs/old"}},
+  "$defs": {"old": {"deprecated": true}}}`),
+			want:  []string{"$.old: required and deprecated"},
+			marks: []error{schema.ErrUnfollowableDeprecation},
+		},
+		"deprecated behind the anyOf of a pointer": {
+			schema: written(`{"required": ["old"],
+  "properties": {"old": {"anyOf": [{"type": "null"}, {"deprecated": true}]}}}`),
+			want:  []string{"$.old: required and deprecated"},
+			marks: []error{schema.ErrUnfollowableDeprecation},
+		},
+		"deprecated under a branch": {
+			schema: written(`{"required": ["old"],
+  "properties": {"old": {"anyOf": [{"type": "string"}, {"deprecated": true}]}}}`),
+		},
+		"deprecated and optional": {
+			schema: written(`{"properties": {"old": {"deprecated": true}}}`),
+		},
+		"deprecated root": {
+			schema: written(`{"deprecated": true, "properties": {"name": {"type": "string"}}}`),
+		},
+		"accept all": {
+			schema:   func(*testing.T) *schema.Schema { return schema.AcceptAll },
+			defaults: []niceyaml.DecodeOption{niceyaml.WithDefaults(func(c *typeConfig) { c.Seats = 20 })},
+		},
+		"nil schema": {
+			schema: func(*testing.T) *schema.Schema { return nil },
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := schema.CheckType[typeConfig](tc.schema(t), tc.defaults...)
+			if len(tc.want) == 0 {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.Error(t, err)
+			require.False(t, niceyaml.IsInvalid(err))
+
+			var (
+				rows  []string
+				marks []error
+			)
+
+			for p := range niceyaml.Problems(err) {
+				rows = append(rows, niceyaml.FormatError(p.Err))
+
+				for _, mark := range []error{schema.ErrUnfollowableDeprecation, schema.ErrUnusedDefault} {
+					if errors.Is(p.Err, mark) {
+						marks = append(marks, mark)
+					}
+				}
+			}
+
+			assert.Equal(t, tc.want, rows)
+			assert.Equal(t, tc.marks, marks)
+		})
+	}
 }

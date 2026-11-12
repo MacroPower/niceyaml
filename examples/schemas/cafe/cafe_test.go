@@ -59,6 +59,16 @@ func TestCafeFields(t *testing.T) {
 	require.NoError(t, schema.CheckFields[cafe.Config]())
 }
 
+// TestCafeType checks that the Config schema does not require a property
+// that it deprecates, or one whose decode default never applies. The
+// cafeConfig helper decodes without niceyaml.WithDefaults, so the test
+// passes no decode options.
+func TestCafeType(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, schema.CheckType[cafe.Config](cafe.Schema))
+}
+
 func TestCafeDefaultConfig(t *testing.T) {
 	t.Parallel()
 

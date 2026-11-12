@@ -2,21 +2,15 @@ package manifest
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
-	"net/url"
 	"reflect"
 	"slices"
-	"strings"
 
 	"go.jacobcolvin.com/x/jsonschema"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
-	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
-	"go.jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml/internal/schemalint"
 )
 
 // Verify loads and compiles the schema of each version. It returns an
@@ -142,6 +136,10 @@ import (
 // property that a step renames between them. It follows each $ref inside
 // the schema document, and skips a $ref to another document.
 //
+// [schema.CheckType] reports the first of these problems for one schema
+// and one Go type, without a registry. Its report leaves out the kind and
+// the version.
+//
 // # Defaults
 //
 // Verify also reports each property that the schema of the current
@@ -168,6 +166,10 @@ import (
 // the place differs. The omitzero option on the field makes it optional
 // at each place of the child type. A panic in a function of WithDefaults
 // reaches the caller.
+//
+// [schema.CheckType] runs the same check for one schema and one Go type,
+// without a registry. A test passes it the decode options that the
+// program decodes with. Its report leaves out the kind and the version.
 func (r *Registry) Verify(ctx context.Context) error {
 	var errs []error
 
@@ -213,7 +215,7 @@ func (r *Registry) verifyTypeFields(entry *kindEntry, compiled map[*versionEntry
 
 		name := entry.kind.name + " " + v.label()
 		fields := r.schemaFields(v, cv)
-		doc := newSchemaDoc(cv)
+		doc := schemalint.NewDoc(cv)
 
 		for _, p := range r.typeFields() {
 			// An unversioned document does not write a version field, so
@@ -227,7 +229,7 @@ func (r *Registry) verifyTypeFields(entry *kindEntry, compiled map[*versionEntry
 				errs = append(errs, authorError(ErrSchemaTypeField,
 					fmt.Sprintf("%s: %s: %s", name, p, unsureWhy), unsureRemedy(p)))
 
-			case !slices.ContainsFunc(fields.hidden, p.Equal) || !doc.field(p).required:
+			case !slices.ContainsFunc(fields.hidden, p.Equal) || !doc.Field(p).Required:
 				// The check sees the field, or the schema does not require
 				// it.
 
@@ -262,21 +264,17 @@ func verifyDeprecations(entry *kindEntry, compiled map[*versionEntry]*jsonschema
 	}
 
 	name := entry.kind.name + " " + current.label()
-	doc := newSchemaDoc(cv)
+	doc := schemalint.NewDoc(cv)
 
 	var errs []error
 
-	if doc.marked(cv.Schema()) {
+	if doc.Marked(doc.Root()) {
 		errs = append(errs, authorError(ErrUnfollowableDeprecation, name+": $: the root schema is deprecated",
 			"use manifest.DeprecatedKind instead"))
 	}
 
-	props := doc.properties()
-	for _, p := range props {
-		if p.required && p.deprecated {
-			errs = append(errs, authorError(ErrUnfollowableDeprecation,
-				fmt.Sprintf("%s: %s: required and deprecated", name, p.path)))
-		}
+	for _, f := range schemalint.RequiredDeprecated(doc) {
+		errs = append(errs, authorError(ErrUnfollowableDeprecation, name+": "+f.Message, f.Details...))
 	}
 
 	written := entry.written
@@ -287,14 +285,14 @@ func verifyDeprecations(entry *kindEntry, compiled map[*versionEntry]*jsonschema
 	}
 
 	required := make(map[string]bool)
-	for _, p := range newSchemaDoc(wv).properties() {
-		required[p.path.String()] = p.required
+	for _, p := range schemalint.NewDoc(wv).Properties() {
+		required[p.Path.String()] = p.Required
 	}
 
-	for _, p := range props {
-		if p.deprecated && required[p.path.String()] {
+	for _, p := range doc.Properties() {
+		if p.Deprecated && required[p.Path.String()] {
 			errs = append(errs, authorError(ErrUnfollowableDeprecation,
-				fmt.Sprintf("%s: %s: deprecated, but %s requires it", name, p.path, written.label()),
+				fmt.Sprintf("%s: %s: deprecated, but %s requires it", name, p.Path, written.label()),
 				fmt.Sprintf("tag the field jsonschema:%q until manifest.Written leaves %s",
 					"deprecated=false", written.label()),
 			))
@@ -315,399 +313,6 @@ func authorError(mark error, msg string, details ...string) error {
 	)
 }
 
-// schemaDoc is one compiled schema document, which resolves the $ref and
-// $dynamicRef keywords that point inside it.
-type schemaDoc struct {
-	byPointer map[string]*jsonschema.Schema
-	byAnchor  map[string]*jsonschema.Schema
-	root      *jsonschema.Schema
-	// Whether the document ignores each sibling of a $ref, as Draft-07
-	// does.
-	refOnly bool
-}
-
-// property is what the schema of a version says about one property.
-type property struct {
-	path       paths.Path
-	required   bool
-	deprecated bool
-}
-
-// newSchemaDoc returns the [schemaDoc] of the schema that v checks with.
-func newSchemaDoc(v *jsonschema.Validator) *schemaDoc {
-	d := &schemaDoc{
-		byPointer: make(map[string]*jsonschema.Schema),
-		byAnchor:  make(map[string]*jsonschema.Schema),
-		root:      v.Schema(),
-		refOnly:   v.Draft() == jsonschema.Draft7,
-	}
-
-	for loc, s := range jsonschema.Schemas(d.root) {
-		d.byPointer[string(loc.Pointer)] = s
-
-		for _, anchor := range []string{s.Anchor, s.DynamicAnchor} {
-			if _, ok := d.byAnchor[anchor]; anchor != "" && !ok {
-				d.byAnchor[anchor] = s
-			}
-		}
-	}
-
-	return d
-}
-
-// resolve returns the schema that ref names inside the document, or nil
-// for a ref to another document or to a place that does not exist.
-func (d *schemaDoc) resolve(ref string) *jsonschema.Schema {
-	frag, ok := strings.CutPrefix(ref, "#")
-	if !ok {
-		return nil
-	}
-
-	frag, err := url.PathUnescape(frag)
-	if err != nil {
-		return nil
-	}
-
-	if frag == "" || strings.HasPrefix(frag, "/") {
-		return d.byPointer[frag]
-	}
-
-	return d.byAnchor[frag]
-}
-
-// chain returns the schema s and each schema whose keywords apply to a
-// value along with s. Each schema that a chain of $ref, $dynamicRef, and
-// allOf reaches from s is such a schema. So is the branch of an anyOf that
-// [nullable] reads through. Under Draft-07, a schema with a $ref adds only
-// the schema that the $ref reaches.
-func (d *schemaDoc) chain(s *jsonschema.Schema) []*jsonschema.Schema {
-	out, _ := d.chainOf(s)
-
-	return out
-}
-
-// chainOf returns the chain of s, as [schemaDoc.chain] does. It also
-// reports whether the chain holds a $ref or $dynamicRef that the document
-// does not resolve, such as a $ref to another document.
-func (d *schemaDoc) chainOf(s *jsonschema.Schema) ([]*jsonschema.Schema, bool) {
-	var out []*jsonschema.Schema
-
-	lost := false
-	seen := make(map[*jsonschema.Schema]bool)
-	queue := []*jsonschema.Schema{s}
-
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
-
-		if cur == nil || seen[cur] {
-			continue
-		}
-
-		seen[cur] = true
-
-		if cur.Ref != "" {
-			target := d.resolve(cur.Ref)
-			lost = lost || target == nil
-			queue = append(queue, target)
-
-			if d.refOnly {
-				continue
-			}
-		}
-
-		out = append(out, cur)
-
-		if cur.DynamicRef != "" {
-			target := d.resolve(cur.DynamicRef)
-			lost = lost || target == nil
-			queue = append(queue, target)
-		}
-
-		queue = append(queue, cur.AllOf...)
-
-		if other := nullable(cur); other != nil {
-			queue = append(queue, other)
-		}
-	}
-
-	return out, lost
-}
-
-// nullable returns the branch of the anyOf of s that admits more than
-// null, when the other branch admits only null. The anyOf that gen writes
-// around the schema of a pointer holds two such branches. It returns nil
-// for any other schema.
-func nullable(s *jsonschema.Schema) *jsonschema.Schema {
-	if len(s.AnyOf) != 2 {
-		return nil
-	}
-
-	for i, branch := range s.AnyOf {
-		if onlyNull(branch) {
-			return s.AnyOf[1-i]
-		}
-	}
-
-	return nil
-}
-
-// onlyNull reports whether s is a schema whose type admits only null.
-func onlyNull(s *jsonschema.Schema) bool {
-	return s != nil && (s.Type == "null" || len(s.Types) == 1 && s.Types[0] == "null")
-}
-
-// marked reports whether a schema in the chain of s holds the deprecated
-// keyword.
-func (d *schemaDoc) marked(s *jsonschema.Schema) bool {
-	return slices.ContainsFunc(d.chain(s), func(t *jsonschema.Schema) bool { return t.Deprecated })
-}
-
-// schemaField is what a schema document says about one value, as
-// [schemaDoc.field] finds it.
-type schemaField struct {
-	// Whether the schema declares the value, through properties for a name
-	// or items for an index. The schema that such a keyword gives the value
-	// does not change the answer.
-	declared bool
-	// Whether a required keyword names the value.
-	required bool
-	// Whether a schema that the walk does not read might read the value.
-	// Such a schema is a branch that declares or requires the value, or
-	// one behind a $ref or $dynamicRef on the way that the document does
-	// not resolve.
-	unsure bool
-}
-
-// field returns what the document says about the value at p. The walk
-// follows the properties of each name of p and the items of each index,
-// through the chain of each schema on the way. A value that the walk does
-// not reach is neither declared nor required. Beside the chains, the walk
-// follows the branches of each schema on the way, as [schemaDoc.branches]
-// finds them, to tell whether one of them reads the value.
-//
-// A schema on the way declares the value when it gives the value a schema,
-// whatever that schema holds. A property schema whose chain is empty thus
-// declares its property. Under Draft-07, the chain of a schema that holds
-// a $ref to another document is empty.
-func (d *schemaDoc) field(p paths.Path) schemaField {
-	var f schemaField
-
-	group, lost := d.chainOf(d.root)
-
-	var branches []*jsonschema.Schema
-
-	mentioned := false
-
-	for sel := range p.Selectors() {
-		more, moreLost := d.branches(append(slices.Clone(group), branches...))
-		branches = append(branches, more...)
-		lost = lost || moreLost
-
-		var next, nextBranches []*jsonschema.Schema
-
-		f.declared, f.required = false, false
-		mentioned = false
-
-		for _, s := range group {
-			f.required = f.required || sel.Kind == paths.SelectorChild && slices.Contains(s.Required, sel.Name)
-
-			sub, subLost, ok := d.below(s, sel)
-			next = append(next, sub...)
-			lost = lost || subLost
-			f.declared = f.declared || ok
-		}
-
-		for _, s := range branches {
-			mentioned = mentioned || sel.Kind == paths.SelectorChild && slices.Contains(s.Required, sel.Name)
-
-			sub, subLost, ok := d.below(s, sel)
-			nextBranches = append(nextBranches, sub...)
-			lost = lost || subLost
-			mentioned = mentioned || ok
-		}
-
-		group, branches = next, nextBranches
-	}
-
-	f.unsure = lost || mentioned
-
-	return f
-}
-
-// below returns the chain of the schema that s gives the value at sel, a
-// name or an index. It also reports whether that chain holds a ref that
-// the document does not resolve, as [schemaDoc.chainOf] does. The last
-// result reports whether s gives the value a schema. The chain of such a
-// schema is empty under Draft-07 when the schema holds a $ref that the
-// document does not resolve.
-func (d *schemaDoc) below(s *jsonschema.Schema, sel paths.Selector) ([]*jsonschema.Schema, bool, bool) {
-	var sub *jsonschema.Schema
-
-	switch sel.Kind {
-	case paths.SelectorChild:
-		sub = s.Properties[sel.Name]
-	case paths.SelectorIndex:
-		sub = item(s, sel.Index)
-	default:
-		return nil, false, false
-	}
-
-	if sub == nil {
-		return nil, false, false
-	}
-
-	chain, lost := d.chainOf(sub)
-
-	return chain, lost, true
-}
-
-// branches returns the chain of each branch of a schema in group, and of
-// each branch of a schema that such a chain holds. A branch is a schema
-// under anyOf, oneOf, not, if, then, else, or dependentSchemas. Its
-// keywords apply to a value in some documents and not in others. The
-// chain already holds the other branch of the anyOf that [nullable] reads
-// through, so that anyOf does not add a branch. The result also reports
-// whether a chain holds a ref that the document does not resolve.
-func (d *schemaDoc) branches(group []*jsonschema.Schema) ([]*jsonschema.Schema, bool) {
-	var out []*jsonschema.Schema
-
-	lost := false
-	seen := make(map[*jsonschema.Schema]bool)
-	queue := group
-
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
-
-		if cur == nil || seen[cur] {
-			continue
-		}
-
-		seen[cur] = true
-
-		for _, branch := range branchesOf(cur) {
-			chain, chainLost := d.chainOf(branch)
-			lost = lost || chainLost
-
-			out = append(out, chain...)
-			queue = append(queue, chain...)
-		}
-	}
-
-	return out, lost
-}
-
-// branchesOf returns the branches of s, as [schemaDoc.branches] names
-// them. The order is not fixed. The result holds nil for each branch
-// keyword that s leaves out.
-func branchesOf(s *jsonschema.Schema) []*jsonschema.Schema {
-	var out []*jsonschema.Schema
-
-	if nullable(s) == nil {
-		out = append(out, s.AnyOf...)
-	}
-
-	out = append(out, s.OneOf...)
-	out = append(out, s.Not, s.If, s.Then, s.Else)
-	out = slices.AppendSeq(out, maps.Values(s.DependentSchemas))
-
-	return slices.AppendSeq(out, maps.Values(s.DependencySchemas))
-}
-
-// item returns the schema that prefixItems, items, or additionalItems
-// gives the element at index i of an array that s checks. It returns nil
-// when s does not give the element a schema through one of these keywords.
-func item(s *jsonschema.Schema, i int) *jsonschema.Schema {
-	switch {
-	case i < len(s.PrefixItems):
-		return s.PrefixItems[i]
-	case i < len(s.ItemsArray):
-		return s.ItemsArray[i]
-	case len(s.ItemsArray) > 0:
-		return s.AdditionalItems
-	default:
-		return s.Items
-	}
-}
-
-// properties returns what the document says about each property that the
-// root schema reaches through properties, in the order of a walk that
-// visits the names of each mapping in sorted order.
-func (d *schemaDoc) properties() []*property {
-	var out []*property
-
-	byPath := make(map[string]*property)
-	d.collect(d.root, paths.Doc(), map[*jsonschema.Schema]bool{}, func(p paths.Path) *property {
-		key := p.String()
-
-		prop, ok := byPath[key]
-		if !ok {
-			prop = &property{path: p}
-			byPath[key] = prop
-			out = append(out, prop)
-		}
-
-		return prop
-	})
-
-	return out
-}
-
-// collect records what the chain of s says about each property under
-// path, and walks each property schema in turn. The walk stops at a
-// schema on its own path, so a recursive type adds its properties once.
-func (d *schemaDoc) collect(
-	s *jsonschema.Schema,
-	path paths.Path,
-	onPath map[*jsonschema.Schema]bool,
-	at func(paths.Path) *property,
-) {
-	group := d.chain(s)
-	for _, t := range group {
-		if onPath[t] {
-			return
-		}
-	}
-
-	for _, t := range group {
-		onPath[t] = true
-	}
-
-	defer func() {
-		for _, t := range group {
-			delete(onPath, t)
-		}
-	}()
-
-	// A name that the group requires and lists under no properties is a
-	// property too.
-	names := make(map[string]bool)
-	required := make(map[string]bool)
-	subs := make(map[string][]*jsonschema.Schema)
-
-	for _, t := range group {
-		for _, name := range t.Required {
-			names[name], required[name] = true, true
-		}
-
-		for name, sub := range t.Properties {
-			names[name] = true
-			subs[name] = append(subs[name], sub)
-		}
-	}
-
-	for _, name := range slices.Sorted(maps.Keys(names)) {
-		p := at(path.Child(name))
-		p.required = p.required || required[name]
-
-		for _, sub := range subs[name] {
-			p.deprecated = p.deprecated || d.marked(sub)
-			d.collect(sub, path.Child(name), onPath, at)
-		}
-	}
-}
-
 // verifyDefaults returns the problems of the defaults of entry, as the
 // Defaults section of [Registry.Verify] describes. Each problem names a
 // property that the schema of the current version requires, that the
@@ -722,200 +327,20 @@ func (r *Registry) verifyDefaults(entry *kindEntry, compiled map[*versionEntry]*
 	}
 
 	opts := slices.Concat(r.cfg.decodeOptions, entry.kind.cfg.decodeOptions)
+	defaults := func(t reflect.Type) reflect.Value {
+		p := reflect.New(t)
+		_ = niceyaml.DefaultsInto(p.Interface(), opts...) //nolint:errcheck // p is a non-nil pointer.
 
-	w := &defaultsWalk{
-		doc:  newSchemaDoc(cv),
-		name: entry.kind.name + " " + current.label(),
-		defaults: func(t reflect.Type) reflect.Value {
-			p := reflect.New(t)
-			_ = niceyaml.DefaultsInto(p.Interface(), opts...) //nolint:errcheck // p is a non-nil pointer.
-
-			return p.Elem()
-		},
-		onPath: map[defaultsKey]bool{},
+		return p.Elem()
 	}
 
-	t := entry.kind.typ
-	w.walk(cv.Schema(), t, w.defaults(t), paths.Doc())
+	name := entry.kind.name + " " + current.label()
 
-	return w.errs
-}
+	var errs []error
 
-// defaultsWalk walks a schema beside the Go type that a decode reads with
-// it, and the defaults that the decode starts from at each place.
-type defaultsWalk struct {
-	doc      *schemaDoc
-	defaults func(t reflect.Type) reflect.Value
-	onPath   map[defaultsKey]bool
-	name     string
-	errs     []error
-}
-
-// defaultsKey names a schema that the walk reads as a type.
-//
-//nolint:unused // The fields tell the keys of a map apart.
-type defaultsKey struct {
-	schema *jsonschema.Schema
-	typ    reflect.Type
-}
-
-// walk reads the value of type t at path, which starts from v, with the
-// schema s. The walk follows properties, items, additionalProperties,
-// and each schema in the chain of s. A pointer reads its target, which
-// starts from the value that the pointer holds, or from the defaults of
-// its type for a nil pointer.
-func (w *defaultsWalk) walk(s *jsonschema.Schema, t reflect.Type, v reflect.Value, path paths.Path) {
-	for t.Kind() == reflect.Pointer {
-		if v.IsNil() {
-			v = w.defaults(t.Elem())
-		} else {
-			v = v.Elem()
-		}
-
-		t = t.Elem()
+	for _, f := range schemalint.UnusedDefaults(schemalint.NewDoc(cv), entry.kind.typ, defaults) {
+		errs = append(errs, authorError(ErrUnusedDefault, name+": "+f.Message, f.Details...))
 	}
 
-	key := defaultsKey{schema: s, typ: t}
-	if s == nil || w.onPath[key] {
-		return
-	}
-
-	w.onPath[key] = true
-	defer delete(w.onPath, key)
-
-	group := w.doc.chain(s)
-
-	switch {
-	case t.Kind() == reflect.Struct && !unmarshaler.DecodesItself(t):
-		w.fields(group, t, v, path)
-
-	case t.Kind() == reflect.Slice || t.Kind() == reflect.Array:
-		for _, g := range group {
-			w.walk(g.Items, t.Elem(), w.defaults(t.Elem()), path.IndexAll())
-		}
-
-	case t.Kind() == reflect.Map:
-		for _, g := range group {
-			w.walk(g.AdditionalProperties, t.Elem(), w.defaults(t.Elem()), path.ChildAll())
-		}
-	}
-}
-
-// fields reads each field of v, a struct of type t that the decode reads
-// field by field, with the properties of the schemas of group. It
-// reports each field that group requires, that the document replaces
-// whole, and whose default is not zero.
-func (w *defaultsWalk) fields(group []*jsonschema.Schema, t reflect.Type, v reflect.Value, path paths.Path) {
-	required := map[string]bool{}
-	props := map[string][]*jsonschema.Schema{}
-
-	for _, g := range group {
-		for _, name := range g.Required {
-			required[name] = true
-		}
-
-		for name, sub := range g.Properties {
-			props[name] = append(props[name], sub)
-		}
-	}
-
-	for _, f := range fieldsOf(t, v) {
-		at := path.Child(f.name)
-
-		if required[f.name] && replacedWhole(f.value.Type()) && !f.value.IsZero() {
-			w.errs = append(w.errs, w.defaultProblem(at, f))
-		}
-
-		for _, sub := range props[f.name] {
-			w.walk(sub, f.value.Type(), f.value, at)
-		}
-	}
-}
-
-// defaultProblem returns the problem of the field f at path, which the
-// schema requires although its default is not zero. When the default at
-// path differs from the one that the type that declares f gives itself, a
-// detail says so.
-func (w *defaultsWalk) defaultProblem(path paths.Path, f structField) error {
-	msg := fmt.Sprintf("%s: %s: required, so its default %s never applies", w.name, path, valueText(f.value))
-
-	own := w.defaults(f.owner).FieldByIndex(f.index)
-	if reflect.DeepEqual(own.Interface(), f.value.Interface()) {
-		return authorError(ErrUnusedDefault, msg)
-	}
-
-	text := valueText(own)
-
-	return authorError(
-		ErrUnusedDefault,
-		msg,
-		fmt.Sprintf("%s defaults %s to %s on its own, so omitzero makes %s optional with %s at "+
-			"its other places", f.owner.Name(), f.name, text, f.name, text),
-	)
-}
-
-// structField is a field that a decode of a struct reads, with its
-// default at one place.
-type structField struct {
-	owner reflect.Type
-	value reflect.Value
-	name  string
-	index []int
-}
-
-// fieldsOf returns each field that a decode of v, a struct of type t,
-// reads by name, with the fields of each struct that t holds inline. It
-// leaves out the fields that the decoder skips and those that it cannot
-// set.
-func fieldsOf(t reflect.Type, v reflect.Value) []structField {
-	var out []structField
-
-	for i := range t.NumField() {
-		field := t.Field(i)
-
-		name, inline, skip := yamlfield.Name(field)
-		if skip || !v.Field(i).CanInterface() {
-			continue
-		}
-
-		if !inline {
-			out = append(out, structField{owner: t, value: v.Field(i), name: name, index: []int{i}})
-
-			continue
-		}
-
-		inner := v.Field(i)
-		if inner.Kind() == reflect.Pointer {
-			if inner.IsNil() {
-				continue
-			}
-
-			inner = inner.Elem()
-		}
-
-		if inner.Kind() == reflect.Struct && !unmarshaler.DecodesItself(inner.Type()) {
-			out = append(out, fieldsOf(inner.Type(), inner)...)
-		}
-	}
-
-	return out
-}
-
-// replacedWhole reports whether a document replaces a value of type t
-// whole, rather than merging a mapping into it field by field, as it does
-// a struct and a pointer to one.
-func replacedWhole(t reflect.Type) bool {
-	base := unmarshaler.Base(t)
-
-	return base.Kind() != reflect.Struct || unmarshaler.DecodesItself(base)
-}
-
-// valueText returns v as the JSON text of a schema, such as 20 or "SEK".
-func valueText(v reflect.Value) string {
-	text, err := json.Marshal(v.Interface())
-	if err != nil {
-		return fmt.Sprint(v.Interface())
-	}
-
-	return string(text)
+	return errs
 }

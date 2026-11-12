@@ -161,6 +161,8 @@ Types declare their constraints with `jsonschema` struct tags. The `gen` tool fr
 
 `gen` names each property as `encoding/json` names the field. The decoder reads the `yaml` tag, or the `json` tag when a field has no `yaml` tag, and lowercases the Go name when that tag names none. Each field of the example has a `json` tag that names it, so each property matches the key that the decoder reads. The tests of the example call [`schema.CheckFields`][niceyaml/schema.CheckFields], which reports each field where the two disagree. A program that decodes a type whole through `niceyaml.CustomUnmarshaler` or `niceyaml.JSONUnmarshalers` passes the same unmarshalers to `CheckFields`, which then skips that type.
 
+The tests also call [`schema.CheckType`][niceyaml/schema.CheckType] with the schema and the decode options of the program. It reports each property that the schema requires and deprecates, and each default from `niceyaml.WithDefaults` that a required property keeps from applying.
+
 A [`schema.Registry`][niceyaml/schema.Registry] picks the schema of each document, so one file can hold documents of several kinds. Run `go run ./examples/schemas/registry` to route the documents of a stream by a `$schema` comment or by their `kind` and report the ones that fail.
 
 The resolvers of a registry run in order, and the first one that does not decline picks the schema. The resolvers example puts a directive in the file ahead of a match on its path. When no resolver picks a schema, the error lists the reasons that the resolvers gave. Every registry needs [`schema.WithAccess`][niceyaml/schema.WithAccess] to load the schema that a directive names, because the option states which files and URLs a document can name. The untrusted example validates uploads whose directives name files and URLs that the server must not read. The deprecations example reports the `deprecated` keyword of a schema as a warning beside the violations. It then lists the schema path and the fix of each deprecation.
@@ -240,6 +242,7 @@ See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pag
 [niceyaml/bubbles/yamlviewport]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/bubbles/yamlviewport
 [niceyaml/fangs]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/fangs
 [niceyaml/schema.CheckFields]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/schema#CheckFields
+[niceyaml/schema.CheckType]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/schema#CheckType
 [niceyaml/schema.Registry]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/schema#Registry
 [niceyaml/schema.Schema]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/schema#Schema
 [niceyaml/schema.WithAccess]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/schema#WithAccess
