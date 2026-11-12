@@ -6395,7 +6395,8 @@ func TestSourceError_TreeBranches(t *testing.T) {
 func TestBindings(t *testing.T) {
 	t.Parallel()
 
-	docs := yamltest.Documents(t, niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "---", "b: 2")), 2)
+	source := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "---", "b: 2"))
+	docs := yamltest.Documents(t, source, 2)
 
 	first := docs[0].Bind(yamltest.ErrorAt("bad a", "a"))
 	second := docs[1].Bind(yamltest.ErrorAt("bad b", "b"))
@@ -6404,6 +6405,11 @@ func TestBindings(t *testing.T) {
 		niceyaml.NewSourceFromString("c: 3\n"),
 		niceyaml.NewError("outer", niceyaml.WithDetails(first)),
 	)
+
+	// A binding of a join that holds a plain error, or that is bound to a
+	// document, comes as one unit.
+	withPlain := source.Bind(errors.Join(first, errors.New("plain")))
+	inDocument := docs[0].Bind(errors.Join(first, docs[0].Bind(yamltest.ErrorAt("worse a", "a"))))
 
 	tcs := map[string]struct {
 		err  error
@@ -6431,6 +6437,26 @@ func TestBindings(t *testing.T) {
 				fmt.Errorf("document 1: %w", second),
 			),
 			want: []error{first, second},
+		},
+		"binding of a join of bindings yields each": {
+			err:  source.Bind(errors.Join(first, second)),
+			want: []error{first, second},
+		},
+		"binding in another source of a join of bindings yields each": {
+			err:  niceyaml.NewSourceFromString("c: 3\n").Bind(errors.Join(second, first)),
+			want: []error{second, first},
+		},
+		"binding of nested joins of bindings yields each": {
+			err:  source.Bind(errors.Join(source.Bind(errors.Join(first, second)), outer)),
+			want: []error{first, second, outer},
+		},
+		"binding of a join with a plain error is one unit": {
+			err:  withPlain,
+			want: []error{withPlain},
+		},
+		"binding in a document of a join of bindings is one unit": {
+			err:  inDocument,
+			want: []error{inDocument},
 		},
 		"binding of a binding is that binding": {
 			err:  yamltest.Bind(t, niceyaml.NewSourceFromString("c: 3\n"), fmt.Errorf("ctx: %w", first)),

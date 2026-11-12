@@ -223,8 +223,10 @@ var (
 	// instead.
 	//
 	// Each of these calls returns the error bound as a [SourceError] at the
-	// offending token. The error of a file with several such documents is a
-	// join, which matches through each of them. [errors.As] still finds the
+	// offending token. A file with several such documents returns one
+	// SourceError bound to the Source instead. That error heads the error of
+	// each document and matches through each of them, and [Bindings] yields
+	// each one. [errors.As] still finds the
 	// go-yaml error, although the chain does not unwrap to it. The document is
 	// at fault for each problem the parse reports with ErrSyntax, as
 	// [IsInvalid] describes.
@@ -4004,7 +4006,7 @@ func (e *SourceError) ordered(shown int) []*SourceError {
 
 	// A detail is no problem, and the order numbers each source where it
 	// first appears among the problems alone.
-	kids := slices.DeleteFunc(flatten(nil, children, e, false), func(kid positioned) bool {
+	kids := slices.DeleteFunc(flatten(nil, children, e, false, false), func(kid positioned) bool {
 		return kid.detail || kid.underDetail
 	})
 
@@ -4286,9 +4288,14 @@ func (e *SourceError) all(seen map[*SourceError]bool, yield func(*SourceError) b
 // Bindings returns an iterator over each [*SourceError] that the wrappers
 // and joins around err lead to, in depth-first order. The outermost comes
 // first, and each branch of an [errors.Join] follows the one before it. It
-// does not look below a binding, so each binding comes as one unit. A
-// caller that renders each binding on its own, such as one section per
-// document of a file, walks it:
+// does not look below a binding, so each binding comes as one unit, with
+// one exception. A binding of an [errors.Join] whose branches are all
+// bindings gives its place to those bindings, when it is not bound to a
+// document. [Source.ValidateDocuments] and [Source.File] return such a
+// binding for a file in which several documents fail, so the iterator
+// yields the binding of each document, in file order. A caller that
+// renders each binding on its own, such as one section per document of a
+// file, walks it:
 //
 //	for bound := range niceyaml.Bindings(err) {
 //		fmt.Println(niceyaml.FormatError(bound))
@@ -4296,6 +4303,57 @@ func (e *SourceError) all(seen map[*SourceError]bool, yield func(*SourceError) b
 //
 // The iterator does not yield a binding for a nil err.
 func Bindings(err error) iter.Seq[*SourceError] {
+	return func(yield func(*SourceError) bool) {
+		for x := range outerBindings(err) {
+			if !x.eachPart(yield) {
+				return
+			}
+		}
+	}
+}
+
+// eachPart yields e, or the part each binding below e yields when e joins
+// bindings, as [SourceError.joinsBindings] reports. It reports whether
+// yield wanted more.
+func (e *SourceError) eachPart(yield func(*SourceError) bool) bool {
+	if !e.joinsBindings() {
+		return yield(e)
+	}
+
+	for _, c := range e.below {
+		if !c.bound.eachPart(yield) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// joinsBindings reports whether e binds a join whose branches are all
+// bindings, and is not bound to a document. Such a binding does not have a
+// line of its own and heads the binding of each branch, which it did not
+// bind itself. The binding of a join of the errors of several documents
+// is one. It reads the error e binds rather than the texts of e, because
+// the texts of e read it.
+func (e *SourceError) joinsBindings() bool {
+	if _, _, joined := joinBranches(e.err); !joined || len(e.below) == 0 {
+		return false
+	}
+
+	if _, ok := e.DocumentIndex(); ok {
+		return false
+	}
+
+	return !slices.ContainsFunc(e.below, func(c boundChild) bool {
+		return c.detail || c.unbound
+	})
+}
+
+// outerBindings returns an iterator over each [*SourceError] that the
+// wrappers and joins around err lead to, in depth-first order. Unlike
+// [Bindings], it does not look below any binding, so each binding comes
+// as one unit.
+func outerBindings(err error) iter.Seq[*SourceError] {
 	return func(yield func(*SourceError) bool) {
 		for below := range errorsBelow(err) {
 			x, ok := below.(*SourceError) //nolint:errorlint // The node itself, not a chain search.
@@ -4362,14 +4420,14 @@ func eachBelow(err error, yield func(error) bool) bool {
 	return true
 }
 
-// allBindings returns an iterator over each binding [Bindings] yields and
-// every binding below it, depth first, with each binding once however
-// many times the tree reaches it.
+// allBindings returns an iterator over each binding [outerBindings]
+// yields and every binding below it, depth first, with each binding once
+// however many times the tree reaches it.
 func allBindings(err error) iter.Seq[*SourceError] {
 	return func(yield func(*SourceError) bool) {
 		seen := make(map[*SourceError]bool)
 
-		for x := range Bindings(err) {
+		for x := range outerBindings(err) {
 			if !x.all(seen, yield) {
 				return
 			}

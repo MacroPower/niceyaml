@@ -4858,6 +4858,11 @@ func TestNewErrorReport(t *testing.T) {
 			err:            errors.Join(farC, farA),
 			wantUnresolved: []string{"second.yaml: far c", "first.yaml: far a"},
 		},
+		"a binding of a join of bindings reports each as the join does": {
+			err:            first.Bind(errors.Join(farA, badB)),
+			want:           []string{stringtest.JoinLF("(first.yaml)", "   2 | b: 2", "     |    ^ bad b")},
+			wantUnresolved: []string{"first.yaml: far a"},
+		},
 		"a binding with no location has nothing to explain": {
 			err: yamltest.Bind(t, first, errors.New("plain")),
 		},

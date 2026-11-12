@@ -266,12 +266,12 @@ func fileResult(diag io.Writer, name string, err error, warnings *niceyaml.Warni
 }
 
 // validateFile validates every document of the file at yamlPath against the
-// registry with [niceyaml.Source.ValidateDocuments]. That method joins what
-// every document reports, so one run names each invalid document. A
-// document that does not parse reports its syntax error, and the documents
-// around it validate as they do in a file that parses. After ctx is
-// canceled, the remaining documents do not validate, and the error reports
-// the cancellation once.
+// registry with [niceyaml.Source.ValidateDocuments]. That method returns
+// what every document reports in one error, so one run names each invalid
+// document. A document that does not parse reports its syntax error, and
+// the documents around it validate as they do in a file that parses.
+// After ctx is canceled, the remaining documents do not validate, and the
+// error reports the cancellation once.
 //
 // Each error it returns is bound to the source. The source takes yamlPath
 // as the user typed it for its name. A message draws the name as

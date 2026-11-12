@@ -2999,8 +2999,8 @@ func TestSource_AllDocuments_SyntaxError(t *testing.T) {
 				}
 			}
 
-			// File returns one syntax error as it is, and several joined
-			// in file order.
+			// File returns one syntax error as it is, and several in one
+			// binding of the Source, which Bindings walks in file order.
 			file, err := source.File()
 			require.Error(t, err)
 			assert.Nil(t, file)
@@ -3008,12 +3008,26 @@ func TestSource_AllDocuments_SyntaxError(t *testing.T) {
 			if len(failed) == 1 {
 				assert.Same(t, failed[0], err)
 			} else {
-				joined, ok := err.(interface{ Unwrap() []error }) //nolint:errorlint // The value itself is the join.
-				require.True(t, ok, "want a join, got %T", err)
-				require.Len(t, joined.Unwrap(), len(failed))
+				bound, ok := err.(*niceyaml.SourceError) //nolint:errorlint // The value itself is the bound error.
+				require.True(t, ok, "want *niceyaml.SourceError, got %T", err)
+				assert.Same(t, source, bound.Source())
+				assert.Same(t, err, source.Bind(err))
 
-				for i, branch := range joined.Unwrap() {
-					assert.Same(t, failed[i], branch)
+				_, inDoc := bound.DocumentIndex()
+				assert.False(t, inDoc)
+
+				// The binding of the file stops errors.As, so the error of
+				// each document comes from Bindings.
+				var target *niceyaml.SourceError
+
+				require.ErrorAs(t, err, &target)
+				assert.Same(t, bound, target)
+
+				parts := slices.Collect(niceyaml.Bindings(err))
+				require.Len(t, parts, len(failed))
+
+				for i, part := range parts {
+					assert.Same(t, failed[i], part)
 				}
 			}
 
@@ -3542,8 +3556,17 @@ func TestSource_ValidateDocuments(t *testing.T) {
 
 				_, fileErr := source.File()
 
+				// The call returns the very error File returns, not an
+				// equal one built anew.
 				for via, v := range validators {
-					assert.Equal(t, fileErr, source.ValidateDocuments(t.Context(), v), via)
+					err := source.ValidateDocuments(t.Context(), v)
+					if fileErr == nil {
+						require.NoError(t, err, via)
+
+						continue
+					}
+
+					assert.Same(t, fileErr, err, via)
 				}
 			})
 		}
@@ -3658,6 +3681,105 @@ func TestSource_ValidateDocuments(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestSource_ValidateDocuments_SeveralDocuments(t *testing.T) {
+	t.Parallel()
+
+	short := schema.MustCompile([]byte(`{"additionalProperties": {"maxLength": 1}}`))
+
+	// The documents of many lists one violation per document, more than
+	// the message lists.
+	var (
+		many     strings.Builder
+		manyRows []string
+	)
+
+	for i := range niceyaml.ErrorListLimit + 5 {
+		many.WriteString("---\na: xx\n")
+
+		if i < niceyaml.ErrorListLimit {
+			manyRows = append(manyRows, fmt.Sprintf("f.yaml:%d:4: $.a: string length 2 is greater than 1", 2*i+2))
+		}
+	}
+
+	tcs := map[string]struct {
+		input string
+		// The message of the result.
+		want string
+		// The number of documents that fail.
+		docs int
+	}{
+		// The heading of each document does not carry a position, and
+		// still comes before the syntax error of a later document.
+		"violations of several documents beside a syntax error": {
+			input: stringtest.LinesLF(
+				"a: xx",
+				"b: xx",
+				"---",
+				"a: xx",
+				"b: xx",
+				"---",
+				"x: [",
+			),
+			want: stringtest.JoinLF(
+				"f.yaml: document 1: 2 schema violations",
+				"f.yaml:1:4: $.a: string length 2 is greater than 1",
+				"f.yaml:2:4: $.b: string length 2 is greater than 1",
+				"f.yaml: document 2: 2 schema violations",
+				"f.yaml:4:4: $.a: string length 2 is greater than 1",
+				"f.yaml:5:4: $.b: string length 2 is greater than 1",
+				"f.yaml:7:4: "+unclosedSequence,
+			),
+			docs: 3,
+		},
+		"more violations than the message lists": {
+			input: many.String(),
+			want:  stringtest.JoinLF(append(manyRows, "f.yaml: and 5 more")...),
+			docs:  niceyaml.ErrorListLimit + 5,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input, niceyaml.WithName("f.yaml"))
+
+			err := source.ValidateDocuments(t.Context(), short)
+			require.EqualError(t, err, tc.want)
+
+			// One binding of the Source heads the binding of each
+			// document, whatever the number of documents.
+			bound, ok := err.(*niceyaml.SourceError) //nolint:errorlint // The value itself is the bound error.
+			require.True(t, ok, "want *niceyaml.SourceError, got %T", err)
+			assert.Same(t, source, bound.Source())
+			assert.Same(t, err, source.Bind(err))
+
+			_, inDoc := bound.DocumentIndex()
+			assert.False(t, inDoc)
+
+			var indexes []int
+
+			for part := range niceyaml.Bindings(err) {
+				index, ok := part.DocumentIndex()
+				require.True(t, ok)
+
+				indexes = append(indexes, index)
+			}
+
+			want := make([]int, tc.docs)
+			for i := range want {
+				want[i] = i
+			}
+
+			assert.Equal(t, want, indexes)
+
+			// Warnings.Report returns the binding as it is when it holds
+			// no warning.
+			assert.Same(t, err, niceyaml.NewWarnings().Report(err))
+		})
+	}
 }
 
 func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {

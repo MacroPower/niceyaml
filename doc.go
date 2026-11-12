@@ -184,11 +184,12 @@
 // together with the document above it. A syntax error in either document thus
 // fails both, and both return that one error. The two documents also share
 // one count of the document byte limit of [WithDocumentByteLimit].
-// [Source.File] returns the errors of the documents that did not parse as one
-// error. Each syntax error
-// matches [ErrSyntax], and each error of a document past a limit of the
-// Source matches [ErrLimit]. A text that is not UTF-8 does not parse at all.
-// The whole text is one document whose error matches [ErrEncoding].
+// [Source.File] returns the errors of the documents that did not parse in one
+// [*SourceError] bound to the Source, and [Bindings] yields the error of each
+// document from it. Each syntax error matches [ErrSyntax], and each error of
+// a document past a limit of the Source matches [ErrLimit]. A text that is
+// not UTF-8 does not parse at all. The whole text is one document whose error
+// matches [ErrEncoding].
 //
 // A document without content is empty, as [Node.IsEmpty] reports. A trailing
 // "---" leaves one, as in `name: x\n---\n`. So does a Helm template that
@@ -492,8 +493,10 @@
 // excerpt. The %+v verb and the LogValue methods show at most
 // [ErrorListLimit] problems and count the rest. An error with thousands of
 // problems thus reaches a log as a short text, but FormatError renders every
-// problem in its tree. A program that wants a short report from FormatError,
-// [NewErrorReport], or
+// problem in its tree. [Source.File] and [Source.ValidateDocuments] return
+// one SourceError for a file, however many of its documents fail, so the
+// cap holds for the errors of a whole file. A program that wants a short
+// report from FormatError, [NewErrorReport], or
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] passes
 // [WithProblemLimit]. The report then keeps the first problems of the tree
 // and the headings above them, and it counts the rest in
@@ -777,8 +780,8 @@
 // The Node of a document that did not parse returns the error of its parse
 // from [Node.Decode]. A loop over the documents thus gets that error beside
 // the errors of the documents that parsed. [Source.ValidateDocuments]
-// validates every document and joins their errors. The Documents section
-// describes syntax errors and empty documents.
+// validates every document and returns their errors in one [*SourceError].
+// The Documents section describes syntax errors and empty documents.
 //
 // [Node.Decode] returns a new value, and [Node.DecodeInto] fills one that the
 // caller holds. A decode runs these steps in order, and the first step that

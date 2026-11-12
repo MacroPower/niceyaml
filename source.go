@@ -1664,16 +1664,31 @@ func (s *Source) AllDocuments() []*Node {
 }
 
 // ValidateDocuments runs v on each document that [Source.Documents]
-// returns, in file order, as [Node.Validate] runs it. It joins the errors
-// that the documents return. A document that did not parse reports the
-// error of its parse, and two documents that parse together report theirs
-// once, as [Source.AllDocuments] describes. One call thus reports the
-// error of each document that did not parse beside what v reports for
-// each document that parsed:
+// returns, in file order, as [Node.Validate] runs it. A document that did
+// not parse reports the error of its parse, and two documents that parse
+// together report theirs once, as [Source.AllDocuments] describes. One
+// call thus reports the error of each document that did not parse beside
+// what v reports for each document that parsed:
 //
 //	err := source.ValidateDocuments(ctx, niceyaml.MultiValidator(schema, names))
 //	if err != nil {
 //		log.Print(niceyaml.FormatError(err))
+//	}
+//
+// The result is the error of the one document that fails, or else one
+// [*SourceError] bound to the Source. That binding heads the error of
+// each document that fails, in file order. Its message and its %+v verb thus
+// list at most [ErrorListLimit] problems, however many documents fail.
+// [errors.As] with a *SourceError target finds that binding itself, and
+// [Bindings] yields each error that the result heads. An error bound to a
+// document reports its index through [SourceError.DocumentIndex]. The
+// error of ctx is bound to the Source alone and reports no index:
+//
+//	for bound := range niceyaml.Bindings(err) {
+//		if index, ok := bound.DocumentIndex(); ok {
+//			fmt.Printf("document %d\n", index+1)
+//		}
+//		fmt.Println(niceyaml.FormatError(bound))
 //	}
 //
 // It leaves out the empty documents that Source.Documents leaves out. The
@@ -1726,7 +1741,13 @@ func (s *Source) ValidateDocuments(ctx context.Context, v Validator) error {
 		errs = append(errs, s.Bind(err))
 	}
 
-	return multierr.Join(errs)
+	// When the documents report the errors of the parse alone, the result
+	// is the error that [Source.File] returns.
+	if p := s.parsed.get(s.parse); slices.Equal(errs, p.errs) {
+		return p.err
+	}
+
+	return s.Bind(multierr.Join(errs))
 }
 
 // documents returns the root [*Node] of each YAML document, as
@@ -1783,8 +1804,6 @@ func pickContentDocuments(docs []*Node) []*Node {
 // when a "..." marker rather than a header opens it. Use Source.Documents
 // for a file that might hold several.
 func (s *Source) Document() (*Node, error) {
-	// The parse bound each syntax error already, and binding the join of
-	// several anew would return another error than File does.
 	_, err := s.File()
 	if err != nil {
 		return nil, err
@@ -1940,10 +1959,12 @@ func (s *Source) single() (*Node, error) {
 // A file with a document that did not parse does not have a tree. For such
 // a file, File returns nil and an error that covers every document that
 // did not parse, as the Documents section of the package documentation
-// describes. One such error comes back as a [*SourceError], and several
-// come back joined, in file order, each bound to its own document. Every
-// syntax error matches [ErrSyntax], and its message draws each control
-// character as [go.jacobcolvin.com/niceyaml/escape.Control] draws it. The
+// describes. The error is a [*SourceError]. It is the error of the one
+// document that did not parse, or else a binding to the Source that heads
+// the error of each such document in file order. Each of those errors is
+// bound to its own document, and [Bindings] yields them. Every syntax
+// error matches [ErrSyntax], and its message draws each control character
+// as [go.jacobcolvin.com/niceyaml/escape.Control] draws it. The
 // error of a document past the depth limit or the document byte limit,
 // or of a text past the byte limit, matches [ErrLimit] and not ErrSyntax.
 // The error of a text that is not UTF-8 matches [ErrEncoding] and not
@@ -1964,8 +1985,11 @@ type parsedFile struct {
 	// The file, the copies of the tokens the parser read, and the runs
 	// that did not parse.
 	result *docparse.Result
-	// The error of the one run that did not parse, or the join of the
-	// errors of several, each bound to the Source.
+	// The error of each run that did not parse, in file order, each bound
+	// to its document.
+	errs []error
+	// The binding of the join of errs, which heads the binding of each
+	// run, or nil when every run parsed.
 	err error
 	// The root of each document of the file, in file order.
 	docs []*Node
@@ -1989,7 +2013,16 @@ func (s *Source) parse() *parsedFile {
 
 	docs := newDocuments(s, r.Documents(tks, s.lines.Len()), errs)
 
-	return &parsedFile{result: r, err: multierr.Join(errs), docs: docs, content: pickContentDocuments(docs)}
+	// The documents bound each error, so the join binds after them. The
+	// binder does not route, because routing reads the documents that this
+	// parse builds.
+	return &parsedFile{
+		result:  r,
+		errs:    errs,
+		err:     bindTree(multierr.Join(errs), binder{src: s}),
+		docs:    docs,
+		content: pickContentDocuments(docs),
+	}
 }
 
 // parseTokens returns the parse of tks, the tokens of the Source. A text
