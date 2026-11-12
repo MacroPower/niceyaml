@@ -62,6 +62,15 @@
 //	    require.NoError(t, schema.CheckFields[Config]())
 //	}
 //
+// A program that decodes a type whole through a
+// [go.jacobcolvin.com/niceyaml.CustomUnmarshaler] or through
+// [go.jacobcolvin.com/niceyaml.JSONUnmarshalers] passes CheckFields the
+// unmarshalers that it gives its Source. The check then skips each such
+// type, as it skips a type with an UnmarshalYAML method, and still checks
+// the fields of every other struct:
+//
+//	require.NoError(t, schema.CheckFields[Config](unmarshalers...))
+//
 // # Validation
 //
 // [Compile] turns a JSON schema document, in JSON or YAML, into a

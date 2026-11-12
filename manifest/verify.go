@@ -42,6 +42,16 @@ import (
 //	require.NoError(t, schema.CheckFields[config.Cafe]())
 //	require.NoError(t, config.Registry.Verify(t.Context()))
 //
+// The test passes CheckFields the unmarshalers that the decodes of the
+// kind apply, in the order that they apply them. The unmarshalers of
+// [WithUnmarshalers] come first, and the unmarshalers of the Source of
+// the document follow. Last come the unmarshalers that each
+// [niceyaml.WithUnmarshaler] in [WithDecodeOptions] or in the
+// [DecodeOptions] of the kind holds. The check then skips each type that
+// those decodes read whole:
+//
+//	require.NoError(t, schema.CheckFields[config.Cafe](unmarshalers...))
+//
 // [niceyaml.Problems] yields each row of the error, and each row matches
 // one sentinel. A row of a schema that fails matches [schema.ErrLoad] or
 // [schema.ErrCompile]. Each section of this documentation names the

@@ -2,6 +2,7 @@ package genfield_test
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 	"go.jacobcolvin.com/x/jsonschema"
 
 	"go.jacobcolvin.com/niceyaml/internal/genfield"
+	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 )
 
 type inner struct {
@@ -32,6 +34,16 @@ func (provided) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.
 	return jsonschema.TypeSchema{}, nil
 }
 
+// quantity decodes itself through UnmarshalJSON when a decode turns on
+// those methods.
+type quantity struct {
+	Value int
+}
+
+func (q *quantity) UnmarshalJSON(b []byte) error {
+	return json.Unmarshal(b, &q.Value) //nolint:wrapcheck // The test returns the error as it is.
+}
+
 const (
 	embedWant = `mixed.inner: embedded struct needs yaml:",inline", because gen reads it inline ` +
 		`and the decode nests it`
@@ -42,8 +54,9 @@ func TestCheck(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		typ  reflect.Type
-		want []string
+		typ          reflect.Type
+		unmarshalers unmarshaler.Options
+		want         []string
 	}{
 		"rules for inline fields and names": {
 			typ:  reflect.TypeFor[mixed](),
@@ -79,6 +92,19 @@ func TestCheck(t *testing.T) {
 		"type that supplies its own schema": {
 			typ: reflect.TypeFor[provided](),
 		},
+		"type that the unmarshalers decode whole": {
+			typ:          reflect.TypeFor[struct{ Q quantity }](),
+			unmarshalers: unmarshaler.Options{JSON: true},
+			want: []string{`struct { Q genfield_test.quantity }.Q: ` +
+				`field needs json:"q", because gen names it "Q" and the decode reads "q"`},
+		},
+		"type that the zero unmarshalers decode by field": {
+			typ: reflect.TypeFor[struct {
+				Q quantity `json:"q"`
+			}](),
+			want: []string{`quantity.Value: field needs json:"value", because gen names it "Value" ` +
+				`and the decode reads "value"`},
+		},
 		"map with the embed option that the decoder skips": {
 			typ: reflect.TypeFor[struct {
 				Extra map[string]string `json:",embed" yaml:"-"`
@@ -93,7 +119,7 @@ func TestCheck(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, genfield.Check(tc.typ))
+			assert.Equal(t, tc.want, genfield.Check(tc.typ, tc.unmarshalers))
 		})
 	}
 }

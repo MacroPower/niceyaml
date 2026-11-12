@@ -8,6 +8,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml/internal/decodetree"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
+	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 )
@@ -97,6 +98,17 @@ func init() {
 		// the tree.
 		return decodetree.Changes(d.root.Body, d.state.Facts(), len(d.node.source.references) > 0) &&
 			d.tree().Changed()
+	}
+	hook.Unmarshalers = func(us any) unmarshaler.Options {
+		list, _ := us.([]Unmarshaler) //nolint:errcheck // The hook takes a []Unmarshaler.
+
+		var o unmarshaler.Options
+
+		for _, u := range list {
+			u.applyTo(&o)
+		}
+
+		return o
 	}
 	hook.KnownKeys = func(keys []paths.Path) any {
 		keys = slices.Clone(keys)

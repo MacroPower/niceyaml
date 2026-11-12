@@ -2,6 +2,9 @@ package schema_test
 
 import (
 	"context"
+	"encoding/json"
+	"net"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -122,6 +125,71 @@ type (
 	holdsProvided struct {
 		Server provided `json:"server"`
 	}
+
+	holdsEndpoint struct {
+		Endpoint endpoint `json:"endpoint"`
+		Timeout  int
+	}
+
+	holdsQuantity struct {
+		Memory quantity `json:"memory"`
+	}
+)
+
+// endpoint stands for a type of another package, whose fields the
+// program cannot tag. A [niceyaml.CustomUnmarshaler] decodes it whole.
+type endpoint struct {
+	Host string
+	Port int
+}
+
+// quantity stands for a type of another package that decodes itself
+// through UnmarshalJSON, as [niceyaml.JSONUnmarshalers] turns on.
+type quantity struct {
+	Value int
+	Unit  string
+}
+
+func (q *quantity) UnmarshalJSON(b []byte) error {
+	var s string
+
+	err := json.Unmarshal(b, &s)
+	if err != nil {
+		return err //nolint:wrapcheck // The test returns the error as it is.
+	}
+
+	q.Unit = strings.TrimLeft(s, "0123456789")
+
+	v, err := strconv.Atoi(strings.TrimSuffix(s, q.Unit))
+	if err != nil {
+		return err //nolint:wrapcheck // The test returns the error as it is.
+	}
+
+	q.Value = v
+
+	return nil
+}
+
+// decodeEndpoint decodes an [endpoint] from its "host:port" text.
+var decodeEndpoint = niceyaml.CustomUnmarshaler(
+	func(_ context.Context, e *endpoint, decode func(any) error) error {
+		var s string
+
+		err := decode(&s)
+		if err != nil {
+			return err
+		}
+
+		host, port, err := net.SplitHostPort(s)
+		if err != nil {
+			return err //nolint:wrapcheck // The test returns the error as it is.
+		}
+
+		e.Host = host
+		e.Port, err = strconv.Atoi(port)
+
+		return err //nolint:wrapcheck // The test returns the error as it is.
+	},
 )
 
 // provided supplies its own schema, which names its field as the decoder
@@ -172,7 +240,7 @@ type fieldsCase struct {
 // fieldsCaseFor returns a [fieldsCase] for T.
 func fieldsCaseFor[T any](input string, want ...string) fieldsCase {
 	return fieldsCase{
-		check: schema.CheckFields[T],
+		check: func() error { return schema.CheckFields[T]() },
 		gen: func(t *testing.T) *schema.Schema {
 			t.Helper()
 
@@ -298,4 +366,100 @@ func TestCheckFields(t *testing.T) {
 			require.Error(t, doc.Validate(t.Context(), tc.gen(t)), "the generated schema rejects the input")
 		})
 	}
+}
+
+func TestCheckFieldsUnmarshalers(t *testing.T) {
+	t.Parallel()
+
+	endpointWant := []string{
+		`holdsEndpoint.Timeout: field needs json:"timeout", because gen names it "Timeout" ` +
+			`and the decode reads "timeout"`,
+		`endpoint.Host: field needs json:"host", because gen names it "Host" and the decode reads "host"`,
+		`endpoint.Port: field needs json:"port", because gen names it "Port" and the decode reads "port"`,
+	}
+	timeoutWant := endpointWant[:1]
+	quantityWant := []string{
+		`quantity.Value: field needs json:"value", because gen names it "Value" and the decode reads "value"`,
+		`quantity.Unit: field needs json:"unit", because gen names it "Unit" and the decode reads "unit"`,
+	}
+
+	tcs := map[string]struct {
+		check func(us ...niceyaml.Unmarshaler) error
+		us    []niceyaml.Unmarshaler
+		want  []string
+	}{
+		"type without an unmarshaler": {
+			check: schema.CheckFields[holdsEndpoint],
+			want:  endpointWant,
+		},
+		"custom unmarshaler": {
+			check: schema.CheckFields[holdsEndpoint],
+			us:    []niceyaml.Unmarshaler{decodeEndpoint},
+			want:  timeoutWant,
+		},
+		"nil function removes a custom unmarshaler": {
+			check: schema.CheckFields[holdsEndpoint],
+			us:    []niceyaml.Unmarshaler{decodeEndpoint, niceyaml.CustomUnmarshaler[endpoint](nil)},
+			want:  endpointWant,
+		},
+		"UnmarshalJSON methods off": {
+			check: schema.CheckFields[holdsQuantity],
+			want:  quantityWant,
+		},
+		"UnmarshalJSON methods on": {
+			check: schema.CheckFields[holdsQuantity],
+			us:    []niceyaml.Unmarshaler{niceyaml.JSONUnmarshalers(true)},
+		},
+		"last JSONUnmarshalers applies": {
+			check: schema.CheckFields[holdsQuantity],
+			us:    []niceyaml.Unmarshaler{niceyaml.JSONUnmarshalers(true), niceyaml.JSONUnmarshalers(false)},
+			want:  quantityWant,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tc.check(tc.us...)
+			if len(tc.want) == 0 {
+				require.NoError(t, err)
+
+				return
+			}
+
+			want := make([]string, 0, len(tc.want))
+			for _, msg := range tc.want {
+				want = append(want, schema.ErrFieldMismatch.Error()+": "+msg)
+			}
+
+			require.ErrorIs(t, err, schema.ErrFieldMismatch)
+			require.EqualError(t, err, strings.Join(want, "\n"))
+		})
+	}
+}
+
+func TestCheckFieldsUnmarshalersMatchDecode(t *testing.T) {
+	t.Parallel()
+
+	us := []niceyaml.Unmarshaler{decodeEndpoint, niceyaml.JSONUnmarshalers(true)}
+
+	type config struct {
+		Endpoint endpoint `json:"endpoint"`
+		Memory   quantity `json:"memory"`
+	}
+
+	require.NoError(t, schema.CheckFields[config](us...))
+
+	doc := yamltest.FirstDocument(t, "endpoint: a.test:80\nmemory: 64Mi\n")
+
+	got, err := doc.Decode[config](t.Context(),
+		niceyaml.WithUnmarshaler(us...),
+		niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject),
+	)
+	require.NoError(t, err)
+	require.Equal(t, config{
+		Endpoint: endpoint{Host: "a.test", Port: 80},
+		Memory:   quantity{Value: 64, Unit: "Mi"},
+	}, got)
 }
