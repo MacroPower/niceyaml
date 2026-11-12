@@ -173,6 +173,35 @@ func (d heldSpecContextDoc) ValidateContext(ctx context.Context) error {
 	}{d.Spec})
 }
 
+// heldSpecHookDoc holds a spec that a decode does not reach. Its
+// ValidateContext checks the spec with SelfValidateValue and a collector
+// derived from its context. It moves the result under the path of the spec
+// and returns the warnings beside the errors.
+type heldSpecHookDoc struct {
+	Spec  any    `yaml:"-"`
+	Extra string `yaml:"extra"`
+}
+
+func (d heldSpecHookDoc) ValidateContext(ctx context.Context) error {
+	warnings := niceyaml.NewWarnings()
+
+	err := niceyaml.SelfValidateValue(warnings.Context(ctx), d.Spec)
+
+	//nolint:wrapcheck // The decode places the error as it is.
+	return niceyaml.Rebase(errors.Join(err, warnings.Err()), paths.Current().Child("spec"))
+}
+
+// notedError wraps an error in a value that a map cannot hash, because it
+// holds a slice.
+type notedError struct {
+	err   error
+	notes []string
+}
+
+func (e notedError) Error() string { return strings.Join(e.notes, ", ") + ": " + e.err.Error() }
+
+func (e notedError) Unwrap() error { return e.err }
+
 // contextSpec is a [warningSpec] whose check takes the context of the
 // call and returns its warnings beside its errors.
 type contextSpec struct {
@@ -1107,6 +1136,103 @@ func TestWarnings(t *testing.T) {
 			err:      "cafe.yaml:2:10: $.spec.seats: seats must be even",
 			warnings: "cafe.yaml:2:10: warning: $.spec.seats: fewer than 10 seats",
 		},
+		"a ValidateContext that returns the warnings of a collector from its context": {
+			run: func(_ *testing.T, ctx context.Context) error {
+				return doc.DecodeInto(ctx, &heldSpecHookDoc{Spec: warningSpec{Seats: 3}})
+			},
+			warnings: "cafe.yaml:2:10: warning: $.spec.seats: fewer than 10 seats",
+		},
+		"a ValidateContext that returns the warnings of a failing call": {
+			run: func(_ *testing.T, ctx context.Context) error {
+				return doc.DecodeInto(ctx, &heldSpecHookDoc{Spec: mixedSpec{}})
+			},
+			err:      "cafe.yaml:2:10: $.spec.seats: seats must be even",
+			warnings: "cafe.yaml:2:10: warning: $.spec.seats: fewer than 10 seats",
+		},
+		"a value check that returns the warnings of a collector from its context": {
+			run: func(_ *testing.T, ctx context.Context) error {
+				var got plainCafeDoc
+
+				return doc.DecodeInto(
+					ctx,
+					&got,
+					niceyaml.WithValueCheck(func(ctx context.Context, _ *plainCafeDoc) error {
+						warnings := niceyaml.NewWarnings()
+						err := niceyaml.SelfValidateValue(warnings.Context(ctx), warningSpec{Seats: 4})
+
+						return niceyaml.Rebase(errors.Join(err, warnings.Err()), paths.Current().Child("spec"))
+					}),
+				)
+			},
+			warnings: "cafe.yaml:2:10: warning: $.spec.seats: fewer than 10 seats",
+		},
+		"a validator that returns the warnings of a collector from its context": {
+			run: func(_ *testing.T, ctx context.Context) error {
+				return doc.Validate(ctx, niceyaml.ValidatorFunc(func(ctx context.Context, _ *niceyaml.Node) error {
+					warnings := niceyaml.NewWarnings()
+					err := niceyaml.SelfValidateValue(warnings.Context(ctx), warningSpec{Seats: 4})
+
+					return fmt.Errorf(
+						"spec: %w",
+						niceyaml.Rebase(errors.Join(err, warnings.Err()), paths.Current().Child("spec")),
+					)
+				}))
+			},
+			warnings: "cafe.yaml:2:10: warning: $.spec.seats: fewer than 10 seats",
+		},
+		"a failing validator whose nested check returns a warning in a wrapper of a value type": {
+			run: func(_ *testing.T, ctx context.Context) error {
+				return doc.Validate(ctx, niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+					err := n.Validate(ctx, niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+						return notedError{err: n.Bind(niceyaml.NewWarning("old layout")), notes: []string{"noted"}}
+					}))
+					if err != nil {
+						return fmt.Errorf("nested check: %w", err)
+					}
+
+					return errors.New("boom")
+				}))
+			},
+			err:      "cafe.yaml: boom",
+			warnings: "noted: cafe.yaml: warning: old layout",
+		},
+		"a validator that returns a warning of the same error that its nested check warns at another node": {
+			run: func(_ *testing.T, ctx context.Context) error {
+				old := niceyaml.NewWarning("old layout")
+
+				return doc.Validate(ctx, niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+					warnings := niceyaml.NewWarnings()
+					err := n.Validate(
+						warnings.Context(ctx),
+						niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+							n.Warn(ctx, old)
+
+							return nil
+						}),
+					)
+					if err != nil {
+						return fmt.Errorf("nested check: %w", err)
+					}
+
+					return niceyaml.Rebase(old, paths.Current().Child("extra"))
+				}))
+			},
+			warnings: stringtest.JoinLF(
+				"cafe.yaml: 2 warnings",
+				"cafe.yaml:3:8: warning: $.extra: old layout",
+				"cafe.yaml: warning: old layout",
+			),
+		},
+		"a SelfValidateValue whose ValidateContext returns the warnings of a collector from its context": {
+			run: func(_ *testing.T, ctx context.Context) error {
+				return niceyaml.SelfValidateValue(ctx, heldSpecHookDoc{Spec: []warningSpec{{Seats: 3}, {Seats: 5}}})
+			},
+			warnings: stringtest.JoinLF(
+				"2 warnings",
+				"warning: $.spec[0].seats: fewer than 10 seats",
+				"warning: $.spec[1].seats: fewer than 10 seats",
+			),
+		},
 		"a ValidateContext that returns a warning": {
 			run: func(_ *testing.T, ctx context.Context) error {
 				var got contextCafeDoc
@@ -1233,6 +1359,49 @@ func TestWarnings(t *testing.T) {
 			check(t, tc.run(t, t.Context()))
 		})
 	}
+
+	t.Run("a value check returns the warnings of a collector from its context as errors", func(t *testing.T) {
+		t.Parallel()
+
+		// The check returns each warning that it handed to its context, so
+		// the decode does not report that warning beside the error.
+		warnings := niceyaml.NewWarnings()
+
+		var got plainCafeDoc
+
+		err := doc.DecodeInto(warnings.Context(t.Context()), &got, niceyaml.WithValueCheck(
+			func(ctx context.Context, _ *plainCafeDoc) error {
+				held := niceyaml.NewWarnings()
+				err := niceyaml.SelfValidateValue(held.Context(ctx), warningSpec{Seats: 4})
+
+				return niceyaml.AsErrors(niceyaml.Rebase(errors.Join(err, held.Err()), paths.Current().Child("spec")))
+			},
+		))
+		require.EqualError(t, err, "cafe.yaml:2:10: $.spec.seats: fewer than 10 seats")
+		require.NoError(t, warnings.Err())
+	})
+
+	t.Run("a validator returns the warnings of a collector from its context as errors", func(t *testing.T) {
+		t.Parallel()
+
+		// The nested check binds its warning to the document, so the
+		// errors the validator returns hold a copy of that binding.
+		warnings := niceyaml.NewWarnings()
+
+		err := doc.Validate(warnings.Context(t.Context()), niceyaml.ValidatorFunc(
+			func(ctx context.Context, n *niceyaml.Node) error {
+				held := niceyaml.NewWarnings()
+				err := n.Validate(held.Context(ctx), oldSpec)
+				if err != nil {
+					return fmt.Errorf("nested check: %w", err)
+				}
+
+				return niceyaml.AsErrors(held.Err())
+			},
+		))
+		require.EqualError(t, err, "cafe.yaml:1:1: $.spec~: old spec")
+		require.NoError(t, warnings.Err())
+	})
 
 	t.Run("a parent validates after a child warns, and the decode passes", func(t *testing.T) {
 		t.Parallel()

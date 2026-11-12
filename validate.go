@@ -147,21 +147,21 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error 
 //		}{p.Upstreams})
 //	}
 //
-// The walk places each warning that the method hands to its context at
-// the value of the method, under the path that the warning names. A
-// [Warnings] that the method derives from its context hands each warning
-// to the walk as well. So a method that passes p.Upstreams alone and
-// moves the result under its path with [Rebase] reports each warning
-// twice, and one of the two names the wrong path.
-//
-// A Validate method of a [SelfValidator] does not get a context, so it
-// collects the warnings of the call with a Warnings of its own. It
-// returns them beside its errors, and the walk places both:
+// A method can also pass p.Upstreams alone. It then collects the warnings
+// of the call with a [Warnings] of its own and returns them beside its
+// errors. It moves the result under the path of the field with [Rebase],
+// and the walk places both. A Validate method of a [SelfValidator] does not
+// get a context, so it derives its collector from [context.Background]:
 //
 //	warnings := niceyaml.NewWarnings()
 //	err := niceyaml.SelfValidateValue(warnings.Context(context.Background()), p.Upstreams)
 //
 //	return niceyaml.Rebase(errors.Join(err, warnings.Err()), paths.Current().Child("upstreams"))
+//
+// A ValidateContext method can derive its collector from its own context
+// instead. That collector hands each warning to the walk as well, as
+// [Warnings.Context] describes. The walk reports each warning that the
+// method also returns once, at the path of the result.
 //
 // A method must not pass its own receiver to SelfValidateValue, because
 // the call then runs that method again without end. A method that passes
