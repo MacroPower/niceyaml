@@ -142,7 +142,28 @@ func (d *document) pastAliasLimit() bool {
 //
 // Receive instances from [Source.Documents], [Source.AllDocuments],
 // [Source.Document], [Node.At], [Node.Nodes], [Node.Document],
-// [SourceError.Node], or [SourceError.Document].
+// [SourceError.Node], or [SourceError.Document]. The zero Node is not a
+// valid Node.
+//
+// A nil Node does not belong to a document. Its readers return zero values
+// or false, and [Node.View] returns a view without lines. The readers are
+// [Node.Err], [Node.AST], [Node.DocumentAST], [Node.Document],
+// [Node.Source], [Node.FilePath], [Node.FS], [Node.Path], [Node.Tokens],
+// [Node.Preamble], [Node.Text], [Node.Scalar], [Node.Span], [Node.Range],
+// [Node.KeyRange], [Node.PathAt], [Node.NodeAt], [Node.Kind],
+// [Node.IsEmpty], [Node.Target], [Node.Origin], and [Node.MarshalYAML].
+// [Node.Bind] returns nil for a nil error, and [Node.Warn] does nothing
+// for one. The methods that need the document panic on a nil Node. They
+// are [Node.At], [Node.Nodes], [Node.Ranges], [Node.Decode],
+// [Node.DecodeInto], [Node.DecodeAt], [Node.DecodeIfPresent],
+// [Node.YAMLComments], [Node.Validate], [Node.SelfValidate],
+// [Node.DocumentResolver], [Node.DataLocator], [Node.DocumentIndex], and
+// [Node.Bind] and [Node.Warn] of an error that is not nil.
+//
+// [SourceError.Node], [SourceError.Document], [Source.DocumentAt], and
+// [Node.NodeAt] return a nil Node with false. A report thus reads the
+// file path, the path, and the lines of the Node of each problem without
+// checking for nil.
 //
 // The Decoding section of the package documentation describes the steps
 // a decode runs. The Scoped Nodes section describes what a Node from
@@ -193,9 +214,10 @@ type Node struct {
 // that [Source.File] returns. Every Node of the Source shares that tree
 // and resolves against it, so a caller must not modify the node. A
 // document that did not parse does not have a node, so DocumentAST
-// returns nil for it, as [Node.Err] describes.
+// returns nil for it, as [Node.Err] describes. It also returns nil for a
+// nil Node.
 func (n *Node) DocumentAST() *ast.DocumentNode {
-	if n.doc.err != nil {
+	if n == nil || n.doc.err != nil {
 		return nil
 	}
 
@@ -343,7 +365,13 @@ func (n *Node) Document() *Node {
 // resolver follows. [Node.Kind] looks through the tag and the alias,
 // and reports whether the Node holds a mapping, a sequence, or a
 // scalar.
+//
+// AST returns nil for a nil Node.
 func (n *Node) AST() ast.Node {
+	if n == nil {
+		return nil
+	}
+
 	if n.base.IsRoot() {
 		return n.doc.root.Body
 	}
@@ -729,12 +757,21 @@ func (n *Node) lastContentLine(tk *token.Token) (int, bool) {
 // for the first match of `$.items[*]` reports `$.items[0]`. The path
 // starts at `$`, so a caller can pass it to [Node.At], [Node.Ranges], or
 // [AtPath] through any Node of the document. It names the same node there.
+// A nil Node returns the zero [paths.Path].
 func (n *Node) Path() paths.Path {
+	if n == nil {
+		return paths.Path{}
+	}
+
 	return n.base
 }
 
-// Source returns the [*Source] the node came from.
+// Source returns the [*Source] the node came from, or nil for a nil Node.
 func (n *Node) Source() *Source {
+	if n == nil {
+		return nil
+	}
+
 	return n.source
 }
 
@@ -752,6 +789,9 @@ func (n *Node) Source() *Source {
 // lines, so "document 3" in [SourceError.Error] is the document at
 // index 2. [SourceError.DocumentIndex] reports the index of the document
 // an error is bound to, for a caller that holds the error but not a Node.
+//
+// DocumentIndex panics on a nil Node, because the index 0 names the first
+// document.
 func (n *Node) DocumentIndex() int {
 	return n.doc.index
 }
@@ -768,9 +808,9 @@ func (n *Node) DocumentIndex() int {
 // path returns the tokens of the root. For a Node that Node.At scopes
 // below the root, they run from the first token under the node through
 // the last, comments between them included. They are nil when the
-// scope does not select anything. The slice is a copy, so reordering it
-// does not affect the Node. Every Node shares the tokens themselves, so a
-// caller must not modify them.
+// scope does not select anything, and for a nil Node. The slice is a
+// copy, so reordering it does not affect the Node. Every Node shares the
+// tokens themselves, so a caller must not modify them.
 //
 // The go-yaml parser does not read these tokens as they are, as
 // [Source.Tokens] describes. Hand the parser the stream that
@@ -779,6 +819,10 @@ func (n *Node) DocumentIndex() int {
 // tree that File builds, take the File of a second Source, as Source.File
 // describes.
 func (n *Node) Tokens() token.Tokens {
+	if n == nil {
+		return nil
+	}
+
 	return slices.Clone(n.content)
 }
 
@@ -862,8 +906,12 @@ func (n *Node) Text() string {
 // in the preamble of the document it describes. A document without
 // content, such as one holding comments alone, is all preamble. The slice
 // is a copy of shared tokens that a caller must not modify, as for
-// [Node.Tokens].
+// [Node.Tokens]. Preamble returns nil for a nil Node.
 func (n *Node) Preamble() token.Tokens {
+	if n == nil {
+		return nil
+	}
+
 	return slices.Clone(n.doc.tokens[:n.doc.preamble])
 }
 
@@ -871,7 +919,7 @@ func (n *Node) Preamble() token.Tokens {
 // [Source.FilePath]. It is absolute for a document [NewSourceFromFile]
 // read, so a schema routes on the file and not on how the caller
 // spelled its path. It returns an empty string when the source does not
-// have a path.
+// have a path, and for a nil Node.
 //
 // The document that [NewSourceFromLayers] builds did not come from a file.
 // Its Source has the path of the layer [MergeAs] names, or else of the
@@ -879,17 +927,17 @@ func (n *Node) Preamble() token.Tokens {
 // its value. [Node.Origin] returns the Node of the value in the file of
 // its layer, and FilePath of that Node names the file.
 func (n *Node) FilePath() string {
-	return n.source.FilePath()
+	return n.Source().FilePath()
 }
 
 // FS returns the file system that [Node.FilePath] names a file in, which
-// is [Source.FS]. It returns nil when the source does not have one. A path
-// then names a file on disk. A Node of the document that
-// [NewSourceFromLayers] builds returns the file system of the layer
-// [MergeAs] names, or else of the lowest layer, as [Node.FilePath]
-// describes.
+// is [Source.FS]. It returns nil when the source does not have one, and a
+// path then names a file on disk. It also returns nil for a nil Node. A
+// Node of the document that [NewSourceFromLayers] builds returns the file
+// system of the layer [MergeAs] names, or else of the lowest layer, as
+// [Node.FilePath] describes.
 func (n *Node) FS() fs.FS {
-	return n.source.FS()
+	return n.Source().FS()
 }
 
 // Span returns the lines of [Source.Lines] that the node covers. A whole
@@ -898,7 +946,7 @@ func (n *Node) FS() fs.FS {
 // to the end of the source. The first document also covers the lines
 // above its first token, so the spans of a source cover every one of its
 // lines. A document without tokens, other than the first, does not cover
-// any line.
+// any line, and neither does a nil Node.
 //
 // A path that selects the root gives the root, so [Node.At] and
 // [Node.Nodes] of such a path return the span of the whole document. A
@@ -939,6 +987,10 @@ func (n *Node) FS() fs.FS {
 // the lines of Span widen to the key that introduces a collection, so
 // Span is not Range rounded to lines.
 func (n *Node) Span() position.Span {
+	if n == nil {
+		return position.Span{}
+	}
+
 	return n.span
 }
 
@@ -1092,8 +1144,13 @@ func (n *Node) rangeOf(node ast.Node) (position.Range, bool) {
 // does, and [line.View.Held] returns its lines on their own. The view
 // shares its lines with every view over the source. [SourceError.Annotate]
 // thus marks a bound error on it when the location of the error lies in
-// the span, and reports false otherwise, as Node.Span describes.
+// the span, and reports false otherwise, as Node.Span describes. A nil
+// Node returns a view without lines, as a nil [Source] does.
 func (n *Node) View() *line.View {
+	if n == nil {
+		return n.Source().View()
+	}
+
 	return line.NewViewWithin(n.source.lines, n.span)
 }
 
@@ -1376,12 +1433,16 @@ func (n *Node) bindAlias(path paths.Path, reason error) (error, bool) {
 // as separate bindings, bind each one before joining them.
 //
 // Bind returns nil for a nil err, and for a nil [*Error] or
-// [*SourceError] pointer. Bind returns an already bound error unchanged,
-// so Bind is idempotent. The Errors section defines a bound error. Bind
-// never modifies err. In a document that did not parse, a path does not
-// resolve, and [SourceError.Unresolved] returns [ErrPathNeedsDocument]
-// wrapping the error of the parse.
+// [*SourceError] pointer, even on a nil Node. Bind returns an already
+// bound error unchanged, so Bind is idempotent. The Errors section
+// defines a bound error. Bind never modifies err. In a document that did
+// not parse, a path does not resolve, and [SourceError.Unresolved]
+// returns [ErrPathNeedsDocument] wrapping the error of the parse.
 func (n *Node) Bind(err error) error {
+	if isNothing(err) {
+		return nil
+	}
+
 	return bindTree(err, binder{src: n.source, node: n, locate: true})
 }
 

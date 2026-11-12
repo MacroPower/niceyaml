@@ -553,6 +553,14 @@ func TestRefBeside(t *testing.T) {
 		_, err := schema.RefBeside(noPath, "./schema.json")
 		require.ErrorIs(t, err, schema.ErrNoBaseDir)
 
+		// A nil document reads as a document without a file path.
+		_, err = schema.RefBeside(nil, "./schema.json")
+		require.ErrorIs(t, err, schema.ErrNoBaseDir)
+
+		ref, err := schema.RefBeside(nil, "https://example.com/schema.json")
+		require.NoError(t, err)
+		assert.Equal(t, "https://example.com/schema.json", ref.Key())
+
 		// A file system alone gives the document no directory either.
 		orphan := yamltest.FirstDocument(t, "kind: App\n", niceyaml.WithFS(bundle))
 
