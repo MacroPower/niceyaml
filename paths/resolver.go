@@ -21,8 +21,7 @@ import (
 // [errors.As], and read the alias from [AliasError.Alias] or its position
 // from [AliasError.Position].
 type AliasError struct {
-	// Alias is the alias that does not resolve. It is nil when
-	// [Resolver.Anchor] gets a node that is not an alias.
+	// Alias is the alias that does not resolve.
 	Alias *ast.AliasNode
 	// Cause says why the alias does not resolve. It wraps [ErrAlias]. A
 	// nil Cause stands for ErrAlias itself.
@@ -747,24 +746,25 @@ func (f *EntryFinder) Entry(node ast.Node, name string) (*ast.MappingValueNode, 
 	return entry, nil
 }
 
-// Anchor returns the anchor that node refers to when node is an alias.
-// The result is the anchor whose content [Resolver.Deref] reaches first
-// when it follows the alias. Where the anchor holds another alias, Anchor
-// stops at the anchor, but Deref continues to the content of the anchor
-// that the second alias refers to. Anchor also returns the anchor of an
-// alias that leads back to itself, such as one inside the content of that
-// anchor. Deref rejects such an alias.
+// Anchor returns the anchor that alias refers to. The result is the
+// anchor whose content [Resolver.Deref] reaches first when it follows the
+// alias. Where the anchor holds another alias, Anchor stops at the anchor,
+// but Deref continues to the content of the anchor that the second alias
+// refers to. Anchor also returns the anchor of an alias that leads back to
+// itself, such as one inside the content of that anchor. Deref rejects
+// such an alias.
 //
-// Returns an [*AliasError] wrapping [ErrAlias] when node is not an alias.
-// It returns one too for an alias that does not have a name or does not
-// name an anchor before it. The AliasError of a node that is not an alias
-// holds a nil alias. The error of an alias whose anchor a reference
-// document defines wraps [ErrReferenceAlias] too, as
-// [WithReferenceAnchors] describes.
-func (r *Resolver) Anchor(node ast.Node) (*ast.AnchorNode, error) {
-	alias, ok := node.(*ast.AliasNode)
-	if !ok || alias == nil {
-		return nil, fmt.Errorf("anchor: %w", &AliasError{Cause: fmt.Errorf("%w: not an alias", ErrAlias)})
+// The document holds a tagged alias, such as `!!str *x`, as an
+// [*ast.TagNode] whose Value is the alias, so pass that Value to Anchor.
+//
+// Returns an [*AliasError] wrapping [ErrAlias] for an alias that does not
+// have a name or does not name an anchor before it. The error of an alias
+// whose anchor a reference document defines wraps [ErrReferenceAlias] too,
+// as [WithReferenceAnchors] describes. Returns an error wrapping
+// [ErrNotFound] for a nil alias.
+func (r *Resolver) Anchor(alias *ast.AliasNode) (*ast.AnchorNode, error) {
+	if alias == nil {
+		return nil, fmt.Errorf("anchor: %w: nil alias", ErrNotFound)
 	}
 
 	tk := astnode.Token(alias.Value)

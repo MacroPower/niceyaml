@@ -464,18 +464,18 @@ func (d *Doc) enclosedAliases() map[*ast.AliasNode]bool {
 // null too, as the graph of the text reads it. ReadValue returns the
 // problem of another alias that the text does not resolve, as
 // [unresolved] gives it.
-func (d *Doc) readValue(node ast.Node) (ast.Node, []ast.Node, error) {
+func (d *Doc) readValue(node ast.Node) (ast.Node, []*ast.AliasNode, error) {
 	res := d.node.DocumentResolver()
 	content := astnode.Converted(node)
 
 	var (
-		aliases []ast.Node
+		aliases []*ast.AliasNode
 		problem error
 	)
 
 	for {
 		alias, ok := content.(*ast.AliasNode)
-		if !ok || slices.Contains(aliases, ast.Node(alias)) {
+		if !ok || slices.Contains(aliases, alias) {
 			return content, aliases, nil
 		}
 
