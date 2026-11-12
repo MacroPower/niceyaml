@@ -597,11 +597,14 @@
 // collector holds.
 //
 // Of the lines of its file, a detached error keeps only the lines that its
-// excerpts show. The memory that those lines take thus grows with the number
-// of problems and with the context lines around each. It does not grow with
-// the length of the file, with one exception. One line of a scalar that spans
+// excerpts show. Those include the excerpt that go-yaml renders for each
+// syntax error and decode error, a fixed number of lines around the token of
+// the error. The memory that those lines take thus grows with the number of
+// problems and with the context lines around each. It does not grow with the
+// length of the file, with two exceptions. One line of a scalar that spans
 // several lines carries the value of the whole scalar, and the copy of that
-// line keeps that value.
+// line keeps that value. A syntax error in a quoted scalar with no closing
+// quote keeps the rest of the source.
 //
 // The program detaches the whole error of a file once, after
 // [Warnings.Report] adds the warnings of the collector. When the bindings of

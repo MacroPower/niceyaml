@@ -11,6 +11,8 @@ import (
 	"testing"
 	"weak"
 
+	"github.com/goccy/go-yaml"
+	"github.com/goccy/go-yaml/parser"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -707,18 +709,43 @@ func TestDetach_PanicError(t *testing.T) {
 	})
 }
 
+// aroundExcerpt returns a document that puts problem on its tenth line,
+// between runs of lines that lie past the excerpt of a go-yaml error. The
+// lines before problem hold the key "before", and the lines after it hold
+// the key "after", each with a list of integers.
+func aroundExcerpt(problem string) string {
+	pad := strings.Repeat("  - 1\n", 8)
+
+	return "before:\n" + pad + problem + "after:\n" + pad
+}
+
 // detachedFrom returns a weak pointer to a new source of input and the
 // detached error that check returns for it. Nothing else holds the
-// source.
+// source. The error that check returns might hold a go-yaml error with a
+// token. Then detachedFrom also returns a weak pointer to the first token
+// that the token of that go-yaml error links to.
 func detachedFrom(
 	ctx context.Context,
 	input string,
 	check func(context.Context, *niceyaml.Source) error,
-) (weak.Pointer[niceyaml.Source], error) {
+) (weak.Pointer[niceyaml.Source], weak.Pointer[token.Token], error) {
 	source := niceyaml.NewSourceFromString(input, niceyaml.WithName("check.yaml"))
+	live := check(ctx, source)
+
+	var head weak.Pointer[token.Token]
+
+	found, ok := errors.AsType[yaml.Error](live)
+	if ok && found.GetToken() != nil {
+		tk := found.GetToken()
+		for tk.Prev != nil {
+			tk = tk.Prev
+		}
+
+		head = weak.Make(tk)
+	}
 
 	//nolint:wrapcheck // The test reads the detached error itself.
-	return weak.Make(source), niceyaml.Detach(check(ctx, source))
+	return weak.Make(source), head, niceyaml.Detach(live)
 }
 
 func TestDetach_ReleasesSource(t *testing.T) {
@@ -733,6 +760,9 @@ func TestDetach_ReleasesSource(t *testing.T) {
 	tcs := map[string]struct {
 		check func(context.Context, *niceyaml.Source) error
 		input string
+		// The type of the go-yaml error that the detached error holds, or
+		// nil when it holds none.
+		yamlError yaml.Error
 	}{
 		"path": {
 			input: "a: 1\n",
@@ -741,24 +771,74 @@ func TestDetach_ReleasesSource(t *testing.T) {
 			},
 		},
 		"syntax error": {
-			input: "a: [1\n",
+			input: aroundExcerpt("a: [1\nb: 2\n"),
 			check: func(_ context.Context, source *niceyaml.Source) error {
 				_, err := source.File()
 
 				return err
 			},
+			yamlError: &yaml.SyntaxError{},
 		},
-		"decode error": {
-			input: "a: x\n",
+		"type error": {
+			input: aroundExcerpt("a: x\n"),
 			check: func(ctx context.Context, source *niceyaml.Source) error {
 				type config struct {
-					A []int `yaml:"a"`
+					Before []int `yaml:"before"`
+					After  []int `yaml:"after"`
+					A      int   `yaml:"a"`
 				}
 
 				_, err := documentOf(source).Decode[config](ctx)
 
 				return err
 			},
+			yamlError: &yaml.TypeError{},
+		},
+		"overflow": {
+			input: aroundExcerpt("a: 300\n"),
+			check: func(ctx context.Context, source *niceyaml.Source) error {
+				type config struct {
+					Before []int `yaml:"before"`
+					After  []int `yaml:"after"`
+					A      int8  `yaml:"a"`
+				}
+
+				_, err := documentOf(source).Decode[config](ctx)
+
+				return err
+			},
+			yamlError: &yaml.OverflowError{},
+		},
+		"unexpected node type": {
+			input: aroundExcerpt("a: x\n"),
+			check: func(ctx context.Context, source *niceyaml.Source) error {
+				type config struct {
+					Before []int `yaml:"before"`
+					After  []int `yaml:"after"`
+					A      []int `yaml:"a"`
+				}
+
+				_, err := documentOf(source).Decode[config](ctx)
+
+				return err
+			},
+			yamlError: &yaml.UnexpectedNodeTypeError{},
+		},
+		"unknown field": {
+			input: aroundExcerpt("a: 1\nb: 2\n"),
+			check: func(ctx context.Context, source *niceyaml.Source) error {
+				type config struct {
+					Before []int `yaml:"before"`
+					After  []int `yaml:"after"`
+					A      int   `yaml:"a"`
+				}
+
+				_, err := documentOf(source).Decode[config](ctx,
+					niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject))
+
+				return err
+			},
+			yamlError: &yaml.UnknownFieldError{},
 		},
 		"path with no single document": {
 			input: "a: 1\n---\nb: 2\n",
@@ -818,7 +898,7 @@ func TestDetach_ReleasesSource(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			source, detached := detachedFrom(t.Context(), tc.input, tc.check)
+			source, head, detached := detachedFrom(t.Context(), tc.input, tc.check)
 			require.Error(t, detached)
 
 			runtime.GC()
@@ -826,6 +906,429 @@ func TestDetach_ReleasesSource(t *testing.T) {
 
 			assert.Nil(t, source.Value())
 			assert.NotEmpty(t, niceyaml.FormatError(detached))
+
+			found, ok := errors.AsType[yaml.Error](detached)
+			require.Equal(t, tc.yamlError != nil, ok)
+
+			if ok {
+				assert.IsType(t, tc.yamlError, found)
+
+				tk := found.GetToken()
+				require.NotNil(t, tk)
+
+				// The token of the live go-yaml error links to every token
+				// of the parse. The first of them lies past the excerpt of
+				// the error, and the copy does not keep it.
+				assert.Greater(t, tk.Position.Line-4, 1, "the input reaches past the excerpt")
+				assert.Nil(t, head.Value())
+
+				first, last := chainLines(tk)
+				assert.GreaterOrEqual(t, first, tk.Position.Line-4)
+				assert.LessOrEqual(t, last, tk.Position.Line+strings.Count(tk.Origin, "\n")+4)
+			}
+		})
+	}
+}
+
+// chainLines returns the first and the last line of the tokens that tk
+// reaches through Prev and Next.
+func chainLines(tk *token.Token) (int, int) {
+	first, last := tk.Position.Line, tk.Position.Line
+
+	for t := tk; t != nil; t = t.Prev {
+		first = min(first, t.Position.Line)
+		last = max(last, t.Position.Line)
+	}
+
+	for t := tk; t != nil; t = t.Next {
+		first = min(first, t.Position.Line)
+		last = max(last, t.Position.Line)
+	}
+
+	return first, last
+}
+
+// linkedTokens returns every token that tk reaches through any chain of
+// Prev and Next links, tk among them.
+func linkedTokens(tk *token.Token) []*token.Token {
+	seen := map[*token.Token]bool{tk: true}
+	tokens := []*token.Token{tk}
+
+	for i := 0; i < len(tokens); i++ {
+		for _, link := range []*token.Token{tokens[i].Prev, tokens[i].Next} {
+			if link != nil && !seen[link] {
+				seen[link] = true
+				tokens = append(tokens, link)
+			}
+		}
+	}
+
+	return tokens
+}
+
+func TestDetach_YAMLError(t *testing.T) {
+	t.Parallel()
+
+	around := aroundExcerpt
+
+	decode := func(t *testing.T, input string, v any, opts ...niceyaml.DecodeOption) error {
+		t.Helper()
+
+		return yamltest.FirstDocument(t, input).DecodeInto(t.Context(), v, opts...)
+	}
+
+	unclosed := around("a: [1\nb: 2\n")
+
+	// The raw function returns the syntax error that go-yaml returns for
+	// unclosed, with no wrapper of this package around it.
+	raw := func(t *testing.T) error {
+		t.Helper()
+
+		var v map[string]any
+
+		err := yaml.Unmarshal([]byte(unclosed), &v)
+		require.Error(t, err)
+
+		return err //nolint:wrapcheck // The test needs the go-yaml error itself.
+	}
+
+	tcs := map[string]struct {
+		err  func(t *testing.T) error
+		want yaml.Error
+	}{
+		"syntax error": {
+			err: func(t *testing.T) error {
+				t.Helper()
+
+				_, err := niceyaml.NewSourceFromString(unclosed).File()
+
+				return err
+			},
+			want: &yaml.SyntaxError{},
+		},
+		"type error": {
+			err: func(t *testing.T) error {
+				t.Helper()
+
+				var v struct {
+					Before []int `yaml:"before"`
+					After  []int `yaml:"after"`
+					A      int   `yaml:"a"`
+				}
+
+				return decode(t, around("a: x\n"), &v)
+			},
+			want: &yaml.TypeError{},
+		},
+		"overflow": {
+			err: func(t *testing.T) error {
+				t.Helper()
+
+				var v struct {
+					Before []int `yaml:"before"`
+					After  []int `yaml:"after"`
+					A      int8  `yaml:"a"`
+				}
+
+				return decode(t, around("a: 300\n"), &v)
+			},
+			want: &yaml.OverflowError{},
+		},
+		"unexpected node type": {
+			err: func(t *testing.T) error {
+				t.Helper()
+
+				var v struct {
+					Before []int `yaml:"before"`
+					After  []int `yaml:"after"`
+					A      []int `yaml:"a"`
+				}
+
+				return decode(t, around("a: x\n"), &v)
+			},
+			want: &yaml.UnexpectedNodeTypeError{},
+		},
+		"unknown field": {
+			err: func(t *testing.T) error {
+				t.Helper()
+
+				var v struct {
+					Before []int `yaml:"before"`
+					After  []int `yaml:"after"`
+				}
+
+				return decode(t, around("b: 2\n"), &v,
+					niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject))
+			},
+			want: &yaml.UnknownFieldError{},
+		},
+		"duplicate key without a binding": {
+			err: func(t *testing.T) error {
+				t.Helper()
+
+				// The parser keeps the second key, and the decoder
+				// rejects it.
+				file, err := parser.ParseBytes([]byte(around("a: 1\na: 2\n")), 0, parser.AllowDuplicateMapKey())
+				require.NoError(t, err)
+
+				var v map[string]any
+
+				return fmt.Errorf("load: %w", yaml.NodeToValue(file.Docs[0].Body, &v))
+			},
+			want: &yaml.DuplicateKeyError{},
+		},
+		"syntax error without a binding": {
+			err: func(t *testing.T) error {
+				t.Helper()
+
+				return fmt.Errorf("load: %w", raw(t))
+			},
+			want: &yaml.SyntaxError{},
+		},
+		"go-yaml error alone": {
+			err:  raw,
+			want: &yaml.SyntaxError{},
+		},
+		"invalid": {
+			err: func(t *testing.T) error {
+				t.Helper()
+
+				return niceyaml.Invalid(raw(t))
+			},
+			want: &yaml.SyntaxError{},
+		},
+		"located": {
+			err: func(t *testing.T) error {
+				t.Helper()
+
+				return niceyaml.Locate(raw(t))
+			},
+			want: &yaml.SyntaxError{},
+		},
+		"bound in a source": {
+			err: func(t *testing.T) error {
+				t.Helper()
+
+				return niceyaml.NewSourceFromString("a: 1\n").Bind(raw(t))
+			},
+			want: &yaml.SyntaxError{},
+		},
+		"bound to a node": {
+			err: func(t *testing.T) error {
+				t.Helper()
+
+				return yamltest.FirstDocument(t, "a: 1\n").Bind(raw(t))
+			},
+			want: &yaml.SyntaxError{},
+		},
+		"joined": {
+			err: func(t *testing.T) error {
+				t.Helper()
+
+				return errors.Join(raw(t), errors.New("other"))
+			},
+			want: &yaml.SyntaxError{},
+		},
+		"panic": {
+			err: func(t *testing.T) error {
+				t.Helper()
+
+				return &niceyaml.PanicError{Value: raw(t)}
+			},
+			want: &yaml.SyntaxError{},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tc.err(t)
+			require.Error(t, err)
+
+			live, ok := errors.AsType[yaml.Error](err)
+			require.True(t, ok)
+			require.IsType(t, tc.want, live)
+
+			liveTk := live.GetToken()
+			require.NotNil(t, liveTk)
+
+			line := liveTk.Position.Line
+			first, last := chainLines(liveTk)
+			require.True(t, first < line-4 || last > line+4, "the input reaches past the excerpt")
+
+			prev, next := liveTk.Prev, liveTk.Next
+			message := live.Error()
+
+			detached := niceyaml.Detach(err)
+			require.Error(t, detached)
+
+			// The copy renders the excerpt of the original, so each
+			// wrapper that takes its message from it keeps its message.
+			assert.Equal(t, err.Error(), detached.Error())
+			assert.Equal(t, niceyaml.FormatError(err), niceyaml.FormatError(detached))
+
+			found, ok := errors.AsType[yaml.Error](detached)
+			require.True(t, ok)
+			assert.IsType(t, live, found)
+			assert.NotSame(t, live, found)
+			assert.Equal(t, message, found.Error())
+			assert.Equal(t, live.FormatError(true, true), found.FormatError(true, true))
+
+			tk := found.GetToken()
+			require.NotNil(t, tk)
+			assert.Equal(t, liveTk.Value, tk.Value)
+			assert.Equal(t, *liveTk.Position, *tk.Position)
+
+			// The copy links only to the tokens of its excerpt, which shows
+			// three lines on each side of the lines of its token, and to
+			// one more token on each side.
+			first, last = chainLines(tk)
+			assert.GreaterOrEqual(t, first, line-4)
+			assert.LessOrEqual(t, last, line+strings.Count(tk.Origin, "\n")+4)
+
+			// The live error keeps its token and the links of that token.
+			assert.Same(t, liveTk, live.GetToken())
+			assert.Same(t, prev, liveTk.Prev)
+			assert.Same(t, next, liveTk.Next)
+
+			// A detached error holds nothing more to detach.
+			assert.Same(t, detached, niceyaml.Detach(detached))
+		})
+	}
+}
+
+func TestDetach_YAMLErrorExcerpt(t *testing.T) {
+	t.Parallel()
+
+	// Each input puts tokens at the edges of the excerpt that go-yaml
+	// renders for its syntax error. The colors or the lines of the excerpt
+	// there depend on the tokens that the copy keeps.
+	tcs := map[string]struct {
+		input string
+		same  bool
+	}{
+		"token on several lines": {
+			// The token of the error holds the empty lines after it, so
+			// the excerpt reaches three lines past the last of them.
+			input: stringtest.JoinLF("a: 1", "", "", ":", "b: [1,", "  2]", "", "", "", "c: 3", ""),
+		},
+		"anchor before the excerpt": {
+			// The excerpt colors its first token as an anchor when the
+			// token before it is an anchor.
+			input: stringtest.JoinLF("x: 1", "&", "", "", "a: 1", "", "%", "", "", "", "", "b: 2", ""),
+		},
+		"mapping value after the excerpt": {
+			// The excerpt colors its last token as a key when the token
+			// after it is a mapping value.
+			input: stringtest.JoinLF("a: 1", "b: x", "c: {k: v, ]}", "d: e", "  f: 2", "g", ":", "h: 3", ""),
+		},
+		"first token before the excerpt": {
+			// The comment that opens the stream links to no token before
+			// it, but its text lies past the excerpt.
+			input: stringtest.JoinLF("# c", "", "", "", "b: [1", ""),
+		},
+		"last token after the excerpt": {
+			// The token that closes the stream links to no token after
+			// it, but its text lies past the excerpt.
+			input: stringtest.JoinLF("a: 1", "%", "", "", "", "", "x"),
+		},
+		"nothing past the excerpt": {
+			input: stringtest.JoinLF("a: 1", "b: [1", ""),
+			same:  true,
+		},
+		"empty value before a document": {
+			// The parser puts a null token after the colon of "a". The
+			// colon links on to the null token, which links to nothing. The
+			// "---" after the colon links back to it all the same. The
+			// excerpt of the error follows the links on from the colon, so
+			// it never reaches the token of the error.
+			input: stringtest.JoinLF("p: 1", "q: 1", "r: 1", "s: 1", "a:", "---", "b: [1", ""),
+		},
+	}
+
+	parse := map[string]func(input string) error{
+		"go-yaml": func(input string) error {
+			var v any
+
+			return yaml.Unmarshal([]byte(input), &v)
+		},
+		"source": func(input string) error {
+			_, err := niceyaml.NewSourceFromString(input).File()
+
+			return err
+		},
+	}
+
+	for name, tc := range tcs {
+		for parser, parseInput := range parse {
+			t.Run(name+"/"+parser, func(t *testing.T) {
+				t.Parallel()
+
+				err := parseInput(tc.input)
+
+				var live *yaml.SyntaxError
+
+				require.ErrorAs(t, err, &live)
+
+				detached := niceyaml.Detach(err)
+
+				var found *yaml.SyntaxError
+
+				require.ErrorAs(t, detached, &found)
+
+				if tc.same {
+					assert.Same(t, live, found)
+
+					return
+				}
+
+				assert.NotSame(t, live, found)
+
+				assert.Equal(t, err.Error(), detached.Error())
+				assert.Equal(t, live.FormatError(true, true), found.FormatError(true, true))
+				assert.Equal(t, live.FormatError(false, true), found.FormatError(false, true))
+
+				// The copy links to no token with text past the excerpt. A
+				// token at either end of the chain keeps the line of a token
+				// past the excerpt, but none of its text.
+				first := live.Token.Position.Line - 3
+				last := live.Token.Position.Line + strings.Count(live.Token.Origin, "\n") + 3
+
+				for _, tk := range linkedTokens(found.Token) {
+					if tk.Position.Line >= first && tk.Position.Line <= last {
+						continue
+					}
+
+					assert.Empty(t, tk.Value, tk.Position)
+					assert.Empty(t, strings.Trim(tk.Origin, " "), tk.Position)
+				}
+
+				assert.Same(t, detached, niceyaml.Detach(detached))
+			})
+		}
+	}
+}
+
+func TestDetach_YAMLErrorWithoutToken(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		err error
+	}{
+		"no token": {
+			err: &yaml.TypeError{},
+		},
+		"token without a position": {
+			err: &yaml.SyntaxError{Token: &token.Token{}},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Same(t, tc.err, niceyaml.Detach(tc.err))
 		})
 	}
 }
