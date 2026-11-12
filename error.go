@@ -1126,8 +1126,8 @@ func markFault(err error, d declaration) error {
 // ErrorOption configures an [Error]. [NewError], [Invalid], [Unchecked],
 // [Locate], and [Error.With] take the same options. [AtPath] sets the path
 // of the Error, and [AtData] and [AtDataKey] set it by the names of decoded
-// data. Of these three, the last one given wins. [AtPosition] or [AtRange]
-// sets its position or range, and the last one given wins.
+// data. Of these three, the last one given wins. [AtPosition], [AtToken],
+// or [AtRange] sets its position or range, and the last one given wins.
 // [WithDetails] adds the errors that explain it.
 //
 // Available options:
@@ -1135,6 +1135,7 @@ func markFault(err error, d declaration) error {
 //   - [AtData]
 //   - [AtDataKey]
 //   - [AtPosition]
+//   - [AtToken]
 //   - [AtRange]
 //   - [WithDetails]
 type ErrorOption func(*errorConfig)
@@ -1221,18 +1222,47 @@ func AtPath(p paths.Path) ErrorOption {
 // [SourceError.Excerpt] highlights the content of the token at that
 // position. A path from [AtPath] on the same Error names the value in the
 // message, and the position locates the error. A producer that holds a
-// go-yaml token converts it with [position.NewFromToken], and one that does
-// not hold a token builds the position itself.
+// go-yaml token sets the position with [AtToken], and one that does not
+// hold a token builds the position itself.
 func AtPosition(p position.Position) ErrorOption {
 	return func(c *errorConfig) {
 		c.loc = p
 	}
 }
 
-// atToken returns an [ErrorOption] that sets the position of tk, or one
-// that does not set anything when tk or its position is nil. The token of a
-// go-yaml error, or its position, might be nil.
-func atToken(tk *token.Token) ErrorOption {
+// AtToken is an [ErrorOption] that sets the position where the token tk
+// starts, as [AtPosition] of [position.NewFromToken] sets it. When tk or
+// its position is nil, AtToken does not set anything, so the Error keeps
+// the position or range that an earlier option set, or has no location.
+// The token of a go-yaml error can be nil, and the Start of an
+// [*ast.DocumentNode] without a "---" header is nil. A zero position puts
+// the error at the first character of the text instead.
+//
+// The token must come from the [Source] that binds the Error, such as a
+// token of [Source.Tokens], of [Node.AST], or of [paths.Resolver.Token].
+// A token of another parse holds the line and column that the parse
+// counted. A parse might count the text of the Source another way. Then
+// the Error binds at the wrong place without a sign, or without a
+// location when the position lies past the end of the text. A parse of
+// part of the text counts lines from the start of that part. The bytes
+// that an UnmarshalYAML method decodes again and the text of [Node.Text]
+// are such parts.
+//
+// The lexer of go-yaml can also count the whole text another way than the
+// Source does. For example, it counts one line more for each comment line
+// that ends in CRLF, and it can count a column fewer after a tab. A caller
+// can decode the whole text of the Source with go-yaml, through a
+// [yaml.Decoder] for a stream of several documents. It converts a go-yaml
+// error of that decode only when it knows that go-yaml counts that text
+// as the Source does:
+//
+//	var ye yaml.Error
+//	if errors.As(err, &ye) {
+//		err = niceyaml.NewError(ye.GetMessage(), niceyaml.AtToken(ye.GetToken()))
+//	}
+//
+//	return source.Bind(err)
+func AtToken(tk *token.Token) ErrorOption {
 	if tk == nil || tk.Position == nil {
 		return func(*errorConfig) {}
 	}
@@ -2845,10 +2875,10 @@ func (b binder) yamlLocation(tk *token.Token) ([]ErrorOption, *document, bool) {
 
 	node := b.nodeAt(position.NewFromToken(tk).Line)
 	if node == nil {
-		return []ErrorOption{atToken(tk)}, nil, true
+		return []ErrorOption{AtToken(tk)}, nil, true
 	}
 
-	opts := append([]ErrorOption{atToken(node.doc.pathIndex().OwnerToken(tk))}, node.rejectionLocation(tk)...)
+	opts := append([]ErrorOption{AtToken(node.doc.pathIndex().OwnerToken(tk))}, node.rejectionLocation(tk)...)
 
 	return opts, node.doc, true
 }

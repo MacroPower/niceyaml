@@ -1432,6 +1432,15 @@ func (n *Node) bindAlias(path paths.Path, reason error) (error, bool) {
 // reports that line. To keep several errors
 // as separate bindings, bind each one before joining them.
 //
+// A go-yaml error from a decode that the caller runs itself holds the
+// tokens of that parse. So it binds as an error without a location, as
+// the Errors section describes. A scoped Node places such an error at its
+// own value. A caller that decoded the whole text of the Source, and not
+// [Node.Text], can convert the error with NewError(e.GetMessage(),
+// AtToken(e.GetToken())) before it binds the result. The conversion is
+// exact only when go-yaml counts the text as the Source does. [AtToken]
+// describes when it does not.
+//
 // Bind returns nil for a nil err, and for a nil [*Error] or
 // [*SourceError] pointer, even on a nil Node. Bind returns an already
 // bound error unchanged, so Bind is idempotent. The Errors section

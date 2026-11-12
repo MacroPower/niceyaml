@@ -2057,7 +2057,7 @@ func (s *Source) single() (*Node, error) {
 	if len(docs) > 1 {
 		return nil, Invalid(
 			fmt.Errorf("%w: %d documents", ErrMultipleDocuments, len(docs)),
-			atToken(docs[1].doc.anchorToken()),
+			AtToken(docs[1].doc.anchorToken()),
 		)
 	}
 
@@ -2273,10 +2273,10 @@ func (s *Source) parseError(f docparse.Failure) error {
 
 	switch {
 	case large:
-		err = Invalid(&LimitError{Kind: LimitDocumentBytes, Max: sizeErr.Limit}, atToken(sizeErr.Token))
+		err = Invalid(&LimitError{Kind: LimitDocumentBytes, Max: sizeErr.Limit}, AtToken(sizeErr.Token))
 
 	case deep:
-		err = Invalid(&LimitError{Kind: LimitDepth, Max: depthErr.Limit}, atToken(depthErr.Token))
+		err = Invalid(&LimitError{Kind: LimitDepth, Max: depthErr.Limit}, AtToken(depthErr.Token))
 
 	case errors.Is(f.Err, ErrLimit), errors.Is(f.Err, ErrEncoding):
 		err = f.Err
@@ -2288,12 +2288,12 @@ func (s *Source) parseError(f docparse.Failure) error {
 			at = f.Run[i]
 		}
 
-		err = Unchecked(panicked("parser", &PanicError{Value: f.Panic, Stack: f.Stack}), atToken(at))
+		err = Unchecked(panicked("parser", &PanicError{Value: f.Panic, Stack: f.Stack}), AtToken(at))
 
 	case ok:
 		msg := escape.Control(yamlErr.GetMessage())
 
-		err = Invalid(markSyntax(yamlMessage(yamlErr, msg)), atToken(yamlErr.GetToken()))
+		err = Invalid(markSyntax(yamlMessage(yamlErr, msg)), AtToken(yamlErr.GetToken()))
 
 	default:
 		err = markSyntax(f.Err)

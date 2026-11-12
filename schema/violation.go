@@ -14,7 +14,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/fault"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/paths"
-	"go.jacobcolvin.com/niceyaml/position"
 )
 
 // noFormMessage is the message of the violation that stands for a value
@@ -407,11 +406,7 @@ func (c converter) atTarget(target datapath.Target, key bool) []niceyaml.ErrorOp
 
 	opts := []niceyaml.ErrorOption{niceyaml.AtPath(path)}
 
-	if tk := target.Token(key); tk != nil && tk.Position != nil {
-		opts = append(opts, niceyaml.AtPosition(position.NewFromToken(tk)))
-	}
-
-	return opts
+	return append(opts, niceyaml.AtToken(target.Token(key)))
 }
 
 // constrainsKey reports whether e is a failure of a keyword that
@@ -455,11 +450,7 @@ func (c converter) atMissing(target datapath.Target, name string) []niceyaml.Err
 		return opts
 	}
 
-	if tk := target.Start(true); tk != nil && tk.Position != nil {
-		opts = append(opts, niceyaml.AtPosition(position.NewFromToken(tk)))
-	}
-
-	return opts
+	return append(opts, niceyaml.AtToken(target.Start(true)))
 }
 
 // atData returns the option that locates an error at the value that the
