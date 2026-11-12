@@ -635,8 +635,8 @@ func (pl *updatePlan) mergeProblem(path paths.Path, merges []*edge, key, what st
 	in := instance{
 		construct: ConstructMergeKeys,
 		at:        at,
-		but: fmt.Sprintf(", but the `<<` merge key at %d:%d brings %s into %s %s",
-			pos.Line+1, pos.Col+1, key, path, what),
+		but: fmt.Sprintf(", but the `<<` merge key at %s brings %s into %s %s",
+			pos.OneBased(), key, path, what),
 		fix: fmt.Sprintf("set %s with Set, which writes the entries in place of the merge key", path),
 	}
 

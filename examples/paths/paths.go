@@ -77,10 +77,11 @@ func main() {
 	fmt.Println("\nFind the path at a position:")
 
 	// A position counts lines and columns from 0, as a cursor in a viewer
-	// does. A position on a key gives a path that ends in "~".
+	// does, and OneBased prints it counted from 1, as an editor does. A
+	// position on a key gives a path that ends in "~".
 	for _, cursor := range []position.Position{position.New(13, 6), position.New(13, 14)} {
 		if path, ok := doc.PathAt(cursor); ok {
-			fmt.Printf("line %d, column %d: %s\n", cursor.Line+1, cursor.Col+1, path)
+			fmt.Printf("%s: %s\n", cursor.OneBased(), path)
 		}
 	}
 }

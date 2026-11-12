@@ -103,7 +103,7 @@ func main() {
 		for _, s := range d.Schemas {
 			rule := escape.Control(s.SchemaPath)
 			msg := escape.Control(s.Message)
-			fmt.Printf("%s:%d:%d\t%s\t%s\t%s\n", name, pos.Line+1, pos.Col+1, path, rule, msg)
+			fmt.Printf("%s:%s\t%s\t%s\t%s\n", name, pos.OneBased(), path, rule, msg)
 		}
 	}
 

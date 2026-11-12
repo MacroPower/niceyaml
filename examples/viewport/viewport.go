@@ -176,7 +176,7 @@ func main() {
 			continue
 		}
 
-		fmt.Printf("%s %q on line %d, column %d, in %s\n", at, r, pos.Line+1, pos.Col+1, path)
+		fmt.Printf("%s %q at %s, in %s\n", at, r, pos.OneBased(), path)
 	}
 }
 

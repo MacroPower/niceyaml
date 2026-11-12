@@ -190,8 +190,8 @@ func (d *Doc) mergeWords(e *ast.MappingValueNode, alias *ast.AliasNode) string {
 	pos := d.nodeSite(e.Key, true).at.Start
 	name, _ := astnode.Name(alias.Value)
 
-	return fmt.Sprintf("%s at %d:%d, a merge key that reads %s, so that document decides which names %s reads",
-		mergeText(keptMerge{m: d.mappingOf(e), entry: e}), pos.Line+1, pos.Col+1, d.referenceWords(name),
+	return fmt.Sprintf("%s at %s, a merge key that reads %s, so that document decides which names %s reads",
+		mergeText(keptMerge{m: d.mappingOf(e), entry: e}), pos.OneBased(), d.referenceWords(name),
 		d.ownerPath(e.Key))
 }
 

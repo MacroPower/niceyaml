@@ -9,7 +9,6 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/bom"
-	"go.jacobcolvin.com/niceyaml/position"
 )
 
 // misreadError is what go-yaml misreads in a text. The fix says what the
@@ -181,7 +180,7 @@ func (d *Doc) valueMisread() (misreadFound, bool) {
 
 	return misreadFound{
 		kind: misreadMark, start: marks[0],
-		msg: fmt.Sprintf("go-yaml reads the byte order mark at %d:%d as text of the value", at.Line+1, at.Col+1),
+		msg: fmt.Sprintf("go-yaml reads the byte order mark at %s as text of the value", at.OneBased()),
 		fix: markFix,
 	}, true
 }
@@ -194,14 +193,8 @@ const inEdited = "in the edited text"
 const markFix = "remove the byte order mark"
 
 // userAt returns the line and the column in the user's text of the byte at
-// off of the current text, as [placeText] names them. A byte order mark is
-// no token, so a message names its place so.
+// off of the current text, as a message names a place, such as "3:1". A
+// byte order mark is no token, so a message names its place so.
 func (d *Doc) userAt(off int) string {
-	return placeText(d.userPos(off))
-}
-
-// placeText returns the line and the column of pos, as a message names a
-// place, such as "3:1".
-func placeText(pos position.Position) string {
-	return fmt.Sprintf("%d:%d", pos.Line+1, pos.Col+1)
+	return d.userPos(off).OneBased()
 }

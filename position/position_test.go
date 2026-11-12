@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
 	"testing"
 
 	"github.com/goccy/go-yaml/token"
@@ -59,6 +60,30 @@ func TestNewFromToken(t *testing.T) {
 			t.Parallel()
 
 			assert.Equal(t, tc.want, position.NewFromToken(tc.token))
+		})
+	}
+}
+
+func TestPositionOneBased(t *testing.T) {
+	t.Parallel()
+
+	maxOneBased := strconv.FormatUint(uint64(math.MaxInt)+1, 10)
+
+	tcs := map[string]struct {
+		pos  position.Position
+		want string
+	}{
+		"zero":            {pos: position.New(0, 0), want: "1:1"},
+		"line and column": {pos: position.New(1, 6), want: "2:7"},
+		"max line":        {pos: position.New(math.MaxInt, 0), want: maxOneBased + ":1"},
+		"max column":      {pos: position.New(0, math.MaxInt), want: "1:" + maxOneBased},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.pos.OneBased())
 		})
 	}
 }

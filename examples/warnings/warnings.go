@@ -114,7 +114,7 @@ func main() {
 		pos, _ := problem.Position()
 		name := escape.Control(problem.Name())
 		msg := escape.Control(problem.Message())
-		fmt.Printf("%s:%d:%d\t%s\t%s\n", name, pos.Line+1, pos.Col+1, severity, msg)
+		fmt.Printf("%s:%s\t%s\t%s\n", name, pos.OneBased(), severity, msg)
 	}
 
 	fmt.Println("\nCall a Validate method directly:")
