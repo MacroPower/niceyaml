@@ -34,13 +34,7 @@ type editRecord struct {
 // a key. That path names its entry or its item, or the nearest value above
 // it that the user wrote.
 func (r editRecord) holder() paths.Path {
-	if last, ok := r.path.Last(); ok && last.Kind == paths.SelectorKey {
-		path, _ := r.path.Parent()
-
-		return path
-	}
-
-	return r.path
+	return r.path.Value()
 }
 
 // entryPlace returns the place in the user's text of the key of e, an

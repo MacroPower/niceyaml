@@ -415,13 +415,7 @@ func (f *PlanFile) docLabel(d PlanDocument) string {
 // removalPath returns the path of the value that rm removed, as a header
 // names it, without the `~` of an entry.
 func removalPath(rm edit.Removal) string {
-	if rm.Item {
-		return rm.Path.String()
-	}
-
-	parent, _ := rm.Path.Parent()
-
-	return parent.String()
+	return rm.Path.Value().String()
 }
 
 // planFile decides what the plan does with f and adds the problems of its

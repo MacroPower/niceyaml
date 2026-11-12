@@ -569,12 +569,7 @@ func pointedNode(res *paths.Resolver, path paths.Path) (ast.Node, error) {
 		return nil, err //nolint:wrapcheck // The caller reads the error of the Resolver.
 	}
 
-	before := path
-	for last, ok := before.Last(); ok && last.Kind == paths.SelectorKey; last, ok = before.Last() {
-		before, _ = before.Parent()
-	}
-
-	return res.Node(before) //nolint:wrapcheck // The caller reads the error of the Resolver.
+	return res.Node(path.Value()) //nolint:wrapcheck // The caller reads the error of the Resolver.
 }
 
 // holdsPath reports whether the current text holds a value at path, as the
@@ -1306,10 +1301,8 @@ func (d *Doc) userPathOf(path paths.Path, n ast.Node, pos position.Position) pat
 	// The site path of a token in a key ends in `~` where it names the entry
 	// of that key. No path names a key inside a << merge entry, so an error
 	// at such a key shows the path of the mapping that holds the entry.
-	if last, _ := path.Last(); last.Kind == paths.SelectorKey && path.Len() > 1 {
-		if gotLast, _ := got.Last(); gotLast.Kind != paths.SelectorKey {
-			return got
-		}
+	if path.IsKey() && path.Len() > 1 && !got.IsKey() {
+		return got
 	}
 
 	return spelled(got, path)
@@ -1366,22 +1359,18 @@ func (d *Doc) keyBytes(path paths.Path) (span, bool) {
 // its first key or item, but every text spells the root as `$` and its key
 // as `$~`, so both keep their path.
 func spelled(got, path paths.Path) paths.Path {
-	last, _ := path.Last()
-
-	if parent, ok := path.Parent(); path.IsRoot() || ok && parent.IsRoot() && last.Kind == paths.SelectorKey {
+	if path.Value().IsRoot() {
 		return path
 	}
 
 	gotLast, _ := got.Last()
 
 	switch {
-	case last.Kind == paths.SelectorKey && gotLast.Kind == paths.SelectorChild:
+	case path.IsKey() && gotLast.Kind == paths.SelectorChild:
 		return got.Key()
 
-	case last.Kind != paths.SelectorKey && gotLast.Kind == paths.SelectorKey:
-		parent, _ := got.Parent()
-
-		return parent
+	case !path.IsKey():
+		return got.Value()
 
 	default:
 		return got

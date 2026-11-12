@@ -1286,7 +1286,7 @@ func (d *Doc) bindAt(off, size int, problem func(opts ...niceyaml.ErrorOption) e
 	at := d.site(s, false)
 
 	if path, ok := d.node.PathAt(positionIn(d.cur, d.curLines, off)); ok {
-		if last, _ := path.Last(); last.Kind == paths.SelectorKey {
+		if path.IsKey() {
 			at = d.keyPlace(s)
 		}
 	}

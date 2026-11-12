@@ -5459,6 +5459,20 @@ func TestNode_At_NotFound(t *testing.T) {
 		assert.Equal(t, "$.hours~", key.Path().String())
 		assert.Equal(t, "hours", key.AST().String())
 	})
+
+	t.Run("a key selector on a key node keeps one key selector", func(t *testing.T) {
+		t.Parallel()
+
+		key := yamltest.At(t, doc, hoursPath.Key())
+
+		again, err := key.At(paths.Current().Key())
+		require.NoError(t, err)
+		assert.True(t, key.Path().Equal(again.Path()))
+		assert.Equal(t, "$.hours~", again.Path().String())
+
+		err = key.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Key())))
+		require.EqualError(t, err, "c.yaml:3:1: $.hours~: bad")
+	})
 }
 
 func TestNode_At_UnresolvedAlias(t *testing.T) {

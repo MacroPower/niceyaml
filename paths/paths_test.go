@@ -75,8 +75,8 @@ func TestPath_Build(t *testing.T) {
 			wantYAML: "$",
 		},
 		"current path with selectors": {
-			path:     paths.Current().Child("items").Index(0).Key(),
-			want:     "@.items[0]~",
+			path:     paths.Current().Child("items").Index(0),
+			want:     "@.items[0]",
 			wantYAML: "$.items[0]",
 		},
 		"zero value with a child": {
@@ -170,16 +170,6 @@ func TestPath_Build(t *testing.T) {
 			path:     paths.Doc().Recursive("x.y"),
 			want:     "$..'x.y'",
 			wantYAML: "$..x.y",
-		},
-		"key selector, which goccy has no form for": {
-			path:     paths.Doc().Child("spec", "name").Key(),
-			want:     "$.spec.name~",
-			wantYAML: "$.spec.name",
-		},
-		"key selector mid-path": {
-			path:     paths.Doc().Child("a").Key().Child("b"),
-			want:     "$.a~.b",
-			wantYAML: "$.a.b",
 		},
 		"name wrapped in single quotes": {
 			path:     paths.Doc().Child("'x'"),
@@ -319,16 +309,43 @@ func TestPath_Index_Negative(t *testing.T) {
 	}
 }
 
-func TestPath_YAMLPath_Wildcards(t *testing.T) {
+func TestPath_YAMLPath_NoEquivalent(t *testing.T) {
 	t.Parallel()
 
-	// The goccy syntax has no selector for every entry of a mapping, and a
-	// path without it would name the mapping. The goccy syntax takes a name
-	// alone after `..`, so it has no form for every node below one either.
+	// The goccy syntax has no selector for the key of an entry or for every
+	// entry of a mapping. A path without either would name another node:
+	// the value or the mapping. The goccy syntax takes a name alone after
+	// `..`, so it has no form for every node below one either.
 	tcs := map[string]struct {
 		path paths.Path
 		want string
+		// Whether the goccy parser reads the text, as a path that names
+		// another node.
+		goccyReads bool
 	}{
+		// The goccy parser reads a `~` after a name as part of the name.
+		"key selector": {
+			path:       paths.Doc().Child("spec", "name").Key(),
+			want:       "$.spec.name~",
+			goccyReads: true,
+		},
+		"key selector on a current path": {
+			path: paths.Current().Child("items").Index(0).Key(),
+			want: "@.items[0]~",
+		},
+		"key selector on the root": {
+			path: paths.Doc().Key(),
+			want: "$~",
+		},
+		"key selector mid-path": {
+			path:       paths.Doc().Child("a").Key().Child("b"),
+			want:       "$.a~.b",
+			goccyReads: true,
+		},
+		"key selector with a name goccy cannot quote": {
+			path: paths.Doc().Child("a.b").Key(),
+			want: "$.'a.b'~",
+		},
 		"mapping wildcard after a child": {
 			path: paths.Doc().Child("jobs").ChildAll(),
 			want: "$.jobs.*",
@@ -413,15 +430,19 @@ func TestPath_YAMLPath_Wildcards(t *testing.T) {
 
 			assertPathText(t, tc.path, tc.want)
 
-			// YAMLPath names the path it cannot convert, and the goccy
-			// parser rejects the text.
+			// YAMLPath names the path it cannot convert. The goccy parser
+			// rejects the text, or reads it as a path to another node.
 			yp, err := tc.path.YAMLPath()
 			require.ErrorIs(t, err, paths.ErrNoYAMLPath)
 			require.EqualError(t, err, "convert "+tc.want+": selector has no goccy/go-yaml equivalent")
 			assert.Nil(t, yp)
 
 			_, err = yaml.PathString(tc.want)
-			require.Error(t, err)
+			if tc.goccyReads {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
 		})
 	}
 }
@@ -598,6 +619,33 @@ func TestPath_Join(t *testing.T) {
 			qs:   []paths.Path{paths.Doc().Child("a"), paths.Doc().Child("b"), paths.Current().Child("c")},
 			want: "$.b.c",
 		},
+		// A path that ends in `~` already names the key, so a `~` that
+		// starts the next path adds nothing.
+		"key to a key path": {
+			p:    paths.Doc().Child("jobs", "build").Key(),
+			qs:   []paths.Path{paths.Current().Key()},
+			want: "$.jobs.build~",
+		},
+		"key to a key path through current": {
+			p:    paths.Doc().Child("a").Key(),
+			qs:   []paths.Path{paths.Current(), paths.Current().Key()},
+			want: "$.a~",
+		},
+		"key and a child to a key path": {
+			p:    paths.Doc().Child("a").Key(),
+			qs:   []paths.Path{paths.Current().Key().Child("b")},
+			want: "$.a~.b",
+		},
+		"key to a path that a joined path ends in a key": {
+			p:    paths.Doc(),
+			qs:   []paths.Path{paths.Current().Child("a").Key(), paths.Current().Key(), paths.Current().Key()},
+			want: "$.a~",
+		},
+		"key to a relative key path": {
+			p:    paths.Current().Key(),
+			qs:   []paths.Path{paths.Current().Key()},
+			want: "@~",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -733,6 +781,20 @@ func TestPath_CutPrefix(t *testing.T) {
 			prefix: paths.Doc().Child("spec").Child("hours"),
 			want:   "$.spec~",
 		},
+		// Join drops a `~` that follows a `~`, so the cut does not give
+		// back the `@~` path that the join took.
+		"join of a key path and a key": {
+			p:      paths.Doc().Child("a").Key().Join(paths.Current().Key()),
+			prefix: paths.Doc().Child("a").Key(),
+			want:   "@",
+			ok:     true,
+		},
+		"join of a key path and a key with a child": {
+			p:      paths.Doc().Child("a").Key().Join(paths.Current().Key().Child("b")),
+			prefix: paths.Doc().Child("a").Key(),
+			want:   "@.b",
+			ok:     true,
+		},
 	}
 
 	for name, tc := range tcs {
@@ -746,6 +808,108 @@ func TestPath_CutPrefix(t *testing.T) {
 			if ok {
 				assert.Equal(t, tc.p, tc.prefix.Join(got))
 			}
+		})
+	}
+}
+
+func TestPath_Key(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		path paths.Path
+		want string
+	}{
+		"child":         {path: paths.Doc().Child("jobs", "build"), want: "$.jobs.build~"},
+		"key of a key":  {path: paths.Doc().Child("jobs", "build").Key(), want: "$.jobs.build~"},
+		"root":          {path: paths.Doc(), want: "$~"},
+		"key of a root": {path: paths.Doc().Key(), want: "$~"},
+		"current":       {path: paths.Current(), want: "@~"},
+		"current key":   {path: paths.Current().Key(), want: "@~"},
+		"element":       {path: paths.Doc().Child("items").Index(0), want: "$.items[0]~"},
+		"wildcard":      {path: paths.Doc().Child("jobs").ChildAll(), want: "$.jobs.*~"},
+		"child of a key": {
+			path: paths.Doc().Child("a").Key().Child("b"),
+			want: "$.a~.b~",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			key := tc.path.Key()
+			assertPathText(t, key, tc.want)
+
+			// Key does not change a path that names a key already.
+			assert.True(t, key.Key().Equal(key))
+			assert.Equal(t, key.String(), key.Key().String())
+		})
+	}
+}
+
+func TestPath_IsKey(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		path paths.Path
+		want bool
+	}{
+		"key":               {path: paths.Doc().Child("a").Key(), want: true},
+		"parsed key":        {path: paths.MustParse("$.jobs.build~"), want: true},
+		"key of the root":   {path: paths.Doc().Key(), want: true},
+		"current key":       {path: paths.Current().Key(), want: true},
+		"key of a wildcard": {path: paths.Doc().ChildAll().Key(), want: true},
+		"value":             {path: paths.Doc().Child("a")},
+		"root":              {path: paths.Doc()},
+		"current":           {path: paths.Current()},
+		"element":           {path: paths.Doc().Index(0)},
+		"child after a key": {path: paths.Doc().Child("a").Key().Child("b")},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.path.IsKey())
+		})
+	}
+}
+
+func TestPath_Value(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		path paths.Path
+		want string
+		// The entry that the last selector of the value names, if any.
+		entry string
+	}{
+		"key":               {path: paths.MustParse("$.jobs.build~"), want: "$.jobs.build", entry: "build"},
+		"value":             {path: paths.MustParse("$.jobs.build"), want: "$.jobs.build", entry: "build"},
+		"key of the root":   {path: paths.Doc().Key(), want: "$"},
+		"root":              {path: paths.Doc(), want: "$"},
+		"current key":       {path: paths.Current().Child("name").Key(), want: "@.name", entry: "name"},
+		"key of an element": {path: paths.Doc().Child("items").Index(0).Key(), want: "$.items[0]"},
+		"child after a key": {path: paths.Doc().Child("a").Key().Child("b"), want: "$.a~.b", entry: "b"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			value := tc.path.Value()
+			assertPathText(t, value, tc.want)
+			assert.False(t, value.IsKey())
+
+			last, ok := value.Last()
+			if tc.entry == "" {
+				assert.NotEqual(t, paths.SelectorChild, last.Kind)
+
+				return
+			}
+
+			require.True(t, ok)
+			assert.Equal(t, paths.Selector{Kind: paths.SelectorChild, Name: tc.entry}, last)
 		})
 	}
 }
@@ -1258,6 +1422,11 @@ func TestPath_YAMLPath(t *testing.T) {
 			wantString: "$..'a.b'",
 			want:       "6",
 		},
+		"value of a key path": {
+			path:       paths.Doc().Child("a", "don't").Key().Value(),
+			wantString: "$.a.don't",
+			want:       "1",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -1357,18 +1526,6 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 		doc := documentOf(t, stringtest.LinesLF("x: plain", `"'x'": quoted`))
 
 		assert.Equal(t, "plain", goccyValue(t, paths.Doc().Child("'x'"), doc))
-	})
-
-	t.Run("goccy drops a key selector mid-path", func(t *testing.T) {
-		t.Parallel()
-
-		doc := documentOf(t, stringtest.LinesLF("a:", "  b: 1"))
-		path := paths.Doc().Child("a").Key().Child("b")
-
-		assert.Equal(t, "1", goccyValue(t, path, doc))
-
-		_, err := paths.NewResolver(doc).Node(path)
-		require.ErrorIs(t, err, paths.ErrNotFound)
 	})
 
 	t.Run("goccy matches a decorated key by its indicator", func(t *testing.T) {

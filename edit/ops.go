@@ -932,8 +932,7 @@ func (d *Doc) recordRemoval(h *Node, p *place, reason string) {
 		}
 
 	case paths.SelectorKey:
-		parent, _ := path.Parent()
-		if name, ok := parent.Last(); ok && name.Kind == paths.SelectorChild {
+		if name, ok := path.Value().Last(); ok && name.Kind == paths.SelectorChild {
 			r.Key = name.Name
 		}
 
@@ -1319,8 +1318,8 @@ func (d *Doc) emptiedNote(holder *place) note {
 		n = d.bareNote(n)
 	}
 
-	if last, ok := n.path.Last(); n.hasPath && ok && last.Kind == paths.SelectorKey {
-		n.path, _ = n.path.Parent()
+	if n.hasPath {
+		n.path = n.path.Value()
 	}
 
 	return n

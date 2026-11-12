@@ -6395,7 +6395,7 @@ func TestWithReferences(t *testing.T) {
 			},
 			"key of an entry that the mapping writes": {
 				path: paths.Doc().Child("list").Key().Key(),
-				want: "app.yaml:2:1: $.list~~: bad",
+				want: "app.yaml:2:1: $.list~: bad",
 			},
 			// A key is a scalar, so a selector after its `~` binds at the key.
 			"index into a key that the mapping writes": {
@@ -6404,9 +6404,9 @@ func TestWithReferences(t *testing.T) {
 				near: "$.list~",
 			},
 			"name below a key that the mapping writes": {
-				path: paths.Doc().Child("kind").Key().Key().Child("x"),
-				want: "app.yaml:1:1: $.kind~~.x: bad",
-				near: "$.kind~~",
+				path: paths.Doc().Child("kind").Key().Child("x"),
+				want: "app.yaml:1:1: $.kind~.x: bad",
+				near: "$.kind~",
 			},
 			// An element does not have a key, so a selector after its `~`
 			// binds at the element.

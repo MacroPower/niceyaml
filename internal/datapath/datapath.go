@@ -336,15 +336,11 @@ func Read(r *paths.Resolver, node ast.Node) (ast.Node, bool) {
 // a node.
 func ParentAt(r *paths.Resolver, p paths.Path) astnode.Parent {
 	last, ok := p.Last()
-	if !ok {
+	if !ok || p.IsKey() {
 		return astnode.Parent{}
 	}
 
 	above, _ := p.Parent()
-
-	if last.Kind == paths.SelectorKey {
-		return astnode.Parent{}
-	}
 
 	node, err := r.Node(above)
 	if err != nil {

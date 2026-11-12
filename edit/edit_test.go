@@ -6256,11 +6256,6 @@ func TestDoc_Locate_WithoutKey(t *testing.T) {
 			at:     "$[1]~",
 			want:   "test.yaml:2:2: $[1]~: bad [1:1-1:1]",
 		},
-		"repeated key selector": {
-			before: "l: [{a: 1}, x]",
-			at:     "$.l[0]~~",
-			want:   "test.yaml:1:5: $.l[0]~~: bad [0:4-0:5]",
-		},
 		"flow mapping root": {
 			before: "{a: [1, {b: 2}]}",
 			at:     "$~",

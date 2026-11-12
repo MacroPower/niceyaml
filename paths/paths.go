@@ -74,9 +74,9 @@ var (
 	// with a `.*`, `[*]`, or `..` selector. Use [Resolver.Nodes] for such paths.
 	ErrWildcard = errors.New("wildcard path matches any number of nodes")
 
-	// ErrNoYAMLPath indicates a path with a `.*` or `..*` selector. The
-	// goccy/go-yaml path syntax does not have a selector for either.
-	// [Path.YAMLPath] returns it.
+	// ErrNoYAMLPath indicates a path with a `~`, `.*`, or `..*` selector.
+	// The goccy/go-yaml path syntax does not have a selector for any of
+	// them. [Path.YAMLPath] returns it.
 	ErrNoYAMLPath = errors.New("selector has no goccy/go-yaml equivalent")
 
 	// ErrExcessiveAliasing indicates a path whose selectors reach far more
@@ -409,23 +409,32 @@ func (p Path) IndexAll() Path {
 // picked, rather than its value. It looks through the `?` indicator of an
 // explicit key. It keeps a tag on the key, as a path to a value keeps a
 // tag on the value. The key thus decodes as it does when the decoder
-// reads the mapping, and [Resolver.Token] still gives the key text. A `~`
-// after a `~` that found a key selects that key again, so `$.a~~` selects
-// what `$.a~` does.
+// reads the mapping, and [Resolver.Token] still gives the key text.
+//
+// Key returns a path that already ends in `~` as it is, because that path
+// already names the key. [Path.Join] also writes one `~` where a path
+// that ends in `~` meets one that starts with it, and [Parse] rejects
+// `~~`. No path thus holds `~~`, so p.Key().Key() and the join of p.Key()
+// with Current().Key() both equal p.Key() and print the same
+// [Path.String]. [Path.IsKey] reports whether a path ends in `~`, and
+// [Path.Value] drops that `~`.
+//
+// No selector after a `~` selects anything, whatever the `~` followed,
+// because a path does not reach into a key. [Resolver.Node] returns an
+// error wrapping [ErrNotFound] for a path such as `$.a~.b`.
 //
 // A sequence element and the root do not have a key, so a `~` after
-// either selects nothing, and so does every selector after that `~`.
-// [Resolver.Node] returns an error wrapping [ErrNotFound] for such a path,
-// and [Resolver.Nodes] leaves the element out. The path `$..*~` thus
-// selects the key of each entry that `..*` selects and none of the
-// sequence elements. It does not select the key of an entry that `..*`
-// leaves out, such as a `<<` merge key, as [Path.RecursiveAll] describes.
+// either selects nothing. Resolver.Node returns an error wrapping
+// ErrNotFound for such a path, and [Resolver.Nodes] leaves the element
+// out. The path `$..*~` thus selects the key of each entry that `..*`
+// selects and none of the sequence elements. It does not select the key
+// of an entry that `..*` leaves out, such as a `<<` merge key, as
+// [Path.RecursiveAll] describes.
 //
 // For a path that ends in such a `~`, [Resolver.Token] points where the
 // path before the `~` does. An error at that path thus still has a place
 // in the source. A check that reports each problem at the key of the node
-// it checks also binds on a sequence element and on the root. A path with
-// a selector other than `~` after such a `~` does not point at a token.
+// it checks also binds on a sequence element and on the root.
 //
 // A path to a mapping or a sequence under a key already points at that
 // key, as [Resolver.Token] describes. The `~` there changes the node the
@@ -436,7 +445,42 @@ func (p Path) IndexAll() Path {
 //	value, err := r.Token(name)         // the token of the value
 //	key, err := r.Token(name.Key())     // the key token "name"
 func (p Path) Key() Path {
+	if p.IsKey() {
+		return p
+	}
+
 	return p.extend(segment{kind: segmentKey})
+}
+
+// IsKey reports whether the path ends in the `~` selector from [Path.Key].
+// Such a path names the key of a mapping entry rather than its value.
+// A path that the library returns for a key, such as the path that
+// [go.jacobcolvin.com/niceyaml.Node.PathAt] gives for a position in a key,
+// ends in `~`.
+func (p Path) IsKey() bool {
+	n := len(p.segments)
+
+	return n > 0 && p.segments[n-1].kind == segmentKey
+}
+
+// Value returns the path without the `~` selector that ends it, or the
+// path as it is when it does not end in `~`. For the path of a key, the
+// result names the value of the same entry. [Path.Last] of the result
+// thus names the entry, and [Path.Parent] of it names the mapping that
+// holds the entry. Both hold whether or not the path named the key:
+//
+//	p := paths.MustParse("$.jobs.build~")
+//	p.IsKey()                       // true
+//	sel, _ := p.Value().Last()      // .build
+//	holder, _ := p.Value().Parent() // $.jobs
+func (p Path) Value() Path {
+	if !p.IsKey() {
+		return p
+	}
+
+	parent, _ := p.Parent()
+
+	return parent
 }
 
 // Recursive returns a copy of the path with a `..selector` recursive descent
@@ -481,6 +525,12 @@ func (p Path) RecursiveAll() Path {
 //
 //	hours.Join(paths.Doc().Child("name")) // $.name
 //
+// A path that ends in the `~` from [Path.Key] already names a key, so
+// Join drops a `~` that starts the path after it, as Key does:
+//
+//	key := paths.Doc().Child("name").Key()
+//	key.Join(paths.Current().Key()) // $.name~
+//
 // Join returns the receiver as it is when qs is empty or holds only
 // [Current], and joining an `@` path to Current yields that path. Join
 // copies each selector once, so joining many short paths in one call takes
@@ -509,7 +559,12 @@ func (p Path) Join(qs ...Path) Path {
 	merged = append(merged, start.segments...)
 
 	for _, q := range rest {
-		merged = append(merged, q.segments...)
+		segs := q.segments
+		if len(segs) > 0 && segs[0].kind == segmentKey && len(merged) > 0 && merged[len(merged)-1].kind == segmentKey {
+			segs = segs[1:]
+		}
+
+		merged = append(merged, segs...)
 	}
 
 	return Path{segments: merged, absolute: start.absolute}
@@ -523,6 +578,12 @@ func (p Path) Join(qs ...Path) Path {
 //	hours := paths.Doc().Child("spec", "hours")
 //	open := paths.Doc().Child("spec", "hours", "open")
 //	open.CutPrefix(hours) // @.open, true
+//
+// CutPrefix cannot restore a `~` that Join dropped. When prefix ends in
+// `~` and the joined path starts with `~`, the rest lacks that `~`:
+//
+//	key := paths.Doc().Child("a").Key()
+//	key.Join(paths.Current().Key()).CutPrefix(key) // @, true
 //
 // The rest reads from the node that prefix selects. It is thus an `@`
 // path wherever the receiver starts, and a path cut by itself is
@@ -555,8 +616,9 @@ func (p Path) CutPrefix(prefix Path) (Path, bool) {
 //
 // The parent starts where the path does. Parent drops one selector of
 // any kind. The parent of a path that ends in `~` is the path to the value
-// of the same entry. The parent of a path that ends in `.*`, `[*]`,
-// `..name`, or `..*` is the path to the node that selector reads.
+// of the same entry, as [Path.Value] gives it. The parent of a path that
+// ends in `.*`, `[*]`, `..name`, or `..*` is the path to the node that
+// selector reads.
 func (p Path) Parent() (Path, bool) {
 	n := len(p.segments)
 
@@ -597,7 +659,8 @@ func (p Path) IsAbsolute() bool {
 // compares the paths and not the nodes they select, so `$.name` differs
 // from `@.name`, and two paths that reach one node through an alias
 // differ. Paths that print the same [Path.String] are equal, so a caller
-// can key a map of paths by that string.
+// can key a map of paths by that string. A path holds at most one `~` in
+// a row, as [Path.Key] describes, so p.Key().Key() equals p.Key().
 func (p Path) Equal(q Path) bool {
 	return p.absolute == q.absolute && slices.Equal(p.segments, q.segments)
 }
@@ -704,15 +767,17 @@ func (p *Path) UnmarshalText(text []byte) error {
 // [Path.String] for a form that Parse reads back.
 //
 // The goccy/go-yaml syntax does not have a selector for the key of an
-// entry. YAMLPath thus leaves out the `~` selector from [Path.Key], and
-// the selectors after it apply to the value. The path $.a~.b becomes
-// $.a.b, which can select a node where [Resolver.Node] does not find one.
+// entry. Dropping the `~` selector from [Path.Key] leaves a path to the
+// value rather than to the key, so [yaml.Path.ReplaceWithNode] on it
+// replaces the value. YAMLPath thus returns an error wrapping
+// [ErrNoYAMLPath] for a path that holds a `~` selector. A caller that
+// wants the value of the entry converts [Path.Value] instead.
 //
 // The goccy/go-yaml syntax also lacks a selector for every entry of a
 // mapping, and its `[*]` lists only the elements of a sequence. Dropping
 // the `.*` selector from [Path.ChildAll] leaves a path to the mapping
 // rather than to its entries. YAMLPath thus returns an error wrapping
-// [ErrNoYAMLPath] for a path that holds a `.*` selector. The goccy/go-yaml
+// ErrNoYAMLPath for a path that holds a `.*` selector. The goccy/go-yaml
 // `..` takes only a name, so YAMLPath also returns that error for the
 // `..*` selector from [Path.RecursiveAll]. A caller can resolve such a
 // path with [Resolver.Matches] and convert the path of each match.
@@ -741,9 +806,7 @@ func (p Path) YAMLPath() (*yaml.Path, error) {
 			pb = pb.IndexAll()
 		case segmentRecursive:
 			pb = pb.Recursive(seg.name)
-		case segmentKey:
-			// No goccy selector names a key.
-		case segmentChildAll, segmentRecursiveAll:
+		case segmentKey, segmentChildAll, segmentRecursiveAll:
 			return nil, fmt.Errorf("convert %s: %w", p, ErrNoYAMLPath)
 		}
 	}
@@ -771,8 +834,9 @@ func builderName(name string) string {
 // with every child name quoted so that PathString holds it as its raw
 // text. It reports false for a path that syntax cannot hold. PathString
 // rejects an empty name and reads a name that is not valid UTF-8 as a
-// different name. The syntax does not quote a recursive name, and it lacks
-// a selector for every entry of a mapping or for every node below one.
+// different name. The syntax does not quote a recursive name. It lacks a
+// selector for the key of an entry, for every entry of a mapping, and for
+// every node below one.
 func (p Path) goccyString() (string, bool) {
 	var sb strings.Builder
 
@@ -802,9 +866,7 @@ func (p Path) goccyString() (string, bool) {
 
 			sb.WriteString(".." + seg.name)
 
-		case segmentKey:
-			// No goccy selector names a key.
-		case segmentChildAll, segmentRecursiveAll:
+		case segmentKey, segmentChildAll, segmentRecursiveAll:
 			return "", false
 		}
 	}
@@ -832,7 +894,7 @@ func (p Path) wildcard() bool {
 // hold content. Its body is nil, or the body holds only comments or
 // directives. A parse that keeps comments leaves them in the body of a
 // comment-only document. A path with no selectors matches that null at
-// the header. A path with only `~` selectors gives the keyless match of
+// the header. The path with only a `~` selector gives the keyless match of
 // that null, as [match.key] describes. It points at the header but does
 // not select a node. An error about the document as a whole thus points
 // at its header line. No deeper path matches anything there.
@@ -877,16 +939,10 @@ func (p Path) matches(r *resolver, doc *ast.DocumentNode) ([]match, error) {
 
 // selectsRoot reports whether the path points at the root node. A path
 // points at the root when it does not have segments, or has only the `~`
-// segments of [Path.Key]. The root does not have a key, so a `~` segment
+// segment of [Path.Key]. The root does not have a key, so a `~` segment
 // there points where the root path does.
 func (p Path) selectsRoot() bool {
-	for _, s := range p.segments {
-		if s.kind != segmentKey {
-			return false
-		}
-	}
-
-	return true
+	return p.Value().Len() == 0
 }
 
 // single resolves the path in doc with r, a resolver for doc, to exactly
