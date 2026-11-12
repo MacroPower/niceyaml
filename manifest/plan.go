@@ -344,9 +344,8 @@ func (f *PlanFile) Header() string {
 
 // Diff returns the change of the file as a view of its hunks, with the
 // line numbers of the file and lines of context around each hunk. When
-// [niceyaml.WithExcerpts] hides the excerpts of the Source, the view does
-// not show a line of the file. It holds one row instead, which counts the
-// lines that change.
+// [niceyaml.WithExcerpts] hides the excerpts of the Source, the view holds
+// no rows, and [PlanFile.Stats] still counts the lines that change.
 //
 // A printer renders the view with styles. [line.View.String] renders it
 // as plain text for a log, with a "-" beside each line the plan removes
@@ -356,35 +355,51 @@ func (f *PlanFile) Header() string {
 // large file. When ctx ends, Diff returns a nil view with the error of
 // ctx, which matches [context.Canceled] or [context.DeadlineExceeded].
 func (f *PlanFile) Diff(ctx context.Context, lines int) (*line.View, error) {
+	result, err := f.diff(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if !f.f.src.ShowsExcerpts() {
+		return result.Unified().Slice(), nil
+	}
+
+	return result.Hunks(lines), nil
+}
+
+// Stats counts the lines that the plan removes from the file and the
+// lines that it adds, from the diff that [PlanFile.Diff] shows. It counts
+// them whether or not [niceyaml.WithExcerpts] hides the excerpts of the
+// Source, so a program that hides them can still print a count for each
+// file:
+//
+//	st, err := f.Stats(ctx)
+//	if err != nil {
+//		return err
+//	}
+//
+//	fmt.Printf("  %d removed, %d added\n", st.Removed, st.Added)
+//
+// Stats passes ctx to [diff.Diff], as Diff does. When ctx ends, Stats
+// returns zero [diff.Stats] with the error of ctx.
+func (f *PlanFile) Stats(ctx context.Context) (diff.Stats, error) {
+	result, err := f.diff(ctx)
+	if err != nil {
+		return diff.Stats{}, err
+	}
+
+	return result.Stats(), nil
+}
+
+// diff returns the diff of the text that the plan read and the new text
+// of the file.
+func (f *PlanFile) diff(ctx context.Context) (*diff.Result, error) {
 	result, err := diff.Diff(ctx, f.f.src.Lines(), f.f.src.WithText(f.after).Lines())
 	if err != nil {
-		return nil, err //nolint:wrapcheck // The error of ctx, as Diff documents.
+		return nil, err //nolint:wrapcheck // The error of ctx, as Diff and Stats document.
 	}
 
-	if f.f.src.ShowsExcerpts() {
-		return result.Hunks(lines), nil
-	}
-
-	stats := result.Stats()
-
-	var parts []string
-
-	if stats.Removed > 0 {
-		parts = append(parts, quantity.Plural(stats.Removed, "line")+" removed")
-	}
-
-	if stats.Added > 0 {
-		word := "added"
-		if len(parts) == 0 {
-			word = quantity.Plural(stats.Added, "line") + " added"
-		} else {
-			word = strconv.Itoa(stats.Added) + " " + word
-		}
-
-		parts = append(parts, word)
-	}
-
-	return line.NewView(niceyaml.NewSourceFromString(strings.Join(parts, ", ")).Lines()), nil
+	return result, nil
 }
 
 // docLabel returns d as a line of a header names it. A document without
