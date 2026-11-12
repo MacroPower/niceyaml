@@ -129,7 +129,9 @@
 //
 // Provide a [finder.Finder] via [WithFinder] to change how search terms
 // match, such as the normalization it applies, or a custom [Searcher] via
-// [WithSearcher] for another search implementation.
+// [WithSearcher] for another search implementation. [Model.SetFinder] and
+// [Model.SetSearcher] swap them at runtime, such as from a key binding that
+// toggles case-sensitive search.
 //
 // Provide a [diff.Differ] via [WithDiffer] to change how the viewport
 // compares two revisions, such as with a line key that ignores spaces at
