@@ -23,11 +23,12 @@ var (
 	//     which cannot match any cleaned path.
 	ErrInvalidPattern = filepaths.ErrInvalidPattern
 
-	// ErrNoBaseDir reports a [FilePath] matcher whose base directory does
-	// not resolve to an absolute path, so the matcher cannot decide. In a
-	// process without a working directory, a relative base does not resolve
-	// to an absolute path.
-	ErrNoBaseDir = errors.New("file path pattern has no base directory")
+	// ErrUnresolvedBase reports a [FilePath] matcher whose base directory
+	// does not resolve to an absolute path, so the matcher cannot decide. In
+	// a process without a working directory, a relative base does not
+	// resolve to an absolute path. Pass [WithBaseDir] an absolute path to
+	// avoid it.
+	ErrUnresolvedBase = errors.New("file path pattern base directory does not resolve")
 )
 
 // FilePathOption configures [FilePath].
@@ -153,9 +154,9 @@ type filePathMatcher struct {
 // patterns belong to the root of a project.
 //
 // In a process without a working directory, a relative base does not
-// resolve to an absolute path. Match then reports [ErrNoBaseDir] when it
-// tests an absolute file path against a relative pattern. A rooted
-// pattern and a relative file path do not need the base.
+// resolve to an absolute path. Match then reports [ErrUnresolvedBase]
+// when it tests an absolute file path against a relative pattern. A
+// rooted pattern and a relative file path do not need the base.
 //
 // FilePath also returns [ErrInvalidPattern] for an empty pattern, because
 // such a pattern does not match any path and silently disables the
@@ -240,7 +241,7 @@ func (m *filePathMatcher) Match(_ context.Context, doc *niceyaml.Node) (bool, er
 	}
 
 	if m.baseErr != nil {
-		return false, fmt.Errorf("%w: %w", ErrNoBaseDir, m.baseErr)
+		return false, fmt.Errorf("%w: %w", ErrUnresolvedBase, m.baseErr)
 	}
 
 	// Rel fails for a path with no route from the base, such as one on
