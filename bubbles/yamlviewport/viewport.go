@@ -298,8 +298,27 @@ func WithPrinter(p *printer.Printer) Option {
 //nolint:gocritic // hugeParam: Copying.
 func WithContainerStyle(s lipgloss.Style) Option {
 	return func(c *config) {
-		c.style = s
+		c.style = containerFrame(s)
 	}
+}
+
+// containerFrame returns s without the properties that size, align, or
+// rewrite the rows it wraps, as [printer.WithContainerStyle] drops them.
+// It drops the width, the height, the maximum width and height, the
+// alignment, Inline, the transform, and the string that
+// [lipgloss.Style.SetString] sets.
+//
+//nolint:gocritic // hugeParam: Copying.
+func containerFrame(s lipgloss.Style) lipgloss.Style {
+	return s.
+		UnsetWidth().
+		UnsetHeight().
+		UnsetMaxWidth().
+		UnsetMaxHeight().
+		UnsetAlign().
+		UnsetInline().
+		UnsetTransform().
+		UnsetString()
 }
 
 // WithSearcher is an [Option] that sets the [Searcher] that search terms run
@@ -603,8 +622,7 @@ func (m *Model) Width() int {
 
 // SetWidth sets the width of the viewport and clamps the scroll offsets to
 // the new bounds. A width that leaves the content width as it is leaves the
-// view where it is. The current width leaves the content width as it is,
-// and so does a width that the container style caps.
+// view where it is. The current width leaves the content width as it is.
 func (m *Model) SetWidth(w int) {
 	old := m.paneWidth()
 
@@ -1281,12 +1299,23 @@ func (m *Model) ToggleWordWrap() {
 	m.SetWordWrap(!m.wrapEnabled)
 }
 
-// ContainerStyle returns the container style applied to the viewport frame.
+// ContainerStyle returns the container style applied to the viewport frame,
+// without the properties that [Model.SetContainerStyle] ignores.
 func (m *Model) ContainerStyle() lipgloss.Style {
 	return m.style
 }
 
 // SetContainerStyle sets the container style applied to the viewport frame.
+//
+// The viewport owns the size and the alignment of the container, as
+// [printer.WithContainerStyle] does for a printer. It ignores the width,
+// the height, the maximum width and height, the alignment, Inline, the
+// transform, and the string that [lipgloss.Style.SetString] sets. It draws
+// s with every other property, such as the margins, the border, the
+// padding, the colors, and the text attributes. Each content row thus
+// renders as one row of [Model.View]. Use [Model.SetWidth] and
+// [Model.SetHeight] to size the view.
+//
 // The frame size changes the content area, so the scroll offsets clamp to
 // it. A style that changes the content width keeps the same line at the
 // top, as far as that clamp allows. A style that leaves the content width
@@ -1296,6 +1325,7 @@ func (m *Model) ContainerStyle() lipgloss.Style {
 //
 //nolint:gocritic // hugeParam: Copying.
 func (m *Model) SetContainerStyle(s lipgloss.Style) {
+	s = containerFrame(s)
 	prev := m.style
 	old := m.paneWidth()
 
@@ -2262,44 +2292,14 @@ func (m *Model) scrollWidth() int {
 	return max(0, m.paneWidth()-m.printer.ContainerStyle().GetHorizontalFrameSize())
 }
 
-// outerSize returns the width and height of the viewport frame: the set
-// dimensions, capped by any fixed or maximum size on the container style.
-// As in lipgloss, a fixed size excludes the style's margins, so that cap
-// adds them back. Lipgloss cuts to MaxWidth and MaxHeight after it adds
-// the margins, so those caps apply as they are.
-func (m *Model) outerSize() (int, int) {
-	w, h := m.Width(), m.Height()
-	if sw := m.style.GetWidth(); sw != 0 {
-		w = min(w, sw+m.style.GetHorizontalMargins())
-	}
-
-	if sh := m.style.GetHeight(); sh != 0 {
-		h = min(h, sh+m.style.GetVerticalMargins())
-	}
-
-	if mw := m.style.GetMaxWidth(); mw > 0 {
-		w = min(w, mw)
-	}
-
-	if mh := m.style.GetMaxHeight(); mh > 0 {
-		h = min(h, mh)
-	}
-
-	return w, h
-}
-
 // maxWidth returns the content width accounting for frame size.
 func (m *Model) maxWidth() int {
-	w, _ := m.outerSize()
-
-	return max(0, w-m.style.GetHorizontalFrameSize())
+	return max(0, m.width-m.style.GetHorizontalFrameSize())
 }
 
 // maxHeight returns the content height accounting for frame size.
 func (m *Model) maxHeight() int {
-	_, h := m.outerSize()
-
-	return max(0, h-m.style.GetVerticalFrameSize())
+	return max(0, m.height-m.style.GetVerticalFrameSize())
 }
 
 // hasContent reports whether the view has lines to display.
@@ -3307,10 +3307,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 // renderContent applies styling and renders lines into final output. It cuts
 // each row to contentW and pads it to contentW, so the style fills only the
 // rows below them. On a viewport of only a few columns, the printer's gutter
-// can force a row past contentW. A style with a width word-wraps every row
-// on each render. It also wraps a row wider than contentW onto a second
-// screen row that the scroll math does not count. The container style
-// therefore renders without its width.
+// can force a row past contentW.
 func (m *Model) renderContent(lines []string, contentW, contentH int) string {
 	textStyle := m.printer.Style(kind.Text)
 
@@ -3329,22 +3326,18 @@ func (m *Model) renderContent(lines []string, contentW, contentH int) string {
 		MaxHeight(contentH).
 		Render(strings.Join(lines, "\n"))
 
-	return m.style.
-		UnsetWidth().UnsetHeight().
-		Render(contents)
+	return m.style.Render(contents)
 }
 
 // View renders the viewport.
 //
-// The outer size is [Model.Width] and [Model.Height], capped by any fixed
-// or maximum size on the container style. When the outer height is
-// positive, View returns exactly that many rows, each as wide as the outer
-// width. A parent can therefore stack its own rows above or below the
-// view. View returns "" for a zero Model, which [New] did not create, and
-// when the outer height is 0 or less.
+// When [Model.Height] is positive, View returns exactly that many rows,
+// each as wide as [Model.Width]. A parent can therefore stack its own rows
+// above or below the view. View returns "" for a zero Model, which [New]
+// did not create, and when the height is 0 or less.
 //
 // The content area lacks room for rows in these cases:
-//   - The outer width is 0 or less.
+//   - The width is 0 or less.
 //   - The frame of the container style takes all of a dimension.
 //   - The separator of a side-by-side diff leaves its panes without a
 //     column.
@@ -3367,13 +3360,12 @@ func (m Model) View() string {
 		return ""
 	}
 
-	outerW, outerH := m.outerSize()
-	if outerH <= 0 {
+	if m.height <= 0 {
 		return ""
 	}
 
 	if !m.canRender() {
-		return strings.Join(slices.Repeat([]string{m.printer.Pad("", outerW)}, outerH), "\n")
+		return strings.Join(slices.Repeat([]string{m.printer.Pad("", m.width)}, m.height), "\n")
 	}
 
 	w, h := m.maxWidth(), m.maxHeight()
