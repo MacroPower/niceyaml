@@ -38,7 +38,18 @@
 // names the entries that `..*` leaves out, such as the entry of a `<<`
 // merge key. A path that ends in a `~` after an element or the root still
 // points where the path before the `~` does. An error at that path thus
-// has a place in the source.
+// has a place in the source. No selector after a `~` selects anything.
+//
+// A path holds at most one `~` in a row. [Path.Key] returns a path that
+// ends in `~` as it is, and [Parse] rejects `~~`. [Path.IsKey] reports
+// whether a path ends in `~`, and [Path.Value] drops that `~`. A caller
+// that gets the path of a key from the library, such as the path of a
+// position in a key, reads the name of its entry from Path.Value:
+//
+//	if p.IsKey() { // $.jobs.build~
+//		sel, _ := p.Value().Last()      // .build
+//		holder, _ := p.Value().Parent() // $.jobs
+//	}
 //
 // A Resolver resolves within a single document, so a caller with a
 // multi-document file must pick the document first. [NewResolver] walks
@@ -458,7 +469,8 @@
 //
 // For the goccy/go-yaml API, [Path.YAMLPath] converts the selectors to a
 // [*yaml.Path]. That syntax does not support `@`, so YAMLPath writes `$`
-// in its place. It does not support the `.*` or `..*` selectors either,
-// so YAMLPath returns an error wrapping [ErrNoYAMLPath] for a path that
-// holds one.
+// in its place. It does not support the `~`, `.*`, or `..*` selectors
+// either, so YAMLPath returns an error wrapping [ErrNoYAMLPath] for a path
+// that holds one. A caller with the path of a key converts [Path.Value]
+// to name the value of the entry.
 package paths

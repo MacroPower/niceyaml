@@ -432,12 +432,7 @@ func (l *layering) layer(doc *Node, path, through paths.Path) (resolvedLayer, la
 		index = at.Layer
 	}
 
-	above := path
-	if last, ok := path.Last(); ok && last.Kind == paths.SelectorKey {
-		above, _ = path.Parent()
-	}
-
-	if _, ok := through.CutPrefix(above); ok {
+	if _, ok := through.CutPrefix(path.Value()); ok {
 		whole, _ := through.CutPrefix(paths.Doc())
 
 		if elem := l.root.Element(whole, l.appends); elem != nil {

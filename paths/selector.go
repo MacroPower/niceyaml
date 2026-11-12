@@ -200,8 +200,8 @@ func (p Path) Selectors() iter.Seq[Selector] {
 //	}
 //
 // For a path that ends in the `~` selector from [Path.Key], Last gives
-// that selector, of kind [SelectorKey]. The name of its entry is then the
-// last selector of [Path.Parent].
+// that selector, of kind [SelectorKey]. For the path of a key or of a
+// value, the last selector of [Path.Value] names the entry.
 func (p Path) Last() (Selector, bool) {
 	if len(p.segments) == 0 {
 		return Selector{}, false

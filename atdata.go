@@ -222,7 +222,7 @@ func (d *dataLocus) over(l locus) *dataLocus {
 
 	below := l.path
 	if d.key && l.data != nil && l.data.key {
-		below = valueOf(below)
+		below = below.Value()
 	}
 
 	over.below = d.below.Join(below)
@@ -321,7 +321,7 @@ func (b binder) unkeyed(n *Node, l locus) (locus, bool) {
 			return l, false
 		}
 
-		l.path, l.data = valueOf(l.path), nil
+		l.path, l.data = l.path.Value(), nil
 
 		return l, true
 	}
@@ -359,19 +359,9 @@ func (b binder) unkeyed(n *Node, l locus) (locus, bool) {
 		return l, false
 	}
 
-	l.path, l.data = valueOf(l.path), nil
+	l.path, l.data = l.path.Value(), nil
 
 	return l, true
-}
-
-// valueOf returns p without the `~` selector that ends it, or p as it is
-// when it does not end in `~`.
-func valueOf(p paths.Path) paths.Path {
-	if sel, ok := p.Last(); ok && sel.Kind == paths.SelectorKey {
-		p, _ = p.Parent()
-	}
-
-	return p
 }
 
 // prefixOf returns the path of the first n selectors of p. The prefix

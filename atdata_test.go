@@ -2560,6 +2560,10 @@ func TestAtData_SelfValidateValue(t *testing.T) {
 				opt:  niceyaml.AtData("x"),
 				want: "f.yaml:2:3: $.m.0x10~.x: x",
 			},
+			"AtDataKey: the key": {
+				opt:  niceyaml.AtDataKey(),
+				want: "f.yaml:2:3: $.m.0x10~: x",
+			},
 			"AtDataKey: a name below the key": {
 				opt:  niceyaml.AtDataKey("x"),
 				want: "f.yaml:2:3: $.m.0x10~.x: x",

@@ -567,7 +567,7 @@ func (n *Node) writtenIn(path paths.Path, in astnode.Parent) ast.Node {
 		return held
 	}
 
-	if last, _ := path.Last(); last.Kind == paths.SelectorKey {
+	if path.IsKey() {
 		return n.entryKey(path)
 	}
 
@@ -939,11 +939,7 @@ func (n *Node) KeyRange() (position.Range, bool) {
 // in `~` names the entry of its key. It returns nil when no entry holds
 // the node.
 func (n *Node) entryKey(path paths.Path) ast.Node {
-	if last, ok := path.Last(); ok && last.Kind == paths.SelectorKey {
-		path, _ = path.Parent()
-	}
-
-	in := datapath.ParentAt(n.doc.pathResolver(), path)
+	in := datapath.ParentAt(n.doc.pathResolver(), path.Value())
 	if in.Entry == nil {
 		return nil
 	}

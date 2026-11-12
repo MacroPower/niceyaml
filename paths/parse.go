@@ -45,8 +45,8 @@ var (
 //   - `[*]` selects every sequence element.
 //   - `~` selects the key of the entry the selector before it picked. It
 //     selects nothing after a sequence element and on the root, which do
-//     not have a key. After a `~` that found a key, it selects that key
-//     again.
+//     not have a key. No selector after a `~` selects anything, and a `~`
+//     cannot follow another `~`.
 //
 // Inside quotes, `\` escapes the next character, so `\'` is a quote and
 // `\\` is a backslash. Parse reads the escapes that [Path.String] writes
@@ -121,6 +121,8 @@ func parseSegments(expr string) ([]segment, error) {
 			seg, rest, err = parseNameOrStar(rest[1:], segmentChildAll, segmentChild)
 		case strings.HasPrefix(rest, "["):
 			seg, rest, err = parseIndex(rest[1:])
+		case strings.HasPrefix(rest, "~~"):
+			return nil, fmt.Errorf("~~ at %d; one ~ selects the key", len(expr)-len(rest))
 		case strings.HasPrefix(rest, "~"):
 			seg, rest = segment{kind: segmentKey}, rest[1:]
 		default:

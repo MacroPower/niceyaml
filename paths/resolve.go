@@ -20,11 +20,10 @@ import (
 // selector picked an element. The index field holds the index of the node
 // in that sequence.
 //
-// The keyed field is set on the key that a `~` selector found. The keyless
-// field is set where a `~` selector did not find a key, as [match.key]
-// describes. Such a match keeps the node, entry, seq, and index fields of
-// the match before the `~`. It is where the path points, for
-// [Resolver.Token], but it does not select a node.
+// The keyless field is set where a `~` selector did not find a key, as
+// [match.key] describes. Such a match keeps the node, entry, seq, and
+// index fields of the match before the `~`. It is where the path points,
+// for [Resolver.Token], but it does not select a node.
 //
 // The segs field holds the selectors that name the node alone. They are
 // the selectors that the resolve has applied so far, and the resolve
@@ -47,7 +46,6 @@ type match struct {
 	segs    []segment
 	order   []int
 	index   int
-	keyed   bool
 	keyless bool
 }
 
@@ -85,10 +83,7 @@ func (m match) parent() astnode.Parent {
 // `~` does not find a key. A sequence element and the root are such
 // matches. The result is then m itself, marked keyless. It does not select
 // a node. It keeps what m points at, so an error at the path still has a
-// place in the source. A `~` on a keyless match gives that match again.
-//
-// A `~` on the key that an earlier `~` found gives that key again. A path
-// that ends in `~~` thus selects what the path that ends in one `~` does.
+// place in the source.
 //
 // The match drops the `?` of an explicit key but keeps the anchors and
 // tags on the key, as a match of a value keeps those on the value. A tag
@@ -96,12 +91,6 @@ func (m match) parent() astnode.Parent {
 // mapping.
 func (m match) key() match {
 	seg := segment{kind: segmentKey}
-
-	if m.keyed || m.keyless {
-		m.segs = append(m.segs, seg)
-
-		return m
-	}
 
 	if m.entry == nil || astnode.Content(m.entry.Key) == nil {
 		next := m.with(m.node, m.entry, seg)
@@ -116,10 +105,7 @@ func (m match) key() match {
 		key = explicit.Value
 	}
 
-	next := m.with(key, nil, seg, -1)
-	next.keyed = true
-
-	return next
+	return m.with(key, nil, seg, -1)
 }
 
 // resolver walks a document for the selectors of a [Path]. Its binding
@@ -1214,12 +1200,12 @@ func readsNull(err error) bool {
 // drops repeats, so a later `.name`, `.*`, `[n]`, or `[*]` selector can
 // still reach one node through several aliases.
 //
-// A `~` selector that does not find a key leaves a keyless match, as
-// [match.key] describes. Such a match does not select a node, so every
-// selector after it other than another `~` selects nothing from it. The
-// keyless matches that resolve returns are thus those of the `~`
-// selectors that end the path. [Resolver.Token] points at them, and the
-// methods that select nodes leave them out.
+// A path does not reach into a key, so no selector after a `~` selects
+// anything, whether or not the `~` found a key. A `~` selector that does
+// not find a key leaves a keyless match, as [match.key] describes. Such a
+// match does not select a node. The keyless matches that resolve returns
+// are thus those of a `~` selector that ends the path. [Resolver.Token]
+// points at them, and the methods that select nodes leave them out.
 //
 // Returns [ErrExcessiveAliasing] when the matches of one selector pass the
 // limit that [resolver.excessive] applies. Resolve checks the limit after
@@ -1231,14 +1217,14 @@ func readsNull(err error) bool {
 func (r *resolver) resolve(root ast.Node, segs []segment) ([]match, error) {
 	matches := []match{{node: root}}
 
-	for _, seg := range segs {
+	for i, seg := range segs {
 		var (
 			next  []match
 			reads lookupReads
 		)
 
-		if seg.kind != segmentKey {
-			matches = slices.DeleteFunc(matches, func(m match) bool { return m.keyless })
+		if i > 0 && segs[i-1].kind == segmentKey {
+			return nil, nil
 		}
 
 		switch seg.kind {

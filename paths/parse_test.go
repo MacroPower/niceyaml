@@ -14,7 +14,7 @@ import (
 func TestParse(t *testing.T) {
 	t.Parallel()
 
-	// TestPath_Build and TestPath_YAMLPath_Wildcards parse back each
+	// TestPath_Build and TestPath_YAMLPath_NoEquivalent parse back each
 	// expression they write. A case that leaves want empty reads back as
 	// the expression it parses.
 	tcs := map[string]struct {
@@ -320,6 +320,13 @@ func TestParse_Invalid(t *testing.T) {
 			want: `parse path "$foo": invalid path: unexpected 'f' at 1`,
 		},
 		"bare text after key selector": {expr: "$.a~b"},
+		"two key selectors": {
+			expr: "$.a~~",
+			want: `parse path "$.a~~": invalid path: ~~ at 3; one ~ selects the key`,
+		},
+		"two key selectors on the root": {expr: "$~~.jobs"},
+		"two key selectors on current":  {expr: "@~~"},
+		"three key selectors":           {expr: "$.a~~~"},
 		"non-ASCII after root": {
 			expr: "$é",
 			want: `parse path "$é": invalid path: unexpected 'é' at 1`,

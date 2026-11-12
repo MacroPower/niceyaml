@@ -2136,14 +2136,11 @@ func TestResolver_KeySelector(t *testing.T) {
 	}{
 		"key of an entry":                          {path: "$.name~", node: "name", token: "name@1:1"},
 		"key of an entry in an element":            {path: "$.items[1].k~", node: "k", token: "k@4:5"},
-		"key of a key":                             {path: "$.name~~", node: "name", token: "name@1:1"},
 		"key of the root":                          {path: "$~", token: "name@1:1"},
 		"key of a scalar element":                  {path: "$.items[0]~", token: "one@3:5"},
 		"key of a mapping element":                 {path: "$.items[1]~", token: "-@4:3"},
-		"key of the key of an element":             {path: "$.items[1]~~", token: "-@4:3"},
 		"child after the key of an element":        {path: "$.items[1]~.k"},
 		"child after the key of the root":          {path: "$~.name"},
-		"child after two keys of the root":         {path: "$~~.name"},
 		"key of a child after the key of the root": {path: "$~.name~"},
 		"index after the key of the root":          {path: "$~.items[0]"},
 	}
@@ -6195,15 +6192,6 @@ func TestResolver_Matches(t *testing.T) {
 		"recursive selector after the key of the root selects nothing": {
 			input: "a: [{k: v}]\n",
 			path:  "$~..*",
-		},
-		"key after the key of an entry": {
-			input: "a: {b: 1}\n",
-			path:  "$.a.*~~",
-			want:  []string{"$.a.b~~=b"},
-		},
-		"key after the key of an element selects nothing": {
-			input: "a: [x]\n",
-			path:  "$.a[*]~~",
 		},
 		"then a child": {
 			input: "a: {b: 1}\nc: [{b: 2}]\n",

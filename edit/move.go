@@ -1087,13 +1087,11 @@ func (d *Doc) bareNote(n note) note {
 // bareItemIn returns path, a path of doc that PathAt gives, as the path of
 // an item of a flow sequence, as [Doc.bareItem] does for the user's text.
 func bareItemIn(doc *niceyaml.Node, path paths.Path) paths.Path {
-	if last, ok := path.Last(); !ok || last.Kind != paths.SelectorKey {
+	if !path.IsKey() {
 		return path
 	}
 
-	entry, _ := path.Parent()
-
-	item, ok := entry.Parent()
+	item, ok := path.Value().Parent()
 	if last, isItem := item.Last(); !ok || !isItem || last.Kind != paths.SelectorIndex {
 		return path
 	}
@@ -1119,7 +1117,7 @@ func bareItemIn(doc *niceyaml.Node, path paths.Path) paths.Path {
 		return path
 	}
 
-	if name, ok := r.KeyName(entries[0].Key); !ok || entry.String() != item.Child(name).String() {
+	if name, ok := r.KeyName(entries[0].Key); !ok || !path.Value().Equal(item.Child(name)) {
 		return path
 	}
 

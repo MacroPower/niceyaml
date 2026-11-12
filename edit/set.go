@@ -2046,12 +2046,7 @@ func (d *Doc) blockPath(p *place) (paths.Path, bool) {
 		return paths.Path{}, false
 	}
 
-	path := held.path
-	if last, ok := path.Last(); ok && last.Kind == paths.SelectorKey {
-		path, _ = path.Parent()
-	}
-
-	return path, true
+	return held.path.Value(), true
 }
 
 // joinValue returns the text of pl as the value of a place whose value

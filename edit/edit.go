@@ -655,7 +655,8 @@ type Removal struct {
 	// user's text holds the value as an item.
 	Key string
 	// Path is the path of the value as the user's text spells it. It ends
-	// in `~` when the user wrote the value under a key.
+	// in `~` when the user wrote the value under a key. [paths.Path.Value]
+	// gives the path of the removed value.
 	Path paths.Path
 	// Range is the range in the user's text of the key that the user wrote
 	// for the value. For an item of a block sequence, it runs from the "-"
