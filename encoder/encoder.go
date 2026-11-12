@@ -141,18 +141,16 @@ type Encoder struct {
 	w io.Writer
 	// Holds the first error w returned.
 	err error
-	// Holds the comments for every document, keyed by YAML path.
-	comments yaml.CommentMap
-	// Holds the go-yaml options of each encode, the options that register
-	// the marshalers last.
-	opts []yaml.EncodeOption
-	// Holds the marshalers of [WithMarshalers].
-	marshalers marshaler.Options
+	// Holds the settings of the options of New. Each encode applies its
+	// own options to a copy.
+	cfg config
 	// Reports whether a document has reached w.
 	written bool
 }
 
-// Option configures an [Encoder].
+// Option configures an encode. [New] takes options for every document an
+// [Encoder] writes, [Encoder.Encode] takes options for one document, and
+// [Marshal] takes options for the document it returns.
 //
 // Available options:
 //   - [Pretty]
@@ -167,8 +165,9 @@ type Encoder struct {
 //   - [WithYAMLComments]
 type Option func(*config)
 
-// config collects the settings, the marshalers, and the comments that
-// build an [Encoder].
+// config collects the settings, the marshalers, and the comments of an
+// encode. A copy of a config shares nothing that an [Option] changes in
+// place, so each encode can apply its own options to a copy.
 type config struct {
 	comments   yaml.CommentMap
 	marshalers marshaler.Options
@@ -181,6 +180,17 @@ type config struct {
 	omitEmpty      bool
 	omitZero       bool
 	autoInt        bool
+}
+
+// newConfig returns the config of opts, applied in order.
+func newConfig(opts []Option) config {
+	var c config
+
+	for _, opt := range opts {
+		opt(&c)
+	}
+
+	return c
 }
 
 // yamlOptions returns the go-yaml options of the settings of c.
@@ -307,12 +317,28 @@ func WithAutoInt(enabled bool) Option {
 	}
 }
 
-// WithYAMLComments is an [Option] that adds the comments in cm to every
-// document the encoder writes. Each key of cm is a YAML path, such as
+// WithYAMLComments is an [Option] that adds the comments in cm to the
+// documents of the encode. Each key of cm is a YAML path, such as
 // "$.a.b" or "$.items[0]", and its comments go on the node that path
 // selects. Build each comment with [yaml.HeadComment], [yaml.LineComment],
 // or [yaml.FootComment]. The encoder ignores a nil comment. The last
-// WithYAMLComments option replaces the earlier ones.
+// WithYAMLComments option replaces the earlier ones, and
+// WithYAMLComments(nil) leaves out the comments of those before it.
+//
+// Given to [New], the option adds cm to every document the [Encoder]
+// writes, so a "$" head comment repeats on each document. A stream of
+// documents that share their fields can share one map that way. Given to
+// [Encoder.Encode], it replaces the map of New for that one document. A
+// stream of documents that each have their own comments passes each map
+// to the call that writes its document:
+//
+//	enc := encoder.New(w, encoder.Pretty())
+//	for i, v := range values {
+//		err := enc.Encode(ctx, v, encoder.WithYAMLComments(comments[i]))
+//		if err != nil {
+//			return err
+//		}
+//	}
 //
 // A path of keys and indexes names one node. So does a path that ends in
 // "[*]", which names the sequence it steps into. The encoder skips the
@@ -364,7 +390,8 @@ func WithAutoInt(enabled bool) Option {
 // fails.
 //
 // Encode checks the keys of cm and the positions before it encodes the
-// value, so a comment map with either fault fails every document.
+// value, so a comment map with either fault fails every document it
+// applies to.
 //
 // The paths are those of [yaml.WithComment], and so is the placement of
 // each comment, except for the line comment of a flow sequence under a
@@ -386,29 +413,49 @@ func WithYAMLComments(cm yaml.CommentMap) Option {
 	}
 }
 
-// New creates a new [*Encoder] that writes to w.
+// New creates a new [*Encoder] that writes to w. The options apply to
+// every document the encoder writes.
 func New(w io.Writer, opts ...Option) *Encoder {
-	var c config
+	return &Encoder{w: w, cfg: newConfig(opts)}
+}
 
-	for _, opt := range opts {
-		opt(&c)
-	}
+// docEncoder encodes one document under the settings of a config.
+//
+// Create instances with [newDocEncoder].
+type docEncoder struct {
+	// Holds the comments of the document, keyed by YAML path.
+	comments yaml.CommentMap
+	// Holds the go-yaml options of the encode, the options that register
+	// the marshalers last.
+	opts []yaml.EncodeOption
+}
 
-	e := &Encoder{
-		w:          w,
-		comments:   c.comments,
-		marshalers: c.marshalers,
-	}
+// newDocEncoder creates a new [*docEncoder] with the settings of c.
+func newDocEncoder(c config) *docEncoder {
+	d := &docEncoder{comments: c.comments}
 
 	// The value that the function of a type returns encodes with the same
 	// options, so the functions of the encoder reach it too.
-	e.opts = append(c.yamlOptions(), c.marshalers.YAMLOptions(e.marshalText)...)
+	d.opts = append(c.yamlOptions(), c.marshalers.YAMLOptions(d.marshalText)...)
 
-	return e
+	return d
 }
 
 // Encode encodes v as YAML and writes it to the underlying writer as one
 // document. Every document after the first starts with a "---" separator.
+//
+// The options apply to this document only, after the options of [New], as
+// if they came last in the call to New. A [WithIndent] of the call
+// replaces the indent of New for this document. A [WithMarshalers] of the
+// call adds its marshalers after those of New.
+//
+// A stream of documents that each have their own comments, such as the
+// documents of a file that [go.jacobcolvin.com/niceyaml.Node.YAMLComments]
+// read, passes each map with [WithYAMLComments] to the call that writes
+// its document. WithYAMLComments of a call replaces the map of New for
+// its document, and WithYAMLComments(nil) writes the document without the
+// comments of New.
+//
 // Encode makes one Write call for each document, separator included, and
 // does not buffer output, so the document has reached the writer when
 // Encode returns. Each document defines its own anchors, so a later
@@ -479,8 +526,8 @@ func New(w io.Writer, opts ...Option) *Encoder {
 // print the node. A comment from [WithYAMLComments] that the encoder
 // cannot place returns an error that matches [ErrComment]. In every case
 // but a refused write, Encode does not write to the writer.
-func (e *Encoder) Encode(ctx context.Context, v any) error {
-	_, err := e.encode(ctx, v)
+func (e *Encoder) Encode(ctx context.Context, v any, opts ...Option) error {
+	_, err := e.encode(ctx, v, opts)
 
 	return err
 }
@@ -488,7 +535,7 @@ func (e *Encoder) Encode(ctx context.Context, v any) error {
 // encode is [Encoder.Encode], and it also returns the node that it printed
 // for v. The scalars of the node hold the values that go-yaml's encoder
 // gave them.
-func (e *Encoder) encode(ctx context.Context, v any) (ast.Node, error) {
+func (e *Encoder) encode(ctx context.Context, v any, opts []Option) (ast.Node, error) {
 	// After a refused write, v never reaches go-yaml, so its marshalers do
 	// not run and an encoding error cannot hide the write error.
 	err := e.writeErr()
@@ -496,16 +543,24 @@ func (e *Encoder) encode(ctx context.Context, v any) (ast.Node, error) {
 		return nil, err
 	}
 
+	c := e.cfg
+	for _, opt := range opts {
+		opt(&c)
+	}
+
+	d := newDocEncoder(c)
+
 	// A comment key that is not a path is an error before v reaches
 	// go-yaml, as it is with the WithComment option of go-yaml. So is a
 	// comment position that go-yaml does not define. The comment map alone
-	// decides both errors, so every document gets the same answer.
-	comments, err := parseComments(e.comments)
+	// decides both errors, so every document that the encoder writes with
+	// the same map gets the same answer.
+	comments, err := parseComments(d.comments)
 	if err != nil {
 		return nil, err
 	}
 
-	node, err := e.node(ctx, v)
+	node, err := d.node(ctx, v)
 	if err != nil {
 		// The value is not at fault when its context ended, so that error
 		// comes back as it is. So does a panic of the printer in the encode
@@ -551,10 +606,10 @@ func (e *Encoder) encode(ctx context.Context, v any) (ast.Node, error) {
 // as [Encoder.Encode] describes. It returns the error of go-yaml's encoder
 // as it is, and an error that matches [ErrNoNode] for a value that
 // encodes to no node.
-func (e *Encoder) node(ctx context.Context, v any) (ast.Node, error) {
+func (d *docEncoder) node(ctx context.Context, v any) (ast.Node, error) {
 	// A go-yaml encoder keeps every anchor it has seen, even from a call
 	// that failed, so each call marshals with a fresh one.
-	node, err := yaml.NewEncoder(io.Discard, e.opts...).EncodeToNodeContext(ctx, v)
+	node, err := yaml.NewEncoder(io.Discard, d.opts...).EncodeToNodeContext(ctx, v)
 	if err != nil {
 		return nil, err //nolint:wrapcheck // The caller names the cause.
 	}
@@ -594,8 +649,8 @@ func (e *Encoder) node(ctx context.Context, v any) (ast.Node, error) {
 // marshalText returns the YAML text of v, the value that the function of
 // a [CustomMarshaler] returns, as the encoder prints it without comments.
 // Go-yaml's encoder reads that text as the YAML of a marshaler.
-func (e *Encoder) marshalText(ctx context.Context, v any) ([]byte, error) {
-	node, err := e.node(ctx, v)
+func (d *docEncoder) marshalText(ctx context.Context, v any) ([]byte, error) {
+	node, err := d.node(ctx, v)
 	if err != nil {
 		return nil, err
 	}
@@ -628,7 +683,7 @@ func init() {
 
 		var buf bytes.Buffer
 
-		node, err := New(&buf, o...).encode(ctx, v)
+		node, err := New(&buf, o...).encode(ctx, v, nil)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -640,13 +695,13 @@ func init() {
 		o, _ := opts.([]Option) //nolint:errcheck // The hook takes the options of Marshal.
 
 		//nolint:wrapcheck // The hook returns the error of go-yaml.
-		return yaml.NewEncoder(io.Discard, New(io.Discard, o...).opts...).EncodeToNodeContext(ctx, v)
+		return yaml.NewEncoder(io.Discard, newDocEncoder(newConfig(o)).opts...).EncodeToNodeContext(ctx, v)
 	}
 
 	hook.Marshalers = func(opts any) marshaler.Options {
 		o, _ := opts.([]Option) //nolint:errcheck // The hook takes the options of Marshal.
 
-		return New(io.Discard, o...).marshalers
+		return newConfig(o).marshalers
 	}
 }
 

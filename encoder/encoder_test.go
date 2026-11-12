@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"reflect"
 	"slices"
 	"strconv"
@@ -472,6 +473,7 @@ func TestEncoder_Encode_documents(t *testing.T) {
 
 	type step struct {
 		value any
+		opts  []encoder.Option
 		fails bool
 	}
 
@@ -543,6 +545,119 @@ func TestEncoder_Encode_documents(t *testing.T) {
 			},
 			want: stringtest.LinesLF("a: 1 # count", "---", "a: 2 # count"),
 		},
+		"comments of each document": {
+			// The comments of a call apply to its document only, so a "$"
+			// head comment does not repeat.
+			steps: []step{
+				{
+					value: map[string]int{"a": 1},
+					opts: []encoder.Option{encoder.WithYAMLComments(yaml.CommentMap{
+						"$": {yaml.HeadComment(" Source: one.yaml")},
+					})},
+				},
+				{
+					value: map[string][]int{"items": {1}},
+					opts: []encoder.Option{encoder.WithYAMLComments(yaml.CommentMap{
+						"$":          {yaml.HeadComment(" Source: two.yaml")},
+						"$.items[0]": {yaml.LineComment(" first")},
+					})},
+				},
+				{value: map[string]int{"b": 2}},
+			},
+			want: stringtest.LinesLF(
+				"# Source: one.yaml",
+				"a: 1",
+				"---",
+				"# Source: two.yaml",
+				"items:",
+				"- 1 # first",
+				"---",
+				"b: 2",
+			),
+		},
+		"comments of a call replace those of New for its document": {
+			steps: []step{
+				{
+					value: map[string]int{"a": 1},
+					opts: []encoder.Option{encoder.WithYAMLComments(yaml.CommentMap{
+						"$.a": {yaml.LineComment(" call")},
+					})},
+				},
+				{value: map[string]int{"a": 2}, opts: []encoder.Option{encoder.WithYAMLComments(nil)}},
+				{value: map[string]int{"a": 3}},
+			},
+			opts: []encoder.Option{
+				encoder.WithYAMLComments(yaml.CommentMap{"$.a": {yaml.LineComment(" new")}}),
+			},
+			want: stringtest.LinesLF("a: 1 # call", "---", "a: 2", "---", "a: 3 # new"),
+		},
+		"comment fault of a call fails its document only": {
+			steps: []step{
+				{
+					value: map[string]int{"a": 1},
+					opts: []encoder.Option{encoder.WithYAMLComments(yaml.CommentMap{
+						"$..a": {yaml.LineComment(" group")},
+					})},
+					fails: true,
+				},
+				{value: map[string]int{"a": 2}},
+			},
+			want: stringtest.LinesLF("a: 2"),
+		},
+		"settings of a call apply to its document only": {
+			steps: []step{
+				{value: itemList{Items: []string{"a"}}},
+				{value: itemList{Items: []string{"b"}}, opts: []encoder.Option{encoder.WithIndent(4)}},
+				{value: itemList{Items: []string{"c"}}, opts: []encoder.Option{encoder.WithIndentSequence(false)}},
+				{value: itemList{Items: []string{"d"}}},
+			},
+			opts: []encoder.Option{encoder.Pretty()},
+			want: stringtest.LinesLF(
+				"items:",
+				"  - a",
+				"---",
+				"items:",
+				"    - b",
+				"---",
+				"items:",
+				"- c",
+				"---",
+				"items:",
+				"  - d",
+			),
+		},
+		"marshalers of a call reach the values they return": {
+			steps: []step{
+				{
+					value: map[string]note{"k": {text: "x"}},
+					opts: []encoder.Option{encoder.WithMarshalers(
+						encoder.CustomMarshaler(func(context.Context, note) (any, error) {
+							return map[string]net.IPNet{"net": tenNet}, nil
+						}),
+						cidr,
+					)},
+				},
+				{value: map[string]string{"k": "z"}},
+			},
+			want: stringtest.LinesLF("k:", "  net: 10.0.0.0/8", "---", "k: z"),
+		},
+		"marshalers of a call add to those of New": {
+			// The marshaler of the call returns a net.IPNet, which the
+			// marshaler of New writes.
+			steps: []step{
+				{
+					value: map[string]note{"k": {text: "x"}},
+					opts: []encoder.Option{encoder.WithMarshalers(
+						encoder.CustomMarshaler(func(context.Context, note) (any, error) {
+							return tenNet, nil
+						}),
+					)},
+				},
+				{value: map[string]net.IPNet{"k": tenNet}},
+			},
+			opts: []encoder.Option{encoder.WithMarshalers(cidr)},
+			want: stringtest.LinesLF("k: 10.0.0.0/8", "---", "k: 10.0.0.0/8"),
+		},
 		"comments only in the documents their path selects a node in": {
 			steps: []step{
 				{value: map[string][]int{"items": {1, 2}}},
@@ -575,7 +690,7 @@ func TestEncoder_Encode_documents(t *testing.T) {
 			enc := encoder.New(&buf, tc.opts...)
 
 			for i, st := range tc.steps {
-				err := enc.Encode(t.Context(), st.value)
+				err := enc.Encode(t.Context(), st.value, st.opts...)
 				if st.fails {
 					require.Error(t, err, "step %d", i)
 				} else {
