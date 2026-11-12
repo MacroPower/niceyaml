@@ -23,11 +23,11 @@ import (
 // follows the value to the target.
 //
 // A node can lose its place to an earlier edit of the Apply. Each later
-// edit, each Decode, each Exists, and each Nodes of an `@` path through
-// such a node then returns a problem that matches [ErrDisplaced]. Kind,
-// Len, and Scalar answer as they do for a place that does not hold a value.
-// They do so even when a later edit writes that place again. A new node
-// from [Node.At] reads and edits the place.
+// edit, each Decode, each Exists, and each Nodes of an `@` path through such
+// a node then returns a problem that matches [ErrDisplaced]. Kind, Len,
+// Scalar, HeadComment, and LineComment answer as they do for a place that
+// does not hold a value. They do so even when a later edit writes that place
+// again. A new node from [Node.At] reads and edits the place.
 //
 // A node loses its place when an edit removes the place, either directly or
 // by replacing a value above it. The edit can reach the place through another
@@ -63,13 +63,15 @@ import (
 // returns. The method that wrote returns nil for it and leaves the Doc as
 // it found it. A node takes edits until the Apply that gave it returns.
 // After that, each method that edits or decodes returns [ErrEnded], and so
-// do [Node.Exists] and [Node.Nodes]. Kind, Len, and Scalar then answer as
-// they do for a place that does not hold a value.
+// do [Node.Exists] and [Node.Nodes]. Kind, Len, Scalar, HeadComment, and
+// LineComment then answer as they do for a place that does not hold a
+// value.
 //
 // The methods that run code of the caller take a context. Set and Insert
 // run marshalers, and Decode runs unmarshalers, so each takes one. SetKey,
-// Move, and Remove do not run code of the caller, so they do not take a
-// context. [Doc.Apply] checks its context between calls of the [Func].
+// Move, Remove, SetHeadComment, and SetLineComment do not run code of the
+// caller, so they do not take a context. [Doc.Apply] checks its context
+// between calls of the [Func].
 //
 // Receive instances as the argument of a [Func], or from [Node.At] or
 // [Node.Nodes].
@@ -1092,14 +1094,15 @@ func (n *Node) stepProblem() error {
 // details name the call, as [Doc.callDetails] names the call that runs.
 type pathProblem func(verb string) error
 
-// read returns the place of n for Kind, Len, and Scalar, with its value as a
-// [*niceyaml.Node] of the current text. They answer as they do for a place
-// that does not hold a value when read reports false. Read reports false
-// where [Node.Exists] does not report true: after the Apply of n returned,
-// and for a node whose path failed, whose place an edit took away, or whose
-// path reads another value. It also reports false at a value that no
-// decode reads, such as an alias without an anchor. A read waits for no
-// Set that reaches its value, as [Doc.settleRead] tells.
+// read returns the place of n for Kind, Len, Scalar, HeadComment, and
+// LineComment, with its value as a [*niceyaml.Node] of the current text.
+// They answer as they do for a place that does not hold a value when read
+// reports false. Read reports false where [Node.Exists] does not report
+// true: after the Apply of n returned, and for a node whose path failed,
+// whose place an edit took away, or whose path reads another value. It also
+// reports false at a value that no decode reads, such as an alias without an
+// anchor. A read waits for no Set that reaches its value, as
+// [Doc.settleRead] tells.
 func (n *Node) read() (*place, *niceyaml.Node, bool) {
 	if n.ended || n.err != nil || n.gone {
 		return nil, nil, false
@@ -1157,11 +1160,12 @@ func (n *Node) read() (*place, *niceyaml.Node, bool) {
 //		return err
 //	}
 //
-// [Node.SetKey], [Node.Remove], and [Node.Move] leave a place that holds
-// no value as they find it. They return the problem of a node that cannot
-// take the call. A Func thus calls them without a check of Exists. Exists
-// is a read, so the Apply fails with its error only when the Func returns
-// it, or when the error matches ErrEngine.
+// [Node.SetKey], [Node.Remove], [Node.Move], [Node.SetHeadComment], and
+// [Node.SetLineComment] leave a place that holds no value as they find it.
+// They return the problem of a node that cannot take the call. A Func
+// thus calls them without a check of Exists. Exists is a read, so the
+// Apply fails with its error only when the Func returns it, or when the
+// error matches ErrEngine.
 func (n *Node) Exists() (bool, error) {
 	n.d.settleRead(n)
 

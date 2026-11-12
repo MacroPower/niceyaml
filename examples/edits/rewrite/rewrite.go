@@ -73,7 +73,15 @@ func main() {
 
 		// Set creates the key at the indent of the other keys of
 		// restaurant.
-		err = root.At(restaurantPath.Child("currency")).Set(ctx, "SEK")
+		currency := root.At(restaurantPath.Child("currency"))
+
+		err = currency.Set(ctx, "SEK")
+		if err != nil {
+			return err
+		}
+
+		// The node of the new entry also writes its comments.
+		err = currency.SetLineComment("ISO 4217 code")
 		if err != nil {
 			return err
 		}
