@@ -296,11 +296,14 @@ type step struct {
 // itself, where every reader still reads an edit.
 //
 // The step runs as one [edit.Doc.Apply], whose messages name the version.
-// [edit.Node.Decode] in fn applies the rules of [WithTypeRules], the
-// defaults among them included. It leaves out the decode options of the
-// registry and the kind, which describe the current version. Fn should
-// pass the ctx that it got to Decode, so the warnings of the decode join
-// the warnings of the load.
+// [edit.Node.Decode] and [edit.Node.DecodeInto] in fn apply the rules of
+// [WithTypeRules], the defaults among them included. Those defaults reach
+// the value that Decode returns and each value that DecodeInto creates
+// inside its v. The v of DecodeInto keeps what it holds, as
+// [edit.Node.DecodeInto] describes. Both decodes leave out the decode
+// options of the registry and the kind, which describe the current
+// version. Fn should pass the ctx that it got to each decode, so the
+// warnings of the decode join the warnings of the load.
 func Migrate(p paths.Path, fn edit.Func) VersionOption {
 	return func(c *versionConfig) {
 		c.steps = append(c.steps, step{path: p, fn: fn})

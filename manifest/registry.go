@@ -188,8 +188,9 @@ func WithDecodeOptions(opts ...niceyaml.DecodeOption) RegistryOption {
 // through [niceyaml.WithTypeRules]. Every decode that the load runs on a
 // document applies them ahead of the rules of its Source, even a Source
 // that [input.Sources] reads. The decode of a manifest, the decode inside
-// a validator, and [go.jacobcolvin.com/niceyaml/edit.Node.Decode] in a
-// step thus apply them. So does a decode of [Object.Current].
+// a validator, and [go.jacobcolvin.com/niceyaml/edit.Node.Decode] and
+// [go.jacobcolvin.com/niceyaml/edit.Node.DecodeInto] in a step thus apply
+// them. So does a decode of [Object.Current].
 // [Object.Original] from a Source that Sources reads keeps the rules of
 // that Source alone. The load thus parses each document of such a Source
 // again, into a copy that holds both lists, and [Object.Current] holds

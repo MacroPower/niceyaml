@@ -99,7 +99,8 @@
 //
 // An error that a step returns shows the path that the step reads, such as
 // the path of its node. So does an error of
-// [go.jacobcolvin.com/niceyaml/edit.Node.Decode] in the step. Each other
+// [go.jacobcolvin.com/niceyaml/edit.Node.Decode] or
+// [go.jacobcolvin.com/niceyaml/edit.Node.DecodeInto] in the step. Each other
 // problem that the edit package finds in a step shows the path that the
 // file spells, as the Errors section of that package describes. Such
 // problems include a refusal of YAML outside the subset and the error of a

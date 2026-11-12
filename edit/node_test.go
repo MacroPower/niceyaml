@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -2357,6 +2359,253 @@ func TestNode_Decode_Renamed(t *testing.T) {
 			requireEdit(t, d, err, tc.want, "")
 		})
 	}
+}
+
+func TestNode_DecodeInto(t *testing.T) {
+	t.Parallel()
+
+	type alarm struct {
+		Sound  string `yaml:"sound"`
+		Volume int    `yaml:"volume"`
+	}
+
+	// A reader written against DecodeInto takes the nodes of each package.
+	type decoder interface {
+		DecodeInto(ctx context.Context, v any, opts ...niceyaml.DecodeOption) error
+	}
+
+	var (
+		_ decoder = (*niceyaml.Node)(nil)
+		_ decoder = (*niceyaml.Source)(nil)
+		_ decoder = (*edit.Node)(nil)
+	)
+
+	t.Run("value of a type known at run time", func(t *testing.T) {
+		t.Parallel()
+
+		typ := reflect.TypeFor[alarm]()
+		d := newDoc(t, stringtest.LinesLF("spec:", "  sound: bell", "  volume: 2"))
+
+		err := applyAt(t, d, spec, func(ctx context.Context, n *edit.Node) error {
+			v := reflect.New(typ)
+
+			err := n.DecodeInto(ctx, v.Interface())
+			if err != nil {
+				return err
+			}
+
+			v.Elem().FieldByName("Volume").SetInt(11)
+
+			return n.Set(ctx, v.Interface())
+		})
+
+		requireEdit(t, d, err, "", stringtest.LinesLF("spec:", "  sound: bell", "  volume: 11"))
+	})
+
+	t.Run("field that the place leaves out", func(t *testing.T) {
+		t.Parallel()
+
+		d := newDoc(t, stringtest.LinesLF("spec:", "  sound: bell"))
+
+		got := alarm{Sound: "horn", Volume: 3}
+
+		err := applyAt(t, d, spec, func(ctx context.Context, n *edit.Node) error {
+			return n.DecodeInto(ctx, &got)
+		})
+		require.NoError(t, err)
+		assert.Equal(t, alarm{Sound: "bell", Volume: 3}, got)
+	})
+
+	t.Run("defaults of the type rules", func(t *testing.T) {
+		t.Parallel()
+
+		rules := []niceyaml.TypeRule{niceyaml.TypeDefaults(func(a *alarm) { a.Volume = 7 })}
+		_, d := newSourceDocWith(t, stringtest.LinesLF("spec:", "  sound: bell"),
+			[]edit.Option{edit.WithTypeRules(rules...)})
+
+		type outer struct {
+			Spec *alarm `yaml:"spec"`
+		}
+
+		typ := reflect.TypeFor[alarm]()
+
+		// DefaultsInto fills filled as Decode starts its value, but zero
+		// keeps the zero value.
+		zero, filled := reflect.New(typ).Interface(), reflect.New(typ).Interface()
+		require.NoError(t, niceyaml.DefaultsInto(filled, rules...))
+
+		var (
+			decoded alarm
+			nested  outer
+		)
+
+		err := d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, root *edit.Node) error {
+			n := root.At(spec)
+
+			var err error
+
+			decoded, err = n.Decode[alarm](ctx)
+			if err != nil {
+				return err
+			}
+
+			err = n.DecodeInto(ctx, zero)
+			if err != nil {
+				return err
+			}
+
+			err = n.DecodeInto(ctx, filled)
+			if err != nil {
+				return err
+			}
+
+			// The value of a nil pointer inside v starts from the defaults.
+			return root.DecodeInto(ctx, &nested)
+		}, label)
+		require.NoError(t, err)
+
+		assert.Equal(t, alarm{Sound: "bell", Volume: 7}, decoded)
+		assert.Equal(t, &alarm{Sound: "bell"}, zero)
+		assert.Equal(t, &decoded, filled)
+		assert.Equal(t, &alarm{Sound: "bell", Volume: 7}, nested.Spec)
+	})
+
+	t.Run("type rules of each source", func(t *testing.T) {
+		t.Parallel()
+
+		// The function of each later list replaces the one before it.
+		own := []niceyaml.TypeRule{niceyaml.TypeDefaults(func(a *alarm) { a.Volume = 7 })}
+		src := []niceyaml.TypeRule{niceyaml.TypeDefaults(func(a *alarm) { a.Volume = 8 })}
+		over := []niceyaml.TypeRule{niceyaml.TypeDefaults(func(a *alarm) { a.Volume = 9 })}
+		opt := niceyaml.OverrideTypeRules(over...)
+
+		source, d := newSourceDocWith(t, stringtest.LinesLF("spec:", "  sound: bell"),
+			[]edit.Option{edit.WithTypeRules(own...)}, niceyaml.WithTypeRules(src...))
+
+		// The Func fills v with each list in the order that the decode
+		// applies them.
+		got := reflect.New(reflect.TypeFor[alarm]()).Interface()
+		require.NoError(t, niceyaml.DefaultsInto(got, slices.Concat(own, source.TypeRules(), over)...))
+
+		var want alarm
+
+		err := applyAt(t, d, spec, func(ctx context.Context, n *edit.Node) error {
+			var err error
+
+			want, err = n.Decode[alarm](ctx, opt)
+			if err != nil {
+				return err
+			}
+
+			return n.DecodeInto(ctx, got, opt)
+		})
+		require.NoError(t, err)
+
+		assert.Equal(t, alarm{Sound: "bell", Volume: 9}, want)
+		assert.Equal(t, &want, got)
+	})
+
+	t.Run("root of an empty document", func(t *testing.T) {
+		t.Parallel()
+
+		_, d := newSourceDocWith(t, "",
+			[]edit.Option{edit.WithTypeRules(niceyaml.TypeDefaults(func(a *alarm) { a.Volume = 7 }))})
+
+		var decoded alarm
+
+		got := alarm{Sound: "horn", Volume: 3}
+
+		err := d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, root *edit.Node) error {
+			var err error
+
+			// Decode returns the defaults of the type, where DecodeInto
+			// leaves v as it is.
+			decoded, err = root.Decode[alarm](ctx)
+			if err != nil {
+				return err
+			}
+
+			return root.DecodeInto(ctx, &got)
+		}, label)
+		require.NoError(t, err)
+		assert.Equal(t, alarm{Volume: 7}, decoded)
+		assert.Equal(t, alarm{Sound: "horn", Volume: 3}, got)
+	})
+
+	t.Run("target that is not a pointer", func(t *testing.T) {
+		t.Parallel()
+
+		d := newDoc(t, stringtest.LinesLF("spec:", "  sound: bell"))
+
+		err := applyAt(t, d, spec, func(ctx context.Context, n *edit.Node) error {
+			return n.DecodeInto(ctx, alarm{})
+		})
+		require.ErrorIs(t, err, niceyaml.ErrDecodeTarget)
+	})
+
+	t.Run("node that cannot decode", func(t *testing.T) {
+		t.Parallel()
+
+		// Each case holds the node at held, runs edit on the root, and then
+		// decodes into a value through the held node.
+		tcs := map[string]struct {
+			edit   edit.Func
+			is     error
+			before string
+			held   string
+			err    string
+		}{
+			"place that holds no value": {
+				before: stringtest.LinesLF("spec:", "  sound: bell"),
+				held:   "$.spec.alarm",
+				is:     paths.ErrNotFound,
+				err:    "cafe.jacobcolvin.com/v1 cannot decode $.spec.alarm, which holds no value",
+			},
+			"value that does not decode": {
+				before: stringtest.LinesLF("spec:", "  volume: loud"),
+				held:   "$.spec",
+				err:    "test.yaml:2:11: $.spec.volume:",
+			},
+			"removed node": {
+				before: stringtest.LinesLF("a: 1", "b: 2"),
+				held:   "$.a",
+				edit: func(_ context.Context, root *edit.Node) error {
+					return root.At(paths.Doc().Child("a")).Remove()
+				},
+				is:  edit.ErrDisplaced,
+				err: "test.yaml:1:4: $.a: cafe.jacobcolvin.com/v1 reads $.a through a node that lost its place to an earlier edit",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				d := newDoc(t, tc.before)
+
+				err := d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, root *edit.Node) error {
+					held := root.At(paths.MustParse(tc.held))
+
+					if tc.edit != nil {
+						err := tc.edit(ctx, root)
+						if err != nil {
+							return err
+						}
+					}
+
+					var v alarm
+
+					return held.DecodeInto(ctx, &v)
+				}, label)
+
+				if tc.is != nil {
+					require.ErrorIs(t, err, tc.is)
+				}
+
+				requireEdit(t, d, err, tc.err, "")
+			})
+		}
+	})
 }
 
 func TestNode_MarshalYAML(t *testing.T) {

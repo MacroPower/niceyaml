@@ -1273,10 +1273,14 @@ func (n *Node) Scalar() (string, bool) {
 // path. [Node.Exists] tells such a place apart from a problem of the node,
 // so a Func checks Exists rather than matching that error. Decode also
 // fails through a node that lost its place to an earlier edit, with a
-// problem that matches [ErrDisplaced], as [Node] describes. The root of an
-// empty document holds no value, and Decode there returns the zero value,
-// as [niceyaml.Node.Decode] does for that document. Such an error belongs
-// to the Func, so the Apply fails with it only when the Func returns it.
+// problem that matches [ErrDisplaced], as [Node] describes. Such an error
+// belongs to the Func, so the Apply fails with it only when the Func
+// returns it.
+//
+// The root of an empty document holds no value, and Decode there returns
+// the value that it starts from, as [niceyaml.Node.Decode] does for that
+// document. That value holds the defaults of T, which is the zero value
+// of T when no [niceyaml.TypeDefaults] rule gives T defaults.
 //
 // An error of the decode keeps the path that it names in the current text.
 // The decoder raises such an error for a type mismatch, and so do a schema
@@ -1305,6 +1309,39 @@ func (n *Node) Decode[T any](ctx context.Context, opts ...niceyaml.DecodeOption)
 	})
 
 	return v, err
+}
+
+// DecodeInto decodes the value into v as [niceyaml.Node.DecodeInto] does,
+// with opts and the settings of the [niceyaml.Source] of the document. It
+// reads the place and fails as [Node.Decode] does, and its errors bind as
+// those of Decode bind. Decode starts its value from the defaults of T,
+// but DecodeInto starts from the value that v holds. A field that the
+// place leaves out thus keeps what v holds. Each value that the decode
+// creates inside v, such as the value of a nil pointer or an item of a
+// slice, starts from the defaults of its type, as
+// [niceyaml.Node.DecodeInto] describes. At the root of an empty document,
+// DecodeInto leaves v as it is.
+//
+// DecodeInto serves a [Func] that knows the type of its value only at run
+// time, such as from a [reflect.Type]. To decode what Decode returns, the
+// Func fills v first with [niceyaml.DefaultsInto]. It passes the rules of
+// [WithTypeRules], then those of [niceyaml.Source.TypeRules], then those
+// of each [niceyaml.OverrideTypeRules] among the opts that it gives
+// DecodeInto. The decode applies the rules in that order:
+//
+//	v := reflect.New(typ).Interface()
+//	if err := niceyaml.DefaultsInto(v, rules...); err != nil {
+//		return err
+//	}
+//	if err := n.DecodeInto(ctx, v); err != nil {
+//		return err
+//	}
+//
+//	return n.Set(ctx, v)
+func (n *Node) DecodeInto(ctx context.Context, v any, opts ...niceyaml.DecodeOption) error {
+	return n.withValue(func(doc *niceyaml.Node) error {
+		return doc.DecodeInto(ctx, v, opts...) //nolint:wrapcheck // The Node binds the error.
+	})
 }
 
 // MarshalYAML returns the value that go-yaml's encoder writes for the
@@ -1406,8 +1443,9 @@ func (n *Node) doc() (*niceyaml.Node, error) {
 
 	switch {
 	case p.root && p.bare:
-		// The root of an empty document decodes to the zero value, as
-		// [niceyaml.Source.Documents] describes.
+		// The root of an empty document decodes as an empty document of
+		// [niceyaml.Source.Documents] does. Decode returns the value that
+		// it starts from, and DecodeInto leaves its value as it is.
 		return n.d.node, nil
 	case !p.exists:
 		// The problem matches [paths.ErrNotFound], as the error of
