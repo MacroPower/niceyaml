@@ -310,19 +310,20 @@
 // a decode does. [errors.As] still finds the go-yaml error, and a program
 // that prints that error itself prints the excerpt of go-yaml.
 //
-// A wrapper that [fmt.Errorf] builds and a wrapper with an Unwrap method
-// that returns one error take the shorter, one-line text in their own
-// message. The wrapper takes the shorter text only when its message copies
-// the full text of go-yaml unchanged. Wrappers that rewrite that text, such
-// as one that indents each line or one that quotes the text with %q, keep
-// the excerpt of go-yaml in their messages. A wrapper of another type whose
-// Unwrap method returns several errors keeps the text of go-yaml in its own
-// message. Each error that it holds still binds without the excerpt.
+// Each wrapper above the go-yaml error takes the shorter, one-line text in
+// its own message, whether [fmt.Errorf] builds it or its Unwrap method
+// returns one error or several. The wrapper takes the shorter text only
+// when its message copies the full text of go-yaml unchanged. Wrappers
+// that rewrite that text, such as one that indents each line or one that
+// quotes the text with %q, keep the excerpt of go-yaml in their messages.
 //
-// A join from [errors.Join] leaves each of its branches to a binding of its
-// own and keeps the full text of go-yaml in its message. The binding of a
-// wrapper above a join prints the shorter text of each go-yaml error in
-// that join too.
+// A join leaves each of its branches to a binding of its own and keeps the
+// full text of go-yaml in its message. Such a join is an error from
+// [errors.Join], or an error of a type of its own whose message lists the
+// messages of its branches one per line. A wrapper that [fmt.Errorf]
+// builds takes the shorter text even when its message lists its branches
+// one per line. The binding of a wrapper above a join prints the shorter
+// text of each go-yaml error in that join too.
 //
 // A path starts at one of two points, as in RFC 9535 JSONPath. A `$` path
 // reads from the root of the document, and an `@` path reads from the [Node]

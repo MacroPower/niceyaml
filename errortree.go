@@ -1594,7 +1594,7 @@ func (c chainEnd) cut(text string) (string, int, int, bool) {
 		case multierr.IsJoin(c.err) || multierr.JoinMessage(msg, branches):
 			full, held = msg, c.branches
 
-		case multierr.IsWrapErrors(c.err) || multierr.HoldsFirst(msg, branches):
+		case multierr.IsWrapErrors(c.err) || holdsFirst(c.err, msg, branches):
 			return text, c.branches, c.branches, true
 
 		default:
@@ -1612,6 +1612,20 @@ func (c chainEnd) cut(text string) (string, int, int, bool) {
 	}
 
 	return strings.TrimRightFunc(before+own+after, unicode.IsSpace), shown, held, true
+}
+
+// holdsFirst reports whether msg, the message of multi, holds the message
+// of the first of branches, the branches of multi. A bind writes a go-yaml
+// error in the message of a stand-in from [multierr.Rebranch] with a
+// shorter text than a branch of that stand-in might. So for such a
+// stand-in, holdsFirst reads the error that the stand-in replaces.
+func holdsFirst(multi error, msg string, branches []error) bool {
+	like := multierr.Rebranched(multi)
+	if x, ok := like.(interface{ Unwrap() []error }); ok { //nolint:errorlint // The error itself, not a chain search.
+		return multierr.HoldsFirst(like.Error(), x.Unwrap())
+	}
+
+	return multierr.HoldsFirst(msg, branches)
 }
 
 // walkChildren reports to onChild the children that a binding and

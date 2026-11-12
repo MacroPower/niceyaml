@@ -122,6 +122,10 @@ func TestIsJoin(t *testing.T) {
 			wrapError: true,
 			built:     true,
 		},
+		"stand-in for another type": {
+			err:   multierr.Rebranch(&listError{msg: "a; b", errs: []error{errA, errB}}, []error{errA, errC}, "a; c"),
+			built: true,
+		},
 		"one verb": {err: fmt.Errorf("x: %w", errA), wrap: true},
 		"stand-in for one verb": {
 			err:   multierr.Replace(fmt.Errorf("x: %w", errA), errC, "x: c", nil),
@@ -329,6 +333,73 @@ func TestRewrap(t *testing.T) {
 
 			require.EqualError(t, got, tc.msg)
 			assert.True(t, multierr.IsWrapErrors(got))
+
+			unwrapped, ok := got.(interface{ Unwrap() []error })
+			require.True(t, ok)
+			assert.Equal(t, tc.branches, unwrapped.Unwrap())
+
+			for _, err := range tc.is {
+				require.ErrorIs(t, got, err)
+			}
+
+			for _, err := range tc.isNot {
+				require.NotErrorIs(t, got, err)
+			}
+
+			if tc.as != nil {
+				requireAs(t, got, tc.as)
+			}
+		})
+	}
+}
+
+func TestRebranch(t *testing.T) {
+	t.Parallel()
+
+	list := &listError{msg: "a; b", errs: []error{errA, errB}}
+
+	tcs := map[string]struct {
+		multi error
+		// The error errors.As finds in the result for a target of its
+		// type, or nil.
+		as       error
+		msg      string
+		branches []error
+		// The errors the result matches for errors.Is, and those it does
+		// not.
+		is, isNot []error
+	}{
+		"error of another type": {
+			multi:    list,
+			msg:      "a; c",
+			branches: []error{errA, errC},
+			// The stand-in matches the error itself and its own branches,
+			// not a branch it replaced.
+			is:    []error{list, errA, errC},
+			isNot: []error{errB},
+			as:    list,
+		},
+		"error with an As method": {
+			multi:    &asError{listError{msg: "a; b", errs: []error{errA, errB}}},
+			msg:      "c",
+			branches: []error{errC},
+			is:       []error{errC},
+			// The As method of the error sets the target.
+			as: matchError{},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := multierr.Rebranch(tc.multi, tc.branches, tc.msg)
+
+			require.EqualError(t, got, tc.msg)
+			assert.Equal(t, tc.multi, multierr.Rebranched(got))
+			require.NoError(t, multierr.Rebranched(tc.multi))
+			assert.False(t, multierr.IsJoin(got))
+			assert.False(t, multierr.IsWrapErrors(got))
 
 			unwrapped, ok := got.(interface{ Unwrap() []error })
 			require.True(t, ok)
@@ -558,6 +629,23 @@ func TestMap(t *testing.T) {
 			want:    "a: b",
 			changed: true,
 			unwraps: []error{errC, errB},
+			is:      []error{errC, errB},
+			isNot:   []error{errA},
+		},
+		"branch of a stand-in for another type": {
+			err:     multierr.Rebranch(list, []error{errA, errB}, "a; b"),
+			want:    "a; b",
+			changed: true,
+			unwraps: []error{errC, errB},
+			is:      []error{list, errC, errB},
+			isNot:   []error{errA},
+			as:      list,
+		},
+		"error a stand-in for another type stands in for": {
+			err:     multierr.Rebranch(errA, []error{errB}, "b"),
+			want:    "b",
+			changed: true,
+			unwraps: []error{errB},
 			is:      []error{errC, errB},
 			isNot:   []error{errA},
 		},

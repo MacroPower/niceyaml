@@ -7477,6 +7477,21 @@ func TestNode_Bind_GoYAMLError(t *testing.T) {
 				"\nsecrets.yaml:4:8: $.creds.ttl: w: " + rejected,
 			message: rejected + "; w: " + rejected,
 		},
+		"a wrapper of its own type with several branches reads each": {
+			node: doc,
+			err:  listError{held, errNameRequired},
+			want: "secrets.yaml: " + rejected + "; name is required" +
+				"\nsecrets.yaml:4:8: $.creds.ttl: " + rejected,
+			message: rejected + "; name is required",
+		},
+		"a wrapper of its own type that holds the error twice reads both": {
+			node: doc,
+			err:  listError{held, fmt.Errorf("w: %w", held)},
+			want: "secrets.yaml: " + rejected + "; w: " + rejected +
+				"\nsecrets.yaml:4:8: $.creds.ttl: " + rejected +
+				"\nsecrets.yaml:4:8: $.creds.ttl: w: " + rejected,
+			message: rejected + "; w: " + rejected,
+		},
 		"an error at a token of another parse keeps its message alone": {
 			node:    doc,
 			err:     foreign,
@@ -7512,12 +7527,96 @@ func TestNode_Bind_GoYAMLError(t *testing.T) {
 		})
 	}
 
+	// The stand-in for a wrapper of its own type matches that wrapper and
+	// splits into the same children.
+	t.Run("a wrapper of its own type keeps its matches and children", func(t *testing.T) {
+		t.Parallel()
+
+		wrapper := listError{held, errNameRequired}
+		err := doc.Bind(wrapper)
+
+		var list listError
+
+		require.ErrorAs(t, err, &list)
+		require.ErrorIs(t, err, errNameRequired)
+
+		problems := yamltest.ProblemsOf(err)
+		require.Len(t, problems, 2)
+		require.EqualError(t, problems[0].Err, "secrets.yaml:4:8: $.creds.ttl: "+rejected)
+		require.EqualError(t, problems[1].Err, "secrets.yaml: name is required")
+
+		// A wrapper whose message is the messages of its branches one per
+		// line is a join, so each branch binds on its own.
+		joined := doc.Bind(&headedError{msg: held.Error() + "\n" + errNameRequired.Error(), errs: wrapper})
+		require.EqualError(t, joined, "secrets.yaml:4:8: $.creds.ttl: "+rejected+"\nsecrets.yaml: name is required")
+	})
+
+	// A wrapper of its own type whose message lists its branches one per
+	// line reads as a join from errors.Join, even inside a wrapper with
+	// several branches. The outer wrapper writes the shorter text of each
+	// go-yaml error in that join.
+	t.Run("a join of its own type inside a wrapper reads as a join", func(t *testing.T) {
+		t.Parallel()
+
+		// The decoder rejects the creds mapping at another token.
+		mapping := yaml.NodeToValue(doc.AST(), &struct {
+			Creds int `yaml:"creds"`
+		}{})
+		require.Error(t, mapping)
+
+		join := errors.Join(held, errNameRequired)
+		joinLike := headedError{msg: join.Error(), errs: []error{held, errNameRequired}}
+
+		heading := stringtest.JoinLF(
+			"secrets.yaml: "+rejected,
+			"name is required; "+rejected,
+			"secrets.yaml:4:8: $.creds.ttl: "+rejected,
+			"secrets.yaml:4:8: $.creds.ttl: "+rejected,
+		)
+
+		outers := map[string]func(inner, second error) error{
+			"fmt.Errorf": func(inner, second error) error { return fmt.Errorf("%w; %w", inner, second) },
+			"own type":   func(inner, second error) error { return listError{inner, second} },
+		}
+
+		for name, wrap := range outers {
+			// The outer wrapper reads held as its second branch, so it
+			// writes the shorter text in place of each copy of held. The
+			// heading holds the text of the sentinel, so the sentinel does
+			// not take a line of its own.
+			require.EqualError(t, doc.Bind(wrap(joinLike, held)), heading, name)
+			require.EqualError(t, doc.Bind(wrap(join, held)), heading, name)
+
+			for _, second := range []error{held, mapping} {
+				assert.Equal(t,
+					niceyaml.FormatError(doc.Bind(wrap(join, second))),
+					niceyaml.FormatError(doc.Bind(wrap(joinLike, second))),
+					name,
+				)
+			}
+		}
+
+		// A wrapper that fmt.Errorf builds takes the shorter text even when
+		// its message lists its branches one per line. A join beside the
+		// mapping rejection takes the shorter text in the heading too.
+		wrapped := niceyaml.FormatError(doc.Bind(listError{fmt.Errorf("%w\n%w", held, errNameRequired), mapping}))
+		assert.NotContains(t, wrapped, "hunter2")
+		assert.Contains(t, wrapped, "secrets.yaml: "+rejected+"\nname is required; ")
+
+		for _, inner := range []error{join, joinLike} {
+			formatted := niceyaml.FormatError(doc.Bind(listError{inner, mapping}))
+			assert.NotContains(t, formatted, "hunter2")
+			assert.Contains(t, formatted, "secrets.yaml: "+rejected+"\nname is required; ")
+		}
+	})
+
 	// A wrapper above a join takes the shorter text of each go-yaml error
 	// in that join, even when no other branch reads as a go-yaml error.
 	t.Run("a wrapper above a join takes the shorter text", func(t *testing.T) {
 		t.Parallel()
 
 		join := errors.Join(held, errNameRequired)
+		joinLike := headedError{msg: join.Error(), errs: []error{held, errNameRequired}}
 		located := "\nsecrets.yaml:4:8: $.creds.ttl: " + rejected
 		children := located + "\nsecrets.yaml: name is required"
 		password := yamltest.At(t, doc, paths.Current().Child("creds").Child("password")).AST().GetToken()
@@ -7533,6 +7632,24 @@ func TestNode_Bind_GoYAMLError(t *testing.T) {
 			"a wrapper that lists a join and a go-yaml error one per line": {
 				err:  fmt.Errorf("%w\n%w", join, syntaxErr),
 				want: "secrets.yaml:3:13: $.creds.password: bad password" + children,
+			},
+			// The heading of a wrapper of its own type holds the text of
+			// each sentinel, so only the located problem takes a line.
+			"a wrapper of its own type": {
+				err:  listError{join, errDocumentRejected},
+				want: "secrets.yaml: " + rejected + "\nname is required; document rejected" + located,
+			},
+			"a wrapper of its own type above a join of its own type": {
+				err:  listError{joinLike, errDocumentRejected},
+				want: "secrets.yaml: " + rejected + "\nname is required; document rejected" + located,
+			},
+			"a wrapper of its own type above a wrapper of the join": {
+				err:  listError{fmt.Errorf("w: %w", join), errDocumentRejected},
+				want: "secrets.yaml: w: " + rejected + "\nname is required; document rejected" + located,
+			},
+			"a wrapper of its own type above a join and the go-yaml error in it": {
+				err:  listError{join, held},
+				want: "secrets.yaml: " + rejected + "\nname is required; " + rejected + located + located,
 			},
 			// The heading cuts the copy that the %w writes.
 			"a wrapper that writes the join twice": {
@@ -7567,6 +7684,26 @@ func TestNode_Bind_GoYAMLError(t *testing.T) {
 				require.ErrorAs(t, err, &typeErr)
 			})
 		}
+
+		// The wrapper takes the shorter text of a go-yaml error after the
+		// first branch of the join that reads as one too.
+		syntaxJoin := errors.Join(held, syntaxErr)
+		formatted := niceyaml.FormatError(doc.Bind(listError{
+			headedError{msg: syntaxJoin.Error(), errs: []error{held, syntaxErr}},
+			errDocumentRejected,
+		}))
+		assert.NotContains(t, formatted, "hunter2")
+		assert.Contains(t, formatted, "secrets.yaml: "+rejected+"\nbad password; document rejected")
+
+		// The stand-in matches the wrapper and splits into the same
+		// children.
+		err := doc.Bind(listError{join, errDocumentRejected})
+
+		var list listError
+
+		require.ErrorAs(t, err, &list)
+		require.ErrorIs(t, err, errDocumentRejected)
+		require.Len(t, yamltest.ProblemsOf(err), 3)
 
 		// A wrapper that writes the join once leaves its text out of the
 		// heading, so the wrapper keeps its message.

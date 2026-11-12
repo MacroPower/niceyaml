@@ -2901,10 +2901,6 @@ func (b binder) readYAMLText(err error, texts *[]yamlText) (error, bool) {
 			return err, false
 		}
 
-		if !multierr.IsWrapErrors(err) {
-			return err, false
-		}
-
 		// Unlike mapWrapper, the walk reads the sentinels too, because a
 		// go-yaml error without a location reads as one.
 		var (
@@ -2913,6 +2909,7 @@ func (b binder) readYAMLText(err error, texts *[]yamlText) (error, bool) {
 			whole  []bool
 		)
 
+		wrapErrors := multierr.IsWrapErrors(err)
 		held := len(*texts)
 
 		for i, branch := range branches {
@@ -2923,6 +2920,19 @@ func (b binder) readYAMLText(err error, texts *[]yamlText) (error, bool) {
 
 			if mapped == nil {
 				mapped, msg, whole = slices.Clone(branches), err.Error(), wholeBranches(len(branches))
+
+				// A wrapper of a type of its own whose message is the
+				// messages of its branches one per line is a join too.
+				// It keeps its text as a join from errors.Join does. A
+				// wrapper that fmt.Errorf builds takes the shorter text
+				// whatever its message holds. The walk formats the message
+				// only after a branch reads as a go-yaml error.
+				if !wrapErrors && multierr.JoinMessage(msg, branches) {
+					*texts = (*texts)[:held]
+					b.readJoinText(branches, texts)
+
+					return err, false
+				}
 			}
 
 			// The message holds the read text of the branch only when
@@ -2954,6 +2964,12 @@ func (b binder) readYAMLText(err error, texts *[]yamlText) (error, bool) {
 			mapped = slices.Clone(branches)
 		} else {
 			msg = replaceBranchesYAMLText(err, msg, mapped, whole, *texts)
+		}
+
+		if !wrapErrors {
+			// The stand-in of a wrapper of any other type reads as that
+			// wrapper does, so it splits into the same children.
+			return multierr.Rebranch(err, mapped, msg), true
 		}
 
 		return multierr.Rewrap(err, mapped, msg), true

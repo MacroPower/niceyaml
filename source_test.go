@@ -4838,6 +4838,19 @@ func TestSource_Bind_GoYAMLError(t *testing.T) {
 	require.ErrorAs(t, err, &typeErr)
 	assert.Same(t, docs[1], yamltest.BoundDocument(t, yamltest.RequireSourceError(t, err)))
 
+	// A wrapper of its own type takes the message without the excerpt of
+	// go-yaml, as a wrapper that fmt.Errorf builds does.
+	t.Run("a wrapper of its own type with several branches", func(t *testing.T) {
+		t.Parallel()
+
+		err := src.Bind(listError{yaml.NodeToValue(docs[1].AST(), &target), errNameRequired})
+		require.EqualError(t, err, stringtest.JoinLF(
+			"f.yaml: cannot unmarshal string into Go struct field .B of type int; name is required",
+			"f.yaml:3:4: $.b: cannot unmarshal string into Go struct field .B of type int",
+		))
+		assert.NotContains(t, niceyaml.FormatError(err), "b: x")
+	})
+
 	// The Source builds the tokens of Source.Tokens and Node.Tokens apart
 	// from its parse. A go-yaml error at one of them thus binds as an
 	// error without a location does. AtToken locates an Error at such a

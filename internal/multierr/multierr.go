@@ -1,17 +1,17 @@
 // Package multierr reads and builds errors that hold several errors.
 // These are the joins that [errors.Join] builds, the wrappers that
 // [fmt.Errorf] builds with several %w verbs, and errors of other types
-// whose message is the messages of their branches one per line.
+// whose Unwrap method returns several errors.
 //
 // A caller that rebuilds such an error around new branches keeps what
-// the old error matched. [Rejoin], [Rewrap], and [Replace] return
-// stand-ins that match the old error for [errors.Is] and [errors.As] and
-// unwrap to the new errors. A caller that must drop the old error
-// rebuilds a wrapper of [fmt.Errorf] with [Wrap] or [WrapErrors] instead.
-// The fmt package does not export the types of those wrappers, so a
-// caller cannot target them with [errors.As]. The rebuilt wrapper does
-// not match anything itself. [Map] rebuilds an error of this package
-// around new copies of the errors it holds.
+// the old error matched. [Rejoin], [Rewrap], [Rebranch], and [Replace]
+// return stand-ins that match the old error for [errors.Is] and
+// [errors.As] and unwrap to the new errors. A caller that must drop the
+// old error rebuilds a wrapper of [fmt.Errorf] with [Wrap] or
+// [WrapErrors] instead. The fmt package does not export the types of
+// those wrappers, so a caller cannot target them with [errors.As]. The
+// rebuilt wrapper does not match anything itself. [Map] rebuilds an
+// error of this package around new copies of the errors it holds.
 package multierr
 
 import (
@@ -152,6 +152,27 @@ func Rewrap(wrapper error, branches []error, msg string) error {
 	return &wrapError{like: wrapper, branches: branches, msg: msg}
 }
 
+// Rebranch returns a stand-in for multi, an error whose Unwrap method
+// returns several errors and which is neither a join that [errors.Join]
+// builds nor a wrapper that [fmt.Errorf] builds. The stand-in unwraps to
+// branches in place of what multi unwraps to, and its message is msg.
+// Neither [IsJoin] nor [IsWrapErrors] reports it, so a caller reads it
+// as it reads multi. It matches multi for [errors.Is] and [errors.As], as
+// multi matches itself, and it matches what each of branches matches.
+func Rebranch(multi error, branches []error, msg string) error {
+	return &branchError{like: multi, branches: branches, msg: msg}
+}
+
+// Rebranched returns the error that err stands in for when err is a
+// stand-in that [Rebranch] returns. It returns nil for any other err.
+func Rebranched(err error) error {
+	if b, ok := err.(*branchError); ok { //nolint:errorlint // The error itself, not a chain search.
+		return b.like
+	}
+
+	return nil
+}
+
 // Replace returns a stand-in for wrapper, an error that wraps others.
 // The stand-in unwraps to err in place of what wrapper wraps, and its
 // message is msg. It matches wrapper for [errors.Is] and [errors.As], as
@@ -180,11 +201,11 @@ func WrapErrors(branches []error, msg string) error {
 }
 
 // IsBuilt reports whether this package built err. The stand-ins of
-// [Rejoin], [Rewrap], and [Replace] count, and so do the wrappers of
-// [Wrap] and [WrapErrors].
+// [Rejoin], [Rewrap], [Rebranch], and [Replace] count, and so do the
+// wrappers of [Wrap] and [WrapErrors].
 func IsBuilt(err error) bool {
 	switch err.(type) { //nolint:errorlint // The error itself, not a chain search.
-	case *joinError, *wrapError, *placedError:
+	case *joinError, *wrapError, *branchError, *placedError:
 		return true
 	default:
 		return false
@@ -220,6 +241,16 @@ func Map(err error, f func(error) (error, bool)) (error, bool) {
 		}
 
 		return &wrapError{like: like, branches: branches, msg: x.msg}, true
+
+	case *branchError:
+		like, stands := mapOne(x.like, f)
+		branches, holds := mapAll(x.branches, f)
+
+		if !stands && !holds {
+			return err, false
+		}
+
+		return &branchError{like: like, branches: branches, msg: x.msg}, true
 
 	case *placedError:
 		like, stands := mapOne(x.like, f)
@@ -313,6 +344,26 @@ func (w *wrapError) Error() string {
 // wrapper.
 func (w *wrapError) Unwrap() []error {
 	return w.branches
+}
+
+// branchError is the stand-in [Rebranch] returns.
+type branchError struct {
+	mimic
+
+	msg string
+	// The errors that take the place of the branches of the error.
+	branches []error
+}
+
+// Error returns the message [Rebranch] received.
+func (b *branchError) Error() string {
+	return b.msg
+}
+
+// Unwrap returns the errors that take the place of the branches of the
+// error.
+func (b *branchError) Unwrap() []error {
+	return b.branches
 }
 
 // placedError is the stand-in [Replace] returns, or the wrapper [Wrap]
