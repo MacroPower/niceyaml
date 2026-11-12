@@ -66,11 +66,18 @@ import (
 // the copy of that token keeps it.
 //
 // Detach keeps the context lines, the width, and the number of marks on
-// one line that opts set too, as [ExcerptOption] describes. Every renderer
-// uses those options for a detached error, whatever options the renderer
-// receives, so a detached error renders as err renders with opts. Those
-// options hold for [FormatError], [NewErrorReport], [SourceError.Excerpt],
-// and the %+v verb. Detach ignores [WithProblemLimit] and keeps every
+// one line that opts set too, as [ExcerptOption] describes. A renderer
+// takes each of them from opts unless an option of its own sets it. So
+// [FormatError], [NewErrorReport], and [SourceError.Excerpt] with no
+// option render a detached error as err renders with opts, and so does
+// the %+v verb. The copy keeps each line whole and keeps the lines of
+// every problem. So the width and the marks on one line that a renderer
+// sets hold as they do for err. Context lines that the renderer sets hold
+// up to the number that opts set, because the copy keeps no line past
+// those. [WithContextLines] in opts thus bounds the context lines of every
+// excerpt of the copy. A renderer that passes an option at its default
+// value can thus render a detached error apart from one that passes no
+// option. Detach ignores [WithProblemLimit] and keeps every
 // problem, so a renderer applies its own limit to a detached error. The
 // lines of a detached binding are not part of any view of a source, so
 // [Annotate] does not mark anything for it.
@@ -756,20 +763,41 @@ func (k *keptSource) keep(src *Source, marks []excerpt.Mark) {
 }
 
 // excerpt returns a fresh view of the lines k kept, with marks on them,
-// cut to hunks and clipped as the options of k set, whatever options the
-// caller passes. It marks at most the number of marks that those options
-// set on each line and counts the rest, as [WithExcerptMarks] describes.
-// The marks lie in the lines of the source, which k does not hold. So
-// excerpt first moves each mark to the lines that k kept.
-func (k *keptSource) excerpt(marks []excerpt.Mark, _ excerptConfig) (*line.View, bool) {
+// cut to hunks and clipped as cfg sets. A setting that no option of cfg
+// set comes from the options of k instead. The context lines stay within
+// those that k kept. It marks at most the number of marks that the
+// settings give each line and counts the rest, as [WithExcerptMarks]
+// describes. The marks lie in the lines of the source, which k does not
+// hold. So excerpt first moves each mark to the lines that k kept.
+func (k *keptSource) excerpt(marks []excerpt.Mark, cfg excerptConfig) (*line.View, bool) {
 	if !k.shows {
 		return nil, false
+	}
+
+	context, width, limit := k.cfg.context, k.cfg.width, k.cfg.marks
+
+	// The copy holds every line within its own context lines of a mark.
+	// The hunks of a smaller count thus match those of the source.
+	if cfg.contextSet {
+		context = min(context, cfg.context)
+	}
+
+	// The copy holds each line whole, so any width clips it as it clips
+	// the line of the source.
+	if cfg.widthSet {
+		width = cfg.width
+	}
+
+	// The copy holds the lines of every mark, so any limit marks what it
+	// marks in the source.
+	if cfg.marksSet {
+		limit = cfg.marks
 	}
 
 	// The limit counts the marks of each line of the source, so it comes
 	// before the move. The move puts every mark of a line that k did not
 	// keep on line -1.
-	marks = excerpt.Limit(marks, k.cfg.marks)
+	marks = excerpt.Limit(marks, limit)
 
 	moved := make([]excerpt.Mark, 0, len(marks))
 	for _, m := range marks {
@@ -782,7 +810,7 @@ func (k *keptSource) excerpt(marks []excerpt.Mark, _ excerptConfig) (*line.View,
 		return nil, false
 	}
 
-	return view.Hunks(k.cfg.context).Clip(k.cfg.width), true
+	return view.Hunks(context).Clip(width), true
 }
 
 // move returns m, a mark in the lines of the source, in the lines k kept.

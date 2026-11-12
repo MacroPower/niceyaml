@@ -96,7 +96,8 @@ func main() {
 
 	// A detached error renders as it did with its source, with an excerpt
 	// for each file under the name of the file. The printer asks for 5
-	// context lines, but each excerpt keeps the 1 that Detach got.
+	// context lines, but Detach kept 1 on either side of each problem, so
+	// each excerpt shows that 1.
 	lipgloss.Println(p.PrintError(all, niceyaml.WithContextLines(5)))
 
 	fmt.Println("\nWrite GitHub workflow commands:")

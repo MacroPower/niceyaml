@@ -154,10 +154,11 @@ func validateCmd(storeOpts ...schemastore.Option) *cobra.Command {
 				// The run holds the error of each file until the run ends.
 				// A binding keeps its whole source alive, so the run
 				// detaches each error, after the report adds the warnings.
-				// The error handler in main renders the error with the
-				// default excerpt options, which Detach keeps. In strict
-				// mode, the report of a file that passes with warnings
-				// fails it too.
+				// Detach keeps the default context lines, so the error
+				// handler in main renders the error with its own excerpt
+				// options up to that many context lines. In strict mode,
+				// the report of a file that passes with warnings fails it
+				// too.
 				err := validateFile(warnings.Context(cmd.Context()), yamlPath, reg, sourceOpts...)
 				if err != nil || strict {
 					err = warnings.Report(err)
