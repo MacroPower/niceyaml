@@ -3,8 +3,11 @@ package yamlviewport_test
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"math"
 	"runtime"
 	"slices"
@@ -78,6 +81,249 @@ func TestViewMode_String(t *testing.T) {
 			assert.Equal(t, tc.want, tc.mode.String())
 		})
 	}
+}
+
+func TestDiffMode_MarshalText(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		err  error
+		want string
+		mode yamlviewport.DiffMode
+	}{
+		"adjacent":     {mode: yamlviewport.DiffModeAdjacent, want: "adjacent"},
+		"origin":       {mode: yamlviewport.DiffModeOrigin, want: "origin"},
+		"none":         {mode: yamlviewport.DiffModeNone, want: "none"},
+		"out of range": {mode: yamlviewport.DiffMode(3), err: yamlviewport.ErrUnknownDiffMode},
+		"negative":     {mode: yamlviewport.DiffMode(-1), err: yamlviewport.ErrUnknownDiffMode},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := tc.mode.MarshalText()
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, string(got))
+		})
+	}
+}
+
+func TestDiffMode_UnmarshalText(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		err  error
+		text string
+		want yamlviewport.DiffMode
+	}{
+		"adjacent":         {text: "adjacent", want: yamlviewport.DiffModeAdjacent},
+		"origin":           {text: "origin", want: yamlviewport.DiffModeOrigin},
+		"none":             {text: "none", want: yamlviewport.DiffModeNone},
+		"capitalized name": {text: "Origin", err: yamlviewport.ErrUnknownDiffMode},
+		"unknown name":     {text: "first", err: yamlviewport.ErrUnknownDiffMode},
+		"number":           {text: "1", err: yamlviewport.ErrUnknownDiffMode},
+		"string form":      {text: "DiffMode(3)", err: yamlviewport.ErrUnknownDiffMode},
+		"empty":            {text: "", err: yamlviewport.ErrUnknownDiffMode},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			// Each case starts from a value that no text names, so a
+			// failing case shows that it leaves the value in place.
+			got := yamlviewport.DiffMode(3)
+
+			err := got.UnmarshalText([]byte(tc.text))
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+				require.ErrorContains(t, err, fmt.Sprintf("%q", tc.text))
+				require.ErrorContains(t, err, "adjacent, origin, or none")
+				assert.Equal(t, yamlviewport.DiffMode(3), got)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestViewMode_MarshalText(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		err  error
+		want string
+		mode yamlviewport.ViewMode
+	}{
+		"full":         {mode: yamlviewport.ViewModeFull, want: "full"},
+		"hunks":        {mode: yamlviewport.ViewModeHunks, want: "hunks"},
+		"side by side": {mode: yamlviewport.ViewModeSideBySide, want: "side-by-side"},
+		"out of range": {mode: yamlviewport.ViewMode(3), err: yamlviewport.ErrUnknownViewMode},
+		"negative":     {mode: yamlviewport.ViewMode(-1), err: yamlviewport.ErrUnknownViewMode},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := tc.mode.MarshalText()
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, string(got))
+		})
+	}
+}
+
+func TestViewMode_UnmarshalText(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		err  error
+		text string
+		want yamlviewport.ViewMode
+	}{
+		"full":             {text: "full", want: yamlviewport.ViewModeFull},
+		"hunks":            {text: "hunks", want: yamlviewport.ViewModeHunks},
+		"side by side":     {text: "side-by-side", want: yamlviewport.ViewModeSideBySide},
+		"capitalized name": {text: "Hunks", err: yamlviewport.ErrUnknownViewMode},
+		"unknown name":     {text: "sidebyside", err: yamlviewport.ErrUnknownViewMode},
+		"number":           {text: "2", err: yamlviewport.ErrUnknownViewMode},
+		"string form":      {text: "ViewMode(3)", err: yamlviewport.ErrUnknownViewMode},
+		"empty":            {text: "", err: yamlviewport.ErrUnknownViewMode},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			// Each case starts from a value that no text names, so a
+			// failing case shows that it leaves the value in place.
+			got := yamlviewport.ViewMode(3)
+
+			err := got.UnmarshalText([]byte(tc.text))
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+				require.ErrorContains(t, err, fmt.Sprintf("%q", tc.text))
+				require.ErrorContains(t, err, "full, hunks, or side-by-side")
+				assert.Equal(t, yamlviewport.ViewMode(3), got)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestModes_Encoding(t *testing.T) {
+	t.Parallel()
+
+	type settings struct {
+		View yamlviewport.ViewMode `json:"view" yaml:"view"`
+		Diff yamlviewport.DiffMode `json:"diff" yaml:"diff"`
+	}
+
+	t.Run("JSON round trip", func(t *testing.T) {
+		t.Parallel()
+
+		var got settings
+
+		require.NoError(t, json.Unmarshal([]byte(`{"view":"side-by-side","diff":"origin"}`), &got))
+		assert.Equal(t, settings{View: yamlviewport.ViewModeSideBySide, Diff: yamlviewport.DiffModeOrigin}, got)
+
+		out, err := json.Marshal(got)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"view":"side-by-side","diff":"origin"}`, string(out))
+	})
+
+	t.Run("YAML document", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("view: hunks\ndiff: none\n")
+
+		got, err := source.Decode[settings](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, settings{View: yamlviewport.ViewModeHunks, Diff: yamlviewport.DiffModeNone}, got)
+	})
+
+	tcs := map[string]struct {
+		err  error
+		text string
+		path string
+	}{
+		"unknown view name": {
+			text: "view: sidebyside\n",
+			err:  yamlviewport.ErrUnknownViewMode,
+			path: "$.view",
+		},
+		"view number": {
+			text: "view: 2\n",
+			err:  yamlviewport.ErrUnknownViewMode,
+			path: "$.view",
+		},
+		"unknown diff name": {
+			text: "view: full\ndiff: first\n",
+			err:  yamlviewport.ErrUnknownDiffMode,
+			path: "$.diff",
+		},
+		"diff number": {
+			text: "diff: 7\n",
+			err:  yamlviewport.ErrUnknownDiffMode,
+			path: "$.diff",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.text, niceyaml.WithName("viewer.yaml"))
+
+			_, err := source.Decode[settings](t.Context())
+			require.ErrorIs(t, err, tc.err)
+			assert.Equal(t, tc.path, yamltest.PathOf(t, yamltest.RequireError(t, err)).String())
+		})
+	}
+
+	t.Run("flag", func(t *testing.T) {
+		t.Parallel()
+
+		fs := flag.NewFlagSet("viewer", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+
+		view := yamlviewport.ViewModeFull
+		fs.TextVar(&view, "view", view, "full, hunks, or side-by-side")
+
+		diffMode := yamlviewport.DiffModeAdjacent
+		fs.TextVar(&diffMode, "diff", diffMode, "adjacent, origin, or none")
+
+		require.NoError(t, fs.Parse([]string{"-view", "side-by-side", "-diff", "origin"}))
+		assert.Equal(t, yamlviewport.ViewModeSideBySide, view)
+		assert.Equal(t, yamlviewport.DiffModeOrigin, diffMode)
+
+		// The flag package formats the error of UnmarshalText with %v, so
+		// the error it returns carries the text but does not wrap the
+		// sentinel.
+		err := fs.Parse([]string{"-view", "split"})
+		require.ErrorContains(t, err, yamlviewport.ErrUnknownViewMode.Error())
+		assert.Equal(t, yamlviewport.ViewModeSideBySide, view)
+	})
 }
 
 func TestViewport_SearchDecorationRefreshesRowCounts(t *testing.T) {

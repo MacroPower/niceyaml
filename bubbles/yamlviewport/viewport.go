@@ -3,6 +3,8 @@ package yamlviewport
 import (
 	"cmp"
 	"context"
+	"errors"
+	"fmt"
 	"iter"
 	"reflect"
 	"slices"
@@ -129,6 +131,16 @@ type Revision interface {
 var (
 	_ Revision = (*niceyaml.Source)(nil)
 	_ Revision = ViewRevision{}
+
+	// ErrUnknownDiffMode reports text or a [DiffMode] value that does not
+	// name one of the DiffMode constants. [DiffMode.MarshalText] and
+	// [DiffMode.UnmarshalText] return it.
+	ErrUnknownDiffMode = errors.New("unknown diff mode")
+
+	// ErrUnknownViewMode reports text or a [ViewMode] value that does not
+	// name one of the ViewMode constants. [ViewMode.MarshalText] and
+	// [ViewMode.UnmarshalText] return it.
+	ErrUnknownViewMode = errors.New("unknown view mode")
 )
 
 // ViewRevision is a [Revision] that pairs a name with a view the caller
@@ -160,6 +172,23 @@ func (r ViewRevision) View() *line.View {
 //
 // Use [Model.SetDiffMode] to change the mode, or [Model.ToggleDiffMode] to
 // cycle through modes.
+//
+// The text form of a DiffMode is its name, "adjacent", "origin", or
+// "none", so a DiffMode decodes from a YAML or JSON string, and
+// [flag.TextVar] reads one from a flag:
+//
+//	diffMode := yamlviewport.DiffModeAdjacent
+//	flag.TextVar(&diffMode, "diff", diffMode, "adjacent, origin, or none")
+//	flag.Parse()
+//
+//	m.SetDiffMode(diffMode)
+//
+// A type that holds a DiffMode reads text. A niceyaml decode into such a
+// type thus bounds the text that the aliases of the whole document repeat.
+// The Limits section of [niceyaml] describes that bound. When the
+// document holds an alias, the decode counts that text once for the whole
+// document. A config loader whose documents repeat large anchors decodes
+// the mode as a string and calls [DiffMode.UnmarshalText] itself.
 type DiffMode int
 
 const (
@@ -189,6 +218,34 @@ func (d DiffMode) String() string {
 	}
 }
 
+// MarshalText implements [encoding.TextMarshaler]. The text is the name
+// that [DiffMode.String] returns. For a value that is not one of the
+// DiffMode constants, MarshalText returns an error that wraps
+// [ErrUnknownDiffMode].
+func (d DiffMode) MarshalText() ([]byte, error) {
+	if d < DiffModeAdjacent || d > DiffModeNone {
+		return nil, fmt.Errorf("%w: %v", ErrUnknownDiffMode, d)
+	}
+
+	return []byte(d.String()), nil
+}
+
+// UnmarshalText implements [encoding.TextUnmarshaler]. It reads the name
+// of a mode, "adjacent", "origin", or "none", as [DiffMode.String] writes
+// it. For any other text, it returns an error that wraps
+// [ErrUnknownDiffMode] and leaves d as it was.
+func (d *DiffMode) UnmarshalText(text []byte) error {
+	for mode := DiffModeAdjacent; mode <= DiffModeNone; mode++ {
+		if string(text) == mode.String() {
+			*d = mode
+
+			return nil
+		}
+	}
+
+	return fmt.Errorf("%w %q, want adjacent, origin, or none", ErrUnknownDiffMode, text)
+}
+
 // ViewMode specifies how the viewport renders diff content. A view mode
 // is a presentation of a diff. Without a diff every mode renders the
 // revision as [ViewModeFull] does, and the mode takes effect when a diff
@@ -196,6 +253,23 @@ func (d DiffMode) String() string {
 //
 // Use [Model.SetViewMode] to change the mode, or [Model.ToggleViewMode] to
 // cycle through modes.
+//
+// The text form of a ViewMode is its name, "full", "hunks", or
+// "side-by-side", so a ViewMode decodes from a YAML or JSON string, and
+// [flag.TextVar] reads one from a flag:
+//
+//	view := yamlviewport.ViewModeFull
+//	flag.TextVar(&view, "view", view, "full, hunks, or side-by-side")
+//	flag.Parse()
+//
+//	m.SetViewMode(view)
+//
+// A type that holds a ViewMode reads text. A niceyaml decode into such a
+// type thus bounds the text that the aliases of the whole document repeat.
+// The Limits section of [niceyaml] describes that bound. When the
+// document holds an alias, the decode counts that text once for the whole
+// document. A config loader whose documents repeat large anchors decodes
+// the mode as a string and calls [ViewMode.UnmarshalText] itself.
 type ViewMode int
 
 const (
@@ -222,6 +296,34 @@ func (v ViewMode) String() string {
 	default:
 		return "ViewMode(" + strconv.Itoa(int(v)) + ")"
 	}
+}
+
+// MarshalText implements [encoding.TextMarshaler]. The text is the name
+// that [ViewMode.String] returns. For a value that is not one of the
+// ViewMode constants, MarshalText returns an error that wraps
+// [ErrUnknownViewMode].
+func (v ViewMode) MarshalText() ([]byte, error) {
+	if v < ViewModeFull || v > ViewModeSideBySide {
+		return nil, fmt.Errorf("%w: %v", ErrUnknownViewMode, v)
+	}
+
+	return []byte(v.String()), nil
+}
+
+// UnmarshalText implements [encoding.TextUnmarshaler]. It reads the name
+// of a mode, "full", "hunks", or "side-by-side", as [ViewMode.String]
+// writes it. For any other text, it returns an error that wraps
+// [ErrUnknownViewMode] and leaves v as it was.
+func (v *ViewMode) UnmarshalText(text []byte) error {
+	for mode := ViewModeFull; mode <= ViewModeSideBySide; mode++ {
+		if string(text) == mode.String() {
+			*v = mode
+
+			return nil
+		}
+	}
+
+	return fmt.Errorf("%w %q, want full, hunks, or side-by-side", ErrUnknownViewMode, text)
 }
 
 // Hit is a place in a revision of the viewport's history. [Model.HitAt]

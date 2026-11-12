@@ -75,6 +75,11 @@
 // revision as [ViewModeFull] does, and the mode takes effect when a diff
 // shows.
 //
+// A [ViewMode] and a [DiffMode] each read and write their name as text,
+// such as "hunks" or "origin". A program thus takes either mode from a
+// flag through [flag.TextVar], or from a field of a config file that it
+// decodes.
+//
 // A line of a diff keeps the overlays and annotations it has in its
 // revision. A diff therefore shows the error marks of the lines it holds.
 // [Revision] says which revision each line comes from.
