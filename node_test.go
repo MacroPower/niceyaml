@@ -1,6 +1,7 @@
 package niceyaml_test
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -2053,6 +2054,160 @@ func TestNode_Text_Nil(t *testing.T) {
 	var node *niceyaml.Node
 
 	assert.Empty(t, node.Text())
+}
+
+func TestNode_Scalar(t *testing.T) {
+	t.Parallel()
+
+	refs := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		`version: &version "1.10"`,
+		"base: &base {x: 1}",
+	), niceyaml.WithName("refs.yaml"))
+
+	tcs := map[string]struct {
+		input string
+		// The path of the Node, $ for the root of the document, or $.a
+		// when unset.
+		path string
+		want string
+		ok   bool
+	}{
+		"float keeps its spelling":       {input: "a: 3.10\n", want: "3.10", ok: true},
+		"float with a trailing zero":     {input: "a: 2.0\n", want: "2.0", ok: true},
+		"octal integer":                  {input: "a: 0755\n", want: "0755", ok: true},
+		"hexadecimal integer":            {input: "a: 0x10\n", want: "0x10", ok: true},
+		"bool keeps its case":            {input: "a: True\n", want: "True", ok: true},
+		"double-quoted scalar":           {input: `a: "nginx:1.25"` + "\n", want: "nginx:1.25", ok: true},
+		"escapes of a quoted scalar":     {input: `a: "x\ty"` + "\n", want: "x\ty", ok: true},
+		"single-quoted scalar":           {input: "a: 'it''s'\n", want: "it's", ok: true},
+		"empty quoted string":            {input: "a: \"\"\n", want: "", ok: true},
+		"tilde":                          {input: "a: ~\n", want: "~", ok: true},
+		"written null":                   {input: "a: null\n", want: "null", ok: true},
+		"entry without a value":          {input: "a:\n", ok: false},
+		"float tag on a quoted scalar":   {input: "a: !!float \"1.10\"\n", want: "1.10", ok: true},
+		"int tag on a quoted scalar":     {input: "a: !!int \"0x10\"\n", want: "0x10", ok: true},
+		"binary tag":                     {input: "a: !!binary aGk=\n", want: "aGk=", ok: true},
+		"timestamp tag":                  {input: "a: !!timestamp 2001-12-14\n", want: "2001-12-14", ok: true},
+		"anchored scalar":                {input: "a: &v 1.10\n", want: "1.10", ok: true},
+		"literal block scalar":           {input: stringtest.LinesLF("a: |", "  1.10"), want: "1.10\n", ok: true},
+		"folded block scalar with strip": {input: stringtest.LinesLF("a: >-", "  x", "  y"), want: "x y", ok: true},
+		"mapping":                        {input: "a: {b: 1}\n", ok: false},
+		"sequence":                       {input: "a: [1]\n", ok: false},
+		"alias of a scalar": {
+			input: stringtest.LinesLF("v: &v 1.10", "a: *v"),
+			want:  "1.10",
+			ok:    true,
+		},
+		"alias of a mapping": {
+			input: stringtest.LinesLF("v: &v {x: 1}", "a: *v"),
+			ok:    false,
+		},
+		"alias of a scalar of a reference document": {
+			input: "a: *version\n",
+			want:  "1.10",
+			ok:    true,
+		},
+		"alias of a mapping of a reference document": {
+			input: "a: *base\n",
+			ok:    false,
+		},
+		"alias inside its own anchor": {
+			input: "a: &a [1, *a]\n",
+			path:  "$.a[1]",
+			ok:    false,
+		},
+		"string tag on an alias of a sequence": {
+			// The tag converts the sequence, so the text is what a decode
+			// reads.
+			input: stringtest.LinesLF("k: &k [x, y]", "a: !!str *k"),
+			want:  "[x y]",
+			ok:    true,
+		},
+		"string tag on an alias of a mapping": {
+			input: stringtest.LinesLF("k: &k {p: 1}", "a: !!str *k"),
+			want:  "map[p:1]",
+			ok:    true,
+		},
+		"int tag on an alias of a sequence": {
+			// A decode reads an int, which Scalar prints.
+			input: stringtest.LinesLF("k: &k [x, y]", "a: !!int *k"),
+			want:  "0",
+			ok:    true,
+		},
+		"bool tag on an alias of a sequence": {
+			// The decode fails.
+			input: stringtest.LinesLF("k: &k [x, y]", "a: !!bool *k"),
+			ok:    false,
+		},
+		"null tag on an alias of a mapping": {
+			input: stringtest.LinesLF("k: &k {p: 1}", "a: !!null *k"),
+			ok:    false,
+		},
+		"tag without a scalar": {
+			input: "a: !!str\n",
+			ok:    false,
+		},
+		"root scalar": {
+			input: "1.10\n",
+			path:  "$",
+			want:  "1.10",
+			ok:    true,
+		},
+		"root mapping": {
+			input: "a: 1\n",
+			path:  "$",
+			ok:    false,
+		},
+		"empty document": {
+			input: "# only a comment\n",
+			path:  "$",
+			ok:    false,
+		},
+		"alias with no anchor": {
+			input: "*nope\n",
+			path:  "$",
+			ok:    false,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input, niceyaml.WithReferences(refs))
+
+			// The root of the document is the Node at $, which At does not
+			// return for a document without a value.
+			n := doc
+			if tc.path != "$" {
+				n = yamltest.At(t, doc, paths.MustParse(cmp.Or(tc.path, "$.a")))
+			}
+
+			got, ok := n.Scalar()
+			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.ok, ok)
+		})
+	}
+
+	t.Run("document that does not parse", func(t *testing.T) {
+		t.Parallel()
+
+		docs := yamltest.AllDocuments(t, niceyaml.NewSourceFromString("a: 1\n---\nb: [\n"), 2)
+
+		got, ok := docs[1].Scalar()
+		assert.Empty(t, got)
+		assert.False(t, ok)
+	})
+
+	t.Run("nil Node", func(t *testing.T) {
+		t.Parallel()
+
+		var node *niceyaml.Node
+
+		got, ok := node.Scalar()
+		assert.Empty(t, got)
+		assert.False(t, ok)
+	})
 }
 
 func TestNode_KeyRange(t *testing.T) {

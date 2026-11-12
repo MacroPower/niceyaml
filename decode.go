@@ -2115,9 +2115,8 @@ func decodeAtWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, 
 // A scalar decodes into a string whatever its type, so a Decode[string]
 // reads a discriminator such as kind. A number decodes into a string in
 // its canonical spelling, so 1.10 reads as "1.1" and 0x10 as "16".
-// [go.jacobcolvin.com/niceyaml/matcher.Text] hands its function
-// the text as the document wrote it, and the String method of
-// [Node.AST] gives the YAML text of any node.
+// [Node.Scalar] returns the text of a scalar as the document writes it,
+// such as a version or a file mode.
 //
 // An [ast.Node] in the result is the node that [Node.AST] returns for its
 // place, and at an alias it is the content of the anchor. The node is

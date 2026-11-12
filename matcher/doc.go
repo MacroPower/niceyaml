@@ -159,7 +159,8 @@
 // that it fills. The decoded value can differ from the text and the YAML
 // value that [Content] and [Text] read. A decode into a string reads
 // version: 1.10 as "1.1", and a decode into an int reads a quoted "2" as
-// 2.
+// 2. [niceyaml.Node.Scalar] returns the text of a scalar as the document
+// writes it, so it reads version: 1.10 as "1.10".
 //
 // Implement the [Matcher] interface for a custom matcher that several
 // callers share, and the [Describer] interface to give it a description.

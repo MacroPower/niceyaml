@@ -58,6 +58,17 @@ func fill(path paths.Path, v any) edit.Func {
 	}
 }
 
+// scalar returns the text that [edit.Node.Scalar] returns for n, and fails
+// the test when n does not hold a scalar with a text.
+func scalar(t *testing.T, n *edit.Node) string {
+	t.Helper()
+
+	text, ok := n.Scalar()
+	require.True(t, ok)
+
+	return text
+}
+
 // exists returns what [edit.Node.Exists] reports for n, and fails the test
 // when Exists returns an error.
 func exists(t *testing.T, n *edit.Node) bool {
@@ -84,6 +95,7 @@ func TestNode_Read(t *testing.T) {
 		Key     string
 		Text    string
 		Kind    niceyaml.NodeKind
+		IsText  bool
 		Exists  bool
 		Missing bool
 	}
@@ -100,13 +112,19 @@ func TestNode_Read(t *testing.T) {
 	err := d.Apply(t.Context(), paths.MustParse("$.spec.*"), func(_ context.Context, n *edit.Node) error {
 		missing := n.At(paths.Current().Child("missing"))
 		assert.Equal(t, niceyaml.NodeNone, missing.Kind())
-		assert.Empty(t, missing.Scalar())
+
+		missingText, missingIsText := missing.Scalar()
+		assert.Empty(t, missingText)
+		assert.False(t, missingIsText)
+
+		text, isText := n.Scalar()
 
 		got = append(got, read{
 			Path:    n.Path().String(),
 			Key:     n.Key(),
-			Text:    n.Scalar(),
+			Text:    text,
 			Kind:    n.Kind(),
+			IsText:  isText,
 			Exists:  exists(t, n),
 			Missing: exists(t, missing),
 		})
@@ -116,7 +134,7 @@ func TestNode_Read(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, []read{
-		{Path: "$.spec.seats", Key: "seats", Text: "40", Kind: niceyaml.NodeScalar, Exists: true},
+		{Path: "$.spec.seats", Key: "seats", Text: "40", Kind: niceyaml.NodeScalar, IsText: true, Exists: true},
 		{Path: "$.spec.tags", Key: "tags", Kind: niceyaml.NodeSequence, Exists: true},
 		{Path: "$.spec.hours", Key: "hours", Kind: niceyaml.NodeMapping, Exists: true},
 	}, got)
@@ -1891,6 +1909,7 @@ func TestNode_Scalar(t *testing.T) {
 		before string
 		want   string
 		kind   niceyaml.NodeKind
+		ok     bool
 	}{
 		"merge key": {
 			// A path never selects a merge key, so it reads no value there.
@@ -1902,11 +1921,36 @@ func TestNode_Scalar(t *testing.T) {
 			before: "a: hello\n",
 			want:   "hello",
 			kind:   niceyaml.NodeScalar,
+			ok:     true,
+		},
+		"hexadecimal integer": {
+			// The text keeps the spelling that a decode into a string drops.
+			before: "a: 0x10\n",
+			want:   "0x10",
+			kind:   niceyaml.NodeScalar,
+			ok:     true,
+		},
+		"empty string": {
+			before: "a: \"\"\n",
+			kind:   niceyaml.NodeScalar,
+			ok:     true,
+		},
+		"entry without a value": {
+			// The decode reads a null, but the document does not write one.
+			before: "a:\n",
+			kind:   niceyaml.NodeScalar,
+		},
+		"written null": {
+			before: "a: ~\n",
+			want:   "~",
+			kind:   niceyaml.NodeScalar,
+			ok:     true,
 		},
 		"alias of a scalar of the document": {
 			before: stringtest.LinesLF("w: &w world", "a: *w"),
 			want:   "world",
 			kind:   niceyaml.NodeScalar,
+			ok:     true,
 		},
 		"alias of a mapping of the document": {
 			before: stringtest.LinesLF("m: &m {y: 2}", "a: *m"),
@@ -1916,11 +1960,13 @@ func TestNode_Scalar(t *testing.T) {
 			before: "a: *word\n",
 			want:   "hello",
 			kind:   niceyaml.NodeScalar,
+			ok:     true,
 		},
 		"alias of a quoted scalar of a reference document": {
 			before: "a: *quoted\n",
 			want:   "a b",
 			kind:   niceyaml.NodeScalar,
+			ok:     true,
 		},
 		"alias of a mapping of a reference document": {
 			before: "a: *base\n",
@@ -1931,51 +1977,61 @@ func TestNode_Scalar(t *testing.T) {
 			before: stringtest.LinesLF("a: |", "  y", "  z"),
 			want:   "y\nz\n",
 			kind:   niceyaml.NodeScalar,
+			ok:     true,
 		},
 		"literal block scalar with strip chomping": {
 			before: stringtest.LinesLF("a: |-", "  y", "  z"),
 			want:   "y\nz",
 			kind:   niceyaml.NodeScalar,
+			ok:     true,
 		},
 		"literal block scalar with keep chomping": {
 			before: stringtest.LinesLF("a: |+", "  y", "", "b: 1"),
 			want:   "y\n\n",
 			kind:   niceyaml.NodeScalar,
+			ok:     true,
 		},
 		"folded block scalar": {
 			before: stringtest.LinesLF("a: >", "  y", "  z"),
 			want:   "y z\n",
 			kind:   niceyaml.NodeScalar,
+			ok:     true,
 		},
 		"folded block scalar with strip chomping": {
 			before: stringtest.LinesLF("a: >-", "  y", "  z"),
 			want:   "y z",
 			kind:   niceyaml.NodeScalar,
+			ok:     true,
 		},
 		"block scalar with an indentation indicator": {
 			before: stringtest.LinesLF("a: |2", "   y", "  z"),
 			want:   " y\nz\n",
 			kind:   niceyaml.NodeScalar,
+			ok:     true,
 		},
 		"anchored block scalar": {
 			before: stringtest.LinesLF("a: &x |", "  y"),
 			want:   "y\n",
 			kind:   niceyaml.NodeScalar,
+			ok:     true,
 		},
 		"tagged block scalar": {
 			before: stringtest.LinesLF("a: !!str |-", "  y"),
 			want:   "y",
 			kind:   niceyaml.NodeScalar,
+			ok:     true,
 		},
 		"alias of a block scalar of the document": {
 			before: stringtest.LinesLF("b: &b |", "  y", "  z", "a: *b"),
 			want:   "y\nz\n",
 			kind:   niceyaml.NodeScalar,
+			ok:     true,
 		},
 		"alias of a block scalar of a reference document": {
 			before: "a: *block\n",
 			want:   "r s",
 			kind:   niceyaml.NodeScalar,
+			ok:     true,
 		},
 		"alias that does not resolve": {
 			// The Func reads the place, and the decode of the document
@@ -2002,7 +2058,10 @@ func TestNode_Scalar(t *testing.T) {
 
 			err = d.Apply(t.Context(), paths.Doc(), func(_ context.Context, n *edit.Node) error {
 				a := n.At(at)
-				assert.Equal(t, tc.want, a.Scalar())
+
+				text, ok := a.Scalar()
+				assert.Equal(t, tc.want, text)
+				assert.Equal(t, tc.ok, ok)
 				assert.Equal(t, tc.kind, a.Kind())
 
 				return nil
@@ -3561,7 +3620,7 @@ func TestNode_Nodes(t *testing.T) {
 			}
 
 			for _, m := range nodes {
-				got = append(got, m.Path().String()+"="+m.Scalar())
+				got = append(got, m.Path().String()+"="+scalar(t, m))
 			}
 
 			return nil
@@ -3584,7 +3643,7 @@ func TestNode_Nodes(t *testing.T) {
 
 		err := d.Apply(t.Context(), paths.MustParse("$.*"), func(_ context.Context, n *edit.Node) error {
 			// The first call reads the hidden entry of a.
-			if hidden || n.At(paths.MustParse("@.x")).Scalar() != "1" {
+			if x, _ := n.At(paths.MustParse("@.x")).Scalar(); hidden || x != "1" {
 				return nil
 			}
 

@@ -152,6 +152,11 @@ func TestText_Reads(t *testing.T) {
 			want:  "1.1",
 		},
 		"bool-tagged quoted scalar": {input: `version: !!bool "True"`, want: "true"},
+		"binary-tagged plain scalar": {
+			// The tag decodes the base64 text.
+			input: `version: !!binary aGk=`,
+			want:  "hi",
+		},
 		"float behind an alias to a reference": {
 			input: `version: *v`,
 			refs:  `v: &v 1.10`,

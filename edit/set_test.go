@@ -4352,9 +4352,9 @@ func TestNode_Insert_Nodes(t *testing.T) {
 		// The node of the Insert reads the new item, and the nodes on the
 		// items from its index on follow their items.
 		assert.Equal(t, paths.Doc().Child("s").Index(0), first.Path())
-		assert.Equal(t, "z", first.Scalar())
+		assert.Equal(t, "z", scalar(t, first))
 		assert.Equal(t, paths.Doc().Child("s").Index(2), second.Path())
-		assert.Equal(t, "b", second.Scalar())
+		assert.Equal(t, "b", scalar(t, second))
 		assert.Equal(t, paths.Doc().Child("s").Index(3), past.Path())
 		assert.False(t, exists(t, past))
 
@@ -4413,7 +4413,7 @@ func TestNode_Insert_SharedItems(t *testing.T) {
 				} {
 					assert.Equal(t, want, n.Path())
 					assert.True(t, exists(t, n))
-					assert.Equal(t, "b", n.Scalar())
+					assert.Equal(t, "b", scalar(t, n))
 				}
 
 				return nil
