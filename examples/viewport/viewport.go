@@ -69,7 +69,7 @@ func main() {
 
 	for i := range view.All() {
 		if n := layout.LineRows(i); n > 1 {
-			start := layout.LineStart(i)
+			start, _ := layout.LineStart(i) // A line that takes rows starts on one.
 			fmt.Printf("Line %d takes rows %d to %d.\n", i+1, start, start+n-1)
 		}
 	}
@@ -77,8 +77,15 @@ func main() {
 	fmt.Println("\nScroll to a search match:")
 
 	// RowOf gives the row a position lands on, so the viewer centers the
-	// match and keeps the window inside the rows the view takes.
-	top := clamp(layout.RowOf(dish.Start)-height/2, layout.Rows()-height)
+	// match and keeps the window inside the rows the view takes. RowOf
+	// reports false for a line the view does not hold, as a view of some of
+	// the lines of the source leaves out a match on another line.
+	dishRow, ok := layout.RowOf(dish.Start)
+	if !ok {
+		return
+	}
+
+	top := clamp(dishRow-height/2, layout.Rows()-height)
 
 	// The rendered rows leave out the container of the printer, so row n
 	// of the rows is row n of the layout. Each row is as wide as its
@@ -96,7 +103,9 @@ func main() {
 
 	// LineAt maps a row back to its line, as a status bar needs. A row of
 	// a wrapped piece or an annotation belongs to the line it sits beside.
-	first, last := layout.LineAt(top), layout.LineAt(top+height-1)
+	// LineAt reports false only for a view without lines.
+	first, _ := layout.LineAt(top)
+	last, _ := layout.LineAt(top + height - 1)
 	fmt.Printf("Lines %d to %d of %d.\n", first+1, last+1, layout.Count())
 
 	fmt.Println("\nScroll sideways to a search match:")
@@ -113,8 +122,15 @@ func main() {
 	layout = rendered.Layout()
 	gutter := layout.GutterWidth()
 	room := width - gutter
-	left := clamp(layout.CellOf(lemon.End)-room, layout.Width()-gutter-room)
-	top = clamp(layout.RowOf(lemon.Start)-height/2, layout.Rows()-height)
+	lemonRow, ok := layout.RowOf(lemon.Start)
+	if !ok {
+		return
+	}
+
+	// RowOf reported that the layout holds the line, so CellOf finds it too.
+	lemonEnd, _ := layout.CellOf(lemon.End)
+	left := clamp(lemonEnd-room, layout.Width()-gutter-room)
+	top = clamp(lemonRow-height/2, layout.Rows()-height)
 
 	from, to := gutter+left, gutter+left+room
 	rows = rendered.Rows()
@@ -148,8 +164,9 @@ func main() {
 		// tests for a gutter cell before it adds the scroll offset, as the
 		// doc of PositionAt describes. LineAt still names the line that a
 		// gutter cell sits beside.
+		i, _ := layout.LineAt(row)
 		if c.cell < gutter {
-			fmt.Println(at, "the gutter of line", layout.LineAt(row)+1)
+			fmt.Println(at, "the gutter of line", i+1)
 
 			continue
 		}
@@ -160,7 +177,7 @@ func main() {
 		cell := c.cell - gutter
 		pos, ok := layout.PositionAt(row, left+cell)
 		if !ok {
-			fmt.Println(at, "no content beside line", layout.LineAt(row)+1)
+			fmt.Println(at, "no content beside line", i+1)
 
 			continue
 		}

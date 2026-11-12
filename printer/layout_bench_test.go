@@ -48,7 +48,7 @@ func BenchmarkLayout_CellOf_OneLine(b *testing.B) {
 			col := 0
 
 			for b.Loop() {
-				if layout.CellOf(position.New(0, col)) < 0 {
+				if _, ok := layout.CellOf(position.New(0, col)); !ok {
 					b.Fatal("no cell")
 				}
 

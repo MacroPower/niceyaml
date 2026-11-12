@@ -741,7 +741,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 			// Each line the view holds takes one row of the layout, and a
 			// view that holds none still prints one empty row.
 			l := p.Layout(view)
-			assert.Len(t, layoutRows(l), view.Count())
+			assert.Len(t, layoutRows(t, l), view.Count())
 			assert.Equal(t, view.Count(), l.Rows())
 			assert.Len(t, strings.Split(got, "\n"), max(1, l.Rows()))
 		})
@@ -1345,7 +1345,7 @@ func TestPrinter_WordWrap(t *testing.T) {
 			assertLayoutMeasures(t, l, got)
 
 			for col, want := range tc.rows {
-				assert.Equal(t, want, l.RowOf(position.New(0, col)), "column %d", col)
+				assert.Equal(t, want, rowOf(t, l, position.New(0, col)), "column %d", col)
 			}
 		})
 	}
@@ -1363,7 +1363,7 @@ func TestPrinter_WordWrap(t *testing.T) {
 		}
 
 		assert.Len(t, rows, len("image:nginx-alpine"))
-		assert.Equal(t, []int{len(rows)}, layoutRows(p.Layout(view)))
+		assert.Equal(t, []int{len(rows)}, layoutRows(t, p.Layout(view)))
 	})
 }
 
@@ -1404,7 +1404,7 @@ func TestPrinter_WordWrap_RowsFit(t *testing.T) {
 			rows := strings.Split(got, "\n")
 
 			assert.Greater(t, len(rows), 1)
-			assert.Equal(t, []int{len(rows)}, layoutRows(p.Layout(view)))
+			assert.Equal(t, []int{len(rows)}, layoutRows(t, p.Layout(view)))
 			assertRowsFit(t, got, tc.want)
 		})
 	}
@@ -4556,7 +4556,7 @@ func TestPrinter_AnnotationKind(t *testing.T) {
 	)
 
 	assert.Equal(t, want, p.Print(view))
-	assert.Equal(t, []int{6}, layoutRows(p.Layout(view)))
+	assert.Equal(t, []int{6}, layoutRows(t, p.Layout(view)))
 }
 
 func TestPrinter_AnnotationKindAbove(t *testing.T) {
@@ -5509,7 +5509,7 @@ func TestPrinter_LineNumbers_MaxNumber(t *testing.T) {
 		"            ^ note",
 		"    - value that wraps",
 	), got)
-	assert.Equal(t, []int{3}, layoutRows(p.Layout(view)))
+	assert.Equal(t, []int{3}, layoutRows(t, p.Layout(view)))
 }
 
 func TestPrinter_LineNumbers_Placeholder(t *testing.T) {
@@ -6187,7 +6187,7 @@ func TestCut_LayoutCells(t *testing.T) {
 			require.NotEqual(t, ansi.Strip(row), row, "the row carries styles")
 
 			for col, want := range clusters {
-				cell := l.GutterWidth() + l.CellOf(position.New(0, col))
+				cell := l.GutterWidth() + cellOf(t, l, position.New(0, col))
 				wantWidth := ansi.StringWidth(want)
 
 				got, width := printer.CutWidth(row, cell, cell+wantWidth)
@@ -6232,7 +6232,7 @@ func TestCut_KeepsCells(t *testing.T) {
 			require.Equal(t, max(0, min(right, rowWidth)-left), width, "window [%d, %d)", left, right)
 
 			for col, want := range clusters {
-				cell := l.CellOf(position.New(0, col))
+				cell := cellOf(t, l, position.New(0, col))
 				w := ansi.StringWidth(want)
 
 				if cell < left || cell+w > right {

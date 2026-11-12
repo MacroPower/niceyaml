@@ -55,17 +55,22 @@ import (
 // cell.
 //
 // A line the view does not hold takes zero rows and does not start on any
-// row. Rows count from 0 at the first row of the first line and leave the
-// container style out. An empty view takes zero rows, but [Printer.Print]
-// draws one empty row for it to carry the container.
+// row. [Layout.LineStart], [Layout.RowOf], and [Layout.CellOf] report
+// false for it. Rows count from 0 at the first row of the first line and
+// leave the container style out. An empty view takes zero rows, but
+// [Printer.Print] draws one empty row for it to carry the container.
 //
 // The rows and cells of the layout are thus those of [Rendered.Rows],
 // which leave the container out too:
 //
 //	r := p.Render(view)
 //	layout := r.Layout()
-//	row := r.Rows()[layout.RowOf(pos)]
-//	cell := layout.GutterWidth() + layout.CellOf(pos)
+//	if at, ok := layout.RowOf(pos); ok {
+//		c, _ := layout.CellOf(pos) // The layout holds the line, as RowOf reports.
+//		row := r.Rows()[at]
+//		cell := layout.GutterWidth() + c
+//		// ...
+//	}
 //
 // [Printer.Print] draws the frame of the container style around those
 // rows. A top margin, border, or padding of the frame puts rows before
@@ -688,15 +693,15 @@ func (l Layout) LineRows(i int) int {
 	return l.lines[k].rows
 }
 
-// LineStart returns the first row of line i of the content, or -1 when
-// the layout does not hold the line.
-func (l Layout) LineStart(i int) int {
+// LineStart returns the first row of line i of the content, and true. It
+// reports false when the layout does not hold the line.
+func (l Layout) LineStart(i int) (int, bool) {
 	k, ok := l.position(i)
 	if !ok {
-		return -1
+		return 0, false
 	}
 
-	return l.starts[k]
+	return l.starts[k], true
 }
 
 // LineLead returns the number of rows line i of the content takes above
@@ -712,49 +717,52 @@ func (l Layout) LineLead(i int) int {
 	return l.lines[k].offsets[0]
 }
 
-// LineAt returns the index in the content of the line that holds row. A
-// row before the first belongs to the first line, and a row past the last
-// belongs to the last line. A scroll offset thus always names a line.
-// LineAt returns -1 when the layout does not hold any lines.
-func (l Layout) LineAt(row int) int {
+// LineAt returns the index in the content of the line that holds row, and
+// true. A row before the first belongs to the first line, and a row past
+// the last belongs to the last line. A scroll offset thus always names a
+// line. LineAt reports false only when the layout does not hold any lines,
+// so false does not mean that row lies outside the layout.
+func (l Layout) LineAt(row int) (int, bool) {
 	n := len(l.lines)
 	if n == 0 {
-		return -1
+		return 0, false
 	}
 
 	// The line whose first row is the last start at or before row. The
 	// last entry of starts is the row count rather than a line, so the
 	// lookup leaves it out.
-	return l.indices[rowIndex(l.starts[:n], row)]
+	return l.indices[rowIndex(l.starts[:n], row)], true
 }
 
 // RowOf returns the row that holds column pos.Col of line pos.Line of the
-// content: the content row the column wraps onto. The line's annotation
-// rows sit beside the wrapped rows that hold their columns. The rows
-// before the content row thus include the earlier wrapped rows with their
-// annotation rows, and the annotation rows above the content row.
+// content, and true. The row is the content row the column wraps onto.
+// The line's annotation rows sit beside the wrapped rows that hold their
+// columns. The rows before the content row thus include the earlier
+// wrapped rows with their annotation rows, and the annotation rows above
+// the content row.
 //
 // A column in the spaces the wrapper dropped at a break belongs to the
 // row before the break. A column past the end of the content belongs to
 // the last row. A column a clipped line leaves out belongs to the row
-// that holds the "..." in its place. RowOf returns -1 when the layout
+// that holds the "..." in its place. RowOf reports false when the layout
 // does not hold the line.
-func (l Layout) RowOf(pos position.Position) int {
+func (l Layout) RowOf(pos position.Position) (int, bool) {
 	k, ok := l.position(pos.Line)
 	if !ok {
-		return -1
+		return 0, false
 	}
 
 	ll := l.lines[k]
 
-	return l.starts[k] + ll.offsets[rowIndex(ll.cols, ll.col(pos.Col))]
+	return l.starts[k] + ll.offsets[rowIndex(ll.cols, ll.col(pos.Col))], true
 }
 
 // CellOf returns the cell that column pos.Col of line pos.Line of the
-// content takes on the row that [Layout.RowOf] puts it on. The cell
-// counts from the start of that row with the gutter left out. A viewer
-// that scrolls horizontally adds [Layout.GutterWidth] to find the cell of
-// a column. CellOf returns -1 when the layout does not hold the line.
+// content takes on the row that [Layout.RowOf] puts it on, and true. The
+// cell counts from the start of that row with the gutter left out. A
+// viewer that scrolls horizontally adds [Layout.GutterWidth] to find the
+// cell of a column. CellOf reports false when the layout does not hold
+// the line.
 //
 // The cell comes from the shown text, so it counts the cells a style's
 // transform adds or removes before the column. The first column of a run
@@ -766,10 +774,10 @@ func (l Layout) RowOf(pos position.Position) int {
 // column past it, as [ColWidth] counts them. On a clipped line, the cell
 // counts the row the line renders as. A column the row leaves out takes
 // the cell where the "..." in its place begins.
-func (l Layout) CellOf(pos position.Position) int {
+func (l Layout) CellOf(pos position.Position) (int, bool) {
 	k, ok := l.position(pos.Line)
 	if !ok {
-		return -1
+		return 0, false
 	}
 
 	ll := l.lines[k]
@@ -780,7 +788,7 @@ func (l Layout) CellOf(pos position.Position) int {
 	cell := sl.cellsBefore(rowIndex(ll.cols, col), offset)
 	past := max(0, col-sl.contentLen)
 
-	return cell + min(past, math.MaxInt-cell)
+	return cell + min(past, math.MaxInt-cell), true
 }
 
 // PositionAt returns the position in the content of the column that

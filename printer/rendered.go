@@ -15,8 +15,12 @@ import (
 //
 //	r := p.Render(view)
 //	layout := r.Layout()
-//	row := r.Rows()[layout.RowOf(pos)]
-//	cell := layout.GutterWidth() + layout.CellOf(pos)
+//	if at, ok := layout.RowOf(pos); ok {
+//		c, _ := layout.CellOf(pos) // The layout holds the line, as RowOf reports.
+//		row := r.Rows()[at]
+//		cell := layout.GutterWidth() + c
+//		// ...
+//	}
 //
 // The rows leave the container out. They do not hold the frame of the
 // container style, and they do not hold the pad of [WithContainerWidth].

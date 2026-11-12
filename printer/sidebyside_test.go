@@ -217,7 +217,10 @@ func TestPrinter_RenderSideBySide_Layouts(t *testing.T) {
 	rows := got.Rows()
 
 	for i := range 3 {
-		row := got.LineStart(i) + max(leftLayout.LineLead(i), rightLayout.LineLead(i))
+		start, ok := got.LineStart(i)
+		require.True(t, ok, "line %d", i)
+
+		row := start + max(leftLayout.LineLead(i), rightLayout.LineLead(i))
 		require.Less(t, row, len(rows))
 
 		leftHalf, rightHalf, ok := strings.Cut(rows[row], " │ ")
@@ -241,19 +244,29 @@ func TestSideBySide_Lines(t *testing.T) {
 		line      int
 		wantStart int
 		wantRows  int
+		missing   bool // Whether neither pane holds the line.
 	}{
 		"line that takes more rows than in either pane": {line: 0, wantStart: 0, wantRows: 6},
 		"line after it":           {line: 1, wantStart: 6, wantRows: 1},
-		"line neither pane holds": {line: 2, wantStart: -1, wantRows: 0},
-		"negative line":           {line: -1, wantStart: -1, wantRows: 0},
+		"line neither pane holds": {line: 2, missing: true},
+		"negative line":           {line: -1, missing: true},
 	}
 
 	for name, tc := range starts {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.wantStart, got.LineStart(tc.line))
 			assert.Equal(t, tc.wantRows, got.LineRows(tc.line))
+
+			start, ok := got.LineStart(tc.line)
+			if tc.missing {
+				assert.False(t, ok)
+
+				return
+			}
+
+			require.True(t, ok)
+			assert.Equal(t, tc.wantStart, start)
 		})
 	}
 
@@ -273,7 +286,9 @@ func TestSideBySide_Lines(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, got.LineAt(tc.row))
+			i, ok := got.LineAt(tc.row)
+			require.True(t, ok)
+			assert.Equal(t, tc.want, i)
 		})
 	}
 }
@@ -422,15 +437,17 @@ func TestSideBySide_Rows(t *testing.T) {
 		var got printer.SideBySide
 
 		gotLeft, gotRight := got.Panes()
-		_, ok := got.PaneRow(false, 0)
+		_, okPaneRow := got.PaneRow(false, 0)
+		_, okStart := got.LineStart(0)
+		_, okLine := got.LineAt(0)
 
 		assert.Empty(t, got.Rows())
 		assert.Empty(t, gotLeft)
 		assert.Empty(t, gotRight)
-		assert.Equal(t, -1, got.LineStart(0))
+		assert.False(t, okStart)
 		assert.Equal(t, 0, got.LineRows(0))
-		assert.Equal(t, -1, got.LineAt(0))
-		assert.False(t, ok)
+		assert.False(t, okLine)
+		assert.False(t, okPaneRow)
 		assert.Empty(t, got.String())
 	})
 }

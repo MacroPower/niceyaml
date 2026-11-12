@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -24,14 +23,60 @@ import (
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
+// rowOf returns the row of pos in l, and fails t when l does not hold the
+// line of pos.
+func rowOf(t *testing.T, l printer.Layout, pos position.Position) int {
+	t.Helper()
+
+	row, ok := l.RowOf(pos)
+	require.True(t, ok, "row of %s", pos)
+
+	return row
+}
+
+// cellOf returns the cell of pos in l, and fails t when l does not hold
+// the line of pos.
+func cellOf(t *testing.T, l printer.Layout, pos position.Position) int {
+	t.Helper()
+
+	cell, ok := l.CellOf(pos)
+	require.True(t, ok, "cell of %s", pos)
+
+	return cell
+}
+
+// lineStart returns the first row of line i in l, and fails t when l does
+// not hold the line.
+func lineStart(t *testing.T, l printer.Layout, i int) int {
+	t.Helper()
+
+	row, ok := l.LineStart(i)
+	require.True(t, ok, "start of line %d", i)
+
+	return row
+}
+
+// lineAt returns the line that holds row in l, and fails t when l does not
+// hold any lines.
+func lineAt(t *testing.T, l printer.Layout, row int) int {
+	t.Helper()
+
+	i, ok := l.LineAt(row)
+	require.True(t, ok, "line at row %d", row)
+
+	return i
+}
+
 // layoutRows returns the rows each line of l takes, in layout order.
-func layoutRows(l printer.Layout) []int {
+func layoutRows(t *testing.T, l printer.Layout) []int {
+	t.Helper()
+
 	var rows []int
 
 	prev := -1
 
 	for row := range l.Rows() {
-		if i := l.LineAt(row); i != prev {
+		if i := lineAt(t, l, row); i != prev {
 			rows = append(rows, 0)
 			prev = i
 		}
@@ -62,8 +107,7 @@ func assertRowOfRunes(t *testing.T, l printer.Layout, input string, rows []strin
 			continue
 		}
 
-		row := l.RowOf(position.New(0, col))
-		require.GreaterOrEqual(t, row, 0)
+		row := rowOf(t, l, position.New(0, col))
 		require.Less(t, row, len(rows))
 		assert.Contains(t, rows[row], string(r), "column %d", col)
 	}
@@ -160,10 +204,10 @@ func TestPrinter_Layout(t *testing.T) {
 
 				assertLayoutMeasures(t, l, got)
 				assert.Equal(t, 3, l.Count())
-				assert.Equal(t, tc.wantRows, layoutRows(l))
+				assert.Equal(t, tc.wantRows, layoutRows(t, l))
 
 				for pos, row := range tc.rowOf {
-					assert.Equal(t, row, l.RowOf(pos), "position %s", pos)
+					assert.Equal(t, row, rowOf(t, l, pos), "position %s", pos)
 				}
 			})
 		}
@@ -176,7 +220,7 @@ func TestPrinter_Layout(t *testing.T) {
 
 		start := 0
 		for i := range l.Count() {
-			assert.Equal(t, start, l.LineStart(i), "line %d", i)
+			assert.Equal(t, start, lineStart(t, l, i), "line %d", i)
 
 			start += l.LineRows(i)
 		}
@@ -190,8 +234,9 @@ func TestPrinter_Layout(t *testing.T) {
 		l := p.Layout(newView())
 
 		for i := range l.Count() {
-			for row := l.LineStart(i); row < l.LineStart(i)+l.LineRows(i); row++ {
-				assert.Equal(t, i, l.LineAt(row), "row %d", row)
+			start := lineStart(t, l, i)
+			for row := start; row < start+l.LineRows(i); row++ {
+				assert.Equal(t, i, lineAt(t, l, row), "row %d", row)
 			}
 		}
 	})
@@ -201,12 +246,12 @@ func TestPrinter_Layout(t *testing.T) {
 
 		l := p.Layout(newView())
 
-		assert.Equal(t, 0, l.LineAt(-1))
-		assert.Equal(t, 0, l.LineAt(-100))
-		assert.Equal(t, 0, l.LineAt(math.MinInt))
-		assert.Equal(t, 2, l.LineAt(l.Rows()))
-		assert.Equal(t, 2, l.LineAt(l.Rows()+100))
-		assert.Equal(t, 2, l.LineAt(math.MaxInt))
+		assert.Equal(t, 0, lineAt(t, l, -1))
+		assert.Equal(t, 0, lineAt(t, l, -100))
+		assert.Equal(t, 0, lineAt(t, l, math.MinInt))
+		assert.Equal(t, 2, lineAt(t, l, l.Rows()))
+		assert.Equal(t, 2, lineAt(t, l, l.Rows()+100))
+		assert.Equal(t, 2, lineAt(t, l, math.MaxInt))
 	})
 
 	t.Run("empty view", func(t *testing.T) {
@@ -216,12 +261,26 @@ func TestPrinter_Layout(t *testing.T) {
 
 		assert.Equal(t, 0, l.Rows())
 		assert.Equal(t, 0, l.Count())
-		assert.Equal(t, -1, l.LineAt(0))
-		assert.Equal(t, -1, l.RowOf(position.New(0, 0)))
 		assert.Equal(t, 0, l.Width())
 
-		// The zero Layout holds no cell either.
-		_, ok := printer.Layout{}.PositionAt(0, 0)
+		// An empty layout does not hold a line for any row or position.
+		_, ok := l.LineAt(0)
+		assert.False(t, ok)
+
+		_, ok = l.RowOf(position.New(0, 0))
+		assert.False(t, ok)
+
+		_, ok = l.CellOf(position.New(0, 0))
+		assert.False(t, ok)
+
+		_, ok = l.LineStart(0)
+		assert.False(t, ok)
+
+		// The zero Layout holds no line or cell either.
+		_, ok = printer.Layout{}.LineAt(0)
+		assert.False(t, ok)
+
+		_, ok = printer.Layout{}.PositionAt(0, 0)
 		assert.False(t, ok)
 	})
 
@@ -231,8 +290,9 @@ func TestPrinter_Layout(t *testing.T) {
 		l := p.Layout(newView())
 
 		tcs := map[string]struct {
-			pos  position.Position
-			want int
+			pos     position.Position
+			want    int
+			missing bool // Whether the layout does not hold the line of pos.
 		}{
 			"column zero lands below the annotation rows above":   {pos: position.New(0, 0), want: 2},
 			"last column of the first piece":                      {pos: position.New(0, 13), want: 2},
@@ -246,15 +306,23 @@ func TestPrinter_Layout(t *testing.T) {
 			"column at min int lands on the first content row":    {pos: position.New(0, math.MinInt), want: 2},
 			"line without annotations":                            {pos: position.New(1, 0), want: 6},
 			"line with an annotation below":                       {pos: position.New(2, 3), want: 7},
-			"line past the layout":                                {pos: position.New(3, 0), want: -1},
-			"negative line":                                       {pos: position.New(-1, 0), want: -1},
+			"line past the layout":                                {pos: position.New(3, 0), missing: true},
+			"negative line":                                       {pos: position.New(-1, 0), missing: true},
 		}
 
 		for name, tc := range tcs {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				assert.Equal(t, tc.want, l.RowOf(tc.pos))
+				got, ok := l.RowOf(tc.pos)
+				if tc.missing {
+					assert.False(t, ok)
+
+					return
+				}
+
+				require.True(t, ok)
+				assert.Equal(t, tc.want, got)
 			})
 		}
 	})
@@ -280,31 +348,39 @@ func TestPrinter_Layout(t *testing.T) {
 
 		assertLayoutMeasures(t, l, got)
 		assert.Equal(t, 2, l.Count())
-		assert.Equal(t, []int{6, 2}, layoutRows(l))
+		assert.Equal(t, []int{6, 2}, layoutRows(t, l))
 
 		// The layout speaks in the indices of the content, as the view
 		// does, so line 2 of the content starts after the six rows of
 		// line 0 and line 1, which the slice dropped, takes no rows.
-		assert.Equal(t, 0, l.LineStart(0))
-		assert.Equal(t, 6, l.LineStart(2))
+		assert.Equal(t, 0, lineStart(t, l, 0))
+		assert.Equal(t, 6, lineStart(t, l, 2))
 		assert.Equal(t, 6, l.LineRows(0))
 		assert.Equal(t, 2, l.LineRows(2))
-		assert.Equal(t, -1, l.LineStart(1))
 		assert.Equal(t, 0, l.LineRows(1))
 
-		assert.Equal(t, 0, l.LineAt(0))
-		assert.Equal(t, 0, l.LineAt(5))
-		assert.Equal(t, 2, l.LineAt(6))
-		assert.Equal(t, 2, l.LineAt(7))
-		assert.Equal(t, 2, l.LineAt(100))
-		assert.Equal(t, 0, l.LineAt(-1))
+		_, ok := l.LineStart(1)
+		assert.False(t, ok)
 
-		// RowOf takes a position in the content too, and line 1 is not in
-		// the layout.
-		assert.Equal(t, 2, l.RowOf(position.New(0, 0)))
-		assert.Equal(t, 4, l.RowOf(position.New(0, 15)))
-		assert.Equal(t, 6, l.RowOf(position.New(2, 0)))
-		assert.Equal(t, -1, l.RowOf(position.New(1, 0)))
+		assert.Equal(t, 0, lineAt(t, l, 0))
+		assert.Equal(t, 0, lineAt(t, l, 5))
+		assert.Equal(t, 2, lineAt(t, l, 6))
+		assert.Equal(t, 2, lineAt(t, l, 7))
+		assert.Equal(t, 2, lineAt(t, l, 100))
+		assert.Equal(t, 0, lineAt(t, l, -1))
+
+		// RowOf and CellOf take a position in the content too, and line 1
+		// is not in the layout.
+		assert.Equal(t, 2, rowOf(t, l, position.New(0, 0)))
+		assert.Equal(t, 4, rowOf(t, l, position.New(0, 15)))
+		assert.Equal(t, 6, rowOf(t, l, position.New(2, 0)))
+		assert.Equal(t, 0, cellOf(t, l, position.New(2, 0)))
+
+		_, ok = l.RowOf(position.New(1, 0))
+		assert.False(t, ok)
+
+		_, ok = l.CellOf(position.New(1, 0))
+		assert.False(t, ok)
 	})
 
 	t.Run("a style that changes the text keeps columns aligned", func(t *testing.T) {
@@ -397,11 +473,11 @@ func TestPrinter_Layout(t *testing.T) {
 				l := p.Layout(view)
 
 				for col, row := range tc.rows {
-					assert.Equal(t, row, l.RowOf(position.New(0, col)), "row of column %d", col)
+					assert.Equal(t, row, rowOf(t, l, position.New(0, col)), "row of column %d", col)
 				}
 
 				for col, cell := range tc.cells {
-					assert.Equal(t, cell, l.CellOf(position.New(0, col)), "cell of column %d", col)
+					assert.Equal(t, cell, cellOf(t, l, position.New(0, col)), "cell of column %d", col)
 				}
 			})
 		}
@@ -471,9 +547,15 @@ func TestPrinter_Layout_LineLead(t *testing.T) {
 			assert.Equal(t, tc.want, layout.LineLead(tc.line))
 
 			// The lead is the distance from the first row of the line to
-			// its first content row.
-			first := layout.RowOf(position.New(tc.line, 0)) - layout.LineStart(tc.line)
-			assert.Equal(t, first, layout.LineLead(tc.line))
+			// its first content row. A line the layout does not hold has
+			// neither row.
+			row, okRow := layout.RowOf(position.New(tc.line, 0))
+			start, okStart := layout.LineStart(tc.line)
+			require.Equal(t, okRow, okStart)
+
+			if okRow {
+				assert.Equal(t, row-start, layout.LineLead(tc.line))
+			}
 		})
 	}
 
@@ -939,6 +1021,7 @@ func TestPrinter_Layout_CellOf(t *testing.T) {
 		wrap     int
 		tabWidth int
 		want     int
+		missing  bool // Whether the layout does not hold the line of pos.
 	}{
 		"tab takes one cell by default": {
 			content: "k: \"a\tb\"",
@@ -1010,7 +1093,7 @@ func TestPrinter_Layout_CellOf(t *testing.T) {
 		"line the layout does not hold": {
 			content: "a: 1",
 			pos:     position.New(5, 0),
-			want:    -1,
+			missing: true,
 		},
 	}
 
@@ -1023,7 +1106,15 @@ func TestPrinter_Layout_CellOf(t *testing.T) {
 
 			p := testPrinter().With(printer.WithWrapWidth(tc.wrap), printer.WithTabWidth(tc.tabWidth))
 
-			assert.Equal(t, tc.want, p.Layout(view).CellOf(tc.pos))
+			got, ok := p.Layout(view).CellOf(tc.pos)
+			if tc.missing {
+				assert.False(t, ok)
+
+				return
+			}
+
+			require.True(t, ok)
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }
@@ -1083,7 +1174,9 @@ func TestPrinter_Layout_KeptMeasures(t *testing.T) {
 			return fmt.Sprint(pos, ok)
 		}
 
-		return strconv.Itoa(l.CellOf(q.pos))
+		cell, ok := l.CellOf(q.pos)
+
+		return fmt.Sprint(cell, ok)
 	}
 
 	for name, tc := range tcs {
@@ -1190,8 +1283,8 @@ func TestPrinter_Layout_Clip(t *testing.T) {
 			l := testPrinter().With(printer.WithWrapWidth(tc.wrap)).Layout(newView())
 			pos := position.New(0, tc.col)
 
-			assert.Equal(t, tc.wantRow, l.RowOf(pos), "row")
-			assert.Equal(t, tc.wantCell, l.CellOf(pos), "cell")
+			assert.Equal(t, tc.wantRow, rowOf(t, l, pos), "row")
+			assert.Equal(t, tc.wantCell, cellOf(t, l, pos), "cell")
 		})
 	}
 
@@ -1217,7 +1310,7 @@ func TestPrinter_Layout_Clip(t *testing.T) {
 		row, _, _ := strings.Cut(p.Print(view), "\n")
 
 		for col, want := range map[int]string{15: "k", 45: "O", 25: ".", 0: "."} {
-			cell := l.GutterWidth() + l.CellOf(position.New(0, col))
+			cell := l.GutterWidth() + cellOf(t, l, position.New(0, col))
 
 			assert.Equal(t, want, ansi.Strip(printer.Cut(row, cell, cell+1)), "column %d", col)
 		}
@@ -1697,8 +1790,8 @@ func TestPrinter_Layout_PositionAt_Inverse(t *testing.T) {
 
 					hits++
 
-					require.Equal(t, row, l.RowOf(pos), "row %d cell %d gives %s", row, cell, pos)
-					require.LessOrEqual(t, l.CellOf(pos), cell, "row %d cell %d gives %s", row, cell, pos)
+					require.Equal(t, row, rowOf(t, l, pos), "row %d cell %d gives %s", row, cell, pos)
+					require.LessOrEqual(t, cellOf(t, l, pos), cell, "row %d cell %d gives %s", row, cell, pos)
 				}
 			}
 
@@ -1715,7 +1808,7 @@ func TestPrinter_Layout_PositionAt_Inverse(t *testing.T) {
 
 					pos := position.New(i, col)
 
-					row, cell := l.RowOf(pos), l.CellOf(pos)
+					row, cell := rowOf(t, l, pos), cellOf(t, l, pos)
 
 					got, ok := l.PositionAt(row, cell)
 					if !ok {
@@ -1734,8 +1827,8 @@ func TestPrinter_Layout_PositionAt_Inverse(t *testing.T) {
 					require.False(t, clipped(view, pos), "position %s gives %s", pos, got)
 
 					require.Equal(t, pos.Line, got.Line, "position %s", pos)
-					require.Equal(t, row, l.RowOf(got), "position %s gives %s", pos, got)
-					require.Equal(t, cell, l.CellOf(got), "position %s gives %s", pos, got)
+					require.Equal(t, row, rowOf(t, l, got), "position %s gives %s", pos, got)
+					require.Equal(t, cell, cellOf(t, l, got), "position %s gives %s", pos, got)
 				}
 			}
 		})
