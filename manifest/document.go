@@ -536,7 +536,7 @@ func article(name string) string {
 // checkLayers checks that the layers of a merged document write the same
 // text in each type field.
 func (d *docState) checkLayers() error {
-	layers := hook.Layers(d.doc.Source())
+	layers := d.doc.Source().Layers()
 	if len(layers) < 2 {
 		return nil
 	}
@@ -556,12 +556,7 @@ func (d *docState) checkLayers() error {
 	for i, p := range fields {
 		var writers []writer
 
-		for _, l := range layers {
-			n, ok := l.(*niceyaml.Node)
-			if !ok {
-				continue
-			}
-
+		for _, n := range layers {
 			if r := readTypeField(n, p, reg.cfg.fieldPaths()); r.found {
 				writers = append(writers, writer{node: n, read: r})
 			}

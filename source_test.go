@@ -9639,6 +9639,81 @@ func TestSource_References(t *testing.T) {
 	})
 }
 
+func TestSource_Layers(t *testing.T) {
+	t.Parallel()
+
+	t.Run("documents lowest first", func(t *testing.T) {
+		t.Parallel()
+
+		base := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("base.yaml"))
+		prod := niceyaml.NewSourceFromString("b: 2\n", niceyaml.WithName("prod.yaml"))
+
+		merged, err := niceyaml.NewSourceFromLayers(t.Context(), []*niceyaml.Source{base, nil, prod},
+			niceyaml.MergeAs(prod))
+		require.NoError(t, err)
+
+		got := merged.Layers()
+		require.Len(t, got, 2)
+		assert.Same(t, yamltest.Document(t, base), got[0])
+		assert.Same(t, yamltest.Document(t, prod), got[1])
+	})
+
+	t.Run("scoped nodes as given", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, "app: {a: 1}\n", niceyaml.WithName("base.yaml"))
+		app, err := doc.At(paths.Doc().Child("app"))
+		require.NoError(t, err)
+
+		top := yamltest.FirstDocument(t, "b: 2\n", niceyaml.WithName("prod.yaml"))
+
+		merged := yamltest.Layers(t, app, top)
+
+		assert.Equal(t, []*niceyaml.Node{app, top}, merged.Layers())
+	})
+
+	t.Run("nested merge as it is", func(t *testing.T) {
+		t.Parallel()
+
+		inner := yamltest.Layers(t,
+			niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("base.yaml")),
+			niceyaml.NewSourceFromString("b: 2\n", niceyaml.WithName("mid.yaml")),
+		)
+		top := niceyaml.NewSourceFromString("c: 3\n", niceyaml.WithName("prod.yaml"))
+
+		got := yamltest.Layers(t, inner, top).Layers()
+		require.Len(t, got, 2)
+		assert.Same(t, yamltest.Document(t, inner), got[0])
+		assert.Len(t, got[0].Source().Layers(), 2)
+		assert.Empty(t, got[1].Source().Layers())
+	})
+
+	t.Run("a copy", func(t *testing.T) {
+		t.Parallel()
+
+		base := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("base.yaml"))
+		merged := yamltest.Layers(t, base)
+
+		layers := merged.Layers()
+		layers[0] = nil
+
+		assert.Equal(t, []*niceyaml.Node{yamltest.Document(t, base)}, merged.Layers())
+	})
+
+	t.Run("none", func(t *testing.T) {
+		t.Parallel()
+
+		var nilSource *niceyaml.Source
+
+		merged := yamltest.Layers(t, niceyaml.NewSourceFromString("a: 1\n"))
+
+		assert.Nil(t, niceyaml.NewSourceFromString("a: 1\n").Layers())
+		assert.Nil(t, merged.WithText(merged.Text()).Layers())
+		assert.Nil(t, (&niceyaml.Source{}).Layers())
+		assert.Nil(t, nilSource.Layers())
+	})
+}
+
 func TestSource_Unmarshalers(t *testing.T) {
 	t.Parallel()
 

@@ -42,12 +42,6 @@ var (
 	// type to the chain and does not change anything that a renderer shows.
 	Rewrap func(err error, wrap func(error) error) error
 
-	// Layers returns the layers that niceyaml.NewSourceFromLayers merged
-	// into src, a *niceyaml.Source, as the *niceyaml.Node of the document
-	// that each layer reads, lowest first. It returns nil for a Source that
-	// does not merge layers.
-	Layers func(src any) []any
-
 	// ReferenceName returns the name of the reference document that
 	// defines the anchor of name for the document of n, a *niceyaml.Node.
 	// An alias of name in that document reads this anchor when no anchor
