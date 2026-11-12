@@ -932,11 +932,13 @@
 //
 // An Apply whose last text breaks a limit fails with the message that the
 // Source gives such a text, as in "file is larger than 256 KiB". The error
-// matches [go.jacobcolvin.com/niceyaml.ErrLimit]. The error of either byte
-// limit binds where an error at the path $ binds, as the Errors section
-// describes. The error of the depth limit binds at the token that opens the
-// first level past the limit. The user's text keeps the limits, so
-// [go.jacobcolvin.com/niceyaml.IsInvalid] does not report the error.
+// matches [go.jacobcolvin.com/niceyaml.ErrLimit] and holds the
+// [*go.jacobcolvin.com/niceyaml.LimitError] that names the limit. The error
+// of either byte limit binds where an error at the path $ binds, as the
+// Errors section describes. The error of the depth limit binds at the token
+// that opens the first level past the limit. The user's text keeps the
+// limits, so [go.jacobcolvin.com/niceyaml.IsInvalid] does not report the
+// error.
 //
 // Apply also decodes the whole document after the last call. The text that
 // the user wrote might not decode, as with a `<<` merge key of a scalar,

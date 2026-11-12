@@ -2225,6 +2225,21 @@
 // limit. The other documents of the Source still parse. Each error of a limit
 // matches [ErrLimit] and not [ErrSyntax], and [IsInvalid] reports it.
 //
+// Each error of a limit holds a [*LimitError]. Its Kind names the option
+// that sets the limit, and its Max holds the value of that option. A
+// program that maps each limit to a setting of its own reads the Kind:
+//
+//	if le, ok := errors.AsType[*niceyaml.LimitError](err); ok {
+//		switch le.Kind {
+//		case niceyaml.LimitBytes:
+//			return fmt.Errorf("%w (raise --byte-limit above %d)", err, le.Max)
+//		case niceyaml.LimitDocumentBytes:
+//			return fmt.Errorf("%w (raise --document-byte-limit above %d)", err, le.Max)
+//		case niceyaml.LimitDepth:
+//			return fmt.Errorf("%w (raise --depth-limit above %d)", err, le.Max)
+//		}
+//	}
+//
 // The go-yaml decoder writes the node of each value that reads text out as
 // text, with each alias in full. Types that read text include those with an
 // UnmarshalText method or an UnmarshalYAML method that takes bytes, and those
@@ -2258,9 +2273,10 @@
 // read text. It counts every alias of the document, including an alias that a
 // plain string field reads. It fails on a document past either bound with an
 // error that matches both [ErrLimit] and [ErrExcessiveAliasing], as in
-// "app.yaml:30:5: aliases repeat more than 256 KiB of text". The error binds
-// at the first alias that takes the text past the bound. That alias might not
-// reach any value that reads text.
+// "app.yaml:30:5: aliases repeat more than 256 KiB of text". Its [*LimitError]
+// names the document byte limit or the depth limit, and its Aliases field is
+// true. The error binds at the first alias that takes the text past the
+// bound. That alias might not reach any value that reads text.
 //
 // A decode into a value that does not read text does not write any text, so
 // these bounds do not apply to it. The alias limit still applies.

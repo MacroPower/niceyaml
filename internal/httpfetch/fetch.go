@@ -56,26 +56,28 @@ func (e *Error) Unwrap() error {
 
 // TooLarge returns the error of a text of more than limit bytes. For the
 // noun "response", its message reads as "response is larger than 10 MiB".
-// It matches [niceyaml.ErrLimit], as the error of a Source past its byte
-// limit does. It does not declare a document at fault, so
+// It wraps a [*niceyaml.LimitError] of [niceyaml.LimitLoad] with limit as
+// its Max, so it matches [niceyaml.ErrLimit], as the error of a Source past
+// its byte limit does. It does not declare a document at fault, so
 // [niceyaml.IsInvalid] does not report it.
 func TooLarge(noun string, limit int) error {
-	return sizeError{noun: noun, limit: limit}
+	return &sizeError{noun: noun, limit: &niceyaml.LimitError{Kind: niceyaml.LimitLoad, Max: limit}}
 }
 
-// sizeError is the error [TooLarge] returns.
+// sizeError is the error [TooLarge] returns. It names the text with its
+// noun and wraps the limit.
 type sizeError struct {
+	limit *niceyaml.LimitError
 	noun  string
-	limit int
 }
 
-func (e sizeError) Error() string {
-	return e.noun + " is larger than " + quantity.Bytes(e.limit)
+func (e *sizeError) Error() string {
+	return e.noun + " is larger than " + quantity.Bytes(e.limit.Max)
 }
 
-// Is reports whether target is [niceyaml.ErrLimit].
-func (e sizeError) Is(target error) bool {
-	return target == niceyaml.ErrLimit
+// Unwrap returns the [*niceyaml.LimitError] of e.
+func (e *sizeError) Unwrap() error {
+	return e.limit
 }
 
 // Get performs an HTTP GET for rawURL with client and returns the body. It

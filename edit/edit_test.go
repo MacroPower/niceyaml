@@ -6305,6 +6305,16 @@ func TestDoc_Apply_Limits(t *testing.T) {
 				require.ErrorIs(t, err, niceyaml.ErrLimit)
 				require.NotErrorIs(t, err, edit.ErrEngine)
 				assert.False(t, niceyaml.IsInvalid(err))
+
+				limit, ok := errors.AsType[*niceyaml.LimitError](err)
+				require.True(t, ok)
+
+				want := niceyaml.LimitError{Kind: niceyaml.LimitBytes, Max: 64}
+				if strings.Contains(tc.err, "nests") {
+					want = niceyaml.LimitError{Kind: niceyaml.LimitDepth, Max: 3}
+				}
+
+				assert.Equal(t, want, *limit)
 			}
 
 			requireEdit(t, d, err, tc.err, tc.want)
@@ -6348,6 +6358,10 @@ func TestDoc_Apply_Limits(t *testing.T) {
 					require.ErrorIs(t, err, niceyaml.ErrLimit)
 					require.NotErrorIs(t, err, edit.ErrEngine)
 					assert.False(t, niceyaml.IsInvalid(err))
+
+					limit, ok := errors.AsType[*niceyaml.LimitError](err)
+					require.True(t, ok)
+					assert.Equal(t, niceyaml.LimitError{Kind: niceyaml.LimitDocumentBytes, Max: 64}, *limit)
 				}
 
 				requireEdit(t, d, err, tc.err, tc.want)
@@ -11178,6 +11192,10 @@ func TestFileText(t *testing.T) {
 					require.ErrorIs(t, err, niceyaml.ErrLimit)
 					require.NotErrorIs(t, err, edit.ErrUsage)
 					assert.False(t, niceyaml.IsInvalid(err))
+
+					limit, ok := errors.AsType[*niceyaml.LimitError](err)
+					require.True(t, ok)
+					assert.Equal(t, niceyaml.LimitError{Kind: niceyaml.LimitBytes, Max: 49}, *limit)
 				} else {
 					require.ErrorIs(t, err, edit.ErrUsage)
 				}

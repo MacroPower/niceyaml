@@ -26,7 +26,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/docparse"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/internal/mapkey"
-	"go.jacobcolvin.com/niceyaml/internal/quantity"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/tokens"
@@ -1068,9 +1067,10 @@ func (d *Doc) lexedAt(tks token.Tokens, tk *token.Token) (*token.Token, bool) {
 // problem of either byte limit binds where a problem at the path $ binds.
 // The depth limit counts the levels of the document. Its problem binds at
 // the token that opens the first level past the limit, at the site that
-// [Doc.bindAt] gives the token. Each problem has the message of the
-// Source, and it matches [niceyaml.ErrLimit]. The user's text keeps the
-// limits, so [niceyaml.IsInvalid] does not report the problem.
+// [Doc.bindAt] gives the token. Each problem is the [*niceyaml.LimitError]
+// that the Source gives such a text, and it matches [niceyaml.ErrLimit].
+// The user's text keeps the limits, so [niceyaml.IsInvalid] does not
+// report the problem.
 func (d *Doc) limitProblem(start string) error {
 	if d.cur == start {
 		return nil
@@ -1082,15 +1082,14 @@ func (d *Doc) limitProblem(start string) error {
 	var problem error
 
 	if size := len(src.Text()) - (d.end - d.start) + len(d.cur); size > bytes {
-		problem = d.bindOwn(niceyaml.Unchecked(&limitError{msg: "file is larger than " + quantity.Bytes(bytes)},
+		problem = d.bindOwn(niceyaml.Unchecked(&niceyaml.LimitError{Kind: niceyaml.LimitBytes, Max: bytes},
 			niceyaml.AtPath(paths.Doc())))
 	} else if docBytes < niceyaml.NoLimit && d.runSize() > docBytes {
-		msg := (&docparse.SizeError{Limit: docBytes}).Error()
-		problem = d.bindOwn(niceyaml.Unchecked(&limitError{msg: msg}, niceyaml.AtPath(paths.Doc())))
+		limit := &niceyaml.LimitError{Kind: niceyaml.LimitDocumentBytes, Max: docBytes}
+		problem = d.bindOwn(niceyaml.Unchecked(limit, niceyaml.AtPath(paths.Doc())))
 	} else if tk, deep := docparse.TooDeep(d.src.Tokens(), depth); deep && tk.Position != nil {
-		msg := (&docparse.DepthError{Token: tk, Limit: depth}).Error()
 		problem = d.bindAt(d.offset(position.NewFromToken(tk)), 1, func(opts ...niceyaml.ErrorOption) error {
-			return niceyaml.Unchecked(&limitError{msg: msg}, opts...)
+			return niceyaml.Unchecked(&niceyaml.LimitError{Kind: niceyaml.LimitDepth, Max: depth}, opts...)
 		})
 	}
 
@@ -1314,22 +1313,6 @@ func (d *Doc) bindSite(s site, problem func(opts ...niceyaml.ErrorOption) error)
 	))
 
 	return bound //nolint:wrapcheck // The binding is the problem of the edit.
-}
-
-// limitError is the problem of a text past a limit of its Source. It
-// matches [niceyaml.ErrLimit].
-type limitError struct {
-	msg string
-}
-
-// Error returns the message of e.
-func (e *limitError) Error() string {
-	return e.msg
-}
-
-// Unwrap returns [niceyaml.ErrLimit].
-func (e *limitError) Unwrap() error {
-	return niceyaml.ErrLimit
 }
 
 // The reasons of the problems of [Doc.parseProblem], of [Doc.parse], and

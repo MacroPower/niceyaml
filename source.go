@@ -28,7 +28,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/limitread"
 	"go.jacobcolvin.com/niceyaml/internal/multierr"
 	"go.jacobcolvin.com/niceyaml/internal/pathindex"
-	"go.jacobcolvin.com/niceyaml/internal/quantity"
 	"go.jacobcolvin.com/niceyaml/internal/reftable"
 	"go.jacobcolvin.com/niceyaml/internal/reposition"
 	"go.jacobcolvin.com/niceyaml/line"
@@ -464,10 +463,10 @@ func (c *sourceConfig) pinned() sourceConfig {
 	return out
 }
 
-// limitError returns the error of a text past the byte limit n. The error
-// matches [ErrLimit] and declares the document at fault.
+// limitError returns the error of a text past the byte limit n, a
+// [*LimitError] of [LimitBytes] that declares the document at fault.
 func limitError(n int) error {
-	return Invalid(&markedError{err: errors.New("file is larger than " + quantity.Bytes(n)), marks: []error{ErrLimit}})
+	return Invalid(&LimitError{Kind: LimitBytes, Max: n})
 }
 
 // readLimited reads r to its end, or to one byte past limit when limit is
@@ -2272,12 +2271,10 @@ func (s *Source) parseError(f docparse.Failure) error {
 
 	switch {
 	case large:
-		limit := &markedError{err: errors.New(sizeErr.Error()), marks: []error{ErrLimit}}
-		err = Invalid(limit, atToken(sizeErr.Token))
+		err = Invalid(&LimitError{Kind: LimitDocumentBytes, Max: sizeErr.Limit}, atToken(sizeErr.Token))
 
 	case deep:
-		limit := &markedError{err: errors.New(depthErr.Error()), marks: []error{ErrLimit}}
-		err = Invalid(limit, atToken(depthErr.Token))
+		err = Invalid(&LimitError{Kind: LimitDepth, Max: depthErr.Limit}, atToken(depthErr.Token))
 
 	case errors.Is(f.Err, ErrLimit), errors.Is(f.Err, ErrEncoding):
 		err = f.Err

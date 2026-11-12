@@ -32,7 +32,8 @@ import (
 //     matches [input.ErrOutsideLink].
 //   - A file or a new text that exceeds a size limit of its Source, such
 //     as that of [niceyaml.WithByteLimit] or [niceyaml.WithDepthLimit],
-//     matches [niceyaml.ErrLimit]. A document whose aliases expand past the
+//     matches [niceyaml.ErrLimit], and [errors.As] finds its
+//     [*niceyaml.LimitError]. A document whose aliases expand past the
 //     alias limit of [niceyaml.WithAliasLimit] matches
 //     [niceyaml.ErrExcessiveAliasing], so a program that refuses oversized
 //     input tests for both.

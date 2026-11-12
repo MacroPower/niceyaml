@@ -533,7 +533,8 @@ func newText(text string, docs []*docState) string {
 // them. The documents of one file can still each grow within those limits
 // and hold more bytes together than the byte limit allows. The check
 // keeps every file that Apply writes readable by the next load. The
-// problem matches [niceyaml.ErrLimit]. A load of the file passes, so
+// problem wraps a [*niceyaml.LimitError] of [niceyaml.LimitBytes], so it
+// matches [niceyaml.ErrLimit]. A load of the file passes, so
 // [niceyaml.IsInvalid] does not report the problem.
 func checkLimits(src *niceyaml.Source, after string) error {
 	bytes := src.ByteLimit()
@@ -542,8 +543,8 @@ func checkLimits(src *niceyaml.Source, after string) error {
 	}
 
 	return niceyaml.Unchecked(&problemError{
-		msg:   "cannot rewrite a file whose new text holds more than " + quantity.Bytes(bytes),
-		marks: []error{niceyaml.ErrLimit},
+		err: &niceyaml.LimitError{Kind: niceyaml.LimitBytes, Max: bytes},
+		msg: "cannot rewrite a file whose new text holds more than " + quantity.Bytes(bytes),
 	}, niceyaml.WithDetails(errors.New("split its documents across several files")))
 }
 

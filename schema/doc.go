@@ -272,10 +272,11 @@
 // in memory. A registry therefore refuses a schema file, URL, or YAML
 // text of more than the limit [WithLoadLimit] sets. [Compile] refuses
 // YAML of more than [DefaultLoadLimit]. The error of a schema past the
-// limit matches [go.jacobcolvin.com/niceyaml.ErrLimit], and IsInvalid
-// does not report that error either. Compile takes JSON text of any
-// size, and so does a registry for the bytes of [Embedded] or
-// [Loadable].
+// limit matches [go.jacobcolvin.com/niceyaml.ErrLimit] and holds a
+// [*go.jacobcolvin.com/niceyaml.LimitError] whose Kind is
+// [go.jacobcolvin.com/niceyaml.LimitLoad]. IsInvalid does not report that
+// error either. Compile takes JSON text of any size, and so does a
+// registry for the bytes of [Embedded] or [Loadable].
 //
 // A YAML schema holds the values a decode into any yields, and
 // [Schema.Check] reads the numbers of a document the same way. The

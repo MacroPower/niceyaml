@@ -926,34 +926,38 @@ func TestRegistry_PlanMigration_Limits(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		opts  []manifest.RegistryOption
-		limit niceyaml.SourceOption
-		text  string
-		want  string
+		opts      []manifest.RegistryOption
+		limit     niceyaml.SourceOption
+		text      string
+		want      string
+		wantLimit niceyaml.LimitError
 	}{
 		// The rename makes the 20 bytes of the text two bytes longer, so the
 		// edit of the document fails. The byte limit is a limit of the whole
 		// file, so the error binds at the site of the root (fix27 P83).
 		"new text past the byte limit": {
-			opts:  configOptions(),
-			limit: niceyaml.WithByteLimit(21),
-			want:  "config/config.yaml:1:1: $: file is larger than 21 bytes",
+			opts:      configOptions(),
+			limit:     niceyaml.WithByteLimit(21),
+			want:      "config/config.yaml:1:1: $: file is larger than 21 bytes",
+			wantLimit: niceyaml.LimitError{Kind: niceyaml.LimitBytes, Max: 21},
 		},
 		// The rename makes the 20 bytes of the document two bytes longer, so
 		// the edit of the document fails, and the error binds at the site
 		// of the root.
 		"new text past the document byte limit": {
-			opts:  configOptions(),
-			limit: niceyaml.WithDocumentByteLimit(21),
-			want:  "config/config.yaml:1:1: $: document is larger than 21 bytes",
+			opts:      configOptions(),
+			limit:     niceyaml.WithDocumentByteLimit(21),
+			want:      "config/config.yaml:1:1: $: document is larger than 21 bytes",
+			wantLimit: niceyaml.LimitError{Kind: niceyaml.LimitDocumentBytes, Max: 21},
 		},
 		// Each rename makes the 44 bytes of the file two bytes longer, so the
 		// edit of each document keeps the limit, and the file does not.
 		"new texts of two documents that together pass the byte limit": {
-			opts:  configOptions(),
-			limit: niceyaml.WithByteLimit(46),
-			text:  stringtest.LinesLF("version: 1", "port: 80", "---", "version: 1", "port: 80"),
-			want:  "config/config.yaml: cannot rewrite a file whose new text holds more than 46 bytes",
+			opts:      configOptions(),
+			limit:     niceyaml.WithByteLimit(46),
+			text:      stringtest.LinesLF("version: 1", "port: 80", "---", "version: 1", "port: 80"),
+			want:      "config/config.yaml: cannot rewrite a file whose new text holds more than 46 bytes",
+			wantLimit: niceyaml.LimitError{Kind: niceyaml.LimitBytes, Max: 46},
 		},
 		"new text past the depth limit": {
 			opts: []manifest.RegistryOption{
@@ -971,7 +975,8 @@ func TestRegistry_PlanMigration_Limits(t *testing.T) {
 			// The level past the limit lies in a value that the Set created
 			// inside the mapping that it wrote over the port. So the problem
 			// binds at the key of that mapping (fix25 P78).
-			want: "config/config.yaml:2:1: $.port: document nests more than 2 levels",
+			want:      "config/config.yaml:2:1: $.port: document nests more than 2 levels",
+			wantLimit: niceyaml.LimitError{Kind: niceyaml.LimitDepth, Max: 2},
 		},
 	}
 
@@ -994,6 +999,10 @@ func TestRegistry_PlanMigration_Limits(t *testing.T) {
 			require.ErrorIs(t, plan.Err(), niceyaml.ErrLimit)
 			assert.False(t, niceyaml.IsInvalid(plan.Err()))
 			assert.Equal(t, tc.want, plan.Err().Error())
+
+			limit, ok := errors.AsType[*niceyaml.LimitError](plan.Err())
+			require.True(t, ok)
+			assert.Equal(t, tc.wantLimit, *limit)
 		})
 	}
 }
