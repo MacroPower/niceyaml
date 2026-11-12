@@ -7,7 +7,14 @@ import "charm.land/bubbles/v2/key"
 // Keybindings are optional. Methods such as [Model.ScrollDown] and
 // [Model.ScrollUp] control the viewport from code.
 //
-// Use [DefaultKeyMap] to get a set of default keybindings.
+// Use [DefaultKeyMap] to get a set of default keybindings. A parent that
+// wants one of the default keys for something else replaces that
+// binding or disables it with [key.Binding.SetEnabled].
+//
+// SearchNext and SearchPrevious step through the matches of the
+// current search term. The parent sets and clears the term with
+// [Model.SetSearchTerm] and [Model.ClearSearch], because it owns the
+// search prompt and its cancel key.
 type KeyMap struct {
 	// PageDown scrolls down by one page.
 	PageDown key.Binding
@@ -25,6 +32,14 @@ type KeyMap struct {
 	Left key.Binding
 	// Right scrolls right by the horizontal step.
 	Right key.Binding
+	// GotoTop scrolls to the top.
+	GotoTop key.Binding
+	// GotoBottom scrolls to the bottom.
+	GotoBottom key.Binding
+	// SearchNext selects the next search match.
+	SearchNext key.Binding
+	// SearchPrevious selects the previous search match.
+	SearchPrevious key.Binding
 	// NextRevision navigates to the next revision.
 	NextRevision key.Binding
 	// PreviousRevision navigates to the previous revision.
@@ -71,6 +86,22 @@ func DefaultKeyMap() KeyMap {
 		Right: key.NewBinding(
 			key.WithKeys("right", "l"),
 			key.WithHelp("→/l", "move right"),
+		),
+		GotoTop: key.NewBinding(
+			key.WithKeys("home", "g"),
+			key.WithHelp("g/home", "go to start"),
+		),
+		GotoBottom: key.NewBinding(
+			key.WithKeys("end", "G"),
+			key.WithHelp("G/end", "go to end"),
+		),
+		SearchNext: key.NewBinding(
+			key.WithKeys("n"),
+			key.WithHelp("n", "next match"),
+		),
+		SearchPrevious: key.NewBinding(
+			key.WithKeys("N"),
+			key.WithHelp("N", "prev match"),
 		),
 		NextRevision: key.NewBinding(
 			key.WithKeys("tab"),

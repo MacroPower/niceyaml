@@ -186,20 +186,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.searching = true
 			m.searchInput = ""
 
-		case key.Matches(msg, key.NewBinding(key.WithKeys("n"))):
-			m.viewport.SearchNext()
-
-		case key.Matches(msg, key.NewBinding(key.WithKeys("N"))):
-			m.viewport.SearchPrevious()
-
+		// The viewport steps through matches, but the model owns the
+		// search prompt, so it also owns the key that clears the term.
 		case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
 			m.viewport.ClearSearch()
-
-		case key.Matches(msg, key.NewBinding(key.WithKeys("g"))):
-			m.viewport.GotoTop()
-
-		case key.Matches(msg, key.NewBinding(key.WithKeys("G"))):
-			m.viewport.GotoBottom()
 		}
 	}
 

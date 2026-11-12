@@ -387,6 +387,58 @@ func TestResubmittedSearchScrollsToMatch(t *testing.T) {
 	assert.Equal(t, matched, got.viewport.YOffset())
 }
 
+func TestUpdateViewportKeys(t *testing.T) {
+	t.Parallel()
+
+	// The viewport binds the jump and match keys, so each press moves the
+	// view or the selected match by one step.
+	tcs := map[string]struct {
+		test func(t *testing.T, got model)
+		keys []tea.Msg
+	}{
+		"end": {
+			keys: []tea.Msg{tea.KeyPressMsg{Code: tea.KeyEnd}},
+			test: func(t *testing.T, got model) {
+				t.Helper()
+				assert.Positive(t, got.viewport.YOffset())
+				assert.True(t, got.viewport.AtBottom())
+			},
+		},
+		"end then home": {
+			keys: []tea.Msg{tea.KeyPressMsg{Code: tea.KeyEnd}, tea.KeyPressMsg{Code: tea.KeyHome}},
+			test: func(t *testing.T, got model) {
+				t.Helper()
+				assert.True(t, got.viewport.AtTop())
+			},
+		},
+		"next match": {
+			keys: []tea.Msg{press('n')},
+			test: func(t *testing.T, got model) {
+				t.Helper()
+				assert.Equal(t, 1, got.viewport.SearchIndex())
+			},
+		},
+		"next then previous match": {
+			keys: []tea.Msg{press('n'), press('n'), press('N')},
+			test: func(t *testing.T, got model) {
+				t.Helper()
+				assert.Equal(t, 1, got.viewport.SearchIndex())
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := newModel(&modelOptions{sources: sourcesOf(yamltest.GenerateYAML(40)), search: "key_"})
+			size := tea.WindowSizeMsg{Width: 40, Height: 14}
+
+			tc.test(t, update(t, m, append([]tea.Msg{size}, tc.keys...)...))
+		})
+	}
+}
+
 func TestBaseViewHeight(t *testing.T) {
 	t.Parallel()
 
