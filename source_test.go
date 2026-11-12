@@ -18,6 +18,7 @@ import (
 	"testing/fstest"
 	"testing/iotest"
 	"time"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"github.com/goccy/go-yaml"
@@ -9518,6 +9519,325 @@ func TestSource_PositionAt_Offset(t *testing.T) {
 			off, ok := source.Offset(end)
 			require.True(t, ok)
 			assert.Equal(t, len(text), off)
+		})
+	}
+}
+
+func TestSource_UTF16Column(t *testing.T) {
+	t.Parallel()
+
+	tags := `tags: ["😀", 2]` + "\n"
+
+	tcs := map[string]struct {
+		input string
+		line  int
+		col   int
+		want  int
+		ok    bool
+	}{
+		"start of the text": {
+			input: "a: 1\n",
+			want:  0,
+			ok:    true,
+		},
+		"rune inside the Basic Multilingual Plane takes one unit": {
+			input: "é: 日本\n",
+			col:   4,
+			want:  4,
+			ok:    true,
+		},
+		"rune outside the Basic Multilingual Plane takes two units": {
+			input: tags,
+			col:   12,
+			want:  13,
+			ok:    true,
+		},
+		"end of a range after a rune of two units": {
+			input: tags,
+			col:   13,
+			want:  14,
+			ok:    true,
+		},
+		"rune of two units on a later line": {
+			input: stringtest.LinesLF("😀: 1", "b: 😀"),
+			line:  1,
+			col:   4,
+			want:  5,
+			ok:    true,
+		},
+		"LF takes the unit after the content": {
+			input: "a: 😀\n",
+			col:   4,
+			want:  5,
+			ok:    true,
+		},
+		"column past a LF": {
+			input: "a: 😀\n",
+			col:   5,
+			want:  6,
+			ok:    true,
+		},
+		"CRLF takes one unit": {
+			input: "a: 😀\r\nb: 2",
+			col:   5,
+			want:  6,
+			ok:    true,
+		},
+		"end of a text with no final line ending": {
+			input: "a: 😀",
+			col:   4,
+			want:  5,
+			ok:    true,
+		},
+		"past the end of a text with no final line ending": {
+			input: "a: 😀",
+			col:   5,
+		},
+		"column past a line ending": {
+			input: "a: 1\n",
+			col:   6,
+		},
+		"byte order mark lies before unit 0": {
+			input: "\ufeffa: 😀\n",
+			col:   4,
+			want:  5,
+			ok:    true,
+		},
+		"mark at a document marker lies before unit 0": {
+			input: sourceMarkedHeader,
+			line:  1,
+			col:   3,
+			want:  3,
+			ok:    true,
+		},
+		"mark the tokenizer keeps takes one unit": {
+			input: "a: 1\n\ufeffb: 2\n",
+			line:  1,
+			col:   1,
+			want:  1,
+			ok:    true,
+		},
+		"invalid UTF-8 byte takes one unit": {
+			input: "a: \"\xff😀\"\n",
+			col:   6,
+			want:  7,
+			ok:    true,
+		},
+		"empty text": {
+			input: "",
+			want:  0,
+			ok:    true,
+		},
+		"line past the last": {
+			input: "a: 1\n",
+			line:  2,
+		},
+		"negative line": {
+			input: "a: 1\n",
+			line:  -1,
+		},
+		"negative column": {
+			input: "a: 1\n",
+			col:   -1,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input)
+
+			got, ok := source.UTF16Column(position.New(tc.line, tc.col))
+			assert.Equal(t, tc.ok, ok)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+
+	t.Run("nil Source", func(t *testing.T) {
+		t.Parallel()
+
+		var source *niceyaml.Source
+
+		got, ok := source.UTF16Column(position.New(0, 0))
+		assert.False(t, ok)
+		assert.Zero(t, got)
+	})
+}
+
+func TestSource_PositionAtUTF16(t *testing.T) {
+	t.Parallel()
+
+	tags := `tags: ["😀", 2]` + "\n"
+
+	tcs := map[string]struct {
+		input string
+		line  int
+		col   int
+		want  position.Position
+		ok    bool
+	}{
+		"start of the text": {
+			input: "a: 1\n",
+			ok:    true,
+		},
+		"unit after a rune of two units": {
+			input: tags,
+			col:   13,
+			want:  position.New(0, 12),
+			ok:    true,
+		},
+		"end of a range after a rune of two units": {
+			input: tags,
+			col:   14,
+			want:  position.New(0, 13),
+			ok:    true,
+		},
+		"first unit of a surrogate pair": {
+			input: "a: 😀\n",
+			col:   3,
+			want:  position.New(0, 3),
+			ok:    true,
+		},
+		"second unit of a surrogate pair names its rune": {
+			input: "a: 😀\n",
+			col:   4,
+			want:  position.New(0, 3),
+			ok:    true,
+		},
+		"unit past the content names the line ending": {
+			input: "a: 😀\n",
+			col:   5,
+			want:  position.New(0, 4),
+			ok:    true,
+		},
+		"unit past a line ending": {
+			input: "a: 😀\n",
+			col:   6,
+			want:  position.New(0, 5),
+			ok:    true,
+		},
+		"unit past the column past a line ending": {
+			input: "a: 😀\n",
+			col:   7,
+		},
+		"later line": {
+			input: stringtest.LinesCRLF("😀: 1", "b: 😀"),
+			line:  1,
+			col:   5,
+			want:  position.New(1, 4),
+			ok:    true,
+		},
+		"end of a text with no final line ending": {
+			input: "a: 😀",
+			col:   5,
+			want:  position.New(0, 4),
+			ok:    true,
+		},
+		"past the end of a text with no final line ending": {
+			input: "a: 😀",
+			col:   6,
+		},
+		"byte order mark lies before unit 0": {
+			input: "\ufeffa: 😀\n",
+			col:   5,
+			want:  position.New(0, 4),
+			ok:    true,
+		},
+		"invalid UTF-8 byte takes one unit": {
+			input: "a: \"\xff😀\"\n",
+			col:   7,
+			want:  position.New(0, 6),
+			ok:    true,
+		},
+		"empty text": {
+			input: "",
+			ok:    true,
+		},
+		"line past the last": {
+			input: "a: 1\n",
+			line:  2,
+		},
+		"negative line": {
+			input: "a: 1\n",
+			line:  -1,
+		},
+		"negative column": {
+			input: "a: 1\n",
+			col:   -1,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input)
+
+			got, ok := source.PositionAtUTF16(tc.line, tc.col)
+			assert.Equal(t, tc.ok, ok)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+
+	t.Run("nil Source", func(t *testing.T) {
+		t.Parallel()
+
+		var source *niceyaml.Source
+
+		got, ok := source.PositionAtUTF16(0, 0)
+		assert.False(t, ok)
+		assert.Equal(t, position.Position{}, got)
+	})
+}
+
+func TestSource_UTF16Column_PositionAtUTF16(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]string{
+		"LF":           stringtest.LinesLF("a: 1", `b: "😀é"`, "c: 日本 # 😀😀"),
+		"CRLF":         stringtest.LinesCRLF("a: 1", `b: "😀é"`, "c: 日本 # 😀😀"),
+		"bare CR":      "a: 😀\rb: é\rc: 日本\r",
+		"no final LF":  "a: 1\nb: 😀",
+		"mark":         "\ufeffa: 😀\n\ufeff---\nb: 😀\n",
+		"kept mark":    "a: 1\n\ufeffb: 😀\n",
+		"invalid byte": "a: \xff😀\nb: 2\n",
+	}
+
+	for name, input := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(input)
+			text := source.Text()
+
+			var count int
+
+			for pos := range source.Lines().Runes() {
+				// The column in units counts the text in front of the
+				// position on its line, from column 0.
+				start, ok := source.Offset(position.New(pos.Line, 0))
+				require.True(t, ok, "position %s", pos)
+
+				off, ok := source.Offset(pos)
+				require.True(t, ok, "position %s", pos)
+
+				units, ok := source.UTF16Column(pos)
+				require.True(t, ok, "position %s", pos)
+				assert.Len(t, utf16.Encode([]rune(text[start:off])), units, "position %s", pos)
+
+				// Each unit of the rune comes back as its position.
+				r, _ := utf8.DecodeRuneInString(text[off:])
+				for i := range max(utf16.RuneLen(r), 1) {
+					got, ok := source.PositionAtUTF16(pos.Line, units+i)
+					require.True(t, ok, "position %s unit %d", pos, i)
+					assert.Equal(t, pos, got, "position %s unit %d", pos, i)
+				}
+
+				count++
+			}
+
+			assert.Positive(t, count)
 		})
 	}
 }
