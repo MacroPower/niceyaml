@@ -38,6 +38,12 @@ var (
 	// The label that the tests give their edits.
 	label = edit.WithLabel("cafe.jacobcolvin.com/v1")
 
+	// The option of a Doc that parses and checks the text after each call of
+	// an edit. A Doc with a marshaler does so, because a Set whose value a
+	// marshaler can write does not wait for the end of its Apply. The zero
+	// marshaler writes nothing.
+	eachCall = edit.WithMarshalers(encoder.Marshaler{})
+
 	// The marshaler that writes a net.IPNet as its CIDR text.
 	cidrText = encoder.CustomMarshaler(func(_ context.Context, n net.IPNet) (any, error) {
 		return n.String(), nil
@@ -77,19 +83,55 @@ func newDoc(t *testing.T, text string, opts ...niceyaml.SourceOption) *edit.Doc 
 }
 
 // newSourceDoc returns the Source of text and the Doc of its first
-// document, as [newDoc] makes them.
+// document, as [newDoc] makes them. The Doc takes eds too.
 func newSourceDoc(t *testing.T, text string, opts ...niceyaml.SourceOption) (*niceyaml.Source, *edit.Doc) {
+	t.Helper()
+
+	return newSourceDocWith(t, text, nil, opts...)
+}
+
+// newSourceDocWith returns the Source of text and the Doc of its first
+// document, as [newDoc] makes them, with the options eds of the Doc after
+// those of newDoc.
+func newSourceDocWith(
+	t *testing.T, text string, eds []edit.Option, opts ...niceyaml.SourceOption,
+) (*niceyaml.Source, *edit.Doc) {
 	t.Helper()
 
 	doc := yamltest.FirstDocument(t, text, append([]niceyaml.SourceOption{niceyaml.WithName("test.yaml")}, opts...)...)
 
-	d, err := edit.New(doc, edit.WithApp("cafe"), edit.WithProtected(typeFields...))
+	d, err := edit.New(doc, append([]edit.Option{edit.WithApp("cafe"), edit.WithProtected(typeFields...)}, eds...)...)
 	require.NoError(t, err)
 
 	docSources.Store(d, doc.Source())
 	t.Cleanup(func() { docSources.Delete(d) })
 
 	return doc.Source(), d
+}
+
+// requireEachCall checks err and the text of d, after run applied the
+// edits of a row to d, a Doc of text from [newDoc] with the Source options
+// opts. The same run on a Doc with [eachCall] must fail with the same
+// message, or pass and leave the same text.
+func requireEachCall(
+	t *testing.T, d *edit.Doc, err error, text string, opts []niceyaml.SourceOption, run func(*edit.Doc) error,
+) {
+	t.Helper()
+
+	_, oracle := newSourceDocWith(t, text, []edit.Option{eachCall}, opts...)
+	want := run(oracle)
+
+	assert.Equal(t, errorText(want), errorText(err))
+	assert.Equal(t, oracle.Text(), d.Text())
+}
+
+// errorText returns the formatted err, or "" for a nil err.
+func errorText(err error) string {
+	if err == nil {
+		return ""
+	}
+
+	return niceyaml.FormatError(err)
 }
 
 // applyAt runs fn on the node at path, which an Apply at the root of d
@@ -1849,9 +1891,8 @@ func TestDoc_Apply(t *testing.T) {
 		},
 		"refused set over a value that a merge key brings in, which the func ignores": {
 			// The Set of $.r0 brings in the protected kind through the merge
-			// key. So it fails after its write and leaves the Doc as it found
-			// it. The match $.a, which the merge key brings in from $.r0, keeps
-			// its place, so the wildcard still reaches it.
+			// key. The check after its write finds that, so the Set returns
+			// nil, and the Apply fails once the Func returns.
 			before: stringtest.LinesLF("r0: &x {a: 1}", "<<: *x"),
 			path:   paths.Doc().ChildAll(),
 			fn: func(ctx context.Context, n *edit.Node) error {
@@ -1860,26 +1901,27 @@ func TestDoc_Apply(t *testing.T) {
 				}
 
 				err := n.Set(ctx, map[string]int{"a": 1, "kind": 2})
-				if err == nil || errors.Is(err, edit.ErrEngine) {
-					return fmt.Errorf("the set does not refuse the protected kind: %w", err)
+				if err != nil {
+					return fmt.Errorf("the set fails before it writes: %w", err)
 				}
 
 				return nil
 			},
-			calls: []string{"$.r0", "$.a"},
-			want:  stringtest.LinesLF("r0: &x {a: 1}", "<<: *x"),
+			calls: []string{"$.r0"},
+			err:   "the edit sets $.r0, which creates the protected value $.kind",
 		},
 		"refused set over a value that a merge key brings in, then a set through a node held before": {
-			// The held node reads $.a through the merge key, and the refused
-			// Set leaves it its place.
+			// The refused Set leaves the Doc as it found it, so the held node
+			// reads $.a through the merge key, and its Set passes. The Apply
+			// still fails with the problem of the refused Set.
 			before: stringtest.LinesLF("r0: &x {a: 1}", "<<: *x"),
 			path:   paths.Doc(),
 			fn: func(ctx context.Context, n *edit.Node) error {
 				held := n.At(paths.Doc().Child("a"))
 
 				err := n.At(paths.Doc().Child("r0")).Set(ctx, map[string]int{"a": 1, "kind": 2})
-				if err == nil || errors.Is(err, edit.ErrEngine) {
-					return fmt.Errorf("the set does not refuse the protected kind: %w", err)
+				if err != nil {
+					return fmt.Errorf("the set fails before it writes: %w", err)
 				}
 
 				ok, err := held.Exists()
@@ -1893,7 +1935,7 @@ func TestDoc_Apply(t *testing.T) {
 
 				return held.Set(ctx, 5)
 			},
-			want: stringtest.LinesLF("r0: &x {a: 5}", "<<: *x"),
+			err: "the edit sets $.r0, which creates the protected value $.kind",
 		},
 		"message without a label": {
 			before: cafe,
@@ -4310,6 +4352,14 @@ func TestDoc_Apply(t *testing.T) {
 				return tc.fn(ctx, n)
 			}, tc.opts...)
 
+			requireEachCall(t, d, err, tc.before, opts, func(d *edit.Doc) error {
+				if tc.earlier != nil {
+					require.NoError(t, d.Apply(t.Context(), paths.Doc(), tc.earlier))
+				}
+
+				return d.Apply(t.Context(), tc.path, tc.fn, tc.opts...)
+			})
+
 			if tc.calls != nil {
 				assert.Equal(t, tc.calls, append([]string{}, calls...))
 			}
@@ -5972,8 +6022,8 @@ func TestDoc_Apply_FailedCall(t *testing.T) {
 		engine bool
 	}{
 		"set of a control character": {
-			// Go-yaml's encoder writes U+0001 as it is, so the set fails
-			// after it wrote.
+			// Go-yaml's encoder writes U+0001 as it is, so the Set refuses
+			// the value before it writes.
 			text:     stringtest.LinesLF("a: 1", "z: 1"),
 			call:     func(ctx context.Context, n *edit.Node) error { return n.At(paths.Doc().Child("a")).Set(ctx, "\x01") },
 			held:     "$.z",
@@ -6016,6 +6066,67 @@ func TestDoc_Apply_FailedCall(t *testing.T) {
 			assert.Contains(t, err.Error(), tc.err)
 			assert.Equal(t, tc.text, d.Text())
 		})
+	}
+}
+
+func TestDoc_Apply_FailedCheck(t *testing.T) {
+	t.Parallel()
+
+	// Each row runs a Set that the check after its write refuses. The Set
+	// returns nil and leaves the Doc as it found it, so the reads after it
+	// find the text before it. The Apply fails with the problem of the
+	// check, whatever the Func returns.
+	tcs := map[string]struct {
+		text string
+		path paths.Path
+		err  string
+		// The sentinel of the problem.
+		errIs error
+	}{
+		"line after a block scalar at the end of a text without a line break": {
+			text:  stringtest.JoinLF("a: |", "  x"),
+			path:  paths.Doc().Child("b"),
+			err:   "test.yaml:1:4: $.a: the edit adds lines after this block scalar",
+			errIs: edit.ErrUnsupported,
+		},
+		"new key that go-yaml reads as the value of a tag": {
+			text:  stringtest.LinesLF("x: &d {k: 1}", "c: *d", "a: !t"),
+			path:  paths.Doc().Child("b"),
+			errIs: edit.ErrEngine,
+		},
+	}
+
+	for name, tc := range tcs {
+		for _, fails := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s, func fails %t", name, fails), func(t *testing.T) {
+				t.Parallel()
+
+				d := newDoc(t, tc.text)
+
+				err := d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, n *edit.Node) error {
+					err := n.At(tc.path).Set(ctx, 1)
+					require.NoError(t, err)
+
+					assert.Equal(t, tc.text, d.Text())
+					assert.False(t, d.Edited())
+
+					ok, err := n.At(tc.path).Exists()
+					require.NoError(t, err)
+					assert.False(t, ok)
+
+					if fails {
+						return errors.New("the func fails")
+					}
+
+					return nil
+				})
+				require.ErrorIs(t, err, tc.errIs)
+				assert.Contains(t, niceyaml.FormatError(err), tc.err)
+				assert.NotContains(t, niceyaml.FormatError(err), "the func fails")
+
+				assert.Equal(t, tc.text, d.Text())
+			})
+		}
 	}
 }
 

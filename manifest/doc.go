@@ -67,10 +67,11 @@
 //
 // The steps edit a subset of YAML, as the Supported YAML section of the
 // edit package lists it. A document that migrates fails with an error that
-// matches [go.jacobcolvin.com/niceyaml/edit.ErrUnsupported] when it holds
-// a construct that [go.jacobcolvin.com/niceyaml/edit.New] refuses, or when
-// a step returns the error of a call that refuses a construct. A step
-// reads and edits the document as go-yaml reads it. A document that
+// matches [go.jacobcolvin.com/niceyaml/edit.ErrUnsupported] when it holds a
+// construct that [go.jacobcolvin.com/niceyaml/edit.New] refuses, when a
+// step returns the error of a call that refuses a construct, or when the
+// check of the text after a call refuses a construct that the call wrote. A
+// step reads and edits the document as go-yaml reads it. A document that
 // migrates fails with an error that matches
 // [go.jacobcolvin.com/niceyaml/edit.ErrMisread] when go-yaml's decoder
 // reads it otherwise than YAML does in one of the ways the Supported YAML

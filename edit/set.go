@@ -342,6 +342,10 @@ type payload struct {
 // then fails with the construct. A scalar that go-yaml reads as a value of
 // another kind fails the Set with ErrEngine before such a construct does.
 func (n *Node) Set(ctx context.Context, v any, opts ...SetOption) error {
+	if s, ok := n.d.queues(n, v, opts); ok {
+		return n.d.queueSet(ctx, n, v, s)
+	}
+
 	var cfg setConfig
 
 	for _, opt := range opts {

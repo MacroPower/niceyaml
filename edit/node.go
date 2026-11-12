@@ -48,26 +48,23 @@ import (
 // longer holds that value, the problem binds at the value that the path of the
 // node reads. Its message names the path of the node.
 //
-// Through any other node, a read returns what the text holds. A call after
-// which the text differs from the model of the Apply fails with an error
-// that matches [ErrEngine], as the package documentation describes. Each
-// later edit, each Decode, each Exists, and each Nodes of the Apply then
-// returns that error. Kind, Len, and Scalar then answer as they do for a
-// place that does not hold a value. The Apply fails with that error
-// whatever the Func returns.
+// Through any other node, a read returns what the text holds.
 //
 // The place of a node holds the value that the model of the Apply holds
 // there, as the package documentation describes. A node whose place did
 // not hold a value takes the value that a later edit writes there.
 //
-// When a method cannot make its edit, it returns an error that names the
-// problem and leaves the Doc as it found it. A read that fails returns its
-// error too. [Doc.Apply] fails with such an error only when the [Func]
-// returns it or when the error matches [ErrEngine]. A node takes edits
-// until the Apply that gave it returns. After that, each method that edits
-// or decodes returns [ErrEnded], and so do [Node.Exists] and [Node.Nodes].
-// Kind, Len, and Scalar then answer as they do for a place that does not
-// hold a value.
+// When a method finds a problem with its edit before it writes, it returns
+// an error that names the problem and leaves the Doc as it found it. A read
+// that fails returns its error too. [Doc.Apply] fails with such an error
+// only when the [Func] returns it or when the error matches [ErrEngine].
+// Apply parses and checks the text after each write, as [Doc.Apply]
+// describes. A problem of that check fails the Apply whatever the Func
+// returns. The method that wrote returns nil for it and leaves the Doc as
+// it found it. A node takes edits until the Apply that gave it returns.
+// After that, each method that edits or decodes returns [ErrEnded], and so
+// do [Node.Exists] and [Node.Nodes]. Kind, Len, and Scalar then answer as
+// they do for a place that does not hold a value.
 //
 // The methods that run code of the caller take a context. Set and Insert
 // run marshalers, and Decode runs unmarshalers, so each takes one. SetKey,
@@ -1000,13 +997,12 @@ func (n *Node) Path() paths.Path {
 //
 // Own returns Path through a node whose path [Node.At] refused. It returns
 // Path through a node that lost its place to an earlier edit, and through
-// a node whose Apply returned. It returns Path too after a call that left
-// the text apart from the model, which [ErrEngine] describes.
-// [Node.Exists] returns the problem of the node in each of those states.
-// At an alias that does not resolve, Exists returns the problem of the
-// alias, but Own returns the path where the text writes the alias.
+// a node whose Apply returned. [Node.Exists] returns the problem of the
+// node in each of those states. At an alias that does not resolve, Exists
+// returns the problem of the alias, but Own returns the path where the text
+// writes the alias.
 func (n *Node) Own() paths.Path {
-	if n.ended || n.err != nil || n.gone || n.d.stuck != nil || n.d.displaced(n) {
+	if n.ended || n.err != nil || n.gone || n.d.displaced(n) {
 		return n.path
 	}
 
@@ -1040,9 +1036,7 @@ func (n *Node) Key() string {
 // earlier call took away fails before any other check of the call, as
 // [Doc.goneProblem] tells. A call fails with the error of the path that At
 // took. A call that edits fails at a zone of the Apply that a step of the
-// path before that error reaches instead, as [Doc.stepProblem] tells. After a
-// call of the Apply that left the text apart from the model of the calls,
-// each call returns the problem of that call, as [Doc.modelEnd] gives it.
+// path before that error reaches instead, as [Doc.stepProblem] tells.
 func (n *Node) place(u use, verb string) (*place, error) {
 	switch {
 	case n.ended:
@@ -1063,10 +1057,6 @@ func (n *Node) place(u use, verb string) (*place, error) {
 		n.d.record(err)
 
 		return nil, err
-	}
-
-	if n.d.stuck != nil {
-		return nil, n.d.stuck
 	}
 
 	if n.d.displaced(n) {
@@ -1110,14 +1100,16 @@ type pathProblem func(verb string) error
 // where [Node.Exists] does not report true: after the Apply of n returned,
 // and for a node whose path failed, whose place an edit took away, or whose
 // path reads another value. It also reports false at a value that no
-// decode reads, such as an alias without an anchor, and after a call of the
-// Apply that left the text apart from the model of the calls.
+// decode reads, such as an alias without an anchor. A read waits for no
+// Set that reaches its value, as [Doc.settleRead] tells.
 func (n *Node) read() (*place, *niceyaml.Node, bool) {
 	if n.ended || n.err != nil || n.gone {
 		return nil, nil, false
 	}
 
-	if n.d.stuck != nil || n.d.displaced(n) {
+	n.d.settleRead(n)
+
+	if n.d.displaced(n) {
 		return nil, nil, false
 	}
 
@@ -1153,8 +1145,6 @@ func (n *Node) read() (*place, *niceyaml.Node, bool) {
 //     where a decode reads no value
 //   - through a node that lost its place to an earlier edit, which matches
 //     [ErrDisplaced], as [Node] describes
-//   - after a call of the Apply after which the text differed from the
-//     model, which matches [ErrEngine]
 //   - after the Apply that gave the node returned, which is [ErrEnded]
 //
 // A step of a path that the node cannot take can reach a zone of the
@@ -1175,6 +1165,8 @@ func (n *Node) read() (*place, *niceyaml.Node, bool) {
 // is a read, so the Apply fails with its error only when the Func returns
 // it, or when the error matches ErrEngine.
 func (n *Node) Exists() (bool, error) {
+	n.d.settleRead(n)
+
 	defer n.startRead()()
 
 	p, err := n.place(useRead, "reads")
@@ -1287,9 +1279,6 @@ func (n *Node) Scalar() (string, bool) {
 // empty document holds no value, and Decode there returns the zero value,
 // as [niceyaml.Node.Decode] does for that document. Such an error belongs
 // to the Func, so the Apply fails with it only when the Func returns it.
-// Decode returns the error of a call of the Apply after which the text
-// differed from the model, as [Node] describes. That error matches
-// [ErrEngine], and the Apply fails with it whatever the Func returns.
 //
 // An error of the decode keeps the path that it names in the current text.
 // The decoder raises such an error for a type mismatch, and so do a schema
@@ -1380,6 +1369,8 @@ func (n *Node) MarshalYAML(ctx context.Context) (any, error) {
 // decode, it does not call fn, and it returns the error that [Node.doc]
 // returns.
 func (n *Node) withValue(fn func(doc *niceyaml.Node) error) error {
+	n.d.settleRead(n)
+
 	defer n.startRead()()
 
 	doc, err := n.doc()
@@ -1546,6 +1537,14 @@ func (n *Node) At(path paths.Path) *Node {
 	}
 
 	_, err := n.d.nodePlace(at)
+	if err != nil && n.d.queue != nil {
+		// The problem of the path can name a value that a Set of the queue
+		// writes.
+		n.d.settle()
+
+		_, err = n.d.nodePlace(at)
+	}
+
 	if err != nil {
 		at.err = func(verb string) error {
 			return n.d.readProblem(n, fmt.Errorf("%s %s %s, which %w", n.d.subject(), verb, full, err))
@@ -1614,11 +1613,9 @@ func (n *Node) At(path paths.Path) *Node {
 // the path of Apply fails. After the Apply that gave n returns, Nodes
 // returns [ErrEnded].
 //
-// After a call of the Apply fails with an error that matches ErrEngine,
-// Nodes returns that error for each path, also for a path that holds a
-// `~`. Before that, an `@` path returns the problems that [Node.Exists]
-// returns for n, such as the problem of a node that lost its place. A `$`
-// path does not read the place of n, so it does not return them.
+// An `@` path returns the problems that [Node.Exists] returns for n, such
+// as the problem of a node that lost its place. A `$` path does not read
+// the place of n, so it does not return them.
 func (n *Node) Nodes(path paths.Path) ([]*Node, error) {
 	if n.ended {
 		return nil, ErrEnded
@@ -1633,10 +1630,6 @@ func (n *Node) Nodes(path paths.Path) ([]*Node, error) {
 	n.d.startCall("reads "+full.String(), nil)
 
 	defer n.d.resumeCall(outer)
-
-	if n.d.stuck != nil {
-		return nil, n.d.stuck
-	}
 
 	if holdsKey(path) {
 		return nil, n.d.failAs(ErrUsage, n, "%s reads %s, which %w", n.d.subject(), full, errKeyPath)
@@ -1859,7 +1852,9 @@ func (d *Doc) aliasSite(alias *ast.AliasNode) (site, bool) {
 
 // record keeps err as the problem of the call when err matches
 // [ErrEngine], unless the call already has one. The Func owns every other
-// problem, because the method that met it leaves the Doc as it found it.
+// problem that a method returns before it writes, because the method
+// leaves the Doc as it found it. A problem that the check after a write
+// finds fails the Apply through [Doc.failApply] instead.
 func (d *Doc) record(err error) {
 	if d.callErr == nil && errors.Is(err, ErrEngine) {
 		d.callErr = err

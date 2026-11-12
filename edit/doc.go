@@ -668,7 +668,8 @@
 // Each call of Apply is one transaction. The calls of its Func see the
 // edits of the calls before them. Apply fails with the error that the Func
 // returns. A problem of a call that matches [ErrEngine] fails the Apply
-// too, whatever the Func returns.
+// too, whatever the Func returns, and so does a problem that the check of
+// the text after a write finds.
 //
 // A Func of the Doc cannot call Apply, so one transaction runs one Apply.
 // To edit the places of several paths at once, apply at `$` and select
@@ -695,13 +696,24 @@
 // The two edits pass or fail together. Each node follows the removals
 // before it, so the loop removes each item.
 //
-// A method of Node that cannot make its edit returns its problem to the
-// Func. The method leaves the Doc as it found it, whichever check fails.
-// So a later read of the Func reads the text before the failed edit, and
-// so do [Doc.Text] and [Doc.Removals]. A problem of the method that does
-// not match [ErrEngine] fails the Apply only when the Func returns it. The
-// Func can skip the edit, make another edit instead, or make the edit
-// again after it changes the text.
+// A method of Node returns to the Func each problem that it finds before
+// it writes, such as a key that the mapping holds, a protected value, a
+// place of another kind, a construct on its path that the engine does not
+// edit, or a value that the engine cannot write. The method leaves the Doc
+// as it found it. So a later read of the Func reads the text before the
+// failed edit, and so do [Doc.Text] and [Doc.Removals]. A problem of the
+// method that does not match [ErrEngine] fails the Apply only when the
+// Func returns it. The Func can skip the edit, make another edit instead,
+// or make the edit again after it changes the text.
+//
+// Apply parses and checks the text after the write of each call, as the
+// rest of this section describes. A problem of that check fails the Apply,
+// whatever the Func returns, and names the call that made it. The method of
+// that call returns nil, and the call leaves the Doc as it found it. The
+// Func cannot see such a problem, so it cannot recover from it. Some Sets
+// wait, so that Apply parses and checks the text once for many of them, as
+// [Doc.Apply] describes. The text and the error of the Apply are the same
+// either way, unless the context of the Apply ends during the Apply.
 //
 // For example, a Remove of an anchored value that an alias reads fails with
 // an [*UnsupportedError] whose Related field names each alias. The Func
@@ -788,12 +800,9 @@
 // after the same number of merge keys. Their merge keys must also hold
 // equal values, in order. Two scalars hold the same value when a decode
 // reads equal values from them. A difference shows a bug in the engine or a
-// misread of go-yaml. The first difference fails the call that made it with
-// an error that matches [ErrEngine], and the call leaves the text as it
-// found it. Each later call, each [Node.Decode], each [Node.Exists], and
-// each [Node.Nodes] of the Apply then returns that error. [Node.Scalar],
-// [Node.Kind], and [Node.Len] answer as they do for a place that does not
-// hold a value, as [Node] describes.
+// misread of go-yaml. The first difference fails the Apply with an error
+// that matches [ErrEngine], and the call that made it leaves the text as it
+// found it.
 //
 // The error of a difference binds where the user's text holds the value
 // that differs, as an error at that value does. A value that the call left
