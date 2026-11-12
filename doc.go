@@ -1291,10 +1291,11 @@
 // Validate and each function write `@` paths, which read from the value, and
 // the decode puts them under the path of the value in the document. An Hours
 // under spec that reports @.close thus reports $.spec.hours.close. The path
-// names a field by its yaml tag, its json tag, or its lowercased name. It
-// names an element by its index and a map entry by its key as the document
-// spells it. A map key validates at the path of its entry with a `~` after
-// it, and a field that an inline tag flattens keeps the path of its struct.
+// names a field by its yaml tag, its json tag, or its lowercased name, as
+// [FieldKey] returns it. It names an element by its index and a map entry
+// by its key as the document spells it. A map key validates at the path of
+// its entry with a `~` after it, and a field that an inline tag flattens
+// keeps the path of its struct.
 //
 // A struct field that the document leaves out validates too, with the value
 // that the decode left in it, such as its zero value. A field that go-yaml
