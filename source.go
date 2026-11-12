@@ -775,7 +775,8 @@ func WithUnmarshalers(us ...Unmarshaler) SourceOption {
 // finds behind a syntax error or a decode error holds an excerpt that
 // go-yaml builds. That excerpt prints when a program prints the go-yaml
 // error, and an UnmarshalYAML method that returns such an error puts the
-// excerpt in the message.
+// excerpt in the message. The result of [Detach] keeps the lines of that
+// excerpt, so its go-yaml error prints the same excerpt.
 //
 // The Source that [NewSourceFromLayers] builds has excerpts off when the
 // Source of any layer, or of a reference document a layer reads through

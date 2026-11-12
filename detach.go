@@ -7,6 +7,7 @@ import (
 	"strings"
 	"weak"
 
+	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/internal/excerpt"
@@ -48,15 +49,19 @@ import (
 // with the context lines opts set. It keeps the lines of every problem,
 // however many one line holds. The excerpt of one binding marks problems
 // that the excerpt of the whole error only counts, so it shows those lines
-// too. Detach does not keep any line of a source with excerpts off, as
-// [WithExcerpts] sets them.
+// too. For a source with excerpts off, as [WithExcerpts] sets them,
+// Detach does not keep any line for the excerpts of its bindings.
 //
-// The copy holds those lines and no other line of the source. The memory
-// that those lines take thus grows with the number of problems and with
-// the context lines around each. It does not grow with the length of the
-// file, with one exception. One line of a scalar that spans several lines
-// carries the value of the whole scalar, and the copy of that line keeps
-// that value.
+// The copy of a binding holds those lines and no other line of the
+// source. Each go-yaml error that Detach rebuilds also keeps the lines of
+// the excerpt that go-yaml renders for it, a fixed number of lines around
+// its token. The memory that those lines take thus grows with the number
+// of problems and with the context lines around each. It does not grow
+// with the length of the file, with two exceptions. One line of a scalar
+// that spans several lines carries the value of the whole scalar, and the
+// copy of that line keeps that value. The token of a syntax error in a
+// quoted scalar with no closing quote holds the rest of the source, and
+// the copy of that token keeps it.
 //
 // Detach keeps the context lines, the width, and the number of marks on
 // one line that opts set too, as [ExcerptOption] describes. Every renderer
@@ -101,12 +106,32 @@ import (
 //
 // Any other error that wraps a binding keeps the Source of that binding.
 // Detach keeps such an error as it is, so [errors.Is] and [errors.As] find
-// it in the result as they find it in err. Each go-yaml error in the chain
-// holds a token of the parse, as the one behind [ErrSyntax] does. That
-// token links to the other tokens of the parse and keeps them alive.
+// it in the result as they find it in err.
 //
-// Detach returns err itself when it does not detach any binding of err,
-// such as when err does not hold a binding, or holds only detached ones.
+// A go-yaml error holds a token of the parse, as the one behind
+// [ErrSyntax] does. That token links to every other token of the parse.
+// The message of the error holds an excerpt that go-yaml renders from
+// those links. Detach replaces each go-yaml error that it reaches with a
+// copy that holds copies of the tokens of that excerpt and no other
+// token. [errors.As] finds the copy with the type, the message, the line,
+// and the column of the original. Each error that takes its message from
+// the go-yaml error keeps its message too. The copy is a new error, so
+// [errors.Is] does not report it as the original.
+//
+// Detach rebuilds these go-yaml errors: [*yaml.SyntaxError],
+// [*yaml.TypeError], [*yaml.OverflowError], [*yaml.DuplicateKeyError],
+// [*yaml.UnknownFieldError], and [*yaml.UnexpectedNodeTypeError]. A
+// go-yaml error of another type stays as it is, and so does a go-yaml
+// error below a wrapper that Detach cannot rebuild. The copy keeps the
+// lines of its excerpt even for a source with excerpts off. For a syntax
+// error in a quoted scalar with no closing quote, that excerpt shows the
+// rest of the source.
+//
+// Detach returns err itself when it changes nothing in err, as for a
+// result of Detach or for an error that holds only detached bindings.
+// Detach changes an error that holds a binding that is not yet detached.
+// It also changes an error with a go-yaml error that Detach reaches, when
+// the token of that go-yaml error links past its excerpt.
 // It returns nil for a nil err, and for a nil [*Error] or [*SourceError]
 // pointer.
 func Detach(err error, opts ...ExcerptOption) error {
@@ -178,8 +203,9 @@ func (d *detacher) walk(err error) (error, bool) {
 	return out, changed
 }
 
-// rebuild returns a copy of err with each binding below it detached, as
-// [detacher.walk] describes.
+// rebuild returns a copy of err with each binding below it detached and
+// each go-yaml error below it cut from its parse, as [detacher.walk]
+// describes.
 func (d *detacher) rebuild(err error) (error, bool) {
 	switch x := err.(type) { //nolint:errorlint // Walks the tree one node at a time.
 	case *SourceError:
@@ -214,6 +240,24 @@ func (d *detacher) rebuild(err error) (error, bool) {
 		c.Value = inner
 
 		return &c, true
+
+	case *yaml.SyntaxError:
+		return isolateToken(x, func(e *yaml.SyntaxError) **token.Token { return &e.Token })
+
+	case *yaml.TypeError:
+		return isolateToken(x, func(e *yaml.TypeError) **token.Token { return &e.Token })
+
+	case *yaml.OverflowError:
+		return isolateToken(x, func(e *yaml.OverflowError) **token.Token { return &e.Token })
+
+	case *yaml.DuplicateKeyError:
+		return isolateToken(x, func(e *yaml.DuplicateKeyError) **token.Token { return &e.Token })
+
+	case *yaml.UnknownFieldError:
+		return isolateToken(x, func(e *yaml.UnknownFieldError) **token.Token { return &e.Token })
+
+	case *yaml.UnexpectedNodeTypeError:
+		return isolateToken(x, func(e *yaml.UnexpectedNodeTypeError) **token.Token { return &e.Token })
 	}
 
 	joined, several := err.(interface{ Unwrap() []error }) //nolint:errorlint // The error itself, not a chain search.
@@ -272,6 +316,166 @@ func (d *detacher) rebuild(err error) (error, bool) {
 	default:
 		return err, false
 	}
+}
+
+// isolateToken returns a copy of x, a go-yaml error, and whether x needed
+// one. The token of x links through Prev and Next to every token of its
+// parse and keeps each alive. The copy holds the token that
+// [excerptTokens] returns for it. Field returns the address of the token
+// in an error of the type of x. When x holds no token, or a token that
+// links to no token past its excerpt, isolateToken returns x itself.
+func isolateToken[T any, E interface {
+	*T
+	error
+}](x E, field func(E) **token.Token) (error, bool) {
+	tk := *field(x)
+	if tk == nil || tk.Position == nil {
+		return x, false
+	}
+
+	alone, cut := excerptTokens(tk)
+	if !cut {
+		return x, false
+	}
+
+	c := E(new(T))
+	*c = *x
+	*field(c) = alone
+
+	return c, true
+}
+
+// excerptContext is the number of lines that go-yaml shows in the excerpt
+// of an error before and after the lines of its token.
+const excerptContext = 3
+
+// excerptTokens returns a clone of tk and true. The clone links only to
+// clones of the tokens that go-yaml reads to render the excerpt of an
+// error at tk. The message of a go-yaml error holds the excerpt, so the
+// clone renders the same message as tk. When tk links to no token past
+// that excerpt, excerptTokens returns tk itself and false.
+//
+// The excerpt follows Prev from tk back to the first token on the lines
+// of context before tk. From that token, it follows Next through the
+// lines of context after tk. The parser can link a token on through Next
+// to a token that does not link back through Prev. So those two walks can
+// pass through different tokens, and the walk along Next can end before
+// it reaches tk. The copy keeps each token of both walks and each link
+// between two of them.
+//
+// The excerpt reads only the type, the line, and the trailing spaces of a
+// token that a kept token links to past those walks. In place of such a
+// token, the copy links to a stub that holds only those.
+func excerptTokens(tk *token.Token) (*token.Token, bool) {
+	first := max(tk.Position.Line-excerptContext, 1)
+	last := tk.Position.Line + strings.Count(tk.Origin, "\n") + strings.Count(tk.Origin, "\r") + excerptContext
+
+	kept := map[*token.Token]*token.Token{tk: nil}
+	order := []*token.Token{tk}
+
+	keep := func(t *token.Token) {
+		if _, ok := kept[t]; !ok {
+			kept[t] = nil
+			order = append(order, t)
+		}
+	}
+
+	// Each walk stops at a token it reached before, so a chain whose links
+	// loop does not keep it walking.
+	start := tk
+	for start.Prev != nil && start.Prev.Position != nil && start.Prev.Position.Line >= first {
+		if _, ok := kept[start.Prev]; ok {
+			break
+		}
+
+		start = start.Prev
+		keep(start)
+	}
+
+	walked := map[*token.Token]bool{start: true}
+
+	for t := start.Next; t != nil && t.Position != nil && t.Position.Line <= last && !walked[t]; t = t.Next {
+		walked[t] = true
+		keep(t)
+	}
+
+	// The copy releases nothing in place of a token past the walks that
+	// holds no text and links only to kept tokens. Each stub of a copy is
+	// such a token.
+	stub := func(t *token.Token) bool {
+		_, prevKept := kept[t.Prev]
+		_, nextKept := kept[t.Next]
+
+		return t.Value == "" && strings.Trim(t.Origin, " ") == "" &&
+			(t.Prev == nil || prevKept) && (t.Next == nil || nextKept)
+	}
+
+	cut := false
+
+	for _, t := range order {
+		for _, link := range []*token.Token{t.Prev, t.Next} {
+			if _, ok := kept[link]; link != nil && !ok && !stub(link) {
+				cut = true
+			}
+		}
+	}
+
+	if !cut {
+		return tk, false
+	}
+
+	for _, t := range order {
+		c := t.Clone()
+		c.Value = strings.Clone(c.Value)
+		c.Origin = strings.Clone(c.Origin)
+		kept[t] = c
+	}
+
+	stubs := map[*token.Token]*token.Token{}
+
+	// The copy of link: the clone of a kept token, or the stub of any other.
+	copyOf := func(link *token.Token) *token.Token {
+		if link == nil {
+			return nil
+		}
+
+		if c, ok := kept[link]; ok {
+			return c
+		}
+
+		if s, ok := stubs[link]; ok {
+			return s
+		}
+
+		s := &token.Token{
+			Type:     link.Type,
+			Origin:   strings.Clone(link.Origin[len(strings.TrimRight(link.Origin, " ")):]),
+			Position: clonePosition(link.Position),
+			Prev:     kept[link.Prev],
+			Next:     kept[link.Next],
+		}
+		stubs[link] = s
+
+		return s
+	}
+
+	for _, t := range order {
+		c := kept[t]
+		c.Prev, c.Next = copyOf(t.Prev), copyOf(t.Next)
+	}
+
+	return kept[tk], true
+}
+
+// clonePosition returns a copy of pos, or nil for a nil pos.
+func clonePosition(pos *token.Position) *token.Position {
+	if pos == nil {
+		return nil
+	}
+
+	c := *pos
+
+	return &c
 }
 
 // walkAll returns errs with each walked as [detacher.walk] walks it, and
