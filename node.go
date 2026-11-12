@@ -762,6 +762,13 @@ func (n *Node) DocumentIndex() int {
 // scope does not select anything. The slice is a copy, so reordering it
 // does not affect the Node. Every Node shares the tokens themselves, so a
 // caller must not modify them.
+//
+// The go-yaml parser does not read these tokens as they are, as
+// [Source.Tokens] describes. Hand the parser the stream that
+// [tokens.ForParser] returns. That stream gives the tree that go-yaml
+// builds, which can differ from the tree that [Source.File] builds. For a
+// tree that File builds, take the File of a second Source, as Source.File
+// describes.
 func (n *Node) Tokens() token.Tokens {
 	return slices.Clone(n.content)
 }

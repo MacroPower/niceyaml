@@ -55,3 +55,56 @@ func TestLinesStopsEarly(t *testing.T) {
 
 	assert.Equal(t, []string{"a\n", "b\n"}, got)
 }
+
+func TestAdvance(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		// The line and column reached from line 3, column 4.
+		line, col int
+	}{
+		"empty":                {input: "", line: 3, col: 4},
+		"runes on the line":    {input: "ab", line: 3, col: 6},
+		"multi-byte runes":     {input: "é→", line: 3, col: 6},
+		"LF":                   {input: "a\n", line: 4, col: 1},
+		"CRLF as one break":    {input: "a\r\nb", line: 4, col: 2},
+		"bare CR":              {input: "\rbc", line: 4, col: 3},
+		"text after each kind": {input: "a\nb\r\nc\rde", line: 6, col: 3},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			line, col := lineend.Advance(3, 4, tc.input)
+			assert.Equal(t, tc.line, line, "line")
+			assert.Equal(t, tc.col, col, "col")
+		})
+	}
+}
+
+func TestTrim(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  string
+	}{
+		"empty":              {input: "", want: ""},
+		"no line ending":     {input: "a", want: "a"},
+		"LF":                 {input: "a\n", want: "a"},
+		"CRLF":               {input: "a\r\n", want: "a"},
+		"bare CR":            {input: "a\r", want: "a"},
+		"one ending of two":  {input: "a\n\n", want: "a\n"},
+		"line ending inside": {input: "a\nb", want: "a\nb"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, lineend.Trim(tc.input))
+		})
+	}
+}
