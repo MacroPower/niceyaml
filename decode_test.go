@@ -4635,6 +4635,247 @@ func TestWithValueCheck(t *testing.T) {
 	})
 }
 
+// vendorClient stands for a type of another module whose Validate must
+// run after the program provisions the value.
+type vendorClient struct {
+	Addr        string       `yaml:"addr"`
+	Limits      vendorLimits `yaml:"limits"`
+	provisioned bool
+}
+
+func (c *vendorClient) Validate() error {
+	if !c.provisioned {
+		return errors.New("vendor: Validate called before Provision")
+	}
+
+	return nil
+}
+
+// vendorContextClient stands for a type of another module whose
+// ValidateContext must run after the program provisions the value.
+type vendorContextClient struct {
+	Addr string `yaml:"addr"`
+}
+
+func (vendorContextClient) ValidateContext(context.Context) error {
+	return errors.New("vendor: ValidateContext called before Provision")
+}
+
+// vendorLimits is a type the program owns, whose Validate rejects a max
+// greater than 10.
+type vendorLimits struct {
+	Max int `yaml:"max"`
+}
+
+func (l vendorLimits) Validate() error {
+	if l.Max > 10 {
+		return niceyaml.NewError("max over 10", niceyaml.AtPath(paths.Current().Child("max")))
+	}
+
+	return nil
+}
+
+// vendorConfig holds the vendor types at several places.
+type vendorConfig struct {
+	Backup  *vendorClient       `yaml:"backup"`
+	Context vendorContextClient `yaml:"context"`
+	Client  vendorClient        `yaml:"client"`
+	Limits  vendorLimits        `yaml:"limits"`
+}
+
+func TestWithSelfValidationOf(t *testing.T) {
+	t.Parallel()
+
+	offClient := niceyaml.WithSelfValidationOf[vendorClient](false)
+	offContext := niceyaml.WithSelfValidationOf[vendorContextClient](false)
+	off := niceyaml.DecodeOptions(offClient, offContext)
+
+	input := stringtest.Input(`
+		client:
+		  addr: a
+		backup:
+		  addr: b
+		context:
+		  addr: c
+	`)
+
+	t.Run("sets which types run their methods", func(t *testing.T) {
+		t.Parallel()
+
+		// A check of vendorClient that stands in for its Validate.
+		provisioned := niceyaml.WithValueCheck(func(_ context.Context, c *vendorClient) error {
+			c.provisioned = true
+
+			err := c.Validate()
+			if err != nil {
+				return niceyaml.Unchecked(err)
+			}
+
+			return niceyaml.NewError("addr " + c.Addr + " provisioned")
+		})
+
+		tcs := map[string]struct {
+			input string
+			err   string
+			opts  []niceyaml.DecodeOption
+		}{
+			"the default runs every method": {
+				input: input,
+				err: stringtest.JoinLF(
+					"1:1: $.client: vendor: Validate called before Provision",
+					"3:1: $.backup: vendor: Validate called before Provision",
+					"5:1: $.context: vendor: ValidateContext called before Provision",
+				),
+			},
+			"false skips Validate on a value and through a pointer": {
+				input: input,
+				opts:  []niceyaml.DecodeOption{offClient},
+				err:   "5:1: $.context: vendor: ValidateContext called before Provision",
+			},
+			"false skips ValidateContext": {
+				input: input,
+				opts:  []niceyaml.DecodeOption{offContext},
+				err: stringtest.JoinLF(
+					"1:1: $.client: vendor: Validate called before Provision",
+					"3:1: $.backup: vendor: Validate called before Provision",
+				),
+			},
+			"false for every vendor type passes": {
+				input: input,
+				opts:  []niceyaml.DecodeOption{off},
+			},
+			"false keeps the methods of other types": {
+				input: stringtest.JoinLF(input, "limits:", "  max: 50"),
+				opts:  []niceyaml.DecodeOption{off},
+				err:   "8:8: $.limits.max: max over 10",
+			},
+			"false keeps the values below the type": {
+				input: stringtest.Input(`
+					client:
+					  limits:
+					    max: 50
+				`),
+				opts: []niceyaml.DecodeOption{off},
+				err:  "3:10: $.client.limits.max: max over 10",
+			},
+			"false keeps the value checks of the type": {
+				input: input,
+				opts:  []niceyaml.DecodeOption{off, provisioned},
+				err: stringtest.JoinLF(
+					"1:1: $.client: addr a provisioned",
+					"3:1: $.backup: addr b provisioned",
+				),
+			},
+			"a later true turns the methods back on": {
+				input: input,
+				opts: []niceyaml.DecodeOption{
+					off, niceyaml.WithSelfValidationOf[vendorContextClient](true),
+				},
+				err: "5:1: $.context: vendor: ValidateContext called before Provision",
+			},
+			"WithSelfValidation true does not undo it": {
+				input: input,
+				opts:  []niceyaml.DecodeOption{off, niceyaml.WithSelfValidation(true)},
+			},
+			"WithSelfValidation false turns the value checks off too": {
+				input: input,
+				opts:  []niceyaml.DecodeOption{provisioned, niceyaml.WithSelfValidation(false)},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input)
+
+				_, err := doc.Decode[vendorConfig](t.Context(), tc.opts...)
+				if tc.err == "" {
+					require.NoError(t, err)
+
+					return
+				}
+
+				require.EqualError(t, err, tc.err)
+			})
+		}
+	})
+
+	t.Run("an Unchecked error of a replacement check is not a fault", func(t *testing.T) {
+		t.Parallel()
+
+		replaced := niceyaml.WithValueCheck(func(_ context.Context, c *vendorClient) error {
+			err := c.Validate()
+			if err != nil {
+				return niceyaml.Unchecked(err)
+			}
+
+			return nil
+		})
+
+		doc := yamltest.FirstDocument(t, "client:\n  addr: a\n")
+
+		_, err := doc.Decode[vendorConfig](t.Context(), off)
+		require.NoError(t, err)
+
+		_, err = doc.Decode[vendorConfig](t.Context(), off, replaced)
+		require.EqualError(t, err, "1:1: $.client: vendor: Validate called before Provision")
+		assert.False(t, niceyaml.IsInvalid(err))
+	})
+
+	t.Run("the walks outside a decode read it", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(input)
+
+		doc, err := source.Document()
+		require.NoError(t, err)
+
+		var cfg vendorConfig
+
+		require.NoError(t, doc.DecodeInto(t.Context(), &cfg, niceyaml.WithSelfValidation(false)))
+
+		require.Error(t, doc.SelfValidate(t.Context(), &cfg))
+		require.NoError(t, doc.SelfValidate(t.Context(), &cfg, off))
+		require.NoError(t, source.SelfValidate(t.Context(), &cfg, off))
+		require.NoError(t, niceyaml.SelfValidateValue(t.Context(), &cfg, off))
+		require.EqualError(t,
+			niceyaml.SelfValidateValue(t.Context(), &cfg, offClient),
+			"$.context: vendor: ValidateContext called before Provision",
+		)
+	})
+
+	t.Run("panics for a pointer or interface type", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			call func()
+			want string
+		}{
+			"a pointer": {
+				call: func() { niceyaml.WithSelfValidationOf[*vendorClient](false) },
+				want: "*niceyaml_test.vendorClient",
+			},
+			"an interface": {
+				call: func() { niceyaml.WithSelfValidationOf[niceyaml.SelfValidator](true) },
+				want: "niceyaml.SelfValidator",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				assert.PanicsWithValue(t,
+					"niceyaml.WithSelfValidationOf: "+tc.want+
+						" is a pointer or interface type, which the walk never validates",
+					tc.call,
+				)
+			})
+		}
+	})
+}
+
 // nodeFile is a path that a function of niceyaml.WithNodeCheck resolves
 // beside the file that sets it.
 type nodeFile string

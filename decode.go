@@ -38,12 +38,14 @@ import (
 // [Source.DecodeInto], which decode the one document of a Source.
 // [Node.SelfValidate], [Source.SelfValidate], and [SelfValidateValue]
 // take them too. They read only the functions of [WithValueCheck] and
-// [WithNodeCheck] and the options that say how a value decodes, as
-// Node.SelfValidate lists them.
+// [WithNodeCheck], the types that [WithSelfValidationOf] turns off, and
+// the options that say how a value decodes, as Node.SelfValidate lists
+// them.
 //
 // Available options:
 //   - [WithValidator]
 //   - [WithSelfValidation]
+//   - [WithSelfValidationOf]
 //   - [WithValueCheck]
 //   - [WithNodeCheck]
 //   - [WithUnknownFields]
@@ -75,6 +77,9 @@ type decodeConfig struct {
 	checks []valueCheck
 	// The paths of the keys that [WithAllowedFields] admits.
 	knownKeys []paths.Path
+	// The types whose Validate and ValidateContext methods
+	// [WithSelfValidationOf] turns off.
+	methodsOff []reflect.Type
 	// The types that the options give an unmarshaler, which the go-yaml
 	// decoder does not call on its own.
 	unmarshalers       unmarshaler.Options
@@ -162,9 +167,69 @@ func WithValidator(dv Validator) DecodeOption {
 // whatever the option says, so a caller that turns it off for the decode
 // validates the value later. That later call runs only the functions of
 // WithValueCheck and WithNodeCheck it gets, so the caller passes them again.
+// [WithSelfValidationOf] turns off the methods of one type and keeps the
+// rest of the walk.
 func WithSelfValidation(enabled bool) DecodeOption {
 	return func(c *decodeConfig) {
 		c.skipSelfValidation = !enabled
+	}
+}
+
+// WithSelfValidationOf is a [DecodeOption] that sets whether the
+// self-validation walk calls the Validate method of [SelfValidator] and the
+// ValidateContext method of [SelfValidatorContext] on each value of type
+// T. The default is true. The walk calls those methods on every type that
+// declares one, including a type of another module. The method of such a
+// type can serve another purpose, such as a check that must run after the
+// program provisions the value. A caller turns such a type off:
+//
+//	cfg, err := src.Decode[Config](ctx, niceyaml.WithSelfValidationOf[vendor.Client](false))
+//
+// With false, the walk still validates the values below each value of
+// type T. It also still runs the functions of [WithValueCheck] and
+// [WithNodeCheck] for T. A caller thus replaces the method with a function
+// of its own. That function can call the method itself and wrap its error
+// in [Unchecked]. The error then does not count as a fault of the
+// document:
+//
+//	client := niceyaml.WithValueCheck(func(ctx context.Context, c *vendor.Client) error {
+//		c.Provision()
+//
+//		err := c.Validate()
+//		if err != nil {
+//			return niceyaml.Unchecked(err)
+//		}
+//
+//		return nil
+//	})
+//
+// T matches by its exact type, as it does for WithValueCheck, so the
+// option covers a value of type T and a value that a field of type *T
+// points to. The last WithSelfValidationOf for T in the call sets the
+// value. [WithSelfValidation] set to false turns the whole walk off,
+// whatever this option says. [Node.SelfValidate], [Source.SelfValidate],
+// and [SelfValidateValue] read this option too.
+//
+// WithSelfValidationOf panics for a pointer or interface T, because the
+// walk never validates a value of such a type.
+func WithSelfValidationOf[T any](enabled bool) DecodeOption {
+	t := reflect.TypeFor[T]()
+	if t.Kind() == reflect.Pointer || t.Kind() == reflect.Interface {
+		panic(fmt.Sprintf(
+			"niceyaml.WithSelfValidationOf: %v is a pointer or interface type, which the walk never validates", t,
+		))
+	}
+
+	return func(c *decodeConfig) {
+		off := slices.DeleteFunc(slices.Clone(c.methodsOff), func(o reflect.Type) bool {
+			return o == t
+		})
+
+		if !enabled {
+			off = append(off, t)
+		}
+
+		c.methodsOff = off
 	}
 }
 

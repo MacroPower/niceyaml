@@ -819,7 +819,8 @@
 //  6. Every value in the result that implements [SelfValidator] or
 //     [SelfValidatorContext] validates itself, and each function from
 //     [WithValueCheck] or [WithNodeCheck] checks the values of its type.
-//     [WithSelfValidation] set to false turns this step off.
+//     [WithSelfValidation] set to false turns this step off, and
+//     [WithSelfValidationOf] set to false skips the methods of one type.
 //
 // A field that the document leaves out keeps its value. A mapping merges into
 // a struct field by field at every depth, and the document replaces a slice,
@@ -1287,6 +1288,30 @@
 // Validate and the ValidateContext of the field. A Validate or
 // ValidateContext that an UnmarshalYAML method already called runs again
 // in the decode, so it must be idempotent.
+//
+// The walk calls Validate and ValidateContext on every type that declares
+// one of them, including a type of another module. The author of such a
+// type might not know these rules. The method might also serve another
+// purpose, such as a check that must run after the program provisions the
+// value. [WithSelfValidationOf] set to false skips the methods of one type
+// and keeps the rest of the walk, the functions of WithValueCheck for that
+// type among them. A program that wants the check at its own time calls the
+// method from such a function and wraps a failure that is not a fault of
+// the document in [Unchecked]:
+//
+//	off := niceyaml.WithSelfValidationOf[vendor.Client](false)
+//	client := niceyaml.WithValueCheck(func(ctx context.Context, c *vendor.Client) error {
+//		c.Provision()
+//
+//		err := c.Validate()
+//		if err != nil {
+//			return niceyaml.Unchecked(err)
+//		}
+//
+//		return nil
+//	})
+//
+//	cfg, err := doc.Decode[Config](ctx, off, client)
 //
 // Validate and each function write `@` paths, which read from the value, and
 // the decode puts them under the path of the value in the document. An Hours
