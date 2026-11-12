@@ -962,6 +962,37 @@ func (r *resolver) selectable(node ast.Node) (ast.Node, error) {
 	return content, err
 }
 
+// collectionContent does what [resolver.unwrap] does. But where the value
+// under every tag is a mapping or a sequence, it returns the first tag
+// that converts that value. The decoder reads such a tag as a scalar, as
+// [resolver.selectable] does. Unlike selectable, it gives the scalar under
+// a converting tag on a scalar, such as `!!str 5`. It checks every alias
+// that unwrap checks, so it fails exactly where [resolver.deref] fails.
+func (r *resolver) collectionContent(node ast.Node) (ast.Node, error) {
+	content, err := r.unwrap(node)
+	if err != nil {
+		return nil, err
+	}
+
+	switch content.(type) {
+	case *ast.MappingNode, *ast.SequenceNode:
+	default:
+		return content, nil
+	}
+
+	// Unwrap resolved every alias on the way, so selectable does not fail.
+	selected, err := r.selectable(node)
+	if err != nil {
+		return nil, err
+	}
+
+	if tag, ok := selected.(*ast.TagNode); ok {
+		return tag, nil
+	}
+
+	return content, nil
+}
+
 // content looks through anchors, aliases, and tags from node. It returns
 // two nodes. The first is the first tag it reaches, or the content when it
 // does not reach a tag. The second is the content under every tag. With

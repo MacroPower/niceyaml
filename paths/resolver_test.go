@@ -1498,6 +1498,168 @@ func TestResolver_Deref(t *testing.T) {
 	})
 }
 
+func TestResolver_Content(t *testing.T) {
+	t.Parallel()
+
+	// Each case reads the content of the value of the entry v.
+	tcs := map[string]struct {
+		input string
+		// The text of the content.
+		want string
+		// The type of the content.
+		wantType ast.Node
+		err      error
+	}{
+		"mapping": {
+			input:    "v: {k: x}\n",
+			want:     "{k: x}",
+			wantType: &ast.MappingNode{},
+		},
+		"empty mapping": {
+			input:    "v: {}\n",
+			want:     "{}",
+			wantType: &ast.MappingNode{},
+		},
+		"empty sequence": {
+			input:    "v: []\n",
+			want:     "[]",
+			wantType: &ast.SequenceNode{},
+		},
+		"alias of a mapping": {
+			input:    "a: &a {k: x}\nv: *a\n",
+			want:     "{k: x}",
+			wantType: &ast.MappingNode{},
+		},
+		"local tag on an alias of a mapping": {
+			input:    "a: &a {k: x}\nv: !t *a\n",
+			want:     "{k: x}",
+			wantType: &ast.MappingNode{},
+		},
+		"local tag on an alias of a tagged alias": {
+			input:    stringtest.LinesLF("a: &a [x]", "b: &b !t *a", "v: !u *b"),
+			want:     "[x]",
+			wantType: &ast.SequenceNode{},
+		},
+		"map tag on a mapping": {
+			input:    "v: !!map {k: x}\n",
+			want:     "{k: x}",
+			wantType: &ast.MappingNode{},
+		},
+		"string tag on an alias of a mapping": {
+			input:    "a: &a {k: x}\nv: !!str *a\n",
+			want:     "!!str *a",
+			wantType: &ast.TagNode{},
+		},
+		"null tag on an alias of a sequence": {
+			input:    "a: &a [x]\nv: !!null *a\n",
+			want:     "!!null *a",
+			wantType: &ast.TagNode{},
+		},
+		"string tag before the anchor of a mapping": {
+			input:    "v: !!str &a {k: x}\n",
+			want:     "!!str &a {k: x}",
+			wantType: &ast.TagNode{},
+		},
+		"anchor over a string tag on an alias of a mapping": {
+			input:    "a: &a {k: x}\nv: &b !!str *a\n",
+			want:     "!!str *a",
+			wantType: &ast.TagNode{},
+		},
+		"string tag on a scalar": {
+			input:    "v: !!str 5\n",
+			want:     "5",
+			wantType: &ast.IntegerNode{},
+		},
+		"int tag on a quoted scalar": {
+			input:    "v: !!int \"3\"\n",
+			want:     `"3"`,
+			wantType: &ast.StringNode{},
+		},
+		"local tag on an alias of a scalar": {
+			input:    "a: &a x\nv: !t *a\n",
+			want:     "x",
+			wantType: &ast.StringNode{},
+		},
+		"alias with no anchor before it": {
+			input: "v: *a\na: &a {k: x}\n",
+			err:   paths.ErrAlias,
+		},
+		"string tag on an alias with no anchor before it": {
+			input: "v: !!str *a\na: &a {k: x}\n",
+			err:   paths.ErrAlias,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := documentOf(t, tc.input)
+			r := paths.NewResolver(doc)
+
+			got, err := r.Content(valueOfV(t, doc))
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got.String())
+			assert.IsType(t, tc.wantType, got)
+
+			// A wildcard selects one node for each entry or item of a
+			// mapping or sequence result, and nothing below any other
+			// result.
+			v := paths.Doc().Child("v")
+
+			entries, err := r.Nodes(v.ChildAll())
+			require.NoError(t, err)
+
+			items, err := r.Nodes(v.IndexAll())
+			require.NoError(t, err)
+
+			wantEntries, wantItems := 0, 0
+
+			switch c := got.(type) {
+			case *ast.MappingNode:
+				wantEntries = len(c.Values)
+			case *ast.SequenceNode:
+				wantItems = len(c.Values)
+			}
+
+			assert.Len(t, entries, wantEntries)
+			assert.Len(t, items, wantItems)
+		})
+	}
+
+	t.Run("alias that reads a reference document", func(t *testing.T) {
+		t.Parallel()
+
+		refs := paths.WithReferenceAnchors(func(string) (ast.Node, bool) {
+			return &ast.MappingNode{BaseNode: &ast.BaseNode{}}, true
+		})
+
+		for _, input := range []string{"v: *ref\n", "v: !!str *ref\n"} {
+			doc := documentOf(t, input)
+
+			_, err := paths.NewResolver(doc, refs).Content(valueOfV(t, doc))
+			require.ErrorIs(t, err, paths.ErrReferenceAlias, input)
+		}
+	})
+
+	t.Run("nil node", func(t *testing.T) {
+		t.Parallel()
+
+		got, err := paths.NewResolver(nil).Content(nil)
+		require.NoError(t, err)
+
+		// Compare against an untyped nil, since assert.Nil also accepts a
+		// typed nil.
+		assert.Equal(t, ast.Node(nil), got)
+	})
+}
+
 func TestResolver_KeyName(t *testing.T) {
 	t.Parallel()
 

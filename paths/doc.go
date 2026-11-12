@@ -118,6 +118,13 @@
 // later entry in document order wins, as it does when the decoder fills a
 // map.
 //
+// A caller that walks the document itself reads the node that selectors
+// apply to with [Resolver.Content]. It returns a mapping or a sequence
+// exactly where a selector applies below the node, even when the
+// collection is empty. Where a tag converts a collection, as `!!str *k`
+// does, it returns that tag, because the decoder reads a scalar there. A
+// tag on a scalar, such as `!!str 5`, gives the scalar.
+//
 // A child selector matches an alias key by the content of its anchor, so
 // `*k` after `&k name` matches `.name`. It matches a block scalar key (`|`
 // or `>`) by its content. [Resolver.KeyName] gives the text that a child
