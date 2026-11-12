@@ -1157,7 +1157,11 @@
 // [Node.DecodeInto] allocates for a nil pointer that its target points to.
 // Under [UnknownFieldsWarn], a decode whose context carries a collector also
 // calls again the unmarshalers of the structs that decode themselves from a
-// mapping, as [WithUnknownFields] describes.
+// mapping, as [WithUnknownFields] describes. Under [UnknownFieldsReject], a
+// decode whose decoder panics on a struct that holds a map inline runs
+// again. It calls a second time each unmarshaler that the first pass
+// reached. The search for unknown fields then calls again the unmarshalers
+// of the structs that decode themselves, as [WithUnknownFields] describes.
 //
 // The value at an alias starts from the defaults of its own place. The places
 // that aliases of one anchor fill share one value when they start from equal

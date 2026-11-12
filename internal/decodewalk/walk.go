@@ -59,6 +59,10 @@ type Rules struct {
 	// AnchorKeys returns one Keys for all of them. A nil AnchorKeys keeps
 	// the keys for one walk.
 	AnchorKeys func(alias *ast.AliasNode) *Keys
+	// PanicsOnInlineMap reports whether err, an error of Decode, holds the
+	// panic of a decoder that rejects unknown fields on a struct that
+	// holds a map inline. A nil PanicsOnInlineMap reports false.
+	PanicsOnInlineMap func(err error) bool
 	// Unmarshalers names the types the options of the decode give an
 	// unmarshaler.
 	Unmarshalers unmarshaler.Options

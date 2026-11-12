@@ -166,6 +166,75 @@ func TestIgnoresMerges(t *testing.T) {
 	}
 }
 
+func TestInlinesMap(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		typ  reflect.Type
+		want bool
+	}{
+		"inline map": {
+			typ: reflect.TypeFor[struct {
+				Port  int            `yaml:"port"`
+				Extra map[string]any `yaml:",inline"`
+			}](),
+			want: true,
+		},
+		"inline pointer to a map": {
+			typ: reflect.TypeFor[struct {
+				Extra *map[string]int `yaml:",inline"`
+			}](),
+			want: true,
+		},
+		"inline scalar": {
+			typ: reflect.TypeFor[struct {
+				N int `yaml:",inline"`
+			}](),
+			want: true,
+		},
+		"inline map in a json tag": {
+			typ: reflect.TypeFor[struct {
+				Extra map[string]any `json:",inline"` //nolint:staticcheck // go-yaml reads the options of a json tag.
+			}](),
+			want: true,
+		},
+		"inline struct": {
+			typ: reflect.TypeFor[struct {
+				Inner embedded `yaml:",inline"`
+			}](),
+		},
+		"inline pointer to a struct": {
+			typ: reflect.TypeFor[struct {
+				Inner *embedded `yaml:",inline"`
+			}](),
+		},
+		"map without inline": {
+			typ: reflect.TypeFor[struct {
+				Extra map[string]any `yaml:"extra"`
+			}](),
+		},
+		"inline map that reads an anchor": {
+			typ: reflect.TypeFor[struct {
+				Base map[string]any `yaml:",inline,alias"`
+			}](),
+		},
+		"skipped inline map": {
+			typ: reflect.TypeFor[struct {
+				Extra map[string]any `yaml:"-"`
+			}](),
+		},
+		"no fields": {typ: reflect.TypeFor[struct{}]()},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, yamlfield.InlinesMap(tc.typ))
+		})
+	}
+}
+
 func TestOwnNames(t *testing.T) {
 	t.Parallel()
 

@@ -7,7 +7,8 @@
 // the decoder does. The fields of an inline struct sit beside the
 // fields of its parent. Go-yaml zeroes each such field whose name a field
 // of the parent that is not inline also uses. [OwnNames] returns the
-// names of the parent that zero such a field.
+// names of the parent that zero such a field. An inline map takes every
+// entry of the mapping, and [InlinesMap] reports a struct that holds one.
 //
 // One kind of field does not read an entry of the mapping. An inline
 // field that carries an alias option gets the value of the anchor a `<<`
@@ -86,6 +87,32 @@ func IgnoresMerges(t reflect.Type) bool {
 
 		tag, _ := fieldTag(field)
 		if slices.Contains(strings.Split(tag, ",")[1:], "omitempty") {
+			return true
+		}
+	}
+
+	return false
+}
+
+// InlinesMap reports whether t, a struct type, holds a field inline whose
+// type is neither a struct nor a pointer to one, such as a map. Such a
+// field takes every entry of the mapping. A field that [ReadsAnchor]
+// reports does not count, because it reads an anchor and not the entries.
+// The go-yaml decoder panics on such a field when it rejects unknown
+// fields.
+func InlinesMap(t reflect.Type) bool {
+	for field := range t.Fields() {
+		_, inline, skip := Name(field)
+		if skip || !inline || ReadsAnchor(field) {
+			continue
+		}
+
+		inner := field.Type
+		if inner.Kind() == reflect.Pointer {
+			inner = inner.Elem()
+		}
+
+		if inner.Kind() != reflect.Struct {
 			return true
 		}
 	}

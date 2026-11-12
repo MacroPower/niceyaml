@@ -73,6 +73,12 @@ type UnknownField struct {
 // unmarshaler of the outermost such struct. It runs that unmarshaler on
 // the entries and elements that lead from its mapping down to the
 // candidate. So the unmarshaler decides, as it does in the decode itself.
+// A decoder that rejects unknown fields panics on a struct that holds a
+// map inline. Only the unmarshaler of the outermost such struct knows the
+// type that reads a candidate. So when its decode panics so, the search
+// keeps no candidate at or below that struct. When the decode of
+// the one entry of a struct that does not decode itself panics so, a
+// decode of that entry into a struct without fields decides.
 //
 // Before it reads the keys of the outermost such struct, the search
 // decodes the whole struct once. When the decoder accepts it, the search
@@ -82,6 +88,13 @@ type UnknownField struct {
 // once for all the uses that read it the same way. The unmarshaler of a
 // struct without an unknown field thus runs once more rather than once
 // more for each of its keys or aliases.
+//
+// An inline map takes every key that no other field reads. So a struct
+// that holds a map inline, or holds an inline struct that holds one at
+// any depth, does not have an unknown field. The search takes a key of
+// the mapping of such a struct as a candidate only when the struct
+// decodes itself, because its unmarshaler might not read the map. Such a
+// struct still decides for its own fields.
 //
 // The search does not read below any other type that decodes itself,
 // below a struct that decodes itself held inline, or below the members of
@@ -112,6 +125,11 @@ func UnknownFields(ctx context.Context, r Rules, t reflect.Type, node ast.Node) 
 		var names map[string]bool
 
 		if !r.Unmarshalers.ReportsOwnError(v.Type) {
+			// An inline map takes each key that no field reads.
+			if inlinesMap(v.Type, map[reflect.Type]bool{}) {
+				return
+			}
+
 			names = fieldNames(v.Type, map[reflect.Type]bool{})
 		}
 
@@ -251,10 +269,28 @@ type confirmKey struct {
 // confirm returns the rejection of the key of entry as an unknown field,
 // when the decode of node into a new value of type t rejects it so, or nil
 // for any other outcome. [walker.confirmation] builds node and t.
+//
+// A decoder that rejects unknown fields panics on a struct that holds a
+// map inline, as [Rules] describes for PanicsOnInlineMap. When t decodes
+// itself, the panic leaves the key without a verdict, so confirm returns
+// nil. Otherwise node holds entry alone, and the struct of type t has no
+// field for its key. The search does not take a key of a struct with an
+// inline map as a candidate, so the panic comes from another inline field
+// that the check of the decoder reads as a struct, such as a map that
+// reads an anchor. A decode of node into a struct without fields then
+// decides. It rejects the key as the decoder does, except a key under a
+// prefix that the decoder allows.
 func (w *walker) confirm(node ast.Node, t reflect.Type, entry *ast.MappingValueNode) *yaml.UnknownFieldError {
 	view := w.view(entry)
 
 	err := w.rules.Decode(node, reflect.New(t).Interface())
+	if w.rules.PanicsOnInlineMap != nil && w.rules.PanicsOnInlineMap(err) {
+		if w.rules.Unmarshalers.ReportsOwnError(t) {
+			return nil
+		}
+
+		err = w.rules.Decode(node, &struct{}{})
+	}
 
 	rejected, ok := err.(*yaml.UnknownFieldError) //nolint:errorlint // A wrapped error is the unmarshaler's own.
 	if !ok || rejected.Token == nil || rejected.Token != view.Key.GetToken() || rejected.Token.Position == nil {
@@ -327,4 +363,31 @@ func fieldNames(t reflect.Type, seen map[reflect.Type]bool) map[string]bool {
 	delete(seen, t)
 
 	return names
+}
+
+// inlinesMap reports whether t, a struct type, holds a map inline, as
+// [yamlfield.InlinesMap] reports, or holds a struct inline that does, at
+// any depth. The seen set holds the inline structs the walk is inside of,
+// so the walk stops at a struct that holds itself inline.
+func inlinesMap(t reflect.Type, seen map[reflect.Type]bool) bool {
+	if yamlfield.InlinesMap(t) {
+		return true
+	}
+
+	seen[t] = true
+	defer delete(seen, t)
+
+	for field := range t.Fields() {
+		_, inline, skip := yamlfield.Name(field)
+		if skip || !inline || yamlfield.ReadsAnchor(field) {
+			continue
+		}
+
+		inner := unmarshaler.Base(field.Type)
+		if inner.Kind() == reflect.Struct && !seen[inner] && inlinesMap(inner, seen) {
+			return true
+		}
+	}
+
+	return false
 }

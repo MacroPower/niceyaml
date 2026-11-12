@@ -81,8 +81,13 @@ type decodeConfig struct {
 	methodsOff []reflect.Type
 	// The types that the options give an unmarshaler, which the go-yaml
 	// decoder does not call on its own.
-	unmarshalers       unmarshaler.Options
-	unknownFields      UnknownFieldsMode
+	unmarshalers  unmarshaler.Options
+	unknownFields UnknownFieldsMode
+	// Whether the go-yaml decoder of a decode under UnknownFieldsReject
+	// accepts unknown fields. [Node.decodeUnbound] sets it after the
+	// decoder panics on an inline map. The search for unknown fields then
+	// rejects them in its place.
+	searchesUnknown    bool
 	skipSelfValidation bool
 	orderedMaps        bool
 }
@@ -553,7 +558,9 @@ func (m *UnknownFieldsMode) UnmarshalText(text []byte) error {
 //
 // Under UnknownFieldsWarn, a decode searches the document for unknown
 // fields, even when the decode passes. Under UnknownFieldsReject, the
-// search runs only after the decoder rejects the document.
+// search runs when the decoder rejects the document. It also runs after a
+// decode whose decoder panics on an inline map, as the paragraph on
+// inline maps describes.
 //
 // The search decodes once more each struct that decodes itself from a
 // mapping and that it reads, so the unmarshaler of that struct runs again.
@@ -608,6 +615,48 @@ func (m *UnknownFieldsMode) UnmarshalText(text []byte) error {
 //   - A key in a mapping that holds a key that the decoder does not read as
 //     a string.
 //   - A key in a mapping whose `<<` merge key the decoder refuses.
+//
+// A map that a struct holds inline takes every key that no other field of
+// the struct reads. The struct thus does not have an unknown field. A
+// struct that decodes itself still decides for its own fields, because
+// its UnmarshalYAML method might not read the map. The search does not
+// read below the members of an inline map, so neither mode reports an
+// unknown field there.
+//
+// Under UnknownFieldsReject, the go-yaml decoder panics when the document
+// leads it to a struct that holds a map inline. The panic comes also from
+// a struct that an UnmarshalYAML method decodes into, and from a struct
+// that holds inline a struct with an inline map that reads an anchor. A
+// decode that does not lead the decoder to such a struct keeps the check
+// of the decoder, even for a type that holds one.
+//
+// After the panic, the decode runs again from the value that v held, with
+// a decoder that accepts unknown fields. That decoder fills the value as
+// it does under UnknownFieldsWarn. It leaves out each admitted key that no
+// read keeps, as [WithAllowedFields] describes. When the search then finds
+// a field, the decode fails with an error for each one, and the
+// self-validation walk does not run. When the search finds none, the walk
+// runs.
+//
+// The decode that runs again calls each unmarshaler that the first decode
+// reached a second time. The collector of ctx gets only the warnings of
+// the second decode.
+//
+// A decode that runs again thus reports the fields that UnknownFieldsWarn
+// reports. It also reports a field below a value that a function of
+// [CustomUnmarshaler] decodes. That function starts a decode of its own,
+// which rejects unknown fields again. It does not report a field
+// below a slice with an UnmarshalYAML method, nor a key behind an alias
+// that reads a reference document, even outside the struct with the
+// inline map.
+//
+// The search confirms a field below a struct that decodes itself with the
+// UnmarshalYAML method of that struct. When the method decodes into a
+// type that makes the decoder panic so, the panic does not name a field.
+// Neither mode then reports an unknown field at or below that struct. The
+// method might decode into a type that holds a map inline, or into a
+// mirror of a struct that holds inline a struct with an inline map that
+// reads an anchor.
 //
 // A struct that decodes itself decides for its own fields. When an
 // UnmarshalYAML method decodes into a second type with the same fields,
@@ -1488,7 +1537,7 @@ func (n *Node) newDecoder(cfg decodeConfig, extra ...yaml.DecodeOption) *yaml.De
 
 	opts := slices.Concat(n.source.decodeOptions(), cfg.unmarshalers.YAMLOptions(decode))
 
-	if cfg.unknownFields == UnknownFieldsReject {
+	if cfg.unknownFields == UnknownFieldsReject && !cfg.searchesUnknown {
 		opts = append(opts, yaml.DisallowUnknownField())
 	}
 
@@ -1767,7 +1816,99 @@ func hasComments(group *ast.CommentGroupNode) bool {
 // decodeUnbound decodes node into v with cfg and returns the error for
 // the Node to bind. A node without content or a null leaves v as it is,
 // so defaults survive, but an untagged null clears a pointer or interface.
+//
+// Under [UnknownFieldsReject], the go-yaml decoder panics on a map that a
+// struct holds inline, as [panicsOnInlineMap] reports. After such a panic,
+// the decode sets v back to what it held and runs again with a decoder
+// that accepts unknown fields, as [decodeConfig] describes for
+// searchesUnknown. A decode that a function of a [CustomUnmarshaler] runs
+// starts with a decoder that rejects them again. The collectors of ctx
+// get the warnings of the first pass only when that pass does not panic
+// so.
 func (n *Node) decodeUnbound(
+	ctx context.Context,
+	node ast.Node,
+	v any,
+	cfg decodeConfig,
+	comments yaml.CommentMap,
+) error {
+	cfg.searchesUnknown = false
+
+	if cfg.unknownFields != UnknownFieldsReject {
+		return n.decodeOnce(ctx, node, v, cfg, comments)
+	}
+
+	restore := saveTarget(v)
+
+	// The first pass holds its warnings until it ends, because the decode
+	// that runs again after a panic hands the same warnings to ctx.
+	first := ctx
+	held := NewWarnings()
+
+	if scopeOf(ctx) != nil {
+		first = isolate(ctx, held)
+	}
+
+	err := n.decodeOnce(first, node, v, cfg, comments)
+	if !panicsOnInlineMap(err) {
+		handOn(ctx, held)
+
+		return err
+	}
+
+	restore()
+
+	cfg.searchesUnknown = true
+
+	return n.decodeOnce(ctx, node, v, cfg, comments)
+}
+
+// saveTarget returns a function that sets each value along the chain of
+// pointers that v, a non-nil pointer, reaches back to what it holds now.
+// The chain ends at a value that is not a pointer, at a nil pointer, or
+// past [maxPointerDepth] pointers. The copy of each value is shallow.
+func saveTarget(v any) func() {
+	var held, saved []reflect.Value
+
+	rv := reflect.ValueOf(v).Elem()
+
+	for range maxPointerDepth + 1 {
+		c := reflect.New(rv.Type()).Elem()
+		c.Set(rv)
+
+		held = append(held, rv)
+		saved = append(saved, c)
+
+		if rv.Kind() != reflect.Pointer || rv.IsNil() {
+			break
+		}
+
+		rv = rv.Elem()
+	}
+
+	return func() {
+		for i, rv := range held {
+			rv.Set(saved[i])
+		}
+	}
+}
+
+// panicsOnInlineMap reports whether err holds the panic of the go-yaml
+// decoder on a struct that holds a map inline. The decoder raises it only
+// when it rejects unknown fields. Its check for them reads the fields of
+// each inline type as those of a struct. The check reads every inline
+// field of an inline struct. So the decoder also panics on a map that
+// reads an anchor when a struct holds the struct of that map inline.
+func panicsOnInlineMap(err error) bool {
+	p, ok := errors.AsType[*PanicError](err)
+
+	return ok && bytes.Contains(p.Stack, []byte("go-yaml.(*Decoder).deleteStructKeys("))
+}
+
+// decodeOnce is [Node.decodeUnbound] with one decoder, which rejects
+// unknown fields under [UnknownFieldsReject] unless cfg sets
+// searchesUnknown.
+func (n *Node) decodeOnce(
 	ctx context.Context,
 	node ast.Node,
 	v any,
@@ -1875,6 +2016,12 @@ func (n *Node) decodeUnbound(
 	// own UnmarshalYAML, into an error that holds a PanicError.
 	err = decodeWithRecover(ctx, dec, read, target)
 
+	// The caller runs the decode again after a panic on an inline map, so
+	// the decode does not look for the problems of this pass.
+	if cfg.unknownFields == UnknownFieldsReject && !cfg.searchesUnknown && panicsOnInlineMap(err) {
+		return err
+	}
+
 	// The decoder starts each value it creates from zero, so the Node
 	// builds those values again from their defaults.
 	if err == nil && start.IsValid() {
@@ -1886,9 +2033,35 @@ func (n *Node) decodeUnbound(
 	order := n.readOrder(ctx, cfg, reflect.TypeOf(v).Elem(), node, err)
 	err = n.locateDecodeError(ctx, n.rejection(err, view, order), node, v, cfg)
 
+	if err == nil && cfg.searchesUnknown {
+		return n.unknownFieldProblems(ctx, node, v, cfg)
+	}
+
 	// The decoder stops at its first rejection, so the Node finds the
 	// other problems of the document and reports them together.
 	return n.decodeProblems(ctx, err, node, v, cfg)
+}
+
+// unknownFieldProblems returns the error of a decode of node into v with
+// cfg under [UnknownFieldsReject] whose decoder accepted the document
+// without rejecting unknown fields, as [decodeConfig] describes for
+// searchesUnknown. The error reports each unknown field that the search
+// finds, as [Node.decodeProblems] reports them. It is nil when the search
+// finds none, and the error of ctx when ctx ends. The search confirms
+// each field with a decoder that rejects unknown fields.
+func (n *Node) unknownFieldProblems(ctx context.Context, node ast.Node, v any, cfg decodeConfig) error {
+	cfg.searchesUnknown = false
+
+	c := newProblemCollector(ctx, n, cfg)
+	c.register(node)
+	c.collectUnknown(reflect.TypeOf(v).Elem(), node)
+
+	err := ctx.Err()
+	if err != nil {
+		return err //nolint:wrapcheck // The caller binds the error.
+	}
+
+	return problemsError(slices.Collect(maps.Values(c.found)))
 }
 
 // rootReference returns the anchor of a reference document that alias
@@ -2808,7 +2981,18 @@ func (n *Node) decodeProblems(
 		problems = append(problems, problem)
 	}
 
-	if len(problems) == 1 {
+	return problemsError(problems)
+}
+
+// problemsError returns the error that reports problems, or nil when
+// there are none. One problem comes back alone. Several come back in the
+// order of the source, as the problems of a [Summary] that counts them.
+// The Summary counts unknown fields when each problem is one.
+func problemsError(problems []decodeProblem) error {
+	switch len(problems) {
+	case 0:
+		return nil
+	case 1:
 		return problems[0].err
 	}
 
@@ -3032,11 +3216,25 @@ type problemKey struct {
 // by decoding it again, as the one entry of a mapping or the one element
 // of a sequence.
 //
+// Under [UnknownFieldsReject], the decoder of the collector panics on a
+// struct that holds a map inline, as [panicsOnInlineMap] reports. Each
+// decode of the pass that panics so runs again with a decoder that
+// accepts unknown fields, so the pass still finds the problems of the
+// values. The search for unknown fields keeps the panic, as
+// [decodewalk.UnknownFields] describes.
+//
 // Create instances with [newProblemCollector].
 type problemCollector struct {
 	ctx     context.Context
 	node    *Node
 	decoder *yaml.Decoder
+	// The decoder for the settings of the decode with searchesUnknown
+	// flipped, as [problemCollector.flipped] creates it, or nil before
+	// the first call.
+	flip *yaml.Decoder
+	// The node that [problemCollector.register] read, which the flipped
+	// decoder reads too.
+	registered ast.Node
 	// The problems found, by the position that marks each and the path of
 	// the use it reports.
 	found map[problemKey]decodeProblem
@@ -3044,7 +3242,8 @@ type problemCollector struct {
 	leaves map[leafKey]error
 	// The answer of [problemCollector.confirmed] for each leaf it read.
 	confirms map[confirmKey]bool
-	// What the walk knows of the decode, which decodes with decoder.
+	// What the walk knows of the decode, which decodes as
+	// [problemCollector.decode] does.
 	rules decodewalk.Rules
 	// The settings of the decode.
 	cfg decodeConfig
@@ -3057,7 +3256,7 @@ func newProblemCollector(ctx context.Context, n *Node, cfg decodeConfig) *proble
 	ctx = withoutWarnings(ctx)
 	dec := n.newDecoder(cfg)
 
-	return &problemCollector{
+	c := &problemCollector{
 		ctx:      ctx,
 		node:     n,
 		decoder:  dec,
@@ -3067,6 +3266,44 @@ func newProblemCollector(ctx context.Context, n *Node, cfg decodeConfig) *proble
 		rules:    n.walkRules(ctx, dec, cfg.unmarshalers),
 		cfg:      cfg,
 	}
+
+	c.rules.Decode = c.decode
+
+	return c
+}
+
+// decode decodes node into v with the decoder of the collector. When that
+// decoder rejects unknown fields and panics on a struct that holds a map
+// inline, decode runs again with the decoder that
+// [problemCollector.flipped] returns, which accepts them.
+func (c *problemCollector) decode(node ast.Node, v any) error {
+	err := decodeWithRecover(c.ctx, c.decoder, node, v)
+	if c.cfg.unknownFields != UnknownFieldsReject || c.cfg.searchesUnknown || !panicsOnInlineMap(err) {
+		return err
+	}
+
+	return decodeWithRecover(c.ctx, c.flipped(), node, v)
+}
+
+// flipped returns a decoder for the settings of the collector with
+// searchesUnknown flipped. Under [UnknownFieldsReject], it accepts unknown
+// fields when the decoder of the collector rejects them, and the other way
+// around. It reads the node that [problemCollector.register] read, so it
+// holds the same anchors.
+func (c *problemCollector) flipped() *yaml.Decoder {
+	if c.flip != nil {
+		return c.flip
+	}
+
+	cfg := c.cfg
+	cfg.searchesUnknown = !cfg.searchesUnknown
+	c.flip = c.node.newDecoder(cfg)
+
+	if c.registered != nil {
+		registerWith(c.ctx, c.node, c.flip, c.registered)
+	}
+
+	return c.flip
 }
 
 // walkRules returns the [decodewalk.Rules] of a decode of n with the
@@ -3078,11 +3315,12 @@ func (n *Node) walkRules(ctx context.Context, dec *yaml.Decoder, u unmarshaler.O
 		Decode: func(node ast.Node, v any) error {
 			return decodeWithRecover(ctx, dec, node, v)
 		},
-		Unmarshalers:   u,
-		Anchor:         n.referenceAnchor,
-		AnchorKeys:     n.referenceAnchorKeys,
-		PastAliasLimit: n.doc.pastAliasLimit,
-		Keys:           &n.source.mergeKeys,
+		Unmarshalers:      u,
+		Anchor:            n.referenceAnchor,
+		AnchorKeys:        n.referenceAnchorKeys,
+		PastAliasLimit:    n.doc.pastAliasLimit,
+		PanicsOnInlineMap: panicsOnInlineMap,
+		Keys:              &n.source.mergeKeys,
 	}
 }
 
@@ -3134,12 +3372,24 @@ func (c *problemCollector) collect(t reflect.Type, node ast.Node) {
 
 // collectUnknown finds the unknown fields of a decode of node into a value
 // of type t, other than the known keys that the decode cuts, as
-// [Node.cutKeys] finds them. The decoder of the collector must reject
-// unknown fields, and [problemCollector.register] must have read node.
+// [Node.cutKeys] finds them. [problemCollector.register] must have read
+// node. The search confirms each field with a decoder that rejects
+// unknown fields, which is the decoder of the collector unless the
+// settings of the collector set searchesUnknown.
 func (c *problemCollector) collectUnknown(t reflect.Type, node ast.Node) {
 	cut := c.node.cutKeys(c.ctx, c.rules, c.cfg, t, node)
 
-	for _, field := range decodewalk.UnknownFields(c.ctx, c.rules, t, node) {
+	// The search confirms each field with a decoder that rejects unknown
+	// fields and panics on an inline map, which the decode of the
+	// collector does not.
+	dec := c.decoder
+	if c.cfg.searchesUnknown {
+		dec = c.flipped()
+	}
+
+	search := c.node.walkRules(c.ctx, dec, c.cfg.unmarshalers)
+
+	for _, field := range decodewalk.UnknownFields(c.ctx, search, t, node) {
 		// The search reads node, which holds the known keys that the view
 		// of the decode leaves out.
 		if cut[position.NewFromToken(field.Err.Token)] {
@@ -3157,14 +3407,22 @@ func (c *problemCollector) collectUnknown(t reflect.Type, node ast.Node) {
 // after [Node.prime], so it holds each anchor as the decode held it. The
 // go-yaml decoder assigns an alias the value it holds for the anchor.
 func (c *problemCollector) register(node ast.Node) {
-	view, err := c.node.prime(c.ctx, c.decoder, node)
+	c.registered = node
+
+	registerWith(c.ctx, c.node, c.decoder, node)
+}
+
+// registerWith has dec read node into an interface once, after
+// [Node.prime], as [problemCollector.register] describes for n.
+func registerWith(ctx context.Context, n *Node, dec *yaml.Decoder, node ast.Node) {
+	view, err := n.prime(ctx, dec, node)
 	if err != nil {
 		return
 	}
 
 	var sink any
 
-	_ = c.rules.Decode(view, &sink) //nolint:errcheck // The decode returned this rejection.
+	_ = decodeWithRecover(ctx, dec, view, &sink) //nolint:errcheck // The decode returned this rejection.
 }
 
 // add keeps problem, unless the collector holds one at the same position

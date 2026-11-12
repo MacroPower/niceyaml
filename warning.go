@@ -938,6 +938,18 @@ func isolate(ctx context.Context, w *Warnings) context.Context {
 	return context.WithValue(ctx, warningKey{}, &warningScope{w: w, call: true})
 }
 
+// handOn hands each warning that w holds to every collector that ctx
+// carries, as [deliver] hands them. A step that runs with a context from
+// [isolate] holds its warnings in w, so its caller can drop them or hand
+// them on. For a ctx that does not carry a collector, handOn does nothing.
+func handOn(ctx context.Context, w *Warnings) {
+	rows := w.sorted()
+
+	for s := scopeOf(ctx); s != nil && len(rows) != 0; s = s.outer {
+		s.w.keep(rows)
+	}
+}
+
 // runHook runs a hook of a call and returns the errors and then the
 // warnings of the result. The hooks of a call include a [Validator] and a
 // function of [WithValueCheck]. The warnings include those that the hook

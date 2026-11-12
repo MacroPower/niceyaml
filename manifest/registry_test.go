@@ -577,13 +577,18 @@ func TestNewRegistry_Layouts(t *testing.T) {
 			get:   oneValue[namedInline],
 			want:  namedInline{Extra: Common{Note: "hot"}},
 		},
-		// The go-yaml decoder panics on an inline map when it rejects
-		// unknown fields, so these registries warn about unknown fields
-		// or ignore them. The search for unknown fields reads each key of
-		// the map as known. Under UnknownFieldsWarn, the decode cuts the
-		// type fields out of its view, so the map leaves out apiVersion
-		// and kind. Under UnknownFieldsIgnore, the decode cuts nothing,
-		// so the map holds them.
+		// An inline map takes every key that no other field reads, so the
+		// load reports no unknown field under any mode. Under
+		// UnknownFieldsReject, the default, and UnknownFieldsWarn, the
+		// decode cuts the type fields out of its view, so the map leaves
+		// out apiVersion and kind. Under UnknownFieldsIgnore, the decode
+		// cuts nothing, so the map holds them.
+		"inline map, unknown fields reject": {
+			opts:  withKinds(manifest.NewKind[looseItem]("Item", manifest.Singleton(), v1)),
+			input: "apiVersion: v1\nkind: Item\nprice: 3\nsize: large\n",
+			get:   oneValue[looseItem],
+			want:  looseItem{Price: 3, Extra: map[string]any{"price": uint64(3), "size": "large"}},
+		},
 		"inline map, unknown fields warn": {
 			opts: append(
 				withKinds(manifest.NewKind[looseItem]("Item", manifest.Singleton(), v1)),
