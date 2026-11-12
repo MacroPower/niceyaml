@@ -50,7 +50,7 @@ tasks:
   # renovate-config-validator) are not on the devbox PATH. check:all runs both
   # and go:build:pinned, so it matches the gates in the validate.yaml matrix.
   # go:build:pinned stays out of check because it passes only after the
-  # niceyaml commit that bubbles and fangs require is pushed.
+  # commits that bubbles, fangs, and the nyaml CLI require are pushed.
   check:
     desc: Runs the local checks using devbox
     deps: [lint, test]

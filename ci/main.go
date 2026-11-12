@@ -128,11 +128,13 @@ func (m *Ci) Lint(ctx context.Context) error {
 	return m.runTask(ctx, "lint")
 }
 
-// BuildPinned builds and vets the bubbles and fangs modules through
-// `task go:build:pinned` inside the devbox environment. The target disables
-// the workspace and drops the replace directive for niceyaml. Each module then
-// builds against the niceyaml version its go.mod requires, as it does for a
-// module outside the repository.
+// BuildPinned builds and vets the bubbles, fangs, and cmd/nyaml modules
+// through `task go:build:pinned` inside the devbox environment. The target
+// disables the workspace and drops the replace directive that bubbles and
+// fangs hold for niceyaml. Each module then builds against the module versions
+// its go.mod requires, as Go builds it outside the repository. The target also
+// fails when the go.mod of cmd/nyaml has a replace or an exclude directive,
+// because `go install` refuses a module that has one.
 //
 // +check
 func (m *Ci) BuildPinned(ctx context.Context) error {

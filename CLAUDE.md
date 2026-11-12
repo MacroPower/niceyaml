@@ -11,17 +11,25 @@ task test      # Run all tests (unit + integration)
 task check     # Local gate: lint + test (tools on the devbox PATH, no Dagger)
 task check:all # Everything CI runs (adds security + GitHub config via Dagger, and go:build:pinned)
 
-task go:build:pinned # Build bubbles and fangs against the niceyaml version each requires
+task go:build:pinned # Build bubbles, fangs, and nyaml against the module versions each requires
 ```
 
 Devbox provides all required tools on PATH automatically.
 
-The workspace and the `replace` directives build `bubbles` and `fangs` against
-the checkout. A module outside the repo gets the niceyaml version that their
-`go.mod` files require, and `task go:build:pinned` builds them that way. When
-one of them starts to use niceyaml code newer than that version, require a
-pushed niceyaml commit that has it. `task --summary go:build:pinned` lists the
+The workspace builds `bubbles`, `fangs`, and `cmd/nyaml` against the checkout.
+Outside the repo, Go builds each against the versions of niceyaml, `bubbles`,
+and `fangs` that its `go.mod` requires, and `task go:build:pinned` builds them
+that way. When one of them starts to use code newer than a required version,
+require a pushed commit that has it. `task --summary go:build:pinned` lists the
 commands.
+
+Users install the CLI with `go install`, which refuses a module whose `go.mod`
+has a `replace` directive, so `cmd/nyaml/go.mod` must not have one. `go mod
+tidy` ignores the workspace. `task lint` therefore fails when the CLI imports a
+niceyaml, `bubbles`, or `fangs` package that the required versions lack. Push
+the commit that adds the package, then require it in `cmd/nyaml/go.mod`. The
+`replace` directives in `bubbles/go.mod` and `fangs/go.mod` keep `go mod tidy`
+on the checkout for those two modules.
 
 CI runs these same tasks inside the devbox environment via the `ci` Dagger
 toolchain (`dagger call ci <task>`), so local and CI execute identical commands.

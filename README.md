@@ -205,7 +205,7 @@ The error of `edit.New` holds a problem for each instance that it refuses, in th
 
 - [examples/viewport](examples/viewport)
 
-See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pages, searches, diffs, and validates YAML documents.
+See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pages, searches, diffs, and validates YAML documents. Install it with `go install go.jacobcolvin.com/niceyaml/cmd/nyaml@latest`.
 
 [`yamlviewport`][niceyaml/bubbles/yamlviewport] builds on the public API of `niceyaml` alone, so your own bubble has every building block it uses. [`Printer.Render`][niceyaml/printer.Printer.Render] returns the rows of a view with the [`printer.Layout`][niceyaml/printer.Layout] that measures them. The layout maps each position to its row and cell and each cell back to its position. [`printer.Cut`][niceyaml/printer.Cut] cuts a row to a window of those cells. [`Printer.RenderSideBySide`][niceyaml/printer.Printer.RenderSideBySide] returns the same for the two panes of a side-by-side diff.
 

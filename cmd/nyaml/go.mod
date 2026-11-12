@@ -2,12 +2,6 @@ module go.jacobcolvin.com/niceyaml/cmd/nyaml
 
 go 1.27.0
 
-replace (
-	go.jacobcolvin.com/niceyaml => ../..
-	go.jacobcolvin.com/niceyaml/bubbles => ../../bubbles
-	go.jacobcolvin.com/niceyaml/fangs => ../../fangs
-)
-
 require (
 	charm.land/bubbles/v2 v2.2.1
 	charm.land/bubbletea/v2 v2.1.0
@@ -20,9 +14,9 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
-	go.jacobcolvin.com/niceyaml v0.0.0-20261031072356-ce2a6c4c720b
-	go.jacobcolvin.com/niceyaml/bubbles v0.0.0-00010101000000-000000000000
-	go.jacobcolvin.com/niceyaml/fangs v0.0.0-00010101000000-000000000000
+	go.jacobcolvin.com/niceyaml v0.0.0-20261112054121-ffcd17088c47
+	go.jacobcolvin.com/niceyaml/bubbles v0.0.0-20261112054121-ffcd17088c47
+	go.jacobcolvin.com/niceyaml/fangs v0.0.0-20261112054121-ffcd17088c47
 	go.jacobcolvin.com/x/cobras v0.1.0
 	go.jacobcolvin.com/x/stringtest v0.2.0
 )

@@ -13,9 +13,11 @@ commands as `task check:all` runs locally.
   matching Taskfile target inside the project's devbox environment through the
   `devbox` toolchain. The module mounts the Go module, Go checksum database,
   Go build, and golangci-lint caches for these runs.
-- `build-pinned` runs `task go:build:pinned`, which builds bubbles and fangs
-  against the niceyaml version each requires. It fails until that version is a
-  pushed commit with every package and name the module uses.
+- `build-pinned` runs `task go:build:pinned`, which builds bubbles, fangs, and
+  the nyaml CLI against the module versions each requires. It fails until each
+  required version is a pushed commit with every package and name the module
+  uses. It also fails when `cmd/nyaml/go.mod` has a replace or an exclude
+  directive, because `go install` refuses a module that has one.
 - `test-coverage` runs the coverage target the same way and returns the
   coverage profile file.
 - `lint-renovate` (+check) validates the Renovate configuration with
