@@ -2363,6 +2363,572 @@ func TestWithAllowedFieldPrefixes(t *testing.T) {
 	}
 }
 
+func TestWithAllowedFields(t *testing.T) {
+	t.Parallel()
+
+	type nested struct {
+		A int `yaml:"a"`
+	}
+
+	type store struct {
+		Base   nested   `yaml:"base"`
+		Nested nested   `yaml:"nested"`
+		Items  []nested `yaml:"items"`
+		Bucket string   `yaml:"bucket"`
+	}
+
+	type typed struct {
+		Type   string `yaml:"type"`
+		Bucket string `yaml:"bucket"`
+	}
+
+	strict := niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject)
+	rootType := paths.Doc().Child("type")
+
+	tcs := map[string]struct {
+		input string
+		at    paths.Path
+		err   string
+		opts  []niceyaml.DecodeOption
+	}{
+		"admits only the exact key": {
+			input: stringtest.LinesLF(
+				"type: s3",
+				"bucket: b",
+				"nested:",
+				"  a: 1",
+				"  type: oops",
+				"  typeahead: 2",
+			),
+			opts: []niceyaml.DecodeOption{strict, niceyaml.WithAllowedFields(rootType)},
+			err: stringtest.JoinLF(
+				"2 unknown fields",
+				`5:3: $.nested.type~: unknown field "type"`,
+				`6:3: $.nested.typeahead~: unknown field "typeahead"`,
+			),
+		},
+		"an @ path reads from the root of a document decode": {
+			input: "type: s3\nbucket: b\n",
+			opts: []niceyaml.DecodeOption{
+				strict, niceyaml.WithAllowedFields(paths.Current().Child("type")),
+			},
+		},
+		"a path to the key admits the key": {
+			input: "type: s3\nbucket: b\n",
+			opts:  []niceyaml.DecodeOption{strict, niceyaml.WithAllowedFields(rootType.Key())},
+		},
+		"an @ path reads from the node of a scoped decode": {
+			input: stringtest.LinesLF(
+				"type: outer",
+				"store:",
+				"  type: s3",
+				"  bucket: b",
+			),
+			at: paths.Doc().Child("store"),
+			opts: []niceyaml.DecodeOption{
+				strict, niceyaml.WithAllowedFields(paths.Current().Child("type")),
+			},
+		},
+		"a $ path reads from the root in a scoped decode": {
+			input: stringtest.LinesLF(
+				"store:",
+				"  type: s3",
+				"  bucket: b",
+			),
+			at: paths.Doc().Child("store"),
+			opts: []niceyaml.DecodeOption{
+				strict, niceyaml.WithAllowedFields(paths.Doc().Child("store", "type")),
+			},
+		},
+		"a path outside the decoded node admits nothing": {
+			input: stringtest.LinesLF(
+				"type: outer",
+				"store:",
+				"  type: s3",
+				"  bucket: b",
+			),
+			at:   paths.Doc().Child("store"),
+			opts: []niceyaml.DecodeOption{strict, niceyaml.WithAllowedFields(rootType)},
+			err:  `3:3: $.store.type~: unknown field "type"`,
+		},
+		"a wildcard admits every key it selects": {
+			input: stringtest.LinesLF(
+				"bucket: b",
+				"items:",
+				"  - a: 1",
+				"    type: x",
+				"  - a: 2",
+				"    type: y",
+				"  - a: 3",
+				"    kind: z",
+			),
+			opts: []niceyaml.DecodeOption{
+				strict, niceyaml.WithAllowedFields(paths.Doc().Child("items").IndexAll().Child("type")),
+			},
+			err: `8:5: $.items[2].kind~: unknown field "kind"`,
+		},
+		// The decode admits a key by the key in the document. A key that
+		// the path reaches through an alias or a merge key is admitted at
+		// its anchor, so the anchor admits it too.
+		"admits a key that an alias brings in at its anchor": {
+			input: stringtest.LinesLF(
+				"bucket: b",
+				"base: &b",
+				"  a: 0",
+				"  type: x",
+				"nested: *b",
+			),
+			opts: []niceyaml.DecodeOption{
+				strict, niceyaml.WithAllowedFields(paths.Doc().Child("nested", "type")),
+			},
+		},
+		"admits a key that a merge key brings in at its anchor": {
+			input: stringtest.LinesLF(
+				"bucket: b",
+				"base: &b",
+				"  a: 0",
+				"  type: x",
+				"nested:",
+				"  <<: *b",
+				"  a: 1",
+			),
+			opts: []niceyaml.DecodeOption{
+				strict, niceyaml.WithAllowedFields(paths.Doc().Child("nested", "type")),
+			},
+		},
+		"a key of its own hides the key that a merge key brings in": {
+			input: stringtest.LinesLF(
+				"bucket: b",
+				"base: &b",
+				"  a: 0",
+				"  type: x",
+				"nested:",
+				"  <<: *b",
+				"  type: y",
+			),
+			opts: []niceyaml.DecodeOption{
+				strict, niceyaml.WithAllowedFields(paths.Doc().Child("nested", "type")),
+			},
+			err: `4:3: $.base.type~: unknown field "type"`,
+		},
+		// A key of its own makes the merge key read a copy of the anchor
+		// without that key. The copy also leaves out each other key that
+		// the decode admits at the anchor.
+		"a merge key before a key of its own reads the anchor as the cut leaves it": {
+			input: stringtest.LinesLF(
+				"bucket: b",
+				"base: &b",
+				"  a: 0",
+				"  type: x",
+				"  kind: k",
+				"nested:",
+				"  <<: *b",
+				"  kind: mine",
+			),
+			opts: []niceyaml.DecodeOption{
+				strict, niceyaml.WithAllowedFields(
+					paths.Doc().Child("nested", "kind"),
+					paths.Doc().Child("nested", "type"),
+					paths.Doc().Child("base", "kind"),
+				),
+			},
+		},
+		"each option adds to the keys before it": {
+			input: "type: s3\nkind: k\nbucket: b\nnote: n\n",
+			opts: []niceyaml.DecodeOption{
+				strict,
+				niceyaml.WithAllowedFields(rootType),
+				niceyaml.WithAllowedFields(paths.Doc().Child("kind")),
+			},
+			err: `4:1: $.note~: unknown field "note"`,
+		},
+		"changes nothing in a decode that accepts unknown fields": {
+			input: "type: s3\nbucket: b\nnote: n\n",
+			opts:  []niceyaml.DecodeOption{niceyaml.WithAllowedFields(rootType)},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.AtOrSelf(t, yamltest.FirstDocument(t, tc.input), tc.at)
+
+			got, err := doc.Decode[store](t.Context(), tc.opts...)
+			if tc.err != "" {
+				require.EqualError(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, "b", got.Bucket)
+		})
+	}
+
+	t.Run("a key with a field decodes into it", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, "type: s3\nbucket: b\n")
+
+		got, err := doc.Decode[typed](t.Context(), strict, niceyaml.WithAllowedFields(rootType))
+		require.NoError(t, err)
+		assert.Equal(t, typed{Type: "s3", Bucket: "b"}, got)
+	})
+
+	// An anchor whose type declares the key keeps it, so the alias or the
+	// merge key that reads the anchor elsewhere sees the key too.
+	type mix struct {
+		Base   typed  `yaml:"base"`
+		Nested nested `yaml:"nested"`
+	}
+
+	baseType := paths.Doc().Child("base", "type")
+	nestedType := paths.Doc().Child("nested", "type")
+
+	anchors := map[string]struct {
+		input string
+		keys  []paths.Path
+	}{
+		"an alias reads the key of an anchor with the field": {
+			input: "base: &b\n  type: x\nnested: *b\n",
+			keys:  []paths.Path{nestedType},
+		},
+		"a merge key reads the key of an anchor with the field": {
+			input: "base: &b\n  type: x\nnested:\n  <<: *b\n",
+			keys:  []paths.Path{nestedType},
+		},
+		"the path of the anchor before the path of the alias": {
+			input: "base: &b\n  type: x\nnested: *b\n",
+			keys:  []paths.Path{baseType, nestedType},
+		},
+		"the path of the alias before the path of the anchor": {
+			input: "base: &b\n  type: x\nnested: *b\n",
+			keys:  []paths.Path{nestedType, baseType},
+		},
+		"a wildcard selects the anchor and the alias": {
+			input: "base: &b\n  type: x\nnested: *b\n",
+			keys:  []paths.Path{paths.Doc().ChildAll().Child("type")},
+		},
+	}
+
+	for name, tc := range anchors {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input)
+			allowed := niceyaml.WithAllowedFields(tc.keys...)
+
+			_, err := doc.Decode[mix](t.Context(), strict, allowed)
+			require.EqualError(t, err, `2:3: $.nested.type~: unknown field "type"`)
+
+			w := niceyaml.NewWarnings()
+			got, err := doc.Decode[mix](w.Context(t.Context()),
+				niceyaml.WithUnknownFields(niceyaml.UnknownFieldsWarn), allowed)
+			require.NoError(t, err)
+			assert.Equal(t, "x", got.Base.Type)
+			require.EqualError(t, w.Err(), `2:3: warning: $.nested.type~: unknown field "type"`)
+		})
+	}
+
+	// An interface or a map keeps each key that it reads, so it holds
+	// the key of the anchor. The alias that nested reads then reports the
+	// key.
+	keepers := map[string]struct {
+		decode func(context.Context, *niceyaml.Node, ...niceyaml.DecodeOption) (any, error)
+	}{
+		"an interface reads the key of an anchor": {
+			decode: decodeBase[any],
+		},
+		"a map reads the key of an anchor": {
+			decode: decodeBase[map[string]any],
+		},
+	}
+
+	for name, tc := range keepers {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, "base: &b\n  type: x\nnested: *b\n")
+			allowed := niceyaml.WithAllowedFields(nestedType)
+
+			_, err := tc.decode(t.Context(), doc, strict, allowed)
+			require.EqualError(t, err, `2:3: $.nested.type~: unknown field "type"`)
+
+			w := niceyaml.NewWarnings()
+			got, err := tc.decode(w.Context(t.Context()), doc,
+				niceyaml.WithUnknownFields(niceyaml.UnknownFieldsWarn), allowed)
+			require.NoError(t, err)
+			assert.EqualValues(t, map[string]any{"type": "x"}, got)
+			require.EqualError(t, w.Err(), `2:3: warning: $.nested.type~: unknown field "type"`)
+		})
+	}
+
+	// A scoped decode reads an anchor outside its node through an alias or
+	// a merge key below the node. It admits the key there as a decode of
+	// the whole document does.
+	type wrap struct {
+		Inner  nested `yaml:"inner"`
+		Merged nested `yaml:"merged"`
+	}
+
+	outside := stringtest.LinesLF(
+		"base: &b",
+		"  a: 0",
+		"  type: x",
+		"wrap:",
+		"  inner: *b",
+		"  merged:",
+		"    <<: *b",
+		"    a: 2",
+	)
+
+	scoped := map[string]struct {
+		at   paths.Path
+		keys []paths.Path
+		want any
+	}{
+		"an alias below the node reads an anchor outside it": {
+			at:   paths.Doc().Child("wrap"),
+			keys: []paths.Path{paths.Current().Child("inner", "type")},
+			want: wrap{Merged: nested{A: 2}},
+		},
+		"a merge key below the node reads an anchor outside it": {
+			at:   paths.Doc().Child("wrap"),
+			keys: []paths.Path{paths.Current().Child("merged", "type")},
+			want: wrap{Merged: nested{A: 2}},
+		},
+		"a merge key of the node reads an anchor outside it": {
+			at:   paths.Doc().Child("wrap", "merged"),
+			keys: []paths.Path{paths.Current().Child("type")},
+			want: nested{A: 2},
+		},
+	}
+
+	for name, tc := range scoped {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.AtOrSelf(t, yamltest.FirstDocument(t, outside), tc.at)
+			allowed := niceyaml.WithAllowedFields(tc.keys...)
+
+			decode := func(ctx context.Context, opts ...niceyaml.DecodeOption) (any, error) {
+				if _, ok := tc.want.(nested); ok {
+					return doc.Decode[nested](ctx, opts...)
+				}
+
+				return doc.Decode[wrap](ctx, opts...)
+			}
+
+			got, err := decode(t.Context(), strict, allowed)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+
+			w := niceyaml.NewWarnings()
+			got, err = decode(w.Context(t.Context()),
+				niceyaml.WithUnknownFields(niceyaml.UnknownFieldsWarn), allowed)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+			require.NoError(t, w.Err())
+		})
+	}
+
+	// A merge key before a key of its own reads a copy of the anchor
+	// outside the node, without each key that the decode admits there.
+	t.Run("a merge key before a key of its own reads an anchor outside the node", func(t *testing.T) {
+		t.Parallel()
+
+		input := stringtest.LinesLF(
+			"base: &b",
+			"  a: 0",
+			"  type: x",
+			"  kind: k",
+			"wrap:",
+			"  merged:",
+			"    <<: *b",
+			"    kind: mine",
+		)
+
+		doc := yamltest.AtOrSelf(t, yamltest.FirstDocument(t, input), paths.Doc().Child("wrap", "merged"))
+		allowed := niceyaml.WithAllowedFields(paths.Current().Child("type"), paths.Current().Child("kind"))
+
+		got, err := doc.Decode[nested](t.Context(), strict, allowed)
+		require.NoError(t, err)
+		assert.Equal(t, nested{}, got)
+	})
+
+	// The decoder reads each alias through its anchor cache, as it does
+	// without the option. Each alias thus shares the slices that the
+	// decoder made for its anchor.
+	type list struct {
+		A []int `yaml:"a"`
+	}
+
+	type lists struct {
+		Base  list   `yaml:"base"`
+		Items []list `yaml:"items"`
+	}
+
+	shared := map[string]struct {
+		key paths.Path
+	}{
+		"an alias shares the value of an anchor that holds the key": {
+			key: paths.Doc().Child("base", "type"),
+		},
+		"an alias that the path reaches shares the value of its anchor": {
+			key: paths.Doc().Child("items").IndexAll().Child("type"),
+		},
+	}
+
+	for name, tc := range shared {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, "base: &b\n  type: x\n  a: [1, 2]\nitems: [*b, *b]\n")
+
+			got, err := doc.Decode[lists](t.Context(), strict, niceyaml.WithAllowedFields(tc.key))
+			require.NoError(t, err)
+			require.Len(t, got.Items, 2)
+			assert.Equal(t, []int{1, 2}, got.Base.A)
+			assert.Same(t, &got.Base.A[0], &got.Items[0].A[0])
+			assert.Same(t, &got.Base.A[0], &got.Items[1].A[0])
+		})
+	}
+
+	// The decoder reads each anchor once, so the cost of the decode follows
+	// the written size of the document. The value of top expands to 9^8
+	// mappings.
+	t.Run("nested aliases decode at their written size", func(t *testing.T) {
+		t.Parallel()
+
+		type level0 []nested
+
+		type levels struct {
+			Base nested               `yaml:"base"`
+			L0   level0               `yaml:"l0"`
+			L1   []level0             `yaml:"l1"`
+			L2   [][]level0           `yaml:"l2"`
+			L3   [][][]level0         `yaml:"l3"`
+			L4   [][][][]level0       `yaml:"l4"`
+			L5   [][][][][]level0     `yaml:"l5"`
+			L6   [][][][][][]level0   `yaml:"l6"`
+			Top  [][][][][][][]level0 `yaml:"top"`
+		}
+
+		var b strings.Builder
+
+		b.WriteString("base: &a {a: 1, type: t}\n")
+
+		prev := "a"
+		for _, name := range []string{"l0", "l1", "l2", "l3", "l4", "l5", "l6", "top"} {
+			fmt.Fprintf(&b, "%s: &%s [%s]\n", name, name,
+				strings.Join(slices.Repeat([]string{"*" + prev}, 9), ", "))
+
+			prev = name
+		}
+
+		src := niceyaml.NewSourceFromString(b.String(), niceyaml.WithAliasLimit(false))
+		doc := yamltest.Document(t, src)
+
+		got, err := doc.Decode[levels](t.Context(), strict,
+			niceyaml.WithAllowedFields(paths.Doc().Child("base", "type")))
+		require.NoError(t, err)
+		assert.Equal(t, nested{A: 1}, got.Top[8][8][8][8][8][8][8][8])
+	})
+
+	// A scoped decode registers the anchors outside its node with the cut
+	// content. An anchor that the node reads only through another anchor
+	// thus loses the key too.
+	t.Run("a scoped decode reads nested anchors outside its node", func(t *testing.T) {
+		t.Parallel()
+
+		type pair struct {
+			One []nested `yaml:"one"`
+			Two []nested `yaml:"two"`
+		}
+
+		doc := yamltest.AtOrSelf(t, yamltest.FirstDocument(t, stringtest.LinesLF(
+			"base: &b {a: 1, type: x}",
+			"list: &l [*b, *b]",
+			"wrap:",
+			"  one: *l",
+			"  two: *l",
+		)), paths.Doc().Child("wrap"))
+
+		allowed := niceyaml.WithAllowedFields(paths.Current().Child("one").IndexAll().Child("type"))
+		want := pair{One: []nested{{A: 1}, {A: 1}}, Two: []nested{{A: 1}, {A: 1}}}
+
+		got, err := doc.Decode[pair](t.Context(), strict, allowed)
+		require.NoError(t, err)
+		assert.Equal(t, want, got)
+
+		_, err = doc.Decode[pair](t.Context(), strict)
+		require.ErrorIs(t, err, niceyaml.ErrUnknownField)
+	})
+
+	t.Run("a value that decodes itself does not read the key", func(t *testing.T) {
+		t.Parallel()
+
+		type config struct {
+			Base rawString `yaml:"base"`
+		}
+
+		doc := yamltest.FirstDocument(t, "base:\n  a: 1\n  type: x\n")
+
+		got, err := doc.Decode[config](t.Context(), strict,
+			niceyaml.WithAllowedFields(paths.Doc().Child("base", "type")))
+		require.NoError(t, err)
+		assert.Contains(t, string(got.Base), "a: 1")
+		assert.NotContains(t, string(got.Base), "type")
+	})
+
+	// The decode cannot tell which keys a merge key from a reference
+	// document hides, so it reads each entry before that merge key.
+	t.Run("an entry before a merge key from a reference document", func(t *testing.T) {
+		t.Parallel()
+
+		type config struct {
+			Nested typed `yaml:"nested"`
+		}
+
+		refs := niceyaml.NewSourceFromString("defaults: &d {bucket: b}\n")
+		src := niceyaml.NewSourceFromString("nested:\n  type: x\n  <<: *d\n", niceyaml.WithReferences(refs))
+		doc := yamltest.Document(t, src)
+
+		got, err := doc.Decode[config](t.Context(), strict, niceyaml.WithAllowedFields(nestedType))
+		require.NoError(t, err)
+		assert.Equal(t, typed{Type: "x", Bucket: "b"}, got.Nested)
+	})
+}
+
+// anchorReader reads an anchored mapping at base as a B. It reads the
+// same mapping at nested through an alias, as a struct without a type
+// field.
+type anchorReader[B any] struct {
+	Base   B `yaml:"base"`
+	Nested struct {
+		A int `yaml:"a"`
+	} `yaml:"nested"`
+}
+
+// decodeBase decodes n into an [anchorReader] of B with opts, and returns
+// the value at base.
+func decodeBase[B any](ctx context.Context, n *niceyaml.Node, opts ...niceyaml.DecodeOption) (any, error) {
+	got, err := n.Decode[anchorReader[B]](ctx, opts...)
+
+	return got.Base, err
+}
+
+// rawString is a string that decodes itself from the text go-yaml hands
+// it.
+type rawString string
+
+func (r *rawString) UnmarshalYAML(data []byte) error {
+	*r = rawString(data)
+
+	return nil
+}
+
 // plainLevel has no method of its own. A function from
 // niceyaml.CustomUnmarshaler decodes it from the name of a level.
 type plainLevel int

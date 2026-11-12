@@ -48,6 +48,7 @@ import (
 //   - [WithNodeCheck]
 //   - [WithUnknownFields]
 //   - [WithAllowedFieldPrefixes]
+//   - [WithAllowedFields]
 //   - [WithUnmarshaler]
 //   - [WithYAMLOrderedMaps]
 //   - [WithDefaults]
@@ -72,7 +73,7 @@ type decodeConfig struct {
 	// The functions from [WithValueCheck] and [WithNodeCheck], in the
 	// order given.
 	checks []valueCheck
-	// The paths of the keys that [hook.KnownKeys] admits.
+	// The paths of the keys that [WithAllowedFields] admits.
 	knownKeys []paths.Path
 	// The types that the options give an unmarshaler, which the go-yaml
 	// decoder does not call on its own.
@@ -535,6 +536,7 @@ func (m *UnknownFieldsMode) UnmarshalText(text []byte) error {
 // UnknownFieldsReject reports these keys:
 //
 //   - A key under a prefix that [WithAllowedFieldPrefixes] allows.
+//   - A key at a path that [WithAllowedFields] admits.
 //   - A key below a field of an interface type.
 //   - A key in a mapping that holds a key that the decoder does not read as
 //     a string.
@@ -576,6 +578,65 @@ func WithUnknownFields(mode UnknownFieldsMode) DecodeOption {
 func WithAllowedFieldPrefixes(prefixes ...string) DecodeOption {
 	return func(c *decodeConfig) {
 		c.allowedFieldPrefixes = append(c.allowedFieldPrefixes, prefixes...)
+	}
+}
+
+// WithAllowedFields is a [DecodeOption] that lets the document hold the
+// key at each of keys, even under [UnknownFieldsReject] or
+// [UnknownFieldsWarn]. A loader that picks the Go type from a field such
+// as "type" or "kind" admits that field. The decode still rejects a key
+// of the same name that a nested mapping writes:
+//
+//	s3, err := doc.Decode[S3](ctx,
+//		niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject),
+//		niceyaml.WithAllowedFields(paths.Current().Child("type")),
+//	)
+//
+// Each key names an entry by the path of its value, such as `$.type`, or
+// by the path of its key, such as `$.type~`. A `$` path reads from the
+// root of the document. An `@` path reads from the node that the decode
+// reads, so it suits a decode with [Node.DecodeAt] or on a Node from
+// [Node.At]. A path with a `[*]`, `.*`, `..name`, or `..*` selector admits
+// the key of every entry that it selects. A path that does not select an
+// entry below the node that the decode reads admits nothing.
+// [WithAllowedFieldPrefixes] instead admits a name at any depth.
+//
+// The decode admits each key where the document writes it. A path that
+// reaches its entry through an alias or a `<<` merge key finds the key
+// in the anchored mapping. The decode reads that key at the anchor and at
+// every alias and merge key that reads the anchor. With `$.nested.type`
+// admitted, the decode thus also accepts the key at `$.base.type` here.
+// It does so when the type of base does not have a field for the key:
+//
+//	base: &b
+//	  type: x
+//	nested: *b
+//
+// A path whose mapping writes the key itself finds that key, so a `<<`
+// merge key in that mapping does not admit the key of its anchor.
+//
+// A read keeps an admitted key when a field of a struct, a map, or an
+// interface takes the key. The decoder fills each field that takes it.
+// When one read of a key keeps it, each read of the key that does not
+// keep it reports an unknown field. In the document shown, a type of
+// base with a type field thus has the decode report `$.nested.type~`
+// when the type of nested does not have one.
+//
+// The decode leaves out each admitted key that no read keeps. A value
+// that decodes itself, such as one with an UnmarshalYAML method, does not
+// keep an admitted key below it. Its unmarshaler thus sees the key only
+// when another read keeps it. An admitted key that the decode leaves out
+// also hides each entry of its name that a `<<` merge key before it
+// brings in. The decode leaves those entries out too. A [Validator] of
+// the decode still sees each key.
+//
+// Each WithAllowedFields adds to the keys given before it. The option
+// does not change a decode under [UnknownFieldsIgnore].
+func WithAllowedFields(keys ...paths.Path) DecodeOption {
+	keys = slices.Clone(keys)
+
+	return func(c *decodeConfig) {
+		c.knownKeys = append(c.knownKeys, keys...)
 	}
 }
 
@@ -831,8 +892,9 @@ func WithYAMLOrderedMaps(enabled bool) DecodeOption {
 // decode that a bundle does not reach, such as one inside a [Validator],
 // then applies them too.
 //
-// [WithValidator], [WithValueCheck], [WithNodeCheck], and
-// [WithAllowedFieldPrefixes] add to what the options before them gave,
+// [WithValidator], [WithValueCheck], [WithNodeCheck],
+// [WithAllowedFieldPrefixes], and [WithAllowedFields] add to what the
+// options before them gave,
 // and [WithUnmarshaler] applies its unmarshalers over the earlier ones,
 // as [Unmarshaler] describes. Every
 // other option replaces what an earlier one of its kind set. A call that
@@ -1642,7 +1704,7 @@ func (n *Node) decodeUnbound(
 		return n.decodeRejection(err)
 	}
 
-	cut := n.admitKnownKeys(cfg, reflect.TypeOf(v).Elem(), view)
+	cut := n.admitKnownKeys(ctx, n.walkRules(ctx, dec, cfg.unmarshalers), cfg, reflect.TypeOf(v).Elem(), node, view)
 
 	// The view that the decoder reads leaves out entries and the anchors in
 	// them. Its copies of the mappings that merge keys bring in do not hold
@@ -1654,6 +1716,18 @@ func (n *Node) decodeUnbound(
 		var sink any
 
 		_ = decodeWithRecover(ctx, dec, view, &sink) //nolint:errcheck // The decode of the cut reports it.
+	}
+
+	// The decoder registers each anchor outside node again with the cut
+	// content, so its aliases read the anchor without the cut entries. The
+	// read view does the same for the anchors inside node.
+	for _, anchor := range cut.anchors {
+		var sink any
+
+		err = decodeWithRecover(ctx, dec, anchor, &sink)
+		if err != nil {
+			return n.decodeRejection(n.rejection(err, anchor, firstRead))
+		}
 	}
 
 	view = cut.view
@@ -2957,16 +3031,16 @@ func (c *problemCollector) collect(t reflect.Type, node ast.Node) {
 }
 
 // collectUnknown finds the unknown fields of a decode of node into a value
-// of type t, other than the known keys of the decode. The decoder of the
-// collector must reject unknown fields, and [problemCollector.register]
-// must have read node.
+// of type t, other than the known keys that the decode cuts, as
+// [Node.cutKeys] finds them. The decoder of the collector must reject
+// unknown fields, and [problemCollector.register] must have read node.
 func (c *problemCollector) collectUnknown(t reflect.Type, node ast.Node) {
-	known := c.node.knownKeys(c.cfg)
+	cut := c.node.cutKeys(c.ctx, c.rules, c.cfg, t, node)
 
 	for _, field := range decodewalk.UnknownFields(c.ctx, c.rules, t, node) {
 		// The search reads node, which holds the known keys that the view
 		// of the decode leaves out.
-		if _, ok := known[position.NewFromToken(field.Err.Token)]; ok {
+		if cut[position.NewFromToken(field.Err.Token)] {
 			continue
 		}
 
