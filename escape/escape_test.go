@@ -50,8 +50,24 @@ func TestControl(t *testing.T) {
 			input: "\x00\u0080\x1b\u009B\x7f\u009F",
 			want:  "␀\ufffd␛\ufffd␡\ufffd",
 		},
-		"wide runes unchanged":                           {input: "日本語\x1bテスト", want: "日本語␛テスト"},
-		"right-to-left override unchanged":               {input: "a\u202etxt.lmay", want: "a\u202etxt.lmay"},
+		"wide runes unchanged":   {input: "日本語\x1bテスト", want: "日本語␛テスト"},
+		"right-to-left override": {input: "a\u202etxt.lmay", want: "a\ufffdtxt.lmay"},
+		"all embeddings and overrides": {
+			input: "\u202a\u202b\u202c\u202d\u202e",
+			want:  strings.Repeat("\uFFFD", 5),
+		},
+		"all isolates": {
+			input: "\u2066\u2067\u2068\u2069",
+			want:  strings.Repeat("\uFFFD", 4),
+		},
+		"runes next to the embeddings and isolates unchanged": {
+			input: "\u2029\u202f\u2065\u206a",
+			want:  "\u2029\u202f\u2065\u206a",
+		},
+		"direction marks unchanged": {
+			input: "a\u200eb\u200fc\u061cd",
+			want:  "a\u200eb\u200fc\u061cd",
+		},
 		"zero width space and byte order mark unchanged": {input: "a\u200bb\ufeffc", want: "a\u200bb\ufeffc"},
 		"line and paragraph separators unchanged":        {input: "a b c", want: "a b c"},
 	}

@@ -6028,10 +6028,11 @@ func rowLetterGutter(ctx printer.GutterContext) string {
 func TestColWidth(t *testing.T) {
 	t.Parallel()
 
-	// The width is that of the rendered row. A control character shows in
-	// one cell, a wide rune takes two cells, and every rune of a grapheme
-	// cluster after its first renders within the first. An
-	// AnnotationContext measures its content the same way.
+	// The width is that of the rendered row. Each control character and
+	// each bidirectional override shows in one cell, and a wide rune takes
+	// two cells. Every rune of a grapheme cluster after its first renders
+	// within the first. An AnnotationContext measures its content the same
+	// way.
 	tcs := map[string]struct {
 		content string
 		col     int
@@ -6054,6 +6055,8 @@ func TestColWidth(t *testing.T) {
 		"after a zwj sequence":       {content: "a: \U0001F468\u200d\U0001F469 x", col: 7, want: 6},
 		"inside a keycap":            {content: "a: 1\ufe0f\u20e3 x", col: 5, want: 3},
 		"after a keycap":             {content: "a: 1\ufe0f\u20e3 x", col: 7, want: 6},
+		"after a bidi override":      {content: "a: \u202ex", col: 4, want: 4},
+		"mark after a bidi override": {content: "a: \u202e\u0301x", col: 5, want: 4},
 	}
 
 	for name, tc := range tcs {

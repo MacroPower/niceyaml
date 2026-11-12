@@ -696,6 +696,36 @@ func TestSourceError_Error_NameControl(t *testing.T) {
 	assert.Equal(t, name, source.Name())
 }
 
+func TestFormatError_BidiControls(t *testing.T) {
+	t.Parallel()
+
+	// A display that applies the Unicode bidirectional algorithm reorders
+	// a row at an override or an isolate. The name, the path, the key in
+	// the message, and the excerpt each hold such runes, and none reach
+	// the output.
+	source := niceyaml.NewSourceFromString(
+		"role: user\n\"ro\u202e\u2066el\u2069\u2066\": admin\n",
+		niceyaml.WithName("conf\u202elmay.gif"),
+	)
+
+	var cfg struct {
+		Role string `yaml:"role"`
+	}
+
+	err := source.DecodeInto(t.Context(), &cfg, niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject))
+	require.Error(t, err)
+
+	// Each rune of the key takes one cell, so the carets sit under it.
+	assert.Equal(t, stringtest.JoinLF(
+		"conf\ufffdlmay.gif:2:1: "+
+			`$.'ro\u202e\u2066el\u2069\u2066'~: `+
+			"unknown field \"ro\ufffd\ufffdel\ufffd\ufffd\"",
+		"",
+		"   2 | \"ro\ufffd\ufffdel\ufffd\ufffd\": admin",
+		"     | ^^^^^^^^^^",
+	), niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
+}
+
 func TestSourceError_Error_Document(t *testing.T) {
 	t.Parallel()
 
