@@ -8,4 +8,4 @@ pre-commit:
 commit-msg:
   commands:
     commitlint:
-      run: devbox run -- dagger --progress=logs call commitlint lint --source=. --msg-file={1}
+      run: devbox run -- dagger --progress=logs call ci lint-commit --msg-file={1}

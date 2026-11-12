@@ -31,8 +31,8 @@ speed, and CI keeps it for reproducibility.
 
 ### Toolchain Checks
 
-Two gates compose a sibling toolchain directly rather than running through
-devbox, because their tools are not on the devbox PATH.
+These functions compose a sibling toolchain directly rather than running
+through devbox, because their tools are not on the devbox PATH.
 
 - `lint-actions` (+check) lints the GitHub Actions workflows for security issues
   by composing the `zizmor` toolchain. It pins `.github/zizmor.yaml` as the
@@ -41,6 +41,10 @@ devbox, because their tools are not on the devbox PATH.
   composing the `security` toolchain (Trivy). `security-source-sarif` is the
   non-gating counterpart. It returns a SARIF file for upload to GitHub Code
   Scanning rather than failing on findings.
+- `lint-commit` lints a commit message file by composing the `commitlint`
+  toolchain. The commit-msg hook in `.lefthook.yaml` calls it. The function
+  gives commitlint only `.commitlintrc.yaml` and an empty `.git` directory, so
+  the lint runs the same way from the main checkout and from a linked worktree.
 
 niceyaml ships as a library, and users `go install` the `nyaml` CLI, so this
 module has no release pipeline.
@@ -49,9 +53,10 @@ module has no release pipeline.
 
 - `main.go` defines the `Ci` module (Go module path `dagger/ci`) and the check
   functions.
-- `dagger.json` depends on three toolchains from `github.com/MacroPower/x`. The
-  `devbox` toolchain runs the task checks, the `security` toolchain runs the
-  vulnerability scan, and the `zizmor` toolchain lints the Actions workflows.
+- `dagger.json` depends on toolchains from `github.com/MacroPower/x`. The
+  `commitlint` toolchain lints commit messages, the `devbox` toolchain runs the
+  task checks, the `security` toolchain runs the vulnerability scan, and the
+  `zizmor` toolchain lints the Actions workflows.
 - The module has no `tests/` submodule.
 
 The `engineVersion` in `dagger.json` must match the root `dagger.json` and the

@@ -6,6 +6,11 @@
   },
   "dependencies": [
     {
+      "name": "commitlint",
+      "source": "github.com/MacroPower/x/toolchains/commitlint@main",
+      "pin": "2bc664dbb746234f0aa15333198e5a7f7caaf17d"
+    },
+    {
       "name": "devbox",
       "source": "github.com/MacroPower/x/toolchains/devbox@main",
       "pin": "2bc664dbb746234f0aa15333198e5a7f7caaf17d"

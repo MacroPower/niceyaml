@@ -5,8 +5,9 @@
 // same commands that developers run locally. A local run skips the container
 // for speed, and CI keeps it for reproducibility.
 //
-// LintActions and Security each compose a sibling toolchain directly
-// instead, because their tools are not on the devbox PATH. LintActions runs the zizmor
+// LintActions, LintCommit, and Security each compose a sibling toolchain
+// directly instead, because their tools are not on the devbox PATH.
+// LintActions runs the zizmor toolchain, LintCommit runs the commitlint
 // toolchain, and Security runs the security toolchain, which wraps Trivy.
 // LintRenovate runs a pinned renovate-config-validator in a Node container,
 // because devbox and the shared toolchains do not provide the validator.
@@ -19,6 +20,10 @@ import (
 )
 
 const (
+	// commitlintConfig is the commitlint configuration file that
+	// [Ci.LintCommit] uses, relative to the source root.
+	commitlintConfig = ".commitlintrc.yaml"
+
 	// renovateConfig is the Renovate configuration file that [Ci.LintRenovate]
 	// validates, relative to the source root.
 	renovateConfig = ".github/renovate.json5"
@@ -51,6 +56,8 @@ const (
 type Ci struct {
 	// Source is the project source directory.
 	Source *dagger.Directory
+	// Commitlint is the commitlint toolchain that backs [Ci.LintCommit].
+	Commitlint *dagger.Commitlint // +private
 	// Devbox is the devbox toolchain that the task-based checks run inside.
 	Devbox *dagger.Devbox // +private
 	// Scanner is the security toolchain that backs [Ci.Security] with Trivy.
@@ -69,6 +76,9 @@ func New(
 ) *Ci {
 	return &Ci{
 		Source: source,
+		Commitlint: dag.Commitlint(dagger.CommitlintOpts{
+			CacheNamespace: cacheNamespace + ":commitlint",
+		}),
 		Devbox: dag.Devbox(dagger.DevboxOpts{
 			Source:         source,
 			CacheNamespace: cacheNamespace,
@@ -192,6 +202,30 @@ func (m *Ci) SecuritySourceSarif() *dagger.File {
 // +check
 func (m *Ci) LintActions(ctx context.Context) error {
 	return m.Zizmor.Lint(ctx)
+}
+
+// LintCommit lints a commit message file by composing the commitlint
+// toolchain directly. The commit-msg hook in .lefthook.yaml calls it with the
+// message file that git names.
+//
+// The toolchain gets a directory that holds only .commitlintrc.yaml and an
+// empty .git directory, not the checkout. commitlint takes the nearest
+// directory with an entry named .git as the repository root, and it asks git
+// for core.commentChar. In a linked worktree, .git is a file that points to a
+// host path outside the container, so git reports a fatal error there. That
+// error prints beside every rejected message and reads as its cause. With the
+// empty directory, git finds no repository and reports no error, and
+// commitlint strips the comment lines that start with "#". A core.commentChar
+// setting in the repository has no effect on the lint.
+func (m *Ci) LintCommit(
+	ctx context.Context,
+	// Commit message file to lint, such as .git/COMMIT_EDITMSG.
+	msgFile *dagger.File,
+) error {
+	source := dag.Directory().
+		WithFile(commitlintConfig, m.Source.File(commitlintConfig)).
+		WithNewDirectory(".git")
+	return m.Commitlint.Lint(ctx, source, dagger.CommitlintLintOpts{MsgFile: msgFile})
 }
 
 // LintRenovate validates the Renovate configuration with

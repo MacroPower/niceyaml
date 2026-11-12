@@ -34,7 +34,7 @@ on the checkout for those two modules.
 CI runs these same tasks inside the devbox environment via the `ci` Dagger
 toolchain (`dagger call ci <task>`), so local and CI execute identical commands.
 The `ci` module composes the shared toolchains from github.com/MacroPower/x
-(devbox, security, zizmor), pinned in `ci/dagger.json` and the root
+(commitlint, devbox, security, zizmor), pinned in `ci/dagger.json` and the root
 `dagger.json`. The `dagger` CLI must be on PATH and match the pinned
 `engineVersion`.
 
