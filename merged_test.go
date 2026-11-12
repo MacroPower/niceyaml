@@ -2736,8 +2736,9 @@ func TestNewSourceFromLayers(t *testing.T) {
 	t.Run("a Source and its Nodes report each syntax error once in any order", func(t *testing.T) {
 		t.Parallel()
 
-		// Each document fails to parse on its own, so the Source fails
-		// with the join of both errors, and each Node with one of them.
+		// Each document fails to parse on its own. The Source thus fails
+		// with one binding that heads both errors, and each Node fails
+		// with one of them.
 		two := niceyaml.NewSourceFromString(stringtest.LinesLF("a: [", "---", "b: {"),
 			niceyaml.WithName("two.yaml"))
 		docs := yamltest.AllDocuments(t, two, 2)

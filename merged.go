@@ -645,10 +645,11 @@ func (l resolvedLayer) contextError(err, ctxErr error) error {
 
 // unreportedError returns the part of err, the error of a layer, that no
 // error of reported holds. It returns nil when reported holds all of err.
-// A Source whose documents fail to parse returns the join of their
-// errors, and each Node of it returns one branch of that join. So
-// unreportedError drops each branch of a join that reported holds, and
-// the merge reports each error once in whatever order the layers come.
+// A Source whose documents fail to parse returns the binding of the join
+// of their errors, and each Node of it returns one branch of that join.
+// So unreportedError drops each branch of such a binding that reported
+// holds, and the merge reports each error once in whatever order the
+// layers come.
 func unreportedError(reported []error, err error) error {
 	held := func(e error) bool {
 		return slices.ContainsFunc(reported, func(r error) bool { return errors.Is(r, e) })
@@ -658,23 +659,22 @@ func unreportedError(reported []error, err error) error {
 		return nil
 	}
 
-	if !multierr.IsJoin(err) {
+	bound, ok := err.(*SourceError) //nolint:errorlint // The error itself, not a chain search.
+	if !ok || !bound.joinsBindings() {
 		return err
 	}
 
-	joined, ok := err.(interface{ Unwrap() []error }) //nolint:errorlint // IsJoin checked the error itself, not a chain.
-	if !ok {
-		return err
+	branches := make([]error, 0, len(bound.below))
+	for _, c := range bound.below {
+		branches = append(branches, c.bound)
 	}
-
-	branches := joined.Unwrap()
 
 	kept := slices.DeleteFunc(slices.Clone(branches), held)
 	if len(kept) == len(branches) {
 		return err
 	}
 
-	return multierr.Join(kept)
+	return bindTree(multierr.Join(kept), binder{src: bound.source})
 }
 
 // mergeLayers implements [NewSourceFromLayers]. It writes the merged text

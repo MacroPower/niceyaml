@@ -1922,7 +1922,7 @@ func trees(kids []positioned) []ErrorTree {
 // parent that does not have a row, and each child then keeps the name.
 func appendBoundChildren(kids []positioned, bound *SourceError, named bool) []positioned {
 	from := len(kids)
-	kids = flatten(kids, bound.below, bound, named)
+	kids = flatten(kids, bound.below, bound, named, false)
 
 	for i := from; i < len(kids); i++ {
 		kid := &kids[i]
@@ -1963,15 +1963,18 @@ func appendBoundChildren(kids []positioned, bound *SourceError, named bool) []po
 // flatten appends children to kids. The slice children holds the children
 // of the binding parent. A child that binds a join does not have a line
 // of its own. So the children of the join take its place, with the join
-// as their parent.
-func flatten(kids []positioned, children []boundChild, parent *SourceError, named bool) []positioned {
+// as their parent. The caller sets filed when the binding of a join of
+// bindings holds parent, and each child then comes from that binding.
+func flatten(kids []positioned, children []boundChild, parent *SourceError, named, filed bool) []positioned {
+	filed = filed || parent.joinsBindings()
+
 	for _, c := range children {
 		// The branches sit beside the other children, so they sort by
 		// position among them rather than under a node of their own.
 		joined := joinBinding(c.bound)
 		if joined != nil {
 			from := len(kids)
-			kids = flatten(kids, joined.below, joined, named || joined.origin() != parent.origin())
+			kids = flatten(kids, joined.below, joined, named || joined.origin() != parent.origin(), filed)
 
 			for i := from; c.detail && i < len(kids); i++ {
 				kids[i].underDetail = true
@@ -1981,7 +1984,7 @@ func flatten(kids []positioned, children []boundChild, parent *SourceError, name
 		}
 
 		kid := placed(c.bound)
-		kid.parent, kid.named, kid.detail = parent, named, c.detail
+		kid.parent, kid.named, kid.detail, kid.filed = parent, named, c.detail, filed
 		kids = append(kids, kid)
 	}
 
@@ -2000,6 +2003,8 @@ type positioned struct {
 	tree   ErrorTree
 	pos    position.Position
 	group  int
+	// The index of the document the child falls in, when inDoc.
+	doc int
 	// Whether the child names its source in its line, as [flatten]
 	// decides.
 	named   bool
@@ -2008,6 +2013,14 @@ type positioned struct {
 	detail bool
 	// Whether a detail that binds a join holds the child.
 	underDetail bool
+	// Whether the child falls in the document at index doc.
+	inDoc bool
+	// Whether the binding of a join of bindings holds the child, as
+	// [flatten] finds it.
+	filed bool
+	// Whether the children of the group sort by document, as [arrange]
+	// decides.
+	byDoc bool
 }
 
 // placed returns child with the source and the position that [trees]
@@ -2016,6 +2029,7 @@ type positioned struct {
 // the one that the message of child carries.
 func placed(child *SourceError) positioned {
 	kid := positioned{src: child.origin(), bound: child}
+	kid.doc, kid.inDoc = child.DocumentIndex()
 
 	if _, ok := child.Range(); ok {
 		kid.located = true
@@ -2027,18 +2041,36 @@ func placed(child *SourceError) positioned {
 
 // arrange sorts kids in place by source, in the order that the sources
 // first appear, and then by position. It sorts by source first because a
-// line number means something only within its own source.
+// line number means something only within its own source. When each
+// child of a source comes from the binding of a join of bindings, as
+// [SourceError.joinsBindings] reports, and each one with a position falls
+// in a document, the children of that source sort by document before
+// position. A child without a position then stays in its document, after
+// the children there with one. The children of a file in which several
+// documents fail thus read in file order.
 func arrange(kids []positioned) []positioned {
 	seen := make([]excerptSource, 0, 1)
+	// Whether a child of the group keeps the group from sorting by
+	// document.
+	outside := make([]bool, 0, 1)
 
 	for i := range kids {
 		group := slices.Index(seen, kids[i].src)
 		if group < 0 {
 			group = len(seen)
 			seen = append(seen, kids[i].src)
+			outside = append(outside, false)
 		}
 
 		kids[i].group = group
+
+		if !kids[i].filed || (kids[i].located && !kids[i].inDoc) {
+			outside[group] = true
+		}
+	}
+
+	for i := range kids {
+		kids[i].byDoc = !outside[kids[i].group]
 	}
 
 	slices.SortStableFunc(kids, comparePositioned)
@@ -2046,24 +2078,46 @@ func arrange(kids []positioned) []positioned {
 	return kids
 }
 
-// comparePositioned orders children by source group and then by position.
-// Children that do not have a position come after those with one. They
-// compare equal among themselves, so a stable sort keeps their order.
+// comparePositioned orders children by source group, then by document
+// where [arrange] set byDoc, and then by position. A child without a
+// position sorts after those with one in its document. A child that does
+// not have a position and does not sort by document comes after the rest.
+// Such children compare equal among themselves, so a stable sort keeps
+// their order.
 func comparePositioned(a, b positioned) int {
+	switch ra, rb := a.trailing(), b.trailing(); {
+	case ra && rb:
+		return 0
+	case ra:
+		return 1
+	case rb:
+		return -1
+	}
+
+	// The children of one group both sort by document or neither does.
 	switch {
+	case a.group != b.group:
+		return a.group - b.group
+	case a.byDoc && a.doc != b.doc:
+		return a.doc - b.doc
 	case !a.located && !b.located:
 		return 0
 	case !a.located:
 		return 1
 	case !b.located:
 		return -1
-	case a.group != b.group:
-		return a.group - b.group
 	case a.pos.Line != b.pos.Line:
 		return a.pos.Line - b.pos.Line
 	default:
 		return a.pos.Col - b.pos.Col
 	}
+}
+
+// trailing reports whether the child sorts after the children that
+// [comparePositioned] places, because it does not have a position and
+// does not sort by document.
+func (p positioned) trailing() bool {
+	return !p.located && (!p.byDoc || !p.inDoc)
 }
 
 // newTree returns node with children below it. Each child that does not
