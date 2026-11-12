@@ -78,10 +78,13 @@ func (e *AliasError) Position() (position.Position, bool) {
 }
 
 // Resolver resolves paths in one document, from its root. The root is the
-// node a `$` path reads from. A Resolver does not have another node for an
-// `@` path to read from, so it reads both kinds of path from the root.
-// [Resolver.NodeFrom] takes the node that an `@` path reads from. Every
-// path a Resolver returns starts at `$`.
+// node a `$` path reads from. An `@` path reads from the current node, and
+// only [Resolver.NodeFrom] and [Resolver.MatchesFrom] take one. The other
+// methods that resolve a path return an error wrapping [ErrNoCurrentNode]
+// for an `@` path, and [Resolver.Nearest] reports false for one. To read
+// an `@` path from the root, join [Doc] with it, as in
+// paths.Doc().Join(p). The join leaves a `$` path as it is. The paths that
+// [Resolver.Matches] and [Resolver.Nearest] return start at `$`.
 //
 // A Resolver binds each alias of the document to its anchor once, when a
 // path first needs the binding, as at an alias. Resolving many paths in one
@@ -137,8 +140,8 @@ func WithReferenceAnchors(anchor func(name string) (ast.Node, bool)) ResolverOpt
 }
 
 // NewResolver creates a new [*Resolver] for doc with opts. A nil doc gives
-// a Resolver without a document to resolve in, so each of its resolve
-// methods returns an error wrapping [ErrNoDocument].
+// a Resolver without a document to resolve in. Each of its resolve methods
+// thus returns an error wrapping [ErrNoDocument] for a `$` path.
 func NewResolver(doc *ast.DocumentNode, opts ...ResolverOption) *Resolver {
 	var cfg resolverConfig
 
@@ -156,13 +159,13 @@ func NewResolver(doc *ast.DocumentNode, opts ...ResolverOption) *Resolver {
 	return &Resolver{doc: doc, resolver: r}
 }
 
-// Node resolves the node at p in the document of the Resolver.
+// Node resolves the node at the `$` path p in the document of the
+// Resolver.
 //
-// The document root is the node a `$` path reads from. A Resolver does not
-// have another node to start at, so an `@` path also reads from the
-// document root. Such a path selects the node that the `$` path with the
-// same selectors selects. [Resolver.NodeFrom] takes the node that an `@`
-// path reads from.
+// The document root is the node a `$` path reads from. Node does not have
+// a current node for an `@` path to read from, so it returns an error
+// wrapping [ErrNoCurrentNode] for one. [Resolver.NodeFrom] takes the node
+// that an `@` path reads from.
 //
 // Node looks through anchors and aliases, so the result is the content the
 // path names. It stops at a tag, because the tag decides how that content
@@ -187,14 +190,15 @@ func NewResolver(doc *ast.DocumentNode, opts ...ResolverOption) *Resolver {
 // a path with a `~` after either. [Resolver.Token] still points at the
 // element or the root for a path that ends in such a `~`.
 //
-// Returns [ErrWildcard] for a path with a `.*`, `[*]`, or `..` selector.
-// Resolve such a path with [Resolver.Nodes]. Wraps [ErrNotFound] when
-// nothing exists at the path, together with [ErrNoDocument] when the
-// document lacks content to resolve in. Wraps [ErrAlias] when an alias on
-// the path does not resolve, including one under a tag. That error is an
-// [*AliasError], which carries the alias and the path. Wraps
-// [ErrExcessiveMerging] when the key lookups of a selector read far more
-// nodes under `<<` merge keys than the document holds.
+// Wraps [ErrNoCurrentNode] for an `@` path. Returns [ErrWildcard] for a
+// path with a `.*`, `[*]`, or `..` selector. Resolve such a path with
+// [Resolver.Nodes]. Wraps [ErrNotFound] when nothing exists at the path,
+// together with [ErrNoDocument] when the document lacks content to resolve
+// in. Wraps [ErrAlias] when an alias on the path does not resolve,
+// including one under a tag. That error is an [*AliasError], which carries
+// the alias and the path. Wraps [ErrExcessiveMerging] when the key lookups
+// of a selector read far more nodes under `<<` merge keys than the document
+// holds.
 func (r *Resolver) Node(p Path) (ast.Node, error) {
 	m, err := p.single(r.resolver, r.doc)
 	if err != nil {
@@ -234,10 +238,11 @@ func (r *Resolver) Node(p Path) (ast.Node, error) {
 // an error that wraps [ErrReferenceAlias], including a selector of an `@`
 // path that starts at the alias.
 //
-// Returns the errors [Resolver.Node] returns. An `@` path resolves in node
-// rather than in the document, so only the errors for a `$` path wrap
-// [ErrNoDocument]. A nil node does not hold anything to resolve in, so
-// NodeFrom wraps [ErrNotFound] for an `@` path and a nil node.
+// Returns the errors [Resolver.Node] returns, other than
+// [ErrNoCurrentNode]. An `@` path resolves in node rather than in the
+// document, so only the errors for a `$` path wrap [ErrNoDocument]. A nil
+// node does not hold anything to resolve in, so NodeFrom wraps
+// [ErrNotFound] for an `@` path and a nil node.
 func (r *Resolver) NodeFrom(node ast.Node, p Path) (ast.Node, error) {
 	if p.absolute {
 		return r.Node(p)
@@ -301,16 +306,20 @@ func (r *Resolver) nodeOf(p Path, m match) (ast.Node, error) {
 // selector does. [Resolver.Node] wraps [ErrNotFound] for such a path, but
 // an error at it still binds to a token.
 //
-// The path resolves only against the document body, from its root,
-// whether the path starts at `$` or `@`. The same path thus resolves to
-// different tokens in different documents of one file. Token returns the
-// same errors as [Resolver.Node], except for a path that ends in a `~`
-// without a key to select. It also does not look through the node the
-// last selector reaches. An alias there that does not resolve yields the
-// alias's own token rather than [ErrAlias]. Such an alias might not name
-// an anchor, or it might sit inside the content of its own anchor. Token
-// still returns [ErrAlias] for an alias that an earlier selector resolves
-// through.
+// The path resolves only against the document body, from its root. The
+// same path thus resolves to different tokens in different documents of
+// one file. Token does not have a current node for an `@` path to read
+// from, so it returns an error wrapping [ErrNoCurrentNode] for one. To
+// find the token of an `@` path below a node, join the `$` path of that
+// node with it, as [Path.Join] gives it.
+//
+// Token returns the same errors as [Resolver.Node], except for a path
+// that ends in a `~` without a key to select. It also does not look
+// through the node the last selector reaches. An alias there that does
+// not resolve yields the alias's own token rather than [ErrAlias]. Such
+// an alias might not name an anchor, or it might sit inside the content
+// of its own anchor. Token still returns [ErrAlias] for an alias that an
+// earlier selector resolves through.
 func (r *Resolver) Token(p Path) (*token.Token, error) {
 	m, err := p.single(r.resolver, r.doc)
 	if err != nil {
@@ -322,8 +331,9 @@ func (r *Resolver) Token(p Path) (*token.Token, error) {
 
 // Nearest returns the path of the nearest node the document holds on the
 // way to p, and reports whether p misses a node below that node. It
-// resolves p from the root of the document, whether p starts at `$` or
-// `@`, and the path it returns starts at `$`.
+// resolves the `$` path p from the root of the document, and the path it
+// returns starts at `$`. Nearest does not have a current node for an `@`
+// path to read from, so it reports false for one.
 //
 // When the document does not hold a node that p names, p does not select
 // anything. Nearest then returns the longest prefix of p that resolves,
@@ -354,14 +364,14 @@ func (r *Resolver) Token(p Path) (*token.Token, error) {
 // an alias that does not resolve also gives false, and so does a
 // document without content.
 func (r *Resolver) Nearest(p Path) (Path, bool) {
-	if p.wildcard() || r.doc == nil || !astnode.HasContent(r.doc.Body) {
+	if !p.absolute || p.wildcard() || r.doc == nil || !astnode.HasContent(r.doc.Body) {
 		return Path{}, false
 	}
 
 	// A prefix resolves whenever a longer one does, so the first prefix
 	// that resolves, from the longest down, is the longest.
 	for k := len(p.segments); k >= 0; k-- {
-		m, err := Path{segments: p.segments[:k]}.single(r.resolver, r.doc)
+		m, err := Path{segments: p.segments[:k], absolute: true}.single(r.resolver, r.doc)
 		if errors.Is(err, ErrNotFound) {
 			continue
 		}
@@ -393,11 +403,10 @@ func (r *Resolver) Nearest(p Path) (Path, bool) {
 //	}
 //
 // A path without `.*`, `[*]`, or `..` selectors yields at most one match.
-// The path of that match is the path as given, starting at `$`. The path
-// of a node reached through an alias is the path as written, not the
-// location of the anchor. The path of an entry that a `<<` merge key
-// brings in is the path of the mapping that merges it. Returns the errors
-// [Resolver.Nodes] returns.
+// The path of that match is the path as given. The path of a node reached
+// through an alias is the path as written, not the location of the anchor.
+// The path of an entry that a `<<` merge key brings in is the path of the
+// mapping that merges it. Returns the errors [Resolver.Nodes] returns.
 //
 // Each node is the one that [Resolver.Node] gives for the path of its
 // match. A match at an alias that reads a reference document thus holds
@@ -430,7 +439,7 @@ func (r *Resolver) Matches(p Path) ([]Match, error) {
 // yields no match. MatchesFrom gets node without the entry that holds it,
 // so an `@` path that starts with a `~` yields no match either. Returns
 // the errors that [Resolver.Matches] returns, other than those that wrap
-// [ErrNoDocument] for an `@` path.
+// [ErrNoCurrentNode] or, for an `@` path, [ErrNoDocument].
 func (r *Resolver) MatchesFrom(node ast.Node, p Path) ([]Match, error) {
 	if p.absolute {
 		return r.Matches(p)
@@ -480,12 +489,13 @@ func (r *Resolver) matchesOf(p Path, found []match, absolute bool) ([]Match, err
 	return matches, nil
 }
 
-// Nodes resolves every node that p selects in the document of the
-// Resolver, in document order. As [Resolver.Node] does, it resolves from
-// the document root whether the path starts at `$` or `@`. A path without
-// `.*`, `[*]`, or `..` selectors yields at most one node, and an empty
-// result means nothing exists at the path. [Resolver.Matches] returns the
-// same nodes with the path that selects each one alone.
+// Nodes resolves every node that p selects in the document of the Resolver,
+// in document order. As [Resolver.Node] does, it resolves a `$` path from
+// the document root and returns an error wrapping [ErrNoCurrentNode] for an
+// `@` path. A path without `.*`, `[*]`, or `..` selectors yields at most
+// one node, and an empty result means nothing exists at the path.
+// [Resolver.Matches] returns the same nodes with the path that selects each
+// one alone.
 //
 // Nodes lists one node for each path that selects it, as
 // [Resolver.Matches] does. A node that several aliases or `<<` merge keys
@@ -581,17 +591,18 @@ func (r *Resolver) matchesOf(p Path, found []match, absolute bool) ([]Match, err
 //
 // # Errors
 //
-// Wraps [ErrNoDocument], together with [ErrNotFound], when the Resolver
-// has a nil document. Wraps [ErrAlias] when an alias on the path does not
-// resolve, including one under a tag. A `.*` selector reads every `<<`
-// merge key of its mapping and of the mappings it merges, so an alias that
-// one of them names counts as on the path. A `..*` selector lists every
-// value below the node it starts from, so an alias it lists also counts as
-// on the path, unless the alias reads a reference document. A `..name` or
-// `..*` selector looks up the key of each entry that a `<<` merge key after
-// it might override. An alias of a reference document whose mapping holds
-// that key thus counts as on the path too. The error is an [*AliasError]
-// that carries the alias, as [Resolver.Node] returns one.
+// Wraps [ErrNoCurrentNode] for an `@` path. Wraps [ErrNoDocument], together
+// with [ErrNotFound], when the Resolver has a nil document. Wraps
+// [ErrAlias] when an alias on the path does not resolve, including one
+// under a tag. A `.*` selector reads every `<<` merge key of its mapping
+// and of the mappings it merges, so an alias that one of them names counts
+// as on the path. A `..*` selector lists every value below the node it
+// starts from, so an alias it lists also counts as on the path, unless the
+// alias reads a reference document. A `..name` or `..*` selector looks up
+// the key of each entry that a `<<` merge key after it might override. An
+// alias of a reference document whose mapping holds that key thus counts as
+// on the path too. The error is an [*AliasError] that carries the alias, as
+// [Resolver.Node] returns one.
 //
 // Wraps [ErrExcessiveAliasing] when aliases lead a selector to far more
 // nodes than the document holds. Wraps [ErrExcessiveMerging] when the key

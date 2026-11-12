@@ -79,10 +79,18 @@
 // including the path of a Node and the path of a bound error. Any Node of
 // the document resolves such a path to the same node.
 //
-// Except for [Resolver.NodeFrom], the [Resolver] methods that resolve a
-// path start at the document root. They read an `@` path from the root,
-// as they read a `$` path, and the paths they return start at `$`.
-// NodeFrom takes the node that an `@` path reads from.
+// An `@` path needs a current node to read from. [Resolver.NodeFrom] and
+// [Resolver.MatchesFrom] take that node. The other [Resolver] methods
+// that resolve a path start at the document root. They return an error
+// wrapping [ErrNoCurrentNode] for an `@` path. To resolve an `@` path
+// below a node with them, join the `$` path of the node with it:
+//
+//	spec := paths.Doc().Child("spec")
+//	tk, err := r.Token(spec.Join(paths.Current().Child("replicas")))
+//
+// [Doc] joined with an `@` path reads it from the root, and the join
+// leaves a `$` path as it is. The paths that [Resolver.Matches] returns
+// start at `$`, and those of MatchesFrom start at `@` for an `@` path.
 //
 // # Resolution
 //
@@ -252,10 +260,12 @@
 // value at the path lies in a reference document.
 //
 // When the document does not have content to resolve in, Resolver.Token
-// and Resolver.Node return an error that wraps both [ErrNoDocument] and
-// ErrNotFound. Resolver.Nodes returns that error only for a nil document.
-// In any other document without content, it returns an empty result, as
-// it does for a path that does not select any node.
+// and Resolver.Node return an error for a `$` path that wraps both
+// [ErrNoDocument] and ErrNotFound. Resolver.Nodes returns that error only
+// for a nil document. In any other document without content, it returns
+// an empty result, as it does for a path that does not select any node.
+// For an `@` path, each of these methods returns an error wrapping
+// [ErrNoCurrentNode] instead, whatever the document holds.
 //
 // A `[*]` selector lists the elements of a sequence once for each alias
 // that leads to the sequence. A `.*` selector lists the entries of a

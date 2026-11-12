@@ -3419,7 +3419,7 @@ func TestError_TokenRendersFromSource(t *testing.T) {
 	file, err := source.File()
 	require.NoError(t, err)
 
-	node, err := paths.NewResolver(file.Docs[0]).Node(paths.Current().Child("b"))
+	node, err := paths.NewResolver(file.Docs[0]).Node(paths.Doc().Child("b"))
 	require.NoError(t, err)
 
 	literal, ok := node.(*ast.LiteralNode)
