@@ -568,9 +568,10 @@ func NewError(msg string, opts ...ErrorOption) *Error {
 //	), niceyaml.AtPath(sizePath))
 //
 // The join does not have a line of its own, so the location shows only on
-// the lines of the problems that take it. The Errors section of the package
-// documentation describes a location on a heading. [Locate] describes the
-// location that an err that is bound already keeps.
+// the lines of the problems that take it. An err that is one located
+// [*Error] keeps its location as well, as [Locate] describes. The Errors
+// section of the package documentation describes a location on a heading.
+// [Locate] describes the location that an err that is bound already keeps.
 func Invalid(err error, opts ...ErrorOption) error {
 	if isNothing(err) {
 		return nil
@@ -649,6 +650,23 @@ func Unchecked(err error, opts ...ErrorOption) error {
 //		return niceyaml.Locate(err, niceyaml.AtPath(paths.Current().Child("name")))
 //	}
 //
+// The location of the options reaches the error of the helper only when
+// that error does not carry a location of its own. A located [*Error] on
+// the cause chain of err lies nearer the problem. Its location wins whole,
+// as the location of each problem of a join does. A [Rebase] on that chain
+// lies nearer the problem too. A problem below it without a location takes
+// its base, as it does in a join. A path of the options thus never joins a
+// range of err. A caller that wants the path beside that range calls
+// [Error.With] on the Error of the helper. With replaces the location of
+// each located Error on the cause chain of that Error, down to the first
+// heading. A binding below whose location resolved keeps its location. With
+// keeps the range of the Error itself:
+//
+//	var e *niceyaml.Error
+//	if errors.As(err, &e) {
+//		return e.With(niceyaml.AtPath(paths.Current().Child("name")))
+//	}
+//
 // With a location or details, the result binds and prints as one from
 // [Invalid] or [Unchecked] with the same options does. A result with
 // neither reads as err does in a wrapper with several %w verbs. A result
@@ -723,13 +741,15 @@ func Unchecked(err error, opts ...ErrorOption) error {
 // inside it when the location of that binding resolved, whatever its
 // source. It reads as that binding too when the options name the path of
 // the binding and its location did not resolve. The line of the binding
-// shows that path already. Other located results can sit between the two,
-// as when a helper locates the error at a parent value and its caller at
-// that path. A source that binds the result takes the location of the
-// outermost result. The locations of the results between thus do not
-// show, before the bind or after it. The message of the result,
-// [Problems], [NewErrorTree], and [FormatError] show that binding at its
-// own location.
+// shows that path already. The message of the result, [Problems],
+// [NewErrorTree], and [FormatError] show that binding at its own location.
+//
+// Other located results can sit between the binding and the result, as
+// when a helper locates the error at a parent value and its caller at the
+// path of the binding. The located result nearest the binding wins, before
+// the bind and after it, as it does above any other located error. The
+// result thus reads as the result of the helper alone, and the location of
+// its caller does not show.
 //
 // [Error.Path] of the result reports the path of a binding whose location
 // resolved, before and after the bind. For a binding of another source,
@@ -803,6 +823,13 @@ func wrapUndeclared(err error, opts ...ErrorOption) *Error {
 	return e
 }
 
+// relocated returns an [Error] around err at the location of opts. Unlike
+// one from [Locate], the Error keeps that location when err holds a located
+// Error on its cause chain, as [replacing] describes.
+func relocated(err error, opts ...ErrorOption) *Error {
+	return wrapUndeclared(err, append(opts, replacing())...)
+}
+
 // NewSummary creates a new summary of errs: an [*Error] whose message msg
 // heads several separate problems, such as "3 schema violations" above one
 // error per violation. The summary is a heading and never a problem itself.
@@ -826,6 +853,13 @@ func wrapUndeclared(err error, opts ...ErrorOption) *Error {
 // returns the result for any number of violations:
 //
 //	return niceyaml.NewSummary(fmt.Sprintf("%d violations", len(errs)), errs...)
+//
+// A location around the result does not move a lone violation that no
+// source bound and that carries a location of its own, as [Locate]
+// describes. Such a violation thus binds at the same place for one
+// violation as for several. A lone binding of another source, or one whose
+// location did not resolve, takes the location around the result instead,
+// as Locate describes for a binding outside a join.
 //
 // [errors.Join] lists several problems without a heading. An error built
 // with [WithDetails] is one problem, with the errors that explain it below
@@ -919,6 +953,23 @@ func IsInvalid(err error) bool {
 //
 //	located := err.With(niceyaml.AtPath(namePath))
 //
+// A location in the options replaces the location of the receiver, and a
+// path joins a range that the receiver carries. The location of the copy
+// also replaces the location of each located Error on the cause chain of
+// the receiver, down to the first heading. With thus moves the single
+// problem that the receiver wraps. A heading below the receiver, such as a
+// join, a summary, or an Error from [Invalid] around a join, keeps its
+// location. Each problem of that heading keeps its own location or takes
+// the location of the heading, as the Errors section of the package
+// documentation describes. A binding below whose location resolved keeps
+// its location too, as [Locate] describes. A caller can thus find the
+// Error of one problem with [errors.As] and move it to a coarser place:
+//
+//	var e *niceyaml.Error
+//	if errors.As(err, &e) {
+//		return e.With(niceyaml.AtPath(sectionPath))
+//	}
+//
 // A location on a summary from [NewSummary] reaches each problem it heads
 // that does not carry one, as NewSummary describes.
 func (e *Error) With(opts ...ErrorOption) *Error {
@@ -930,8 +981,18 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 	c.errors = slices.Clone(e.errors)
 	c.details = slices.Clone(e.details)
 
+	// The options apply to an empty config as well, which shows whether
+	// they set a location. Options that set only details leave the
+	// location of the receiver as it was.
+	var set errorConfig
+
 	for _, opt := range opts {
 		opt(&c.errorConfig)
+		opt(&set)
+	}
+
+	if set.hasPath || set.loc != nil {
+		c.relocates = true
 	}
 
 	return &c
@@ -1086,6 +1147,29 @@ type errorConfig struct {
 	// any other, so hasPath marks whether an option set a path.
 	path    paths.Path
 	hasPath bool
+	// The location of the Error replaces each location below it on its
+	// cause chain, down to the first heading. A heading below keeps its
+	// location for its problems, as [childBase.cross] passes it down. A
+	// binding below whose location resolved keeps its location too. A
+	// located Error otherwise gives way to a located Error or a Rebase
+	// below it, as [findAnchor] describes. [replacing] sets it, and so do
+	// [Error.With] for an option that sets a location and the copy that
+	// [valueProblem] makes.
+	relocates bool
+}
+
+// replacing is an [ErrorOption] that makes the location of the Error
+// replace each location below it on its cause chain, down to the first
+// heading. A binding below whose location resolved keeps its location, as
+// [findAnchor] describes. Niceyaml and its edit package use the option
+// where they move an error whose location names a place it no longer
+// binds in. A position that counts lines of another text is one. The
+// option is not part of the API, because a caller replaces the location
+// of an Error with [Error.With].
+func replacing() ErrorOption {
+	return func(c *errorConfig) {
+		c.relocates = true
+	}
 }
 
 // AtPath is an [ErrorOption] that sets the YAML path of the value the error
@@ -1520,9 +1604,10 @@ func (e *Error) Unwrap() []error {
 	return append(result, e.errors...)
 }
 
-// location returns the locus of the nearest located Error along the chain
-// of e, as [anchorOf] finds it. A [*SourceError] there reports the locus it
-// bound, without a base from above, so e and its binding agree.
+// location returns the locus of the located Error nearest the problem
+// along the chain of e, as [anchorOf] finds it. A [*SourceError] there
+// reports the locus it bound, without a base from above, so e and its
+// binding agree.
 func (e *Error) location() locus {
 	if e == nil {
 		return locus{}
@@ -1538,10 +1623,15 @@ func (e *Error) location() locus {
 
 // Path returns the [paths.Path] the [Error] is about and true, or the zero
 // Path and false when the Error does not carry one. The location is the one
-// that [AtPath], [AtData], or [AtDataKey] set on the Error itself or on the
-// nearest located Error along its cause chain. An Error built with
-// [Invalid] around a located Error thus reports that location, with the
-// base of every [Rebase] on the way joined in front.
+// that [AtPath], [AtData], or [AtDataKey] set on the located Error nearest
+// the problem, as [Locate] describes. An Error built with [Invalid] around
+// a located Error thus reports the location of the inner Error, with the
+// base of every [Rebase] on the way joined in front. A location that
+// [Error.With] set replaces the location of each located Error below it.
+// The Error that With returns thus reports its own location, unless a
+// binding below it resolved its location. [Error.Position] and [Error.Range]
+// read the same Error, so the path of one Error never stands beside the
+// position of another.
 //
 // Before a [*Node] binds the Error, the names of [AtData] show as an `@`
 // path, and the path of [AtDataKey] ends in `~`. So
@@ -2817,11 +2907,11 @@ type anchor struct {
 	gaveWay bool
 }
 
-// anchorOf returns the first located [*Error] or [*SourceError] along the
-// cause chain of err. A located Error above a binding whose location
-// resolved gives way to that binding, because no source binds err yet. A
-// [Rebase] without a located error below it anchors at its base, unless
-// the chain below heads several problems.
+// anchorOf returns the located [*Error] or the [*SourceError] nearest the
+// problem along the cause chain of err. A located Error above a binding
+// whose location resolved gives way to that binding, because no source
+// binds err yet. A [Rebase] without a located error below it anchors at
+// its base, unless the chain below heads several problems.
 func anchorOf(err error) anchor {
 	a, _ := findAnchor(err, resolved)
 
@@ -2852,8 +2942,11 @@ func (e *SourceError) anchor() anchor {
 // findAnchor returns the anchor of err and, when it does not find one,
 // whether the chain heads separate problems. One walk answers both, so a
 // chain of [Rebase] Errors reads the chain below each once. A located
-// [*Error] above a binding gives way to that binding when yields reports
-// true for it, and a nil yields never gives way.
+// [*Error] gives way to the anchor of a located Error or a Rebase below
+// it, unless it carries the mark of [replacing]. The location nearest the
+// problem thus wins whole. A located Error above a binding gives way to
+// that binding when yields reports true for it, and a nil yields never
+// gives way.
 func findAnchor(err error, yields func(*SourceError) bool) (anchor, bool) {
 	switch x := err.(type) { //nolint:errorlint // Walks the chain one node at a time.
 	case *SourceError:
@@ -2868,17 +2961,31 @@ func findAnchor(err error, yields func(*SourceError) bool) (anchor, bool) {
 			return anchor{}, false
 		}
 
-		if x.hasLocation() && yields != nil {
-			// A binding below that resolved its location in the source that
-			// x binds in names the value at fault already, so the location
-			// of x does not move it.
+		if x.hasLocation() {
 			below, _ := findAnchor(x.err, yields)
 
-			bound, ok := below.err.(*SourceError) //nolint:errorlint // The anchor itself, found by the walk.
-			if ok && yields(bound) {
-				below.gaveWay = true
+			switch b := below.err.(type) { //nolint:errorlint // The anchor itself, found by the walk.
+			case *Error:
+				// A located Error below is nearer the problem, and so is a
+				// Rebase that anchors at its base. Its location wins whole,
+				// unless x relocates the error.
+				if !x.relocates {
+					if x.move != nil {
+						below.locus = x.move.apply(below.locus)
+					}
 
-				return below, false
+					return below, false
+				}
+
+			case *SourceError:
+				// A binding below that resolved its location in the source
+				// that x binds in names the value at fault already, so the
+				// location of x does not move it.
+				if yields != nil && yields(b) {
+					below.gaveWay = true
+
+					return below, false
+				}
 			}
 		}
 

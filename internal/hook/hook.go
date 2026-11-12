@@ -90,6 +90,13 @@ var (
 	// name, such as `[n]` for an index.
 	AtData func(shown paths.Path, names []string, key bool) any
 
+	// Replacing is a niceyaml.ErrorOption that makes the location of an
+	// error replace each location below it on its cause chain, down to the
+	// first heading. A binding below whose location resolved keeps its
+	// location. A located error otherwise gives way to a located error or a
+	// Rebase below it, as niceyaml.Locate describes.
+	Replacing any
+
 	// Unmarshalers returns the unmarshalers that us, a
 	// []niceyaml.Unmarshaler, give a decode when it applies them in order
 	// to the zero unmarshaler.Options, as niceyaml.WithUnmarshalers

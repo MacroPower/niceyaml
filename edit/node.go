@@ -1695,9 +1695,14 @@ func (n *Node) bind(err error) error {
 				path = target
 			}
 
+			// The site replaces the location on the cause chain of err,
+			// down to its first heading. That location reads from a place
+			// that no path selects.
+			replacing, _ := hook.Replacing.(niceyaml.ErrorOption) //nolint:errcheck // The hook holds an ErrorOption.
+
 			//nolint:wrapcheck // The binding is the error of the Func.
 			return n.d.user.Bind(niceyaml.Locate(err, niceyaml.AtPath(path), niceyaml.AtRange(s.at),
-				niceyaml.WithDetails(n.d.callDetails(s)...)))
+				replacing, niceyaml.WithDetails(n.d.callDetails(s)...)))
 		}
 	}
 

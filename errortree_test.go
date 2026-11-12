@@ -1628,13 +1628,12 @@ func TestErrorTree_Bound(t *testing.T) {
 				return tree{err: err, want: []node{{text: "f.yaml: $.a.*: check: far", err: err, bound: bound}}}
 			},
 		},
-		"located Error with the path of a binding above one at its parent": {
+		"located Error with the path of a binding above one at its parent reads as the inner one": {
 			build: func(t *testing.T) tree {
 				t.Helper()
 
-				// A bind takes the location of the outer Error, so the
-				// location of the inner one does not show before the bind
-				// either.
+				// The location of the inner Error is nearer the binding, so
+				// the node reads as that Error alone does.
 				far := paths.Doc().Child("a").ChildAll()
 				bound := bind(t, niceyaml.NewError("far", niceyaml.AtPath(far)))
 				err := niceyaml.Locate(
@@ -1642,10 +1641,10 @@ func TestErrorTree_Bound(t *testing.T) {
 					niceyaml.AtPath(far),
 				)
 
-				return tree{err: err, want: []node{{text: "f.yaml: $.a.*: far", err: err, bound: bound}}}
+				return tree{err: err, want: []node{{text: "$.a: f.yaml: $.a.*: far", err: err}}}
 			},
 		},
-		"located Error with the path of a binding above one at a position": {
+		"located Error with the path of a binding above one at a position reads as the inner one": {
 			build: func(t *testing.T) tree {
 				t.Helper()
 
@@ -1656,7 +1655,7 @@ func TestErrorTree_Bound(t *testing.T) {
 					niceyaml.AtPath(far),
 				)
 
-				return tree{err: err, want: []node{{text: "f.yaml: $.a.*: far", err: err, bound: bound}}}
+				return tree{err: err, want: []node{{text: "f.yaml: $.a.*: far", err: err}}}
 			},
 		},
 		"unbound summary that heads a binding": {
@@ -3300,13 +3299,15 @@ func TestErrorTree_MessageContextAndPath(t *testing.T) {
 			wantWarning: true,
 		},
 		"located Error above a value binding of a warning": {
-			// The source that binds the Error gives the binding its place,
-			// so the message is that of the warning alone.
+			// The source that binds the Error reads the warning that the
+			// value binding holds, and the location of the warning is nearer
+			// the problem than that of the Error. The message is that of the
+			// warning alone.
 			node: niceyaml.NewErrorTree(yamltest.Bind(t, source,
 				niceyaml.Locate(niceyaml.BindValue(oldA()), atB),
 			)),
 			want:        "old a",
-			wantPath:    "$.b",
+			wantPath:    "$.a",
 			wantWarning: true,
 		},
 		"located Error above a binding of a wrapper in another source": {

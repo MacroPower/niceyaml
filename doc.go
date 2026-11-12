@@ -322,6 +322,32 @@
 // When every problem of the join carries a location of its own, the location
 // of the join does not show.
 //
+// A located Error around a single located Error follows the same rule. The
+// located Error nearest the problem wins, and its location stands whole, so
+// a path above it does not join a range below it. A [Rebase] below the
+// located Error points a problem without a location at its base, as it does
+// for each problem of a join. A summary from [NewSummary] returns a lone
+// problem as it is. When errs holds one violation at `$.license.owner` that
+// no source bound, the result here still reports it at that path, as it
+// does beside a second violation:
+//
+//	return niceyaml.Invalid(niceyaml.NewSummary(msg, errs...), niceyaml.AtPath(licensePath))
+//
+// A binding of another source, or a binding whose location did not resolve,
+// follows the rule for bindings that [Locate] describes. Such a binding
+// takes the location around it when it stands alone, and it keeps its own
+// place as one problem of a join or a summary.
+//
+// [Error.With] replaces the location of the Error it is called on and of
+// each located Error on its cause chain. The first heading on that chain
+// ends it, so the heading keeps its location. Each problem of the heading
+// keeps its own location or takes the location of the heading. A binding
+// below whose location resolved keeps its location, as [Locate] describes.
+// A caller that moves a single problem to a coarser place finds its Error
+// with [errors.As] and calls With on it. A caller that wants a path beside
+// the range of a helper's Error calls With on that Error, which keeps the
+// range.
+//
 // The code that builds an error declares whether the document is at fault for
 // it or the check could not run. A location never decides that question.
 // [NewError] and [Invalid] declare a fault. [Unchecked] takes the same

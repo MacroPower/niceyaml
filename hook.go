@@ -93,6 +93,7 @@ func init() {
 
 		return d.option()
 	}
+	hook.Replacing = replacing()
 	hook.Unmarshalers = func(us any) unmarshaler.Options {
 		list, _ := us.([]Unmarshaler) //nolint:errcheck // The hook takes a []Unmarshaler.
 

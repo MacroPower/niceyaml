@@ -226,11 +226,11 @@ func (t ErrorTree) Label() string {
 // Bound. So does the node of a located [*Error] above a binding whose
 // location resolved, because the binding keeps its own location, as
 // [Locate] describes. The node of a located Error that names the path of
-// a binding whose location did not resolve holds that binding too,
-// whatever the located Errors between the two name. The line of the
-// binding shows that path already. Above any other binding, the Error
-// names a location that a source never resolved, so Bound is nil for its
-// node.
+// a binding whose location did not resolve holds that binding too. The
+// line of the binding shows that path already. A located Error between
+// the two lies nearer the binding, so its location wins instead. Above
+// any other binding, the Error names a location that a source never
+// resolved, so Bound is nil for its node.
 //
 // Until a source binds the Error, the binding below it keeps its location
 // whatever its source. The node of a located Error around an error of an
@@ -1081,13 +1081,13 @@ func wrapperMessage(err error, bound *SourceError) string {
 //
 //   - For a node with a binding, it is the [SourceError.Path] of Bound.
 //   - For a node that is not bound to a source, it is the path of the
-//     first located [*Error] along the cause chain of Err. Path puts the
-//     base of every [Rebase] on the way in front of that path. A problem
-//     that does not carry a location takes the path of the nearest
-//     heading above it that carries one, unless a [Rebase] lies between
-//     them. The Errors section of the package documentation describes a
-//     location on a heading. The label of the node puts the same path in
-//     front of the message.
+//     located [*Error] nearest the problem along the cause chain of Err,
+//     as [Locate] describes. Path puts the base of every [Rebase] on the
+//     way in front of that path. A problem that does not carry a location
+//     takes the path of the nearest heading above it that carries one,
+//     unless a [Rebase] lies between them. The Errors section of the
+//     package documentation describes a location on a heading. The label
+//     of the node puts the same path in front of the message.
 //
 // The source and the position come from Bound, which resolved them, and
 // [ErrorTree.Source] and [ErrorTree.Position] read them for any node. An
@@ -1262,10 +1262,10 @@ func (t ErrorTree) MarshalJSON() ([]byte, error) {
 // anchors the chain itself, so bindingOf returns nil for such an error.
 // An Error that names the path of that binding is the exception. The line
 // of the binding shows that path already, so bindingOf returns the
-// binding, a summary included. Other located Errors can sit between the
-// two, as when a helper and its caller both locate an error. A source
-// that binds err takes the location of the outermost Error, so the
-// location of each Error between does not show, whatever it names.
+// binding, a summary included. Other located Errors can sit above the
+// Error that anchors err, as when a helper and its caller both locate an
+// error. The anchor is the located Error nearest the binding, so the
+// location of each Error above it does not show, whatever it names.
 func bindingOf(err error) *SourceError {
 	a := anchorOf(err)
 	if bound, ok := a.err.(*SourceError); ok { //nolint:errorlint // The anchor itself, found by the walk.
@@ -1396,9 +1396,10 @@ func holdsBinding(err error) bool {
 	return false
 }
 
-// unboundRow gives row the path of the first located [*Error] on the cause
-// chain of err, as a binding does. The binding that [bindingOf] finds for
-// err names its own path, so row then stays as it is.
+// unboundRow gives row the path of the located [*Error] nearest the
+// problem on the cause chain of err, as a binding does. The binding that
+// [bindingOf] finds for err names its own path, so row then stays as it
+// is.
 func unboundRow(err error, row ErrorRow) ErrorRow {
 	if bindingOf(err) != nil {
 		return row
