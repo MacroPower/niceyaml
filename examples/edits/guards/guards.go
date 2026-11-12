@@ -123,8 +123,8 @@ func main() {
 
 	fmt.Println("\nProtect the type fields:")
 
-	// A path never selects a protected value, so a wildcard at the root
-	// skips the type fields.
+	// A path that selects more than one value passes over each protected
+	// value, so a wildcard at the root skips the type fields.
 	err = d.Apply(ctx, paths.Doc().ChildAll(), func(_ context.Context, n *edit.Node) error {
 		fmt.Println("visit", n.Path())
 

@@ -12949,6 +12949,100 @@ func TestWithProtected_Matches(t *testing.T) {
 	})
 }
 
+func TestWithProtected_PlainPath(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input     string
+		protected string
+		path      string
+		// The `@` path below the place of the call where the Func sets a
+		// value, or `@` when empty.
+		set string
+		// The texts that the Func reads, one for each call.
+		want []string
+		err  string
+	}{
+		"protected value": {
+			input:     "apiVersion: v1\nmetadata:\n  name: a\n",
+			protected: "$.apiVersion",
+			path:      "$.apiVersion",
+			want:      []string{"v1"},
+			err:       "$.apiVersion: the edit sets $.apiVersion, which is a protected value",
+		},
+		"inside a protected value": {
+			input:     "apiVersion: v1\nmetadata:\n  name: a\n",
+			protected: "$.metadata",
+			path:      "$.metadata.name",
+			want:      []string{"a"},
+			err:       "$.metadata.name: the edit sets $.metadata.name, which lies inside a protected value",
+		},
+		"root": {
+			input:     "apiVersion: v1\n",
+			protected: "$",
+			path:      "$",
+			set:       "@.apiVersion",
+			want:      []string{""},
+			err:       "the edit sets $.apiVersion, which lies inside a protected value",
+		},
+		"through an alias": {
+			input:     "metadata: &m {name: a}\nspec: {ref: *m}\n",
+			protected: "$.metadata",
+			path:      "$.spec.ref.name",
+			want:      []string{"a"},
+			err:       "lies inside a protected value",
+		},
+		"through a merge key": {
+			input:     "base: &b {kind: Cafe}\nspec: {<<: *b}\n",
+			protected: "$.base.kind",
+			path:      "$.spec.kind",
+			want:      []string{"Cafe"},
+			err:       "is a protected value",
+		},
+		"absent": {
+			input:     "apiVersion: v1\n",
+			protected: "$.kind",
+			path:      "$.kind",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input)
+
+			d, err := edit.New(doc, edit.WithProtected(paths.MustParse(tc.protected)))
+			require.NoError(t, err)
+
+			var got []string
+
+			at := paths.Current()
+			if tc.set != "" {
+				at = paths.MustParse(tc.set)
+			}
+
+			err = d.Apply(t.Context(), paths.MustParse(tc.path), func(ctx context.Context, n *edit.Node) error {
+				got = append(got, n.Text())
+
+				return n.At(at).Set(ctx, "v2")
+			})
+
+			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.input, d.Text())
+
+			if tc.err == "" {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.ErrorIs(t, err, edit.ErrProtected)
+			assert.ErrorContains(t, err, tc.err)
+		})
+	}
+}
+
 func ExampleDoc_Apply() {
 	src := niceyaml.NewSourceFromString(stringtest.LinesLF(
 		"spec:",

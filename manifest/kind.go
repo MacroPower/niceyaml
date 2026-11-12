@@ -279,6 +279,15 @@ type step struct {
 // a `~`. The Versions section of the package documentation describes the
 // calls.
 //
+// The load protects the type fields with [edit.WithProtected], so a step
+// cannot edit them. A path that selects more than one value, such as `.*`
+// or `..name`, passes over each type field. [NewRegistry] refuses a step
+// whose path of names and indexes names a type field or a place inside
+// one. Such a path can still reach a type field through an alias or a `<<`
+// merge key of a document. The step then runs there, and each edit that
+// fn makes there fails with an error that matches [edit.ErrProtected]. A
+// step that returns that error fails the document.
+//
 // An edit that fn makes through an alias or a `<<` merge key changes the
 // anchored value, for every place of the document that reads it.
 // [edit.Node.Own] returns the path of the place in that value. It differs

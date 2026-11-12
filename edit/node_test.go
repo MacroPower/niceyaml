@@ -3541,6 +3541,11 @@ func TestNode_Nodes(t *testing.T) {
 			path:   paths.MustParse("$.*"),
 			want:   []string{"$.spec"},
 		},
+		"protected value on a path of names": {
+			before: stringtest.LinesLF("apiVersion: v1", "kind: Cafe", "spec: {}"),
+			path:   paths.MustParse("$.apiVersion"),
+			want:   []string{"$.apiVersion"},
+		},
 		"entries of a repeated key": {
 			before: stringtest.LinesLF("a: 1", "a: 2", "b: 3"),
 			path:   paths.MustParse("$.*"),
