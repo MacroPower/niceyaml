@@ -1989,6 +1989,173 @@ func TestEntryFinder_Entry(t *testing.T) {
 	}
 }
 
+func TestWithAliasLimit(t *testing.T) {
+	t.Parallel()
+
+	// The document of sharedMerge holds the sequence s of n aliases to the
+	// mapping a, and the mapping d, which merges n inline mappings that
+	// each merge s. One lookup in d reads s once for each of them.
+	sharedMerge := func(n int) string {
+		return stringtest.LinesLF(
+			"a: &a {z: 0}",
+			"s: &s "+yamltest.FlowSequence("*a", n),
+			"d: {<<: "+yamltest.FlowSequence("{<<: *s}", n)+"}",
+		)
+	}
+
+	tcs := map[string]struct {
+		err   error
+		input string
+		path  string
+		opts  []paths.ResolverOption
+		want  int
+	}{
+		"alias fan-out under the default": {
+			input: yamltest.AliasLevels(5),
+			path:  "$.a[5][*][*][*][*][*]",
+			err:   paths.ErrExcessiveAliasing,
+		},
+		"alias fan-out with the limit on": {
+			input: yamltest.AliasLevels(5),
+			path:  "$.a[5][*][*][*][*][*]",
+			opts:  []paths.ResolverOption{paths.WithAliasLimit(true)},
+			err:   paths.ErrExcessiveAliasing,
+		},
+		"alias fan-out with the limit off": {
+			input: yamltest.AliasLevels(5),
+			path:  "$.a[5][*][*][*][*][*]",
+			opts:  []paths.ResolverOption{paths.WithAliasLimit(false)},
+			want:  100_000,
+		},
+		"merge reads under the default": {
+			input: yamltest.WideMerge(2000),
+			path:  "$..nope",
+			err:   paths.ErrExcessiveMerging,
+		},
+		"merge reads with the limit off": {
+			input: yamltest.WideMerge(2000),
+			path:  "$..nope",
+			opts:  []paths.ResolverOption{paths.WithAliasLimit(false)},
+			want:  0,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := documentOf(t, tc.input, yamltest.NoSizeLimits()...)
+
+			matches, err := paths.NewResolver(doc, tc.opts...).Matches(paths.MustParse(tc.path))
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Len(t, matches, tc.want)
+		})
+	}
+
+	t.Run("one lookup", func(t *testing.T) {
+		t.Parallel()
+
+		doc := documentOf(t, sharedMerge(1000), yamltest.NoSizeLimits()...)
+		path := paths.MustParse("$.d.nope")
+
+		_, err := paths.NewResolver(doc).Node(path)
+		require.ErrorIs(t, err, paths.ErrExcessiveMerging)
+
+		_, err = paths.NewResolver(doc, paths.WithAliasLimit(false)).Node(path)
+		require.ErrorIs(t, err, paths.ErrNotFound)
+		require.NotErrorIs(t, err, paths.ErrExcessiveMerging)
+	})
+
+	t.Run("entry finder", func(t *testing.T) {
+		t.Parallel()
+
+		doc := documentOf(t, yamltest.WideMerge(2000))
+
+		for name, tc := range map[string]struct {
+			err  error
+			opts []paths.ResolverOption
+		}{
+			"default":   {err: paths.ErrExcessiveMerging},
+			"limit off": {opts: []paths.ResolverOption{paths.WithAliasLimit(false)}},
+		} {
+			r := paths.NewResolver(doc, tc.opts...)
+
+			m, err := r.Node(paths.MustParse("$.m"))
+			require.NoError(t, err, name)
+
+			finder := r.EntryFinder()
+
+			var last error
+
+			for i := range 2000 {
+				_, err := finder.Entry(m, fmt.Sprintf("%#x", 0x1000+i))
+				if err != nil {
+					last = err
+				}
+			}
+
+			if tc.err == nil {
+				require.NoError(t, last, name)
+			} else {
+				require.ErrorIs(t, last, tc.err, name)
+			}
+		}
+	})
+
+	t.Run("no document", func(t *testing.T) {
+		t.Parallel()
+
+		// A resolver without a document reads no alias, so the merge list
+		// of m holds inline mappings.
+		doc := documentOf(t, yamltest.WideMergeOf(2000, "{z: 0}"), yamltest.NoSizeLimits()...)
+
+		m, err := paths.NewResolver(doc).Node(paths.MustParse("$.m"))
+		require.NoError(t, err)
+
+		path := paths.MustParse("@..nope")
+
+		for name, tc := range map[string]struct {
+			err  error
+			opts []paths.ResolverOption
+		}{
+			"default":   {err: paths.ErrExcessiveMerging},
+			"limit off": {opts: []paths.ResolverOption{paths.WithAliasLimit(false)}},
+		} {
+			r := paths.NewResolver(nil, tc.opts...)
+
+			_, err := r.MatchesFrom(m, path)
+			if tc.err == nil {
+				require.NoError(t, err, name)
+			} else {
+				require.ErrorIs(t, err, tc.err, name)
+			}
+
+			finder := r.EntryFinder()
+
+			var last error
+
+			for i := range 2000 {
+				_, err := finder.Entry(m, fmt.Sprintf("%#x", 0x1000+i))
+				if err != nil {
+					last = err
+				}
+			}
+
+			if tc.err == nil {
+				require.NoError(t, last, name)
+			} else {
+				require.ErrorIs(t, last, tc.err, name)
+			}
+		}
+	})
+}
+
 func TestResolver_Anchor(t *testing.T) {
 	t.Parallel()
 

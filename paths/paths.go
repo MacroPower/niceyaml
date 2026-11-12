@@ -88,7 +88,8 @@ var (
 	// nodes. The limit lets a selector reach as many nodes as the document
 	// holds. Past that count, the extra nodes can make up only the share of
 	// all the nodes the selector reaches that gopkg.in/yaml.v3 allows the
-	// aliases in a document it decodes. It is the same error value as
+	// aliases in a document it decodes. [WithAliasLimit] turns the limit
+	// off. It is the same error value as
 	// [go.jacobcolvin.com/niceyaml.ErrExcessiveAliasing].
 	ErrExcessiveAliasing = aliaslimit.ErrExcessiveAliasing
 
@@ -113,7 +114,8 @@ var (
 	// A selector can read 64 times as many of these nodes as the document
 	// holds, or 524,288 of them, whichever is more. A call of
 	// [Resolver.Entry] can read as many as one selector, and the calls of
-	// one [EntryFinder] can read that many between them.
+	// one [EntryFinder] can read that many between them. [WithAliasLimit]
+	// turns the limit off.
 	ErrExcessiveMerging = errors.New("excessive merging")
 
 	// The nameEscaper replacer escapes the backslashes and single quotes of

@@ -99,21 +99,24 @@ func (d *document) pathResolver() *paths.Resolver {
 // that did not parse gets one without a document, so a path returns an
 // error rather than an empty match. The resolver knows the anchors of the
 // reference documents of the Source, so a path through an alias that reads
-// one names that cause.
+// one names that cause. The alias limit of the Source sets the limits of
+// the resolver, as [WithAliasLimit] describes.
 func (d *document) newResolver() *paths.Resolver {
 	if d.err != nil {
 		return paths.NewResolver(nil)
 	}
 
 	src := d.node.source
+	limit := paths.WithAliasLimit(!src.skipAliasLimit)
+
 	if len(src.references) == 0 {
-		return paths.NewResolver(d.root)
+		return paths.NewResolver(d.root, limit)
 	}
 
 	// The table of the reference anchors builds on the first alias that
 	// lacks an anchor, so a path that does not meet one does not read the
 	// reference documents.
-	return paths.NewResolver(d.root, paths.WithReferenceAnchors(src.referenceValue))
+	return paths.NewResolver(d.root, limit, paths.WithReferenceAnchors(src.referenceValue))
 }
 
 // pastAliasLimit reports whether the aliases of the document take it past
@@ -257,6 +260,10 @@ func (n *Node) Err() error {
 // path first needs them. A [Validator] that runs for each item of a list
 // therefore binds them once, but a resolver from [paths.NewResolver] binds
 // them again for every item.
+//
+// The resolver applies the limits behind [ErrExcessiveAliasing] and
+// [paths.ErrExcessiveMerging], as [paths.WithAliasLimit] describes.
+// [WithAliasLimit] on the [Source] turns both limits off.
 //
 // The resolver knows the anchors of the reference documents of
 // [WithReferences], as [paths.WithReferenceAnchors] describes. A path that
@@ -408,7 +415,8 @@ func (n *Node) valueNode() ast.Node {
 // path, and [paths.ErrNoDocument] too when the document does not have
 // content. It wraps [paths.ErrAlias] for an alias on the path that does
 // not resolve. It wraps [paths.ErrExcessiveMerging] when `<<` merge keys
-// make the lookups read far more nodes than the document holds. It wraps
+// make the lookups read far more nodes than the document holds, as
+// [Node.Nodes] describes for that limit. It wraps
 // [paths.ErrWildcard] for a path that can match several nodes, and
 // [Node.Nodes] scopes each node that such a path selects.
 //
@@ -483,10 +491,10 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 // source. An alias that does not resolve gives one wrapping
 // [paths.ErrAlias]. Aliases or merge keys that lead a selector to far
 // more nodes than the document holds give [ErrExcessiveAliasing] or
-// [paths.ErrExcessiveMerging]. The document is not at fault for either,
-// so each comes inside [Unchecked], and a validator that returns it does
-// not report a fault. A document that did not parse returns the error
-// that [Node.Err] returns.
+// [paths.ErrExcessiveMerging], bound to the receiver without a location.
+// The document is at fault for either, as [IsInvalid] describes, and
+// [WithAliasLimit] on the [Source] turns both limits off. A document that
+// did not parse returns the error that [Node.Err] returns.
 func (n *Node) Nodes(path paths.Path) ([]*Node, error) {
 	if n.doc.err != nil {
 		return nil, n.doc.err
@@ -1289,13 +1297,19 @@ func (n *Node) bindUnresolved(path paths.Path, reason error) error {
 
 // bindLookup binds reason, the error of a lookup that neither misses a
 // value nor stops at an alias that [Node.bindAlias] binds. An alias of the
-// document that does not resolve binds as it is. Any other reason, such as
-// a path past a limit or a wildcard path that [Node.At] rejects, binds
-// inside [Unchecked], because the document is not at fault for it. A
-// validator that returns such an error thus does not report a fault.
+// document that does not resolve binds as it is. A path that the aliases
+// or `<<` merge keys of the document take past a limit binds as [Invalid]
+// without a location. The document is at fault for such a path. Any other
+// reason, such as a wildcard path that [Node.At] rejects, binds inside
+// [Unchecked], because the document is not at fault for it. A validator
+// that returns such an error thus does not report a fault.
 func (n *Node) bindLookup(reason error) error {
 	if errors.Is(reason, paths.ErrAlias) && !errors.Is(reason, paths.ErrReferenceAlias) {
 		return n.bindOwn(reason)
+	}
+
+	if errors.Is(reason, paths.ErrExcessiveAliasing) || errors.Is(reason, paths.ErrExcessiveMerging) {
+		return n.bindOwn(Invalid(reason))
 	}
 
 	return n.bindOwn(Unchecked(reason))
@@ -1373,8 +1387,8 @@ func (n *Node) Bind(err error) error {
 
 // bindOwn binds an error of a call on n as [Node.Bind] does, except that
 // an error without a location does not gain one, even for a scoped Node.
-// The exception holds because the error is about the call and not the
-// value.
+// The exception holds because the error concerns the whole call or path,
+// not a value that n scopes.
 func (n *Node) bindOwn(err error) error {
 	return bindTree(err, binder{src: n.source, node: n})
 }

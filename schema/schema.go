@@ -835,7 +835,9 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // violations of one call, Check can read as many nodes that way as
 // [paths.ErrExcessiveMerging] allows one path selector. Past that limit,
 // Check still reports every violation. A path through such a key names
-// the member and each key below it as the decoder does.
+// the member and each key below it as the decoder does. With
+// [niceyaml.WithAliasLimit] set to false on the [niceyaml.Source], Check
+// reads every merge source that it looks up.
 //
 // # Timestamps
 //
@@ -1341,7 +1343,8 @@ func rootOf(n *niceyaml.Node) ast.Node {
 // reached. Every segment keeps its decoded name when root is nil.
 //
 // The walks that share idx share its limit on the merge sources they
-// read, which is the limit of one [paths.EntryFinder].
+// read, which is the limit of one [paths.EntryFinder]. A resolver without
+// that limit lets the walks read any count of merge sources.
 func sourcePath(root ast.Node, idx *datapath.Index, segments []jsonschema.Segment) datapath.Target {
 	t, _ := sourceRoute(root, idx, segments, false)
 

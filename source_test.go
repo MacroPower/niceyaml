@@ -8032,7 +8032,7 @@ func TestWithAliasLimit(t *testing.T) {
 		}
 	})
 
-	t.Run("limits that stay on", func(t *testing.T) {
+	t.Run("the limit that stays on", func(t *testing.T) {
 		t.Parallel()
 
 		trusted := yamltest.FirstDocument(t, bomb, niceyaml.WithName("bomb.yaml"), niceyaml.WithAliasLimit(false))
@@ -8047,14 +8047,6 @@ func TestWithAliasLimit(t *testing.T) {
 		require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
 		require.NotErrorIs(t, err, schema.ErrValidate)
 		assert.True(t, niceyaml.IsInvalid(err))
-
-		// Each [*] lists ten aliases to the item above, so the path would
-		// select 10^5 nodes. The path is at fault for that, and the
-		// document is not.
-		_, err = trusted.Nodes(paths.MustParse("$.a[5][*][*][*][*][*]"))
-		require.EqualError(t, err, "bomb.yaml: resolve $.a[5][*][*][*][*][*]: excessive aliasing")
-		require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
-		assert.False(t, niceyaml.IsInvalid(err))
 	})
 }
 

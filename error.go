@@ -201,9 +201,9 @@ var (
 	//
 	// [Node.Nodes] returns ErrExcessiveAliasing too, bound to its receiver
 	// with no location, when aliases lead a selector of the path to far more
-	// nodes than the document holds. IsInvalid does not report that error, and
-	// WithAliasLimit does not disable that limit. The paths and schema
-	// packages export the same error value.
+	// nodes than the document holds. The document is at fault for that error
+	// too, and WithAliasLimit disables that limit as well. The paths and
+	// schema packages export the same error value.
 	ErrExcessiveAliasing = aliaslimit.ErrExcessiveAliasing
 
 	// ErrSyntax indicates text the go-yaml parser rejects, such as a flow
@@ -894,7 +894,8 @@ func (e *Error) Is(target error) bool {
 // names, the document is at fault for [ErrMultipleDocuments] and for a
 // value that [Node.At] or [Node.Ranges] does not find. It is also at fault
 // for a schema violation, for the ErrNoMatch of a schema registry, and for
-// [ErrExcessiveAliasing] from every reader but [Node.Nodes].
+// [ErrExcessiveAliasing]. It is at fault for a path that `<<` merge keys
+// take past the limit behind [paths.ErrExcessiveMerging] as well.
 //
 // Servers ask IsInvalid before they test for a sentinel, because
 // [errors.Is] reports whether any problem matches:
@@ -2119,7 +2120,8 @@ type binder struct {
 	node *Node
 	// The index of each document that the bind call translated names of
 	// decoded data in, as [binder.translate] reads them. Every binding of
-	// one call shares it, so the reads of `<<` merge keys share one budget.
+	// one call shares it, so the reads of `<<` merge keys share one budget
+	// while the alias limit of the Source is on.
 	indexes  map[*document]*datapath.Index
 	route    bool
 	locate   bool

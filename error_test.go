@@ -13940,11 +13940,20 @@ func TestIsInvalid(t *testing.T) {
 			want: true,
 		},
 		"excessive aliasing of a path": {
-			// The path selects far more nodes than the document holds,
-			// which is no fault of the document.
+			// The aliases of the document lead the path to far more nodes
+			// than the document holds.
 			err: errOf(yamltest.FirstDocument(t, yamltest.AliasLevels(5)).
 				Nodes(paths.MustParse("$.a[5][*][*][*][*][*]"))),
-			is: niceyaml.ErrExcessiveAliasing,
+			is:   niceyaml.ErrExcessiveAliasing,
+			want: true,
+		},
+		"excessive merging of a path": {
+			// The merge keys of the document make the lookups of the path
+			// read far more nodes than the document holds.
+			err: errOf(yamltest.FirstDocument(t, yamltest.WideMerge(2000)).
+				Nodes(paths.MustParse("$..nope"))),
+			is:   paths.ErrExcessiveMerging,
+			want: true,
 		},
 		"source that does not read": {
 			err: errOf(niceyaml.NewSourceFromFS(fstest.MapFS{}, "cafe.yaml")),
@@ -13967,12 +13976,11 @@ func TestIsInvalid(t *testing.T) {
 			is:  fs.ErrNotExist,
 		},
 		"Each of a path past the alias limit": {
-			// The path selects far more nodes than the document holds,
-			// which is no fault of the document, so Each reports it as
-			// Node.Nodes does.
+			// Each reports the error as Node.Nodes does.
 			err: yamltest.FirstDocument(t, yamltest.AliasLevels(5)).Validate(t.Context(),
 				niceyaml.Each(paths.MustParse("$.a[5][*][*][*][*][*]"), unlocated)),
-			is: niceyaml.ErrExcessiveAliasing,
+			is:   niceyaml.ErrExcessiveAliasing,
+			want: true,
 		},
 		"join of a syntax error and a violation": {
 			err:  errors.Join(decoded("name: [cafe\n"), validated(portSchema)),

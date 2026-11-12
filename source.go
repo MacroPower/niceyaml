@@ -643,9 +643,14 @@ func WithAllowDuplicateKeys(allow bool) SourceOption {
 // The option covers the documents of the Source alone. The limit of a
 // Source counts what its aliases read in the reference documents of
 // [WithReferences]. The option on a reference Source does not change
-// that count. [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] and
-// [Node.Nodes] keep their limits whatever the option says. The Alias
-// Limit section of the package documentation describes each limit.
+// that count. The option also turns off the limits of a path read, which
+// [Node.Nodes], [Node.At], and [Each] apply, as
+// [go.jacobcolvin.com/niceyaml/paths.WithAliasLimit] describes. That
+// covers the limit on the reads of `<<` merge keys, which inline merges
+// can pass without an alias.
+// [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] keeps its
+// limit whatever the option says. The Alias Limit section of the package
+// documentation describes each limit.
 func WithAliasLimit(enabled bool) SourceOption {
 	return func(c *sourceConfig) {
 		c.skipAliasLimit = !enabled

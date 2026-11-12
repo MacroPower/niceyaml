@@ -126,6 +126,9 @@ type resolver struct {
 	// defines, as [WithReferenceAnchors] sets it, or nil.
 	references func(name string) (ast.Node, bool)
 	keys       sync.Map
+	// Turns off the limits that [resolver.excessive] and
+	// [resolver.excessiveMerging] apply, as [WithAliasLimit] sets it.
+	unlimited bool
 }
 
 // aliasBinding holds what a [resolver] reads from the aliases of its
@@ -1311,9 +1314,9 @@ func (r *resolver) resolve(root ast.Node, segs []segment) ([]match, error) {
 //
 // The aliased matches are those past the nodes of the document, so count
 // bounds them. Where the limit allows count, excessive leaves the nodes of
-// the document uncounted.
+// the document uncounted. A resolver without limits allows any count.
 func (r *resolver) excessive(count int) bool {
-	if aliaslimit.Allows(count) {
+	if r.unlimited || aliaslimit.Allows(count) {
 		return false
 	}
 
@@ -1368,9 +1371,10 @@ const (
 // stay a fixed multiple of its nodes. The limit is a fixed multiple of
 // those nodes too, so a document that grows that way stays within it. A
 // document passes the limit when the chain that each lookup reads grows
-// with the document. Reads then grow with the square of its nodes.
+// with the document. Reads then grow with the square of its nodes. A
+// resolver without limits allows any count of reads.
 func (r *resolver) excessiveMerging(reads int) bool {
-	return reads > mergeReadFloor && reads > mergeReadFactor*r.binding().nodes
+	return !r.unlimited && reads > mergeReadFloor && reads > mergeReadFactor*r.binding().nodes
 }
 
 // uniqueMatches returns the first match of each entry or element, in the
