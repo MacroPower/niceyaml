@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"reflect"
 
+	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/genfield"
+	"go.jacobcolvin.com/niceyaml/internal/hook"
 )
 
 // ErrFieldMismatch matches the error of each field that [CheckFields]
@@ -18,8 +20,18 @@ var ErrFieldMismatch = errors.New("generated schema and decoder disagree")
 // reaches from T, such as through a field, a pointer, or the elements of
 // a slice. It skips each type that decodes itself through an unmarshaler,
 // and each type that supplies its own schema through a JSONSchema method.
-// It does not know the unmarshalers that the options of a decode add, or
-// the schemas that the options of the generator supply.
+//
+// The unmarshalers us give the check the types that the program decodes
+// whole through a [niceyaml.CustomUnmarshaler] or through
+// [niceyaml.JSONUnmarshalers]. The check skips those types too. Pass the
+// unmarshalers that the program gives its [niceyaml.Source] with
+// [niceyaml.WithUnmarshalers], so the check reads T as its decodes do.
+// CheckFields applies us in order, as WithUnmarshalers does. A later
+// function for a type replaces an earlier one, a nil function removes
+// it, and the last JSONUnmarshalers applies. The check does not know the
+// schemas that the options of the generator supply. The program pairs
+// each type that us decodes whole with such an option, because the
+// check does not compare that type with the generator.
 //
 // A field fails the check when the generator names its property other
 // than the key that the decoder reads, or when only one of the two reads
@@ -38,10 +50,10 @@ var ErrFieldMismatch = errors.New("generated schema and decoder disagree")
 // documentation shows. It reads the tags of T, not a schema. Do not call
 // it for a T whose schema you write by hand with the keys that the
 // decoder reads. For such a T, it reports fields that the schema matches.
-func CheckFields[T any]() error {
+func CheckFields[T any](us ...niceyaml.Unmarshaler) error {
 	var errs []error
 
-	for _, problem := range genfield.Check(reflect.TypeFor[T]()) {
+	for _, problem := range genfield.Check(reflect.TypeFor[T](), hook.Unmarshalers(us)) {
 		errs = append(errs, fmt.Errorf("%w: %s", ErrFieldMismatch, problem))
 	}
 

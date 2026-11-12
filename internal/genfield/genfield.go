@@ -36,16 +36,17 @@ import (
 // reads it inline and the other nests it, when the property name that
 // gen gives differs from the key that the decoder reads, or when only one
 // of the two reads the field. Check reads the fields of each struct that
-// a decode into t reads field by field. It skips each type that supplies
-// its own schema through a JSONSchema method, because gen does not read
-// the fields of such a type. Each message names the struct and the
-// field, as in "Spec.Common: ...", and says how gen and the decoder read
-// the field.
-func Check(t reflect.Type) []string {
+// a decode into t under the unmarshalers o reads field by field. It
+// skips each type that o decodes whole, as [unmarshaler.Options.Whole]
+// reports, and each type that supplies its own schema through a
+// JSONSchema method, because gen does not read the fields of such a type.
+// Each message names the struct and the field, as in "Spec.Common: ...",
+// and says how gen and the decoder read the field.
+func Check(t reflect.Type, o unmarshaler.Options) []string {
 	var out []string
 
 	yamlfield.Reaches(t, func(t reflect.Type) (bool, bool) {
-		if unmarshaler.DecodesItself(t) ||
+		if _, whole := o.Whole(t); whole ||
 			unmarshaler.Declares(t, reflect.TypeFor[jsonschema.JSONSchemaProvider]()) {
 			return false, true
 		}

@@ -15,6 +15,7 @@ import (
 	"github.com/goccy/go-yaml/ast"
 
 	"go.jacobcolvin.com/niceyaml/internal/marshaler"
+	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 )
@@ -106,6 +107,12 @@ var (
 	// brings in, so the decode skips those entries too. The validators of
 	// the decode still see each key.
 	KnownKeys func(keys []paths.Path) any
+
+	// Unmarshalers returns the unmarshalers that us, a
+	// []niceyaml.Unmarshaler, give a decode when it applies them in order
+	// to the zero unmarshaler.Options, as niceyaml.WithUnmarshalers
+	// applies them.
+	Unmarshalers func(us any) unmarshaler.Options
 
 	// Marshal returns v as encoder.Marshal returns it under opts, a
 	// []encoder.Option, with the node that go-yaml's encoder made for v
