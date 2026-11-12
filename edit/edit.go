@@ -348,8 +348,10 @@ func WithApp(name string) Option {
 // `$` path of names and indexes, and every value inside it. Each Apply
 // protects the node of the text that each path reaches when it starts,
 // through an alias or a `<<` merge key too, whichever path names the node.
-// A path of [Doc.Apply] never selects a protected value or a value inside
-// one. A [Func] cannot set, rename, move, or remove a protected value or a
+// A path of [Doc.Apply] that selects more than one value, such as `.*` or
+// `..name`, passes over each protected value and each value inside one. A
+// path of names and indexes selects such a value as it selects any other.
+// A [Func] cannot set, rename, move, or remove a protected value or a
 // value inside one, and it cannot set, move, or remove a value that holds
 // one. A path that holds no value when the Apply starts stays protected as
 // the Apply found it, so a call that creates a value there fails. A path
@@ -929,6 +931,16 @@ func headerEnd(src *niceyaml.Source, line int) int {
 // The path `$` selects it, so fn writes the first value there, and every
 // other path selects nothing. A `$` path of [WithProtected] protects the
 // root, so `$` then selects nothing too.
+//
+// A path that selects more than one value, such as `.*`, `[*]`, `..name`,
+// or `..*`, passes over each place that is a protected value of
+// [WithProtected] or lies inside one. A path of names and indexes alone
+// selects such a place when it holds a value, so fn runs there and can
+// read the value. Each edit that fn makes there fails with an error that
+// matches [ErrProtected], as an edit through [Node.At] fails. So when
+// WithProtected protects `$.apiVersion`, an Apply at `$.apiVersion` whose
+// fn sets the value fails. The same Apply at `$.*` calls fn on each other
+// value of the root and passes.
 //
 // Each call sees the edits of the calls before it. A read after the write of
 // an earlier call thus reads the written value, through an alias too. Apply

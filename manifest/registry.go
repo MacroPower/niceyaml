@@ -642,6 +642,21 @@ func (b *registryBuilder) checkSteps(k *Kind, vc *versionConfig, i int, label st
 		case holdsKey(s.path):
 			b.failf("kind %s: step %d of %s takes a path without ~, not %s", k.name, j+1, label, s.path)
 		}
+
+		// The load protects the type fields. A step whose path of names and
+		// indexes names a type field, or a place inside one, thus cannot
+		// edit the place of its calls. A path that selects more than one
+		// value passes over the type fields.
+		if !plainPath(s.path) {
+			continue
+		}
+
+		for _, f := range b.r.cfg.typeFields() {
+			if _, ok := s.path.CutPrefix(f.path); ok {
+				b.failf("kind %s: step %d of %s takes %s, but %s protects the type field %s from every step",
+					k.name, j+1, label, s.path, f.option, f.path)
+			}
+		}
 	}
 }
 

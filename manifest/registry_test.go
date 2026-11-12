@@ -263,6 +263,28 @@ func TestNewRegistry(t *testing.T) {
 			)),
 			err: "kind Hours: step 1 of v2 has a nil function",
 		},
+		"step at a type field": {
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
+				manifest.Version("v1"),
+				manifest.Version("v2", manifest.Migrate(paths.Doc().Child("kind"), rename("type"))),
+			)),
+			err: "kind Hours: step 1 of v2 takes $.kind, " +
+				"but manifest.WithKindField protects the type field $.kind from every step",
+		},
+		"step inside a type field": {
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
+				manifest.Version("v1"),
+				manifest.Version("v2", manifest.Migrate(paths.Doc().Child("apiVersion", "x"), rename("y"))),
+			)),
+			err: "kind Hours: step 1 of v2 takes $.apiVersion.x, " +
+				"but manifest.WithVersionField protects the type field $.apiVersion from every step",
+		},
+		"step that sweeps the type fields": {
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
+				manifest.Version("v1"),
+				manifest.Version("v2", manifest.Migrate(paths.Doc().ChildAll(), rename("y"))),
+			)),
+		},
 		"kind name on current version": {
 			opts: withKinds(manifest.NewKind[MenuItem]("MenuItem",
 				manifest.Version("v1", manifest.KindName("Dish")),

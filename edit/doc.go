@@ -1197,8 +1197,15 @@
 // # Protected Values
 //
 // [WithProtected] protects values, such as the type fields of a manifest,
-// from every Func. A path of Apply never selects a protected value or a
-// value inside one.
+// from every Func. The edits are what the protection refuses, not the
+// selection. A path of Apply that selects more than one value, such as
+// `.*` or `..name`, passes over each protected value and each value inside
+// one. A sweep of the document thus leaves the type fields out. A path of
+// names and indexes alone selects a protected place, or a place inside
+// one, when the place holds a value. The Func then reads the value, and
+// each edit there fails, as an edit through [Node.At] fails. So a mistake
+// in such a path shows as an error rather than as an Apply that calls its
+// Func zero times.
 //
 // A protected value is a node of the text, not a path. Each Apply protects
 // the node that each path reaches when the Apply starts, through any alias

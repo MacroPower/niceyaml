@@ -554,6 +554,68 @@ func TestRegistry_Load_Steps(t *testing.T) {
 			// The step is at fault, not the file.
 			matches: []error{edit.ErrProtected},
 		},
+		"step whose path reaches the version field through an alias": {
+			// A path of names and indexes selects the protected value, so
+			// the step runs there, and its edit fails as an edit through
+			// Node.At fails.
+			opts: []manifest.RegistryOption{
+				manifest.WithAppName("cafe"),
+				manifest.WithVersionField(paths.MustParse("$.metadata.version")),
+				manifest.WithKinds(manifest.NewKind[map[string]any]("Hours",
+					manifest.Version("v1"),
+					manifest.Version("v2", manifest.Migrate(paths.MustParse("$.other.version"),
+						func(ctx context.Context, n *edit.Node) error {
+							return n.Set(ctx, "v9")
+						})),
+				)),
+			},
+			files: map[string]string{"hours.yaml": stringtest.LinesLF(
+				"kind: Hours",
+				"metadata: &m",
+				"  version: v1",
+				"other: *m",
+			)},
+			err: stringtest.JoinLF(
+				"config/hours.yaml:3:12: $.metadata.version: v2 sets $.other.version, which is a protected value",
+				"`-- v2 sets $.other.version from this value",
+				"",
+				"   1 | kind: Hours",
+				"   2 | metadata: &m",
+				"   3 |   version: v1",
+				"     |            ^^",
+				"   4 | other: *m",
+			),
+			matches: []error{edit.ErrProtected},
+		},
+		"step that drops the error of an edit of the version field": {
+			// The edit fails, but the document fails only when the step
+			// returns the error. The step then names the document, so the
+			// name shows that the step ran.
+			opts: []manifest.RegistryOption{
+				manifest.WithAppName("cafe"),
+				manifest.WithVersionField(paths.MustParse("$.metadata.version")),
+				manifest.WithKinds(manifest.NewKind[map[string]any]("Hours",
+					manifest.NameField(paths.MustParse("$.name")),
+					manifest.Version("v1"),
+					manifest.Version("v2", manifest.Migrate(paths.MustParse("$.other.version"),
+						func(ctx context.Context, n *edit.Node) error {
+							err := n.Set(ctx, "v9")
+							if !errors.Is(err, edit.ErrProtected) {
+								return fmt.Errorf("want an error that matches ErrProtected, got %w", err)
+							}
+
+							return n.At(paths.MustParse("$.name")).Set(ctx, "weekdays")
+						})),
+				)),
+			},
+			files: map[string]string{"hours.yaml": stringtest.LinesLF(
+				"kind: Hours",
+				"metadata: &m",
+				"  version: v1",
+				"other: *m",
+			)},
+			want: []string{`Hours "weekdays" v1 up-to-date=false`},
+		},
 		"rename that a merge key undoes": {
 			opts:  closes("$.spec.closes"),
 			files: map[string]string{"hours.yaml": merged},

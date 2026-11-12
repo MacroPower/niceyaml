@@ -180,8 +180,9 @@ type selected struct {
 // also selects each entry of a key that it selects whose key a later entry
 // repeats. Only a Source that [niceyaml.WithAllowDuplicateKeys] gives
 // holds such entries. The selectors after the selector read below them.
-// Matches leaves out each place that holds no value, and each place that
-// is a protected value or lies inside one, through any alias or merge key.
+// Matches leaves out each place that holds no value. A path that selects
+// more than one value also leaves out each place that is a protected value
+// or lies inside one, through any alias or merge key.
 func (d *Doc) matches(path paths.Path) ([]*Node, error) {
 	// An empty document holds no value, but its root is a place where a Set
 	// writes the first value. So `$` selects the root, unless a path of
@@ -336,11 +337,13 @@ func lastName(path paths.Path) string {
 }
 
 // addSelected adds the place at path, which hidden reads, to s, unless s
-// holds it already, it holds no value, or it is a protected value or lies
-// inside one.
+// holds it already or it holds no value. A selection whose path selects
+// more than one value also leaves out a place that is a protected value or
+// lies inside one. A path of names and indexes selects such a place, so
+// each edit of the Func there fails as an edit through [Node.At] fails.
 func (d *Doc) addSelected(s *selection, path paths.Path, hidden []hiddenEntry) {
 	p, err := d.walk(path, hidden, nil)
-	if err == nil && (!p.exists || d.reachesGuard(p)) {
+	if err == nil && (!p.exists || (!plain(s.path) && d.reachesGuard(p))) {
 		return
 	}
 
@@ -1572,12 +1575,12 @@ func (n *Node) At(path paths.Path) *Node {
 //
 // Nodes selects the places that [Doc.Apply] selects for path. In one call,
 // each entry and each item takes one node, however many aliases or `<<`
-// merge keys reach it. Nodes leaves out each place that holds no value,
-// and each place that is a protected value of [WithProtected] or lies
-// inside one. The root of an empty document is the one place without a
-// value that a path selects, as Apply describes. An `@` path from a node
-// on an entry that a later entry of its key hides reads below that entry,
-// as Apply describes.
+// merge keys reach it. Nodes leaves out each place that holds no value. A
+// path that selects more than one value also leaves out each place that is
+// a protected value of [WithProtected] or lies inside one. The root of an
+// empty document is the one place without a value that a path selects, as
+// Apply describes. An `@` path from a node on an entry that a later entry
+// of its key hides reads below that entry, as Apply describes.
 //
 // The nodes of different calls of Nodes, and the nodes that Node.At
 // returns below them, can reach one entry or one item through an alias or
