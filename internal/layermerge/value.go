@@ -319,7 +319,7 @@ func (v *Value) LayerPath(rel paths.Path, layer int) paths.Path {
 			sel.Index = at.index
 		}
 
-		held = with(held, sel)
+		held = held.Append(sel)
 	}
 
 	return held
@@ -361,28 +361,6 @@ func (v *Value) Element(rel paths.Path, appends Appends) *Value {
 	}
 
 	return nil
-}
-
-// with returns p with sel behind its selectors.
-func with(p paths.Path, sel paths.Selector) paths.Path {
-	switch sel.Kind {
-	case paths.SelectorChild:
-		return p.Child(sel.Name)
-	case paths.SelectorIndex:
-		return p.Index(sel.Index)
-	case paths.SelectorChildAll:
-		return p.ChildAll()
-	case paths.SelectorIndexAll:
-		return p.IndexAll()
-	case paths.SelectorRecursive:
-		return p.Recursive(sel.Name)
-	case paths.SelectorRecursiveAll:
-		return p.RecursiveAll()
-	case paths.SelectorKey:
-		return p.Key()
-	}
-
-	return p
 }
 
 // child returns the value sel selects in v, or nil when v does not hold

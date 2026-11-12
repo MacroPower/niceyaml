@@ -542,13 +542,13 @@ func (d *Doc) shiftedTarget(target paths.Path, seq *ast.SequenceNode, index int)
 			continue
 		}
 
-		p, err := d.resolve(appendSelectors(paths.Doc(), sels[:i+1]))
+		p, err := d.resolve(paths.Doc().Append(sels[:i+1]...))
 		if err == nil && p.seq == seq {
 			sels[i].Index--
 		}
 	}
 
-	return appendSelectors(paths.Doc(), sels)
+	return paths.Doc().Append(sels...)
 }
 
 // holderID names the value that holds a place across the edits of a
@@ -1162,7 +1162,7 @@ type moveHolder struct {
 // It reports false when the value does not resolve.
 func (d *Doc) targetHolder(target paths.Path, tp *place) (moveHolder, string, bool) {
 	sels := slices.Collect(target.Selectors())
-	h := moveHolder{path: appendSelectors(paths.Doc(), sels[:tp.found]), rest: sels[tp.found:]}
+	h := moveHolder{path: target.Prefix(tp.found), rest: sels[tp.found:]}
 
 	holder, err := d.resolve(h.path)
 	if err != nil || !holder.exists {
@@ -1180,7 +1180,7 @@ func (d *Doc) targetHolder(target paths.Path, tp *place) (moveHolder, string, bo
 // that value does not resolve.
 func (d *Doc) parentHolder(target paths.Path) (moveHolder, bool) {
 	sels := slices.Collect(target.Selectors())
-	h := moveHolder{path: appendSelectors(paths.Doc(), sels[:len(sels)-1]), rest: sels[len(sels)-1:]}
+	h := moveHolder{path: target.Prefix(len(sels) - 1), rest: sels[len(sels)-1:]}
 
 	holder, err := d.resolve(h.path)
 	if err != nil || !holder.exists {

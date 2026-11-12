@@ -812,6 +812,121 @@ func TestPath_CutPrefix(t *testing.T) {
 	}
 }
 
+func TestPath_Prefix(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		p    paths.Path
+		want string
+		n    int
+	}{
+		"root":            {p: paths.Doc(), n: 0, want: "$"},
+		"zero value":      {n: 0, want: "@"},
+		"none of a path":  {p: paths.Doc().Child("a", "b"), n: 0, want: "$"},
+		"none of current": {p: paths.Current().Child("a", "b"), n: 0, want: "@"},
+		"first selector": {
+			p:    paths.Doc().Child("items").Index(3).Child("name"),
+			n:    1,
+			want: "$.items",
+		},
+		"holder": {
+			p:    paths.Doc().Child("items").Index(3).Child("ports").Index(0).Child("name"),
+			n:    3,
+			want: "$.items[3].ports",
+		},
+		"relative": {
+			p:    paths.Current().Child("a").IndexAll().Key(),
+			n:    2,
+			want: "@.a[*]",
+		},
+		"whole path": {
+			p:    paths.Doc().Child("a").Key(),
+			n:    2,
+			want: "$.a~",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := tc.p.Prefix(tc.n)
+			assert.Equal(t, tc.want, got.String())
+			assert.Equal(t, tc.n, got.Len())
+			assert.Equal(t, tc.p.IsAbsolute(), got.IsAbsolute())
+
+			// CutPrefix gives the rest, and Join puts the path together
+			// again.
+			rest, ok := tc.p.CutPrefix(got)
+			require.True(t, ok)
+			assert.True(t, got.Join(rest).Equal(tc.p), "%s joined with %s", got, rest)
+		})
+	}
+
+	t.Run("owns its selectors", func(t *testing.T) {
+		t.Parallel()
+
+		p := paths.Doc().Child("a", "b", "c")
+		prefix := p.Prefix(1)
+		x := prefix.Child("x")
+
+		assert.Equal(t, "$.a.b.c", p.String())
+		assert.Equal(t, "$.a", prefix.String())
+		assert.Equal(t, "$.a.x", x.String())
+	})
+}
+
+func TestPath_Prefix_Panics(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		want string
+		n    int
+	}{
+		"negative":     {n: -1, want: "paths.Path.Prefix: -1 is out of range [0, 2]"},
+		"past the end": {n: 3, want: "paths.Path.Prefix: 3 is out of range [0, 2]"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.PanicsWithValue(t, tc.want, func() {
+				paths.Doc().Child("a", "b").Prefix(tc.n)
+			})
+		})
+	}
+}
+
+func TestPath_HasWildcard(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		expr string
+		want bool
+	}{
+		"root":                {expr: "$"},
+		"current":             {expr: "@"},
+		"names and indexes":   {expr: "$.items[3].name"},
+		"key":                 {expr: "$.a~"},
+		"key of an item":      {expr: "@[0]~"},
+		"mapping wildcard":    {expr: "$.jobs.*", want: true},
+		"sequence wildcard":   {expr: "$.items[*].name", want: true},
+		"recursive name":      {expr: "$..name", want: true},
+		"recursive wildcard":  {expr: "$.spec..*", want: true},
+		"wildcard before key": {expr: "@.jobs.*~", want: true},
+		"quoted star":         {expr: "$.'*'"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, paths.MustParse(tc.expr).HasWildcard())
+		})
+	}
+}
+
 func TestPath_Key(t *testing.T) {
 	t.Parallel()
 

@@ -722,7 +722,7 @@ func (d *Doc) insertHolder(n *Node, p *place, holderPath paths.Path) (*place, *a
 
 	// The place lies past the last item of a sequence, or the document
 	// lacks a value on the way, which the Insert creates as a Set does.
-	found := prefixOf(n.path, p.found)
+	found := n.path.Prefix(p.found)
 
 	holder, err := d.resolveFrom(p, found)
 	if err != nil || !holder.exists {
@@ -790,7 +790,7 @@ func (d *Doc) setCreated(
 	// over an entry on the path of h. The path then does not reach the new
 	// value, so the check of the merges names the edit at the value above
 	// it that the text holds.
-	holderPath := prefixOf(h.path, p.found)
+	holderPath := h.path.Prefix(p.found)
 
 	holder, err := d.resolveFrom(p, holderPath)
 	if err == nil && holder.exists {
@@ -826,7 +826,7 @@ func (d *Doc) setFirst(ctx context.Context, h *Node, p *place, v any, cfg setCon
 
 	case len(sels) > 0 && sels[0].Kind == paths.SelectorIndex && cfg.at.kind != placeLast:
 		// A placement puts an entry, so it does not apply to an item.
-		return nil, d.fail(h, "%s %s %s, but %s is an item", d.subject(), named, cfg.at.words(), prefixOf(h.path, 1))
+		return nil, d.fail(h, "%s %s %s, but %s is an item", d.subject(), named, cfg.at.words(), h.path.Prefix(1))
 
 	case len(sels) > 0 && (cfg.at.kind == placeBefore || cfg.at.kind == placeAfter):
 		return nil, d.fail(h, "%s %s %s %q, but the document holds no %s",
@@ -889,7 +889,7 @@ func (d *Doc) firstProblem(path paths.Path) string {
 func missingProblem(at paths.Path, sels []paths.Selector) string {
 	for i, sel := range sels {
 		if sel.Kind != paths.SelectorChild && sel.Index != 0 {
-			return "the document holds no " + appendSelectors(at, sels[:i]).String()
+			return "the document holds no " + at.Append(sels[:i]...).String()
 		}
 	}
 
@@ -2167,7 +2167,7 @@ func (d *Doc) createValue(
 ) (*edge, modelPlace, error) {
 	at := cfg.at
 	sels := slices.Collect(h.path.Selectors())
-	holderPath := appendSelectors(paths.Doc(), sels[:p.found])
+	holderPath := h.path.Prefix(p.found)
 
 	holder, err := d.resolveFrom(p, holderPath)
 
@@ -2372,7 +2372,7 @@ func (d *Doc) createProblem(holder *place, holderPath paths.Path, content ast.No
 		return name + " holds " + countItems(items)
 	}
 
-	return missingProblem(appendSelectors(holderPath, rest[:1]), rest[1:])
+	return missingProblem(holderPath.Append(rest[:1]...), rest[1:])
 }
 
 // innerEdge returns the edge depth collections down from e, an edge to an

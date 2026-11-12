@@ -280,7 +280,7 @@ func (d *Doc) pathIn(root, node ast.Node) (paths.Path, bool) {
 
 	slices.Reverse(sels)
 
-	return appendSelectors(paths.Current(), sels), true
+	return paths.Current().Append(sels...), true
 }
 
 // isProps reports whether node is an anchor or a tag, which wraps a value.

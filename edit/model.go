@@ -1095,7 +1095,7 @@ func (d *Doc) placeCall(x *model, p *place) modelCall {
 		return c
 	}
 
-	holder, err := d.resolveFrom(p, prefixOf(p.path, p.found))
+	holder, err := d.resolveFrom(p, p.path.Prefix(p.found))
 	if err != nil {
 		return c
 	}

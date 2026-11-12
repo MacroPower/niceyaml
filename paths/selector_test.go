@@ -212,6 +212,10 @@ func TestPath_Selectors(t *testing.T) {
 			rebuilt := buildPath(t, p.Selectors())
 			assert.True(t, rebuilt.Equal(p), "rebuilt %s from %s", rebuilt, p)
 			assert.Equal(t, got, slices.Collect(rebuilt.Selectors()))
+
+			// Append turns the selectors back into an equal path too.
+			appended := p.Prefix(0).Append(got...)
+			assert.True(t, appended.Equal(p), "appended %s from %s", appended, p)
 		})
 	}
 
@@ -262,6 +266,123 @@ func buildPath(t *testing.T, sels iter.Seq[paths.Selector]) paths.Path {
 	}
 
 	return p
+}
+
+func TestPath_Append(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		p    paths.Path
+		want paths.Path
+		sels []paths.Selector
+	}{
+		"no selectors": {
+			p:    paths.Doc().Child("a"),
+			want: paths.Doc().Child("a"),
+		},
+		"onto the root": {
+			p: paths.Doc(),
+			sels: []paths.Selector{
+				{Kind: paths.SelectorChild, Name: "items"},
+				{Kind: paths.SelectorIndex, Index: 3},
+				{Kind: paths.SelectorKey},
+			},
+			want: paths.Doc().Child("items").Index(3).Key(),
+		},
+		"keeps the current node": {
+			p:    paths.Current().Child("spec"),
+			sels: []paths.Selector{{Kind: paths.SelectorChild, Name: "replicas"}},
+			want: paths.Current().Child("spec", "replicas"),
+		},
+		"every kind": {
+			p: paths.Doc(),
+			sels: []paths.Selector{
+				{Kind: paths.SelectorChild, Name: "a"},
+				{Kind: paths.SelectorIndex, Index: 0},
+				{Kind: paths.SelectorChildAll},
+				{Kind: paths.SelectorIndexAll},
+				{Kind: paths.SelectorRecursive, Name: "b"},
+				{Kind: paths.SelectorRecursiveAll},
+				{Kind: paths.SelectorKey},
+			},
+			want: paths.Doc().Child("a").Index(0).ChildAll().IndexAll().Recursive("b").RecursiveAll().Key(),
+		},
+		"ignores fields the kind does not hold": {
+			p: paths.Doc(),
+			sels: []paths.Selector{
+				{Kind: paths.SelectorChild, Name: "a", Index: 5},
+				{Kind: paths.SelectorIndex, Name: "b", Index: 1},
+				{Kind: paths.SelectorIndexAll, Name: "c", Index: 2},
+				{Kind: paths.SelectorChildAll, Name: "d", Index: -1},
+				{Kind: paths.SelectorRecursiveAll, Name: "e"},
+				{Kind: paths.SelectorKey, Name: "f", Index: 3},
+			},
+			want: paths.Doc().Child("a").Index(1).IndexAll().ChildAll().RecursiveAll().Key(),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := tc.p.Append(tc.sels...)
+			assert.True(t, got.Equal(tc.want), "got %s, want %s", got, tc.want)
+			assert.Equal(t, tc.want.String(), got.String())
+
+			// The appended path holds the selectors as the builders store
+			// them, so it starts with the path it extends.
+			rest, ok := got.CutPrefix(tc.p)
+			require.True(t, ok)
+			assert.Equal(t, len(tc.sels), rest.Len())
+		})
+	}
+
+	t.Run("leaves the receiver as it was", func(t *testing.T) {
+		t.Parallel()
+
+		base := paths.Doc().Child("a")
+		x := base.Append(paths.Selector{Kind: paths.SelectorChild, Name: "x"})
+		y := base.Append(paths.Selector{Kind: paths.SelectorChild, Name: "y"})
+
+		assert.Equal(t, "$.a", base.String())
+		assert.Equal(t, "$.a.x", x.String())
+		assert.Equal(t, "$.a.y", y.String())
+	})
+}
+
+func TestPath_Append_Panics(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		want string
+		sels []paths.Selector
+	}{
+		"zero selector": {
+			sels: []paths.Selector{{}},
+			want: "paths.Path.Append: unknown selector kind SelectorKind(0)",
+		},
+		"unknown kind after a valid selector": {
+			sels: []paths.Selector{
+				{Kind: paths.SelectorChild, Name: "a"},
+				{Kind: paths.SelectorKind(99)},
+			},
+			want: "paths.Path.Append: unknown selector kind SelectorKind(99)",
+		},
+		"negative index": {
+			sels: []paths.Selector{{Kind: paths.SelectorIndex, Index: -1}},
+			want: "paths.Path.Append: index -1 is below 0",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.PanicsWithValue(t, tc.want, func() {
+				paths.Doc().Append(tc.sels...)
+			})
+		})
+	}
 }
 
 func TestPath_Last(t *testing.T) {
