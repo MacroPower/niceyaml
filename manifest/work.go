@@ -8,6 +8,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/inputhook"
+	"go.jacobcolvin.com/niceyaml/internal/schemalint"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 )
@@ -105,7 +106,7 @@ type schemaFields struct {
 	// The type fields that the check of the schema does not see.
 	hidden []paths.Path
 	// The type fields that the schema might read in a place that the
-	// registry does not follow, as [schemaField] describes. The registry
+	// registry does not follow, as [schemalint.Field] describes. The registry
 	// cannot tell whether the check sees them.
 	unsure []paths.Path
 }
@@ -119,7 +120,7 @@ type schemaFields struct {
 // the option, the check sees each type field that the schema declares. A
 // type field that the schema does not declare is unsure when a branch or
 // a $ref that the document does not resolve might read it, as
-// [schemaField] describes. Such a field is unsure whether or not the
+// [schemalint.Field] describes. Such a field is unsure whether or not the
 // schema also requires it. The check does not see any other type field.
 //
 // The registry keeps the fields of each version under the version and
@@ -147,17 +148,17 @@ func (r *Registry) schemaFields(v *versionEntry, validator *jsonschema.Validator
 		}
 	}
 
-	doc := newSchemaDoc(validator)
+	doc := schemalint.NewDoc(validator)
 	entry := schemaFields{validator: validator}
 
 	for _, p := range r.typeFields() {
-		f := doc.field(p)
+		f := doc.Field(p)
 
 		switch {
-		case f.declared:
+		case f.Declared:
 			// The check sees the field.
 
-		case f.unsure:
+		case f.Unsure:
 			entry.unsure = append(entry.unsure, p)
 
 		default:

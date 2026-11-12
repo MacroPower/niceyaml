@@ -519,6 +519,7 @@ func TestRegistry_Verify_Deprecations(t *testing.T) {
 
 			n := len(slices.Collect(niceyaml.Problems(err)))
 			requireVerifyRows(t, err, slices.Repeat([]error{manifest.ErrUnfollowableDeprecation}, n))
+			require.ErrorIs(t, err, schema.ErrUnfollowableDeprecation)
 		})
 	}
 }
@@ -629,6 +630,8 @@ func TestRegistry_Verify_Defaults(t *testing.T) {
 
 			assert.Equal(t, tc.want, stringtest.JoinLF(rows...))
 			requireVerifyRows(t, err, slices.Repeat([]error{manifest.ErrUnusedDefault}, len(rows)))
+			// The rows of schema.CheckType match the same sentinel.
+			require.ErrorIs(t, err, schema.ErrUnusedDefault)
 		})
 	}
 }

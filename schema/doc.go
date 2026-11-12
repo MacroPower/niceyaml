@@ -71,6 +71,24 @@
 //
 //	require.NoError(t, schema.CheckFields[Config](unmarshalers...))
 //
+// The generator requires each field without the omitempty or omitzero
+// option. A default from [go.jacobcolvin.com/niceyaml.WithDefaults] on
+// such a field never applies, because every document must write the
+// field. [CheckType] reads the compiled schema beside the type and the
+// decode options that the program decodes with. It reports each such
+// default, and each property that the schema requires and deprecates:
+//
+//	func TestConfigSchema(t *testing.T) {
+//	    require.NoError(t, schema.CheckFields[Config]())
+//	    require.NoError(t, schema.CheckType[Config](configSchema, decoding))
+//	}
+//
+// The test fails for a Config whose schema requires a deprecated old
+// field and a seats field that decoding defaults to 20:
+//
+//	$.old: required and deprecated
+//	$.seats: required, so its default 20 never applies
+//
 // # Validation
 //
 // [Compile] turns a JSON schema document, in JSON or YAML, into a
