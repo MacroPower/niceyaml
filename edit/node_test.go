@@ -3480,40 +3480,69 @@ func TestNode_At_LargeMapping(t *testing.T) {
 	t.Parallel()
 
 	// The lookup of a key costs about the same whatever the number of keys
-	// of its mapping. So 16,000 lookups of keys spread across a mapping of
-	// 16,000 keys take about as long as the same number of lookups in a
-	// mapping of 1,000 keys. A lookup that compares the key that it finds
-	// with each key of the mapping makes the larger mapping take many
-	// times as long. Each loop runs three times, and the fastest run
-	// counts, so that a load on the machine in one run does not set the
-	// result. The check that each lookup found its key runs after the
-	// timed loops.
-	lookups := func(t *testing.T, size int) time.Duration {
-		t.Helper()
+	// of its mapping. So lookups of keys spread across a mapping of 16,000
+	// keys take about as long as the same number of lookups in a mapping
+	// of 250 keys. A lookup that compares the key that it finds with each
+	// key of the mapping makes the larger mapping take about 14 times as
+	// long. The test fails at 4 times as long.
+	//
+	// Each run times its lookups in batches that each spread across the
+	// whole mapping, and the fastest batch of each mapping counts. A batch
+	// takes less than a millisecond, so the scheduler of a loaded machine
+	// rarely stops the test inside one of many batches. The runs of the two
+	// mappings take turns, so a load that lasts slows both. The check that
+	// each lookup found its key runs after the timed loops.
+	const (
+		count   = 16000
+		batches = 32
+		runs    = 5
+	)
 
-		const count = 16000
+	type mapping struct {
+		doc     *edit.Doc
+		paths   []paths.Path
+		found   []*edit.Node
+		fastest time.Duration
+	}
 
-		ps := make([]paths.Path, count)
-		for i := range ps {
-			ps[i] = paths.Doc().Child(fmt.Sprintf("k%d", size-1-i*size/count))
+	newMapping := func(size int) *mapping {
+		m := &mapping{
+			doc:     newDoc(t, strings.ReplaceAll(keys(size), " # count", "")),
+			paths:   make([]paths.Path, count),
+			found:   make([]*edit.Node, count),
+			fastest: time.Duration(math.MaxInt64),
 		}
 
-		d := newDoc(t, strings.ReplaceAll(keys(size), " # count", ""))
-		fastest := time.Duration(math.MaxInt64)
-		found := make([]*edit.Node, count)
+		for i := range m.paths {
+			m.paths[i] = paths.Doc().Child(fmt.Sprintf("k%d", size-1-i*size/count))
+		}
 
-		err := d.Apply(t.Context(), paths.MustParse("$.k0"), func(_ context.Context, n *edit.Node) error {
-			for range 3 {
-				start := time.Now()
+		return m
+	}
 
-				for i, p := range ps {
-					found[i] = n.At(p)
-				}
+	lookups := func(m *mapping, n *edit.Node) {
+		for b := range batches {
+			start := time.Now()
 
-				fastest = min(fastest, time.Since(start))
+			for i := b; i < count; i += batches {
+				m.found[i] = n.At(m.paths[i])
 			}
 
-			for _, at := range found {
+			m.fastest = min(m.fastest, time.Since(start))
+		}
+	}
+
+	small, large := newMapping(250), newMapping(16000)
+	k0 := paths.MustParse("$.k0")
+
+	err := small.doc.Apply(t.Context(), k0, func(ctx context.Context, sn *edit.Node) error {
+		return large.doc.Apply(ctx, k0, func(_ context.Context, ln *edit.Node) error {
+			for range runs {
+				lookups(small, sn)
+				lookups(large, ln)
+			}
+
+			for _, at := range slices.Concat(small.found, large.found) {
 				ok, err := at.Exists()
 				if err != nil {
 					return err
@@ -3526,15 +3555,10 @@ func TestNode_At_LargeMapping(t *testing.T) {
 
 			return nil
 		})
-		require.NoError(t, err)
+	})
+	require.NoError(t, err)
 
-		return fastest
-	}
-
-	small := lookups(t, 1000)
-	large := lookups(t, 16000)
-
-	assert.Less(t, large, 3*small)
+	assert.Less(t, large.fastest, 4*small.fastest)
 }
 
 func TestNode_Len(t *testing.T) {
