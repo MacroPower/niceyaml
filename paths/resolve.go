@@ -267,18 +267,21 @@ func newResolver(doc *ast.DocumentNode) *resolver {
 // otherwise, as the package documentation describes.
 //
 // After it binds every alias, bindAliases counts the nodes of doc,
-// comments included. It also calls [enclosedAliases] to find the aliases
-// that lie inside the content of the anchor they refer to.
+// comments included. The enclosed set of the result holds each alias that
+// the binder found inside the content of the anchor it refers to, other
+// than one that a `<<` merge key names.
 func bindAliases(doc *ast.DocumentNode) *aliasBinding {
 	b := &aliasBinder{
-		anchors: newAnchorSet(),
-		targets: map[*ast.AliasNode]*ast.AnchorNode{},
-		merged:  map[*ast.MappingNode]anchorSet{},
-		pending: map[*ast.MappingNode]*mergedRead{},
-		open:    map[*ast.MappingNode]bool{},
-		watched: map[ast.Node]bool{},
-		merges:  map[*ast.AliasNode]bool{},
-		version: 1,
+		anchors:  newAnchorSet(),
+		targets:  map[*ast.AliasNode]*ast.AnchorNode{},
+		merged:   map[*ast.MappingNode]anchorSet{},
+		pending:  map[*ast.MappingNode]*mergedRead{},
+		open:     map[*ast.MappingNode]bool{},
+		watched:  map[ast.Node]bool{},
+		merges:   map[*ast.AliasNode]bool{},
+		inside:   map[*ast.AnchorNode]bool{},
+		enclosed: map[*ast.AliasNode]bool{},
+		version:  1,
 	}
 
 	ast.Walk(b, doc.Body)
@@ -291,46 +294,15 @@ func bindAliases(doc *ast.DocumentNode) *aliasBinding {
 		return true
 	})
 
-	return &aliasBinding{targets: b.targets, enclosed: enclosedAliases(doc, b.targets, b.merges), nodes: nodes}
-}
-
-// enclosedAliases returns the aliases of doc that lie inside the content
-// of the anchor they refer to. The targets map holds the anchor each
-// alias refers to. The merges set holds the aliases that `<<` merge keys
-// name, and the result leaves those aliases out.
-func enclosedAliases(
-	doc *ast.DocumentNode,
-	targets map[*ast.AliasNode]*ast.AnchorNode,
-	merges map[*ast.AliasNode]bool,
-) map[*ast.AliasNode]bool {
-	open := map[ast.Node]bool{}
 	enclosed := map[*ast.AliasNode]bool{}
 
-	// The walk reads the content of an anchor itself, so it knows which
-	// anchors each alias lies in.
-	var visit func(ast.Node) bool
-
-	visit = func(node ast.Node) bool {
-		switch n := node.(type) {
-		case *ast.AnchorNode:
-			open[n.Value] = true
-			astnode.Inspect(n.Value, visit)
-			delete(open, n.Value)
-
-			return false
-
-		case *ast.AliasNode:
-			if target, ok := targets[n]; ok && open[target.Value] && !merges[n] {
-				enclosed[n] = true
-			}
+	for alias := range b.enclosed {
+		if !b.merges[alias] {
+			enclosed[alias] = true
 		}
-
-		return true
 	}
 
-	astnode.Inspect(doc.Body, visit)
-
-	return enclosed
+	return &aliasBinding{targets: b.targets, enclosed: enclosed, nodes: nodes}
 }
 
 // anchorSet holds the anchors that the binder has recorded so far, in two
@@ -400,8 +372,8 @@ func (s anchorSet) add(other anchorSet) {
 // for every later merge. The pending map holds the other results
 // that mergedAnchors has read, each with the state it depends on. The open
 // map holds the anchored and merged mappings that the walk is inside of,
-// and the ones that mergedAnchors is reading. A mapping that merges itself
-// thus stops there.
+// and the ones that mergedAnchors is reading. A merge that reaches an open
+// mapping closes a cycle of merges, and it brings in nothing there.
 //
 // The watched set holds each mapping and alias that a result in the
 // pending map depends on. The version field counts the changes to the
@@ -410,15 +382,23 @@ func (s anchorSet) add(other anchorSet) {
 //
 // The merges set holds each alias that a `<<` merge key names and that
 // the binder has bound.
+//
+// The inside set holds the anchors whose content the walk is inside. The
+// enclosed set holds each alias that the binder bound to an anchor in the
+// inside set. Each such alias lies inside the content of the anchor it
+// refers to. A `<<` merge key does not bring in a mapping through such an
+// alias, as [aliasBinder.findSources] describes.
 type aliasBinder struct {
-	anchors anchorSet
-	targets map[*ast.AliasNode]*ast.AnchorNode
-	merged  map[*ast.MappingNode]anchorSet
-	pending map[*ast.MappingNode]*mergedRead
-	open    map[*ast.MappingNode]bool
-	watched map[ast.Node]bool
-	merges  map[*ast.AliasNode]bool
-	version int
+	anchors  anchorSet
+	targets  map[*ast.AliasNode]*ast.AnchorNode
+	merged   map[*ast.MappingNode]anchorSet
+	pending  map[*ast.MappingNode]*mergedRead
+	open     map[*ast.MappingNode]bool
+	watched  map[ast.Node]bool
+	merges   map[*ast.AliasNode]bool
+	inside   map[*ast.AnchorNode]bool
+	enclosed map[*ast.AliasNode]bool
+	version  int
 }
 
 // Visit records an anchor or binds an alias, then returns b so [ast.Walk]
@@ -438,11 +418,13 @@ func (b *aliasBinder) Visit(node ast.Node) ast.Visitor {
 		name := astnode.Token(n.Name)
 		b.anchors.record(name, n)
 
-		if mapping := anchoredMapping(n.Value); mapping != nil {
-			b.walkOpen(mapping)
-		} else {
-			ast.Walk(b, n.Value)
-		}
+		b.within([]*ast.AnchorNode{n}, func() {
+			if mapping := anchoredMapping(n.Value); mapping != nil {
+				b.walkOpen(mapping)
+			} else {
+				ast.Walk(b, n.Value)
+			}
+		})
 
 		// An anchor counts again where its content ends, over any anchor of
 		// the same name inside it.
@@ -482,7 +464,7 @@ func (b *aliasBinder) merge(value ast.Node) {
 
 	for _, src := range sources {
 		if src.inline {
-			b.walkOpen(src.mapping)
+			b.within(src.anchors, func() { b.walkOpen(src.mapping) })
 
 			continue
 		}
@@ -493,9 +475,12 @@ func (b *aliasBinder) merge(value ast.Node) {
 
 // mergeSource is a mapping a `<<` merge key brings in. The inline field
 // reports whether the value of the merge key holds the mapping itself,
-// rather than an alias to it.
+// rather than an alias to it. For an inline mapping, the anchors slice
+// holds the anchors in the value of the merge key whose content holds the
+// mapping.
 type mergeSource struct {
 	mapping *ast.MappingNode
+	anchors []*ast.AnchorNode
 	inline  bool
 }
 
@@ -508,6 +493,12 @@ type mergeSource struct {
 // bound to, and stops at an alias it has already followed. It also returns
 // each alias it stops at because the alias is not bound.
 //
+// FindSources also stops at an alias in the enclosed set of the binder.
+// Such an alias lies inside the content of the anchor it refers to. The
+// decoder rejects a merge key that names such an alias, so the merge
+// brings in nothing through the alias, as for the merge of *a in
+// "a: &a [{<<: *a}]".
+//
 // With bind set, findSources binds each alias of value itself to the
 // anchor of its name in nodes. It also walks any other node of value where
 // the decoder expects a mapping, so the aliases inside that node bind too.
@@ -519,9 +510,10 @@ func (b *aliasBinder) findSources(
 		unbound []*ast.AliasNode
 	)
 
-	var find func(node ast.Node, inline, top bool)
+	// The wrap slice holds the anchors in value whose content holds node.
+	var find func(node ast.Node, wrap []*ast.AnchorNode, inline, top bool)
 
-	find = func(node ast.Node, inline, top bool) {
+	find = func(node ast.Node, wrap []*ast.AnchorNode, inline, top bool) {
 		var followed []*ast.AliasNode
 
 		for !astnode.IsNil(node) {
@@ -529,6 +521,10 @@ func (b *aliasBinder) findSources(
 			case *ast.AnchorNode:
 				if name := astnode.Token(n.Name); name != nil {
 					nodes[name.Value] = n
+				}
+
+				if inline {
+					wrap = append(slices.Clip(wrap), n)
 				}
 
 				node = n.Value
@@ -543,7 +539,7 @@ func (b *aliasBinder) findSources(
 				followed = append(followed, n)
 
 				if bind && inline {
-					b.bindMergeAlias(n, nodes)
+					b.within(wrap, func() { b.bindMergeAlias(n, nodes) })
 				}
 
 				target, ok := b.targets[n]
@@ -553,27 +549,36 @@ func (b *aliasBinder) findSources(
 					return
 				}
 
+				if b.enclosed[n] {
+					return
+				}
+
 				node, inline = target.Value, false
 
 			case *ast.MappingNode:
-				sources = append(sources, mergeSource{mapping: n, inline: inline})
+				src := mergeSource{mapping: n, inline: inline}
+				if inline {
+					src.anchors = wrap
+				}
+
+				sources = append(sources, src)
 
 				return
 
 			case *ast.SequenceNode:
 				if top {
 					for _, v := range n.Values {
-						find(v, inline, false)
+						find(v, wrap, inline, false)
 					}
 				} else if bind && inline {
-					ast.Walk(b, n)
+					b.within(wrap, func() { ast.Walk(b, n) })
 				}
 
 				return
 
 			default:
 				if bind && inline {
-					ast.Walk(b, n)
+					b.within(wrap, func() { ast.Walk(b, n) })
 				}
 
 				return
@@ -581,7 +586,7 @@ func (b *aliasBinder) findSources(
 		}
 	}
 
-	find(value, true, true)
+	find(value, nil, true, true)
 
 	return sources, unbound
 }
@@ -601,10 +606,38 @@ func (b *aliasBinder) bindMergeAlias(alias *ast.AliasNode, nodes map[string]*ast
 	}
 }
 
-// bind binds alias to target.
+// bind binds alias to target. It adds alias to the enclosed set when the
+// walk is inside the content of target.
 func (b *aliasBinder) bind(alias *ast.AliasNode, target *ast.AnchorNode) {
 	b.targets[alias] = target
+
+	if b.inside[target] {
+		b.enclosed[alias] = true
+	}
+
 	b.touch(alias)
+}
+
+// within calls walk with each of anchors in the inside set, and then
+// removes the ones that were not in the set before. The walk is inside
+// the content of each of anchors.
+func (b *aliasBinder) within(anchors []*ast.AnchorNode, walk func()) {
+	var added []*ast.AnchorNode
+
+	for _, anchor := range anchors {
+		if !b.inside[anchor] {
+			b.inside[anchor] = true
+			added = append(added, anchor)
+		}
+	}
+
+	defer func() {
+		for _, anchor := range added {
+			delete(b.inside, anchor)
+		}
+	}()
+
+	walk()
 }
 
 // setOpen records whether the walk, or [aliasBinder.mergedAnchors], is
@@ -615,8 +648,6 @@ func (b *aliasBinder) setOpen(mapping *ast.MappingNode, open bool) {
 	} else {
 		delete(b.open, mapping)
 	}
-
-	b.touch(mapping)
 }
 
 // touch starts a new version when a result in the pending map depends on
@@ -631,18 +662,15 @@ func (b *aliasBinder) touch(node ast.Node) {
 // set holds the anchors that merging a mapping records. The final field
 // reports whether they hold for every later merge of the mapping.
 //
-// The mapping field holds the mapping that the result is for. The open
-// field reports whether that mapping was open. It is true only for the
-// empty result of a mapping that mergedAnchors found open. The unbound set
-// holds each alias of a merge key that the read found unbound. The reads
-// slice holds the non-final results of the mappings that the read merged.
-// A result that holds any such alias or result is not final.
+// The mapping field holds the mapping that the result is for. The unbound
+// set holds each alias of a merge key that the read found unbound. The
+// reads slice holds the non-final results of the mappings that the read
+// merged. A result that holds any such alias or result is not final.
 //
 // A result that is not final holds as long as the state it read stays the
 // same:
 //
-//   - Its mapping stays open or closed as the open field records, and the
-//     mapping does not have a final result yet.
+//   - Its mapping does not have a final result yet.
 //   - Each of its unbound aliases stays unbound.
 //   - Each of its reads holds.
 //
@@ -654,7 +682,6 @@ type mergedRead struct {
 	unbound map[*ast.AliasNode]bool
 	reads   []*mergedRead
 	checked int
-	open    bool
 	final   bool
 	held    bool
 }
@@ -665,11 +692,19 @@ type mergedRead struct {
 // mappings it merges. MergedAnchors finds the mappings that those merge
 // keys bring in through the aliases as Visit bound them.
 //
-// A merge records the anchors of a mapping only after the walk leaves that
-// mapping. The result is thus not final when mapping or a mapping it
-// merges is open. An alias that Visit has not bound yet can bring in a
-// mapping after it binds. The result is thus also not final when one of
-// those merge keys names such an alias.
+// A merge that reaches a mapping that the walk or mergedAnchors is inside
+// closes a cycle of merges, and the decoder rejects the document. The
+// decoder fails to find the anchor of an alias whose content it is
+// reading, or it reads the merges of the cycle until it passes its maximum
+// depth. For an open mapping, mergedAnchors thus returns an empty result
+// that is final, so the merge brings in nothing there. It does not keep
+// that result, because a merge after the walk leaves the mapping brings
+// in all of it. No result depends on which mappings are open, so
+// mergedAnchors reads each mapping at most once at each version.
+//
+// An alias that Visit has not bound yet can bring in a mapping after it
+// binds. The result is not final when one of those merge keys names such
+// an alias.
 //
 // MergedAnchors keeps a final result in the merged map. It keeps any other
 // result in the pending map, and reuses that result as long as the result
@@ -682,9 +717,7 @@ func (b *aliasBinder) mergedAnchors(mapping *ast.MappingNode) *mergedRead {
 	}
 
 	if b.open[mapping] {
-		b.watched[mapping] = true
-
-		return &mergedRead{anchors: anchorSet{}, mapping: mapping, open: true}
+		return &mergedRead{anchors: anchorSet{}, final: true}
 	}
 
 	if read, ok := b.pending[mapping]; ok && b.holds(read) {
@@ -718,8 +751,8 @@ func (b *aliasBinder) mergedAnchors(mapping *ast.MappingNode) *mergedRead {
 		return read
 	}
 
-	// The result depends on mapping staying closed, whatever the reads
-	// inside it found, and on its unbound aliases staying unbound.
+	// The result holds until mapping has a final result or one of its
+	// unbound aliases binds.
 	b.watched[mapping] = true
 	for alias := range read.unbound {
 		b.watched[alias] = true
@@ -745,7 +778,7 @@ func (b *aliasBinder) holds(read *mergedRead) bool {
 	}
 
 	_, final := b.merged[read.mapping]
-	held := !final && b.open[read.mapping] == read.open
+	held := !final
 
 	for alias := range read.unbound {
 		if _, ok := b.targets[alias]; ok {

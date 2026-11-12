@@ -227,7 +227,8 @@ func TestResolver_Node(t *testing.T) {
 		},
 		"anchor of a merge source that merges itself": {
 			// The decoder rejects the merge of a mapping into itself. The
-			// binding stops at the cycle and still counts &x one again.
+			// binding does not follow *a inside &a, and still counts &x one
+			// again.
 			input: stringtest.LinesLF(
 				"a: &a {k: &x one, i: {<<: *a}}",
 				"other: &x two",
@@ -237,6 +238,35 @@ func TestResolver_Node(t *testing.T) {
 			),
 			path: "$.m.v",
 			want: "one",
+		},
+		"anchor of a sequence that a merge inside it names": {
+			// The decoder rejects the merge of *a inside &a, so the merge
+			// brings in nothing. *x refers to the &x before it, not to the
+			// &x of the mapping after it.
+			input: stringtest.LinesLF(
+				"x: &x zero",
+				"a: &a [{<<: *a, v: *x}, {k: &x one}]",
+			),
+			path: "$.a[0].v",
+			want: "zero",
+		},
+		"anchor of a merge source behind a cycle of merges": {
+			// The decoder rejects the cycle of merges between c and a. The
+			// merge of *a in c closes the cycle and brings in nothing, also
+			// where n merges *c after the walk leaves a. *x thus refers to
+			// &x two, not to the &x one of a.
+			input: stringtest.LinesLF(
+				"m:",
+				"  <<:",
+				"    - &c {<<: *a}",
+				"    - &a {b: {<<: *c}, k: &x one}",
+				"y: &x two",
+				"n:",
+				"  <<: *c",
+				"  w: *x",
+			),
+			path: "$.n.w",
+			want: "two",
 		},
 		"anchor of a merge source after a merge alias in it binds": {
 			// The first merge of *B reads &B before the walk binds its *C,
@@ -1137,24 +1167,88 @@ func assertSameError(t *testing.T, wantErr, err error, expr string) bool {
 	return true
 }
 
-// openMerges returns a document whose mapping a holds, under an anchor of
-// its own, the mappings b0 and up, as many as links. Each bN merges the
-// two mappings before it, b1 merges b0 and a, and b0 merges a and holds
-// the anchor x.
+// writeMergeChain writes the mappings b1 and up to sb, each on a line of
+// its own after indent, so the chain holds b0 and as many as links in all.
+// Each bN merges the two mappings before it, and b1 merges b0 and the
+// alias other.
+func writeMergeChain(sb *strings.Builder, indent string, links int, other string) {
+	fmt.Fprintf(sb, "%sb1: &b1 {<<: [*b0, %s]}\n", indent, other)
+
+	for i := 2; i < links; i++ {
+		fmt.Fprintf(sb, "%sb%d: &b%d {<<: [*b%d, *b%d]}\n", indent, i, i, i-1, i-2)
+	}
+}
+
+// openMerges returns a document whose mapping m merges the mapping c and,
+// under the anchor a, the mappings b0 and up, as many as links. Mapping c
+// merges a, and b0 merges c and holds the anchor x. The chain of merges
+// that [writeMergeChain] writes follows b0. The merge of a in c thus
+// reaches a while the walk is inside a.
 func openMerges(links int) string {
 	var sb strings.Builder
 
 	sb.WriteString(stringtest.LinesLF(
-		"a: &a",
-		"  b0: &b0 {<<: *a, k: &x one}",
-		"  b1: &b1 {<<: [*b0, *a]}",
+		"m:",
+		"  <<:",
+		"    - &c {<<: *a}",
+		"    - &a",
+		"      b0: &b0 {<<: *c, k: &x one}",
 	))
 
-	for i := 2; i < links; i++ {
-		fmt.Fprintf(&sb, "  b%d: &b%d {<<: [*b%d, *b%d]}\n", i, i, i-1, i-2)
-	}
+	writeMergeChain(&sb, "      ", links, "*c")
 
 	return sb.String()
+}
+
+// pendingMerges returns a document whose mapping m merges the mappings b0
+// and up, as many as links, then the mappings c and d. Mapping b0 merges
+// c, c merges d, and d holds the anchor x. The chain of merges that
+// [writeMergeChain] writes follows b0. The walk reaches the merge of d in
+// c only after the chain, and v refers to x after m.
+func pendingMerges(links int) string {
+	var sb strings.Builder
+
+	sb.WriteString(stringtest.LinesLF(
+		"other: &x two",
+		"m:",
+		"  <<:",
+		"    - b0: &b0 {<<: *c}",
+	))
+
+	writeMergeChain(&sb, "      ", links, "*c")
+
+	sb.WriteString(stringtest.LinesLF(
+		"    - &c {<<: *d}",
+		"    - &d {k: &x one}",
+		"v: *x",
+	))
+
+	return sb.String()
+}
+
+// siblingMerges returns a document whose mapping m merges the mappings a0
+// and up, as many as count. Each aN merges every other mapping of the
+// sequence. The anchor x comes before m, and v refers to it after m.
+func siblingMerges(count int) string {
+	elements := make([]string, 0, count)
+
+	for i := range count {
+		aliases := make([]string, 0, count-1)
+
+		for j := range count {
+			if j != i {
+				aliases = append(aliases, fmt.Sprintf("*a%d", j))
+			}
+		}
+
+		elements = append(elements, fmt.Sprintf("&a%d {k%d: s, <<: [%s]}", i, i, strings.Join(aliases, ", ")))
+	}
+
+	return stringtest.LinesLF(
+		"x: &x one",
+		"m: {<<: ["+strings.Join(elements, ", ")+"]}",
+		"v: *x",
+	)
 }
 
 func TestResolver_NestedMerges(t *testing.T) {
@@ -1172,6 +1266,14 @@ func TestResolver_NestedMerges(t *testing.T) {
 
 	repeated.WriteString("v: *x\n")
 
+	// The mappings of a sequence under &c, where each one merges *c and
+	// thus every mapping of the sequence.
+	selfMerges := stringtest.LinesLF(
+		"x: &x one",
+		"c: &c ["+strings.TrimSuffix(strings.Repeat("{k: s, <<: *c}, ", 60), ", ")+"]",
+		"v: *x",
+	)
+
 	// The alias at each path refers to the anchor &x one.
 	tcs := map[string]struct {
 		input string
@@ -1183,11 +1285,31 @@ func TestResolver_NestedMerges(t *testing.T) {
 			input: repeated.String(),
 			path:  paths.Doc().Child("v"),
 		},
-		// No merge of a bN is final while the walk is inside a. Reading
-		// every merge again would take about 1.6^60 reads.
+		// The merge of *a in c reaches a while the walk is inside it, so
+		// the merge brings in nothing there, and the merges of each bN are
+		// final. Reading every merge again would take about 1.6^60 reads.
 		"merges inside an open anchor": {
-			input: openMerges(60) + "  v: *x\n",
-			path:  paths.Doc().Child("a", "v"),
+			input: openMerges(60) + "      v: *x\n",
+			path:  paths.Doc().Child("m", "v"),
+		},
+		// No merge of a bN is final until the walk binds *d in c. Reading
+		// every merge again would take about 1.6^60 reads.
+		"merges through an alias that has not bound": {
+			input: pendingMerges(60),
+			path:  paths.Doc().Child("v"),
+		},
+		// Reading the merges of each mapping in each order of the mappings
+		// would take 60 factorial reads.
+		"merges of the sequence that holds them": {
+			input: selfMerges,
+			path:  paths.Doc().Child("v"),
+		},
+		// Each mapping of the sequence merges every other one. Reading the
+		// merges of each mapping in each order of the mappings would take
+		// 60 factorial reads.
+		"merges of each other": {
+			input: siblingMerges(60),
+			path:  paths.Doc().Child("v"),
 		},
 	}
 
@@ -2638,6 +2760,11 @@ func TestResolver_Alias(t *testing.T) {
 			input: "x: {<<: &m {k: *m, j: 1}}\n",
 			path:  paths.Doc().Child("x", "k"),
 			want:  "*m",
+		},
+		"alias in a nested sequence inside its own anchor on a merge value": {
+			input: "x: {<<: &s [[*s]]}\n",
+			path:  paths.Doc().Child("x", "<<").Index(0).Index(0),
+			want:  "*s",
 		},
 		"alias of an anchor on an alias inside its own anchor": {
 			// The decoder reads *x as null, so y holds null under the tag, and
