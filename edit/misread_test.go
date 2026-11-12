@@ -454,7 +454,7 @@ func TestNew_Misread(t *testing.T) {
 				opts = append(opts, niceyaml.WithAllowDuplicateKeys(true))
 			}
 
-			d, err := edit.New(misreadSource(t, tc.text, tc.refs, opts...), edit.WithApp("cafe"))
+			d, err := edit.New(misreadSource(t, tc.text, tc.refs, opts...), edit.WithAppName("cafe"))
 			if tc.err == "" {
 				require.NoError(t, err)
 				assert.Equal(t, tc.text, d.Text())
@@ -463,7 +463,7 @@ func TestNew_Misread(t *testing.T) {
 			}
 
 			for range tc.repeat {
-				_, again := edit.New(misreadSource(t, tc.text, tc.refs, opts...), edit.WithApp("cafe"))
+				_, again := edit.New(misreadSource(t, tc.text, tc.refs, opts...), edit.WithAppName("cafe"))
 				require.Error(t, again)
 				require.Equal(t, niceyaml.FormatError(err), niceyaml.FormatError(again))
 			}

@@ -546,7 +546,7 @@
 // construct of several tokens binds at the first of them. So a mapping with
 // more than one `<<` merge key binds at its first merge key, whatever each
 // merge key reads. Each site binds as the Errors section describes. Its
-// message names the program as [WithApp] names it, and a detail says what
+// message names the program as [WithAppName] names it, and a detail says what
 // to write instead. Its Fix field holds the words of that detail. Its
 // Related field holds the paths of the sites of the construct, such as the
 // first anchor of a name that the document defines twice. For an anchor

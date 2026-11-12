@@ -4502,7 +4502,7 @@ func (d *Doc) aliasCopyFix(readers []reader, at paths.Path) string {
 	return strings.Join(append(fixes, "or keep "+at.String()), ", ")
 }
 
-// appName returns the name of the program, as [WithApp] gives it.
+// appName returns the name of the program, as [WithAppName] gives it.
 func (d *Doc) appName() string {
 	if d.cfg.app == "" {
 		return "this program"

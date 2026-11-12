@@ -45,7 +45,7 @@ func (d *docState) migrate(ctx context.Context) bool {
 	reg := d.l.reg
 
 	ed, err := edit.New(d.doc,
-		edit.WithApp(reg.app()),
+		edit.WithAppName(reg.app()),
 		edit.WithProtected(reg.typeFields()...),
 		edit.WithTypeRules(reg.cfg.typeRules...),
 		edit.WithMarshalers(reg.cfg.marshalers...),

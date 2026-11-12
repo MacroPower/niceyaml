@@ -313,7 +313,7 @@ type Func func(ctx context.Context, n *Node) error
 // Option configures a [Doc].
 //
 // Options:
-//   - [WithApp]
+//   - [WithAppName]
 //   - [WithMarshalers]
 //   - [WithProtected]
 //   - [WithTypeRules]
@@ -332,13 +332,13 @@ type config struct {
 	marshalers []encoder.Marshaler
 }
 
-// WithApp is an [Option] that names the app in the messages of the
+// WithAppName is an [Option] that names the app in the messages of the
 // engine. A refusal of YAML that the engine does not edit names it, as in
 // "cafe does not edit a document that defines the anchor &x twice". So
 // does the message of a bug in the engine, which asks the user to report
-// the bug to the authors of the app. Without WithApp, a message names
+// the bug to the authors of the app. Without WithAppName, a message names
 // "this program".
-func WithApp(name string) Option {
+func WithAppName(name string) Option {
 	return func(c *config) {
 		c.app = name
 	}
