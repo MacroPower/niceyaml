@@ -14,7 +14,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
-	"github.com/goccy/go-yaml/lexer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
@@ -142,7 +141,7 @@ func TestPrinter_AddStyleToRange(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			view := niceyaml.NewSourceFromTokens(lexer.Tokenize(tc.input)).View()
+			view := niceyaml.NewSourceFromString(tc.input).View()
 			view.AddOverlay(testOverlayHighlight, tc.rng)
 
 			assert.Equal(t, tc.want, testPrinter().Print(view))
@@ -292,7 +291,7 @@ func TestNewPrinter(t *testing.T) {
 	// The default gutter adds line numbers, and the default container
 	// adds nothing around the rows.
 	p := printer.New(printer.WithStyles(style.Styles{}))
-	view := niceyaml.NewSourceFromTokens(lexer.Tokenize("key: value")).View()
+	view := niceyaml.NewSourceFromString("key: value").View()
 
 	assert.Equal(t, "   1  key: value", p.Print(view))
 	assert.Equal(t, lipgloss.NewStyle(), p.ContainerStyle())
@@ -2998,7 +2997,7 @@ func TestPrinter_Print_Tokens(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			view := niceyaml.NewSourceFromTokens(lexer.Tokenize(tc.input)).View()
+			view := niceyaml.NewSourceFromString(tc.input).View()
 
 			assert.Equal(t, tc.want, yamltest.NewXMLPrinter().Print(view))
 			assert.Equal(t, tc.input, testPrinter().Print(view))

@@ -228,10 +228,9 @@ var (
 	// at fault for each problem the parse reports with ErrSyntax, as
 	// [IsInvalid] describes.
 	//
-	// A panic in the parser does not match. A token without a position that
-	// [NewSourceFromTokens] received can cause such a panic. The same calls
-	// return the panic as a [PanicError], bound at the first token with a
-	// position among the tokens the parser was reading.
+	// A panic in the parser does not match. The same calls return the panic
+	// as a [PanicError], bound at the first token with a position among the
+	// tokens the parser was reading.
 	//
 	// [errors.Is] reports whether any problem of an error matches ErrSyntax,
 	// so an error that matches can hold a problem of another kind beside it. A
@@ -334,11 +333,6 @@ var (
 	// "save the file as UTF-8" for a Source with a file path, as
 	// [Source.FilePath] reports. It says "encode the text as UTF-8" for any
 	// other Source.
-	//
-	// The check reads the text of the Source. A Source of
-	// [NewSourceFromTokens] holds no text, so its parse skips the check. It
-	// reads the tokens as the lexer wrote them, with U+FFFD in place of each
-	// byte that UTF-8 does not allow.
 	//
 	// A program that accepts such a text replaces those bytes itself before
 	// it builds the Source. For example, [strings.ToValidUTF8] puts one

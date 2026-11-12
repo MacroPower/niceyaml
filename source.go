@@ -30,7 +30,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/pathindex"
 	"go.jacobcolvin.com/niceyaml/internal/quantity"
 	"go.jacobcolvin.com/niceyaml/internal/reftable"
-	"go.jacobcolvin.com/niceyaml/internal/segment"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -47,17 +46,17 @@ import (
 // documentation describes how a Source divides a file into documents. A
 // Source never changes after creation, so it is safe for concurrent use.
 //
-// The zero Source holds one empty document and does not hold any
-// tokens. A nil Source behaves like a Source without text or options.
+// The zero Source holds an empty text and one empty document, and it does
+// not hold any tokens. A nil Source holds no text, tokens, or options.
 // [Source.Name], [Source.FilePath], [Source.FS], [Source.Text],
-// [Source.Offset], [Source.Tokens], and [Source.Lines] return zero values
-// for it, [Source.View] returns a view without lines, and
-// [Source.ShowsExcerpts] reports true. The methods that need the parse
-// panic on a nil Source. They are [Source.Documents],
-// [Source.AllDocuments], [Source.Document], [Source.File],
-// [Source.DecodeInto], [Source.Decode], [Source.SelfValidate],
-// [Source.ValidateDocuments], and [Source.Bind] of an error that is not
-// nil.
+// [Source.Offset], [Source.PositionAt], [Source.Tokens], and
+// [Source.Lines] return zero values or false for it, [Source.View]
+// returns a view without lines, and [Source.ShowsExcerpts] reports true.
+// The methods that need the parse panic on a nil Source. They are
+// [Source.Documents], [Source.AllDocuments], [Source.Document],
+// [Source.File], [Source.DecodeInto], [Source.Decode],
+// [Source.SelfValidate], [Source.ValidateDocuments], and [Source.Bind] of
+// an error that is not nil.
 //
 // [ErrorTree.Source] returns nil for an error that is not bound to a
 // Source and for one that [Detach] detached. A report thus reads the
@@ -66,8 +65,8 @@ import (
 // a detached one alike.
 //
 // Create instances with [NewSourceFromFile], [NewSourceFromFS],
-// [NewSourceFromReader], [NewSourceFromBytes], [NewSourceFromString],
-// [NewSourceFromTokens], or [NewSourceFromLayers].
+// [NewSourceFromReader], [NewSourceFromBytes], [NewSourceFromString], or
+// [NewSourceFromLayers].
 type Source struct {
 	// Holds the layers [NewSourceFromLayers] merged into the Source, or nil.
 	// An error bound in the merged document binds in a layer instead.
@@ -76,9 +75,7 @@ type Source struct {
 	// stands for, or nil. Only a Source of [NewSourceFromDerived] has a
 	// relocation.
 	relocation *relocation
-	// Holds the text the Source read, which [Source.Text] returns. A
-	// Source built from tokens did not read any text, and hasInput is
-	// false for it.
+	// Holds the text the Source read, which [Source.Text] returns.
 	input string
 	lines line.Lines
 	// The parse of the tokens, made on the first call that needs it.
@@ -120,7 +117,6 @@ type Source struct {
 	// hook.LineBreaks keeps them.
 	lineBreaks lazy[any]
 	sourceConfig
-	hasInput bool
 }
 
 // lazy holds a value that get computes on the first call. Its zero value
@@ -312,8 +308,7 @@ func (c *sourceConfig) budget() aliasing.Budget {
 // does not read the text, so the Source does not split it into documents.
 // The whole text is one document that fails with the same error, as a
 // document that does not parse does, however many documents the text
-// holds. [NewSourceFromTokens] applies the limit the same way, to the
-// bytes of text that its tokens hold.
+// holds.
 //
 // The lexer reads a text past the limit in time and memory that grow with
 // its length. A program that takes text from a sender it does not trust
@@ -925,8 +920,14 @@ func NewSourceFromString(src string, opts ...SourceOption) *Source {
 func newStringSource(src string, cfg sourceConfig) *Source {
 	// Nothing else holds the stream that Tokenize returns, so the Source
 	// shifts its tokens in place.
-	s := newResetSource(tokens.ResetPositionsInPlace(tokens.Tokenize(src)), cfg)
-	s.input, s.hasInput = src, true
+	tks := tokens.ResetPositionsInPlace(tokens.Tokenize(src))
+	s := &Source{input: src, lines: line.NewLines(tks), sourceConfig: cfg}
+
+	// The lines hold each token of tks, and tks holds no nil token, so the
+	// lines give back tks. The stream of lines without a token is nil.
+	if len(tks) > 0 {
+		s.stream = tks
+	}
 
 	return s
 }
@@ -940,6 +941,32 @@ func newStringSource(src string, cfg sourceConfig) *Source {
 //
 //	next := source.WithText(formatted)
 //	next = source.WithText(formatted, niceyaml.WithName("formatted"))
+//
+// A program gives one document of a file a Source of its own through the
+// text that the lines of its [Node.Span] cover. [Source.Offset] gives
+// column 0 of a line past a byte order mark that the lexer dropped. The
+// cut moves each end back to the start of such a mark, so the mark goes
+// to the document that it opens. [Source.Offset] reports false for the
+// line after the last when the text does not end in a line break. The
+// last document then runs to the end of the text:
+//
+//	text := source.Text()
+//	cut := func(off int) int {
+//		if strings.HasSuffix(text[:off], "\uFEFF") {
+//			return off - len("\uFEFF")
+//		}
+//
+//		return off
+//	}
+//
+//	span := doc.Span()
+//	start, _ := source.Offset(position.New(span.Start, 0))
+//	end, ok := source.Offset(position.New(span.End, 0))
+//	if !ok {
+//		end = len(text)
+//	}
+//
+//	one := source.WithText(text[cut(start):cut(end)])
 //
 // The limits of the new Source are those of the Source, as
 // [Source.ByteLimit], [Source.DocumentByteLimit], and [Source.DepthLimit]
@@ -1003,54 +1030,6 @@ func readFile(path string, limit int) ([]byte, error) {
 	defer f.Close() //nolint:errcheck // A read-only file has nothing to flush.
 
 	return readLimited(f, limit)
-}
-
-// NewSourceFromTokens creates a new [*Source] from [token.Tokens].
-// See [line.NewLines] for details on token splitting behavior.
-//
-// The Source holds clones of the tokens, and [tokens.ResetPositions]
-// resets their positions, so the text it holds counts its lines from 1 as
-// [tokens.Tokenize] does. Line i of [Source.Lines] holds line i+1 of the
-// text. Tokens that count from 1 already, as a whole stream does, keep
-// their positions unless the lexer dropped the first text, as
-// [tokens.ResetPositions] describes. ResetPositions renumbers tokens cut
-// from a longer stream, such as those that [Node.Tokens] returns, from
-// the first one. To render one document of a file with the file's line
-// numbers, print the file's view with [Node.Span] instead.
-//
-// The Source does not read any text, so [Source.Text] returns an empty
-// string for it and [Source.Offset] reports false. Its parse does not
-// check the encoding, as [ErrEncoding] describes.
-//
-// The byte limit counts the bytes of text that the tokens hold. The lexer
-// repeats some line endings in two tokens, as [tokens.Tokenize] describes,
-// and the limit counts such an ending one time. Tokens past the limit make
-// one document that does not parse, as [WithByteLimit] describes. A caller
-// that passes the tokens of a Source with a raised limit, such as those
-// that [Node.Tokens] returns, passes the same option here.
-func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
-	return newTokenSource(tks, newSourceConfig(opts))
-}
-
-// newTokenSource returns the [Source] that [NewSourceFromTokens] creates
-// from tks with the settings cfg.
-func newTokenSource(tks token.Tokens, cfg sourceConfig) *Source {
-	return newResetSource(tokens.ResetPositions(tks), cfg)
-}
-
-// newResetSource returns the [Source] of tks with the settings cfg. Either
-// [tokens.ResetPositions] or [tokens.ResetPositionsInPlace] reset the
-// positions of tks, and the Source holds its tokens.
-func newResetSource(tks token.Tokens, cfg sourceConfig) *Source {
-	s := &Source{lines: line.NewLines(tks), sourceConfig: cfg}
-
-	// The lines hold each token of tks, and tks holds no nil token, so the
-	// lines give back tks. The stream of lines without a token is nil.
-	if len(tks) > 0 {
-		s.stream = tks
-	}
-
-	return s
 }
 
 // parserOptions returns the options the Source parses its tokens with.
@@ -1380,8 +1359,8 @@ func (s *Source) Unmarshalers() []Unmarshaler {
 //	text := source.Text()
 //	fixed := text[:start] + "5" + text[end:]
 //
-// A Source that [NewSourceFromTokens] built did not read any text, so
-// Text returns an empty string for it, as it does for a nil Source.
+// A nil Source does not hold any text, so Text returns an empty string
+// for it.
 func (s *Source) Text() string {
 	if s == nil {
 		return ""
@@ -1418,10 +1397,9 @@ func (s *Source) Text() string {
 // Offset reports false for a position outside the text. A position is
 // outside the text when it has a negative line or column, a line past
 // the last, or a column past the end of its line. Offset also reports
-// false for a Source that [NewSourceFromTokens] built and for a nil
-// Source, because neither holds any text.
+// false for a nil Source, which does not hold any text.
 func (s *Source) Offset(pos position.Position) (int, bool) {
-	if s == nil || !s.hasInput || pos.Line < 0 || pos.Col < 0 {
+	if s == nil || pos.Line < 0 || pos.Col < 0 {
 		return 0, false
 	}
 
@@ -1453,11 +1431,10 @@ func (s *Source) Offset(pos position.Position) (int, bool) {
 // takes time in proportion to the column it returns.
 //
 // PositionAt reports false for a negative off and for one past the length
-// of the text. It also reports false for a Source that
-// [NewSourceFromTokens] built and for a nil Source, because neither holds
-// any text.
+// of the text. It also reports false for a nil Source, which does not
+// hold any text.
 func (s *Source) PositionAt(off int) (position.Position, bool) {
-	if s == nil || !s.hasInput {
+	if s == nil {
 		return position.Position{}, false
 	}
 
@@ -1503,12 +1480,9 @@ func (s *Source) DocumentAt(pos position.Position) (*Node, bool) {
 // them. Each call returns a new slice that holds the same tokens. See
 // [line.Lines.Tokens] for how a token cut across lines comes back whole.
 //
-// The tokens of a Source of tokens are the clones [NewSourceFromTokens]
-// made through [tokens.ResetPositions], not the tokens the caller passed.
-// The Source keeps using them, so treat them as read-only. When the input
-// came from [tokens.Tokenize], as it does for every constructor that reads
-// text, the Line and Column of each token name the rune where its text
-// starts.
+// The Source keeps using the tokens, so treat them as read-only. The
+// Source builds them from its text with [tokens.Tokenize], so the Line and
+// Column of each token name the rune where its text starts.
 //
 // A nil Source does not hold any tokens, so Tokens returns nil for it.
 func (s *Source) Tokens() token.Tokens {
@@ -1918,7 +1892,7 @@ func (s *Source) parse() *parsedFile {
 // The parse applies the document byte limit and the depth limit to each
 // run of documents, as [docparse.ParseLimits] describes.
 func (s *Source) parseTokens(tks token.Tokens) *docparse.Result {
-	if limit := s.bytes(); s.size() > limit {
+	if limit := s.bytes(); len(s.input) > limit {
 		return docparse.Fail(tks, limitError(limit))
 	}
 
@@ -2007,25 +1981,6 @@ func invalidByte(text string) int {
 	}
 
 	return -1
-}
-
-// size returns the number of bytes that the byte limit counts. They are
-// the bytes of the text that the Source read, or the bytes of the text
-// that its tokens hold for a Source that did not read any. The Origins of
-// the tokens hold some line endings twice, and the parts of the lines
-// hold them twice too. The count is thus the sum of [segment.TextLen]
-// for each line, which counts the bytes of a repeated ending one time.
-func (s *Source) size() int {
-	if s.hasInput {
-		return len(s.input)
-	}
-
-	n := 0
-	for _, l := range s.lines.All() {
-		n += segment.TextLen(l.Tokens())
-	}
-
-	return n
 }
 
 // parseError returns the error of f, a run the parser rejected, bound to

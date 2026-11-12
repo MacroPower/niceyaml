@@ -24,7 +24,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/kind"
 	"go.jacobcolvin.com/niceyaml/style/theme"
-	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 // endOfOutput is the text the test writes to the terminal after the
@@ -134,7 +133,7 @@ func TestErrorHandler_TerminalWidth(t *testing.T) {
 
 	// The value is a single token longer than any width, so the excerpt
 	// wraps it into rows that fill the width the printer wraps at.
-	src := niceyaml.NewSourceFromTokens(tokens.Tokenize("name: " + strings.Repeat("x", 300) + "\n"))
+	src := niceyaml.NewSourceFromString("name: " + strings.Repeat("x", 300) + "\n")
 	err := yamltest.Bind(t, src, errAt("invalid name", "$.name"))
 
 	tcs := map[string]struct {

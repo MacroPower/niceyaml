@@ -662,7 +662,7 @@ type Removal struct {
 }
 
 // New creates a new [Doc] that holds the text of doc, the root of a
-// document of a [niceyaml.Source] that read text, such as one that
+// document of a [niceyaml.Source], such as one that
 // [niceyaml.Source.Documents] returns. It returns the error of a document
 // that does not parse, or of a reference document of
 // [niceyaml.WithReferences] that does not parse, because a decode of the
