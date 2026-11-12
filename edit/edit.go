@@ -459,11 +459,12 @@ type Doc struct {
 	brk string
 	// The current text.
 	cur string
-	// The text of the "---" that opens the next document, or "" when no such
-	// header follows. Each parse reads the current text with it, as the
-	// parser reads the document in its file. The comment lines before the
-	// header belong to the text of the document, as they do at the end of a
-	// file.
+	// The text after the document through the "---" that opens the next
+	// document, or "" when no such header follows. It holds the comment
+	// lines above the header, which belong to the next document, as
+	// [go.jacobcolvin.com/niceyaml.Node.Span] gives them to it. Each parse
+	// reads the current text with it, as the parser reads the document in
+	// its file, and no edit writes it.
 	tail string
 	// The label of the Apply running, or "" for one without a label.
 	label string
@@ -750,16 +751,6 @@ func readDoc(doc *niceyaml.Node, cfg config) (*Doc, error) {
 	text := src.Text()
 	span := doc.Span()
 
-	// The comment lines before the "---" that opens the document belong to
-	// the document before it, as its text holds them, so the document
-	// starts at its header.
-	if i := doc.DocumentIndex(); i > 0 {
-		before := src.AllDocuments()[i-1].Span()
-		if line, ok := headerAfter(src, before.End); ok && line > span.Start {
-			span.Start = line
-		}
-	}
-
 	// A byte order mark that the tokenizer drops lies before column 0 of
 	// its line, so the document starts past the mark of its first line, and
 	// that mark stays out of its text.
@@ -777,22 +768,25 @@ func readDoc(doc *niceyaml.Node, cfg config) (*Doc, error) {
 
 	d := &Doc{user: doc, base: span.Start, cfg: cfg, start: start}
 
-	// The comment lines between the document and a "---" after it belong to
-	// the document, as the comment lines at the end of a file do.
-	if line, ok := headerAfter(src, span.End); ok {
-		if off, ok := src.Offset(position.New(line, 0)); ok && lineStart(text, off) >= end {
-			d.tail = text[off:headerEnd(src, line)]
-			end = lineStart(text, off)
-		}
-	}
-
 	d.end = end
 	orig := text[start:end]
 
+	// The comment lines between the document and a "---" after it belong to
+	// the next document, as its span holds them. The parse reads them with
+	// the header, and no edit writes them.
+	var tail string
+
+	if line, ok := headerAfter(src, span.End); ok {
+		tail = text[end:headerEnd(src, line)]
+	}
+
 	// The parse counts positions without the marks that the tokenizer
 	// drops, such as one after the "---" of a later document, so the text
-	// leaves them out too.
+	// and its tail leave them out too. The tokenizer reads the tail after
+	// the text, so the marks of the tail drop as they drop there.
+	dropped, _ := bom.Drop(orig + tail)
 	orig, d.marks = bom.Drop(orig)
+	d.tail = dropped[len(orig):]
 
 	d.orig, d.cur = orig, orig
 	d.origLines = lineStarts(orig)
@@ -809,6 +803,15 @@ func readDoc(doc *niceyaml.Node, cfg config) (*Doc, error) {
 	}
 
 	return d, nil
+}
+
+// tailContext returns the lines of the tail before the line of its "---",
+// the comment lines above the header of the next document and the blank
+// lines between them, with their line breaks.
+func (d *Doc) tailContext() string {
+	starts := lineStarts(d.tail)
+
+	return d.tail[:starts[len(starts)-1]]
 }
 
 // headerMarker is the marker of a document header, which starts a

@@ -43,20 +43,29 @@ func TestNode_Set(t *testing.T) {
 		panics any
 	}{
 		"string of several lines at the end of a document before a comment line deeper than its text": {
-			// The comment line between the document and the next "---" belongs
-			// to b, as at the end of a file, so the new entry goes after it.
+			// The comment line above the next "---" belongs to the next
+			// document, so the new entry goes above it. The lines of the block
+			// scalar go one space past the comment line.
 			before: stringtest.LinesLF("a:", "  b: 1", "    # d", "---", "y: 3"),
 			path:   paths.MustParse("$.a.c"),
 			value:  "x\n",
-			want:   stringtest.LinesLF("a:", "  b: 1", "    # d", "  c: |", "    x"),
+			want:   stringtest.LinesLF("a:", "  b: 1", "  c: |", "     x"),
 		},
 		"string of several lines in place of the last value of a document before a comment line deeper than its text": {
-			// The lines of the block scalar go one space past the comment line,
-			// as at the end of a file.
+			// The lines of the block scalar go one space past the comment line
+			// of the next document, as at the end of a file.
 			before: stringtest.LinesLF("a: 1", "    # d", "---", "y: 3"),
 			path:   paths.Doc().Child("a"),
 			value:  "x\n",
-			want:   stringtest.LinesLF("a: |", "     x", "    # d"),
+			want:   stringtest.LinesLF("a: |", "     x"),
+		},
+		"string of several lines in a new last item before a comment line of the next document deeper than its text": {
+			// The lines of the block scalar go one space past the comment line
+			// of the next document.
+			before: stringtest.LinesLF("s:", "  - 1", "      # d", "---", "y: 3"),
+			path:   paths.MustParse("$.s[1]"),
+			value:  "x\n",
+			want:   stringtest.LinesLF("s:", "  - 1", "  - |", "       x"),
 		},
 		"string with blank lines at the end of a document before a later document": {
 			// The block scalar takes the place of the blank lines.

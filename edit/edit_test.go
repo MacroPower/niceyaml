@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"slices"
@@ -16,16 +17,19 @@ import (
 	"time"
 	"weak"
 
+	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/edit"
 	"go.jacobcolvin.com/niceyaml/encoder"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
+	"go.jacobcolvin.com/niceyaml/schema"
 )
 
 var (
@@ -776,16 +780,16 @@ func TestDoc_Apply_Documents(t *testing.T) {
 		"refusal of a comment line after a root flow mapping before a later document": {
 			// Go-yaml's parser refuses the comment line after "{}" with its
 			// comments, and the error binds at that line of the file. The
-			// root holds the comment line, so the problem shows $ (fix25
-			// G25-2).
+			// comment line belongs to the later document, so the problem
+			// shows $ and no value of the document.
 			text:   stringtest.LinesLF("a: 1", "# tail", "---", "b: 2"),
 			fn:     func(ctx context.Context, n *edit.Node) error { return remove(ctx, n.At(paths.Doc().Child("a"))) },
 			err:    "test.yaml:2:1: $: go-yaml's parser refuses the edited text with its comments: value is not allowed in this context",
 			engine: true,
 		},
 		"refusal of a comment line after a set in a root flow mapping before a later document": {
-			// The root holds the comment line, so the problem shows $ (fix25
-			// G25-2).
+			// The comment line belongs to the later document, so the problem
+			// shows $.
 			text: stringtest.LinesLF("{a: 1}", "# tail", "---", "b: 2"),
 			fn: func(ctx context.Context, n *edit.Node) error {
 				return n.At(paths.Doc().Child("a")).Set(ctx, 2)
@@ -794,12 +798,22 @@ func TestDoc_Apply_Documents(t *testing.T) {
 			engine: true,
 		},
 		"refusal of a comment line of a document between two others": {
-			// The root holds the comment line, so the problem shows $ (fix25
-			// G25-2).
+			// The comment line belongs to the last document, so the problem
+			// shows $.
 			text:   stringtest.LinesLF("z: 0", "---", "a: 1", "# tail", "---", "b: 2"),
 			doc:    1,
 			fn:     func(ctx context.Context, n *edit.Node) error { return remove(ctx, n.At(paths.Doc().Child("a"))) },
 			err:    "test.yaml:4:1: $: go-yaml's parser refuses the edited text with its comments: value is not allowed in this context",
+			engine: true,
+		},
+		"refusal of an indented comment line after a blank line before a later document": {
+			// The error binds at the comment line in the user's text, past the
+			// blank line and the spaces that start it.
+			text: stringtest.LinesLF("{a: 1}", "", "  # tail", "---", "b: 2"),
+			fn: func(ctx context.Context, n *edit.Node) error {
+				return n.At(paths.Doc().Child("a")).Set(ctx, 2)
+			},
+			err:    "test.yaml:3:3: $: go-yaml's parser refuses the edited text with its comments: value is not allowed in this context",
 			engine: true,
 		},
 	}
@@ -849,62 +863,201 @@ func TestDoc_Apply_DocumentEnd(t *testing.T) {
 	}
 
 	// Each row runs on text alone and on text before a later document. The
-	// comment lines at the end of the document belong to it in both, so the
-	// edits leave the same text of the document.
+	// comment lines at the end of a file belong to the document above them,
+	// and the comment lines above a "---" belong to the document below it,
+	// as niceyaml.Node.Span gives them. Want is the text of the file alone,
+	// and later is the text before the later document, or the error of the
+	// Apply there.
 	tcs := map[string]struct {
-		fn   edit.Func
-		text string
-		want string
+		fn       edit.Func
+		text     string
+		want     string
+		later    string
+		laterErr string
+		// The sentinel of laterErr, or nil for [edit.ErrEngine].
+		laterIs error
 	}{
 		"removal of the last entry before a comment line indented past its key": {
-			// The comment line belongs to d, the last entry of r0, so the
-			// removal takes it.
-			text: stringtest.LinesLF("r0:", "  d: 1", "   # d"),
-			fn:   at("$.r0", remove),
-			want: "{}\n",
+			// At the end of a file, the comment line belongs to d, the last
+			// entry of r0, so the removal takes it. Before a later document,
+			// the comment line belongs to that document, so it stays.
+			// Go-yaml's parser refuses the comment line after the "{}" that
+			// the removal leaves, and the error binds at that line.
+			text:     stringtest.LinesLF("r0:", "  d: 1", "   # d"),
+			fn:       at("$.r0", remove),
+			want:     "{}\n",
+			laterErr: "test.yaml:3:4: $: go-yaml's parser refuses the edited text with its comments",
+		},
+		"removal of an entry before a comment line indented past its key": {
+			text:  stringtest.LinesLF("r0:", "  c: 1", "  d: 1", "   # d"),
+			fn:    at("$.r0.d", remove),
+			want:  stringtest.LinesLF("r0:", "  c: 1"),
+			later: stringtest.LinesLF("r0:", "  c: 1", "   # d"),
 		},
 		"new entry after a comment line indented past the last key": {
-			text: stringtest.LinesLF("r2: 1", "    # d"),
-			fn:   at("$.z", set("x")),
-			want: stringtest.LinesLF("r2: 1", "    # d", "z: x"),
+			text:  stringtest.LinesLF("r2: 1", "    # d"),
+			fn:    at("$.z", set("x")),
+			want:  stringtest.LinesLF("r2: 1", "    # d", "z: x"),
+			later: stringtest.LinesLF("r2: 1", "z: x", "    # d"),
 		},
 		"new block scalar after a comment line indented past the last key": {
-			text: stringtest.LinesLF("r2: 1", "    # d"),
-			fn:   at("$.z", set("y\n z\n")),
-			want: stringtest.LinesLF("r2: 1", "    # d", "z: |", "  y", "   z"),
+			// Before a later document, the lines of the scalar go one space
+			// past the comment line, which the scalar would read as text.
+			text:  stringtest.LinesLF("r2: 1", "    # d"),
+			fn:    at("$.z", set("y\n z\n")),
+			want:  stringtest.LinesLF("r2: 1", "    # d", "z: |", "  y", "   z"),
+			later: stringtest.LinesLF("r2: 1", "z: |", "     y", "      z", "    # d"),
 		},
 		"block scalar in place of the last value before a comment line indented past its key": {
-			// The lines of the scalar go one space past the comment line, which
-			// stays with the entry.
-			text: stringtest.LinesLF("a: 1", "    # d"),
-			fn:   at("$.a", set("x\n")),
-			want: stringtest.LinesLF("a: |", "     x", "    # d"),
+			// The lines of the scalar go one space past the comment line in
+			// both texts.
+			text:  stringtest.LinesLF("a: 1", "    # d"),
+			fn:    at("$.a", set("x\n")),
+			want:  stringtest.LinesLF("a: |", "     x", "    # d"),
+			later: stringtest.LinesLF("a: |", "     x", "    # d"),
 		},
 		"move of the last entry before a comment line at the first column": {
-			// The comment line at the first column stays at the end with the
-			// blank line before it.
-			text: stringtest.LinesLF("a: 1", "", "b: 2", "# tail"),
-			fn:   at("$.b", move("$.z")),
-			want: stringtest.LinesLF("a: 1", "z: 2", "", "# tail"),
+			// At the end of a file, the comment line stays at the end with the
+			// blank line before it. Before a later document, the blank line
+			// ends the document, and it goes with the entry, as at the end of
+			// a file without the comment line.
+			text:  stringtest.LinesLF("a: 1", "", "b: 2", "# tail"),
+			fn:    at("$.b", move("$.z")),
+			want:  stringtest.LinesLF("a: 1", "z: 2", "", "# tail"),
+			later: stringtest.LinesLF("a: 1", "z: 2", "# tail"),
+		},
+		"removal of the last entry after a block scalar before a comment line as deep as its lines": {
+			// Before a later document, the scalar of the user's text ends the
+			// document, and it reads the comment line as text. So its lines go
+			// one space past the comment line, and its string stays "x\n".
+			text:  stringtest.LinesLF("a: |", "  x", "b: 1", "  # c"),
+			fn:    at("$.b", remove),
+			want:  stringtest.LinesLF("a: |", "  x"),
+			later: stringtest.LinesLF("a: |", "   x", "  # c"),
+		},
+		"removal of the last entry after a block scalar with keep chomping": {
+			text:  stringtest.LinesLF("a: |+", "  x", "", "b: 1", "  # c"),
+			fn:    at("$.b", remove),
+			want:  stringtest.LinesLF("a: |+", "  x", ""),
+			later: stringtest.LinesLF("a: |+", "   x", "", "  # c"),
+		},
+		"removal of the last entry after a block scalar with an indentation indicator": {
+			// The indicator grows by as many spaces as the lines.
+			text:  stringtest.LinesLF("a: |2", "  x", "b: 1", "  # c"),
+			fn:    at("$.b", remove),
+			want:  stringtest.LinesLF("a: |2", "  x"),
+			later: stringtest.LinesLF("a: |3", "   x", "  # c"),
+		},
+		"removal of the last entry after a block scalar whose indicator cannot grow": {
+			// The indicator cannot grow past 9, the largest that the parser
+			// takes. So the scalar reads the comment line as text, and the
+			// Apply fails.
+			text:     stringtest.LinesLF("a: |9", "         x", "b: 1", "          # c"),
+			fn:       at("$.b", remove),
+			want:     stringtest.LinesLF("a: |9", "         x"),
+			laterIs:  edit.ErrUnsupported,
+			laterErr: `test.yaml:1:4: $.a: the edit removes $.b, after which this block scalar reads "x\n # c\n", not "x\n"`,
+		},
+		"removal of the last entry after a block scalar with a line of spaces past its indent": {
+			// The line of five spaces holds text of the scalar, so it moves
+			// with the other lines, and the string stays "x\n   \n".
+			text:  stringtest.LinesLF("a: |", "  x", "     ", "b: 1", "   # c"),
+			fn:    at("$.b", remove),
+			want:  stringtest.LinesLF("a: |", "  x", "     "),
+			later: stringtest.LinesLF("a: |", "    x", "       ", "   # c"),
+		},
+		"removal of the last entry after an empty block scalar": {
+			// The scalar has no lines to move past the comment line. Go-yaml
+			// refuses an indentation indicator there, so the scalar reads the
+			// comment line as text, and the Apply fails.
+			text:     stringtest.LinesLF("a: |", "b: 1", "  # c"),
+			fn:       at("$.b", remove),
+			want:     stringtest.LinesLF("a: |"),
+			laterIs:  edit.ErrUnsupported,
+			laterErr: `test.yaml:1:4: $.a: the edit removes $.b, after which this block scalar reads "# c\n", not ""`,
+		},
+		"removal of the last item after an empty block scalar": {
+			text:     stringtest.LinesLF("s:", "  - |", "  - 1", "    # c"),
+			fn:       at("$.s[1]", remove),
+			want:     stringtest.LinesLF("s:", "  - |"),
+			laterIs:  edit.ErrUnsupported,
+			laterErr: `test.yaml:2:5: $.s[0]: the edit removes $.s[1], after which this block scalar reads "# c\n", not ""`,
+		},
+		"move of the last entry after an empty block scalar": {
+			text:     stringtest.LinesLF("m:", "  k: 0", "a: |", "b: 1", "  # c"),
+			fn:       at("$.b", move("$.m.b")),
+			want:     stringtest.LinesLF("m:", "  k: 0", "  b: 1", "    # c", "a: |"),
+			laterIs:  edit.ErrUnsupported,
+			laterErr: `test.yaml:3:4: $.a: the edit moves $.b to $.m.b, after which this block scalar reads "# c\n", not ""`,
+		},
+		"removal of the last entry of a nested mapping after a block scalar": {
+			text:  stringtest.LinesLF("a:", "  k: |", "    x", "  j: 1", "    # c"),
+			fn:    at("$.a.j", remove),
+			want:  stringtest.LinesLF("a:", "  k: |", "    x"),
+			later: stringtest.LinesLF("a:", "  k: |", "     x", "    # c"),
+		},
+		"removal of the last item after a block scalar": {
+			text:  stringtest.LinesLF("s:", "  - |", "    x", "  - 1", "    # c"),
+			fn:    at("$.s[1]", remove),
+			want:  stringtest.LinesLF("s:", "  - |", "    x"),
+			later: stringtest.LinesLF("s:", "  - |", "     x", "    # c"),
+		},
+		"move of the last entry after a block scalar": {
+			// At the end of a file, the comment line belongs to b, so it moves
+			// with b. Before a later document, it stays, and the lines of the
+			// scalar go past it.
+			text:  stringtest.LinesLF("m:", "  k: 0", "a: |", "  x", "b: 1", "  # c"),
+			fn:    at("$.b", move("$.m.b")),
+			want:  stringtest.LinesLF("m:", "  k: 0", "  b: 1", "    # c", "a: |", "  x"),
+			later: stringtest.LinesLF("m:", "  k: 0", "  b: 1", "a: |", "   x", "  # c"),
+		},
+		"move of the last item after a block scalar": {
+			text:  stringtest.LinesLF("m:", "  k: 0", "s:", "  - |", "    x", "  - 1", "    # c"),
+			fn:    at("$.s[1]", move("$.m.j")),
+			want:  stringtest.LinesLF("m:", "  k: 0", "  j: 1", "    # c", "s:", "  - |", "    x"),
+			later: stringtest.LinesLF("m:", "  k: 0", "  j: 1", "s:", "  - |", "     x", "    # c"),
 		},
 	}
 
+	next := stringtest.LinesLF("---", "zz: 3")
+
 	for name, tc := range tcs {
-		for _, tail := range []string{"", stringtest.LinesLF("---", "zz: 3")} {
-			t.Run(fmt.Sprintf("%s, %q after it", name, tail), func(t *testing.T) {
-				t.Parallel()
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-				src := niceyaml.NewSourceFromString(tc.text+tail, niceyaml.WithName("test.yaml"))
+			src := niceyaml.NewSourceFromString(tc.text, niceyaml.WithName("test.yaml"))
 
-				d, err := edit.New(src.AllDocuments()[0])
-				require.NoError(t, err)
-				require.NoError(t, d.Apply(t.Context(), paths.Doc(), tc.fn))
+			d, err := edit.New(src.AllDocuments()[0])
+			require.NoError(t, err)
+			require.NoError(t, d.Apply(t.Context(), paths.Doc(), tc.fn))
 
-				got, err := edit.FileText(src, d)
-				require.NoError(t, err)
-				assert.Equal(t, tc.want+tail, got)
-			})
-		}
+			got, err := edit.FileText(src, d)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+
+		t.Run(name+", before a later document", func(t *testing.T) {
+			t.Parallel()
+
+			src := niceyaml.NewSourceFromString(tc.text+next, niceyaml.WithName("test.yaml"))
+
+			d, err := edit.New(src.AllDocuments()[0])
+			require.NoError(t, err)
+
+			err = d.Apply(t.Context(), paths.Doc(), tc.fn)
+			if tc.laterErr != "" {
+				require.ErrorIs(t, err, cmp.Or(tc.laterIs, edit.ErrEngine))
+				assert.Contains(t, niceyaml.FormatError(err), tc.laterErr)
+
+				return
+			}
+
+			require.NoError(t, err)
+
+			got, err := edit.FileText(src, d)
+			require.NoError(t, err)
+			assert.Equal(t, tc.later+next, got)
+		})
 	}
 }
 
@@ -5939,7 +6092,7 @@ func TestDoc_Apply_Limits(t *testing.T) {
 				limit: len("a: xxxxx\n..."),
 				key:   "a",
 				value: "yyyyy",
-				want:  "a: yyyyy\n...\n# c\n",
+				want:  "a: yyyyy\n...\n",
 			},
 			"comments below a marker, value past the limit": {
 				text:  "a: xxxxx\n...\n# c\n---\nb: 2\n",
@@ -5954,7 +6107,7 @@ func TestDoc_Apply_Limits(t *testing.T) {
 				limit: len("\n# cccccccccc\n---\nb: x\n"),
 				key:   "b",
 				value: "z",
-				want:  "---\nb: z\n",
+				want:  "# cccccccccc\n---\nb: z\n",
 			},
 			"comments above the document, value past the limit": {
 				text:  "a: 1\n...\n# cccccccccc\n---\nb: x\n",
@@ -10795,11 +10948,19 @@ func TestDoc_Text(t *testing.T) {
 			want:   stringtest.LinesLF("# c", "\ufeffa: 20"),
 		},
 		"byte order mark after the end of a document": {
-			// The mark lies in the prefix of the next document, after the
-			// comment line that the first document holds.
+			// The mark lies in the prefix of the next document, which holds
+			// the comment line after the "..." line.
 			text:   stringtest.LinesLF("a: 1", "...", "\ufeff# c", "---", "a: 2"),
-			before: stringtest.LinesLF("a: 1", "...", "\ufeff# c"),
-			want:   stringtest.LinesLF("a: 20", "...", "\ufeff# c"),
+			before: stringtest.LinesLF("a: 1", "..."),
+			want:   stringtest.LinesLF("a: 20", "..."),
+		},
+		"byte order mark in front of a comment line above a later document": {
+			// The text of the later document starts past the mark of its
+			// first line, as the text of the first document does.
+			text:   stringtest.LinesLF("a: 1", "...", "\ufeff# c", "---", "a: 2"),
+			doc:    1,
+			before: stringtest.LinesLF("# c", "---", "a: 2"),
+			want:   stringtest.LinesLF("# c", "---", "a: 20"),
 		},
 	}
 
@@ -10838,6 +10999,139 @@ func TestDoc_Text(t *testing.T) {
 			requireChanges(t, src, d)
 		})
 	}
+}
+
+func TestDoc_Text_Span(t *testing.T) {
+	t.Parallel()
+
+	// Each row checks every document of text. Before an Apply, the text of
+	// a Doc is the text of the lines of the span of its document, and its
+	// Node holds the lines and the preamble of that document. After a Set
+	// of $.a to 20, the text of a Doc in place of those lines gives the
+	// FileText of the Doc.
+	tcs := map[string]struct {
+		text string
+		// The text of each document.
+		want []string
+	}{
+		"comment line above a header": {
+			text: stringtest.LinesLF("a: 1", "# b", "---", "a: 2"),
+			want: []string{"a: 1\n", stringtest.LinesLF("# b", "---", "a: 2")},
+		},
+		"comment lines indented past the last key above a header": {
+			text: stringtest.LinesLF("a:", "  b: 1", "    # b", "", "  # c", "---", "a: 2", "# d", "---", "a: 3"),
+			want: []string{
+				stringtest.LinesLF("a:", "  b: 1"),
+				stringtest.LinesLF("    # b", "", "  # c", "---", "a: 2"),
+				stringtest.LinesLF("# d", "---", "a: 3"),
+			},
+		},
+		"blank line before a comment line above a header": {
+			text: stringtest.LinesLF("a: 1", "", "# b", "---", "a: 2"),
+			want: []string{stringtest.LinesLF("a: 1", ""), stringtest.LinesLF("# b", "---", "a: 2")},
+		},
+		"comment line after a document end marker": {
+			text: stringtest.LinesLF("a: 1", "...", "# b", "---", "a: 2"),
+			want: []string{stringtest.LinesLF("a: 1", "..."), stringtest.LinesLF("# b", "---", "a: 2")},
+		},
+		"comment line below a header": {
+			text: stringtest.LinesLF("a: 1", "---", "# b", "a: 2"),
+			want: []string{"a: 1\n", stringtest.LinesLF("---", "# b", "a: 2")},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			src := niceyaml.NewSourceFromString(tc.text)
+			docs := src.Documents()
+			require.Len(t, docs, len(tc.want))
+
+			lines := strings.SplitAfter(tc.text, "\n")
+
+			for i, doc := range docs {
+				span := doc.Span()
+				spanText := strings.Join(lines[span.Start:span.End], "")
+
+				d, err := edit.New(doc)
+				require.NoError(t, err)
+				assert.Equal(t, tc.want[i], d.Text())
+				assert.Equal(t, spanText, d.Text())
+				assert.Equal(t, tokenValues(doc.Preamble()), tokenValues(d.Node().Preamble()))
+				assert.Equal(t, span.Len(), d.Node().Span().Len())
+
+				result, err := diff.Diff(t.Context(), doc.View(), d.Node().View())
+				require.NoError(t, err)
+				assert.False(t, result.Stats().Changed())
+
+				err = d.Apply(t.Context(), paths.Doc().Child("a"), func(ctx context.Context, n *edit.Node) error {
+					return n.Set(ctx, 20)
+				})
+				require.NoError(t, err)
+
+				want, err := edit.FileText(src, d)
+				require.NoError(t, err)
+
+				spliced := strings.Join(lines[:span.Start], "") + d.Text() + strings.Join(lines[span.End:], "")
+				assert.Equal(t, want, spliced)
+
+				after := niceyaml.NewSourceFromString(want).Documents()
+				require.Len(t, after, len(docs))
+				assert.Equal(t, tokenValues(after[i].Preamble()), tokenValues(d.Node().Preamble()))
+			}
+		})
+	}
+}
+
+func TestDoc_Node_Directive(t *testing.T) {
+	t.Parallel()
+
+	// The directive above the header of the second document is in the
+	// preamble of the Node of its Doc, so the Node validates against the
+	// schema of the directive, as the document does.
+	dir := t.TempDir()
+	yamltest.WriteFiles(t, dir, map[string]string{
+		"b.json": `{"required": ["replicas"]}`,
+		"f.yaml": stringtest.LinesLF(
+			"kind: A",
+			"# yaml-language-server: $schema=./b.json",
+			"---",
+			"kind: B",
+			"replicas: 1",
+		),
+	})
+
+	src, err := niceyaml.NewSourceFromFile(filepath.Join(dir, "f.yaml"))
+	require.NoError(t, err)
+
+	reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(schema.Directive()))
+	doc := src.Documents()[1]
+
+	require.NoError(t, doc.Validate(t.Context(), reg))
+
+	d, err := edit.New(doc)
+	require.NoError(t, err)
+	require.NoError(t, d.Node().Validate(t.Context(), reg))
+
+	err = d.Apply(t.Context(), paths.Doc().Child("replicas"), func(_ context.Context, n *edit.Node) error {
+		return n.Remove()
+	})
+	require.NoError(t, err)
+
+	err = d.Node().Validate(t.Context(), reg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "replicas")
+}
+
+// tokenValues returns the value of each token of tks, in order.
+func tokenValues(tks token.Tokens) []string {
+	values := make([]string, 0, len(tks))
+	for _, tk := range tks {
+		values = append(values, tk.Value)
+	}
+
+	return values
 }
 
 func TestDoc_Text_PrefixMark(t *testing.T) {

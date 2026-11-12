@@ -86,8 +86,10 @@ func (d *Doc) Changes() []Change {
 	cur, origins := d.markedText()
 
 	// A Range cannot end between a byte order mark and the line that it
-	// stands before. So the mark before the "---" of the next document
-	// joins the text, as a part that the edits kept.
+	// stands before. So a mark at the start of the first line after the
+	// document joins the text, as a part that the edits kept. That line can
+	// be a comment line above the "---" of the next document, or the "---"
+	// itself.
 	end := d.end
 	if pos, ok := src.PositionAt(end); ok {
 		if off, ok := src.Offset(pos); ok && off > end {

@@ -2671,7 +2671,8 @@ func (d *Doc) insertPayload(
 
 	lastLine := d.lastLineOf(last)
 	brk := d.breakBefore(lastLine + 1)
-	text := appendRun(d.entryLines(key, pl, col, brk), newRun(brk, origin))
+	lines := d.indentPast(d.entryLines(key, pl, col, brk), pl.tail, lastLine+1)
+	text := appendRun(lines, newRun(brk, origin))
 
 	return d.applyEdit(h, d.linesEdit(lastLine+1, text, brk, pl, origin)...)
 }
@@ -3190,7 +3191,8 @@ func (d *Doc) insertPayloadItem(
 	col := d.keyColumn(last)
 	lastLine := d.lastLineOf(last)
 	brk := d.breakBefore(lastLine + 1)
-	text := appendRun(d.itemLines(pl, col, brk), newRun(brk, origin))
+	lines := d.indentPast(d.itemLines(pl, col, brk), pl.tail, lastLine+1)
+	text := appendRun(lines, newRun(brk, origin))
 
 	return d.applyEdit(h, d.linesEdit(lastLine+1, text, brk, pl, origin)...)
 }

@@ -720,9 +720,23 @@ func apartRule(a apart) string {
 // engineAtToken returns err as the problem of a bug in the engine, bound at
 // the bytes of tk, a token of the current text, as [Doc.engineAtOffset]
 // binds them. A token without bytes, such as the null of an entry without
-// a value, binds at the byte where the text places it. The Apply records
-// the problem.
+// a value, binds at the byte where the text places it. A token of the tail
+// binds where the user's text holds it. The Apply records the problem.
 func (d *Doc) engineAtToken(tk *token.Token, err error) error {
+	// A token of the tail lies outside the document, so it binds where the
+	// user's text holds it, at the path $, as [Doc.tailRange] places it.
+	if ranges := d.src.Lines().ContentRanges(tk); len(ranges) > 0 {
+		rng := position.NewRange(ranges[0].Start, ranges[len(ranges)-1].End)
+		if at, ok := d.tailRange(rng); ok {
+			problem := d.bindSite(site{path: paths.Doc(), at: at}, func(opts ...niceyaml.ErrorOption) error {
+				return d.engineProblem(err, opts...)
+			})
+			d.record(problem)
+
+			return problem
+		}
+	}
+
 	s, ok := d.tokenSpan(tk)
 	if !ok {
 		off := d.offset(position.NewFromToken(tk))
