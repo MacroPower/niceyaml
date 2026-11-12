@@ -387,11 +387,6 @@ func hasAnchor(node ast.Node) bool {
 	return false
 }
 
-// prefixOf returns the path of the first n selectors of path.
-func prefixOf(path paths.Path, n int) paths.Path {
-	return appendSelectors(paths.Doc(), slices.Collect(path.Selectors())[:n])
-}
-
 // child is the entry that a path through a name selects in a mapping.
 type child struct {
 	// The entry, or nil when the path selects none.

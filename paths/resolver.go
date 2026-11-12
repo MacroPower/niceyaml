@@ -363,7 +363,7 @@ func (r *Resolver) Token(p Path) (*token.Token, error) {
 // an alias that does not resolve also gives false, and so does a
 // document without content.
 func (r *Resolver) Nearest(p Path) (Path, bool) {
-	if !p.absolute || p.wildcard() || r.doc == nil || !astnode.HasContent(r.doc.Body) {
+	if !p.absolute || p.HasWildcard() || r.doc == nil || !astnode.HasContent(r.doc.Body) {
 		return Path{}, false
 	}
 

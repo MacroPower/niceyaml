@@ -1530,7 +1530,7 @@ func (d *Doc) liesIn(node, outer ast.Node) bool {
 func rebased(path paths.Path, k int, to func(head paths.Path) paths.Path) paths.Path {
 	sels := slices.Collect(path.Selectors())
 
-	return appendSelectors(to(prefixOf(path, k)), sels[k:])
+	return to(path.Prefix(k)).Append(sels[k:]...)
 }
 
 // shown returns v, a value of a decode into any, as a message shows it on

@@ -130,7 +130,7 @@ func through(hidden []hiddenEntry, from, path paths.Path) []hiddenEntry {
 			return hidden[:i]
 		}
 
-		if _, ok := path.CutPrefix(prefixOf(from, h.depth)); !ok {
+		if _, ok := path.CutPrefix(from.Prefix(h.depth)); !ok {
 			return hidden[:i]
 		}
 	}
@@ -267,12 +267,12 @@ func (d *Doc) selectFrom(s *selection, from ast.Node, base paths.Path, hidden []
 		case j == len(sels)-1 && (sel.Kind == paths.SelectorChildAll || sel.Kind == paths.SelectorRecursiveAll):
 			listed = matches
 		case sel.Kind == paths.SelectorChildAll:
-			listed, err = res.MatchesFrom(from, appendSelectors(start, sels[:j+1]))
+			listed, err = res.MatchesFrom(from, start.Append(sels[:j+1]...))
 		case recursive:
 			// The matches of rel passed, so a failure here comes from an
 			// alias that `..*` lists and `..name` passes by. The decode of
 			// the text then fails.
-			listed, err = res.MatchesFrom(from, appendSelectors(start, sels[:j]).RecursiveAll())
+			listed, err = res.MatchesFrom(from, start.Append(sels[:j]...).RecursiveAll())
 		default:
 			continue
 		}
@@ -326,7 +326,7 @@ func (d *Doc) selectBelow(
 		return nil
 	}
 
-	return d.selectFrom(s, h.Value, path, e, appendSelectors(paths.Current(), sels))
+	return d.selectFrom(s, h.Value, path, e, paths.Current().Append(sels...))
 }
 
 // lastName returns the name of the last selector of path.
@@ -588,7 +588,7 @@ func (d *Doc) ownPath(path paths.Path, p *place) (paths.Path, bool) {
 			return path, true
 		}
 
-		return appendSelectors(held, slices.Collect(path.Selectors())[p.found:]), !decided
+		return held.Append(slices.Collect(path.Selectors())[p.found:]...), !decided
 	}
 
 	own, ok := d.pathTo(p.value)
@@ -702,7 +702,7 @@ func (d *Doc) pathTo(node ast.Node) (paths.Path, bool) {
 
 	slices.Reverse(sels)
 
-	return appendSelectors(paths.Doc(), sels), true
+	return paths.Doc().Append(sels...), true
 }
 
 // protection returns the reason that edits cannot change p, a place of
@@ -1980,7 +1980,7 @@ func (r *reached) rebase(to func(head paths.Path) paths.Path) {
 func (r *reached) shift(from, by int) {
 	for n, k := range r.nodes {
 		if !n.gone {
-			n.path = shiftedPath(n.path, prefixOf(n.path, k), from, by)
+			n.path = shiftedPath(n.path, n.path.Prefix(k), from, by)
 		}
 	}
 }
@@ -2074,7 +2074,7 @@ func shiftedPath(path, seq paths.Path, from, by int) paths.Path {
 		return path
 	}
 
-	return appendSelectors(seq, sels)
+	return seq.Append(sels...)
 }
 
 // matchProblem binds err, the error of the matches of path, the path of
@@ -2101,30 +2101,6 @@ func (d *Doc) matchProblem(path paths.Path, err error) error {
 	//nolint:wrapcheck // The binding is the error of the document.
 	return d.user.Bind(niceyaml.Invalid(problem,
 		niceyaml.AtPath(at.path), niceyaml.AtRange(at.at), niceyaml.WithDetails(d.callDetails(at)...)))
-}
-
-// appendSelectors returns p with sels after it.
-func appendSelectors(p paths.Path, sels []paths.Selector) paths.Path {
-	for _, sel := range sels {
-		switch sel.Kind {
-		case paths.SelectorChild:
-			p = p.Child(sel.Name)
-		case paths.SelectorIndex:
-			p = p.Index(sel.Index)
-		case paths.SelectorKey:
-			p = p.Key()
-		case paths.SelectorChildAll:
-			p = p.ChildAll()
-		case paths.SelectorRecursive:
-			p = p.Recursive(sel.Name)
-		case paths.SelectorRecursiveAll:
-			p = p.RecursiveAll()
-		default:
-			p = p.IndexAll()
-		}
-	}
-
-	return p
 }
 
 // spot is the place of an edit, as the paths that the Apply keeps up to

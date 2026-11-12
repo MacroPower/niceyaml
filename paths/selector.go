@@ -1,6 +1,7 @@
 package paths
 
 import (
+	"fmt"
 	"iter"
 	"strconv"
 )
@@ -104,30 +105,28 @@ func (s Selector) String() string {
 }
 
 // segment returns the internal form of s, and reports false for a
-// selector of an unknown kind.
+// selector of an unknown kind. It keeps Name and Index only for the kinds
+// that hold them, so two selectors of a kind without a name or an index
+// give equal segments.
 func (s Selector) segment() (segment, bool) {
-	seg := segment{name: s.Name, index: s.Index}
-
 	switch s.Kind {
 	case SelectorChild:
-		seg.kind = segmentChild
+		return segment{kind: segmentChild, name: s.Name}, true
 	case SelectorIndex:
-		seg.kind = segmentIndex
+		return segment{kind: segmentIndex, index: s.Index}, true
 	case SelectorChildAll:
-		seg.kind = segmentChildAll
+		return segment{kind: segmentChildAll}, true
 	case SelectorIndexAll:
-		seg.kind = segmentIndexAll
+		return segment{kind: segmentIndexAll}, true
 	case SelectorRecursive:
-		seg.kind = segmentRecursive
+		return segment{kind: segmentRecursive, name: s.Name}, true
 	case SelectorRecursiveAll:
-		seg.kind = segmentRecursiveAll
+		return segment{kind: segmentRecursiveAll}, true
 	case SelectorKey:
-		seg.kind = segmentKey
+		return segment{kind: segmentKey}, true
 	default:
 		return segment{}, false
 	}
-
-	return seg, true
 }
 
 // selector returns the exported form of s. It sets Name and Index only
@@ -186,6 +185,47 @@ func (p Path) Selectors() iter.Seq[Selector] {
 			}
 		}
 	}
+}
+
+// Append returns a copy of the path with sels appended, in order. It
+// undoes [Path.Selectors], so a caller can change some selectors of a path
+// and build the path again. The copy starts where the path does:
+//
+//	sels := slices.Collect(p.Selectors()) // $.items[3].name
+//	for i, sel := range sels {
+//		if sel.Kind == paths.SelectorIndex {
+//			sels[i] = paths.Selector{Kind: paths.SelectorIndexAll}
+//		}
+//	}
+//
+//	p.Prefix(0).Append(sels...) // $.items[*].name
+//
+// Append reads Name only for the kinds [SelectorChild] and
+// [SelectorRecursive], and Index only for the kind [SelectorIndex]. It
+// ignores them for the other kinds, so the result equals the path that
+// the matching builder, such as [Path.IndexAll], gives.
+//
+// Panics on a selector of an unknown kind, such as the zero [Selector].
+// Also panics on a selector of kind SelectorIndex with a negative Index,
+// as [Path.Index] does. A caller that builds selectors from untrusted input
+// should check the kind and the index before it calls Append.
+func (p Path) Append(sels ...Selector) Path {
+	segs := make([]segment, 0, len(sels))
+
+	for _, sel := range sels {
+		seg, ok := sel.segment()
+		if !ok {
+			panic(fmt.Sprintf("paths.Path.Append: unknown selector kind %s", sel.Kind))
+		}
+
+		if seg.kind == segmentIndex && seg.index < 0 {
+			panic(fmt.Sprintf("paths.Path.Append: index %d is below 0", seg.index))
+		}
+
+		segs = append(segs, seg)
+	}
+
+	return p.extend(segs...)
 }
 
 // Last returns the last selector of the path and true, or the zero

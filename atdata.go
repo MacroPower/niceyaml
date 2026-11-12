@@ -312,7 +312,7 @@ func (b binder) unkeyed(n *Node, l locus) (locus, bool) {
 
 	resolver := n.DocumentResolver()
 
-	above, err := resolver.Node(prefixOf(l.data.base, 0))
+	above, err := resolver.Node(l.data.base.Prefix(0))
 	if err != nil {
 		// The root of a document resolves unless the document has no
 		// content. The data of such a document is null, so it lacks every
@@ -334,7 +334,7 @@ func (b binder) unkeyed(n *Node, l locus) (locus, bool) {
 	for sel := range l.data.base.Selectors() {
 		depth++
 
-		node, err := resolver.Node(prefixOf(l.data.base, depth))
+		node, err := resolver.Node(l.data.base.Prefix(depth))
 		if err != nil {
 			next = sel
 
@@ -362,16 +362,6 @@ func (b binder) unkeyed(n *Node, l locus) (locus, bool) {
 	l.path, l.data = l.path.Value(), nil
 
 	return l, true
-}
-
-// prefixOf returns the path of the first n selectors of p. The prefix
-// starts where p does.
-func prefixOf(p paths.Path, n int) paths.Path {
-	for p.Len() > n {
-		p, _ = p.Parent()
-	}
-
-	return p
 }
 
 // dataIndex returns the [datapath.Index] of the document of n that b

@@ -273,7 +273,8 @@
 //
 // The wildcard selectors `.*`, `[*]`, `..name`, and `..*` select any
 // number of nodes, so [Resolver.Token] and [Resolver.Node] reject them
-// with [ErrWildcard]. Use [Resolver.Nodes] to list every match.
+// with [ErrWildcard]. [Path.HasWildcard] reports whether a path holds one.
+// Use [Resolver.Nodes] to list every match.
 // [ErrNotFound] means that the document does not hold a node at the path.
 // [ErrAlias] means an alias on the path forms a cycle or does not have an
 // anchor of its name before it, and [ErrReferenceAlias] means that the
@@ -439,6 +440,15 @@
 //		sel, _ := m.Path.Last()
 //		fmt.Println(sel.Name) // build, test, ...
 //	}
+//
+// [Path.Append] builds a path from selectors, so a caller can change some
+// selectors of a path and build it again. [Path.Prefix] keeps the first
+// selectors of a path, and [Path.CutPrefix] gives the rest:
+//
+//	sels := slices.Collect(p.Selectors()) // $.items[3].name
+//	sels[1] = paths.Selector{Kind: paths.SelectorIndexAll}
+//	p.Prefix(0).Append(sels...)           // $.items[*].name
+//	p.Prefix(2)                           // $.items[3]
 //
 // The name of a selector is the text that it matches a key by. In a path
 // that the library resolves, the name is the text that [Resolver.KeyName]

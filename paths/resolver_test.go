@@ -639,6 +639,7 @@ func TestResolver_Wildcard(t *testing.T) {
 
 			r := paths.NewResolver(documentOf(t, tc.input))
 			path := paths.MustParse(tc.path)
+			assert.True(t, path.HasWildcard())
 
 			_, err := r.Node(path)
 			require.ErrorIs(t, err, paths.ErrWildcard)
@@ -649,8 +650,21 @@ func TestResolver_Wildcard(t *testing.T) {
 			root, err := r.Node(paths.Doc())
 			require.NoError(t, err)
 
-			_, err = r.NodeFrom(root, paths.MustParse("@"+tc.path[1:]))
+			current := paths.MustParse("@" + tc.path[1:])
+			assert.True(t, current.HasWildcard())
+
+			_, err = r.NodeFrom(root, current)
 			require.ErrorIs(t, err, paths.ErrWildcard)
+
+			// Node and Token need a current node for an `@` path before
+			// they look at its selectors.
+			_, err = r.Node(current)
+			require.ErrorIs(t, err, paths.ErrNoCurrentNode)
+			require.NotErrorIs(t, err, paths.ErrWildcard)
+
+			_, err = r.Token(current)
+			require.ErrorIs(t, err, paths.ErrNoCurrentNode)
+			require.NotErrorIs(t, err, paths.ErrWildcard)
 		})
 	}
 }

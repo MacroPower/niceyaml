@@ -1172,9 +1172,7 @@ func (n *Node) aliasLocation(path paths.Path, reason error) (location, bool) {
 	resolver := n.doc.pathResolver()
 	start := n.base.Join(path)
 
-	if slices.ContainsFunc(slices.Collect(start.Selectors()), func(sel paths.Selector) bool {
-		return sel.Kind != paths.SelectorChild && sel.Kind != paths.SelectorIndex && sel.Kind != paths.SelectorKey
-	}) {
+	if start.HasWildcard() {
 		spelled, _, ok := n.doc.pathIndex().OwnerPath(resolver, tk)
 		if !ok {
 			return location{}, false

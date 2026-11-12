@@ -71,7 +71,8 @@ var (
 	ErrReferenceAlias = errors.New("alias reads a reference document")
 
 	// ErrWildcard indicates a request for a single node or token from a path
-	// with a `.*`, `[*]`, or `..` selector. Use [Resolver.Nodes] for such paths.
+	// with a `.*`, `[*]`, or `..` selector. [Path.HasWildcard] reports such
+	// paths. Use [Resolver.Nodes] for them.
 	ErrWildcard = errors.New("wildcard path matches any number of nodes")
 
 	// ErrNoYAMLPath indicates a path with a `~`, `.*`, or `..*` selector.
@@ -632,6 +633,29 @@ func (p Path) Parent() (Path, bool) {
 	return Path{segments: slices.Clone(p.segments[:n-1]), absolute: p.absolute}, true
 }
 
+// Prefix returns the path of the first n selectors of the path. The
+// prefix starts where the path does, so Prefix(0) gives [Doc] or
+// [Current]. [Path.CutPrefix] gives the selectors after the prefix as an
+// `@` path:
+//
+//	name := paths.Doc().Child("items").Index(3).Child("name")
+//	holder := name.Prefix(2)          // $.items[3]
+//	rest, _ := name.CutPrefix(holder) // @.name
+//
+// Panics when n is less than 0 or more than [Path.Len], as a slice
+// expression does.
+func (p Path) Prefix(n int) Path {
+	if n < 0 || n > len(p.segments) {
+		panic(fmt.Sprintf("paths.Path.Prefix: %d is out of range [0, %d]", n, len(p.segments)))
+	}
+
+	if n == 0 {
+		return Path{absolute: p.absolute}
+	}
+
+	return Path{segments: slices.Clone(p.segments[:n]), absolute: p.absolute}
+}
+
 // IsRoot reports whether the path names the document root: `$` with no
 // selectors, as [Doc] creates. A path of `@` with no selectors names the
 // current node. That node is the root only for a resolve without a
@@ -874,8 +898,19 @@ func (p Path) goccyString() (string, bool) {
 	return sb.String(), true
 }
 
-// wildcard reports whether any selector can match more than one node.
-func (p Path) wildcard() bool {
+// HasWildcard reports whether the path holds a `.*`, `[*]`, `..name`, or
+// `..*` selector. Each of those selects any number of nodes, so
+// [Resolver.NodeFrom] returns [ErrWildcard] for every such path.
+// [Resolver.Node] and [Resolver.Token] return it for a `$` path that
+// holds one, and return [ErrNoCurrentNode] for any `@` path. A caller can
+// thus reject such a path where it builds one:
+//
+//	if p.HasWildcard() {
+//		return fmt.Errorf("%s can select several nodes", p)
+//	}
+//
+// The `~` selector does not count as a wildcard.
+func (p Path) HasWildcard() bool {
 	for _, seg := range p.segments {
 		switch seg.kind {
 		case segmentChildAll, segmentIndexAll, segmentRecursive, segmentRecursiveAll:
@@ -961,7 +996,7 @@ func (p Path) single(r *resolver, doc *ast.DocumentNode) (match, error) {
 		return match{}, fmt.Errorf("resolve %s: %w", p, ErrNoCurrentNode)
 	}
 
-	if p.wildcard() {
+	if p.HasWildcard() {
 		return match{}, fmt.Errorf("resolve %s: %w", p, ErrWildcard)
 	}
 
@@ -988,7 +1023,7 @@ func (p Path) single(r *resolver, doc *ast.DocumentNode) (match, error) {
 // Returns [ErrWildcard] for a path with a `.*`, `[*]`, or `..` selector and
 // wraps [ErrNotFound] when nothing exists at the path.
 func (p Path) singleFrom(r *resolver, node ast.Node) (match, error) {
-	if p.wildcard() {
+	if p.HasWildcard() {
 		return match{}, fmt.Errorf("resolve %s: %w", p, ErrWildcard)
 	}
 
