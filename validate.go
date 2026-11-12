@@ -1516,8 +1516,9 @@ type SelfValidator interface {
 // as it places a warning that the method returns. A nested
 // [SelfValidateValue] or
 // [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] that gets the
-// context hands its warnings there. ValidateContext can also return its
-// warnings beside its errors, as Validate does.
+// context hands its warnings there. ValidateContext hands each warning
+// that it raises itself to the context with [WarnValue], or returns it
+// beside its errors, as Validate does.
 //
 // The walk reads a result of ValidateContext as it reads a result of
 // Validate. The decode presumes a fault for each error that does not

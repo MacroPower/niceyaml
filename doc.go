@@ -654,8 +654,11 @@
 // check fail. [NewWarning] takes the options of [NewError], so a warning
 // carries a location and details and binds to a [Source] as an error does.
 // The nearest severity mark on the cause chain of a problem decides its
-// severity. NewWarning and [Node.Warn] mark a warning, [AsErrors] marks an
-// error above each warning, and a problem without a mark is an error.
+// severity. NewWarning, [Node.Warn], [WarnValue], and [AsWarnings] mark a
+// warning, [AsErrors] marks an error above each warning, and a problem
+// without a mark is an error. AsWarnings keeps the type of the error it
+// marks, so a check that warns with an error type of its own gives
+// [errors.As] that type.
 // [Invalid], [Unchecked], [Locate], [Rebase], [Node.Bind], and [fmt.Errorf]
 // do not add a mark, so a warning stays a warning inside them. A warning
 // among the details of an error leaves that error an error.
@@ -674,10 +677,14 @@
 //	`-- 4:1: $.wifi~: unknown field "wifi"
 //
 // A [Validator] reports each warning with Node.Warn and returns only its
-// failures. A Validate method of a [SelfValidator] returns its warnings beside
-// its errors. A ValidateContext method of a [SelfValidatorContext] returns
-// them too, and a nested call that gets its context, such as
-// [SelfValidateValue], hands its warnings to that context. [Node.Validate],
+// failures. A check that gets a context and not a Node reports each warning
+// with [WarnValue] in the same way. Such checks include a function of
+// [WithValueCheck], a ValidateContext method of a [SelfValidatorContext],
+// and an engine that checks a decoded value, as
+// [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] does. A nested
+// call that gets that context, such as [SelfValidateValue], hands its
+// warnings to that context too. A Validate method of a [SelfValidator] does
+// not get a context, so it returns its warnings beside its errors. [Node.Validate],
 // [Source.ValidateDocuments], the Decode methods of Node and Source,
 // [Node.SelfValidate], [Source.SelfValidate], and [SelfValidateValue] collect
 // the warnings of the checks they run. Each such call gives every warning to
@@ -716,9 +723,10 @@
 // reports its warnings with Node.Warn and returns a failure that holds only
 // errors, which the call returns as the validator wrote it. A failure that
 // the validator binds with Node.Bind and that still holds a warning loses
-// its type, even with the method. A Validate method and a function of
-// [WithValueCheck] do not get a [*Node]. They return their warnings beside
-// their errors, so a type of their own that holds both needs the method.
+// its type, even with the method. A check without a [*Node] that reports
+// its warnings with [WarnValue] keeps the type of its failure in the same
+// way. A Validate method does not get a context. It returns its warnings
+// beside its errors, so a type of its own that holds both needs the method.
 //
 // Each problem keeps its [ErrorTree.Context] through that split. A warning
 // that the call removes from a wrapper still reports the text of that
@@ -1264,12 +1272,12 @@
 // niceyaml that calls that method, and that Validate calls ValidateContext
 // with [context.Background]. A nested call that gets the context of
 // ValidateContext, such as [SelfValidateValue], hands its warnings to that
-// context. A ValidateContext whose every warning comes from such a call
-// returns nil for a value that passes, and so does that Validate. A guard
-// of such a type calls ValidateContext with its own context and tests the
-// result against nil. A ValidateContext returns each warning that it
-// raises itself beside its errors, so a guard of a type that raises one
-// asks HasErrors instead.
+// context. A ValidateContext hands each warning that it raises itself to
+// that context with [WarnValue]. Such a ValidateContext returns nil for a
+// value that passes, and so does that Validate. A guard of such a type
+// calls ValidateContext with its own context and tests the result against
+// nil. A ValidateContext that returns a warning beside its errors needs a
+// guard that asks HasErrors instead.
 //
 // A Validate or ValidateContext that an embedded field promotes runs once,
 // on that field. The walk counts only the methods that a type declares

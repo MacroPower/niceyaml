@@ -1169,7 +1169,7 @@ func (s *Schema) ValidateValue(ctx context.Context, data any) error {
 	warnings, err := s.checkValue(ctx, data)
 
 	for _, w := range warnings {
-		hook.Warn(ctx, niceyaml.BindValue(w))
+		niceyaml.WarnValue(ctx, w)
 	}
 
 	//nolint:wrapcheck // Binding puts each path in the text, and the error keeps its own context.

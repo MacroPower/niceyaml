@@ -2,7 +2,6 @@ package niceyaml
 
 import (
 	"context"
-	"slices"
 
 	"github.com/goccy/go-yaml/ast"
 
@@ -19,12 +18,6 @@ import (
 //nolint:gochecknoinits // The hooks reach no API, so only init can set them.
 func init() {
 	hook.Tally = newTally
-	hook.MarkWarning = func(err error) error { return remark(err, severityWarning) }
-	hook.Warn = func(ctx context.Context, err error) {
-		if !isNothing(err) {
-			deliver(ctx, remark(err, severityWarning))
-		}
-	}
 	hook.Isolate = func(ctx context.Context, w any) context.Context {
 		held, _ := w.(*Warnings) //nolint:errcheck // The hook takes a *Warnings.
 
@@ -115,13 +108,6 @@ func init() {
 		}
 
 		return o
-	}
-	hook.KnownKeys = func(keys []paths.Path) any {
-		keys = slices.Clone(keys)
-
-		return DecodeOption(func(c *decodeConfig) {
-			c.knownKeys = append(c.knownKeys, keys...)
-		})
 	}
 }
 

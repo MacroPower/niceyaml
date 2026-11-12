@@ -14,7 +14,6 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/datapath"
-	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -223,7 +222,7 @@ func (c converter) deprecationWarning(d *deprecated, instance any) error {
 	}
 
 	//nolint:wrapcheck // The mark adds no text.
-	return hook.MarkWarning(niceyaml.Invalid(&Deprecation{Message: message, Schemas: d.schemas, Key: key}, opts...))
+	return niceyaml.AsWarnings(niceyaml.Invalid(&Deprecation{Message: message, Schemas: d.schemas, Key: key}, opts...))
 }
 
 // keyName returns the name of the member that d marks, as its path spells

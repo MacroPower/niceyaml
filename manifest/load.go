@@ -566,7 +566,7 @@ func (l *loader) outcome(rows []*row) (error, error) {
 func deliver(ctx context.Context, rows []*row) {
 	for _, r := range rows {
 		if !niceyaml.HasErrors(r.err) {
-			hook.Warn(ctx, r.err)
+			niceyaml.WarnValue(ctx, r.err)
 		}
 	}
 }

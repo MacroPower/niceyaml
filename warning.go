@@ -178,11 +178,11 @@ func (e *SourceError) marksWarning() bool {
 //	}
 //
 // A ValidateContext method of a [SelfValidatorContext] returns nil for a
-// value that passes when each of its warnings comes from a nested call
-// that gets its context, such as [SelfValidateValue]. Such a call hands
-// its warnings to that context. A ValidateContext returns each warning
-// that it raises itself beside its errors, so its callers ask HasErrors
-// too.
+// value that passes when it hands each of its warnings to its context.
+// It hands a warning that it raises itself with [WarnValue], and a nested
+// call that gets its context, such as [SelfValidateValue], hands its own.
+// A ValidateContext that returns a warning beside its errors needs callers
+// that ask HasErrors too.
 func HasErrors(err error) bool {
 	if isNothing(err) {
 		return false
@@ -269,6 +269,34 @@ func AsErrors(err error) error {
 	}
 
 	return remark(err, severityError)
+}
+
+// AsWarnings returns err with a warning mark above each of its problems,
+// so each error of err becomes a warning. It is the inverse of
+// [AsErrors]. The mark leaves the type of each problem on its cause chain,
+// so a check that reports a typed error as a warning keeps that type for
+// [errors.As]:
+//
+//	func (c Cfg) Validate() error {
+//		if c.Layout != "" {
+//			return niceyaml.AsWarnings(niceyaml.Invalid(&RuleError{ID: "R1", Msg: "legacy layout"},
+//				niceyaml.AtPath(paths.Current().Child("layout"))))
+//		}
+//
+//		return nil
+//	}
+//
+// Each renderer then writes "warning:" after the position of each
+// problem. Each heading that niceyaml wrote to count the errors and the
+// warnings below it counts them again, so "2 errors, 1 warning" reads "3
+// warnings". AsWarnings rebuilds joins and wrappers as AsErrors does.
+// It returns nil for a nil err.
+func AsWarnings(err error) error {
+	if isNothing(err) {
+		return nil
+	}
+
+	return remark(err, severityWarning)
 }
 
 // WithoutWarnings returns the errors of err without its warnings, as a
@@ -602,6 +630,10 @@ func countText(errs, warns int) string {
 //	if w := warnings.Err(); w != nil {
 //		log.Print(niceyaml.FormatError(w))
 //	}
+//
+// A check of the program follows the same protocol. It hands each warning
+// to the collector with [Node.Warn], or with [WarnValue] when it does not
+// hold a Node, and returns its errors alone.
 //
 // A call whose context does not carry a collector drops its warnings,
 // whether it passes or fails. A decode under [UnknownFieldsWarn] is the
@@ -1261,6 +1293,35 @@ func (n *Node) Warn(ctx context.Context, err error) {
 	}
 
 	deliver(ctx, n.Bind(remark(err, severityWarning)))
+}
+
+// WarnValue reports err as a warning to the collector of ctx, as
+// [Node.Warn] does, for a check that does not hold a [*Node]. Such checks
+// include a function of [WithValueCheck], a ValidateContext method of a
+// [SelfValidatorContext], and an engine that checks a decoded value. It
+// marks err a warning, as [AsWarnings] does, and binds it as [BindValue]
+// binds an error, unless err is bound already. The text of the warning
+// thus names each path from the value that the check reads, and a call
+// that runs the check can still place it in a document. A check that
+// reports its warnings this way returns its errors alone, so its callers
+// test the result against nil:
+//
+//	func (e *Engine) ValidateValue(ctx context.Context, v any) error {
+//		niceyaml.WarnValue(ctx, e.deprecations(v))
+//
+//		return niceyaml.BindValue(e.failures(v))
+//	}
+//
+// A [Validator] holds a Node, so it reports each warning with Node.Warn,
+// which places the warning in the document. WarnValue does nothing for a
+// nil err, and a context that does not carry a collector drops the
+// warning.
+func WarnValue(ctx context.Context, err error) {
+	if isNothing(err) {
+		return
+	}
+
+	deliver(ctx, BindValue(remark(err, severityWarning)))
 }
 
 // warningRow is one problem that a [Warnings] holds or that

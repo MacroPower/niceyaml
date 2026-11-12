@@ -27,21 +27,13 @@ var (
 	// when members is empty.
 	Tally func(members []error) error
 
-	// MarkWarning returns err with a warning mark above it, as
-	// niceyaml.Node.Warn marks the error that it reports.
-	MarkWarning func(err error) error
-
-	// Warn reports err as a warning to the collector of ctx, as
-	// niceyaml.Node.Warn does, and does not bind it to a document.
-	Warn func(ctx context.Context, err error)
-
 	// Isolate returns a copy of ctx whose collector is w, a
 	// *niceyaml.Warnings, alone. The collectors of ctx do not get the
 	// warnings of a call that runs with the copy. The caller can thus filter
-	// those warnings and deliver them later with Warn. The copy counts as
-	// the context of a call of niceyaml, as the context of a hook does. A
-	// collector that code derives from it with niceyaml.Warnings.Context
-	// thus hands its warnings to w as well.
+	// those warnings and deliver them later with niceyaml.WarnValue. The
+	// copy counts as the context of a call of niceyaml, as the context of a
+	// hook does. A collector that code derives from it with
+	// niceyaml.Warnings.Context thus hands its warnings to w as well.
 	Isolate func(ctx context.Context, w any) context.Context
 	// Rewrap returns err with wrap applied to the error that it binds, when
 	// err is a *niceyaml.SourceError, and wrap(err) otherwise. The result
@@ -95,18 +87,6 @@ var (
 	// path selects, such as the value of an entry that a later entry of its
 	// key hides.
 	Scope func(n any, path paths.Path, node ast.Node) any
-
-	// KnownKeys returns a niceyaml.DecodeOption that admits the key at
-	// each of keys, a path from `$` in the document that the decode reads.
-	// A decode under niceyaml.UnknownFieldsReject or
-	// niceyaml.UnknownFieldsWarn then reports every unknown field except
-	// those keys. A key with a field in the target
-	// decodes into that field. The decode skips each key without a field
-	// that reads it, and every key below a value that decodes itself. Such
-	// a key replaces each entry of its name that a `<<` merge key before it
-	// brings in, so the decode skips those entries too. The validators of
-	// the decode still see each key.
-	KnownKeys func(keys []paths.Path) any
 
 	// AtData returns a niceyaml.ErrorOption that locates an error at the
 	// value that names lead to in decoded data, at the key of its entry

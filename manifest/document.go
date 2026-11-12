@@ -741,9 +741,10 @@ func (d *docState) decode(ctx context.Context) bool {
 	reg := d.l.reg
 	entry := d.route.kind
 
-	known, _ := hook.KnownKeys(reg.typeFields()).(niceyaml.DecodeOption) //nolint:errcheck // The hook returns a DecodeOption.
-
-	opts := append([]niceyaml.DecodeOption{niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject), known},
+	opts := append([]niceyaml.DecodeOption{
+		niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject),
+		niceyaml.WithAllowedFields(reg.typeFields()...),
+	},
 		reg.cfg.decodeOptions...)
 	opts = append(opts, entry.kind.cfg.decodeOptions...)
 

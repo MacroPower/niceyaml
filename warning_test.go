@@ -791,6 +791,175 @@ func TestAsErrors_Tally(t *testing.T) {
 	), niceyaml.AsErrors(report).Error())
 }
 
+func TestAsWarnings(t *testing.T) {
+	t.Parallel()
+
+	doc := yamltest.FirstDocument(t, warningCafe, niceyaml.WithName("cafe.yaml"))
+	unknown := niceyaml.NewError(`unknown field "wifi"`, niceyaml.AtPath(paths.Doc().Child("wifi").Key()))
+	seats := niceyaml.NewError("too many seats", niceyaml.AtPath(paths.Doc().Child("seats")))
+
+	require.NoError(t, niceyaml.AsWarnings(nil))
+
+	tcs := map[string]struct {
+		err  error
+		want string
+	}{
+		"a bound error becomes a warning": {
+			err:  doc.Bind(unknown),
+			want: `cafe.yaml:4:1: warning: $.wifi~: unknown field "wifi"`,
+		},
+		"an unbound error becomes a warning that binds as one": {
+			err:  unknown,
+			want: `cafe.yaml:4:1: warning: $.wifi~: unknown field "wifi"`,
+		},
+		"a join marks each error": {
+			err: doc.Bind(errors.Join(seats, unknown)),
+			want: stringtest.JoinLF(
+				`cafe.yaml:1:8: warning: $.seats: too many seats`,
+				`cafe.yaml:4:1: warning: $.wifi~: unknown field "wifi"`,
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := niceyaml.AsWarnings(tc.err)
+			require.Error(t, got)
+			assert.False(t, niceyaml.HasErrors(got))
+			assert.Equal(t, tc.want, doc.Bind(got).Error())
+		})
+	}
+
+	t.Run("a typed error keeps its type", func(t *testing.T) {
+		t.Parallel()
+
+		got := niceyaml.AsWarnings(niceyaml.Invalid(&ruleError{id: "R1"},
+			niceyaml.AtPath(paths.Current().Child("seats"))))
+		assert.False(t, niceyaml.HasErrors(got))
+
+		rule, ok := errors.AsType[*ruleError](got)
+		require.True(t, ok)
+		assert.Equal(t, "R1", rule.id)
+		assert.Equal(t, "cafe.yaml:1:8: warning: $.seats: rule R1", doc.Bind(got).Error())
+	})
+
+	t.Run("a heading counts the warnings again", func(t *testing.T) {
+		t.Parallel()
+
+		warnings := niceyaml.NewWarnings()
+
+		_, err := doc.Decode[warningSpec](warnings.Context(t.Context()),
+			niceyaml.WithValidator(warnAtKey("legacyPricing", `deprecated field "legacyPricing"`)),
+			niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject))
+		require.Error(t, err)
+
+		assert.Equal(t, stringtest.JoinLF(
+			"cafe.yaml: 4 warnings",
+			`cafe.yaml:2:1: warning: $.curency~: unknown field "curency"`,
+			`cafe.yaml:3:1: warning: $.legacyPricing~: unknown field "legacyPricing"`,
+			`cafe.yaml:3:1: warning: $.legacyPricing~: deprecated field "legacyPricing"`,
+			`cafe.yaml:4:1: warning: $.wifi~: unknown field "wifi"`,
+		), niceyaml.AsWarnings(warnings.Report(err)).Error())
+	})
+
+	t.Run("a check that returns a typed warning passes", func(t *testing.T) {
+		t.Parallel()
+
+		warnings := niceyaml.NewWarnings()
+
+		_, err := doc.Decode[warningSpec](warnings.Context(t.Context()),
+			niceyaml.WithValueCheck(func(context.Context, *warningSpec) error {
+				return niceyaml.AsWarnings(niceyaml.Invalid(&ruleError{id: "R1"},
+					niceyaml.AtPath(paths.Current().Child("seats"))))
+			}))
+		require.NoError(t, err)
+
+		got := warnings.Err()
+		assert.Equal(t, "cafe.yaml:1:8: warning: $.seats: rule R1", got.Error())
+
+		var rule *ruleError
+
+		assert.ErrorAs(t, got, &rule)
+	})
+}
+
+func TestWarnValue(t *testing.T) {
+	t.Parallel()
+
+	doc := yamltest.FirstDocument(t, warningCafe, niceyaml.WithName("cafe.yaml"))
+	seats := paths.Current().Child("seats")
+
+	tcs := map[string]struct {
+		warn error
+		want string
+	}{
+		"an error becomes a warning bound to the value": {
+			warn: niceyaml.NewError("too many seats", niceyaml.AtPath(seats)),
+			want: "warning: $.seats: too many seats",
+		},
+		"a warning stays a warning": {
+			warn: niceyaml.NewWarning("too many seats", niceyaml.AtPath(seats)),
+			want: "warning: $.seats: too many seats",
+		},
+		"a bound error keeps its binding": {
+			warn: doc.Bind(niceyaml.NewError("too many seats", niceyaml.AtPath(seats))),
+			want: "cafe.yaml:1:8: warning: $.seats: too many seats",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			warnings := niceyaml.NewWarnings()
+
+			niceyaml.WarnValue(warnings.Context(t.Context()), tc.warn)
+
+			got := warnings.Err()
+			require.Error(t, got)
+			assert.Equal(t, tc.want, got.Error())
+			assert.False(t, niceyaml.HasErrors(got))
+		})
+	}
+
+	t.Run("a nil error reports nothing", func(t *testing.T) {
+		t.Parallel()
+
+		warnings := niceyaml.NewWarnings()
+
+		niceyaml.WarnValue(warnings.Context(t.Context()), nil)
+		require.NoError(t, warnings.Err())
+	})
+
+	t.Run("a context without a collector drops the warning", func(t *testing.T) {
+		t.Parallel()
+
+		assert.NotPanics(t, func() {
+			niceyaml.WarnValue(t.Context(), niceyaml.NewError("too many seats"))
+		})
+	})
+
+	t.Run("a decode places the warning of a value check", func(t *testing.T) {
+		t.Parallel()
+
+		warnings := niceyaml.NewWarnings()
+
+		_, err := doc.Decode[warningSpec](warnings.Context(t.Context()),
+			niceyaml.WithValueCheck(func(ctx context.Context, _ *warningSpec) error {
+				niceyaml.WarnValue(ctx, niceyaml.NewError("too many seats", niceyaml.AtPath(seats)))
+
+				return nil
+			}))
+		require.NoError(t, err)
+
+		got := warnings.Err()
+		require.Error(t, got)
+		assert.Equal(t, "cafe.yaml:1:8: warning: $.seats: too many seats", got.Error())
+	})
+}
+
 func TestWithoutWarnings(t *testing.T) {
 	t.Parallel()
 

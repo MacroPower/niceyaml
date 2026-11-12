@@ -269,7 +269,7 @@ func markProblem(mark, err error) error {
 func newWarning(marks []error, msg string, opts ...niceyaml.ErrorOption) error {
 	problem := niceyaml.Invalid(&problemError{msg: msg, marks: marks}, opts...)
 
-	return hook.MarkWarning(problem) //nolint:wrapcheck // The mark adds no text.
+	return niceyaml.AsWarnings(problem) //nolint:wrapcheck // The mark adds no text.
 }
 
 // Problem describes one row of a [*LoadError] that a load, a plan, or
