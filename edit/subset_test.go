@@ -1365,7 +1365,7 @@ func TestDoc_Apply_Unsupported(t *testing.T) {
 	// The Func that read returns reads the text at path, then runs then.
 	read := func(path string, then edit.Func) edit.Func {
 		return func(ctx context.Context, root *edit.Node) error {
-			root.At(paths.MustParse(path)).Text()
+			root.At(paths.MustParse(path)).Scalar()
 
 			return then(ctx, root)
 		}

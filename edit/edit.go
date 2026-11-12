@@ -1113,7 +1113,9 @@ func (d *Doc) endApply() {
 // the line of a mark in the prefix of the document, the mark moves in front
 // of that content. The tokenizer still drops it there. A mark at the start of
 // the document stands before the text of the document, so Text leaves it
-// out, and [FileText] keeps it.
+// out, and [FileText] keeps it. Before the first edit, Text thus holds the
+// bytes that [niceyaml.Node.Text] returns for the document, without a mark
+// at its start.
 func (d *Doc) Text() string {
 	return d.withMarks(d.textMarks())
 }

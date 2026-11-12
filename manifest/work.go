@@ -10,7 +10,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/inputhook"
 	"go.jacobcolvin.com/niceyaml/internal/schemalint"
 	"go.jacobcolvin.com/niceyaml/paths"
-	"go.jacobcolvin.com/niceyaml/position"
 )
 
 // startWork sets the working copy of a document that routed, and reports
@@ -40,12 +39,10 @@ func (d *docState) startWork() bool {
 // Source of the document. It adds the problem of a copy that does not
 // parse, or that holds nothing, and reports false.
 func (d *docState) prepareWork(doc *niceyaml.Node, locate func(niceyaml.Located) niceyaml.Place) bool {
-	src := doc.Source()
 	span := doc.Span()
-	start, end := textBounds(doc)
 	us := slices.Concat(d.l.reg.cfg.unmarshalers, d.doc.Source().Unmarshalers())
 
-	working := niceyaml.NewSourceFromDerived(src.Text()[start:end], d.doc, func(at niceyaml.Located) niceyaml.Place {
+	working := niceyaml.NewSourceFromDerived(doc.Text(), d.doc, func(at niceyaml.Located) niceyaml.Place {
 		if at.HasRange {
 			at.Range.Start.Line += span.Start
 			at.Range.End.Line += span.Start
@@ -75,27 +72,6 @@ func (d *docState) prepareWork(doc *niceyaml.Node, locate func(niceyaml.Located)
 	d.fail(niceyaml.NewError("document holds nothing"))
 
 	return false
-}
-
-// textBounds returns the bytes [start, end) of the text of the Source of
-// doc that the lines of doc hold.
-func textBounds(doc *niceyaml.Node) (int, int) {
-	src := doc.Source()
-	span := doc.Span()
-
-	start, ok := src.Offset(position.New(span.Start, 0))
-	if !ok {
-		start = 0
-	}
-
-	end := len(src.Text())
-	if span.End < src.Lines().Len() {
-		if off, ok := src.Offset(position.New(span.End, 0)); ok {
-			end = off
-		}
-	}
-
-	return start, end
 }
 
 // schemaFields is what the schema of a version says about the type

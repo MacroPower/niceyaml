@@ -129,10 +129,14 @@ func (v *View) Over(lines Lines) bool {
 // [View.All] yields them. The result shares the lines by pointer with the
 // content, as [Collect] does. It has the methods a View lacks, such as
 // [Lines.Content], [Lines.Tokens], [Lines.Runes], and [Lines.TokenAt].
-// With them, a caller reaches the text of the lines a slice holds, such as
-// one document of a file that holds several:
+// With them, a caller reaches the content of the lines a slice holds, such
+// as one document of a file that holds several:
 //
-//	text := doc.View().Held().Content()
+//	content := doc.View().Held().Content()
+//
+// Lines.Content joins the lines with "\n" and drops the final line ending.
+// The bytes of one document as the file writes them come from
+// [go.jacobcolvin.com/niceyaml.Node.Text].
 //
 // Each line keeps the number it has in the file, but the indices of the
 // result start at zero. Line i of the result is the i-th held line, not

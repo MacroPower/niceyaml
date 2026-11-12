@@ -639,7 +639,8 @@ func (ls Lines) ranges(tk *token.Token, span func(segment.Segment) position.Span
 // It joins the lines with newlines, so the result ends each line but the
 // last with "\n" whatever line endings the source used. A program that
 // needs the bytes of the source reads
-// [go.jacobcolvin.com/niceyaml.Source.Text].
+// [go.jacobcolvin.com/niceyaml.Source.Text], and one that needs the bytes
+// of one document reads [go.jacobcolvin.com/niceyaml.Node.Text].
 func (ls Lines) Content() string {
 	if len(ls.lines) == 0 {
 		return ""
