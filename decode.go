@@ -128,7 +128,11 @@ func newDecodeConfig(s *Source, opts []DecodeOption) decodeConfig {
 // at the first that fails. A caller that wants every failure of several
 // validators gives one option a [MultiValidator]. The decode presumes the
 // document at fault for each error of a validator that does not declare
-// anything, as [Validator] describes.
+// anything, as [Validator] describes. The decode runs the check of
+// [Node.CheckAliasLimit] before the validators, and the validators do not
+// run when that check fails. A decode into a type that reads text counts
+// the text that the aliases write out after the validators, as the Decoding
+// section of the package documentation describes.
 //
 // A [go.jacobcolvin.com/niceyaml/schema.Schema] checks the document
 // against one JSON schema, and a
@@ -1061,18 +1065,25 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig, comments
 		return n.Bind(n.source.referenceErr)
 	}
 
+	// The alias check runs before the validators, so a validator that
+	// walks the aliases of the document does not run past the limit.
+	err = n.CheckAliasLimit()
+	if err != nil {
+		return err
+	}
+
 	err = n.validate(ctx, cfg.validators)
 	if err != nil {
 		return err
 	}
 
-	err = aliasing.CheckDecode(decodedValue{n})
-	if err == nil && aliasing.DecodesTextWith(reflect.TypeOf(v).Elem(), cfg.unmarshalers) {
+	// The text check depends on the type of v, so it runs after the
+	// validators.
+	if aliasing.DecodesTextWith(reflect.TypeOf(v).Elem(), cfg.unmarshalers) {
 		err = aliasing.CheckDecodeText(decodedValue{n})
-	}
-
-	if err != nil {
-		return n.aliasingError(err)
+		if err != nil {
+			return n.aliasingError(err)
+		}
 	}
 
 	// The decoder step reports each problem as an error, whatever it wraps,

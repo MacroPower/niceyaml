@@ -1855,6 +1855,9 @@ func (k NodeKind) String() string {
 //		children, err = n.Nodes(paths.Current().IndexAll())
 //	}
 //
+// Such a walk follows every alias, so it calls [Node.CheckAliasLimit] on
+// the Node it starts from before it reads any children.
+//
 // Kind looks through the anchor and the tag on the node, an alias and the
 // anchor it refers to, and the `?` of an explicit key. The root of
 // `&r {a: 1}` and of `!!map {a: 1}` is thus a mapping, but [Node.AST] gives
@@ -1892,6 +1895,58 @@ func (n *Node) Kind() NodeKind {
 	default:
 		return NodeScalar
 	}
+}
+
+// CheckAliasLimit returns the error that a decode of the Node into a type
+// that does not read text returns for the alias limit. It returns nil when
+// the limit lets such a decode read the Node. A caller that walks the Node
+// with [Node.Kind] and [Node.Nodes] follows every alias. Each call of
+// Nodes stays within the limits of its own path,
+// so such a walk of a document whose aliases nest can run for minutes
+// without an error. A walk that follows aliases calls CheckAliasLimit
+// first:
+//
+//	if err := n.CheckAliasLimit(); err != nil {
+//		return err
+//	}
+//
+// The error matches [ErrExcessiveAliasing], and [IsInvalid] reports it. It
+// binds at the alias of the document that repeats the most nodes, as the
+// Alias Limit section of the package documentation describes. The count
+// covers the whole document, so a Node that holds one small alias in a
+// document past the limit fails. The document keeps the count, so a check
+// of each item of a list counts the document once.
+//
+// CheckAliasLimit returns nil for a Node whose value does not hold an
+// alias and for a nil Node. It also returns nil for each Node of a
+// [Source] with [WithAliasLimit] set to false. For a document that did not
+// parse, it returns the error that [Node.Err] returns.
+//
+// A decode into a type that reads text also counts the text that the
+// aliases write out, as the Decoding section of the package documentation
+// describes. That decode fails when aliases make up too much of the text.
+// It also fails when the text passes the document byte limit or the depth
+// limit of the Source. The check leaves out the whole count of the text,
+// so it can return nil for a Node that such a decode refuses.
+//
+// [Node.Validate] does not run the check. A validator that reads tokens or
+// a `$..*` path does not follow an alias, so an editor or a linter can
+// still report on a document past the limit.
+func (n *Node) CheckAliasLimit() error {
+	if n == nil {
+		return nil
+	}
+
+	if n.doc.err != nil {
+		return n.doc.err
+	}
+
+	err := aliasing.CheckDecode(decodedValue{n})
+	if err != nil {
+		return n.aliasingError(err)
+	}
+
+	return nil
 }
 
 // Scalar returns the text of the scalar of the Node as the document

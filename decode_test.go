@@ -10645,6 +10645,59 @@ func TestDocument_Decode_ExcessiveAliasing(t *testing.T) {
 			assert.NotEmpty(t, got)
 		})
 	}
+
+	t.Run("before the validators", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, yamltest.AliasLevels(7))
+
+		var ran atomic.Bool
+
+		v := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+			ran.Store(true)
+
+			return errors.New("bad document")
+		})
+
+		_, err := doc.Decode[any](t.Context(), niceyaml.WithValidator(v))
+		require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
+		assert.False(t, ran.Load())
+	})
+
+	t.Run("text after the validators", func(t *testing.T) {
+		t.Parallel()
+
+		// The aliases repeat a long scalar. They make up too much of the
+		// text that a decode writes out but not of the value that it reads.
+		// The text stays within the document byte limit.
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"s: &s "+strings.Repeat("y", 100),
+			"t: &t "+yamltest.FlowSequence("*s", 20),
+			"u: "+yamltest.FlowSequence("*t", 20),
+		))
+
+		require.NoError(t, doc.CheckAliasLimit())
+
+		_, err := doc.Decode[any](t.Context())
+		require.NoError(t, err)
+
+		var ran atomic.Bool
+
+		v := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+			ran.Store(true)
+
+			return nil
+		})
+
+		type target struct {
+			Addr netip.Addr `yaml:"addr"`
+		}
+
+		_, err = doc.Decode[target](t.Context(), niceyaml.WithValidator(v))
+		require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
+		require.NotErrorIs(t, err, niceyaml.ErrLimit)
+		assert.True(t, ran.Load())
+	})
 }
 
 // aliasText is a value that decodes itself from the text of its node.
