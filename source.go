@@ -1389,6 +1389,9 @@ func (s *Source) Text() string {
 // with a final line ending, the offset of column 0 of the line after it
 // is the length of the text.
 //
+// [Source.UTF16Column] counts the same column in UTF-16 code units, for
+// a client of the Language Server Protocol.
+//
 // Offset reads the start of the line from an index and then walks the
 // runes of that line up to the column. A column counts runes and an offset
 // counts bytes, so a call takes time in proportion to the column. That
@@ -1445,6 +1448,97 @@ func (s *Source) PositionAt(off int) (position.Position, bool) {
 	}
 
 	return position.New(ln, col), true
+}
+
+// UTF16Column returns the column of pos, a position in the coordinates of
+// [Source.Lines], counted in the UTF-16 code units of its line, and true.
+// A language server sends that column to a client of the Language Server
+// Protocol (LSP). UTF-16 is the one position encoding that every LSP
+// client supports. The line of pos stays the same, so a diagnostic
+// converts the Start and the End of its range:
+//
+//	for p := range niceyaml.Problems(err) {
+//		r, _ := p.Range()
+//		start, _ := src.UTF16Column(r.Start)
+//		end, _ := src.UTF16Column(r.End)
+//		publish(r.Start.Line, start, r.End.Line, end, p.Message())
+//	}
+//
+// UTF16Column counts the runes in front of pos as [Source.Offset] counts
+// them. A rune outside the Basic Multilingual Plane, such as an emoji,
+// takes two units, and every other rune takes one. A line ending takes one
+// unit whether it is LF, CRLF, or a bare CR, and so does a byte that is
+// not valid UTF-8. The two counts thus differ only on a line that holds
+// a rune outside that plane in front of pos.
+//
+// A byte order mark that [tokens.Tokenize] dropped lies before column 0 of
+// its line, so it takes no unit. An editor strips a mark at the start of
+// a file, so it agrees on that line. An editor that keeps a mark later in
+// the file, such as one in front of a document marker, counts one unit
+// more on that line than UTF16Column does.
+//
+// A column in UTF-8 bytes is Offset(pos) minus the offset of column 0 of
+// its line. A report in the Static Analysis Results Interchange Format
+// (SARIF) does not convert its columns. Its log sets columnKind to
+// "unicodeCodePoints", and SARIF then counts columns in runes.
+//
+// UTF16Column walks the runes of the line up to the column, as Offset
+// walks them, so a call takes time in proportion to the column.
+//
+// UTF16Column reports false where Offset does. Such a position has a
+// negative line or column, a line past the last, or a column past the
+// end of its line. A nil Source, which does not hold any text, reports
+// false too.
+func (s *Source) UTF16Column(pos position.Position) (int, bool) {
+	if s == nil {
+		return 0, false
+	}
+
+	return s.offsets.get(func() bom.Index { return bom.NewIndex(s.input) }).UTF16Column(pos.Line, pos.Col)
+}
+
+// PositionAtUTF16 returns the position of the rune that holds the UTF-16
+// code unit at col on line ln, and true. Both ln and col count from 0,
+// and the position is in the coordinates of [Source.Lines]. It is the inverse of
+// [Source.UTF16Column], and it counts as UTF16Column counts. A language
+// server converts a cursor from a client of the Language Server Protocol
+// before it finds the value there:
+//
+//	if pos, ok := src.PositionAtUTF16(line, character); ok {
+//		if doc, ok := src.DocumentAt(pos); ok {
+//			path, _ := doc.PathAt(pos)
+//		}
+//	}
+//
+// The second unit of a surrogate pair names the rune of that pair, as a
+// byte inside a rune does for [Source.PositionAt]. The unit after the
+// content of a line names its line ending. The unit after the line ending
+// names the column past it on the same line, and [Source.Offset] places
+// that column where the next line starts. A byte order mark that
+// [tokens.Tokenize] dropped lies before unit 0 of its line, as
+// UTF16Column describes.
+//
+// PositionAtUTF16 walks the runes of the line up to col, so a call takes
+// time in proportion to the column it returns.
+//
+// PositionAtUTF16 reports false for a negative ln or col, for a line
+// past the last, and for a col past the end of its line. Such a col lies
+// more than one unit after the content of a line with a line ending, or
+// after the content of the last line of a text without one. It also
+// reports false for a nil Source, which does not hold any text.
+func (s *Source) PositionAtUTF16(ln, col int) (position.Position, bool) {
+	if s == nil {
+		return position.Position{}, false
+	}
+
+	idx := s.offsets.get(func() bom.Index { return bom.NewIndex(s.input) })
+
+	runes, ok := idx.ColumnAtUTF16(ln, col)
+	if !ok {
+		return position.Position{}, false
+	}
+
+	return position.New(ln, runes), true
 }
 
 // DocumentAt returns the root [*Node] of the document whose [Node.Span]

@@ -6,7 +6,8 @@
 // that YAML allows before it lexes, so every position counts the text
 // without them. Code that maps a position back to the text that it came
 // from calls this package to learn where the text lost a mark. An
-// [Index] maps a line and a column to a byte offset in that text.
+// [Index] maps a line and a column to a byte offset in that text, and to
+// a column in UTF-16 code units.
 //
 //	text, marks := bom.Drop("\ufeffa: 1\n")
 //	fmt.Printf("%q %v", text, marks) // "a: 1\n" [0]
@@ -15,6 +16,7 @@ package bom
 import (
 	"slices"
 	"strings"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"go.jacobcolvin.com/niceyaml/internal/lineend"
@@ -162,17 +164,14 @@ func NewIndex(src string) Index {
 // runes of the line up to col. The index does not hold the offsets of the
 // runes within a line, so a call takes time in proportion to col.
 func (x Index) Offset(line, col int) (int, bool) {
-	if line < 0 || col < 0 || line >= len(x.starts) {
+	if col < 0 {
 		return 0, false
 	}
 
-	start, end := x.starts[line], len(x.text)
-	if line+1 < len(x.starts) {
-		end = x.starts[line+1]
+	start, end, content, ok := x.line(line)
+	if !ok {
+		return 0, false
 	}
-
-	whole := x.text[start:end]
-	content := trimLineEnding(whole)
 
 	at, n := 0, 0
 	for ; n < col && at < len(content); n++ {
@@ -183,7 +182,7 @@ func (x Index) Offset(line, col int) (int, bool) {
 	switch {
 	case n == col:
 		at += start
-	case n+1 == col && len(content) < len(whole):
+	case n+1 == col && start+len(content) < end:
 		// The line ending takes the column after the content, so the
 		// column after that one is where the next line starts.
 		at = end
@@ -196,6 +195,104 @@ func (x Index) Offset(line, col int) (int, bool) {
 	dropped, _ := slices.BinarySearch(x.marks, at+1)
 
 	return at + dropped*len(Mark), true
+}
+
+// UTF16Column returns the column in UTF-16 code units of the rune at line
+// and col, both 0-indexed, and true. It counts the content of the line in
+// front of col in UTF-16, so a rune outside the Basic Multilingual Plane
+// takes two units and every other rune takes one. A line ending takes
+// one unit, and so does a byte that is not valid UTF-8. A mark that the
+// tokenizer dropped lies before unit 0 of its line.
+//
+// UTF16Column reports false where [Index.Offset] does. It walks the runes
+// of the line up to col, as Offset walks them.
+func (x Index) UTF16Column(line, col int) (int, bool) {
+	if col < 0 {
+		return 0, false
+	}
+
+	start, end, content, ok := x.line(line)
+	if !ok {
+		return 0, false
+	}
+
+	at, n, units := 0, 0, 0
+	for ; n < col && at < len(content); n++ {
+		r, size := utf8.DecodeRuneInString(content[at:])
+		at += size
+		units += utf16.RuneLen(r)
+	}
+
+	switch {
+	case n == col:
+		return units, true
+	case n+1 == col && start+len(content) < end:
+		// The line ending takes the unit after the content.
+		return units + 1, true
+	default:
+		return 0, false
+	}
+}
+
+// ColumnAtUTF16 returns the column in runes of the rune that holds the
+// UTF-16 code unit at units on line, both 0-indexed, and true. It is the
+// inverse of [Index.UTF16Column] and counts as UTF16Column counts. The
+// second unit of a surrogate pair thus has the column of its rune.
+//
+// ColumnAtUTF16 reports false for a negative line or units, a line that
+// the text does not hold, and a unit past the end of its line. It walks
+// the runes of the line up to units.
+func (x Index) ColumnAtUTF16(line, units int) (int, bool) {
+	if units < 0 {
+		return 0, false
+	}
+
+	start, end, content, ok := x.line(line)
+	if !ok {
+		return 0, false
+	}
+
+	at, col := 0, 0
+	for units > 0 && at < len(content) {
+		r, size := utf8.DecodeRuneInString(content[at:])
+
+		n := utf16.RuneLen(r)
+		if units < n {
+			// The unit lies inside the surrogate pair of this rune.
+			return col, true
+		}
+
+		at += size
+		units -= n
+		col++
+	}
+
+	switch {
+	case units == 0:
+		return col, true
+	case units == 1 && start+len(content) < end:
+		// The line ending takes the unit after the content.
+		return col + 1, true
+	default:
+		return 0, false
+	}
+}
+
+// line returns the offsets in the text of the start of line and of the
+// start of the line after it, the content of line without its line
+// ending, and true. It reports false for a line that the text does not
+// hold.
+func (x Index) line(line int) (int, int, string, bool) {
+	if line < 0 || line >= len(x.starts) {
+		return 0, 0, "", false
+	}
+
+	start, end := x.starts[line], len(x.text)
+	if line+1 < len(x.starts) {
+		end = x.starts[line+1]
+	}
+
+	return start, end, trimLineEnding(x.text[start:end]), true
 }
 
 // trimLineEnding returns s without the line ending at its end, if any.
@@ -245,12 +342,7 @@ func (x Index) Position(off int) (int, int, bool) {
 	line, _ := slices.BinarySearch(x.starts, at+1)
 	line--
 
-	start, end := x.starts[line], len(x.text)
-	if line+1 < len(x.starts) {
-		end = x.starts[line+1]
-	}
-
-	content := trimLineEnding(x.text[start:end])
+	start, _, content, _ := x.line(line)
 	rel := at - start
 	col := 0
 

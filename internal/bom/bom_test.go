@@ -211,3 +211,71 @@ func TestIndex_Position(t *testing.T) {
 		})
 	}
 }
+
+func TestIndex_UTF16Column(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		src       string
+		line, col int
+		want      int
+		ok        bool
+	}{
+		"the start":                     {src: "a: 1\n", want: 0, ok: true},
+		"a rune of two units":           {src: "a: 😀 b\n", col: 4, want: 5, ok: true},
+		"the line ending":               {src: "a: 😀\n", col: 4, want: 5, ok: true},
+		"past the line ending":          {src: "a: 😀\n", col: 5, want: 6, ok: true},
+		"a column past the line ending": {src: "a: 😀\n", col: 6},
+		"the end of text with no break": {src: "a: 😀", col: 4, want: 5, ok: true},
+		"past the end of the text":      {src: "a: 😀", col: 5},
+		"a mark before the text":        {src: bom.Mark + "a: 😀\n", col: 4, want: 5, ok: true},
+		"a byte that is not UTF-8":      {src: "a\xff😀\n", col: 3, want: 4, ok: true},
+		"a line past the last":          {src: "a: 1\n", line: 2},
+		"a negative column":             {src: "a: 1\n", col: -1},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := bom.NewIndex(tc.src).UTF16Column(tc.line, tc.col)
+			assert.Equal(t, tc.ok, ok)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestIndex_ColumnAtUTF16(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		src         string
+		line, units int
+		want        int
+		ok          bool
+	}{
+		"the start":                     {src: "a: 1\n", want: 0, ok: true},
+		"after a rune of two units":     {src: "a: 😀 b\n", units: 5, want: 4, ok: true},
+		"inside a rune of two units":    {src: "a: 😀 b\n", units: 4, want: 3, ok: true},
+		"the line ending":               {src: "a: 😀\n", units: 5, want: 4, ok: true},
+		"past the line ending":          {src: "a: 😀\n", units: 6, want: 5, ok: true},
+		"a unit past the line ending":   {src: "a: 😀\n", units: 7},
+		"the end of text with no break": {src: "a: 😀", units: 5, want: 4, ok: true},
+		"past the end of the text":      {src: "a: 😀", units: 6},
+		"a mark before the text":        {src: bom.Mark + "a: 😀\n", units: 5, want: 4, ok: true},
+		"a byte that is not UTF-8":      {src: "a\xff😀\n", units: 4, want: 3, ok: true},
+		"a line past the last":          {src: "a: 1\n", line: 2},
+		"a negative line":               {src: "a: 1\n", line: -1},
+		"a negative unit":               {src: "a: 1\n", units: -1},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := bom.NewIndex(tc.src).ColumnAtUTF16(tc.line, tc.units)
+			assert.Equal(t, tc.ok, ok)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}

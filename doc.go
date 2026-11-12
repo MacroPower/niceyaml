@@ -546,6 +546,12 @@
 // the name. [errors.As] on the Err field of the node finds the typed error
 // of that problem.
 //
+// A column counts runes. A language server converts each column with
+// [Source.UTF16Column] before it publishes a diagnostic, because a client
+// of the Language Server Protocol counts columns in UTF-16 code units.
+// [Source.PositionAtUTF16] converts a cursor from the client back to a
+// position.
+//
 // A report in JSON encodes each node. [ErrorTree.MarshalJSON] writes the
 // message, the context, the name, the file path, and the path as its text.
 // It writes [ErrorTree.Range] counted from 0, as every position in this
