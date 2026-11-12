@@ -14,15 +14,14 @@ import (
 
 // startWork sets the working copy of a document that routed, and reports
 // whether the document can go on to its checks. The working copy is the
-// document itself unless the registry has unmarshalers and the Source
-// came from [input.Sources]. Only such a Source lacks the unmarshalers
-// of the registry. A Source that the load built holds them already, and
-// a registry without [WithUnmarshalers] has none to add. For a Source
-// from [input.Sources] under [WithUnmarshalers], the working copy is a
-// copy that puts them under the unmarshalers of that Source, as
-// prepareWork builds it.
+// document itself unless the registry has type rules and the Source came
+// from [input.Sources]. Only such a Source lacks the rules of the
+// registry. A Source that the load built holds them already, and a
+// registry without [WithTypeRules] has none to add. For a Source from
+// [input.Sources] under [WithTypeRules], the working copy is a copy that
+// puts them under the rules of that Source, as prepareWork builds it.
 func (d *docState) startWork() bool {
-	if len(d.l.reg.cfg.unmarshalers) > 0 && d.f.target.kind == inputhook.Source {
+	if len(d.l.reg.cfg.typeRules) > 0 && d.f.target.kind == inputhook.Source {
 		return d.prepareWork(d.doc)
 	}
 
@@ -36,12 +35,12 @@ func (d *docState) startWork() bool {
 // from the first line of its span, so each error of the copy binds in doc
 // at the line that holds its text. The error of a migrated copy moves on
 // from doc to the document, through the binding of its edit.Doc. The copy
-// takes the unmarshalers of the registry under those of the Source of the
+// takes the type rules of the registry under those of the Source of the
 // document. It adds the problem of a copy that does not parse, or that
 // holds nothing, and reports false.
 func (d *docState) prepareWork(doc *niceyaml.Node) bool {
 	span := doc.Span()
-	us := slices.Concat(d.l.reg.cfg.unmarshalers, d.doc.Source().Unmarshalers())
+	rules := slices.Concat(d.l.reg.cfg.typeRules, d.doc.Source().TypeRules())
 
 	working := niceyaml.NewSourceFromDerived(doc.Text(), doc, func(at niceyaml.Located) niceyaml.Place {
 		if at.HasRange {
@@ -50,7 +49,7 @@ func (d *docState) prepareWork(doc *niceyaml.Node) bool {
 		}
 
 		return niceyaml.Place{Path: at.Path, HasPath: at.HasPath, Range: at.Range, HasRange: at.HasRange}
-	}, niceyaml.WithUnmarshalers(us...), niceyaml.WithoutLimits())
+	}, niceyaml.WithTypeRules(rules...), niceyaml.WithoutLimits())
 
 	for _, n := range working.AllDocuments() {
 		if n.Err() != nil {

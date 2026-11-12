@@ -1353,7 +1353,7 @@ var (
 // gives them.
 func (d *Doc) userDecode(ctx context.Context) error {
 	_, err := d.user.Decode[any](ctx, niceyaml.WithSelfValidation(false),
-		niceyaml.WithUnmarshaler(d.cfg.unmarshalers...))
+		niceyaml.OverrideTypeRules(d.cfg.typeRules...))
 	if err == nil {
 		return nil
 	}

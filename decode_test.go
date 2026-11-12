@@ -1885,7 +1885,7 @@ func TestWithUnknownFields(t *testing.T) {
 
 					return err
 				},
-				opts: []niceyaml.DecodeOption{warn, niceyaml.WithUnmarshaler(custom)},
+				opts: []niceyaml.DecodeOption{warn, niceyaml.OverrideTypeRules(custom)},
 			},
 			"a key before a merge key that reads a reference document": {
 				input:    stringtest.LinesLF("name: Fika", "extra: 1", "<<: *base"),
@@ -2022,7 +2022,7 @@ func TestWithUnknownFields(t *testing.T) {
 			}
 
 			defaulted := false
-			defaults := niceyaml.WithDefaults(func(*target) { defaulted = true })
+			defaults := niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(*target) { defaulted = true }))
 
 			calls := &problemCalls{}
 			_, err := doc.Decode[target](context.WithValue(t.Context(), callsKey{}, calls),
@@ -2080,7 +2080,7 @@ func TestWithUnknownFields(t *testing.T) {
 					})
 
 					defaulted := false
-					defaults := niceyaml.WithDefaults(func(*inner) { defaulted = true })
+					defaults := niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(*inner) { defaulted = true }))
 
 					got := target{Self: &inner{A: 7}}
 					err := into(t.Context(), &got, warn, defaults, niceyaml.WithValidator(validator))
@@ -3033,7 +3033,7 @@ func (*methodLevel) UnmarshalText([]byte) error {
 func TestCustomUnmarshaler(t *testing.T) {
 	t.Parallel()
 
-	levels := niceyaml.WithUnmarshaler(niceyaml.CustomUnmarshaler(decodeLevel))
+	levels := niceyaml.OverrideTypeRules(niceyaml.CustomUnmarshaler(decodeLevel))
 
 	t.Run("decodes every value of the type", func(t *testing.T) {
 		t.Parallel()
@@ -3075,7 +3075,7 @@ func TestCustomUnmarshaler(t *testing.T) {
 
 		var got []string
 
-		record := niceyaml.WithUnmarshaler(niceyaml.CustomUnmarshaler(
+		record := niceyaml.OverrideTypeRules(niceyaml.CustomUnmarshaler(
 			func(ctx context.Context, _ *plainLevel, decode func(any) error) error {
 				var name string
 
@@ -3128,7 +3128,7 @@ func TestCustomUnmarshaler(t *testing.T) {
 				t.Parallel()
 
 				got, err := yamltest.FirstDocument(t, tc.input).Decode[map[string]net.IPNet](
-					t.Context(), niceyaml.WithUnmarshaler(niceyaml.CustomUnmarshaler(decodeCIDR)),
+					t.Context(), niceyaml.OverrideTypeRules(niceyaml.CustomUnmarshaler(decodeCIDR)),
 				)
 				require.NoError(t, err)
 				assert.Equal(t, "10.0.0.0/8", new(got["office"]).String())
@@ -3141,7 +3141,7 @@ func TestCustomUnmarshaler(t *testing.T) {
 
 		var got []string
 
-		record := niceyaml.WithUnmarshaler(niceyaml.CustomUnmarshaler(
+		record := niceyaml.OverrideTypeRules(niceyaml.CustomUnmarshaler(
 			func(_ context.Context, _ *plainLevel, decode func(any) error) error {
 				var text yaml.RawMessage
 
@@ -3189,8 +3189,8 @@ func TestCustomUnmarshaler(t *testing.T) {
 		}
 
 		decoders := niceyaml.DecodeOptions(
-			niceyaml.WithUnmarshaler(niceyaml.CustomUnmarshaler(decodeCIDR)),
-			niceyaml.WithUnmarshaler(niceyaml.CustomUnmarshaler(decodeSpan)),
+			niceyaml.OverrideTypeRules(niceyaml.CustomUnmarshaler(decodeCIDR)),
+			niceyaml.OverrideTypeRules(niceyaml.CustomUnmarshaler(decodeSpan)),
 			levels,
 		)
 
@@ -3393,7 +3393,7 @@ func TestCustomUnmarshaler(t *testing.T) {
 			Broken panickingUnmarshaler `yaml:"broken"`
 		}
 
-		boxes := niceyaml.WithUnmarshaler(
+		boxes := niceyaml.OverrideTypeRules(
 			niceyaml.CustomUnmarshaler(func(_ context.Context, b *box, decode func(any) error) error {
 				type fields box
 
@@ -3666,7 +3666,7 @@ func TestCustomUnmarshaler(t *testing.T) {
 	t.Run("the error of the function for the node the decode reads", func(t *testing.T) {
 		t.Parallel()
 
-		cidr := niceyaml.WithUnmarshaler(niceyaml.CustomUnmarshaler(decodeCIDR))
+		cidr := niceyaml.OverrideTypeRules(niceyaml.CustomUnmarshaler(decodeCIDR))
 
 		_, err := yamltest.FirstDocument(t, "10.0.0.0/33\n").Decode[net.IPNet](t.Context(), cidr)
 		require.EqualError(t, err, "1:1: $: invalid CIDR address: 10.0.0.0/33")
@@ -3675,7 +3675,7 @@ func TestCustomUnmarshaler(t *testing.T) {
 		require.EqualError(t, err, "expected string, got sequence")
 
 		_, err = yamltest.FirstDocument(t, "from: nine\nto: 3\n").Decode[plainSpan](
-			t.Context(), niceyaml.WithUnmarshaler(niceyaml.CustomUnmarshaler(decodeSpan)),
+			t.Context(), niceyaml.OverrideTypeRules(niceyaml.CustomUnmarshaler(decodeSpan)),
 		)
 		require.EqualError(t, err, "1:7: $.from: expected integer, got string")
 	})
@@ -3693,7 +3693,7 @@ func TestCustomUnmarshaler(t *testing.T) {
 		_, err := doc.DecodeAt[[]net.IPNet](
 			t.Context(),
 			paths.Current().Child("nets"),
-			niceyaml.WithUnmarshaler(niceyaml.CustomUnmarshaler(decodeCIDR)),
+			niceyaml.OverrideTypeRules(niceyaml.CustomUnmarshaler(decodeCIDR)),
 		)
 		require.EqualError(t, err, "4:3: $.nets[1]: expected string, got mapping")
 	})
@@ -3705,7 +3705,7 @@ func TestCustomUnmarshaler(t *testing.T) {
 
 		got, err := doc.Decode[map[string]plainSpan](
 			t.Context(),
-			niceyaml.WithUnmarshaler(niceyaml.CustomUnmarshaler(decodeSpan)),
+			niceyaml.OverrideTypeRules(niceyaml.CustomUnmarshaler(decodeSpan)),
 		)
 		require.NoError(t, err)
 		assert.Equal(t, map[string]plainSpan{"span": {From: 2, To: 3}}, got)
@@ -3714,7 +3714,7 @@ func TestCustomUnmarshaler(t *testing.T) {
 	t.Run("the decode takes a pointer alone", func(t *testing.T) {
 		t.Parallel()
 
-		byValue := niceyaml.WithUnmarshaler(
+		byValue := niceyaml.OverrideTypeRules(
 			niceyaml.CustomUnmarshaler(func(_ context.Context, _ *plainLevel, decode func(any) error) error {
 				var name string
 
@@ -3732,7 +3732,7 @@ func TestCustomUnmarshaler(t *testing.T) {
 	t.Run("the decode refuses the type its function decodes", func(t *testing.T) {
 		t.Parallel()
 
-		recursive := niceyaml.WithUnmarshaler(niceyaml.CustomUnmarshaler(
+		recursive := niceyaml.OverrideTypeRules(niceyaml.CustomUnmarshaler(
 			func(_ context.Context, l *plainLevel, decode func(any) error) error {
 				return decode(l)
 			},
@@ -3750,7 +3750,7 @@ func TestCustomUnmarshaler(t *testing.T) {
 	t.Run("an error that wraps a go-yaml type error keeps its text", func(t *testing.T) {
 		t.Parallel()
 
-		counted := niceyaml.WithUnmarshaler(
+		counted := niceyaml.OverrideTypeRules(
 			niceyaml.CustomUnmarshaler(func(_ context.Context, _ *plainLevel, decode func(any) error) error {
 				var text yaml.RawMessage
 
@@ -3786,7 +3786,7 @@ func TestCustomUnmarshaler(t *testing.T) {
 		t.Parallel()
 
 		calls := 0
-		count := niceyaml.WithUnmarshaler(
+		count := niceyaml.OverrideTypeRules(
 			niceyaml.CustomUnmarshaler(func(context.Context, *plainLevel, func(any) error) error {
 				calls++
 
@@ -3805,7 +3805,7 @@ func TestCustomUnmarshaler(t *testing.T) {
 	t.Run("the function decodes ahead of a method of the type", func(t *testing.T) {
 		t.Parallel()
 
-		byFunction := niceyaml.WithUnmarshaler(
+		byFunction := niceyaml.OverrideTypeRules(
 			niceyaml.CustomUnmarshaler(func(_ context.Context, l *methodLevel, _ func(any) error) error {
 				*l = 7
 
@@ -3826,7 +3826,7 @@ func TestCustomUnmarshaler(t *testing.T) {
 	t.Run("a nil function removes the function of the type", func(t *testing.T) {
 		t.Parallel()
 
-		removed := niceyaml.WithUnmarshaler(niceyaml.CustomUnmarshaler[plainLevel](nil))
+		removed := niceyaml.OverrideTypeRules(niceyaml.CustomUnmarshaler[plainLevel](nil))
 
 		tcs := map[string]struct {
 			opts []niceyaml.DecodeOption
@@ -3930,7 +3930,7 @@ func TestCustomUnmarshaler(t *testing.T) {
 
 		// The decoder writes the text of the value from a node that passed
 		// the limits of the document, which turn the depth check off here.
-		values := niceyaml.WithUnmarshaler(
+		values := niceyaml.OverrideTypeRules(
 			niceyaml.CustomUnmarshaler(func(_ context.Context, n *nested, decode func(any) error) error {
 				return decode(&n.value)
 			}),
@@ -5615,7 +5615,7 @@ func TestJSONUnmarshalers(t *testing.T) {
 	}{
 		"decodes through the method": {
 			input: "size: 4k\n",
-			opts:  []niceyaml.DecodeOption{niceyaml.WithUnmarshaler(niceyaml.JSONUnmarshalers(true))},
+			opts:  []niceyaml.DecodeOption{niceyaml.OverrideTypeRules(niceyaml.JSONUnmarshalers(true))},
 			want:  4096,
 		},
 		"reads the fields by default": {
@@ -5625,14 +5625,14 @@ func TestJSONUnmarshalers(t *testing.T) {
 		"a later false turns the option off": {
 			input: "size: {bytes: 3}\n",
 			opts: []niceyaml.DecodeOption{
-				niceyaml.WithUnmarshaler(niceyaml.JSONUnmarshalers(true)),
-				niceyaml.WithUnmarshaler(niceyaml.JSONUnmarshalers(false)),
+				niceyaml.OverrideTypeRules(niceyaml.JSONUnmarshalers(true)),
+				niceyaml.OverrideTypeRules(niceyaml.JSONUnmarshalers(false)),
 			},
 			want: 3,
 		},
 		"the error of the method binds at the value": {
 			input: "size: big\n",
-			opts:  []niceyaml.DecodeOption{niceyaml.WithUnmarshaler(niceyaml.JSONUnmarshalers(true))},
+			opts:  []niceyaml.DecodeOption{niceyaml.OverrideTypeRules(niceyaml.JSONUnmarshalers(true))},
 			err:   `1:7: $.size: size: strconv.Atoi: parsing "big": invalid syntax`,
 		},
 	}
@@ -5658,14 +5658,14 @@ func TestJSONUnmarshalers(t *testing.T) {
 		t.Parallel()
 
 		got, err := yamltest.FirstDocument(t, "size: 4k\n").Decode[map[string]yamlSize](
-			t.Context(), niceyaml.WithUnmarshaler(niceyaml.JSONUnmarshalers(true)),
+			t.Context(), niceyaml.OverrideTypeRules(niceyaml.JSONUnmarshalers(true)),
 		)
 		require.NoError(t, err)
 		assert.Equal(t, map[string]yamlSize{"size": {Bytes: 1}}, got)
 	})
 }
 
-func TestWithUnmarshaler(t *testing.T) {
+func TestOverrideTypeRules(t *testing.T) {
 	t.Parallel()
 
 	levels := niceyaml.CustomUnmarshaler(decodeLevel)
@@ -5679,27 +5679,27 @@ func TestWithUnmarshaler(t *testing.T) {
 	tcs := map[string]struct {
 		input string
 		err   string
-		us    []niceyaml.Unmarshaler
+		us    []niceyaml.TypeRule
 		want  plainLevel
 	}{
 		"applies an unmarshaler": {
 			input: "level: high\n",
-			us:    []niceyaml.Unmarshaler{levels},
+			us:    []niceyaml.TypeRule{levels},
 			want:  levelHigh,
 		},
 		"a later function for a type replaces an earlier one": {
 			input: "level: high\n",
-			us:    []niceyaml.Unmarshaler{levels, seven},
+			us:    []niceyaml.TypeRule{levels, seven},
 			want:  7,
 		},
 		"a later nil function removes an earlier one": {
 			input: "level: high\n",
-			us:    []niceyaml.Unmarshaler{levels, niceyaml.CustomUnmarshaler[plainLevel](nil)},
+			us:    []niceyaml.TypeRule{levels, niceyaml.CustomUnmarshaler[plainLevel](nil)},
 			err:   "1:8: $.level: expected integer, got string",
 		},
-		"the zero Unmarshaler changes nothing": {
+		"the zero TypeRule changes nothing": {
 			input: "level: high\n",
-			us:    []niceyaml.Unmarshaler{levels, {}},
+			us:    []niceyaml.TypeRule{levels, {}},
 			want:  levelHigh,
 		},
 		"no unmarshaler changes nothing": {
@@ -5713,7 +5713,7 @@ func TestWithUnmarshaler(t *testing.T) {
 			t.Parallel()
 
 			got, err := yamltest.FirstDocument(t, tc.input).Decode[map[string]plainLevel](
-				t.Context(), niceyaml.WithUnmarshaler(tc.us...),
+				t.Context(), niceyaml.OverrideTypeRules(tc.us...),
 			)
 			if tc.err != "" {
 				require.EqualError(t, err, tc.err)
@@ -5729,8 +5729,8 @@ func TestWithUnmarshaler(t *testing.T) {
 	t.Run("keeps its unmarshalers when the caller changes the slice", func(t *testing.T) {
 		t.Parallel()
 
-		us := []niceyaml.Unmarshaler{levels}
-		opt := niceyaml.WithUnmarshaler(us...)
+		us := []niceyaml.TypeRule{levels}
+		opt := niceyaml.OverrideTypeRules(us...)
 		us[0] = seven
 
 		got, err := yamltest.FirstDocument(t, "level: high\n").Decode[map[string]plainLevel](t.Context(), opt)
@@ -9543,7 +9543,7 @@ func TestDecodeOptions(t *testing.T) {
 		// The last CustomUnmarshaler given for a type decodes it, so
 		// the marker a decode yields names the option that came last.
 		setMarker := func(value marker) niceyaml.DecodeOption {
-			return niceyaml.WithUnmarshaler(
+			return niceyaml.OverrideTypeRules(
 				niceyaml.CustomUnmarshaler(func(_ context.Context, m *marker, _ func(any) error) error {
 					*m = value
 
@@ -9765,7 +9765,7 @@ func TestDecodeOptions_EntryPoints(t *testing.T) {
 				runs := 0
 
 				opts := form([]niceyaml.DecodeOption{
-					niceyaml.WithUnmarshaler(gradeNames),
+					niceyaml.OverrideTypeRules(gradeNames),
 					niceyaml.WithValidator(niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
 						runs++
 
@@ -10723,7 +10723,7 @@ func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 	)
 	kind := paths.Current().Child("kind")
 
-	plainText := niceyaml.WithUnmarshaler(
+	plainText := niceyaml.OverrideTypeRules(
 		niceyaml.CustomUnmarshaler(func(_ context.Context, a *aliasPlain, decode func(any) error) error {
 			return decode((*string)(a))
 		}),
@@ -10756,7 +10756,7 @@ func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 		"json unmarshaler elements under their option": {
 			path:   kind,
 			target: func() any { return new([]aliasJSON) },
-			decode: []niceyaml.DecodeOption{niceyaml.WithUnmarshaler(niceyaml.JSONUnmarshalers(true))},
+			decode: []niceyaml.DecodeOption{niceyaml.OverrideTypeRules(niceyaml.JSONUnmarshalers(true))},
 			err:    niceyaml.ErrExcessiveAliasing,
 		},
 		"json unmarshaler elements without their option": {
@@ -10917,12 +10917,12 @@ func TestDocument_Decode_AliasExpansion(t *testing.T) {
 		"l:",
 	) + strings.Repeat("  - *a\n", 20)
 
-	customList := niceyaml.WithUnmarshaler(
+	customList := niceyaml.OverrideTypeRules(
 		niceyaml.CustomUnmarshaler(func(_ context.Context, l *aliasList, decode func(any) error) error {
 			return decode((*[]string)(l))
 		}),
 	)
-	customValue := niceyaml.WithUnmarshaler(
+	customValue := niceyaml.OverrideTypeRules(
 		niceyaml.CustomUnmarshaler(func(_ context.Context, v *aliasValue, decode func(any) error) error {
 			return decode(&v.value)
 		}),
@@ -11442,7 +11442,7 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 				S strictOption `yaml:"s"`
 			}](
 				strict,
-				niceyaml.WithUnmarshaler(niceyaml.CustomUnmarshaler(
+				niceyaml.OverrideTypeRules(niceyaml.CustomUnmarshaler(
 					func(context.Context, *strictOption, func(any) error) error { return nil },
 				)),
 			),
@@ -11465,7 +11465,7 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 		"type with an UnmarshalJSON method under its option": {
 			decode: decodeAs[struct {
 				S strictJSON `yaml:"s"`
-			}](strict, niceyaml.WithUnmarshaler(niceyaml.JSONUnmarshalers(true))),
+			}](strict, niceyaml.OverrideTypeRules(niceyaml.JSONUnmarshalers(true))),
 			input: nestedUnknown,
 			want:  `7:1: $.qqq~: unknown field "qqq"`,
 		},
@@ -14223,7 +14223,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 	t.Parallel()
 
-	custom := niceyaml.WithUnmarshaler(niceyaml.CustomUnmarshaler(decodePulled))
+	custom := niceyaml.OverrideTypeRules(niceyaml.CustomUnmarshaler(decodePulled))
 
 	registerPulled()
 
@@ -14322,7 +14322,7 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 		// The option turns the method on, so the search leaves the image
 		// to the method, which accepts it.
 		"json unmarshaler under its option": {
-			decode: decodeAs[problemImaged[problemJSON]](niceyaml.WithUnmarshaler(niceyaml.JSONUnmarshalers(true))),
+			decode: decodeAs[problemImaged[problemJSON]](niceyaml.OverrideTypeRules(niceyaml.JSONUnmarshalers(true))),
 			input:  listRepo,
 			want:   "1:11: $.replicas: expected integer, got string",
 		},
@@ -14522,7 +14522,7 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 			decode: decodeAs[struct {
 				Either map[string]problemTextual `yaml:"either"`
 				Port   int                       `yaml:"port"`
-			}](niceyaml.WithUnmarshaler(niceyaml.JSONUnmarshalers(true))),
+			}](niceyaml.OverrideTypeRules(niceyaml.JSONUnmarshalers(true))),
 			input: "either: {a: {b: 1}}\nport: x\n",
 			want:  "2:7: $.port: expected integer, got string",
 		},
@@ -15360,7 +15360,7 @@ func TestDocument_Decode_Problems_UnmarshalerCalls(t *testing.T) {
 				Names    []tier `yaml:"names"`
 				Timeout  int    `yaml:"timeout"`
 				Replicas int    `yaml:"replicas"`
-			}](niceyaml.WithUnmarshaler(niceyaml.CustomUnmarshaler(uniqueTier))),
+			}](niceyaml.OverrideTypeRules(niceyaml.CustomUnmarshaler(uniqueTier))),
 		},
 	}
 
@@ -15440,7 +15440,7 @@ func TestDocument_Decode_Problems_UnmarshalerCalls(t *testing.T) {
 		_, err := yamltest.FirstDocument(t, "either: {a: 1}\nport: x\n").Decode[struct {
 			Either problemEither `yaml:"either"`
 			Port   int           `yaml:"port"`
-		}](t.Context(), niceyaml.WithUnmarshaler(niceyaml.JSONUnmarshalers(true)))
+		}](t.Context(), niceyaml.OverrideTypeRules(niceyaml.JSONUnmarshalers(true)))
 		require.EqualError(t, err, "2:7: $.port: expected integer, got string")
 		assert.Equal(t, map[string]int{"json": 1}, eitherCalls.take())
 	})
@@ -15540,8 +15540,10 @@ func TestDocument_Decode_Problems_Warnings(t *testing.T) {
 		"the fill of an element from its defaults": {
 			target: &[]problemWarner{},
 			input:  "- {a: 1}\n",
-			opts:   []niceyaml.DecodeOption{niceyaml.WithDefaults(func(w *problemWarner) { w.A = 9 })},
-			want:   deprecated,
+			opts: []niceyaml.DecodeOption{
+				niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(w *problemWarner) { w.A = 9 })),
+			},
+			want: deprecated,
 		},
 		// The decoder calls the method on an element that starts from
 		// zero, and the fill calls it again on one that starts from the
@@ -15551,16 +15553,20 @@ func TestDocument_Decode_Problems_Warnings(t *testing.T) {
 			target: &[]problemModeWarner{},
 			value:  &[]problemModeWarner{{Mode: "legacy"}},
 			input:  "- {}\n",
-			opts:   []niceyaml.DecodeOption{niceyaml.WithDefaults(func(w *problemModeWarner) { w.Mode = "legacy" })},
-			want:   `inner.yaml: warning: mode ""`,
+			opts: []niceyaml.DecodeOption{
+				niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(w *problemModeWarner) { w.Mode = "legacy" })),
+			},
+			want: `inner.yaml: warning: mode ""`,
 		},
 		// The decoder starts the element and its field from zero, so the
 		// fill decodes the field again from its defaults.
 		"the fill of a field of an element": {
 			target: &[]problemWarned{},
 			input:  "- {self: {a: 1}, port: 1}\n",
-			opts:   []niceyaml.DecodeOption{niceyaml.WithDefaults(func(w *problemWarner) { w.A = 9 })},
-			want:   deprecated,
+			opts: []niceyaml.DecodeOption{
+				niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(w *problemWarner) { w.A = 9 })),
+			},
+			want: deprecated,
 		},
 		// The decode allocates a value for a nil pointer that the target
 		// points to, and that value starts from its defaults. So the
@@ -15569,8 +15575,10 @@ func TestDocument_Decode_Problems_Warnings(t *testing.T) {
 			target: new(*problemModeWarner),
 			value:  &legacy,
 			input:  "{}\n",
-			opts:   []niceyaml.DecodeOption{niceyaml.WithDefaults(func(w *problemModeWarner) { w.Mode = "legacy" })},
-			want:   `inner.yaml: warning: mode "legacy"`,
+			opts: []niceyaml.DecodeOption{
+				niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(w *problemModeWarner) { w.Mode = "legacy" })),
+			},
+			want: `inner.yaml: warning: mode "legacy"`,
 		},
 		// The decode starts from the map that the target holds, so the
 		// fill decodes each key again to find its entry.
@@ -15585,17 +15593,21 @@ func TestDocument_Decode_Problems_Warnings(t *testing.T) {
 			target: new(map[problemWarnerKey]int),
 			value:  &map[problemWarnerKey]int{"a": 1},
 			input:  "a: 1\n",
-			opts:   []niceyaml.DecodeOption{niceyaml.WithDefaults(func(k *problemWarnerKey) { *k = "d" })},
-			want:   deprecated,
+			opts: []niceyaml.DecodeOption{
+				niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(k *problemWarnerKey) { *k = "d" })),
+			},
+			want: deprecated,
 		},
-		// The key type has a function of WithDefaults, so the fill decodes
+		// The key type has a function of TypeDefaults, so the fill decodes
 		// each key again, although the function leaves the key at zero.
 		"the fill of a map whose key type has a function that sets nothing": {
 			target: new(map[problemWarnerKey]int),
 			value:  &map[problemWarnerKey]int{"a": 1},
 			input:  "a: 1\n",
-			opts:   []niceyaml.DecodeOption{niceyaml.WithDefaults(func(*problemWarnerKey) {})},
-			want:   deprecated,
+			opts: []niceyaml.DecodeOption{
+				niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(*problemWarnerKey) {})),
+			},
+			want: deprecated,
 		},
 		// The struct that holds the map inline has defaults, so the fill
 		// builds the struct again and decodes each key of its mapping.
@@ -15604,8 +15616,10 @@ func TestDocument_Decode_Problems_Warnings(t *testing.T) {
 			target: &problemWarnerInline{},
 			value:  &problemWarnerInline{Extra: map[problemWarnerKey]int{"a": 1}},
 			input:  "a: 1\n",
-			opts:   []niceyaml.DecodeOption{niceyaml.WithDefaults(func(w *problemWarnerInline) { w.Port = 8080 })},
-			want:   deprecated,
+			opts: []niceyaml.DecodeOption{
+				niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(w *problemWarnerInline) { w.Port = 8080 })),
+			},
+			want: deprecated,
 		},
 		// The value below the key validates itself, so the walk decodes
 		// the key again to name its path. The target holds a nil map, so
@@ -15724,7 +15738,7 @@ func TestDocument_Decode_Problems_Context(t *testing.T) {
 		t.Parallel()
 
 		calls := 0
-		counting := niceyaml.WithUnmarshaler(
+		counting := niceyaml.OverrideTypeRules(
 			niceyaml.CustomUnmarshaler(func(context.Context, *problemPulled, func(any) error) error {
 				calls++
 
@@ -17043,7 +17057,7 @@ func TestDocument_Decode_Rejection_Label(t *testing.T) {
 
 	// The function decodes the value as an int8 and puts text of its own
 	// in front of the rejection.
-	wrapping := niceyaml.WithUnmarshaler(niceyaml.CustomUnmarshaler(
+	wrapping := niceyaml.OverrideTypeRules(niceyaml.CustomUnmarshaler(
 		func(_ context.Context, _ *optionDecoded, decode func(any) error) error {
 			var small int8
 
@@ -17978,7 +17992,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				decode: decodeAs[struct {
 					Name  string      `yaml:"name"`
 					Value jsonDecoded `yaml:"value"`
-				}](niceyaml.WithUnmarshaler(niceyaml.JSONUnmarshalers(true))),
+				}](niceyaml.OverrideTypeRules(niceyaml.JSONUnmarshalers(true))),
 				want: `2:1: $.value: unmarshaler rejected the value`,
 			},
 			"type an option decodes": {
@@ -17986,7 +18000,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				decode: decodeAs[struct {
 					Name  string        `yaml:"name"`
 					Value optionDecoded `yaml:"value"`
-				}](niceyaml.WithUnmarshaler(niceyaml.CustomUnmarshaler(
+				}](niceyaml.OverrideTypeRules(niceyaml.CustomUnmarshaler(
 					func(context.Context, *optionDecoded, func(any) error) error { return errUnmarshal },
 				))),
 				want: `2:8: $.value: unmarshaler rejected the value`,
@@ -18493,7 +18507,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				decode: decodeAs[struct {
 					Name  string        `yaml:"name"`
 					Value optionDecoded `yaml:"value"`
-				}](niceyaml.WithUnmarshaler(niceyaml.CustomUnmarshaler(
+				}](niceyaml.OverrideTypeRules(niceyaml.CustomUnmarshaler(
 					func(context.Context, *optionDecoded, func(any) error) error { return spanError() },
 				))),
 				is:   errSpan,

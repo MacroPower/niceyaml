@@ -23,7 +23,7 @@ var (
 	ErrUnfollowableDeprecation = errors.New("deprecation that a user cannot follow")
 
 	// ErrUnusedDefault indicates a property that the schema requires, and
-	// whose default from [niceyaml.WithDefaults] is not zero. Every
+	// whose default from [niceyaml.TypeDefaults] is not zero. Every
 	// document must write such a property, so the default never applies.
 	// [CheckType] reports it, and so does
 	// [go.jacobcolvin.com/niceyaml/manifest.Registry.Verify].
@@ -37,17 +37,18 @@ var (
 // a slice. It skips each type that decodes itself through an unmarshaler,
 // and each type that supplies its own schema through a JSONSchema method.
 //
-// The unmarshalers us give the check the types that the program decodes
-// whole through a [niceyaml.CustomUnmarshaler] or through
+// The rules give the check the types that the program decodes whole
+// through a [niceyaml.CustomUnmarshaler] or through
 // [niceyaml.JSONUnmarshalers]. The check skips those types too. Pass the
-// unmarshalers that the program gives its [niceyaml.Source] with
-// [niceyaml.WithUnmarshalers], so the check reads T as its decodes do.
-// CheckFields applies us in order, as WithUnmarshalers does. A later
-// function for a type replaces an earlier one, a nil function removes
-// it, and the last JSONUnmarshalers applies. The check does not know the
-// schemas that the options of the generator supply. The program pairs
-// each type that us decodes whole with such an option, because the
-// check does not compare that type with the generator.
+// rules that the program decodes with, such as those it gives its
+// [niceyaml.Source] with [niceyaml.WithTypeRules], so the check reads T
+// as its decodes do. CheckFields applies the rules in order, as
+// WithTypeRules does. A later function for a type replaces an earlier
+// one, a nil function removes it, and the last JSONUnmarshalers applies.
+// The check does not read a [niceyaml.TypeDefaults]. It does not know the
+// schemas that the options of the generator supply either. The program
+// pairs each type that the rules decode whole with such an option,
+// because the check does not compare that type with the generator.
 //
 // A field fails the check when the generator names its property other
 // than the key that the decoder reads, or when only one of the two reads
@@ -66,22 +67,23 @@ var (
 // documentation shows. It reads the tags of T, not a schema. Do not call
 // it for a T whose schema you write by hand with the keys that the
 // decoder reads. For such a T, it reports fields that the schema matches.
-func CheckFields[T any](us ...niceyaml.Unmarshaler) error {
+func CheckFields[T any](rules ...niceyaml.TypeRule) error {
 	var errs []error
 
-	for _, problem := range genfield.Check(reflect.TypeFor[T](), hook.Unmarshalers(us)) {
+	for _, problem := range genfield.Check(reflect.TypeFor[T](), hook.Unmarshalers(rules)) {
 		errs = append(errs, fmt.Errorf("%w: %s", ErrFieldMismatch, problem))
 	}
 
 	return errors.Join(errs...)
 }
 
-// CheckType reports each property that s requires and deprecates, and
-// each default of T under opts that s keeps from ever applying. Pass the
-// schema, the type, and the decode options that the program decodes
-// with, such as those it passes to [niceyaml.Node.Decode] beside
-// [niceyaml.WithValidator]. CheckType returns nil for a nil s and for a
-// schema that checks nothing, such as one from [AcceptAll].
+// CheckType reports each property that s requires and deprecates, and each
+// default of T under rules that s keeps from ever applying. Pass the
+// schema, the type, and the type rules that the program decodes with,
+// those it gives its [niceyaml.Source] with [niceyaml.WithTypeRules] first
+// and those it passes to [niceyaml.OverrideTypeRules] after them.
+// CheckType returns nil for a nil s and for a schema that checks nothing,
+// such as one from [AcceptAll].
 //
 // CheckType reports each property that s requires and marks deprecated.
 // A user who follows the warning and removes the property fails the
@@ -107,13 +109,13 @@ func CheckFields[T any](us ...niceyaml.Unmarshaler) error {
 // instead.
 //
 // CheckType also reports each property that s requires, that a document
-// replaces whole, and whose default under opts is not zero. Every
+// replaces whole, and whose default under rules is not zero. Every
 // document must then write the property, so the default never applies:
 //
 //	$.seats: required, so its default 20 never applies
 //
-// The error matches [ErrUnusedDefault]. The defaults come from the
-// [niceyaml.WithDefaults] options among opts. A document replaces every
+// The error matches [ErrUnusedDefault]. The defaults come from each
+// [niceyaml.TypeDefaults] among rules. A document replaces every
 // value whole, except a struct and a pointer to a struct, which a mapping
 // merges into field by field. The check follows properties, items, and
 // additionalProperties through each chain that joins schemas. Under an
@@ -122,14 +124,14 @@ func CheckFields[T any](us ...niceyaml.Unmarshaler) error {
 // the function set. A detail names the default that a child type gives
 // itself, when a function of a parent type sets it to another value. The
 // omitzero option on the field makes it optional at each place of the
-// child type. A panic in a function of WithDefaults reaches the caller.
+// child type. A panic in a function of TypeDefaults reaches the caller.
 //
 // [niceyaml.IsInvalid] reports false for each error, because the schema
 // and the program are at fault rather than a document. CheckType joins
 // the errors of several properties, and [niceyaml.Problems] yields each
 // of them. Call CheckType in a test, beside [CheckFields], as the
 // Generation section of the package documentation shows.
-func CheckType[T any](s *Schema, opts ...niceyaml.DecodeOption) error {
+func CheckType[T any](s *Schema, rules ...niceyaml.TypeRule) error {
 	if s == nil || s.JSONSchema() == nil {
 		return nil
 	}
@@ -144,7 +146,7 @@ func CheckType[T any](s *Schema, opts ...niceyaml.DecodeOption) error {
 
 	defaults := func(t reflect.Type) reflect.Value {
 		p := reflect.New(t)
-		_ = niceyaml.DefaultsInto(p.Interface(), opts...) //nolint:errcheck // p is a non-nil pointer.
+		_ = niceyaml.DefaultsInto(p.Interface(), rules...) //nolint:errcheck // p is a non-nil pointer.
 
 		return p.Elem()
 	}

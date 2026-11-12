@@ -70,9 +70,8 @@ var (
 // names. It takes the name, the file path, the file system, and the
 // preamble of that layer. An error that does not carry a location binds
 // in that layer.
-// Every decode of the Source applies the unmarshalers of
-// [MergeUnmarshalers], or else the unmarshalers that [WithUnmarshalers]
-// gives the Source of that layer.
+// Every decode of the Source applies the rules of [MergeTypeRules], or
+// else the rules that [WithTypeRules] gives the Source of that layer.
 //
 // The merge fails with the error of every layer that it cannot read a
 // value from, lowest first. It reads each layer alone, so the error of
@@ -115,7 +114,7 @@ func NewSourceFromLayers[L Layer](ctx context.Context, layers []L, opts ...Merge
 // Available options:
 //   - [MergeAppend]
 //   - [MergeAs]
-//   - [MergeUnmarshalers]
+//   - [MergeTypeRules]
 type MergeOption func(*mergeConfig)
 
 // mergeConfig holds the settings a [MergeOption] configures.
@@ -124,23 +123,23 @@ type mergeConfig struct {
 	as Layer
 	// The paths of [MergeAppend], in the order given.
 	appends []paths.Path
-	// The unmarshalers of [MergeUnmarshalers], in the order given.
-	unmarshalers []Unmarshaler
-	// Whether the caller passed a MergeUnmarshalers option, even an empty
-	// one. When it is set, unmarshalers replaces those of the layer that
-	// the merged Source stands for.
-	ownUnmarshalers bool
+	// The rules of [MergeTypeRules], in the order given.
+	typeRules []TypeRule
+	// Whether the caller passed a MergeTypeRules option, even an empty
+	// one. When it is set, typeRules replaces those of the layer that the
+	// merged Source stands for.
+	ownTypeRules bool
 }
 
 // MergeAs is a [MergeOption] that makes the Source [NewSourceFromLayers]
-// builds stand for layer, such as the file of the user above defaults
-// that the program embeds. The Source takes the name, the file path, the
-// file system, and the preamble of that layer in place of those of the
-// lowest layer. It also takes the unmarshalers that [WithUnmarshalers]
-// gives the Source of that layer, unless [MergeUnmarshalers] gives the
-// merge its own. An error that does not carry a location binds in that
-// layer. The layers merge in the order given whichever layer the Source
-// stands for, so a higher layer still sets the values it holds.
+// builds stand for layer, such as the file of the user above defaults that
+// the program embeds. The Source takes the name, the file path, the file
+// system, and the preamble of that layer in place of those of the lowest
+// layer. It also takes the rules that [WithTypeRules] gives the Source of
+// that layer, unless [MergeTypeRules] gives the merge its own. An error
+// that does not carry a location binds in that layer. The layers merge in
+// the order given whichever layer the Source stands for, so a higher layer
+// still sets the values it holds.
 //
 // The preamble holds the schema directive of the layer, so the directive
 // of that layer picks the schema of the merged document. A relative
@@ -152,10 +151,10 @@ type mergeConfig struct {
 //
 // A nil layer, a nil Source, and a nil Node each keep the lowest layer, so
 // an optional file goes to MergeAs as it is. The Source stands for the
-// lowest layer when that file is missing, so unmarshalers given to that
-// file alone apply only when it exists. A program gives its
-// unmarshalers to MergeUnmarshalers instead. Every decode then reads the
-// types of the program the same way whichever files exist.
+// lowest layer when that file is missing, so rules given to that file
+// alone apply only when it exists. A program gives its rules to
+// MergeTypeRules instead. Every decode then reads the types of the
+// program the same way whichever files exist.
 //
 // For any other layer that the layers do not hold, NewSourceFromLayers
 // returns an error that wraps [ErrUnknownLayer]. It compares the
@@ -170,37 +169,36 @@ func MergeAs(layer Layer) MergeOption {
 	}
 }
 
-// MergeUnmarshalers is a [MergeOption] that gives every decode of the
-// Source [NewSourceFromLayers] builds the unmarshalers us, in place of
-// the unmarshalers of the layer the Source stands for. A program that
-// merges an optional file of the user over the defaults it embeds gives
-// its unmarshalers here, such as the cidr [Unmarshaler] that
-// [CustomUnmarshaler] shows. Every decode then applies them whichever
-// files exist:
+// MergeTypeRules is a [MergeOption] that gives every decode of the
+// Source [NewSourceFromLayers] builds the rules, in place of the rules of
+// the layer the Source stands for. A program that merges an optional file
+// of the user over the defaults it embeds gives its rules here, such as
+// the cidr [TypeRule] that [CustomUnmarshaler] shows. Every decode then
+// applies them whichever files exist:
 //
 //	merged, err := niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{defaults, user},
 //		niceyaml.MergeAs(user),
-//		niceyaml.MergeUnmarshalers(cidr),
+//		niceyaml.MergeTypeRules(cidr),
 //	)
 //
-// Like the unmarshalers of [WithUnmarshalers], the unmarshalers us reach
-// the decode inside a [Validator] and every decode of the empty Source
-// that a merge returns when it skips every layer. A Node that
-// [Node.Origin] returns belongs to the document of a layer, so a decode
-// of it applies the unmarshalers of that layer instead.
+// Like the rules of [WithTypeRules], the rules reach the decode inside a
+// [Validator] and every decode of the empty Source that a merge returns
+// when it skips every layer. A Node that [Node.Origin] returns belongs to
+// the document of a layer, so a decode of it applies the rules of that
+// layer instead.
 //
-// A merge with MergeUnmarshalers does not take an unmarshaler from any
-// layer, even when us is empty. Each MergeUnmarshalers adds to the ones
-// before it, so a later function for a type replaces an earlier one and
-// the last [JSONUnmarshalers] applies. MergeUnmarshalers copies the slice
-// us, so the option keeps its unmarshalers when the caller changes the
-// slice it passed.
-func MergeUnmarshalers(us ...Unmarshaler) MergeOption {
-	us = slices.Clone(us)
+// A merge with MergeTypeRules does not take a rule from any layer, even
+// when rules is empty. Each MergeTypeRules adds to the ones before it, so
+// a later function for a type replaces an earlier one of its kind and the
+// last [JSONUnmarshalers] applies. MergeTypeRules copies the slice rules,
+// so the option keeps its rules when the caller changes the slice it
+// passed.
+func MergeTypeRules(rules ...TypeRule) MergeOption {
+	rules = slices.Clone(rules)
 
 	return func(c *mergeConfig) {
-		c.unmarshalers = slices.Concat(c.unmarshalers, us)
-		c.ownUnmarshalers = true
+		c.typeRules = slices.Concat(c.typeRules, rules)
+		c.ownTypeRules = true
 	}
 }
 
@@ -334,9 +332,9 @@ type Layer interface {
 // alone. Each element has its origin in the layer that wrote it, at the
 // index it has there.
 //
-// The origin decodes with the unmarshalers of the Source of its layer,
-// and not with those of [MergeUnmarshalers]. So a program that decodes
-// origins gives the same [WithUnmarshalers] to the Source of every layer.
+// The origin decodes with the rules of the Source of its layer, and not
+// with those of [MergeTypeRules]. So a program that decodes origins gives
+// the same [WithTypeRules] to the Source of every layer.
 //
 // A value that a layer writes as an alias has its origin at that alias,
 // as [Node.At] scopes it. [Node.Target] of the origin gives the content
@@ -701,7 +699,7 @@ func mergeLayers[L Layer](ctx context.Context, given []L, cfg mergeConfig) (*Sou
 	}
 
 	if len(layers) == 0 {
-		return NewSourceFromString("", WithUnmarshalers(cfg.unmarshalers...)), nil
+		return NewSourceFromString("", WithTypeRules(cfg.typeRules...)), nil
 	}
 
 	var (
@@ -814,15 +812,15 @@ func positionsLayers(layers []resolvedLayer) bool {
 // newMergedSource returns a new [*Source] that holds text, with the name,
 // the file, and the settings of from. It drops the references of from.
 // Its excerpts are on when excerpts is true, and it reports positions
-// when positions is true. It takes the unmarshalers of merge when merge
-// sets its own. It parses text before it returns, so it binds each syntax
+// when positions is true. It takes the rules of merge when merge sets
+// its own. It parses text before it returns, so it binds each syntax
 // error before the caller sets layers.
 func newMergedSource(from *Source, text string, excerpts, positions bool, merge mergeConfig) *Source {
 	src := NewSourceFromString(text, func(c *sourceConfig) {
 		*c = from.sourceConfig
 
-		if merge.ownUnmarshalers {
-			c.unmarshalers = merge.unmarshalers
+		if merge.ownTypeRules {
+			c.typeRules = merge.typeRules
 		}
 
 		// The merged value holds no alias, so it reads no reference

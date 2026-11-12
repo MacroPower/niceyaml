@@ -12,10 +12,10 @@ import (
 //
 //nolint:gochecknoinits // The hooks reach no API, so only init can set them.
 func init() {
-	inputhook.Read = func(ctx context.Context, in any, us []niceyaml.Unmarshaler) (*inputhook.Result, error) {
+	inputhook.Read = func(ctx context.Context, in any, rules []niceyaml.TypeRule) (*inputhook.Result, error) {
 		i, _ := in.(Input) //nolint:errcheck // The hook takes an Input.
 
-		rd, err := readInputs(ctx, i, us)
+		rd, err := readInputs(ctx, i, rules)
 		if err != nil {
 			return nil, err
 		}

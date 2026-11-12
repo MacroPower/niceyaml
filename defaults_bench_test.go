@@ -9,7 +9,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
 
-// BenchmarkWithDefaults_ReferenceMergeInEachDocument decodes each
+// BenchmarkTypeDefaults_ReferenceMergeInEachDocument decodes each
 // document of a Source of many documents with defaults. Each document is
 // a mapping whose `<<` merge key reads one anchor of 200 keys of a
 // reference document. The default sets a field whose entry the anchor
@@ -21,7 +21,7 @@ import (
 // the time per document stays flat as the Source grows. The metric
 // retained-B is the heap that one decode of each document of a new Source
 // leaves live while the Source lives.
-func BenchmarkWithDefaults_ReferenceMergeInEachDocument(b *testing.B) {
+func BenchmarkTypeDefaults_ReferenceMergeInEachDocument(b *testing.B) {
 	type config struct {
 		X struct {
 			K0 int `yaml:"k0"`
@@ -29,7 +29,7 @@ func BenchmarkWithDefaults_ReferenceMergeInEachDocument(b *testing.B) {
 	}
 
 	ref := yamltest.References("u: &u\n" + yamltest.GenerateLines(200, "  k%d: 1"))
-	defaults := niceyaml.WithDefaults(func(c *config) { c.X.K0 = 7 })
+	defaults := niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(c *config) { c.X.K0 = 7 }))
 
 	decode := func(docs []*niceyaml.Node) {
 		for _, doc := range docs {

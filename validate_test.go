@@ -169,7 +169,7 @@ var (
 // a decode into a typed value, the keys of its maps among them, and
 // counts its calls in n.
 func countStrings(n *int) niceyaml.DecodeOption {
-	return niceyaml.WithUnmarshaler(
+	return niceyaml.OverrideTypeRules(
 		niceyaml.CustomUnmarshaler(func(_ context.Context, s *string, decode func(any) error) error {
 			// The function decodes a string, so its decode reads a second
 			// type that the function does not decode.
@@ -2454,14 +2454,14 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		// path of that close, so each error binds at the value the option
 		// gives an unmarshaler.
 		opts := niceyaml.DecodeOptions(
-			niceyaml.WithUnmarshaler(
+			niceyaml.OverrideTypeRules(
 				niceyaml.CustomUnmarshaler(func(_ context.Context, o *optionDecodedHours, _ func(any) error) error {
 					o.Inner = hours{Open: "17:00", Close: "09:00"}
 
 					return nil
 				}),
 			),
-			niceyaml.WithUnmarshaler(niceyaml.JSONUnmarshalers(true)),
+			niceyaml.OverrideTypeRules(niceyaml.JSONUnmarshalers(true)),
 		)
 
 		want := stringtest.JoinLF(
@@ -2506,7 +2506,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		_, err := dd.Decode[map[string]*embedsJSON](
 			t.Context(),
-			niceyaml.WithUnmarshaler(niceyaml.JSONUnmarshalers(true)),
+			niceyaml.OverrideTypeRules(niceyaml.JSONUnmarshalers(true)),
 		)
 		require.EqualError(t, err, "1:7: $.shop.inner.close: closes before it opens")
 	})
@@ -3425,7 +3425,7 @@ func TestNode_SelfValidate_KeyOptions(t *testing.T) {
 		err  string
 	}{
 		"the options of the decode match the key of the document": {
-			opts: []niceyaml.DecodeOption{niceyaml.WithUnmarshaler(gradeNames)},
+			opts: []niceyaml.DecodeOption{niceyaml.OverrideTypeRules(gradeNames)},
 			err:  `app.yaml:2:15: $.by_grade.high.url: url "ftp://h" is not http`,
 		},
 		"without them, the error binds at the key of the map": {
@@ -3444,7 +3444,7 @@ func TestNode_SelfValidate_KeyOptions(t *testing.T) {
 			err := doc.DecodeInto(
 				t.Context(),
 				&cfg,
-				niceyaml.WithUnmarshaler(gradeNames),
+				niceyaml.OverrideTypeRules(gradeNames),
 				niceyaml.WithSelfValidation(false),
 			)
 			require.NoError(t, err)
@@ -3530,7 +3530,7 @@ func TestNode_SelfValidate_MatchesDecode(t *testing.T) {
 				by_grade:
 				  high: {url: ftp://h}
 			`),
-			opts: []niceyaml.DecodeOption{niceyaml.WithUnmarshaler(gradeNames)},
+			opts: []niceyaml.DecodeOption{niceyaml.OverrideTypeRules(gradeNames)},
 			err:  `2:15: $.by_grade.high.url: url "ftp://h" is not http`,
 		},
 		// SelfValidate decodes the keys with the references of the source,
@@ -4218,7 +4218,7 @@ func TestSelfValidateValue_Options(t *testing.T) {
 			Nums sortedNums `yaml:"nums"`
 		}
 
-		sorted := niceyaml.WithUnmarshaler(
+		sorted := niceyaml.OverrideTypeRules(
 			niceyaml.CustomUnmarshaler(func(_ context.Context, s *sortedNums, decode func(any) error) error {
 				var nums []int
 

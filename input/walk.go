@@ -217,9 +217,9 @@ type reader struct {
 	// The details of each directory input that did not select a file.
 	empty []string
 	files []*inputhook.File
-	// The unmarshalers that every Source that the reader builds takes ahead
+	// The type rules that every Source that the reader builds takes ahead
 	// of the options of its input.
-	unmarshalers []niceyaml.Unmarshaler
+	typeRules []niceyaml.TypeRule
 	// The files, Sources, and streams that the read has taken, which a
 	// later input that names one of them skips.
 	disk    []os.FileInfo
@@ -235,14 +235,14 @@ type fsKey struct {
 }
 
 // readInputs reads the files of in, in read order. Each Source that it
-// builds takes the unmarshalers in us.
-func readInputs(ctx context.Context, in Input, us []niceyaml.Unmarshaler) (*reader, error) {
+// builds takes the type rules in rules.
+func readInputs(ctx context.Context, in Input, rules []niceyaml.TypeRule) (*reader, error) {
 	inputs, err := prepare(ctx, in, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	r := &reader{ctx: ctx, unmarshalers: us}
+	r := &reader{ctx: ctx, typeRules: rules}
 
 	for _, p := range inputs {
 		err := ctx.Err()
@@ -441,10 +441,10 @@ func equalFS(a, b reflect.Value) bool {
 }
 
 // sourceOptions returns the options of a Source that the reader builds:
-// the unmarshalers of the reader, then the options of the user, then
+// the type rules of the reader, then the options of the user, then
 // own. Each later option wins.
 func (r *reader) sourceOptions(user []niceyaml.SourceOption, own ...niceyaml.SourceOption) []niceyaml.SourceOption {
-	return slices.Concat([]niceyaml.SourceOption{niceyaml.WithUnmarshalers(r.unmarshalers...)}, user, own)
+	return slices.Concat([]niceyaml.SourceOption{niceyaml.WithTypeRules(r.typeRules...)}, user, own)
 }
 
 // readError returns the problem of a file whose read failed. The problem

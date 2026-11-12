@@ -74,6 +74,6 @@ type Result struct {
 }
 
 // Read reads the files of in, an input.Input, in load order, as
-// input.Input.Files does. Each Source that it builds takes the
-// unmarshalers us ahead of the source options of its input.
-var Read func(ctx context.Context, in any, us []niceyaml.Unmarshaler) (*Result, error)
+// input.Input.Files does. Each Source that it builds takes the type
+// rules ahead of the source options of its input.
+var Read func(ctx context.Context, in any, rules []niceyaml.TypeRule) (*Result, error)

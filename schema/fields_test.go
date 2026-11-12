@@ -387,8 +387,8 @@ func TestCheckFieldsUnmarshalers(t *testing.T) {
 	}
 
 	tcs := map[string]struct {
-		check func(us ...niceyaml.Unmarshaler) error
-		us    []niceyaml.Unmarshaler
+		check func(us ...niceyaml.TypeRule) error
+		us    []niceyaml.TypeRule
 		want  []string
 	}{
 		"type without an unmarshaler": {
@@ -397,12 +397,12 @@ func TestCheckFieldsUnmarshalers(t *testing.T) {
 		},
 		"custom unmarshaler": {
 			check: schema.CheckFields[holdsEndpoint],
-			us:    []niceyaml.Unmarshaler{decodeEndpoint},
+			us:    []niceyaml.TypeRule{decodeEndpoint},
 			want:  timeoutWant,
 		},
 		"nil function removes a custom unmarshaler": {
 			check: schema.CheckFields[holdsEndpoint],
-			us:    []niceyaml.Unmarshaler{decodeEndpoint, niceyaml.CustomUnmarshaler[endpoint](nil)},
+			us:    []niceyaml.TypeRule{decodeEndpoint, niceyaml.CustomUnmarshaler[endpoint](nil)},
 			want:  endpointWant,
 		},
 		"UnmarshalJSON methods off": {
@@ -411,11 +411,11 @@ func TestCheckFieldsUnmarshalers(t *testing.T) {
 		},
 		"UnmarshalJSON methods on": {
 			check: schema.CheckFields[holdsQuantity],
-			us:    []niceyaml.Unmarshaler{niceyaml.JSONUnmarshalers(true)},
+			us:    []niceyaml.TypeRule{niceyaml.JSONUnmarshalers(true)},
 		},
 		"last JSONUnmarshalers applies": {
 			check: schema.CheckFields[holdsQuantity],
-			us:    []niceyaml.Unmarshaler{niceyaml.JSONUnmarshalers(true), niceyaml.JSONUnmarshalers(false)},
+			us:    []niceyaml.TypeRule{niceyaml.JSONUnmarshalers(true), niceyaml.JSONUnmarshalers(false)},
 			want:  quantityWant,
 		},
 	}
@@ -445,7 +445,7 @@ func TestCheckFieldsUnmarshalers(t *testing.T) {
 func TestCheckFieldsUnmarshalersMatchDecode(t *testing.T) {
 	t.Parallel()
 
-	us := []niceyaml.Unmarshaler{decodeEndpoint, niceyaml.JSONUnmarshalers(true)}
+	us := []niceyaml.TypeRule{decodeEndpoint, niceyaml.JSONUnmarshalers(true)}
 
 	type config struct {
 		Endpoint endpoint `json:"endpoint"`
@@ -457,7 +457,7 @@ func TestCheckFieldsUnmarshalersMatchDecode(t *testing.T) {
 	doc := yamltest.FirstDocument(t, "endpoint: a.test:80\nmemory: 64Mi\n")
 
 	got, err := doc.Decode[config](t.Context(),
-		niceyaml.WithUnmarshaler(us...),
+		niceyaml.OverrideTypeRules(us...),
 		niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject),
 	)
 	require.NoError(t, err)
@@ -508,13 +508,13 @@ func TestCheckType(t *testing.T) {
 
 	tcs := map[string]struct {
 		schema   func(t *testing.T) *schema.Schema
-		defaults []niceyaml.DecodeOption
+		defaults []niceyaml.TypeRule
 		want     []string
 		marks    []error
 	}{
 		"generated schema": {
 			schema:   generated,
-			defaults: []niceyaml.DecodeOption{niceyaml.WithDefaults(func(c *typeConfig) { c.Seats = 20 })},
+			defaults: []niceyaml.TypeRule{niceyaml.TypeDefaults(func(c *typeConfig) { c.Seats = 20 })},
 			want: []string{
 				"$.old: required and deprecated",
 				"$.seats: required, so its default 20 never applies",
@@ -523,19 +523,19 @@ func TestCheckType(t *testing.T) {
 		},
 		"optional with a default": {
 			schema:   written(`{"properties": {"seats": {"type": "integer"}}}`),
-			defaults: []niceyaml.DecodeOption{niceyaml.WithDefaults(func(c *typeConfig) { c.Seats = 20 })},
+			defaults: []niceyaml.TypeRule{niceyaml.TypeDefaults(func(c *typeConfig) { c.Seats = 20 })},
 		},
 		"required with a zero default": {
 			schema: written(`{"required": ["seats"]}`),
 		},
 		"required struct that merges": {
 			schema:   written(`{"required": ["kitchen"]}`),
-			defaults: []niceyaml.DecodeOption{niceyaml.WithDefaults(func(c *typeConfig) { c.Kitchen.Port = 9100 })},
+			defaults: []niceyaml.TypeRule{niceyaml.TypeDefaults(func(c *typeConfig) { c.Kitchen.Port = 9100 })},
 		},
 		"default that a parent sets": {
 			schema: written(`{"properties": {"kitchen": {"$ref": "#/$defs/printer"}},
   "$defs": {"printer": {"required": ["port"]}}}`),
-			defaults: []niceyaml.DecodeOption{niceyaml.WithDefaults(func(c *typeConfig) { c.Kitchen.Port = 9101 })},
+			defaults: []niceyaml.TypeRule{niceyaml.TypeDefaults(func(c *typeConfig) { c.Kitchen.Port = 9101 })},
 			want: []string{
 				stringtest.JoinLF(
 					"$.kitchen.port: required, so its default 9101 never applies",
@@ -546,19 +546,19 @@ func TestCheckType(t *testing.T) {
 		},
 		"default of an item": {
 			schema:   written(`{"properties": {"tables": {"items": {"required": ["port"]}}}}`),
-			defaults: []niceyaml.DecodeOption{niceyaml.WithDefaults(func(p *typePrinter) { p.Port = 9100 })},
+			defaults: []niceyaml.TypeRule{niceyaml.TypeDefaults(func(p *typePrinter) { p.Port = 9100 })},
 			want:     []string{"$.tables[*].port: required, so its default 9100 never applies"},
 			marks:    []error{schema.ErrUnusedDefault},
 		},
 		"default of a nil pointer": {
 			schema:   written(`{"properties": {"spare": {"anyOf": [{"type": "null"}, {"required": ["port"]}]}}}`),
-			defaults: []niceyaml.DecodeOption{niceyaml.WithDefaults(func(p *typePrinter) { p.Port = 9100 })},
+			defaults: []niceyaml.TypeRule{niceyaml.TypeDefaults(func(p *typePrinter) { p.Port = 9100 })},
 			want:     []string{"$.spare.port: required, so its default 9100 never applies"},
 			marks:    []error{schema.ErrUnusedDefault},
 		},
 		"required under a branch": {
 			schema:   written(`{"anyOf": [{"required": ["seats"]}, {"required": ["name"]}]}`),
-			defaults: []niceyaml.DecodeOption{niceyaml.WithDefaults(func(c *typeConfig) { c.Seats = 20 })},
+			defaults: []niceyaml.TypeRule{niceyaml.TypeDefaults(func(c *typeConfig) { c.Seats = 20 })},
 		},
 		"deprecated behind a $ref": {
 			schema: written(`{"required": ["old"], "properties": {"old": {"$ref": "#/$defs/old"}},
@@ -584,7 +584,7 @@ func TestCheckType(t *testing.T) {
 		},
 		"accept all": {
 			schema:   func(*testing.T) *schema.Schema { return schema.AcceptAll() },
-			defaults: []niceyaml.DecodeOption{niceyaml.WithDefaults(func(c *typeConfig) { c.Seats = 20 })},
+			defaults: []niceyaml.TypeRule{niceyaml.TypeDefaults(func(c *typeConfig) { c.Seats = 20 })},
 		},
 		"nil schema": {
 			schema: func(*testing.T) *schema.Schema { return nil },

@@ -122,9 +122,11 @@
 // declares that version or a newer one.
 //
 // A load decodes each manifest from the defaults that
-// [niceyaml.WithDefaults] gives its Go type, in the options of
-// [WithDecodeOptions] and [DecodeOptions]. The defaults belong to the
-// current version. A changed default changes the meaning of every file
+// [niceyaml.TypeDefaults] gives its Go type, through
+// [niceyaml.OverrideTypeRules] in the options of [WithDecodeOptions] and
+// [DecodeOptions]. The defaults belong to the current version, so they
+// stay out of [WithTypeRules], whose rules reach the decodes of the
+// migration steps too. A changed default changes the meaning of every file
 // that leaves the field out. The author thus ships the change as a new
 // version, whose step writes the old default where the field is missing.
 //
@@ -254,19 +256,19 @@
 // or the depth limit. [niceyaml.IsInvalid] does not report
 // that error, because the text that the user wrote keeps the limits.
 //
-// [WithUnmarshalers] sets how the Go types of the kinds read YAML, such
-// as a type of another package that a document writes as text. A load
-// gives the unmarshalers to each Source that it builds. Every decode that
-// the load runs on a document applies them too. The decode of a manifest,
-// the decode inside a validator, and the decode of a migration step thus
+// [WithTypeRules] sets how the Go types of the kinds read YAML, such as
+// a type of another package that a document writes as text. A load gives
+// the rules to each Source that it builds. Every decode that the load
+// runs on a document applies them too. The decode of a manifest, the
+// decode inside a validator, and the decode of a migration step thus
 // read the types alike. So does a decode of [Object.Current].
 // [Object.Original] from a Source that [input.Sources] reads keeps the
-// unmarshalers of that Source alone.
+// rules of that Source alone.
 //
 // [WithMarshalers] sets how the Go types of the kinds write YAML. Each
 // migration step writes its values through them, so a step that decodes a
-// value through the unmarshalers and sets it back writes the text that
-// the unmarshalers read.
+// value through the rules and sets it back writes the text that the rules
+// read.
 //
 // # Routing
 //
@@ -434,19 +436,20 @@
 // every type field. With true, the check sees each type field as the
 // document writes it. With false, the check does not see any type field.
 //
-// The decode admits the type fields, and by default rejects every other key
-// that the Go type does not declare. A [niceyaml.WithUnknownFields] among
-// the options of [WithDecodeOptions] or [DecodeOptions] replaces that mode,
-// so [niceyaml.UnknownFieldsWarn] makes each such key a warning of the load.
-// A type field of the document replaces each type field of its name that a
-// `<<` merge key before it brings in, so the decode admits those too. A Go
-// type that reads the type fields, such as one that embeds the TypeMeta
-// of Kubernetes or a map[string]any, gets the names of the current version.
-// Each validator of [WithDecodeOptions] and [DecodeOptions] sees them too. A
-// value that decodes itself does not see a type field below it, whether it
-// decodes through a method such as UnmarshalYAML or through an unmarshaler
-// of [WithUnmarshalers]. Every error and every warning binds in the file of
-// the user.
+// The decode admits the type fields, and by default rejects every other
+// key that the Go type does not declare. A [niceyaml.WithUnknownFields]
+// among the options of [WithDecodeOptions] or [DecodeOptions] replaces
+// that mode, so [niceyaml.UnknownFieldsWarn] makes each such key a warning
+// of the load. A type field of the document replaces each type field of
+// its name that a `<<` merge key before it brings in, so the decode admits
+// those too. A Go type that reads the type fields, such as one that embeds
+// the TypeMeta of Kubernetes or a map[string]any, gets the names of the
+// current version. Each validator of [WithDecodeOptions] and
+// [DecodeOptions] sees them too. A value that decodes itself does not see
+// a type field below it, whether it decodes through a method such as
+// UnmarshalYAML or through a [niceyaml.CustomUnmarshaler] of
+// [WithTypeRules]. Every error and every warning binds in the file of the
+// user.
 //
 // The decode reads the document in the layout of the current version,
 // which can be a copy that the load made. Each validator of
@@ -465,7 +468,7 @@
 // value. It reads the directory from that Node. A copy that the load made
 // is not a merged Source, so Origin returns the Node of the copy itself.
 // The load makes such a copy of a migrated document, and of every
-// document of an [input.Sources] input under [WithUnmarshalers]. In such
+// document of an [input.Sources] input under [WithTypeRules]. In such
 // a copy, a value that a higher layer set resolves against the directory
 // of the MergeAs layer or the lowest layer.
 //
@@ -522,11 +525,10 @@
 //
 // For a document that declares the current version, the two layouts
 // match, and Current is Original, except for a Source that
-// [input.Sources] reads under [WithUnmarshalers]. Only a copy puts the
-// unmarshalers of the registry under those of that Source, so the load
-// builds Current as a copy of such a document. It also builds Current
-// as a copy of a migrated document, and the copy holds the migrated
-// text.
+// [input.Sources] reads under [WithTypeRules]. Only a copy puts the rules
+// of the registry under those of that Source, so the load builds Current
+// as a copy of such a document. It also builds Current as a copy of a
+// migrated document, and the copy holds the migrated text.
 //
 // # Problems
 //

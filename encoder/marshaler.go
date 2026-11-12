@@ -12,7 +12,9 @@ import (
 )
 
 // Marshaler sets how the types of the program write YAML. It is the
-// counterpart of [go.jacobcolvin.com/niceyaml.Unmarshaler].
+// counterpart of the [go.jacobcolvin.com/niceyaml.TypeRule] values that
+// [go.jacobcolvin.com/niceyaml.CustomUnmarshaler] and
+// [go.jacobcolvin.com/niceyaml.JSONUnmarshalers] return.
 // [CustomMarshaler] gives one type a function, and [JSONMarshalers] turns
 // the MarshalJSON methods of the types on or off.
 //

@@ -515,7 +515,7 @@ func TestObject_Layouts(t *testing.T) {
 		t.Parallel()
 
 		reg := manifest.MustNewRegistry(
-			manifest.WithUnmarshalers(niceyaml.CustomUnmarshaler(decodeAlarmLevel)),
+			manifest.WithTypeRules(niceyaml.CustomUnmarshaler(decodeAlarmLevel)),
 			manifest.WithKinds(manifest.NewKind[Alarm]("Alarm",
 				manifest.NameField(meta.Child("name")), manifest.Version("alarm.jacobcolvin.com/v1"))),
 		)
@@ -556,7 +556,7 @@ func TestObject_Layouts(t *testing.T) {
 		t.Parallel()
 
 		reg := manifest.MustNewRegistry(
-			manifest.WithUnmarshalers(niceyaml.CustomUnmarshaler(decodeAlarmLevel)),
+			manifest.WithTypeRules(niceyaml.CustomUnmarshaler(decodeAlarmLevel)),
 			manifest.WithKinds(manifest.NewKind[Alarm]("Alarm",
 				manifest.NameField(meta.Child("name")), manifest.Version("alarm.jacobcolvin.com/v1"))),
 		)

@@ -102,7 +102,7 @@ type removal struct {
 //   - [WithAppName]
 //   - [WithMigrateHint]
 //   - [WithDecodeOptions]
-//   - [WithUnmarshalers]
+//   - [WithTypeRules]
 //   - [WithMarshalers]
 //   - [WithVersionField]
 //   - [WithKindField]
@@ -118,7 +118,7 @@ type registryConfig struct {
 	appName         string
 	migrateHint     string
 	decodeOptions   []niceyaml.DecodeOption
-	unmarshalers    []niceyaml.Unmarshaler
+	typeRules       []niceyaml.TypeRule
 	marshalers      []encoder.Marshaler
 	ignores         []matcher.Matcher
 	kinds           []*Kind
@@ -164,8 +164,10 @@ func WithMigrateHint(hint string) RegistryOption {
 
 // WithDecodeOptions is a [RegistryOption] that adds options to each decode
 // of a manifest. They apply after the option that rejects unknown fields
-// and before the options of [DecodeOptions]. A [niceyaml.WithDefaults] of a
-// kind thus replaces one of the registry for the same type. With
+// and before the options of [DecodeOptions]. A [niceyaml.TypeDefaults] in a
+// [niceyaml.OverrideTypeRules] among the DecodeOptions of a kind thus
+// replaces one in WithDecodeOptions for the same type. Both apply over the
+// rules of [WithTypeRules]. With
 // niceyaml.WithUnknownFields(niceyaml.UnknownFieldsWarn) among them, the
 // unknown fields of each manifest become warnings of the load. Neither
 // UnknownFieldsWarn nor UnknownFieldsReject reports the type fields that
@@ -176,33 +178,39 @@ func WithDecodeOptions(opts ...niceyaml.DecodeOption) RegistryOption {
 	}
 }
 
-// WithUnmarshalers is a [RegistryOption] that sets how the Go types of
-// the kinds read YAML, such as a [net.IPNet] that a document writes as
-// CIDR text:
+// WithTypeRules is a [RegistryOption] that sets how the Go types of the
+// kinds read YAML, such as a [net.IPNet] that a document writes as CIDR
+// text:
 //
-//	manifest.WithUnmarshalers(niceyaml.CustomUnmarshaler(decodeCIDR))
+//	manifest.WithTypeRules(niceyaml.CustomUnmarshaler(decodeCIDR))
 //
-// A load passes the unmarshalers to each [niceyaml.Source] that it builds,
-// through [niceyaml.WithUnmarshalers]. Every decode that the load runs on
-// a document applies them ahead of the unmarshalers of its Source, even a
-// Source that [input.Sources] reads. The decode of a manifest, the decode
-// inside a validator, and [go.jacobcolvin.com/niceyaml/edit.Node.Decode]
-// in a step thus apply them. So does a decode of [Object.Current].
-// [Object.Original] from a Source that Sources reads keeps the unmarshalers
-// of that Source alone. The load thus parses each document of such a
-// Source again, into a copy that holds both lists, and [Object.Current]
-// holds that copy. A Source that the load builds itself holds the
-// unmarshalers already, so its documents do not get that copy.
+// A load passes the rules to each [niceyaml.Source] that it builds,
+// through [niceyaml.WithTypeRules]. Every decode that the load runs on a
+// document applies them ahead of the rules of its Source, even a Source
+// that [input.Sources] reads. The decode of a manifest, the decode inside
+// a validator, and [go.jacobcolvin.com/niceyaml/edit.Node.Decode] in a
+// step thus apply them. So does a decode of [Object.Current].
+// [Object.Original] from a Source that Sources reads keeps the rules of
+// that Source alone. The load thus parses each document of such a Source
+// again, into a copy that holds both lists, and [Object.Current] holds
+// that copy. A Source that the load builds itself holds the rules
+// already, so its documents do not get that copy.
 //
-// The unmarshalers of the Source of a document apply over them. Those
-// come from [input.WithSourceOptions], or from the program that built a
-// Source that [input.Sources] reads. A [niceyaml.WithUnmarshaler] in
+// The defaults of a [niceyaml.TypeDefaults] among the rules reach the
+// decode of each migration step too. A step that decodes a value and sets
+// it back then writes the defaults into the file. Give the defaults of a
+// kind to [niceyaml.OverrideTypeRules] in [WithDecodeOptions] or
+// [DecodeOptions] instead, so they reach the decode of a manifest alone.
+//
+// The rules of the Source of a document apply over them. Those come from
+// [input.WithSourceOptions], or from the program that built a Source that
+// [input.Sources] reads. A [niceyaml.OverrideTypeRules] in
 // [WithDecodeOptions] or [DecodeOptions] applies over both in the decode
-// of a manifest. Each WithUnmarshalers adds to the ones before it, so a
+// of a manifest. Each WithTypeRules adds to the ones before it, so a
 // later function for a type replaces an earlier one.
-func WithUnmarshalers(us ...niceyaml.Unmarshaler) RegistryOption {
+func WithTypeRules(rules ...niceyaml.TypeRule) RegistryOption {
 	return func(c *registryConfig) {
-		c.unmarshalers = append(c.unmarshalers, us...)
+		c.typeRules = append(c.typeRules, rules...)
 	}
 }
 
@@ -219,9 +227,9 @@ func WithUnmarshalers(us ...niceyaml.Unmarshaler) RegistryOption {
 // [go.jacobcolvin.com/niceyaml/edit.WithMarshalers]. Each
 // [go.jacobcolvin.com/niceyaml/edit.Node.Set] and
 // [go.jacobcolvin.com/niceyaml/edit.Node.Insert] in a step thus writes a
-// value that it read through the unmarshalers of [WithUnmarshalers] the
-// way the document holds it. Each WithMarshalers adds to the ones before
-// it, so a later function for a type replaces an earlier one.
+// value that it read through the rules of [WithTypeRules] the way the
+// document holds it. Each WithMarshalers adds to the ones before it, so a
+// later function for a type replaces an earlier one.
 func WithMarshalers(ms ...encoder.Marshaler) RegistryOption {
 	return func(c *registryConfig) {
 		c.marshalers = append(c.marshalers, ms...)

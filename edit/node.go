@@ -1266,8 +1266,8 @@ func (n *Node) Scalar() (string, bool) {
 
 // Decode decodes the value as [niceyaml.Node.Decode] does, with opts and
 // the settings of the [niceyaml.Source] of the document, such as its
-// reference documents and its unmarshalers. The unmarshalers of
-// [WithUnmarshalers] apply ahead of those of the Source. A [Func] should
+// reference documents and its type rules. The rules of [WithTypeRules]
+// apply ahead of those of the Source. A [Func] should
 // pass the ctx it got, so the warnings of the decode reach the
 // [niceyaml.Warnings] on the context of [Doc.Apply]. Decode fails on a
 // place that does not hold a value, with a problem that matches

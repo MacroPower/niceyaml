@@ -61,14 +61,14 @@ type Place struct {
 // Source that no program derived.
 //
 // The Source starts from the settings of the Source of home, its name,
-// its file path, its references, its unmarshalers, and its limits among
-// them. It applies opts over them, as [Source.WithText] does. The
-// unmarshalers of a [WithUnmarshalers] in opts thus apply over those of
-// home. A function of opts for a type replaces one of home, and a nil
-// function removes it. A program that puts defaults of its own under
-// those of home passes both lists in that order:
+// its file path, its references, its type rules, and its limits among
+// them. It applies opts over them, as [Source.WithText] does. The rules
+// of a [WithTypeRules] in opts thus apply over those of home. A function
+// of opts for a type replaces one of home, and a nil function removes
+// it. A program that puts rules of its own under those of home passes
+// both lists in that order:
 //
-//	niceyaml.WithUnmarshalers(slices.Concat(defaults, doc.Source().Unmarshalers())...)
+//	niceyaml.WithTypeRules(slices.Concat(own, doc.Source().TypeRules())...)
 //
 // The limits stay those of home, as [Source.ByteLimit],
 // [Source.DocumentByteLimit], and [Source.DepthLimit] report them. A text that

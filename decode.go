@@ -51,9 +51,8 @@ import (
 //   - [WithUnknownFields]
 //   - [WithAllowedFieldPrefixes]
 //   - [WithAllowedFields]
-//   - [WithUnmarshaler]
+//   - [OverrideTypeRules]
 //   - [WithYAMLOrderedMaps]
-//   - [WithDefaults]
 //   - [DecodeOptions]
 //
 // An option reaches only the call that gets it, so a [Validator] that
@@ -61,14 +60,14 @@ import (
 // describes the documents, such as [WithReferences] or [WithAliasLimit],
 // belongs to the [Source], as the Decoding section of the package
 // documentation describes. A Source also gives every decode of its
-// documents the unmarshalers of [WithUnmarshalers], and those of
-// [WithUnmarshaler] in the call apply over them.
+// documents the rules of [WithTypeRules], and those of
+// [OverrideTypeRules] in the call apply over them.
 type DecodeOption func(*decodeConfig)
 
 // decodeConfig holds the settings a [DecodeOption] configures. Its zero
 // value holds the defaults.
 type decodeConfig struct {
-	// The function that [WithDefaults] gives each type.
+	// The function that [TypeDefaults] gives each type.
 	defaults             defaultFuncs
 	validators           []Validator
 	allowedFieldPrefixes []string
@@ -99,17 +98,16 @@ type valueCheck struct {
 }
 
 // newDecodeConfig returns the settings of a decode of a document of s.
-// It starts from the defaults, applies the unmarshalers of
-// [WithUnmarshalers] on s over them, and then applies opts, each in
-// order. A nil s stands for a value without a document, and it does not
-// add an unmarshaler. The result does not share anything with another
-// decode.
+// It starts from the defaults, applies the rules of [WithTypeRules] on s
+// over them, and then applies opts, each in order. A nil s stands for a
+// value without a document, and it does not add a rule. The result does
+// not share anything with another decode.
 func newDecodeConfig(s *Source, opts []DecodeOption) decodeConfig {
 	var cfg decodeConfig
 
 	if s != nil {
-		for _, u := range s.unmarshalers {
-			u.applyTo(&cfg.unmarshalers)
+		for _, r := range s.typeRules {
+			r.applyTo(&cfg)
 		}
 	}
 
@@ -389,10 +387,10 @@ func WithValueCheck[T any](fn func(ctx context.Context, v *T) error) DecodeOptio
 //   - The walk runs under [SelfValidateValue], which does not have a
 //     document.
 //   - The value is a struct field that the document leaves out, such as
-//     one that a function of [WithDefaults] fills.
+//     one that a function of [TypeDefaults] fills.
 //   - The value lies below a value that decodes itself, through its own
-//     unmarshaler method or an unmarshaler of [WithUnmarshaler] or
-//     [WithUnmarshalers]. The value that decodes itself gets its Node.
+//     unmarshaler method or a [CustomUnmarshaler] function. The value
+//     that decodes itself gets its Node.
 //   - The value lies below a map entry whose path names the entries of
 //     several keys, as [ErrAmbiguousPath] describes.
 //   - Node.At fails for the path of the value, such as a path below an
@@ -705,49 +703,64 @@ func WithAllowedFields(keys ...paths.Path) DecodeOption {
 	}
 }
 
-// Unmarshaler sets how the types of the program read YAML.
-// [CustomUnmarshaler] gives one type a function, and [JSONUnmarshalers]
-// turns the UnmarshalJSON methods of the types on or off.
+// TypeRule sets how a decode reads the values of a type of the program.
+// [CustomUnmarshaler] gives one type a function that reads its YAML,
+// [TypeDefaults] gives one type a function that sets the value a decode
+// starts from, and [JSONUnmarshalers] turns the UnmarshalJSON methods of
+// the types on or off.
 //
-// A program gives its unmarshalers to the [Source] with
-// [WithUnmarshalers], so every decode of the documents applies them. A
-// call applies its own over them with [WithUnmarshaler]. A Source from
-// [NewSourceFromLayers] takes them with [MergeUnmarshalers]. Each place
+// A program gives its rules to the [Source] with [WithTypeRules], so
+// every decode of the documents applies them. A call applies its own
+// over them with [OverrideTypeRules]. A Source from
+// [NewSourceFromLayers] takes them with [MergeTypeRules]. Each place
 // takes the same value. In the example, a Source takes cidr with
-// WithUnmarshalers, and one call on a document of another Source takes
-// it with WithUnmarshaler:
+// WithTypeRules, and one call on a document of another Source takes it
+// with OverrideTypeRules:
 //
 //	cidr := niceyaml.CustomUnmarshaler(decodeCIDR)
 //
-//	source, err := niceyaml.NewSourceFromFile(path, niceyaml.WithUnmarshalers(cidr))
-//	nets, err := doc.Decode[[]net.IPNet](ctx, niceyaml.WithUnmarshaler(cidr))
+//	source, err := niceyaml.NewSourceFromFile(path, niceyaml.WithTypeRules(cidr))
+//	nets, err := doc.Decode[[]net.IPNet](ctx, niceyaml.OverrideTypeRules(cidr))
 //
-// A decode applies its unmarshalers in order, those of the Source first.
-// A function for a type replaces the function that an earlier
-// Unmarshaler gave that type, and a nil function removes it. The last
-// JSONUnmarshalers applies. The zero Unmarshaler does not change
+// A decode applies its rules in order, those of the Source first. A
+// function for a type replaces the function of the same kind that an
+// earlier TypeRule gave that type, and a nil function removes it. The
+// last JSONUnmarshalers applies. The zero TypeRule does not change
 // anything.
 //
-// Create instances with [CustomUnmarshaler] or [JSONUnmarshalers].
-type Unmarshaler struct {
-	// Sets the unmarshaler in the settings of a decode, or nil for the
-	// zero Unmarshaler.
-	apply func(*unmarshaler.Options)
+// Create instances with [CustomUnmarshaler], [TypeDefaults], or
+// [JSONUnmarshalers].
+type TypeRule struct {
+	// Sets the rule in the settings of a decode, or nil for the zero
+	// TypeRule.
+	apply func(*decodeConfig)
 }
 
-// applyTo sets the unmarshaler of u in o.
-func (u Unmarshaler) applyTo(o *unmarshaler.Options) {
-	if u.apply != nil {
-		u.apply(o)
+// applyTo sets the rule of r in c.
+func (r TypeRule) applyTo(c *decodeConfig) {
+	if r.apply != nil {
+		r.apply(c)
 	}
 }
 
-// CustomUnmarshaler creates a new [Unmarshaler] that decodes every value
+// typeRulesConfig returns the settings that rules give a decode when it
+// applies them, in order, to the zero settings.
+func typeRulesConfig(rules []TypeRule) decodeConfig {
+	var cfg decodeConfig
+
+	for _, r := range rules {
+		r.applyTo(&cfg)
+	}
+
+	return cfg
+}
+
+// CustomUnmarshaler creates a new [TypeRule] that decodes every value
 // of type T with fn, for a type the program cannot give an UnmarshalYAML
 // method, such as one of another package. The decoder calls fn in place
 // of decoding the fields, elements, or entries of T, and ahead of any
 // unmarshaler method T has. A field of type *T decodes through fn too,
-// and a null leaves it nil without calling fn. The cidr Unmarshaler
+// and a null leaves it nil without calling fn. The cidr TypeRule
 // decodes a [net.IPNet] from its CIDR text:
 //
 //	cidr := niceyaml.CustomUnmarshaler(func(ctx context.Context, n *net.IPNet, decode func(any) error) error {
@@ -767,8 +780,8 @@ func (u Unmarshaler) applyTo(o *unmarshaler.Options) {
 //	})
 //
 // The function gets the context of the decode and a decode function. The
-// decode function decodes the value with the unmarshalers of the
-// [Source] and the options of the decode. It reads an alias as the
+// decode function decodes the value with the type rules of the [Source],
+// defaults included, and the options of the decode. It reads an alias as the
 // content of its anchor, and it does not run a [Validator]. A decode into a
 // pointer to T calls fn again, so the decode function returns an error
 // for such a target. A function that decodes T by its fields decodes
@@ -792,18 +805,18 @@ func (u Unmarshaler) applyTo(o *unmarshaler.Options) {
 // secret store, wraps the error of a failed lookup in [Unchecked], so
 // [IsInvalid] does not report it.
 //
-// A program gives the Unmarshaler to the Source with [WithUnmarshalers],
-// so every decode of the documents applies it, the decode inside a
+// A program gives the TypeRule to the Source with [WithTypeRules], so
+// every decode of the documents applies it, the decode inside a
 // [Validator] included. A nil fn removes the function that an earlier
-// Unmarshaler or the Source gave the type. A library that gets a Source
+// TypeRule or the Source gave the type. A library that gets a Source
 // from its caller can thus read T by the methods of the type alone, when
-// it passes CustomUnmarshaler[T](nil) to [WithUnmarshaler]. Give the
+// it passes CustomUnmarshaler[T](nil) to [OverrideTypeRules]. Give the
 // function to CustomUnmarshaler rather than to
 // [yaml.RegisterCustomUnmarshaler], whose types a decode cannot see.
 //
 // CustomUnmarshaler panics for a pointer type T. The decoder reads a *T
 // through T, so the function for T already decodes a pointer to T.
-func CustomUnmarshaler[T any](fn func(ctx context.Context, v *T, decode func(any) error) error) Unmarshaler {
+func CustomUnmarshaler[T any](fn func(ctx context.Context, v *T, decode func(any) error) error) TypeRule {
 	t := reflect.TypeFor[T]()
 	if t.Kind() == reflect.Pointer {
 		panic(fmt.Sprintf("niceyaml.CustomUnmarshaler: %v is a pointer type, "+
@@ -811,8 +824,8 @@ func CustomUnmarshaler[T any](fn func(ctx context.Context, v *T, decode func(any
 	}
 
 	if fn == nil {
-		return Unmarshaler{apply: func(o *unmarshaler.Options) {
-			*o = o.Without(t)
+		return TypeRule{apply: func(c *decodeConfig) {
+			c.unmarshalers = c.unmarshalers.Without(t)
 		}}
 	}
 
@@ -835,8 +848,8 @@ func CustomUnmarshaler[T any](fn func(ctx context.Context, v *T, decode func(any
 		})
 	}
 
-	return Unmarshaler{apply: func(o *unmarshaler.Options) {
-		*o = o.With(t, opt)
+	return TypeRule{apply: func(c *decodeConfig) {
+		c.unmarshalers = c.unmarshalers.With(t, opt)
 	}}
 }
 
@@ -867,7 +880,7 @@ func (e shieldedError) As(target any) bool {
 	return errors.As(e.err, target)
 }
 
-// JSONUnmarshalers creates a new [Unmarshaler] that sets whether a type
+// JSONUnmarshalers creates a new [TypeRule] that sets whether a type
 // with an UnmarshalJSON method decodes through that method. Without
 // JSONUnmarshalers(true), a decode reads such a type by its fields,
 // elements, or entries, as it reads a type without the method.
@@ -886,34 +899,43 @@ func (e shieldedError) As(target any) bool {
 // the path of the struct.
 //
 // A program whose types read their documents through UnmarshalJSON gives
-// JSONUnmarshalers(true) to the [Source] with [WithUnmarshalers], so
-// every decode of the documents applies it, the decode inside a
-// [Validator] included. A call that gets JSONUnmarshalers(false) through
-// [WithUnmarshaler] turns the methods off for that call alone.
-func JSONUnmarshalers(enabled bool) Unmarshaler {
-	return Unmarshaler{apply: func(o *unmarshaler.Options) {
-		o.JSON = enabled
+// JSONUnmarshalers(true) to the [Source] with [WithTypeRules], so every
+// decode of the documents applies it, the decode inside a [Validator]
+// included. A call that gets JSONUnmarshalers(false) through
+// [OverrideTypeRules] turns the methods off for that call alone.
+func JSONUnmarshalers(enabled bool) TypeRule {
+	return TypeRule{apply: func(c *decodeConfig) {
+		c.unmarshalers.JSON = enabled
 	}}
 }
 
-// WithUnmarshaler is a [DecodeOption] that applies the unmarshalers us
-// to the decode, in order, over the unmarshalers that [WithUnmarshalers]
-// gives the [Source]. A call can thus replace or remove the function the
-// Source gives a type, or turn the JSON methods off for itself alone:
+// OverrideTypeRules is a [DecodeOption] that applies rules to the
+// decode, in order, over the rules that [WithTypeRules] gives the
+// [Source]. A call can thus replace or remove a function that the Source
+// gives a type, or turn the JSON methods off for itself alone:
 //
-//	cfg, err := doc.Decode[Config](ctx, niceyaml.WithUnmarshaler(niceyaml.JSONUnmarshalers(false)))
+//	cfg, err := doc.Decode[Config](ctx, niceyaml.OverrideTypeRules(niceyaml.JSONUnmarshalers(false)))
 //
-// A program that reads every document of a Source with the same
-// unmarshalers gives them to the Source instead. A decode that this
-// option does not reach, such as one inside a [Validator], then applies
-// them too. WithUnmarshaler copies the slice us, so the option keeps its
-// unmarshalers when the caller changes the slice it passed.
-func WithUnmarshaler(us ...Unmarshaler) DecodeOption {
-	us = slices.Clone(us)
+// A step that must see the document without the defaults that the Source
+// gives its types removes the function of each type that its value holds,
+// for its own call:
+//
+//	raw, err := n.Decode[Item](ctx, niceyaml.OverrideTypeRules(
+//		niceyaml.TypeDefaults[Item](nil),
+//		niceyaml.TypeDefaults[Printer](nil),
+//	))
+//
+// A program that reads every document of a Source with the same rules
+// gives them to the Source instead. A decode that this option does not
+// reach, such as one inside a [Validator], then applies them too.
+// OverrideTypeRules copies the slice rules, so the option keeps its rules
+// when the caller changes the slice it passed.
+func OverrideTypeRules(rules ...TypeRule) DecodeOption {
+	rules = slices.Clone(rules)
 
 	return func(c *decodeConfig) {
-		for _, u := range us {
-			u.applyTo(&c.unmarshalers)
+		for _, r := range rules {
+			r.applyTo(c)
 		}
 	}
 }
@@ -952,19 +974,20 @@ func WithYAMLOrderedMaps(enabled bool) DecodeOption {
 // [Node.Nodes], that node is one value inside the document. Those calls
 // thus take the settings without the schema of the whole document.
 //
-// The unmarshalers that say how the types of the program read YAML go to
-// the [Source] with [WithUnmarshalers] instead of into such a bundle. A
-// decode that a bundle does not reach, such as one inside a [Validator],
-// then applies them too.
+// A [TypeRule] that every decode of the documents must apply goes to the
+// [Source] with [WithTypeRules] instead of into such a bundle. A decode
+// that a bundle does not reach, such as one inside a [Validator], then
+// applies it too. A rule that only the decodes of the bundle apply, such
+// as defaults that a [Validator] must not see, goes into the bundle
+// through [OverrideTypeRules].
 //
 // [WithValidator], [WithValueCheck], [WithNodeCheck],
 // [WithAllowedFieldPrefixes], and [WithAllowedFields] add to what the
-// options before them gave,
-// and [WithUnmarshaler] applies its unmarshalers over the earlier ones,
-// as [Unmarshaler] describes. Every
-// other option replaces what an earlier one of its kind set. A call that
-// gets the same DecodeOptions twice thus runs each of its validators and
-// each of its value checks twice.
+// options before them gave, and [OverrideTypeRules] applies its rules over
+// the earlier ones, as [TypeRule] describes. Every other option replaces
+// what an earlier one of its kind set. A call that gets the same
+// DecodeOptions twice thus runs each of its validators and each of its
+// value checks twice.
 //
 // DecodeOptions copies opts, so the result keeps its options when the
 // caller changes the slice it passed. A nil DecodeOption among opts
@@ -1005,9 +1028,10 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // field the document leaves out keeps its value. The Decoding section
 // describes how a mapping, a null, and an alias fill v. The Defaults
 // section describes the value that each value the decode creates starts
-// from. A decode into a v that [Defaults] or [DefaultsInto] filled returns
-// what [Node.Decode] returns. A caller whose type is a runtime value, such
-// as a [reflect.Type], fills v with DefaultsInto. A v that points to a nil
+// from. A decode into a v that [Source.Defaults] or [Source.DefaultsInto]
+// filled under the same options returns what [Node.Decode] returns. A
+// caller whose type is a runtime value, such as a [reflect.Type], fills v
+// with Source.DefaultsInto. A v that points to a nil
 // pointer starts from the defaults too, except for a null or empty
 // document, which leaves that pointer nil.
 //
@@ -2194,7 +2218,7 @@ func (n *Node) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, erro
 	ctx = enterCall(ctx)
 	cfg := newDecodeConfig(n.source, opts)
 
-	// The check of the context runs before the functions of WithDefaults,
+	// The check of the context runs before the functions of TypeDefaults,
 	// so a decode that cannot start runs no code of the caller.
 	err := checkDecode(ctx, &zero, cfg)
 	if err != nil {

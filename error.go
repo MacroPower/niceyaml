@@ -43,11 +43,12 @@ var (
 	ErrMultipleDocuments = errors.New("multiple documents in source")
 
 	// ErrDecodeTarget indicates that the value given to [Node.DecodeInto],
-	// [Node.DecodeIfPresent], or [DefaultsInto] is nil, a nil pointer, or
-	// not a pointer. The call then cannot write into it. Node.DecodeInto and
-	// Node.DecodeIfPresent return the error bound to the source as a
-	// [SourceError] with no location. DefaultsInto reads no source, so it
-	// returns the error unbound. It is a mistake of the caller, so the
+	// [Node.DecodeIfPresent], [DefaultsInto], or [Source.DefaultsInto] is
+	// nil, a nil pointer, or not a pointer. The call then cannot write into
+	// it. Node.DecodeInto and Node.DecodeIfPresent return the error bound to
+	// the source as a [SourceError] with no location. DefaultsInto and
+	// Source.DefaultsInto read no document, so they return the error
+	// unbound. It is a mistake of the caller, so the
 	// error comes inside [Unchecked]. [IsInvalid] does not report it, even
 	// from a check that returns it as it is.
 	ErrDecodeTarget = errors.New("decode target is not a non-nil pointer")
@@ -66,7 +67,7 @@ var (
 	// context does not carry a [Warnings] collector, so the decode has
 	// nowhere to report its unknown fields. [Node.Decode],
 	// [Node.DecodeInto], and the methods that call them return it before the
-	// decode runs a function of [WithDefaults], a [Validator], or the decoder.
+	// decode runs a function of [TypeDefaults], a [Validator], or the decoder.
 	// [Node.DecodeIfPresent] returns it before it resolves its path. Each
 	// returns the error bound to the source as a [SourceError] with no
 	// location. It is a mistake of the caller, so the error comes inside

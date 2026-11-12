@@ -133,7 +133,7 @@ var (
 	ErrUnfollowableDeprecation = schema.ErrUnfollowableDeprecation
 
 	// ErrUnusedDefault indicates a property that the schema of the current
-	// version requires, and whose default from [niceyaml.WithDefaults] is
+	// version requires, and whose default from [niceyaml.TypeDefaults] is
 	// not zero. Every file must write such a property, so the default never
 	// applies. [Registry.Verify] reports the problem, as its Defaults
 	// section describes. It is the same error value as

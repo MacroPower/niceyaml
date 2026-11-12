@@ -13,36 +13,59 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/decodewalk"
 )
 
-// WithDefaults is a [DecodeOption] that gives the type T a function that
-// sets its defaults. A decode starts each value of type T that it creates
-// from those defaults, so a field the document leaves out keeps its
-// default:
+// TypeDefaults creates a new [TypeRule] that gives the type T a function
+// that sets its defaults. A decode starts each value of type T that it
+// creates from those defaults, so a field the document leaves out keeps
+// its default:
 //
-//	var decoding = niceyaml.DecodeOptions(
-//		niceyaml.WithDefaults(func(s *CafeSpec) {
+//	var rules = []niceyaml.TypeRule{
+//		niceyaml.TypeDefaults(func(s *CafeSpec) {
 //			s.Seats = 20
 //			s.Kitchen.Port = 9101
 //		}),
-//		niceyaml.WithDefaults(func(p *Printer) {
+//		niceyaml.TypeDefaults(func(p *Printer) {
 //			p.Port = 9100
 //		}),
-//	)
+//	}
 //
 // The function gets a value whose struct fields hold the defaults of
 // their own types, and changes what it needs. The function of a parent
 // thus decides each value that it writes, and the defaults of each child
 // hold elsewhere. In the example, the kitchen printer of a CafeSpec
 // defaults to port 9101, and every other Printer to 9100. A later
-// WithDefaults for a type replaces an earlier one. The Defaults section of
-// the package documentation describes which values a decode creates.
+// TypeDefaults for a type replaces an earlier one, and a nil fn removes
+// the function that an earlier TypeRule or the [Source] gave T. The
+// Defaults section of the package documentation describes which values a
+// decode creates.
+//
+// A program that gives the rule to the Source with [WithTypeRules] has
+// every decode of the documents start from the defaults, the decode
+// inside a [Validator] included. Give defaults to the Source only when
+// every decode of its documents must see them. A check that a value
+// holds a key, or a step that writes decoded values back to the
+// document, reads the defaults as if the document wrote them.
+// TypeDefaults[T](nil) in [OverrideTypeRules] removes the function of T
+// alone, and each struct field of T still takes the defaults of its own
+// type. A call that must see the document without the defaults of the
+// Source removes the function of each type that its value holds. A
+// program whose own decodes alone take the defaults passes the rule to
+// OverrideTypeRules in those decodes instead. A rule about the value that
+// a decode returns, defaults included, belongs in [WithValueCheck] or in
+// a Validate method, which see the defaults wherever they come from.
 //
 // A decode calls fn once for each value it creates, so a map or a
 // pointer that fn sets belongs to that value alone. A panic in fn makes
 // the decode return an error that holds a [PanicError].
-func WithDefaults[T any](fn func(*T)) DecodeOption {
+func TypeDefaults[T any](fn func(*T)) TypeRule {
 	t := reflect.TypeFor[T]()
 
-	return func(c *decodeConfig) {
+	if fn == nil {
+		return TypeRule{apply: func(c *decodeConfig) {
+			delete(c.defaults, t)
+		}}
+	}
+
+	return TypeRule{apply: func(c *decodeConfig) {
 		if c.defaults == nil {
 			c.defaults = defaultFuncs{}
 		}
@@ -51,65 +74,113 @@ func WithDefaults[T any](fn func(*T)) DecodeOption {
 			p, _ := reflect.TypeAssert[*T](v.Addr())
 			fn(p)
 		}
-	}
+	}}
 }
 
-// Defaults returns the value of type T that [Node.Decode] starts from with
-// opts. The value starts as the zero value, with each struct field built
-// from the defaults of its own type. The function that [WithDefaults]
-// gives T then runs on it. A caller that fills its own value for
-// [Node.DecodeInto] starts there:
+// Defaults returns the value of type T that a decode under rules starts
+// from. The value starts as the zero value, with each struct field built
+// from the defaults of its own type. The function that [TypeDefaults]
+// gives T among rules then runs on it. A caller that fills its own value
+// for [Node.DecodeInto] starts there:
 //
-//	spec := niceyaml.Defaults[CafeSpec](decoding)
-//	if err := doc.DecodeInto(ctx, &spec, decoding); err != nil {
+//	spec := niceyaml.Defaults[CafeSpec](rules...)
+//	if err := doc.DecodeInto(ctx, &spec, niceyaml.OverrideTypeRules(rules...)); err != nil {
 //		return err
 //	}
 //
-// A caller that holds its type as a runtime value, such as a
-// [reflect.Type], starts from [DefaultsInto]. A pointer to a nil pointer
-// also starts from the defaults, because DecodeInto allocates the value
-// that the nil pointer points to from them. A null or empty document
-// leaves that pointer nil, though, and Decode returns the defaults for it.
+// [Source.Defaults] returns the value that a decode of the documents of
+// a [Source] starts from, with the rules of the Source and those of the
+// options of the call. A caller that holds its type as a runtime value,
+// such as a [reflect.Type], starts from [DefaultsInto]. A pointer to a nil
+// pointer also starts from the defaults, because DecodeInto allocates the
+// value that the nil pointer points to from them. A null or empty
+// document leaves that pointer nil, though, and Decode returns the
+// defaults for it.
 //
-// A panic in a function of WithDefaults reaches the caller.
-func Defaults[T any](opts ...DecodeOption) T {
+// A panic in a function of TypeDefaults reaches the caller.
+func Defaults[T any](rules ...TypeRule) T {
 	// A nil interface asserts to the zero value, which it is.
-	v, _ := reflect.TypeAssert[T](newDecodeConfig(nil, opts).defaults.value(reflect.TypeFor[T]()))
+	v, _ := reflect.TypeAssert[T](typeRulesConfig(rules).defaults.value(reflect.TypeFor[T]()))
 
 	return v
 }
 
 // DefaultsInto replaces the value that v points to with the value that
-// [Defaults] returns for its type under opts. It does not merge, so a
-// field that v held before takes its default too. [Node.DecodeInto] from
-// the result matches [Node.Decode], as it does from Defaults. A caller
-// whose type is a runtime value, such as a [reflect.Type], uses
-// DefaultsInto where it cannot name a type for Defaults:
+// [Defaults] returns for its type under rules. It does not merge, so a
+// field that v held before takes its default too. A caller whose type is
+// a runtime value, such as a [reflect.Type], uses DefaultsInto where it
+// cannot name a type for Defaults:
 //
 //	v := reflect.New(t).Interface()
-//	if err := niceyaml.DefaultsInto(v, decoding); err != nil {
-//		return err
-//	}
-//	if err := doc.DecodeInto(ctx, v, decoding); err != nil {
+//	if err := niceyaml.DefaultsInto(v, rules...); err != nil {
 //		return err
 //	}
 //
 // For a v that is nil, a nil pointer, or not a pointer, DefaultsInto
 // returns an error that wraps [ErrDecodeTarget] and leaves v as it is. A
-// panic in a function of [WithDefaults] reaches the caller.
-func DefaultsInto(v any, opts ...DecodeOption) error {
+// panic in a function of [TypeDefaults] reaches the caller.
+func DefaultsInto(v any, rules ...TypeRule) error {
+	return setDefaults(v, typeRulesConfig(rules))
+}
+
+// Defaults returns the value of type T that [Node.Decode] starts from for
+// a document of the [Source] under opts. The rules of [WithTypeRules] on
+// the Source apply first, and those of [OverrideTypeRules] among opts
+// apply over them, as they do in the decode. A caller that fills its own
+// value for [Node.DecodeInto] starts there:
+//
+//	spec := source.Defaults[CafeSpec](decoding)
+//	if err := source.DecodeInto(ctx, &spec, decoding); err != nil {
+//		return err
+//	}
+//
+// The value starts as [Defaults] describes. A nil Source gives no rules
+// of its own. A panic in a function of [TypeDefaults] reaches the caller.
+func (s *Source) Defaults[T any](opts ...DecodeOption) T {
+	// A nil interface asserts to the zero value, which it is.
+	v, _ := reflect.TypeAssert[T](newDecodeConfig(s, opts).defaults.value(reflect.TypeFor[T]()))
+
+	return v
+}
+
+// DefaultsInto replaces the value that v points to with the value that
+// [Source.Defaults] returns for its type under opts. It does not merge, so
+// a field that v held before takes its default too. [Node.DecodeInto]
+// from the result matches [Node.Decode], as it does from Source.Defaults.
+// A caller whose type is a runtime value, such as a [reflect.Type], uses
+// DefaultsInto where it cannot name a type for Source.Defaults:
+//
+//	v := reflect.New(t).Interface()
+//	if err := source.DefaultsInto(v, decoding); err != nil {
+//		return err
+//	}
+//	if err := source.DecodeInto(ctx, v, decoding); err != nil {
+//		return err
+//	}
+//
+// For a v that is nil, a nil pointer, or not a pointer, DefaultsInto
+// returns an error that wraps [ErrDecodeTarget] and leaves v as it is. A
+// nil Source gives no rules of its own. A panic in a function of
+// [TypeDefaults] reaches the caller.
+func (s *Source) DefaultsInto(v any, opts ...DecodeOption) error {
+	return setDefaults(v, newDecodeConfig(s, opts))
+}
+
+// setDefaults replaces the value that v points to with the defaults of its
+// type under cfg, as [DefaultsInto] describes.
+func setDefaults(v any, cfg decodeConfig) error {
 	err := checkTarget(v, ErrDecodeTarget, true)
 	if err != nil {
 		return err
 	}
 
 	rv := reflect.ValueOf(v).Elem()
-	rv.Set(newDecodeConfig(nil, opts).defaults.value(rv.Type()))
+	rv.Set(cfg.defaults.value(rv.Type()))
 
 	return nil
 }
 
-// defaultFuncs holds the function that [WithDefaults] gives each type.
+// defaultFuncs holds the function that [TypeDefaults] gives each type.
 type defaultFuncs map[reflect.Type]func(reflect.Value)
 
 // value returns the defaults of t. It starts from the zero value and sets
@@ -130,7 +201,7 @@ func (d defaultFuncs) value(t reflect.Type) reflect.Value {
 	return v
 }
 
-// sets reports whether [WithDefaults] gives t a function. The defaults
+// sets reports whether [TypeDefaults] gives t a function. The defaults
 // of any other type hold only the defaults of the types of its fields.
 func (d defaultFuncs) sets(t reflect.Type) bool {
 	_, ok := d[t]
@@ -162,7 +233,7 @@ func (d defaultFuncs) fillFields(v reflect.Value) {
 }
 
 // start returns the defaults of t for a decode that creates a value of t
-// from node. It returns a panic in a function of [WithDefaults] as an
+// from node. It returns a panic in a function of [TypeDefaults] as an
 // error at node that holds a [PanicError].
 func (d defaultFuncs) start(t reflect.Type, node ast.Node) (reflect.Value, error) {
 	var (

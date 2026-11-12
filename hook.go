@@ -94,16 +94,10 @@ func init() {
 		return d.option()
 	}
 	hook.Replacing = replacing()
-	hook.Unmarshalers = func(us any) unmarshaler.Options {
-		list, _ := us.([]Unmarshaler) //nolint:errcheck // The hook takes a []Unmarshaler.
+	hook.Unmarshalers = func(rules any) unmarshaler.Options {
+		list, _ := rules.([]TypeRule) //nolint:errcheck // The hook takes a []TypeRule.
 
-		var o unmarshaler.Options
-
-		for _, u := range list {
-			u.applyTo(&o)
-		}
-
-		return o
+		return typeRulesConfig(list).unmarshalers
 	}
 }
 
