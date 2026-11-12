@@ -1262,6 +1262,11 @@ func (s *Source) Name() string {
 // [WithFilePath] set, as given. A message or a report names the file
 // with [Source.Name], which spells it as the caller did.
 //
+// A Source of [NewSourceFromLayers] has the file path of one layer, but
+// its text is the merge of every layer, not the text of that file. A
+// program that writes a file thus tests len(src.Layers()) > 0 first, as
+// [Source.Layers] describes.
+//
 // FilePath returns an empty string when none of those set it, and for a
 // nil Source.
 func (s *Source) FilePath() string {
@@ -1370,6 +1375,40 @@ func (s *Source) References() []*Source {
 	return slices.Clone(s.references)
 }
 
+// Layers returns the layers that [NewSourceFromLayers] merged into the
+// [Source], lowest first. Each layer is the [*Node] that the merge read.
+// That Node is the document of a Source layer, or the Node that the
+// caller passed, such as a scope of [Node.At]. A program that watches the
+// files of a merge reads their paths there:
+//
+//	for _, layer := range merged.Layers() {
+//		watch(layer.FilePath())
+//	}
+//
+// A layer that is itself a merged Source comes back as it is. A caller
+// that wants every file of such a merge calls Layers again on the
+// [Node.Source] of that layer.
+//
+// The text of a Source with layers is text that niceyaml wrote, not the
+// text of the file that [Source.FilePath] names. A program that writes a
+// file checks len(src.Layers()) > 0 first. For such a Source, it edits
+// the file that holds each value, which [Node.Origin] finds.
+//
+// Each call returns a new slice, and Layers returns nil for any other
+// Source and for a nil Source.
+func (s *Source) Layers() []*Node {
+	if s == nil || s.layers == nil {
+		return nil
+	}
+
+	nodes := make([]*Node, 0, len(s.layers.layers))
+	for _, l := range s.layers.layers {
+		nodes = append(nodes, l.node)
+	}
+
+	return nodes
+}
+
 // Unmarshalers returns the unmarshalers that every decode of the
 // documents of the [Source] applies, those of each [WithUnmarshalers], in
 // the order given. A Source of [NewSourceFromLayers] returns those that
@@ -1406,6 +1445,11 @@ func (s *Source) Unmarshalers() []Unmarshaler {
 //
 //	text := source.Text()
 //	fixed := text[:start] + "5" + text[end:]
+//
+// The text of a Source with [Source.Layers] is the merge that niceyaml
+// wrote from every layer, not the text of the file that
+// [Source.FilePath] names. The test for such a Source is
+// len(src.Layers()) > 0.
 //
 // A nil Source does not hold any text, so Text returns an empty string
 // for it.

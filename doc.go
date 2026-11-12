@@ -1892,7 +1892,11 @@
 // the file of a layer names whatever lies there in the merged text. Every
 // Node of the document has the [Node.FilePath] and [Node.FS] of the layer
 // that the Source stands for. [Node.Origin] returns the Node that holds a
-// value in the file of its layer.
+// value in the file of its layer. [Source.Layers] returns the Node of each
+// layer, so code that receives a Source from elsewhere can tell a merge
+// from the text of a file. Such code, such as a tool that writes fixes
+// back to disk or a [Validator] that compares the layers, tests
+// len(src.Layers()) > 0.
 //
 // A program that embeds its defaults below the file of the user passes
 // MergeAs with the Source of that file. It gives its unmarshalers, such as

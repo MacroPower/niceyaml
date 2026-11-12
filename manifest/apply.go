@@ -9,7 +9,6 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/escape"
-	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/internal/inputhook"
 	"go.jacobcolvin.com/niceyaml/internal/quantity"
 )
@@ -87,7 +86,7 @@ func (p *Plan) Apply(ctx context.Context, opts ...ApplyOption) (*Result, error) 
 
 	for _, f := range p.files {
 		err := ctx.Err()
-		if err == nil && len(hook.Layers(f.f.src)) > 0 {
+		if err == nil && len(f.f.src.Layers()) > 0 {
 			err = f.layersProblem()
 		}
 

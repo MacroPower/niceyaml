@@ -24,11 +24,6 @@ func init() {
 		return isolate(ctx, held)
 	}
 	hook.Rewrap = rewrap
-	hook.Layers = func(src any) []any {
-		s, _ := src.(*Source) //nolint:errcheck // The hook takes a *Source.
-
-		return s.layerNodes()
-	}
 	hook.ReferenceName = func(n any, name string) (string, bool) {
 		node, _ := n.(*Node) //nolint:errcheck // The hook takes a *Node.
 
@@ -140,21 +135,4 @@ func rewrap(err error, wrap func(error) error) error {
 	}
 
 	return c
-}
-
-// layerNodes returns the document of each layer that s merges, lowest
-// first, or nil for a Source that does not merge layers.
-func (s *Source) layerNodes() []any {
-	if s == nil || s.layers == nil {
-		return nil
-	}
-
-	nodes := make([]any, 0, len(s.layers.layers))
-	for _, l := range s.layers.layers {
-		if l.node != nil {
-			nodes = append(nodes, l.node)
-		}
-	}
-
-	return nodes
 }

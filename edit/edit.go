@@ -719,6 +719,15 @@ type Removal struct {
 // So such a document is empty too. The parser reads an
 // empty value under a tag that a line break or a space follows. So New
 // takes "!t\n" with that value as its root.
+//
+// New takes a document of [niceyaml.NewSourceFromLayers], whose
+// [niceyaml.Source.Layers] are not empty. Its Doc edits the merged text,
+// which holds the values of every layer, as a program that shows an
+// effective configuration wants. That text is not the text of the file
+// that [niceyaml.Source.FilePath] names. A program that writes a file
+// edits the document of the layer that holds the value instead. That
+// document is the [niceyaml.Node.Document] of the Node that
+// [niceyaml.Node.Origin] returns.
 func New(doc *niceyaml.Node, opts ...Option) (*Doc, error) {
 	switch {
 	case doc == nil:
@@ -1239,6 +1248,13 @@ func (d *Doc) withMarks(places []markPlace) string {
 // order. Without a Doc, FileText returns the text of src as it is. A
 // program that edits only the documents that match a test can thus pass
 // the Docs that it made, even when no document matched.
+//
+// For a src with [niceyaml.Source.Layers], FileText returns the merged
+// text that niceyaml wrote from every layer. A program must not write
+// that text to the file that [niceyaml.Source.FilePath] names. The file
+// then holds the values of the other layers and loses its comments. A
+// program that writes a file edits the document of each layer instead,
+// as [New] describes.
 //
 // FileText returns an error that matches [ErrUsage] when a Doc comes from
 // another Source than src, and when two Docs come from one document.
