@@ -557,13 +557,13 @@ func TestFilePath_NoWorkingDirectory(t *testing.T) {
 		"relative pattern and absolute path": {
 			pattern:  "configs/*.yaml",
 			filePath: file,
-			err:      matcher.ErrNoBaseDir,
+			err:      matcher.ErrUnresolvedBase,
 		},
 		"relative base": {
 			pattern:  "*.yaml",
 			opts:     []matcher.FilePathOption{matcher.WithBaseDir("configs")},
 			filePath: file,
-			err:      matcher.ErrNoBaseDir,
+			err:      matcher.ErrUnresolvedBase,
 		},
 		"absolute base": {
 			pattern:  "configs/*.yaml",
@@ -574,7 +574,7 @@ func TestFilePath_NoWorkingDirectory(t *testing.T) {
 		"double star pattern and absolute path": {
 			pattern:  "**/configs/*.yaml",
 			filePath: file,
-			err:      matcher.ErrNoBaseDir,
+			err:      matcher.ErrUnresolvedBase,
 		},
 		"rooted double star pattern": {
 			pattern:  volume + "/**/configs/*.yaml",
@@ -594,7 +594,7 @@ func TestFilePath_NoWorkingDirectory(t *testing.T) {
 		"braces whose rooted alternative does not match": {
 			pattern:  "{" + rootedBase + "/other,configs}/*.yaml",
 			filePath: file,
-			err:      matcher.ErrNoBaseDir,
+			err:      matcher.ErrUnresolvedBase,
 		},
 		"double star pattern and relative path": {
 			pattern:  "**/configs/*.yaml",
