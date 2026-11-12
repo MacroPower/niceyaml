@@ -5785,6 +5785,59 @@ func TestNode_At_NotFound(t *testing.T) {
 	})
 }
 
+func TestNode_At_MergeLimit(t *testing.T) {
+	t.Parallel()
+
+	// The mapping d merges 1000 inline mappings that each merge the
+	// sequence s of 1000 aliases, so one lookup in d reads s 1000 times.
+	input := stringtest.LinesLF(
+		"a: &a {z: 0}",
+		"s: &s "+yamltest.FlowSequence("*a", 1000),
+		"d: {<<: "+yamltest.FlowSequence("{<<: *s}", 1000)+"}",
+	)
+	path := paths.MustParse("$.d.nope")
+
+	tcs := map[string]struct {
+		err  error
+		opts []niceyaml.SourceOption
+	}{
+		"limit on": {
+			err: paths.ErrExcessiveMerging,
+		},
+		"limit off": {
+			opts: []niceyaml.SourceOption{niceyaml.WithAliasLimit(false)},
+			err:  paths.ErrNotFound,
+		},
+		"limit on with references": {
+			opts: []niceyaml.SourceOption{yamltest.References("base: &base {port: 80}\n")},
+			err:  paths.ErrExcessiveMerging,
+		},
+		"limit off with references": {
+			opts: []niceyaml.SourceOption{
+				niceyaml.WithAliasLimit(false),
+				yamltest.References("base: &base {port: 80}\n"),
+			},
+			err: paths.ErrNotFound,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, input, tc.opts...)
+
+			_, err := doc.At(path)
+			require.ErrorIs(t, err, tc.err)
+			assert.True(t, niceyaml.IsInvalid(err))
+
+			_, err = doc.Ranges(path)
+			require.ErrorIs(t, err, tc.err)
+			assert.True(t, niceyaml.IsInvalid(err))
+		})
+	}
+}
+
 func TestNode_At_UnresolvedAlias(t *testing.T) {
 	t.Parallel()
 
@@ -7537,6 +7590,102 @@ func TestNode_Nodes(t *testing.T) {
 
 		_, err = bomb.Decode[any](t.Context())
 		require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
+	})
+
+	t.Run("a path past a limit is a fault of the document", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			err   error
+			input string
+			path  string
+		}{
+			"nested aliases": {
+				input: yamltest.AliasLevels(5),
+				path:  "$.a[5][*][*][*][*][*]",
+				err:   niceyaml.ErrExcessiveAliasing,
+			},
+			"many merge sources": {
+				input: yamltest.WideMerge(2000),
+				path:  "$..nope",
+				err:   paths.ErrExcessiveMerging,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input)
+
+				_, err := doc.Nodes(paths.MustParse(tc.path))
+				require.ErrorIs(t, err, tc.err)
+				assert.True(t, niceyaml.IsInvalid(err))
+
+				// The error is about the whole path, so it binds without a
+				// location.
+				bound := yamltest.RequireSourceError(t, err)
+				assert.Same(t, doc.Source(), bound.Source())
+
+				_, located := bound.Position()
+				assert.False(t, located)
+			})
+		}
+	})
+
+	t.Run("the alias limit option turns off the path limits", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input string
+			path  string
+			refs  string
+			want  int
+		}{
+			"nested aliases": {
+				input: yamltest.AliasLevels(5),
+				path:  "$.a[5][*][*][*][*][*]",
+				want:  100_000,
+			},
+			"nested aliases with references": {
+				input: yamltest.AliasLevels(5),
+				path:  "$.a[5][*][*][*][*][*]",
+				refs:  "base: &base {port: 80}\n",
+				want:  100_000,
+			},
+			"many merge sources": {
+				input: yamltest.WideMerge(2000),
+				path:  "$..nope",
+				want:  0,
+			},
+			"many merge sources with references": {
+				input: yamltest.WideMerge(2000),
+				path:  "$..nope",
+				refs:  "base: &base {port: 80}\n",
+				want:  0,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				opts := []niceyaml.SourceOption{niceyaml.WithAliasLimit(false)}
+				if tc.refs != "" {
+					opts = append(opts, yamltest.References(tc.refs))
+				}
+
+				doc := yamltest.FirstDocument(t, tc.input, opts...)
+
+				nodes, err := doc.Nodes(paths.MustParse(tc.path))
+				require.NoError(t, err)
+				assert.Len(t, nodes, tc.want)
+
+				err = doc.Validate(t.Context(), niceyaml.Each(paths.MustParse(tc.path),
+					niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error { return nil })))
+				require.NoError(t, err)
+			})
+		}
 	})
 }
 

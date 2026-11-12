@@ -1169,50 +1169,76 @@ func TestAtData_MergeReads(t *testing.T) {
 	// To spell a key of m, the binding reads the whole list of its merge
 	// key, and the errors of one bind share one limit on those reads.
 	// Past it, each path keeps the decoded name of its key, and the error
-	// still binds at the value, by its position.
+	// still binds at the value, by its position. With the alias limit off,
+	// the reads have no limit, so every path spells its key.
 	const members = 2000
 
-	doc := locatorDoc(t, yamltest.WideMerge(members))
-
-	errs := make([]error, 0, members)
-	for i := range members {
-		errs = append(errs, niceyaml.NewError(strconv.Itoa(i), niceyaml.AtData("m", strconv.Itoa(0x1000+i))))
+	tcs := map[string]struct {
+		opts []niceyaml.SourceOption
+		all  bool
+	}{
+		"limit on": {},
+		"limit off": {
+			opts: []niceyaml.SourceOption{niceyaml.WithAliasLimit(false)},
+			all:  true,
+		},
 	}
 
-	spelled := 0
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	for problem := range niceyaml.Problems(doc.Bind(errors.Join(errs...))) {
-		i, err := strconv.Atoi(problem.Bound.Message())
-		require.NoError(t, err)
+			opts := append([]niceyaml.SourceOption{
+				niceyaml.WithName("f.yaml"),
+				yamltest.References(referenceDoc),
+			}, tc.opts...)
+			doc := yamltest.FirstDocument(t, yamltest.WideMerge(members), opts...)
 
-		require.Equal(t, i+2, yamltest.PositionOf(t, problem.Bound).Line, "member %d", i)
+			errs := make([]error, 0, members)
+			for i := range members {
+				errs = append(errs, niceyaml.NewError(strconv.Itoa(i), niceyaml.AtData("m", strconv.Itoa(0x1000+i))))
+			}
 
-		path, ok := problem.Bound.Path()
-		require.True(t, ok)
+			spelled := 0
 
-		if strings.HasPrefix(path.String(), "$.m.0x") {
-			spelled++
+			for problem := range niceyaml.Problems(doc.Bind(errors.Join(errs...))) {
+				i, err := strconv.Atoi(problem.Bound.Message())
+				require.NoError(t, err)
 
-			continue
-		}
+				require.Equal(t, i+2, yamltest.PositionOf(t, problem.Bound).Line, "member %d", i)
 
-		require.Equal(t, "$.m."+strconv.Itoa(0x1000+i), path.String())
+				path, ok := problem.Bound.Path()
+				require.True(t, ok)
+
+				if strings.HasPrefix(path.String(), "$.m.0x") {
+					spelled++
+
+					continue
+				}
+
+				require.Equal(t, "$.m."+strconv.Itoa(0x1000+i), path.String())
+			}
+
+			if tc.all {
+				assert.Equal(t, members, spelled)
+			} else {
+				assert.Positive(t, spelled)
+				assert.Less(t, spelled, members)
+			}
+
+			// A DataLocator shares the limit among its lookups the same way.
+			loc := doc.DataLocator()
+			found := 0
+
+			for i := range members {
+				if _, ok := loc.Path("m", strconv.Itoa(0x1000+i)); ok {
+					found++
+				}
+			}
+
+			assert.Equal(t, spelled, found)
+		})
 	}
-
-	assert.Positive(t, spelled)
-	assert.Less(t, spelled, members)
-
-	// A DataLocator shares the limit among its lookups the same way.
-	loc := doc.DataLocator()
-	found := 0
-
-	for i := range members {
-		if _, ok := loc.Path("m", strconv.Itoa(0x1000+i)); ok {
-			found++
-		}
-	}
-
-	assert.Equal(t, spelled, found)
 }
 
 // dataPort is an entry of [dataPorts].

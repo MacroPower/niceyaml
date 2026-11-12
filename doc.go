@@ -2056,20 +2056,30 @@
 // A path through a mapping whose `<<` merge key reads a reference document
 // finds its entry by reading the merge sources of that mapping, as the
 // References section describes. A path reads those sources as it reads the
-// merge sources of the document, so the count does not stop the read. The
-// limit behind [go.jacobcolvin.com/niceyaml/paths.ErrExcessiveMerging]
-// bounds it instead. An error at such a path thus binds in a document past
-// the limit as it binds with the limit off.
+// merge sources of the document, so the count does not stop the read.
+// While [WithAliasLimit] is on, the limit behind
+// [go.jacobcolvin.com/niceyaml/paths.ErrExcessiveMerging] bounds it
+// instead. When the merge reads of such a path stay within that limit, an
+// error at the path binds in a document past the limit as it binds with
+// the limit off.
+//
+// A path read applies the limits of its resolver, as
+// [go.jacobcolvin.com/niceyaml/paths.WithAliasLimit] describes them.
+// [Node.Nodes] and [Each] refuse a path whose selectors reach far more nodes
+// through aliases than the document holds. [Node.At], [Node.Ranges], and
+// Node.Nodes refuse a path whose key lookups read far more nodes under `<<`
+// merge keys than the document holds. [IsInvalid] reports either error,
+// because the aliases or the merge keys of the document cause it. The error
+// binds to the Node of the call without a location.
 //
 // [WithAliasLimit] set to false turns the limit off for the documents of one
 // Source, for input that the program trusts, such as a file it ships. It also
 // turns off the bounds that the Limits section describes for the text that
-// aliases write out. Two checks stay on whatever the option says.
+// aliases write out, and the limits of a path read. One check stays on
+// whatever the option says.
 // [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] takes a Go value
 // and does not take a Source. It refuses a value that shares its maps and
 // slices past the limit, even one that a Source with the limit off decoded.
-// [Node.Nodes] refuses a path whose selectors reach far more nodes through
-// aliases than the document holds.
 //
 // The count reads through each alias that a reference document of
 // [WithReferences] resolves. Such an alias counts what the anchor of its

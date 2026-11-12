@@ -319,6 +319,9 @@
 // number of nodes in the document. One lookup alone can read that many,
 // so [Resolver.Node] and [Resolver.Token] return the error as well.
 //
+// [WithAliasLimit] set to false turns off both limits for a document that
+// the program trusts.
+//
 // # Error Highlighting
 //
 // Pass a [Path] to [go.jacobcolvin.com/niceyaml.AtPath], which highlights

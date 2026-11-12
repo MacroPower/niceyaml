@@ -103,6 +103,7 @@ type Resolver struct {
 //
 // Available options:
 //   - [WithReferenceAnchors]
+//   - [WithAliasLimit]
 type ResolverOption func(*resolverConfig)
 
 // resolverConfig holds the settings that a [ResolverOption] configures.
@@ -110,6 +111,9 @@ type resolverConfig struct {
 	// Returns the value of the anchor of a name that a reference document
 	// defines, or nil.
 	references func(name string) (ast.Node, bool)
+	// Turns off the limits behind [ErrExcessiveAliasing] and
+	// [ErrExcessiveMerging].
+	unlimited bool
 }
 
 // WithReferenceAnchors is a [ResolverOption] that gives the anchors of the
@@ -138,6 +142,28 @@ func WithReferenceAnchors(anchor func(name string) (ast.Node, bool)) ResolverOpt
 	}
 }
 
+// WithAliasLimit is a [ResolverOption] that sets whether the [Resolver]
+// limits what the selectors of a path reach and read. The default is
+// true. With the limit on, a selector that aliases lead to far more nodes
+// than the document holds stops with [ErrExcessiveAliasing]. Key lookups
+// that read far more nodes under `<<` merge keys stop with
+// [ErrExcessiveMerging]. The option sets both limits, including the one
+// that an [EntryFinder] applies to its lookups. A document can pass the
+// merge limit without an alias, through a long chain of inline merges.
+//
+// With the limit off, one path through a few hundred bytes of nested
+// aliases can select millions of nodes. The lookups on a chain of merges
+// then grow with the square of the length of the chain. Turn the limit
+// off only for a document that the program trusts, such as a file it
+// ships:
+//
+//	r := paths.NewResolver(doc, paths.WithAliasLimit(false))
+func WithAliasLimit(enabled bool) ResolverOption {
+	return func(c *resolverConfig) {
+		c.unlimited = !enabled
+	}
+}
+
 // NewResolver creates a new [*Resolver] for doc with opts. A nil doc gives
 // a Resolver without a document to resolve in. Each of its resolve methods
 // thus returns an error wrapping [ErrNoDocument] for a `$` path.
@@ -149,11 +175,12 @@ func NewResolver(doc *ast.DocumentNode, opts ...ResolverOption) *Resolver {
 	}
 
 	if doc == nil {
-		return &Resolver{resolver: &resolver{binding: noBinding, references: cfg.references}}
+		return &Resolver{resolver: &resolver{binding: noBinding, references: cfg.references, unlimited: cfg.unlimited}}
 	}
 
 	r := newResolver(doc)
 	r.references = cfg.references
+	r.unlimited = cfg.unlimited
 
 	return &Resolver{doc: doc, resolver: r}
 }

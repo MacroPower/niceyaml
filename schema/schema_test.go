@@ -4587,9 +4587,12 @@ func TestSchema_SourcePath_MergeReads(t *testing.T) {
 	// Check share one limit on the nodes they read under the merge key.
 	// Check reports each violation past that limit too, with a path
 	// that keeps the decoded name of its key, which selects no entry.
+	// With the alias limit off on the Source, Check reads every merge
+	// source and spells every key.
 	v := compileSchema(t, integersInM)
 
 	tcs := map[string]struct {
+		opts    []niceyaml.SourceOption
 		members int
 		decoded bool
 	}{
@@ -4598,13 +4601,17 @@ func TestSchema_SourcePath_MergeReads(t *testing.T) {
 			members: 2000,
 			decoded: true,
 		},
+		"many merge sources without alias limit": {
+			members: 2000,
+			opts:    []niceyaml.SourceOption{niceyaml.WithAliasLimit(false)},
+		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			dd := yamltest.FirstDocument(t, yamltest.WideMerge(tc.members))
+			dd := yamltest.FirstDocument(t, yamltest.WideMerge(tc.members), tc.opts...)
 
 			err := v.Check(t.Context(), dd)
 

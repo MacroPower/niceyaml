@@ -14,8 +14,10 @@
 //
 // With niceyaml.WithAliasLimit, the source of a document turns the limit
 // off for a decode of the document, including the decode that the schema
-// validator runs. The limit stays on for a value that a caller hands the
-// validator and for the selectors of a path.
+// validator runs, and for the selectors of a path that reads the
+// document. A resolver from paths.NewResolver turns it off for the
+// selectors of a path with paths.WithAliasLimit. The limit stays on for a
+// value that a caller hands the validator.
 package aliaslimit
 
 import (

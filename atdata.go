@@ -853,11 +853,11 @@ func keyName(key reflect.Value) string {
 // Create instances with [Node.DataLocator].
 //
 // A DataLocator is safe for concurrent use, and it reads each mapping
-// once, so a caller creates one for all the lookups of a run. Its reads
-// of `<<` merge keys share one budget, as large as the budget that
-// [paths.ErrExcessiveMerging] allows one path selector. A caller thus
-// creates a DataLocator for each run and does not keep one for the life
-// of the document.
+// once, so a caller creates one for all the lookups of a run. While
+// [WithAliasLimit] is on, its reads of `<<` merge keys share one budget,
+// as large as the budget that [paths.ErrExcessiveMerging] allows one path
+// selector. A caller thus creates a DataLocator for each run and does not
+// keep one for the life of the document.
 type DataLocator struct {
 	// The node the names read from.
 	root ast.Node
