@@ -1458,8 +1458,8 @@ func TestWarnings(t *testing.T) {
 			},
 			warnings: stringtest.JoinLF(
 				"all.yaml: 2 warnings",
-				"all.yaml: document 1: warning: old layout",
-				"all.yaml: document 2: warning: old layout",
+				"all.yaml:1: document 1: warning: old layout",
+				"all.yaml:2: document 2: warning: old layout",
 			),
 		},
 		"a ValidateDocuments whose validator warns without a location": {
@@ -1474,8 +1474,8 @@ func TestWarnings(t *testing.T) {
 			},
 			warnings: stringtest.JoinLF(
 				"all.yaml: 2 warnings",
-				"all.yaml: document 1: warning: old layout",
-				"all.yaml: document 2: warning: old layout",
+				"all.yaml:1: document 1: warning: old layout",
+				"all.yaml:2: document 2: warning: old layout",
 			),
 		},
 		"a ValidateDocuments whose validator warns at one position of the file": {
@@ -2289,8 +2289,8 @@ func TestWarnings(t *testing.T) {
 				},
 				want: stringtest.JoinLF(
 					"all.yaml: 2 warnings",
-					"all.yaml: document 1: warning: $.spec.*: old deep",
-					"all.yaml: document 2: warning: $.spec.*: old deep",
+					"all.yaml:1: document 1: warning: $.spec.*: old deep",
+					"all.yaml:2: document 2: warning: $.spec.*: old deep",
 				),
 				docs: []int{0, 1},
 			},
@@ -2301,8 +2301,8 @@ func TestWarnings(t *testing.T) {
 				},
 				want: stringtest.JoinLF(
 					"all.yaml: 2 warnings",
-					"all.yaml: document 1: warning: old layout",
-					"all.yaml: document 2: warning: old layout",
+					"all.yaml:1: document 1: warning: old layout",
+					"all.yaml:2: document 2: warning: old layout",
 				),
 				docs: []int{0, 1},
 			},
@@ -2312,8 +2312,8 @@ func TestWarnings(t *testing.T) {
 				},
 				want: stringtest.JoinLF(
 					"all.yaml: 2 warnings",
-					"all.yaml: document 1: warning: old layout",
-					"all.yaml: document 2: warning: old layout",
+					"all.yaml:1: document 1: warning: old layout",
+					"all.yaml:2: document 2: warning: old layout",
 				),
 				docs: []int{0, 1},
 			},
@@ -2325,8 +2325,8 @@ func TestWarnings(t *testing.T) {
 				},
 				want: stringtest.JoinLF(
 					"all.yaml: 2 warnings",
-					"all.yaml: document 2: warning: $.spec.*: old deep",
-					"all.yaml: document 1: warning: $.spec.*: old deep",
+					"all.yaml:2: document 2: warning: $.spec.*: old deep",
+					"all.yaml:1: document 1: warning: $.spec.*: old deep",
 				),
 				docs: []int{1, 0},
 			},
@@ -3347,8 +3347,8 @@ func TestWarnings_Report(t *testing.T) {
 				want: stringtest.JoinLF(
 					"all.yaml: 1 error, 2 warnings",
 					"all.yaml:3:7: $.spec: bad spec",
-					"all.yaml: document 2: warning: $.spec.*: old deep",
-					"all.yaml: document 1: warning: $.spec.*: old deep",
+					"all.yaml:2: document 2: warning: $.spec.*: old deep",
+					"all.yaml:1: document 1: warning: $.spec.*: old deep",
 				),
 			},
 			"beside the same warning bound in no document": {
@@ -3358,7 +3358,7 @@ func TestWarnings_Report(t *testing.T) {
 					"all.yaml: 1 error, 2 warnings",
 					"all.yaml:3:7: $.spec: bad spec",
 					"all.yaml: warning: old layout",
-					"all.yaml: document 1: warning: old layout",
+					"all.yaml:1: document 1: warning: old layout",
 				),
 			},
 			"beside a detached copy of it in another document": {
@@ -3367,8 +3367,8 @@ func TestWarnings_Report(t *testing.T) {
 				want: stringtest.JoinLF(
 					"1 error, 2 warnings",
 					"all.yaml:3:7: $.spec: bad spec",
-					"all.yaml: document 2: warning: $.spec.*: old deep",
-					"all.yaml: document 1: warning: $.spec.*: old deep",
+					"all.yaml:2: document 2: warning: $.spec.*: old deep",
+					"all.yaml:1: document 1: warning: $.spec.*: old deep",
 				),
 			},
 			"not beside a detached copy of it in the same document": {
@@ -3377,7 +3377,7 @@ func TestWarnings_Report(t *testing.T) {
 				want: stringtest.JoinLF(
 					"1 error, 1 warning",
 					"all.yaml:3:7: $.spec: bad spec",
-					"all.yaml: document 2: warning: $.spec.*: old deep",
+					"all.yaml:2: document 2: warning: $.spec.*: old deep",
 				),
 			},
 			"not beside the same warning at one position that another document binds": {

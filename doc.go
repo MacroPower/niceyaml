@@ -1455,9 +1455,11 @@
 // the node. A detail does not gain a location.
 //
 // The root of a document leaves a problem without a location as it is,
-// because such a problem can be about the whole document. A location does not
-// declare anything, so [IsInvalid] reports a bound error only when it reports
-// the error that the Node bound.
+// because such a problem can be about the whole document. In a file of
+// several documents, its message names the document and the first line of
+// it. [SourceError.DocumentSpan] reports the lines of the document. A location
+// does not declare anything, so [IsInvalid] reports a bound error only when it
+// reports the error that the Node bound.
 //
 // [Node.Document] returns the root of the document. A validator that can
 // check only a whole document, such as a

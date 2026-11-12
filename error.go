@@ -2693,19 +2693,55 @@ func (e *SourceError) keepsMessage() bool {
 }
 
 // place returns what stands in front of the message of a binding that does
-// not write a position, without the colon after it, as "cafe.yaml:
-// document 3". It leaves out either part when e does not have it.
+// not write a position, without the colon after it. It names the source,
+// the first line of the document, and the document, and leaves out each
+// part that e does not have. A name without the line reads "cafe.yaml:
+// document 3".
 func (e *SourceError) place() string {
-	name, doc := e.label(), e.documentLabel()
+	name, doc := e.label(), e.documentPlace()
 
 	switch {
 	case doc == "":
 		return name
 	case name == "":
 		return doc
+	case e.documentLine() != "":
+		return name + ":" + doc
 	default:
 		return name + ": " + doc
 	}
+}
+
+// documentPlace returns the document of e as the row of e names it, with
+// the first line of the document in front, as "11: document 3". It reads
+// "document 3" when e does not report the lines of its document, and ""
+// when [SourceError.documentLabel] returns "".
+func (e *SourceError) documentPlace() string {
+	doc := e.documentLabel()
+
+	first := e.documentLine()
+	if first == "" {
+		return doc
+	}
+
+	return first + ": " + doc
+}
+
+// documentLine returns the first line of the document of e, counted from
+// 1, for an e that [SourceError.documentLabel] names a document for. It
+// returns "" for any other e, and for one whose [SourceError.DocumentSpan]
+// reports false.
+func (e *SourceError) documentLine() string {
+	if e.documentLabel() == "" {
+		return ""
+	}
+
+	span, ok := e.DocumentSpan()
+	if !ok {
+		return ""
+	}
+
+	return oneBased(span.Start)
 }
 
 // suffixed returns s with a colon after it, or "" for an empty s.
@@ -2718,8 +2754,9 @@ func suffixed(s string) string {
 }
 
 // documentLabel returns "document 3" for an e without a position that is
-// bound in the third document of a file of several. The message of such an
-// e does not have a line number that names the document. The number counts
+// bound in the third document of a file of several. The label does not hold
+// a line, and [SourceError.documentPlace] puts the first line of the
+// document in front of it. The number counts
 // every document of the file, as [Source.AllDocuments] does. A detached
 // binding reads the label it kept.
 func (e *SourceError) documentLabel() string {
@@ -3449,8 +3486,9 @@ func (e *SourceError) Document() (*Node, bool) {
 // reports the index of the document it was bound to, although
 // SourceError.Document reports false for it. The message of a bound error
 // counts documents from 1, as it counts lines, so "document 3" in
-// [SourceError.Error] is the document at index 2. A report that groups the
-// problems of a file by document reads the index of each:
+// [SourceError.Error] is the document at index 2. The line in front of
+// that label is the first line of [SourceError.DocumentSpan]. A report
+// that groups the problems of a file by document reads the index of each:
 //
 //	for problem := range niceyaml.Problems(err) {
 //		if index, ok := problem.DocumentIndex(); ok {
@@ -3468,6 +3506,41 @@ func (e *SourceError) DocumentIndex() (int, bool) {
 	}
 
 	return doc.DocumentIndex(), true
+}
+
+// DocumentSpan returns the lines of the document the error is bound to and
+// true. It is the [Node.Span] of the root that [SourceError.Document]
+// returns, so it covers the "---" line and the comments before the content
+// of the document. A binding that [Detach] detached reports the span of
+// the document it was bound to, as it reports its index.
+//
+// An error bound at the root of a document without a location, such as a
+// document that no schema matches, does not have a position. A report that
+// gives each problem a line reads the first line of the span for such an
+// error, as [SourceError.Error] does in a file of several documents:
+//
+//	line := 0
+//	if pos, ok := problem.Position(); ok {
+//		line = pos.Line
+//	} else if span, ok := problem.DocumentSpan(); ok {
+//		line = span.Start
+//	}
+//
+// DocumentSpan reports false where [SourceError.DocumentIndex] reports
+// false. It also reports false for an error bound in a Source with
+// positions off, as [WithPositions] sets them, because the lines of such a
+// Source name nothing the user can find.
+func (e *SourceError) DocumentSpan() (position.Span, bool) {
+	if e != nil && e.keptDoc != nil {
+		return e.keptDoc.span, e.keptDoc.spans
+	}
+
+	doc, ok := e.Document()
+	if !ok || !e.source.ReportsPositions() {
+		return position.Span{}, false
+	}
+
+	return doc.Span(), true
 }
 
 // Message returns the text of the bound error without its own position,
@@ -3550,8 +3623,12 @@ func (e *SourceError) Unwrap() error {
 // [Source.Name], and the message of a source without a name starts with
 // "line:col:". An error without a position reads "name: msg". In a source
 // that holds several documents, such an error names its document behind the
-// name, counted from 1 among [Source.AllDocuments], as "name: document 3:
-// msg".
+// name, counted from 1 among [Source.AllDocuments]. The first line of
+// [SourceError.DocumentSpan] stands between the name and the document, as
+// "name:11: document 3: msg". The error does not point at a place inside
+// the document, so the line does not have a column. In a Source with
+// positions off, the message leaves the line out, as in "name: document
+// 3: msg".
 //
 // The text a wrapper added to the bound error sits behind the path. A
 // binding that wraps another binding reads the same way. Its line takes the

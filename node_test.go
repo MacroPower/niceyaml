@@ -3712,10 +3712,10 @@ func TestDocument_Bind(t *testing.T) {
 				err:   errors.New("standard error"),
 				want:  "dir/config.yaml: standard error",
 			},
-			"a later document names its number": {
+			"a later document names its line and number": {
 				input: twoDocuments,
 				err:   errors.New("plain"),
-				want:  "document 2: plain",
+				want:  "2: document 2: plain",
 			},
 			"keeps context wrapped around an Error": {
 				input: "key: value\n",
@@ -4054,7 +4054,7 @@ func TestDocument_Err(t *testing.T) {
 
 		bound := yamltest.RequireSourceError(t, err)
 		assert.Same(t, doc, yamltest.BoundDocument(t, bound))
-		assert.Equal(t, "f.yaml: document 2: $.d: bad", err.Error())
+		assert.Equal(t, "f.yaml:4: document 2: $.d: bad", err.Error())
 
 		_, ok := bound.Range()
 		assert.False(t, ok)

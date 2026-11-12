@@ -532,9 +532,12 @@ type Match struct {
 // [niceyaml.FormatError] draws the same tree with ASCII lines.
 //
 // In a file that holds several documents, the message names the document
-// that the lookup ran for, as "app.yaml: document 3: no matching
-// schema". A registry among the resolvers gives the reason of each of
-// its own resolvers, as [Registry.Resolve] describes.
+// that the lookup ran for. Its first line stands in front, as
+// "app.yaml:11: document 3: no matching schema". The error does not have
+// a position, so a report reads that line from
+// [niceyaml.SourceError.DocumentSpan]. A registry among the resolvers
+// gives the reason of each of its own resolvers, as [Registry.Resolve]
+// describes.
 //
 // Returns [ErrResolve] if a resolver applied but could not name the
 // schema. Returns an error that holds a [*LoadError] matching [ErrLoad]

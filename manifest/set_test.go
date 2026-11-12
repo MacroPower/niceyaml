@@ -449,7 +449,7 @@ func TestObject_Layouts(t *testing.T) {
 
 		bound := semla.Current.Bind(niceyaml.NewError("pricey", niceyaml.AtPath(price)))
 		require.EqualError(t, bound, "config/menu.yaml:15:10: $.spec.price: pricey")
-		require.EqualError(t, semla.Current.Bind(errors.New("pricey")), "config/menu.yaml: document 2: pricey")
+		require.EqualError(t, semla.Current.Bind(errors.New("pricey")), "config/menu.yaml:9: document 2: pricey")
 		require.EqualError(t, semla.Bind(niceyaml.NewError("pricey", niceyaml.AtPath(price))),
 			"config/menu.yaml:15:10: $.spec.price: pricey")
 
@@ -503,7 +503,7 @@ func TestObject_Layouts(t *testing.T) {
 		// and its binding holds the position there.
 		bound := hours.Current.Bind(niceyaml.NewError("too early", niceyaml.AtPath(open)))
 		require.EqualError(t, bound, "cafe.yaml:13:10: $.spec.open: too early")
-		require.EqualError(t, hours.Current.Bind(errors.New("too early")), "cafe.yaml: document 2: too early")
+		require.EqualError(t, hours.Current.Bind(errors.New("too early")), "cafe.yaml:7: document 2: too early")
 
 		for problem := range niceyaml.Problems(bound) {
 			assert.Equal(t, "12:9-12:16", yamltest.RangeOf(t, problem).String())
