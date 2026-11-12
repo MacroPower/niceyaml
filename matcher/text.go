@@ -31,6 +31,17 @@ type textMatcher struct {
 // returns an error where [Content] does, and it refuses the documents
 // that [Content] refuses for their aliases.
 //
+// [niceyaml.Node.Scalar] returns the text of a scalar as the document
+// writes it, and the text that Match passes differs from it in two ways.
+// First, Match reads a scalar after a tag converts it, plain or quoted.
+// Such a tag can respell the text, so !!float "1.10" gives "1.1" here and
+// "1.10" from Scalar, and !!binary aGk= gives "hi" here and "aGk=" from
+// Scalar. Such a tag can also keep the scalar from matching, as
+// !!timestamp 2001-12-14 does, but Scalar returns "2001-12-14". Second, a
+// written null such as ~ does not match, but Scalar returns its text.
+// Match reads the text that [Content] compares a string with, so the two
+// matchers read one text.
+//
 // The Matcher describes itself as `$.apiVersion passes a text test`,
 // through [Describer]. That description is the reason that
 // [go.jacobcolvin.com/niceyaml/schema.When] gives when it declines.

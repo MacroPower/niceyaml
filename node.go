@@ -1,6 +1,7 @@
 package niceyaml
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -1814,6 +1815,78 @@ func (n *Node) Kind() NodeKind {
 	default:
 		return NodeScalar
 	}
+}
+
+// Scalar returns the text of the scalar of the Node as the document
+// writes it, and reports whether the Node holds a scalar with a text. Use
+// Scalar for the text that the author typed, such as a version or a file
+// mode, and [Node.Decode] for the value that YAML reads from that text:
+//
+//	n, err := doc.At(paths.Doc().Child("python"))
+//	if err != nil {
+//		return err
+//	}
+//
+//	text, ok := n.Scalar()
+//
+// The text is the string that a decode reads from the scalar before a tag
+// converts it. So python: 3.10 gives "3.10", mode: 0755 gives "0755", and
+// hex: 0x10 gives "0x10", where a Decode[string] gives "3.1", "493", and
+// "16". A tag does not change the text, so !!int "0x10" gives "0x10" too,
+// where a Decode[string] gives "0". Scalar resolves the quotes, the
+// escapes, and the folding of the scalar, so `image: "nginx:1.25"` gives
+// nginx:1.25 without its quotes.
+// [Node.Text] returns the scalar with its quotes, as the source writes it.
+// A block scalar gives the lines after its header, such as "|" or ">-",
+// with the indentation, the folding, and the chomping of the block
+// applied, so a `|` scalar that holds 1.10 gives "1.10\n".
+//
+// Scalar reads through anchors, tags, and aliases as [Node.Kind] and a
+// decode do. An alias thus gives the text of the scalar that its anchor
+// holds, in the document or in a reference document of [WithReferences].
+// A written null gives its text, so `~` gives "~" and null gives "null".
+// A tag can convert a mapping or a sequence to a scalar, as "!!str *k"
+// does for a sequence k. Such a tag has no text of its own, so Scalar
+// prints the value that a decode reads from it, as [fmt.Sprint] prints
+// it. So "!!str *k" gives "[x y]" for the sequence [x, y], and "!!int *k"
+// gives "0". Scalar reports false when that decode fails, as it does for
+// "!!bool *k", or reads a null, as it does for "!!null *k".
+//
+// Scalar reports false for a nil Node and a Node whose document did not
+// parse. It also reports false for a mapping, a sequence, and an entry or
+// an item without a value. A tag without a scalar under it, as in
+// `key: !!str`, reports false, though a decode reads "" from it. An alias
+// that does not resolve and an alias inside the content of its own anchor
+// report false too. The
+// [go.jacobcolvin.com/niceyaml/matcher.Text] matcher reads a scalar by a
+// rule of its own, as its documentation describes.
+//
+//nolint:contextcheck // The decode of a converted collection reads no state that a context carries.
+func (n *Node) Scalar() (string, bool) {
+	if n == nil || n.doc.err != nil {
+		return "", false
+	}
+
+	node := n.valueNode()
+	if !astnode.HasContent(node) {
+		return "", false
+	}
+
+	content := n.doc.content(node)
+	if _, ok := content.(*ast.TagNode); !ok {
+		return astnode.ScalarText(content)
+	}
+
+	v, err := n.Decode[any](context.Background())
+	if err != nil || v == nil {
+		return "", false
+	}
+
+	if s, ok := v.(string); ok {
+		return s, true
+	}
+
+	return fmt.Sprint(v), true
 }
 
 // content returns the mapping, sequence, or scalar under node, as

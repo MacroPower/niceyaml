@@ -1251,45 +1251,25 @@ func (n *Node) Append(ctx context.Context, v any) error {
 	return n.At(paths.Current().Index(n.Len())).Insert(ctx, v)
 }
 
-// Scalar returns the string that a decode reads from a scalar, before a
-// tag converts it, so 0x10 gives "0x10". The string has the quotes, the
-// escapes, and the folding of the scalar resolved, so `image: "nginx:1.25"`
-// gives nginx:1.25 without its quotes. [niceyaml.Node.Text] returns the
-// scalar as the source writes it. For a block scalar, Scalar holds the
-// lines after the header, such as "|" or ">-", with the indentation, the
-// folding, and the chomping of the block applied. Scalar returns "" for a
-// mapping, a sequence, and a place that does not hold a value. At an
-// alias, Scalar reads the anchor as a decode does. It thus returns the
-// string of the scalar that the anchor holds, in the document or in a
-// reference document of [niceyaml.WithReferences]. Scalar returns ""
-// whenever [Node.Exists] does not return true, both for a place that does
-// not hold a value and for a node that Exists returns a problem for, as
-// [Node.Kind] describes.
-//
-//nolint:contextcheck // The decode of such a scalar reads no state that a context carries.
-func (n *Node) Scalar() string {
-	p, doc, ok := n.read()
+// Scalar returns the text of the scalar at the place as the document
+// writes it, and reports whether the place holds a scalar with a text.
+// It reads the value of the place by the rule of [niceyaml.Node.Scalar],
+// so 0x10 gives "0x10", and `image: "nginx:1.25"` gives nginx:1.25
+// without its quotes. A written null gives "~" or "null", and `key: ""`
+// gives "" and true, but `key:` gives "" and false. A node on an entry
+// that a later entry of its key hides reads the value of the hidden
+// entry. At an alias, Scalar reads the anchor as a decode does, in the
+// document or in a reference document of [niceyaml.WithReferences].
+// Scalar reports false whenever [Node.Exists] does not return true, both
+// for a place that does not hold a value and for a node that Exists
+// returns a problem for, as [Node.Kind] describes.
+func (n *Node) Scalar() (string, bool) {
+	_, doc, ok := n.read()
 	if !ok {
-		return ""
+		return "", false
 	}
 
-	content := hook.Content(n.d.node, p.value)
-	if _, ok := content.(*ast.TagNode); !ok {
-		text, _ := astnode.ScalarText(content)
-
-		return text
-	}
-
-	v, err := doc.Decode[any](context.Background())
-	if err != nil || v == nil {
-		return ""
-	}
-
-	if s, ok := v.(string); ok {
-		return s
-	}
-
-	return fmt.Sprint(v)
+	return doc.Scalar()
 }
 
 // Decode decodes the value as [niceyaml.Node.Decode] does, with opts and

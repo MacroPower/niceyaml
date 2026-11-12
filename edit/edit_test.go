@@ -629,7 +629,10 @@ func TestDoc_Apply_Empty(t *testing.T) {
 			assert.False(t, exists(t, n))
 			assert.Equal(t, niceyaml.NodeNone, n.Kind())
 			assert.Zero(t, n.Len())
-			assert.Empty(t, n.Scalar())
+
+			text, ok := n.Scalar()
+			assert.Empty(t, text)
+			assert.False(t, ok)
 
 			got, err := n.Decode[map[string]int](ctx)
 			require.NoError(t, err)
@@ -1262,7 +1265,11 @@ func TestDoc_Apply(t *testing.T) {
 		}
 	}
 
-	text := func(n *edit.Node) any { return n.Scalar() }
+	text := func(n *edit.Node) any {
+		s, _ := n.Scalar()
+
+		return s
+	}
 	kind := func(n *edit.Node) any { return n.Kind() }
 	exists := func(n *edit.Node) any {
 		ok, _ := n.Exists() //nolint:errcheck // The read compares the answer alone.
@@ -2059,7 +2066,8 @@ func TestDoc_Apply(t *testing.T) {
 					return err
 				}
 
-				if !ok || r.Kind() != niceyaml.NodeScalar || r.Scalar() != fmt.Sprint(v) || none {
+				text, isText := r.Scalar()
+				if !ok || r.Kind() != niceyaml.NodeScalar || !isText || text != fmt.Sprint(v) || none {
 					return fmt.Errorf("the reads of %s do not agree", r.Path())
 				}
 
@@ -2095,7 +2103,9 @@ func TestDoc_Apply(t *testing.T) {
 			fn: func(_ context.Context, n *edit.Node) error {
 				b := n.At(paths.Current().Child("b"))
 
-				return b.Move(paths.Doc().Child("b" + b.Scalar()))
+				text, _ := b.Scalar()
+
+				return b.Move(paths.Doc().Child("b" + text))
 			},
 			err: `test.yaml:1:1: $.web: the edit moves $.web.b to $.b1, which reaches "web", a key that its mapping repeats, and cafe does not edit the entries of a repeated key`,
 		},
@@ -2268,7 +2278,7 @@ func TestDoc_Apply(t *testing.T) {
 			before: drinks,
 			path:   paths.MustParse("$.drinks[*]"),
 			fn: func(ctx context.Context, n *edit.Node) error {
-				if n.At(paths.Current().Child("item")).Scalar() == "K" {
+				if item, _ := n.At(paths.Current().Child("item")).Scalar(); item == "K" {
 					return n.At(paths.Current().Child("milk", "cost")).SetKey("price")
 				}
 
@@ -5943,7 +5953,9 @@ func TestDoc_Apply_FailedCall(t *testing.T) {
 
 				assert.Equal(t, tc.text, d.Text())
 				assert.Empty(t, d.Removals())
-				assert.Equal(t, tc.heldText, held.Scalar())
+
+				heldText, _ := held.Scalar()
+				assert.Equal(t, tc.heldText, heldText)
 
 				got, err := n.Decode[any](ctx)
 				require.NoError(t, err)
@@ -5980,7 +5992,10 @@ func TestDoc_Apply_NodeAfterItsApply(t *testing.T) {
 	assert.False(t, ok)
 	require.ErrorIs(t, err, edit.ErrEnded)
 	assert.Equal(t, niceyaml.NodeNone, kept.Kind())
-	assert.Empty(t, kept.Scalar())
+
+	text, ok := kept.Scalar()
+	assert.Empty(t, text)
+	assert.False(t, ok)
 	require.ErrorIs(t, kept.Set(t.Context(), 2), edit.ErrEnded)
 	require.ErrorIs(t, kept.Update(t.Context(), 2), edit.ErrEnded)
 	require.ErrorIs(t, kept.At(paths.Current().Child("b")).Set(t.Context(), 2), edit.ErrEnded)
@@ -12274,7 +12289,11 @@ func TestDoc_Apply_duplicateKeys(t *testing.T) {
 			err: `test.yaml:1:1: $.a: the edit removes $.a, which reaches "a", a key that its mapping repeats, and cafe does not edit the entries of a repeated key`,
 		},
 		"rename of each entry to a key of its own": {
-			fn:  func(_ context.Context, n *edit.Node) error { return n.SetKey(n.Key() + n.Scalar()) },
+			fn: func(_ context.Context, n *edit.Node) error {
+				text, _ := n.Scalar()
+
+				return n.SetKey(n.Key() + text)
+			},
 			err: `test.yaml:1:1: $.a: the edit renames $.a to "a1", which reaches "a", a key that its mapping repeats, and cafe does not edit the entries of a repeated key`,
 		},
 		"set of each entry": {
@@ -12305,7 +12324,7 @@ func TestDoc_Apply_duplicateKeys(t *testing.T) {
 			// It steps through the repeated key first, so the refusal of that
 			// key decides the problem.
 			fn: func(ctx context.Context, n *edit.Node) error {
-				if n.Scalar() != "1" {
+				if text, _ := n.Scalar(); text != "1" {
 					return nil
 				}
 
@@ -12328,7 +12347,8 @@ func TestDoc_Apply_duplicateKeys(t *testing.T) {
 			)
 
 			err := d.Apply(t.Context(), paths.MustParse("$.*"), func(ctx context.Context, n *edit.Node) error {
-				texts = append(texts, n.Scalar())
+				text, _ := n.Scalar()
+				texts = append(texts, text)
 
 				v, err := n.Decode[int](ctx)
 				require.NoError(t, err)
@@ -13144,7 +13164,8 @@ func TestWithProtected_PlainPath(t *testing.T) {
 			}
 
 			err = d.Apply(t.Context(), paths.MustParse(tc.path), func(ctx context.Context, n *edit.Node) error {
-				got = append(got, n.Scalar())
+				text, _ := n.Scalar()
+				got = append(got, text)
 
 				return n.At(at).Set(ctx, "v2")
 			})
