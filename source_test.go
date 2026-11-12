@@ -23,6 +23,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/parser"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -40,6 +41,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/kind"
+	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 var (
@@ -823,6 +825,54 @@ func TestSource_File_BlankLineBeforeFirstKey(t *testing.T) {
 
 			_, err = doc.Decode[struct{ B int }](t.Context(), niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject))
 			require.ErrorIs(t, err, niceyaml.ErrDecode)
+		})
+	}
+}
+
+func TestSource_File_SecondSource(t *testing.T) {
+	t.Parallel()
+
+	// The File of a second Source of the same text parses as File does,
+	// and no Node of the first Source shares it. The go-yaml parser
+	// accepts each text from ForParser only when go-yaml accepts it.
+	tcs := map[string]struct {
+		input string
+		// The error that the go-yaml parser reports for the stream that
+		// ForParser returns, or empty when it parses.
+		parserErr string
+	}{
+		"blank line of a tab": {
+			input: stringtest.LinesLF("\t", "key: v"),
+		},
+		"comment below a flow collection": {
+			input:     stringtest.LinesLF("[a, b]", "# trailing"),
+			parserErr: "value is not allowed in this context",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input)
+
+			shared, err := source.File()
+			require.NoError(t, err)
+
+			own, err := source.WithText(source.Text()).File()
+			require.NoError(t, err)
+
+			assert.NotSame(t, shared, own)
+			assert.Equal(t, shared.String(), own.String())
+
+			_, err = parser.Parse(tokens.ForParser(source.Tokens()), parser.ParseComments)
+			if tc.parserErr != "" {
+				require.ErrorContains(t, err, tc.parserErr)
+
+				return
+			}
+
+			require.NoError(t, err)
 		})
 	}
 }

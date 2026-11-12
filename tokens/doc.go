@@ -10,6 +10,19 @@
 //
 //	tks := tokens.Tokenize("key: value")
 //
+// # Parser Input
+//
+// The go-yaml parser rejects some valid documents in a stream from
+// [Tokenize], and in the tokens of a
+// [go.jacobcolvin.com/niceyaml.Source]. Hand the parser the stream that
+// [ForParser] returns:
+//
+//	f, err := parser.Parse(tokens.ForParser(src.Tokens()), parser.ParseComments)
+//
+// The parser then builds the tree that go-yaml builds from the text. For
+// the tree of [go.jacobcolvin.com/niceyaml.Source.File], take the File of
+// a second Source, as Source.File describes.
+//
 // # Line Endings
 //
 // The go-yaml lexer keeps line endings in a token's Origin and can split a

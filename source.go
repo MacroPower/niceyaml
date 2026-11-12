@@ -30,6 +30,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/pathindex"
 	"go.jacobcolvin.com/niceyaml/internal/quantity"
 	"go.jacobcolvin.com/niceyaml/internal/reftable"
+	"go.jacobcolvin.com/niceyaml/internal/reposition"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -921,7 +922,7 @@ func NewSourceFromString(src string, opts ...SourceOption) *Source {
 func newStringSource(src string, cfg sourceConfig) *Source {
 	// Nothing else holds the stream that Tokenize returns, so the Source
 	// shifts its tokens in place.
-	tks := tokens.ResetPositionsInPlace(tokens.Tokenize(src))
+	tks := reposition.Reset(tokens.Tokenize(src))
 	s := &Source{input: src, lines: line.NewLines(tks), sourceConfig: cfg}
 
 	// The lines hold each token of tks, and tks holds no nil token, so the
@@ -1579,6 +1580,15 @@ func (s *Source) DocumentAt(pos position.Position) (*Node, bool) {
 // Source builds them from its text with [tokens.Tokenize], so the Line and
 // Column of each token name the rune where its text starts.
 //
+// The go-yaml parser does not read these tokens as they are. It rejects
+// some valid documents in them, such as one with a tab on a blank line
+// ahead of the first key. Hand the parser the stream that
+// [tokens.ForParser] returns. The parser then builds the tree that go-yaml
+// builds from the text. Go-yaml rejects some documents that [Source.File]
+// accepts, such as one with a comment below a flow collection at its
+// root. For the tree that File builds, take the File of a second Source,
+// as Source.File describes.
+//
 // A nil Source does not hold any tokens, so Tokens returns nil for it.
 func (s *Source) Tokens() token.Tokens {
 	if s == nil {
@@ -1909,8 +1919,12 @@ func (s *Source) single() (*Node, error) {
 // parses the Source, and every later call returns the same tree or the
 // same error. Every [Node] of the Source shares the tree. [Node.At],
 // [Node.Ranges], and every error binding resolve against it, so a caller
-// must not modify it. A caller that edits a document parses a tree of
-// its own, or edits the text and builds a new Source.
+// must not modify it. For a tree to modify, take the File of a second
+// Source, as in src.WithText(src.Text()).File(). No Node of src shares
+// that tree, and the second Source parses it as File parses the tree of
+// src. A caller can also edit the document with the
+// [go.jacobcolvin.com/niceyaml/edit] package, or edit the text and build
+// a new Source.
 //
 // The tokens of the tree are copies of the tokens of the Source. The
 // Lines section of the package documentation describes how the copies

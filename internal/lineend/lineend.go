@@ -1,9 +1,9 @@
 // Package lineend holds the rule for where the go-yaml lexer ends a line.
 //
 // The lexer advances Position.Line on "\n", "\r\n", and a bare "\r", and
-// counts a CRLF as one line break. Code that cuts text into lines or counts
-// its line breaks to match the lexer's positions calls this package rather
-// than repeating the rule.
+// counts a CRLF as one line break. Code that cuts text into lines, counts
+// its line breaks, or moves a position across it to match the lexer's
+// positions calls this package rather than repeating the rule.
 //
 //	for ln := range lineend.Lines("a\r\nb\rc") {
 //		fmt.Printf("%q ", ln) // "a\r\n" "b\r" "c"
@@ -13,6 +13,7 @@ package lineend
 import (
 	"iter"
 	"strings"
+	"unicode/utf8"
 )
 
 // Lines yields the lines of s. It cuts each line after its line ending,
@@ -52,4 +53,28 @@ func Lines(s string) iter.Seq[string] {
 // "\n", and a bare "\r" as one break each.
 func CountBreaks(s string) int {
 	return strings.Count(s, "\n") + strings.Count(s, "\r") - strings.Count(s, "\r\n")
+}
+
+// Advance returns the line and column reached by moving from line and col
+// across s. A line break moves to column 1 of the next line, and any
+// other rune moves one column to the right.
+func Advance(line, col int, s string) (int, int) {
+	for ln := range Lines(s) {
+		text := strings.TrimRight(ln, "\r\n")
+		if len(text) < len(ln) {
+			line, col = line+1, 1
+
+			continue
+		}
+
+		col += utf8.RuneCountInString(text)
+	}
+
+	return line, col
+}
+
+// Trim returns s without its trailing line ending: "\n", "\r\n", or a
+// bare "\r".
+func Trim(s string) string {
+	return strings.TrimSuffix(strings.TrimSuffix(s, "\n"), "\r")
 }
