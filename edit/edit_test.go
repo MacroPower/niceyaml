@@ -581,10 +581,17 @@ func TestDoc_Apply_Empty(t *testing.T) {
 	tcs := map[string]struct {
 		path      paths.Path
 		protected []paths.Path
+		opts      []edit.ApplyOption
 		calls     int
 	}{
 		"root":           {path: paths.Doc(), calls: 1},
 		"protected root": {path: paths.Doc(), protected: []paths.Path{paths.Doc()}},
+		"protected root without protection": {
+			path:      paths.Doc(),
+			protected: []paths.Path{paths.Doc()},
+			opts:      []edit.ApplyOption{edit.WithoutProtection()},
+			calls:     1,
+		},
 		"protected name": {path: paths.Doc(), protected: []paths.Path{paths.Doc().Child("a")}, calls: 1},
 		"name":           {path: paths.Doc().Child("a")},
 		"index":          {path: paths.Doc().Index(0)},
@@ -606,7 +613,7 @@ func TestDoc_Apply_Empty(t *testing.T) {
 				calls++
 
 				return nil
-			})
+			}, tc.opts...)
 			require.NoError(t, err)
 			assert.Equal(t, tc.calls, calls)
 		})
@@ -648,6 +655,125 @@ func TestDoc_Apply_Empty(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "# c\na: 1\n", d.Text())
 		assert.True(t, d.Edited())
+	})
+}
+
+func TestDoc_Apply_WithoutProtection(t *testing.T) {
+	t.Parallel()
+
+	text := stringtest.LinesLF("apiVersion: v1", "kind: Cafe", "name: a")
+
+	// Each row runs fn at path with the options of the row, on a Doc whose
+	// type fields are protected.
+	tcs := map[string]struct {
+		path paths.Path
+		fn   edit.Func
+		opts []edit.ApplyOption
+		want string
+		err  string
+	}{
+		"set of a protected value": {
+			path: paths.Doc().Child("apiVersion"),
+			fn:   func(ctx context.Context, n *edit.Node) error { return n.Set(ctx, "v2") },
+			err:  "which is a protected value",
+		},
+		"set of a protected value without protection": {
+			path: paths.Doc().Child("apiVersion"),
+			fn:   func(ctx context.Context, n *edit.Node) error { return n.Set(ctx, "v2") },
+			opts: []edit.ApplyOption{edit.WithoutProtection()},
+			want: stringtest.LinesLF("apiVersion: v2", "kind: Cafe", "name: a"),
+		},
+		"removal of a protected value without protection": {
+			path: paths.Doc().Child("kind"),
+			fn:   func(_ context.Context, n *edit.Node) error { return n.Remove() },
+			opts: []edit.ApplyOption{edit.WithoutProtection(), label},
+			want: stringtest.LinesLF("apiVersion: v1", "name: a"),
+		},
+		"wildcard": {
+			// A path that selects more than one value passes over the
+			// protected values.
+			path: paths.Doc().ChildAll(),
+			fn:   func(ctx context.Context, n *edit.Node) error { return n.Set(ctx, "x") },
+			want: stringtest.LinesLF("apiVersion: v1", "kind: Cafe", "name: x"),
+		},
+		"wildcard without protection": {
+			path: paths.Doc().ChildAll(),
+			fn:   func(ctx context.Context, n *edit.Node) error { return n.Set(ctx, "x") },
+			opts: []edit.ApplyOption{edit.WithoutProtection()},
+			want: stringtest.LinesLF("apiVersion: x", "kind: x", "name: x"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d := newDoc(t, text)
+
+			err := d.Apply(t.Context(), tc.path, tc.fn, tc.opts...)
+			if tc.err != "" {
+				require.ErrorIs(t, err, edit.ErrProtected)
+				assert.Contains(t, niceyaml.FormatError(err), tc.err)
+				assert.Equal(t, text, d.Text())
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, d.Text())
+		})
+	}
+
+	t.Run("next Apply", func(t *testing.T) {
+		t.Parallel()
+
+		// The option covers one Apply, so the next Apply without it guards
+		// the values again.
+		d := newDoc(t, text)
+		at := paths.Doc().Child("apiVersion")
+
+		require.NoError(t, d.Apply(t.Context(), at, func(ctx context.Context, n *edit.Node) error {
+			return n.Set(ctx, "v2")
+		}, edit.WithoutProtection()))
+
+		err := d.Apply(t.Context(), at, func(ctx context.Context, n *edit.Node) error {
+			return n.Set(ctx, "v3")
+		})
+		require.ErrorIs(t, err, edit.ErrProtected)
+		assert.Equal(t, stringtest.LinesLF("apiVersion: v2", "kind: Cafe", "name: a"), d.Text())
+	})
+
+	t.Run("one Doc of a file", func(t *testing.T) {
+		t.Parallel()
+
+		// A framework runs a step under the protection, then writes the type
+		// field it protects in the same Doc. The Doc keeps one list of
+		// removals, and FileText writes the whole file.
+		src := niceyaml.NewSourceFromString(
+			stringtest.LinesLF("first: doc", "---", "apiVersion: v1", "old: 1", "---", "third: doc"),
+			niceyaml.WithName("test.yaml"),
+		)
+
+		d, err := edit.New(src.AllDocuments()[1], edit.WithProtected(typeFields...))
+		require.NoError(t, err)
+
+		err = d.Apply(t.Context(), paths.Doc().Child("old"), func(_ context.Context, n *edit.Node) error {
+			return n.Remove()
+		}, label)
+		require.NoError(t, err)
+
+		err = d.Apply(t.Context(), paths.Doc().Child("apiVersion"), func(ctx context.Context, n *edit.Node) error {
+			return n.Set(ctx, "v2")
+		}, label, edit.WithoutProtection())
+		require.NoError(t, err)
+
+		got, err := edit.FileText(src, d)
+		require.NoError(t, err)
+		assert.Equal(t, stringtest.LinesLF("first: doc", "---", "apiVersion: v2", "---", "third: doc"), got)
+
+		removals := d.Removals()
+		require.Len(t, removals, 1)
+		assert.Equal(t, "old", removals[0].Key)
 	})
 }
 

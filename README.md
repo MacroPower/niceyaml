@@ -184,7 +184,7 @@ The resolvers of a registry run in order, and the first one that does not declin
 - [examples/edits/rewrite](examples/edits/rewrite)
 - [examples/edits/guards](examples/edits/guards)
 
-[`edit.Doc`][niceyaml/edit.Doc] renames keys and sets, moves, and removes values. It keeps every byte that an edit leaves alone. The rewrite example edits a file and validates the result, so each error points at the line that the owner wrote. The guards example shows the checks that keep an edit from damaging a file. When an `Apply` fails, it drops every edit it made. Wildcards skip the protected keys.
+[`edit.Doc`][niceyaml/edit.Doc] renames keys and sets, moves, and removes values. It keeps every byte that an edit leaves alone. The rewrite example edits a file and validates the result, so each error points at the line that the owner wrote. The guards example shows the checks that keep an edit from damaging a file. When an `Apply` fails, it drops every edit it made. Wildcards skip the protected keys, and only an `Apply` with `edit.WithoutProtection` can change them.
 
 `edit.Node.Set` replaces a value whole, and it drops the comments inside the old value. `edit.Node.Update` writes a decoded and changed Go value back and rewrites only the text that changed, so the comments inside the value stay.
 

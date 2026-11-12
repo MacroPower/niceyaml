@@ -37,8 +37,8 @@ func main() {
 		return
 	}
 
-	// WithProtected protects the type fields from every Func. The type
-	// fields tell a loader what the document holds.
+	// WithProtected protects the type fields from the Func of each Apply.
+	// The type fields tell a loader what the document holds.
 	d, err := edit.New(doc, edit.WithProtected(paths.Doc().Child("apiVersion"), paths.Doc().Child("kind")))
 	if err != nil {
 		lipgloss.Println(p.PrintError(err))
@@ -145,6 +145,38 @@ func main() {
 	lipgloss.Println(p.PrintError(err))
 	fmt.Println("Protected:", errors.Is(err, edit.ErrProtected), "Invalid:", niceyaml.IsInvalid(err))
 
+	fmt.Println("\nWrite a protected value:")
+
+	// The program owns the type fields, so it writes the version that the
+	// edits migrate to in an Apply of its own. WithoutProtection lifts the
+	// guard for that one Apply, and the next Apply guards the fields again.
+	version := paths.Doc().Child("apiVersion")
+
+	err = d.Apply(ctx, version, func(ctx context.Context, n *edit.Node) error {
+		return n.Set(ctx, "cafe.jacobcolvin.com/v2")
+	}, label, edit.WithoutProtection())
+	if err != nil {
+		lipgloss.Println(p.PrintError(err))
+
+		return
+	}
+
+	stamp, err := d.Node().At(version)
+	if err != nil {
+		lipgloss.Println(p.PrintError(err))
+
+		return
+	}
+
+	apiVersion, err := stamp.Decode[string](ctx)
+	if err != nil {
+		lipgloss.Println(p.PrintError(err))
+
+		return
+	}
+
+	fmt.Println("The file declares", apiVersion)
+
 	fmt.Println("\nReplace an anchored value:")
 
 	// The milk entry defines the anchor that both drinks read. A Set there
@@ -233,8 +265,8 @@ func main() {
 	}
 
 	// Each Apply that failed left the Doc as it was. So the price rise, the
-	// new milk, the Sets of the aliases, and the removal are the only
-	// changes to the file. The Kaffe keeps the key cost, and the milk costs
-	// 7.
+	// new version, the new milk, the Sets of the aliases, and the removal
+	// are the only changes to the file. The Kaffe keeps the key cost, and
+	// the milk costs 7.
 	show()
 }
