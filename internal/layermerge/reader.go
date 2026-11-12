@@ -51,6 +51,9 @@ type Reader struct {
 	// Layer is the index of the layer among the layers the merge reads.
 	// Each value the read returns holds it as [Value.Layer].
 	Layer int
+	// Positions reports whether the errors of the layer report positions.
+	// [Value.ErrorLayer] prefers a layer that does.
+	Positions bool
 }
 
 // NodeError is the error of a node the reader cannot merge: an alias
@@ -206,7 +209,7 @@ func (r *Reader) anchor(alias *ast.AliasNode, ref bool) (*ast.AnchorNode, bool, 
 
 // content returns the value of content, a node [Reader.follow] found.
 func (r *Reader) content(content ast.Node, ref bool) (*Value, error) {
-	v := &Value{Layer: r.Layer}
+	v := &Value{Layer: r.Layer, shown: r.Layer, shows: r.Positions}
 
 	switch n := content.(type) {
 	case nil:

@@ -344,8 +344,9 @@ func (f *PlanFile) Header() string {
 
 // Diff returns the change of the file as a view of its hunks, with the
 // line numbers of the file and lines of context around each hunk. When
-// [niceyaml.WithExcerpts] hides the excerpts of the Source, the view holds
-// no rows, and [PlanFile.Stats] still counts the lines that change.
+// [niceyaml.Source.ShowsExcerpts] reports false, as [niceyaml.WithExcerpts]
+// and [niceyaml.WithPositions] set it, the view holds no rows, and
+// [PlanFile.Stats] still counts the lines that change.
 //
 // A printer renders the view with styles. [line.View.String] renders it
 // as plain text for a log, with a "-" beside each line the plan removes
@@ -369,9 +370,9 @@ func (f *PlanFile) Diff(ctx context.Context, lines int) (*line.View, error) {
 
 // Stats counts the lines that the plan removes from the file and the
 // lines that it adds, from the diff that [PlanFile.Diff] shows. It counts
-// them whether or not [niceyaml.WithExcerpts] hides the excerpts of the
-// Source, so a program that hides them can still print a count for each
-// file:
+// them whether or not [niceyaml.Source.ShowsExcerpts] reports true, so a
+// program that hides the excerpts of the Source can still print a count
+// for each file:
 //
 //	st, err := f.Stats(ctx)
 //	if err != nil {

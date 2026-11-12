@@ -1421,9 +1421,9 @@ func TestNewSourceFromLayers_Document_Excerpts(t *testing.T) {
 	t.Parallel()
 
 	var (
-		baseInput = stringtest.LinesLF("db:", "  host: db.internal")
-		prodInput = stringtest.LinesLF("db:", "  port: 5432")
-		envInput  = stringtest.LinesLF("db:", "  password: hunter2")
+		baseInput    = stringtest.LinesLF("db:", "  host: db.internal")
+		prodInput    = stringtest.LinesLF("db:", "  port: 5432")
+		secretsInput = stringtest.LinesLF("db:", "  password: hunter2")
 	)
 
 	shown := func(input, name string, opts ...niceyaml.SourceOption) *niceyaml.Node {
@@ -1450,15 +1450,15 @@ func TestNewSourceFromLayers_Document_Excerpts(t *testing.T) {
 			want:   true,
 		},
 		"the highest layer has excerpts off": {
-			layers: []*niceyaml.Node{shown(baseInput, "base.yaml"), off(envInput, "environment")},
+			layers: []*niceyaml.Node{shown(baseInput, "base.yaml"), off(secretsInput, "secrets.yaml")},
 		},
 		"the lowest layer has excerpts off": {
-			layers: []*niceyaml.Node{off(envInput, "environment"), shown(baseInput, "base.yaml")},
+			layers: []*niceyaml.Node{off(secretsInput, "secrets.yaml"), shown(baseInput, "base.yaml")},
 		},
 		"a layer between two others has excerpts off": {
 			layers: []*niceyaml.Node{
 				shown(baseInput, "base.yaml"),
-				off(envInput, "environment"),
+				off(secretsInput, "secrets.yaml"),
 				shown(prodInput, "prod.yaml"),
 			},
 		},
@@ -1467,7 +1467,7 @@ func TestNewSourceFromLayers_Document_Excerpts(t *testing.T) {
 				shown(baseInput, "base.yaml"),
 				yamltest.At(
 					t,
-					off(stringtest.LinesLF("defaults:", "  db: {password: hunter2}"), "environment"),
+					off(stringtest.LinesLF("defaults:", "  db: {password: hunter2}"), "secrets.yaml"),
 					paths.Doc().Child("defaults"),
 				),
 			},
@@ -1488,7 +1488,7 @@ func TestNewSourceFromLayers_Document_Excerpts(t *testing.T) {
 		},
 		"a merged layer holds a layer with excerpts off": {
 			layers: []*niceyaml.Node{
-				layersDocument(t, shown(baseInput, "base.yaml"), off(envInput, "environment")),
+				layersDocument(t, shown(baseInput, "base.yaml"), off(secretsInput, "secrets.yaml")),
 				shown(prodInput, "prod.yaml"),
 			},
 		},
@@ -2155,18 +2155,20 @@ func ExampleNewSourceFromLayers_environment() {
 		"server": map[string]any{"port": 0},
 	}
 
-	// A comment names the variable beside its value.
-	data, err := encoder.Marshal(ctx, overrides, encoder.WithYAMLComments(yaml.CommentMap{
-		"$.server.port": {yaml.LineComment(" APP_SERVER_PORT")},
-	}))
+	data, err := encoder.Marshal(ctx, overrides)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	env := niceyaml.NewSourceFromBytes(data, niceyaml.WithName("environment"))
+	// The program wrote the text, so its errors report no position in it.
+	env := niceyaml.NewSourceFromBytes(data,
+		niceyaml.WithName("environment"), niceyaml.WithPositions(false))
 
 	requires := schema.MustCompile([]byte(`{
-		"properties": {"server": {"required": ["host", "port"]}}
+		"properties": {"server": {
+			"required": ["host", "port", "tls"],
+			"properties": {"port": {"minimum": 1}}
+		}}
 	}`))
 
 	merged, err := niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{base, env})
@@ -2174,16 +2176,20 @@ func ExampleNewSourceFromLayers_environment() {
 		log.Fatal(err)
 	}
 
-	// The schema finds the port it requires in the environment, and the
-	// check of the server reports the port in that layer.
+	// The key that no layer sets binds in the file that holds the server,
+	// with an excerpt. The port binds in the environment by its path
+	// alone.
 	_, err = merged.Decode[layerConfig](ctx, niceyaml.WithValidator(requires))
 	fmt.Println(niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
 
 	// Output:
-	// environment:2:9: $.server.port: port must be at least 1
+	// base.yaml: 2 schema violations
+	// |-- 1:1: $.server.tls: missing required property "tls"
+	// `-- environment: $.server.port: 0 is less than 1
 	//
-	//    2 |   port: 0 # APP_SERVER_PORT
-	//      |         ^
+	// base.yaml
+	//    1 | server:
+	//      | ^^^^^^ missing required property "tls"
 }
 
 func ExampleMergeAs() {
@@ -6637,15 +6643,15 @@ func TestNewSourceFromLayers_Bind(t *testing.T) {
 func TestNewSourceFromLayers_ExcerptsOff(t *testing.T) {
 	t.Parallel()
 
-	// The environment sets a password alone, and its text must not show.
+	// A file of credentials sets a password alone, and its text must not show.
 	base := yamltest.FirstDocument(t,
 		stringtest.LinesLF("db:", "  host: db.internal", "  port: 0"),
 		niceyaml.WithName("base.yaml"),
 	)
-	env := yamltest.FirstDocument(t, stringtest.LinesLF("db:", "  password: hunter2"),
-		niceyaml.WithName("environment"), niceyaml.WithExcerpts(false))
+	secrets := yamltest.FirstDocument(t, stringtest.LinesLF("db:", "  password: hunter2"),
+		niceyaml.WithName("secrets.yaml"), niceyaml.WithExcerpts(false))
 
-	layers := yamltest.Layers(t, base, env)
+	layers := yamltest.Layers(t, base, secrets)
 	db := paths.Doc().Child("db")
 
 	requiresName := schema.MustCompile([]byte(`{
@@ -6674,14 +6680,15 @@ func TestNewSourceFromLayers_ExcerptsOff(t *testing.T) {
 		want string
 	}{
 		// No layer holds the name, so its error binds in the highest
-		// layer that holds the mapping, which is the environment.
-		"a key no layer holds prints no line of the environment": {
+		// layer that holds the mapping, which is secrets.yaml. Excerpts
+		// off do not move it, as positions off do.
+		"a key no layer holds prints no line of the secrets file": {
 			fail: validate(requiresName),
-			want: `environment:1:1: $.db.name: missing required property "name"`,
+			want: `secrets.yaml:1:1: $.db.name: missing required property "name"`,
 		},
-		"a value of the environment prints no line": {
+		"a value of the secrets file prints no line": {
 			fail: bind(niceyaml.NewError("too short", niceyaml.AtPath(db.Child("password")))),
-			want: "environment:2:13: $.db.password: too short",
+			want: "secrets.yaml:2:13: $.db.password: too short",
 		},
 		"a value of a file keeps its excerpt": {
 			fail: bind(niceyaml.NewError("port must be at least 1", niceyaml.AtPath(db.Child("port")))),
@@ -6699,7 +6706,7 @@ func TestNewSourceFromLayers_ExcerptsOff(t *testing.T) {
 			want: stringtest.JoinLF(
 				"base.yaml: 2 schema violations",
 				"|-- 3:9: $.db.port: 0 is less than 1",
-				"`-- environment:1:1: $.db.name: missing required property \"name\"",
+				"`-- secrets.yaml:1:1: $.db.name: missing required property \"name\"",
 				"",
 				"base.yaml",
 				"   1 | db:",
@@ -6746,7 +6753,7 @@ func TestNewSourceFromLayers_ExcerptsOff(t *testing.T) {
 				return yamltest.Document(t, layers).
 					Bind(niceyaml.NewError("too short", niceyaml.AtPosition(position.New(3, 12))))
 			},
-			want: "environment:2:13: too short",
+			want: "secrets.yaml:2:13: too short",
 		},
 	}
 
@@ -6764,6 +6771,257 @@ func TestNewSourceFromLayers_ExcerptsOff(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNewSourceFromLayers_PositionsOff(t *testing.T) {
+	t.Parallel()
+
+	// The program writes the environment, so a line of its text names
+	// nothing the user can open.
+	base := yamltest.FirstDocument(t,
+		stringtest.LinesLF("db:", "  host: db.internal", "  port: 0"),
+		niceyaml.WithName("base.yaml"),
+	)
+	env := yamltest.FirstDocument(t,
+		stringtest.LinesLF("db:", "  password: hunter2", "cache:", "  size: 0"),
+		niceyaml.WithName("environment"), niceyaml.WithPositions(false))
+
+	layers := yamltest.Layers(t, base, env)
+	db := paths.Doc().Child("db")
+
+	validate := func(schemaText string) func(t *testing.T) error {
+		return func(t *testing.T) error {
+			t.Helper()
+
+			v := schema.MustCompile([]byte(schemaText))
+			_, err := layers.Decode[map[string]any](t.Context(), niceyaml.WithValidator(v))
+
+			return err
+		}
+	}
+
+	bind := func(err error) func(t *testing.T) error {
+		return func(*testing.T) error { return layers.Bind(err) }
+	}
+
+	tcs := map[string]struct {
+		fail func(t *testing.T) error
+		want string
+	}{
+		"a key no layer holds binds in the file that holds the mapping": {
+			fail: validate(`{"properties": {"db": {"required": ["name"]}}}`),
+			want: stringtest.JoinLF(
+				`base.yaml:1:1: $.db.name: missing required property "name"`,
+				"",
+				"   1 | db:",
+				"     | ^^",
+				"   2 |   host: db.internal",
+				"   3 |   port: 0",
+			),
+		},
+		"a key of a mapping that only the environment holds binds there": {
+			fail: validate(`{"properties": {"cache": {"required": ["ttl"]}}}`),
+			want: `environment: $.cache.ttl: missing required property "ttl"`,
+		},
+		"a value of the environment binds there without a position": {
+			fail: bind(niceyaml.NewError("too short", niceyaml.AtPath(db.Child("password")))),
+			want: "environment: $.db.password: too short",
+		},
+		"errors in both layers print the excerpt of the file alone": {
+			fail: validate(`{"properties": {
+				"db": {"properties": {"port": {"minimum": 1}}},
+				"cache": {"properties": {"size": {"minimum": 1}}}
+			}}`),
+			want: stringtest.JoinLF(
+				"base.yaml: 2 schema violations",
+				"|-- 3:9: $.db.port: 0 is less than 1",
+				"`-- environment: $.cache.size: 0 is less than 1",
+				"",
+				"base.yaml",
+				"   1 | db:",
+				"   2 |   host: db.internal",
+				"   3 |   port: 0",
+				"     |         ^ 0 is less than 1",
+			),
+		},
+		"a position in the merged text binds without a position": {
+			fail: func(t *testing.T) error {
+				t.Helper()
+
+				return yamltest.Document(t, layers).
+					Bind(niceyaml.NewError("too short", niceyaml.AtPosition(position.New(3, 12))))
+			},
+			want: "environment: $.db.password: too short",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tc.fail(t)
+			require.Error(t, err)
+
+			assert.Equal(t, tc.want, niceyaml.FormatError(err))
+
+			for renderer, got := range renderings(err) {
+				assert.NotContains(t, got, "no excerpt", renderer)
+				assert.NotRegexp(t, `environment:\d`, got, renderer)
+				assert.NotContains(t, got, excerptSecret, renderer)
+			}
+		})
+	}
+
+	required := func(t *testing.T, layers *niceyaml.Source) string {
+		t.Helper()
+
+		v := schema.MustCompile([]byte(`{"properties": {"db": {"required": ["name"]}}}`))
+		_, err := layers.Decode[map[string]any](t.Context(), niceyaml.WithValidator(v))
+		require.Error(t, err)
+
+		return niceyaml.FormatError(err, niceyaml.WithContextLines(0))
+	}
+
+	t.Run("the merged Source reports positions when a layer does", func(t *testing.T) {
+		t.Parallel()
+
+		assert.True(t, layers.ReportsPositions())
+		assert.False(t, yamltest.Layers(t, env).ReportsPositions())
+	})
+
+	t.Run("a merged layer that reports positions holds the mapping", func(t *testing.T) {
+		t.Parallel()
+
+		// The merged layer reports positions through base.yaml, so the
+		// mapping binds in it, and from there in base.yaml.
+		flags := yamltest.FirstDocument(t, stringtest.LinesLF("db:", "  port: 5432"),
+			niceyaml.WithName("flags"), niceyaml.WithPositions(false))
+
+		got := required(t, yamltest.Layers(t, layers, flags))
+		assert.Equal(t, stringtest.JoinLF(
+			`base.yaml:1:1: $.db.name: missing required property "name"`,
+			"",
+			"   1 | db:",
+			"     | ^^",
+		), got)
+	})
+
+	t.Run("a nested merge binds as the flat merge does", func(t *testing.T) {
+		t.Parallel()
+
+		// Inside the merged layer, only the environment holds the cache, so
+		// a file below the merged layer holds the mapping for an error.
+		file := yamltest.FirstDocument(t, "cache: {ttl: 1}\n", niceyaml.WithName("file.yaml"))
+		v := schema.MustCompile([]byte(`{"properties": {"cache": {"required": ["name"]}}}`))
+		want := stringtest.JoinLF(
+			`file.yaml:1:1: $.cache.name: missing required property "name"`,
+			"",
+			"   1 | cache: {ttl: 1}",
+			"     | ^^^^^",
+		)
+
+		for name, merged := range map[string]*niceyaml.Source{
+			"flat":   yamltest.Layers(t, file, base, env),
+			"nested": yamltest.Layers(t, file, layers),
+		} {
+			_, err := merged.Decode[map[string]any](t.Context(), niceyaml.WithValidator(v))
+			require.Error(t, err, name)
+			assert.Equal(t, want, niceyaml.FormatError(err, niceyaml.WithContextLines(0)), name)
+		}
+	})
+
+	t.Run("a layer with positions off turns off the excerpts of the merge", func(t *testing.T) {
+		t.Parallel()
+
+		assert.False(t, layers.ShowsExcerpts())
+		assert.Contains(t, layers.Text(), excerptSecret)
+
+		// A reference document with positions off does the same.
+		ref := niceyaml.NewSourceFromString("secret: &secret hunter2\n",
+			niceyaml.WithName("environment"), niceyaml.WithPositions(false))
+		file := niceyaml.NewSourceFromString("db: {password: *secret}\n",
+			niceyaml.WithName("base.yaml"), niceyaml.WithReferences(ref))
+
+		assert.False(t, yamltest.Layers(t, file).ShowsExcerpts())
+	})
+
+	t.Run("a mapping only generated layers hold binds in the highest", func(t *testing.T) {
+		t.Parallel()
+
+		flags := yamltest.FirstDocument(t, stringtest.LinesLF("db:", "  port: 5432"),
+			niceyaml.WithName("flags"), niceyaml.WithPositions(false))
+
+		got := required(t, yamltest.Layers(t, env, flags))
+		assert.Equal(t, `flags: $.db.name: missing required property "name"`, got)
+	})
+
+	t.Run("a sequence that layers append to binds in the file", func(t *testing.T) {
+		t.Parallel()
+
+		plugins := paths.Doc().Child("plugins")
+		file := yamltest.FirstDocument(t, stringtest.LinesLF("plugins:", "  - lint"),
+			niceyaml.WithName("base.yaml"))
+		extra := yamltest.FirstDocument(t, stringtest.LinesLF("plugins:", "  - fmt"),
+			niceyaml.WithName("environment"), niceyaml.WithPositions(false))
+
+		merged, err := niceyaml.NewSourceFromLayers(t.Context(), []*niceyaml.Node{file, extra},
+			niceyaml.MergeAppend(plugins))
+		require.NoError(t, err)
+
+		err = merged.Bind(niceyaml.NewError("too many plugins", niceyaml.AtPath(plugins)))
+		assert.Equal(t, stringtest.JoinLF(
+			"base.yaml:1:1: $.plugins: too many plugins",
+			"",
+			"   1 | plugins:",
+			"     | ^^^^^^^",
+		), niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
+
+		err = merged.Bind(niceyaml.NewError("unknown plugin", niceyaml.AtPath(plugins.Index(1))))
+		assert.Equal(t, "environment: $.plugins[0]: unknown plugin", niceyaml.FormatError(err))
+
+		// A position in the merged text names the element by the index
+		// that the environment gives it.
+		require.Equal(t, "  - fmt", merged.Lines().Line(2).Content())
+
+		err = merged.Bind(niceyaml.NewError("unknown plugin", niceyaml.AtPosition(position.New(2, 4))))
+		assert.Equal(t, "environment: $.plugins[0]: unknown plugin", niceyaml.FormatError(err))
+	})
+
+	t.Run("the origin of a mapping lies in the file", func(t *testing.T) {
+		t.Parallel()
+
+		node, err := yamltest.Document(t, layers).At(db)
+		require.NoError(t, err)
+
+		origin, err := node.Origin()
+		require.NoError(t, err)
+		assert.Equal(t, "base.yaml", origin.Source().Name())
+
+		node, err = yamltest.Document(t, layers).At(paths.Doc().Child("cache"))
+		require.NoError(t, err)
+
+		origin, err = node.Origin()
+		require.NoError(t, err)
+		assert.Equal(t, "environment", origin.Source().Name())
+	})
+
+	t.Run("a bound error keeps the layer, the node, and the path", func(t *testing.T) {
+		t.Parallel()
+
+		err := layers.Bind(niceyaml.NewError("too short", niceyaml.AtPath(db.Child("password"))))
+		bound := yamltest.RequireSourceError(t, err)
+
+		assert.Same(t, env.Source(), bound.Source())
+		assert.Same(t, env, yamltest.BoundNode(t, bound))
+
+		path, ok := bound.Path()
+		require.True(t, ok)
+		assert.Equal(t, db.Child("password"), path)
+
+		_, ok = bound.Position()
+		assert.False(t, ok)
+		require.NoError(t, bound.Unresolved())
+	})
 }
 
 func TestNewSourceFromLayers_Alias(t *testing.T) {
