@@ -979,7 +979,7 @@ func (d *Doc) userHolder(off int) (note, bool) {
 
 	// The range of a value starts past its anchor and its tag. The item of
 	// a flow sequence starts at its first byte, which holds them.
-	if last.Kind == paths.SelectorIndex && comparePositions(pos, n.at.Start) < 0 {
+	if last.Kind == paths.SelectorIndex && pos.Compare(n.at.Start) < 0 {
 		n.at = position.NewRange(pos, n.at.End)
 	}
 

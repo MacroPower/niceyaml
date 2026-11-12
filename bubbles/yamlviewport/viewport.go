@@ -689,7 +689,7 @@ func (m *Model) remeasure(ranges ...position.Range) {
 
 	spans := make([]position.Span, 0, len(ranges))
 	for _, r := range ranges {
-		spans = append(spans, position.NewSpan(r.Start.Line, r.LastLine()+1))
+		spans = append(spans, r.LineSpan())
 	}
 
 	p := m.renderPrinter(m.paneWidth())
@@ -1661,7 +1661,7 @@ func (m *Model) updateSideBySideSearchState() {
 	// the inserted line that replaced it share a position, and the left
 	// pane's match comes first there.
 	slices.SortFunc(combined, func(a, b searchMatch) int {
-		if c := comparePos(a.rng.Start, b.rng.Start); c != 0 {
+		if c := a.rng.Start.Compare(b.rng.Start); c != 0 {
 			return c
 		}
 
@@ -1697,7 +1697,7 @@ func (m *Model) updateSearchState() {
 	// them into document order as the side-by-side path does.
 	m.leftMatches = heldMatches(m.baseLeft, find(m.index, m.searchTerm))
 	slices.SortStableFunc(m.leftMatches, func(a, b position.Range) int {
-		return comparePos(a.Start, b.Start)
+		return a.Start.Compare(b.Start)
 	})
 
 	m.rightMatches = nil
@@ -1706,12 +1706,6 @@ func (m *Model) updateSearchState() {
 	for _, rng := range m.leftMatches {
 		m.searchMatches = append(m.searchMatches, searchMatch{rng: rng})
 	}
-}
-
-// comparePos orders positions by line and then by column, the document
-// order that both search paths sort their matches into.
-func comparePos(a, b position.Position) int {
-	return cmp.Or(cmp.Compare(a.Line, b.Line), cmp.Compare(a.Col, b.Col))
 }
 
 // find returns the matches of search in idx. A [Searcher] can return a nil

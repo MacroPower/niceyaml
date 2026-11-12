@@ -1209,7 +1209,7 @@ func (d *Doc) userRange(start, end int) position.Range {
 		to = position.New(last.Line, last.Col+1)
 	}
 
-	if to.Line < from.Line || to.Line == from.Line && to.Col < from.Col {
+	if to.Compare(from) < 0 {
 		to = from
 	}
 
@@ -1232,7 +1232,7 @@ func (d *Doc) tailRange(rng position.Range) (position.Range, bool) {
 	shift := d.base + len(d.origLines) - 1 - last
 	end := rng.End
 
-	if end.Line < rng.Start.Line || end.Line == rng.Start.Line && end.Col < rng.Start.Col {
+	if end.Compare(rng.Start) < 0 {
 		end = rng.Start
 	}
 

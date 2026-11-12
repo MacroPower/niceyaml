@@ -1,6 +1,7 @@
 package position
 
 import (
+	"cmp"
 	"fmt"
 	"math"
 	"slices"
@@ -69,6 +70,18 @@ func (p Position) OneBased() string {
 	return oneBased(p.Line) + ":" + oneBased(p.Col)
 }
 
+// Compare orders the position against q by line, then by column. It
+// returns -1 when p comes before q, 0 when they are equal, and +1 when p
+// comes after q. To sort positions into document order, pass the method
+// expression position.Position.Compare to [slices.SortFunc].
+//
+// Two positions are comparable only when they come from the same content.
+// A position of a diff row and a position of a revision line name places
+// in different content, so their order does not mean anything.
+func (p Position) Compare(q Position) int {
+	return cmp.Or(cmp.Compare(p.Line, q.Line), cmp.Compare(p.Col, q.Col))
+}
+
 // oneBased returns the decimal text of n + 1. It prints [math.MaxInt] + 1
 // through a uint64, because the sum wraps to a negative int.
 func oneBased(n int) string {
@@ -95,17 +108,7 @@ func NewRange(start, end Position) Range {
 // The range is half-open [Start, End), where Start is inclusive and End is
 // exclusive.
 func (r Range) Contains(pos Position) bool {
-	// Before start?
-	if pos.Line < r.Start.Line || (pos.Line == r.Start.Line && pos.Col < r.Start.Col) {
-		return false
-	}
-
-	// At or after end?
-	if pos.Line > r.End.Line || (pos.Line == r.End.Line && pos.Col >= r.End.Col) {
-		return false
-	}
-
-	return true
+	return pos.Compare(r.Start) >= 0 && pos.Compare(r.End) < 0
 }
 
 // String returns the range as "startLine:startCol-endLine:endCol" with
@@ -137,11 +140,29 @@ func (r Range) LastLine() int {
 	return r.End.Line
 }
 
+// LineSpan returns the [Span] of the lines the [Range] covers, from
+// Start.Line through [Range.LastLine], inclusive. The span suits
+// [go.jacobcolvin.com/niceyaml/line.View.Slice] and the other functions
+// that take spans of lines.
+//
+// For an inverted range, which does not cover any line, LineSpan returns
+// the empty span at Start.Line. The End of the span saturates at
+// [math.MaxInt] instead of wrapping around. A half-open span cannot hold
+// line [math.MaxInt], so the span of a range whose last line is
+// [math.MaxInt] leaves that line out.
+func (r Range) LineSpan() Span {
+	if r.inverted() {
+		return NewSpan(r.Start.Line, r.Start.Line)
+	}
+
+	return NewSpan(r.Start.Line, addSat(r.LastLine(), 1))
+}
+
 // inverted reports whether the [Range] ends before its start, on an
 // earlier line or at an earlier column of the same line, so it does not
 // cover any line.
 func (r Range) inverted() bool {
-	return r.End.Line < r.Start.Line || r.End.Line == r.Start.Line && r.End.Col < r.Start.Col
+	return r.End.Compare(r.Start) < 0
 }
 
 // Span represents a half-open range [Start, End) of integers, such as a

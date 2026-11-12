@@ -390,7 +390,7 @@ func clampRange(lines line.Lines, r position.Range) position.Range {
 		r.End = position.New(last, lines.Line(last).Width())
 	}
 
-	if r.End.Line < r.Start.Line || (r.End.Line == r.Start.Line && r.End.Col < r.Start.Col) {
+	if r.End.Compare(r.Start) < 0 {
 		return position.NewRange(r.Start, r.Start)
 	}
 

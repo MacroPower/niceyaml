@@ -2106,10 +2106,8 @@ func comparePositioned(a, b positioned) int {
 		return 1
 	case !b.located:
 		return -1
-	case a.pos.Line != b.pos.Line:
-		return a.pos.Line - b.pos.Line
 	default:
-		return a.pos.Col - b.pos.Col
+		return a.pos.Compare(b.pos)
 	}
 }
 

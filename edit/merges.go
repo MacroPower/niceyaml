@@ -187,8 +187,3 @@ func (d *Doc) entryProblem(e *ast.MappingValueNode, path paths.Path, msg string,
 
 	return d.bindOwn(niceyaml.NewError(msg, opts...))
 }
-
-// comparePositions orders two positions by line, then by column.
-func comparePositions(a, b position.Position) int {
-	return cmp.Or(cmp.Compare(a.Line, b.Line), cmp.Compare(a.Col, b.Col))
-}
