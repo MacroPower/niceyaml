@@ -217,8 +217,11 @@
 //
 //	r := p.Render(view)
 //	layout := r.Layout()
-//	row := r.Rows()[layout.RowOf(pos)]
-//	window := p.Pad(printer.Cut(row, offset, offset+width), width)
+//	if at, ok := layout.RowOf(pos); ok {
+//		row := r.Rows()[at]
+//		window := p.Pad(printer.Cut(row, offset, offset+width), width)
+//		// ...
+//	}
 //
 // [Printer.RenderSideBySide] renders two views as panes beside each
 // other. Its [*SideBySide] holds the zipped rows, the rows of each pane,

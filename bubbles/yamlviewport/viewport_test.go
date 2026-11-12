@@ -2515,6 +2515,41 @@ func TestViewport_SideBySideAlignsRowsAbove(t *testing.T) {
 	}
 }
 
+func TestViewport_SideBySideAlignsFirstRows(t *testing.T) {
+	t.Parallel()
+
+	// A transform on the key adds text before column 0. That text wraps
+	// onto a row of its own, so two wrapped rows of the line start at
+	// column 0. The annotation above column 0 of the left pane sits above
+	// the second of them, below the first content row. The panes align on
+	// the rows above the first content row of the line. They thus match
+	// printer.Printer.RenderSideBySide, and the right pane gets no blank
+	// rows above the line.
+	styles := style.New(lipgloss.NewStyle(), style.Set(kind.NameTag, bracketStyle("longprefix=", "")))
+	p := testPrinterWithLineNumbers().With(printer.WithStyles(styles))
+
+	before := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1")).View()
+	after := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1")).View()
+
+	before.AnnotateLine(0, line.Annotation{Content: "x", Placement: line.Above, Cols: position.NewSpan(0, 1)})
+
+	m := testModel(p, 33, 3)
+	m.SetViewMode(yamlviewport.ViewModeSideBySide)
+	m.SetRevisions(yamlviewport.NewRevision("v1", before), yamlviewport.NewRevision("v2", after))
+
+	want := stringtest.JoinLF(
+		"   1  longprefi │    1  longprefi",
+		"      x         │    -  x=a: 1",
+		"   -  x=a: 1    │",
+	)
+	assert.Equal(t, want, plainRows(&m))
+
+	// The printer renders the same rows side by side at the same width.
+	wide := p.With(printer.WithWrapWidth(33))
+	printed := wide.RenderSideBySide(before, after).String()
+	assert.Equal(t, want, strings.TrimRight(stringtest.TrimLineEnds(ansi.Strip(printed)), "\n"))
+}
+
 func TestViewport_SideBySideFillerRowsKeepTheFrame(t *testing.T) {
 	t.Parallel()
 

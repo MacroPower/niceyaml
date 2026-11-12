@@ -32,8 +32,10 @@ const sideBySideSeparator = " │ "
 //
 //	s := p.RenderSideBySide(before, after)
 //	rows := s.Rows()
-//	top := s.LineStart(i)
-//	window := rows[top:min(top+height, len(rows))]
+//	if top, ok := s.LineStart(i); ok {
+//		window := rows[top:min(top+height, len(rows))]
+//		// ...
+//	}
 //
 // A pane fills the rows that only the other pane takes with filler rows,
 // which do not show a row of its view. [SideBySide.PaneRow] maps a zipped
@@ -231,15 +233,15 @@ func (s *SideBySide) position(i int) (int, bool) {
 	return slices.BinarySearch(s.indices, i)
 }
 
-// LineStart returns the first zipped row of line i of the content, or -1
-// when neither pane holds the line.
-func (s *SideBySide) LineStart(i int) int {
+// LineStart returns the first zipped row of line i of the content, and
+// true. It reports false when neither pane holds the line.
+func (s *SideBySide) LineStart(i int) (int, bool) {
 	k, ok := s.position(i)
 	if !ok {
-		return -1
+		return 0, false
 	}
 
-	return s.starts[k]
+	return s.starts[k], true
 }
 
 // LineRows returns the number of zipped rows line i of the content takes.
@@ -256,16 +258,16 @@ func (s *SideBySide) LineRows(i int) int {
 }
 
 // LineAt returns the index in the content of the line that holds zipped
-// row. A row before the first belongs to the first line, and a row past
-// the last belongs to the last line, as in [Layout.LineAt]. LineAt
-// returns -1 when neither pane holds a line.
-func (s *SideBySide) LineAt(row int) int {
+// row, and true. A row before the first belongs to the first line, and a
+// row past the last belongs to the last line, as in [Layout.LineAt].
+// LineAt reports false only when neither pane holds a line.
+func (s *SideBySide) LineAt(row int) (int, bool) {
 	n := len(s.indices)
 	if n == 0 {
-		return -1
+		return 0, false
 	}
 
-	return s.indices[rowIndex(s.starts[:n], row)]
+	return s.indices[rowIndex(s.starts[:n], row)], true
 }
 
 // PaneRow returns the row of a pane that zipped row shows, and true. The
@@ -294,7 +296,9 @@ func (s *SideBySide) PaneRow(right bool, row int) (int, bool) {
 		return 0, false
 	}
 
-	return layout.LineStart(i) + at, true
+	start, _ := layout.LineStart(i) // The pane holds line i, because it takes rows.
+
+	return start + at, true
 }
 
 // PaneStart returns the cell of a zipped row at which the left pane

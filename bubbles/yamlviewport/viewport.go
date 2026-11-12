@@ -1959,7 +1959,7 @@ func (c *rowCache) measure(layout printer.Layout, view *line.View, rows, widths,
 		if k, ok := slices.BinarySearch(c.indices, i); ok {
 			rows[k] = layout.LineRows(i)
 			widths[k] = layout.LineWidth(i)
-			above[k] = rowsAbove(layout, i)
+			above[k] = layout.LineLead(i)
 		}
 	}
 }
@@ -1975,18 +1975,12 @@ func (c *rowCache) differs(layout printer.Layout, view *line.View, rows, widths,
 			continue
 		}
 
-		if rows[k] != layout.LineRows(i) || widths[k] != layout.LineWidth(i) || above[k] != rowsAbove(layout, i) {
+		if rows[k] != layout.LineRows(i) || widths[k] != layout.LineWidth(i) || above[k] != layout.LineLead(i) {
 			return true
 		}
 	}
 
 	return false
-}
-
-// rowsAbove returns the rows that line i takes in layout above its first
-// content row, such as the rows of its annotations above it.
-func rowsAbove(layout printer.Layout, i int) int {
-	return layout.RowOf(position.New(i, 0)) - layout.LineStart(i)
 }
 
 // ensureRows fills the row count cache when it is empty, scrolls back to the
@@ -2273,7 +2267,7 @@ func layoutRows(layout printer.Layout, view *line.View) ([]int, []int, []int, []
 		indices = append(indices, i)
 		rows = append(rows, layout.LineRows(i))
 		widths = append(widths, layout.LineWidth(i))
-		above = append(above, rowsAbove(layout, i))
+		above = append(above, layout.LineLead(i))
 	}
 
 	return indices, rows, widths, above
@@ -2817,7 +2811,8 @@ func (m *Model) Shows(hit Hit) bool {
 	// takes the same cell. No X offset brings that cell on screen, so the last cell of the
 	// content stands in for it. The cell of every other column lies inside
 	// the content, so the clamp keeps it.
-	x := min(layout.GutterWidth()+layout.CellOf(pos), max(0, m.rowWidth()-1))
+	cell, _ := layout.CellOf(pos) // The layout holds the line, as paneRow reports.
+	x := min(layout.GutterWidth()+cell, max(0, m.rowWidth()-1))
 
 	return x >= m.xOffset && x < m.xOffset+m.scrollWidth()
 }
@@ -3119,8 +3114,8 @@ func (m *Model) paneRow(right bool, pos position.Position) (int, printer.Layout,
 	// the other pane has more rows above its first content row.
 	layout := m.renderPrinter(m.paneWidth()).Layout(m.highlightedWithin(right, position.NewSpan(i, i+1)))
 
-	lineRow := layout.RowOf(pos)
-	if lineRow < 0 {
+	lineRow, ok := layout.RowOf(pos)
+	if !ok {
 		return 0, printer.Layout{}, false
 	}
 
@@ -3183,8 +3178,11 @@ func (m *Model) scrollTo(target scrollTarget) bool {
 		end = position.New(i, view.Line(i).Width())
 	}
 
-	x := layout.GutterWidth() + layout.CellOf(rng.Start)
-	xEnd := layout.GutterWidth() + layout.CellOf(end)
+	// The layout holds line i, as paneRow reports.
+	startCell, _ := layout.CellOf(rng.Start)
+	endCell, _ := layout.CellOf(end)
+	x := layout.GutterWidth() + startCell
+	xEnd := layout.GutterWidth() + endCell
 
 	// A range that fits the first screen shows without scrolling, so the
 	// view keeps the gutter and the start of the line in sight.
