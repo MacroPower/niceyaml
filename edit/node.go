@@ -185,10 +185,10 @@ type selected struct {
 // or lies inside one, through any alias or merge key.
 func (d *Doc) matches(path paths.Path) ([]*Node, error) {
 	// An empty document holds no value, but its root is a place where a Set
-	// writes the first value. So `$` selects the root, unless a path of
-	// [WithProtected] protects it, and any other path selects nothing.
+	// writes the first value. So `$` selects the root, unless a guard of
+	// the Apply protects it, and any other path selects nothing.
 	if d.node.IsEmpty() {
-		if path.IsRoot() && !slices.ContainsFunc(d.cfg.protected, paths.Path.IsRoot) {
+		if path.IsRoot() && !slices.ContainsFunc(d.guards, (*guard).atRoot) {
 			return []*Node{d.newNode(paths.Doc())}, nil
 		}
 
@@ -454,6 +454,11 @@ type guard struct {
 	// Whether the node holds the protected value, rather than being it, for
 	// a path that a reference document decides.
 	holds bool
+}
+
+// atRoot reports whether g guards the root of the document.
+func (g *guard) atRoot() bool {
+	return g.path.IsRoot()
 }
 
 // guardValues gives the Apply that starts a guard for each path of
@@ -1577,12 +1582,13 @@ func (n *Node) At(path paths.Path) *Node {
 //
 // Nodes selects the places that [Doc.Apply] selects for path. In one call,
 // each entry and each item takes one node, however many aliases or `<<`
-// merge keys reach it. Nodes leaves out each place that holds no value. A
-// path that selects more than one value also leaves out each place that is
-// a protected value of [WithProtected] or lies inside one. The root of an
-// empty document is the one place without a value that a path selects, as
-// Apply describes. An `@` path from a node on an entry that a later entry
-// of its key hides reads below that entry, as Apply describes.
+// merge keys reach it. Nodes leaves out each place that holds no value. In
+// an Apply without [WithoutProtection], a path that selects more than one
+// value also leaves out each place that is a protected value of
+// [WithProtected] or lies inside one. The root of an empty document is the
+// one place without a value that a path selects, as Apply describes. An
+// `@` path from a node on an entry that a later entry of its key hides
+// reads below that entry, as Apply describes.
 //
 // The nodes of different calls of Nodes, and the nodes that Node.At
 // returns below them, can reach one entry or one item through an alias or

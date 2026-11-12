@@ -229,7 +229,8 @@
 // fails, as in "the edit sets $[1], but the document holds no $". A Set of `$`
 // with a slice writes a root sequence. Remove, SetKey, and Move at the root
 // fail, as they fail at the root of any document. A `$` path of [WithProtected]
-// protects the root, so an Apply of `$` then selects nothing.
+// protects the root, so an Apply of `$` then selects nothing, unless the Apply
+// runs with [WithoutProtection].
 //
 // The first value goes on block lines at the end of the text of the
 // document. Those lines go after its comment lines and before a "..."
@@ -765,8 +766,6 @@
 //     that holds an item takes the value before that item. A target at the
 //     path of the entry puts the entry where its placement option puts it
 //     in the same mapping.
-//   - The write of a protected field creates or replaces the field, first
-//     in its mapping.
 //
 // Go-yaml's parser compares the keys of a mapping by their text, as a path
 // names them. A call that writes a key that its mapping holds already fails
@@ -917,8 +916,7 @@
 // of the edited document as a load of the file counts them, with the
 // comments below a "..." marker in the document after the marker. The
 // calls read the text without the limits, so a later call can bring the
-// text back within a limit that an earlier call passed. The write of a
-// protected field keeps the limits too.
+// text back within a limit that an earlier call passed.
 //
 // An Apply whose last text breaks a limit fails with the message that the
 // Source gives such a text, as in "file is larger than 256 KiB". The error
@@ -1197,15 +1195,24 @@
 // # Protected Values
 //
 // [WithProtected] protects values, such as the type fields of a manifest,
-// from every Func. The edits are what the protection refuses, not the
-// selection. A path of Apply that selects more than one value, such as
-// `.*` or `..name`, passes over each protected value and each value inside
-// one. A sweep of the document thus leaves the type fields out. A path of
-// names and indexes alone selects a protected place, or a place inside
-// one, when the place holds a value. The Func then reads the value, and
-// each edit there fails, as an edit through [Node.At] fails. So a mistake
-// in such a path shows as an error rather than as an Apply that calls its
-// Func zero times.
+// from the Func of each Apply. The edits are what the protection refuses,
+// not the selection. A path of Apply that selects more than one value, such
+// as `.*` or `..name`, passes over each protected value and each value
+// inside one. A sweep of the document thus leaves the type fields out. A
+// path of names and indexes alone selects a protected place, or a place
+// inside one, when the place holds a value. The Func then reads the value,
+// and each edit there fails, as an edit through [Node.At] fails. So a
+// mistake in such a path shows as an error rather than as an Apply that
+// calls its Func zero times.
+//
+// [WithoutProtection] lifts the protection for one Apply. A framework that
+// runs the Funcs of others protects its type fields from them, and then
+// writes those fields in an Apply of its own with WithoutProtection. The
+// write stays in the one Doc, so [Doc.Removals] and [FileText] cover it
+// with the edits of the steps. A Func gets only a [Node], and an Apply that
+// a Func calls fails with [ErrNested], so only the owner of the Doc can
+// lift the protection. The next Apply without the option guards the values
+// again.
 //
 // A protected value is a node of the text, not a path. Each Apply protects
 // the node that each path reaches when the Apply starts, through any alias

@@ -10,18 +10,10 @@ package edithook
 import (
 	"context"
 
-	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
 var (
-	// Locator returns the locate function of d, a *edit.Doc. The function
-	// gives the place in the user's document of a location in the text of
-	// d, or in a copy of that text that keeps every line and column. A
-	// Source that niceyaml.NewSourceFromDerived builds from such a copy
-	// binds its errors in the user's document through it.
-	Locator func(d any) func(niceyaml.Located) niceyaml.Place
-
 	// Bounds returns the bytes [start, end) of the text of the Source of d,
 	// a *edit.Doc, that the text of d stands for. The function
 	// edit.FileText writes edit.Doc.Text in place of those bytes. A caller
@@ -32,17 +24,17 @@ var (
 	Bounds func(d any) (start, end int)
 
 	// SetField sets the protected type field at path of d, a *edit.Doc, to
-	// the string text, outside any Apply. It is the one write that reaches
-	// a value of edit.WithProtected, so the manifest package writes the
-	// type fields that its steps cannot touch. Messages name that edit by
-	// label. A scalar that the document writes keeps its style where text
-	// allows it, and it keeps its anchor, so each alias of the anchor reads
-	// the new value. A field that the document lacks goes first in its
-	// mapping, as edit.Node.Set with edit.First places it, after the
-	// comment lines at the top of the document. Where the document lacks
-	// the mapping too, the field goes in as edit.Node.Set creates a value,
-	// with the mappings above it that the document lacks, after the last
-	// entry of the mapping that takes them.
+	// the string text, outside any Apply. The write reaches a value of
+	// edit.WithProtected, as an Apply with edit.WithoutProtection does, so
+	// the manifest package writes the type fields that its steps cannot
+	// touch. Messages name that edit by label. A scalar that the document
+	// writes keeps its style where text allows it, and it keeps its anchor,
+	// so each alias of the anchor reads the new value. A field that the
+	// document lacks goes first in its mapping, as edit.Node.Set with
+	// edit.First places it, after the comment lines at the top of the
+	// document. Where the document lacks the mapping too, the field goes in
+	// as edit.Node.Set creates a value, with the mappings above it that the
+	// document lacks, after the last entry of the mapping that takes them.
 	//
 	// SetField fails with a problem of the document when a `<<` merge key
 	// brings in a name of path from a reference document. The problem

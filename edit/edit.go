@@ -357,8 +357,9 @@ func WithApp(name string) Option {
 // the Apply found it, so a call that creates a value there fails. A path
 // that a reference document decides protects the alias or the mapping
 // whose lookup reads that document, as a value that holds the protected
-// value. Each WithProtected adds to the paths before it. The Protected
-// Values section of the package documentation gives the rules.
+// value. Each WithProtected adds to the paths before it. An Apply with
+// [WithoutProtection] runs without the protection. The Protected Values
+// section of the package documentation gives the rules.
 func WithProtected(ps ...paths.Path) Option {
 	return func(c *config) {
 		c.protected = append(c.protected, ps...)
@@ -402,11 +403,14 @@ func WithMarshalers(ms ...encoder.Marshaler) Option {
 //
 // Options:
 //   - [WithLabel]
+//   - [WithoutProtection]
 type ApplyOption func(*applyConfig)
 
 // applyConfig holds the settings that each [ApplyOption] gives an Apply.
 type applyConfig struct {
 	label string
+	// Whether the Apply runs without the guards of [WithProtected].
+	unprotected bool
 }
 
 // WithLabel is an [ApplyOption] that names the edits of the Apply in its
@@ -416,6 +420,21 @@ type applyConfig struct {
 func WithLabel(label string) ApplyOption {
 	return func(c *applyConfig) {
 		c.label = label
+	}
+}
+
+// WithoutProtection is an [ApplyOption] that runs the Apply as if the Doc
+// had no paths of [WithProtected]. The Func can then edit a protected value
+// as it edits any other value, and a path that selects more than one value
+// selects the protected values too. Every other check of the Apply still
+// runs. The option covers one Apply, so the next Apply without it guards
+// the values again. A Func gets only a [Node], and an Apply that a Func
+// calls fails with [ErrNested], so only the owner of the Doc lifts the
+// protection, such as a framework that runs the Funcs of others and then
+// writes the type fields that it protects from them.
+func WithoutProtection() ApplyOption {
+	return func(c *applyConfig) {
+		c.unprotected = true
 	}
 }
 
@@ -931,17 +950,18 @@ func headerEnd(src *niceyaml.Source, line int) int {
 // an empty document is the one place without a value that a path selects.
 // The path `$` selects it, so fn writes the first value there, and every
 // other path selects nothing. A `$` path of [WithProtected] protects the
-// root, so `$` then selects nothing too.
+// root, so `$` then selects nothing too, unless the Apply runs with
+// [WithoutProtection].
 //
-// A path that selects more than one value, such as `.*`, `[*]`, `..name`,
-// or `..*`, passes over each place that is a protected value of
-// [WithProtected] or lies inside one. A path of names and indexes alone
-// selects such a place when it holds a value, so fn runs there and can
-// read the value. Each edit that fn makes there fails with an error that
-// matches [ErrProtected], as an edit through [Node.At] fails. So when
-// WithProtected protects `$.apiVersion`, an Apply at `$.apiVersion` whose
-// fn sets the value fails. The same Apply at `$.*` calls fn on each other
-// value of the root and passes.
+// In an Apply without [WithoutProtection], a path that selects more than
+// one value, such as `.*`, `[*]`, `..name`, or `..*`, passes over each
+// place that is a protected value of [WithProtected] or lies inside one. A
+// path of names and indexes alone selects such a place when it holds a
+// value, so fn runs there and can read the value. Each edit that fn makes
+// there fails with an error that matches [ErrProtected], as an edit
+// through [Node.At] fails. So when WithProtected protects `$.apiVersion`,
+// an Apply at `$.apiVersion` whose fn sets the value fails. The same Apply
+// at `$.*` calls fn on each other value of the root and passes.
 //
 // Each call sees the edits of the calls before it. A read after the write of
 // an earlier call thus reads the written value, through an alias too. Apply
@@ -1031,15 +1051,15 @@ func (d *Doc) Apply(ctx context.Context, path paths.Path, fn Func, opts ...Apply
 		d.endApply()
 	}()
 
-	err := d.run(ctx, path, fn, cfg.label)
+	err := d.run(ctx, path, fn, cfg)
 	passed = err == nil
 
 	return err
 }
 
-// run runs fn on each place that path selects, as the Apply that messages
-// name label, and checks the result.
-func (d *Doc) run(ctx context.Context, path paths.Path, fn Func, label string) error {
+// run runs fn on each place that path selects, as the Apply that cfg
+// describes, and checks the result.
+func (d *Doc) run(ctx context.Context, path paths.Path, fn Func, cfg applyConfig) error {
 	start := d.save()
 
 	// A text whose aliases take a decode past the alias limit fails with the
@@ -1051,8 +1071,11 @@ func (d *Doc) run(ctx context.Context, path paths.Path, fn Func, label string) e
 		}
 	}
 
-	d.begin(label)
-	d.guardValues()
+	d.begin(cfg.label)
+
+	if !cfg.unprotected {
+		d.guardValues()
+	}
 
 	nodes, err := d.matches(path)
 	if err != nil {
@@ -1274,6 +1297,14 @@ func FileText(src *niceyaml.Source, docs ...*Doc) (string, error) {
 // errors bind in the user's text. An error keeps the path that it names,
 // as the Errors section of the package documentation describes. During an
 // Apply, Node reads the document as [Doc.Text] does.
+//
+// A program that parses a copy of the text passes the node as the home of
+// [niceyaml.NewSourceFromDerived]. Each error of the copy then binds in
+// the user's text. A nil locate fits a copy that keeps every line and
+// column of the node:
+//
+//	n := d.Node()
+//	work := niceyaml.NewSourceFromDerived(n.Source().Text(), n, nil)
 func (d *Doc) Node() *niceyaml.Node {
 	return d.node
 }

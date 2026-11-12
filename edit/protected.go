@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/edithook"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -15,11 +14,6 @@ import (
 //
 //nolint:gochecknoinits // edithook cannot import edit, so edit sets the hooks when it loads.
 func init() {
-	edithook.Locator = func(d any) func(niceyaml.Located) niceyaml.Place {
-		doc, _ := d.(*Doc) //nolint:errcheck // The hook takes a *Doc.
-
-		return doc.locate
-	}
 	edithook.Bounds = func(d any) (int, int) {
 		doc, _ := d.(*Doc) //nolint:errcheck // The hook takes a *Doc.
 

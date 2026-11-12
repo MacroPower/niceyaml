@@ -55,7 +55,10 @@ type Place struct {
 // instead, at the place that locate gives for the location that the error
 // resolved in text. A message, an excerpt, and [ErrorTree.Name] thus show
 // the document that the user wrote. A nil locate keeps each location as
-// it is, for a text that keeps every line and column of home.
+// it is, for a text that keeps every line and column of home. Home can be
+// a document of a derived Source too. An error then binds in home, and it
+// moves on from there to the home of that Source, until it reaches a
+// Source that no program derived.
 //
 // The Source starts from the settings of the Source of home, its name,
 // its file path, its references, its unmarshalers, and its limits among

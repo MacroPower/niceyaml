@@ -23,7 +23,7 @@ import (
 // prepareWork builds it.
 func (d *docState) startWork() bool {
 	if len(d.l.reg.cfg.unmarshalers) > 0 && d.f.target.kind == inputhook.Source {
-		return d.prepareWork(d.doc, nil)
+		return d.prepareWork(d.doc)
 	}
 
 	d.work = d.doc
@@ -31,25 +31,22 @@ func (d *docState) startWork() bool {
 	return true
 }
 
-// prepareWork sets the working copy to a copy of doc, the document or a
-// migrated copy of it. Every line and column of the copy matches doc, so
-// locate moves a location of the copy, as doc places it, into the
-// document. A nil locate leaves the location as it is, for doc itself.
-// The copy takes the unmarshalers of the registry under those of the
-// Source of the document. It adds the problem of a copy that does not
-// parse, or that holds nothing, and reports false.
-func (d *docState) prepareWork(doc *niceyaml.Node, locate func(niceyaml.Located) niceyaml.Place) bool {
+// prepareWork sets the working copy to a copy of doc, the document or the
+// edit.Doc.Node of a migration of it. The copy holds the lines of doc
+// from the first line of its span, so each error of the copy binds in doc
+// at the line that holds its text. The error of a migrated copy moves on
+// from doc to the document, through the binding of its edit.Doc. The copy
+// takes the unmarshalers of the registry under those of the Source of the
+// document. It adds the problem of a copy that does not parse, or that
+// holds nothing, and reports false.
+func (d *docState) prepareWork(doc *niceyaml.Node) bool {
 	span := doc.Span()
 	us := slices.Concat(d.l.reg.cfg.unmarshalers, d.doc.Source().Unmarshalers())
 
-	working := niceyaml.NewSourceFromDerived(doc.Text(), d.doc, func(at niceyaml.Located) niceyaml.Place {
+	working := niceyaml.NewSourceFromDerived(doc.Text(), doc, func(at niceyaml.Located) niceyaml.Place {
 		if at.HasRange {
 			at.Range.Start.Line += span.Start
 			at.Range.End.Line += span.Start
-		}
-
-		if locate != nil {
-			return locate(at)
 		}
 
 		return niceyaml.Place{Path: at.Path, HasPath: at.HasPath, Range: at.Range, HasRange: at.HasRange}

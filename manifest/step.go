@@ -74,7 +74,7 @@ func (d *docState) migrate(ctx context.Context) bool {
 			d.earlyWarned = len(d.warned)
 		}
 
-		if !d.prepareWork(ed.Node(), edithook.Locator(ed)) {
+		if !d.prepareWork(ed.Node()) {
 			return false
 		}
 
