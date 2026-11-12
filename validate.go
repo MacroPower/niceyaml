@@ -58,9 +58,10 @@ import (
 //
 // The walk also applies the options in opts that say how a value decodes:
 // [WithUnmarshaler], [WithUnknownFields], [WithAllowedFieldPrefixes], and
-// [WithYAMLOrderedMaps]. It does not read any other option. The walk does
-// not report an unknown field, even under [UnknownFieldsWarn]. A caller
-// passes the options of the decode again.
+// [WithYAMLOrderedMaps]. It skips the methods of each type that
+// [WithSelfValidationOf] turns off. It does not read any other option.
+// The walk does not report an unknown field, even under
+// [UnknownFieldsWarn]. A caller passes the options of the decode again.
 //
 // In a document that did not parse, every error binds without a position.
 // SelfValidate returns those errors rather than the error that [Node.Err]
@@ -129,10 +130,11 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error 
 // [WithNodeCheck] gets a nil Node, because the value does not have a
 // document. SelfValidateValue
 // recognizes a type that decodes itself through its own unmarshaler
-// method or through an unmarshaler of [WithUnmarshaler] in opts. It does
-// not read any other option. The value does not have a [Source], so the
-// unmarshalers of [WithUnmarshalers] do not reach the walk. A caller
-// passes them in opts with WithUnmarshaler instead.
+// method or through an unmarshaler of [WithUnmarshaler] in opts. It skips
+// the methods of each type that [WithSelfValidationOf] in opts turns off.
+// It does not read any other option. The value does not have a [Source],
+// so the unmarshalers of [WithUnmarshalers] do not reach the walk. A
+// caller passes them in opts with WithUnmarshaler instead.
 //
 // A ValidateContext method of a [SelfValidatorContext] whose value holds
 // fields a decode does not reach, such as one tagged `yaml:"-"`,
@@ -1072,7 +1074,8 @@ func selfCheckOf(t reflect.Type) selfCheck {
 }
 
 // validate runs the method of v that [selfCheckOf] names, through a copy when v
-// is not addressable. It runs ValidateContext as it runs a function of
+// is not addressable, unless [WithSelfValidationOf] turned the methods of its
+// type off. It runs ValidateContext as it runs a function of
 // [WithValueCheck]. It then runs each function of the walk from WithValueCheck
 // and [WithNodeCheck] for the type of v, in order. Every check runs and reports
 // its own failure, whatever the checks before it return. Rebasing the error of
@@ -1087,7 +1090,12 @@ func (w *selfWalker) validate(v reflect.Value, at place) {
 
 	v = addressable(v)
 
-	switch selfCheckOf(v.Type()) {
+	method := selfCheckOf(v.Type())
+	if slices.Contains(w.cfg.methodsOff, v.Type()) {
+		method = noSelfCheck
+	}
+
+	switch method {
 	case contextSelfCheck:
 		validator, ok := reflect.TypeAssert[SelfValidatorContext](v.Addr())
 		if ok {
@@ -1442,8 +1450,8 @@ func (w *selfWalker) valueNode(node ast.Node, parsed bool) ast.Node {
 
 // SelfValidator is a type that validates itself after a decode.
 // [Node.Decode] and [Node.DecodeInto] call Validate on every value in the
-// result that implements it, through a value or a pointer receiver,
-// unless [WithSelfValidation] disables these calls. Validate reports a
+// result that implements it, through a value or a pointer receiver.
+// [WithSelfValidation] set to false disables these calls. Validate reports a
 // problem as an [*Error] with an `@` path, which reads from the value. A
 // type thus checks its invariants in one place and reports the right
 // lines in any document:
@@ -1488,6 +1496,12 @@ func (w *selfWalker) valueNode(node ast.Node, parsed bool) ast.Node {
 //
 // A type whose check needs the context of the call, such as one that
 // does I/O, implements [SelfValidatorContext] instead.
+//
+// The walk calls Validate on every type that declares it, including a type
+// of another module. Such a method might not follow these rules, or it
+// might serve another purpose, such as a check that must run after the
+// program provisions the value. [WithSelfValidationOf] turns off the
+// method of one type and keeps the rest of the walk.
 type SelfValidator interface {
 	Validate() error
 }
