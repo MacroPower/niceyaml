@@ -616,12 +616,12 @@ func (m *UnknownFieldsMode) UnmarshalText(text []byte) error {
 //     a string.
 //   - A key in a mapping whose `<<` merge key the decoder refuses.
 //
-// A map that a struct holds inline takes every key that no other field of
-// the struct reads. The struct thus does not have an unknown field. A
-// struct that decodes itself still decides for its own fields, because
-// its UnmarshalYAML method might not read the map. The search does not
-// read below the members of an inline map, so neither mode reports an
-// unknown field there.
+// A map that a struct holds inline takes every key of the mapping,
+// including the keys that other fields of the struct read. The struct
+// thus does not have an unknown field. A struct that decodes itself
+// still decides for its own fields, because its UnmarshalYAML method
+// might not read the map. The search does not read below the members of
+// an inline map, so neither mode reports an unknown field there.
 //
 // Under UnknownFieldsReject, the go-yaml decoder panics when the document
 // leads it to a struct that holds a map inline. The panic comes also from
@@ -737,6 +737,15 @@ func WithAllowedFieldPrefixes(prefixes ...string) DecodeOption {
 // keep it reports an unknown field. In the document shown, a type of
 // base with a type field thus has the decode report `$.nested.type~`
 // when the type of nested does not have one.
+//
+// A struct can hold inline a field of a type other than a struct, such
+// as a map, directly or through inline structs. That field takes every
+// key of the mapping, so the struct keeps each admitted key, and the
+// field holds the key under every [UnknownFieldsMode]. In the document
+// shown, a type of base that holds a map inline thus has the decode
+// report `$.nested.type~` when the type of nested does not have a field
+// for the key. An inline field that reads an anchor, as a
+// `yaml:",inline,alias"` tag sets, does not take the keys of the mapping.
 //
 // The decode leaves out each admitted key that no read keeps. A value
 // that decodes itself, such as one with an UnmarshalYAML method, does not

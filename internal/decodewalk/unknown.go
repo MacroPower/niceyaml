@@ -89,12 +89,13 @@ type UnknownField struct {
 // struct without an unknown field thus runs once more rather than once
 // more for each of its keys or aliases.
 //
-// An inline map takes every key that no other field reads. So a struct
-// that holds a map inline, or holds an inline struct that holds one at
-// any depth, does not have an unknown field. The search takes a key of
-// the mapping of such a struct as a candidate only when the struct
-// decodes itself, because its unmarshaler might not read the map. Such a
-// struct still decides for its own fields.
+// An inline map takes every key of the mapping, including the keys that
+// other fields read. So a struct that holds a map inline, or holds an
+// inline struct that holds one at any depth, does not have an unknown
+// field. The search takes a key of the mapping of such a struct as a
+// candidate only when the struct decodes itself, because its unmarshaler
+// might not read the map. Such a struct still decides for its own
+// fields.
 //
 // The search does not read below any other type that decodes itself,
 // below a struct that decodes itself held inline, or below the members of
@@ -125,8 +126,9 @@ func UnknownFields(ctx context.Context, r Rules, t reflect.Type, node ast.Node) 
 		var names map[string]bool
 
 		if !r.Unmarshalers.ReportsOwnError(v.Type) {
-			// An inline map takes each key that no field reads.
-			if inlinesMap(v.Type, map[reflect.Type]bool{}) {
+			// An inline map takes every key of the mapping, so the
+			// struct has no unknown field.
+			if yamlfield.InlinesMap(v.Type) {
 				return
 			}
 
@@ -363,31 +365,4 @@ func fieldNames(t reflect.Type, seen map[reflect.Type]bool) map[string]bool {
 	delete(seen, t)
 
 	return names
-}
-
-// inlinesMap reports whether t, a struct type, holds a map inline, as
-// [yamlfield.InlinesMap] reports, or holds a struct inline that does, at
-// any depth. The seen set holds the inline structs the walk is inside of,
-// so the walk stops at a struct that holds itself inline.
-func inlinesMap(t reflect.Type, seen map[reflect.Type]bool) bool {
-	if yamlfield.InlinesMap(t) {
-		return true
-	}
-
-	seen[t] = true
-	defer delete(seen, t)
-
-	for field := range t.Fields() {
-		_, inline, skip := yamlfield.Name(field)
-		if skip || !inline || yamlfield.ReadsAnchor(field) {
-			continue
-		}
-
-		inner := unmarshaler.Base(field.Type)
-		if inner.Kind() == reflect.Struct && !seen[inner] && inlinesMap(inner, seen) {
-			return true
-		}
-	}
-
-	return false
 }

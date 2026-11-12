@@ -128,13 +128,14 @@ func (n *Node) cutKeys(
 // keptKeys returns the keys of known that some read of a decode of node
 // into a value of type t keeps, with the rules and the unmarshalers u of
 // the decode. A struct keeps each key that it reads into a field, as
-// [keyField] finds the fields. A map or an interface keeps every key that
-// it reads. A value that the decoder rejects whole keeps each key below
-// it, such as a mapping where a slice reads a sequence. A struct leaves
-// out each other key that it reads. A value that decodes itself, as
-// [unmarshaler.Options.Whole] reports for u, does not keep any key below
-// it. Its unmarshaler thus reads a known key only when another read keeps
-// the key.
+// [keyField] finds the fields. A struct that holds a map inline thus
+// keeps every key that it reads. A map or an interface keeps every key
+// that it reads. A value that the decoder rejects whole keeps each key
+// below it, such as a mapping where a slice reads a sequence. A struct
+// leaves out each other key that it reads. A value that decodes itself,
+// as [unmarshaler.Options.Whole] reports for u, does not keep any key
+// below it. Its unmarshaler thus reads a known key only when another
+// read keeps the key.
 //
 // The walk follows each alias and each `<<` merge key, as
 // [decodewalk.Walk] describes. It thus finds a key in an anchored mapping
@@ -187,7 +188,7 @@ func (n *Node) keptKeys(
 					continue
 				}
 
-				if _, ok := keyField(u, v.Type, name, map[reflect.Type]bool{}); ok {
+				if keyField(v.Type, name) {
 					keep(entry)
 				}
 			}
@@ -327,18 +328,21 @@ func (c keyCut) readView(view func(ast.Node) ast.Node) func(ast.Node) ast.Node {
 	}
 }
 
-// keyField returns the type of the field that reads the key name in t, a
-// struct type. It returns false when t does not have such a field. The
-// field is one of t itself, or one of a struct that t holds inline, at
-// any depth, as [yamlfield.Name] names the fields. A field of t takes
-// precedence over a field of an inline struct, as it does in go-yaml.
-//
-// Some inline structs decode themselves, as [unmarshaler.Options.Whole]
-// reports for u. Each such struct reads its keys through its
-// unmarshaler, so for those keys keyField returns the type of the struct.
-// The seen set holds the structs that the search has read. The search
-// skips those structs, so it ends for a struct that holds itself inline.
-func keyField(u unmarshaler.Options, t reflect.Type, name string, seen map[reflect.Type]bool) (reflect.Type, bool) {
+// keyField reports whether a field of t, a struct type, reads the key
+// name. The field is one of t itself, or one of a struct that t holds
+// inline, at any depth, as [yamlfield.Name] names the fields. A map that
+// t holds inline at any depth, as [yamlfield.InlinesMap] reports, reads
+// every key of the mapping. So keyField reports true for each name when
+// t holds such a map.
+func keyField(t reflect.Type, name string) bool {
+	return yamlfield.InlinesMap(t) || namedField(t, name, map[reflect.Type]bool{})
+}
+
+// namedField reports whether a field of t, a struct type, or of a struct
+// that t holds inline, at any depth, has the name name. The seen set
+// holds the structs that the search has read. The search skips those
+// structs, so it ends for a struct that holds itself inline.
+func namedField(t reflect.Type, name string, seen map[reflect.Type]bool) bool {
 	seen[t] = true
 
 	var inline []reflect.Type
@@ -352,28 +356,17 @@ func keyField(u unmarshaler.Options, t reflect.Type, name string, seen map[refle
 		case isInline:
 			inline = append(inline, unmarshaler.Base(field.Type))
 		case own == name:
-			return field.Type, true
+			return true
 		}
 	}
 
 	for _, inner := range inline {
-		if inner.Kind() != reflect.Struct || seen[inner] {
-			continue
+		if inner.Kind() == reflect.Struct && !seen[inner] && namedField(inner, name, seen) {
+			return true
 		}
-
-		field, ok := keyField(u, inner, name, seen)
-		if !ok {
-			continue
-		}
-
-		if _, whole := u.Whole(inner); whole {
-			return inner, true
-		}
-
-		return field, true
 	}
 
-	return nil, false
+	return false
 }
 
 // keyCutter makes the [keyCut] of the view of a decode of n.

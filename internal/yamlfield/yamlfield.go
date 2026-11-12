@@ -8,7 +8,8 @@
 // fields of its parent. Go-yaml zeroes each such field whose name a field
 // of the parent that is not inline also uses. [OwnNames] returns the
 // names of the parent that zero such a field. An inline map takes every
-// entry of the mapping, and [InlinesMap] reports a struct that holds one.
+// entry of the mapping, and [InlinesMap] reports a struct that holds one,
+// directly or through inline structs.
 //
 // One kind of field does not read an entry of the mapping. An inline
 // field that carries an alias option gets the value of the anchor a `<<`
@@ -95,15 +96,26 @@ func IgnoresMerges(t reflect.Type) bool {
 }
 
 // InlinesMap reports whether t, a struct type, holds a field inline whose
-// type is neither a struct nor a pointer to one, such as a map. Such a
-// field takes every entry of the mapping. A field that [ReadsAnchor]
-// reports does not count, because it reads an anchor and not the entries.
-// The go-yaml decoder panics on such a field when it rejects unknown
-// fields.
+// type is neither a struct nor a pointer to one, such as a map, or holds
+// a struct inline that does, at any depth. Such a field takes every entry
+// of the mapping, including the entries that other fields read. A field
+// that [ReadsAnchor] reports does not count, because it reads an anchor
+// and not the entries. The search reads each inline struct once, so it
+// ends for a struct that holds itself inline.
 func InlinesMap(t reflect.Type) bool {
+	return inlinesMap(t, map[reflect.Type]bool{})
+}
+
+// inlinesMap is [InlinesMap] for a search that has read the structs in
+// seen.
+func inlinesMap(t reflect.Type, seen map[reflect.Type]bool) bool {
+	seen[t] = true
+
+	var inline []reflect.Type
+
 	for field := range t.Fields() {
-		_, inline, skip := Name(field)
-		if skip || !inline || ReadsAnchor(field) {
+		_, isInline, skip := Name(field)
+		if skip || !isInline || ReadsAnchor(field) {
 			continue
 		}
 
@@ -113,6 +125,14 @@ func InlinesMap(t reflect.Type) bool {
 		}
 
 		if inner.Kind() != reflect.Struct {
+			return true
+		}
+
+		inline = append(inline, inner)
+	}
+
+	for _, inner := range inline {
+		if !seen[inner] && inlinesMap(inner, seen) {
 			return true
 		}
 	}

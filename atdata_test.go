@@ -1502,8 +1502,8 @@ func (absolutePorts) Validate() error {
 	return niceyaml.Rebase(niceyaml.NewError("other", niceyaml.AtData("16")), paths.Doc().Child("other"))
 }
 
-// dataInlineMap holds a map inline, which takes the entries that no field
-// names.
+// dataInlineMap holds a map inline, which takes every entry of the mapping,
+// including the kind that its Kind field also reads.
 type dataInlineMap struct {
 	Extra map[string]dataPort `yaml:",inline"`
 	Kind  string              `yaml:"kind"`

@@ -790,8 +790,10 @@ func (w *selfWalker) dataStep(v reflect.Value, at place, name string, spelled bo
 // fieldNamed returns the field of v, a struct at the place at, that the
 // decode reads under name, and the place of that field. A field of the
 // struct itself wins over a field of an inline struct, as in the decode.
-// An inline map holds the entries that no field names, which
-// [selfWalker.entryNamed] finds by name and spelled.
+// An inline map holds every entry of the mapping, including the entries
+// that fields read. The search looks in an inline map, through
+// [selfWalker.entryNamed], only after the fields of the struct and of
+// each inline struct that comes before the map in field order.
 func (w *selfWalker) fieldNamed(v reflect.Value, at place, name string, spelled bool) (reflect.Value, place, bool) {
 	var inline []reflect.Value
 

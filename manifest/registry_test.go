@@ -85,7 +85,8 @@ type namedInline struct {
 	Extra Common `yaml:",inline"`
 }
 
-// looseItem holds each key that no other field reads in an inline map.
+// looseItem holds every key of the mapping in an inline map, including
+// the price that its Price field also reads.
 type looseItem struct {
 	Extra map[string]any `yaml:",inline"`
 	Price int            `json:"price"`
@@ -577,17 +578,16 @@ func TestNewRegistry_Layouts(t *testing.T) {
 			get:   oneValue[namedInline],
 			want:  namedInline{Extra: Common{Note: "hot"}},
 		},
-		// An inline map takes every key that no other field reads, so the
-		// load reports no unknown field under any mode. Under
-		// UnknownFieldsReject, the default, and UnknownFieldsWarn, the
-		// decode cuts the type fields out of its view, so the map leaves
-		// out apiVersion and kind. Under UnknownFieldsIgnore, the decode
-		// cuts nothing, so the map holds them.
+		// An inline map takes every key of the mapping, so the load
+		// reports no unknown field under any mode, and the map holds
+		// apiVersion and kind under every mode.
 		"inline map, unknown fields reject": {
 			opts:  withKinds(manifest.NewKind[looseItem]("Item", manifest.Singleton(), v1)),
 			input: "apiVersion: v1\nkind: Item\nprice: 3\nsize: large\n",
 			get:   oneValue[looseItem],
-			want:  looseItem{Price: 3, Extra: map[string]any{"price": uint64(3), "size": "large"}},
+			want: looseItem{Price: 3, Extra: map[string]any{
+				"apiVersion": "v1", "kind": "Item", "price": uint64(3), "size": "large",
+			}},
 		},
 		"inline map, unknown fields warn": {
 			opts: append(
@@ -596,7 +596,9 @@ func TestNewRegistry_Layouts(t *testing.T) {
 			),
 			input: "apiVersion: v1\nkind: Item\nprice: 3\nsize: large\n",
 			get:   oneValue[looseItem],
-			want:  looseItem{Price: 3, Extra: map[string]any{"price": uint64(3), "size": "large"}},
+			want: looseItem{Price: 3, Extra: map[string]any{
+				"apiVersion": "v1", "kind": "Item", "price": uint64(3), "size": "large",
+			}},
 		},
 		"inline map, unknown fields ignore": {
 			opts: append(

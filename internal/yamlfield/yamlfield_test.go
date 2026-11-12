@@ -166,6 +166,17 @@ func TestIgnoresMerges(t *testing.T) {
 	}
 }
 
+// mapHolder holds a map inline.
+type mapHolder struct {
+	Extra map[string]any `yaml:",inline"`
+}
+
+// selfHolder holds itself inline.
+type selfHolder struct {
+	Self *selfHolder `yaml:",inline"`
+	Port int         `yaml:"port"`
+}
+
 func TestInlinesMap(t *testing.T) {
 	t.Parallel()
 
@@ -208,6 +219,26 @@ func TestInlinesMap(t *testing.T) {
 				Inner *embedded `yaml:",inline"`
 			}](),
 		},
+		"map in an inline struct": {
+			typ: reflect.TypeFor[struct {
+				Holder mapHolder `yaml:",inline"`
+			}](),
+			want: true,
+		},
+		"map two inline structs deep": {
+			typ: reflect.TypeFor[struct {
+				Outer *struct {
+					Holder *mapHolder `yaml:",inline"`
+				} `yaml:",inline"`
+			}](),
+			want: true,
+		},
+		"map in an inline struct that reads an anchor": {
+			typ: reflect.TypeFor[struct {
+				Base mapHolder `yaml:",inline,alias"`
+			}](),
+		},
+		"struct that holds itself inline": {typ: reflect.TypeFor[selfHolder]()},
 		"map without inline": {
 			typ: reflect.TypeFor[struct {
 				Extra map[string]any `yaml:"extra"`

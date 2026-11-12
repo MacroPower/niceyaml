@@ -3046,6 +3046,202 @@ func TestWithAllowedFields(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, typed{Type: "x", Bucket: "b"}, got.Nested)
 	})
+
+	// A map that a struct holds inline takes every key of the mapping, even
+	// one that another field reads. It thus holds an admitted key under
+	// every mode, as it does when the decode admits nothing. An inline
+	// field of another type that is not a struct, such as an interface,
+	// takes every key too.
+	t.Run("an inline map holds an admitted key", func(t *testing.T) {
+		t.Parallel()
+
+		type loose struct {
+			Extra  map[string]any `yaml:",inline"`
+			Bucket string         `yaml:"bucket"`
+		}
+
+		type deep struct {
+			Loose *loose `yaml:",inline"`
+		}
+
+		type typedExtra struct {
+			Extra  map[string]string `yaml:",inline"`
+			Bucket string            `yaml:"bucket"`
+		}
+
+		type anyExtra struct {
+			Extra  any    `yaml:",inline"`
+			Bucket string `yaml:"bucket"`
+		}
+
+		input := "type: s3\nbucket: b\nnote: n\n"
+		want := map[string]any{"type": "s3", "bucket": "b", "note": "n"}
+
+		// Each read returns the inline map and the bucket field.
+		type read func(ctx context.Context, doc *niceyaml.Node, opts ...niceyaml.DecodeOption) (any, string, error)
+
+		reads := map[string]read{
+			"directly": func(ctx context.Context, doc *niceyaml.Node, opts ...niceyaml.DecodeOption) (any, string, error) {
+				got, err := doc.Decode[loose](ctx, opts...)
+
+				return got.Extra, got.Bucket, err
+			},
+			"through an inline struct": func(
+				ctx context.Context, doc *niceyaml.Node, opts ...niceyaml.DecodeOption,
+			) (any, string, error) {
+				got, err := doc.Decode[deep](ctx, opts...)
+				if got.Loose == nil {
+					return nil, "", err
+				}
+
+				return got.Loose.Extra, got.Loose.Bucket, err
+			},
+			"with typed values": func(ctx context.Context, doc *niceyaml.Node, opts ...niceyaml.DecodeOption) (any, string, error) {
+				got, err := doc.Decode[typedExtra](ctx, opts...)
+
+				extra := map[string]any{}
+				for k, v := range got.Extra {
+					extra[k] = v
+				}
+
+				return extra, got.Bucket, err
+			},
+			"into an interface": func(ctx context.Context, doc *niceyaml.Node, opts ...niceyaml.DecodeOption) (any, string, error) {
+				got, err := doc.Decode[anyExtra](ctx, opts...)
+
+				return got.Extra, got.Bucket, err
+			},
+		}
+
+		modes := []niceyaml.UnknownFieldsMode{
+			niceyaml.UnknownFieldsReject,
+			niceyaml.UnknownFieldsWarn,
+			niceyaml.UnknownFieldsIgnore,
+		}
+
+		for name, read := range reads {
+			for _, mode := range modes {
+				t.Run(name+", "+mode.String(), func(t *testing.T) {
+					t.Parallel()
+
+					doc := yamltest.FirstDocument(t, input)
+					warnings := niceyaml.NewWarnings()
+
+					got, bucket, err := read(warnings.Context(t.Context()), doc,
+						niceyaml.WithUnknownFields(mode), niceyaml.WithAllowedFields(rootType))
+					require.NoError(t, err)
+					require.NoError(t, warnings.Err())
+					assert.Equal(t, want, got)
+					assert.Equal(t, "b", bucket)
+				})
+			}
+		}
+	})
+
+	// A `<<` merge key brings the admitted key of an anchor into the
+	// mapping, and the inline map takes it there. The map also holds the
+	// anchored mapping under base, with the key in it.
+	t.Run("an inline map holds an admitted key that a merge key brings in", func(t *testing.T) {
+		t.Parallel()
+
+		type loose struct {
+			Extra  map[string]any `yaml:",inline"`
+			Bucket string         `yaml:"bucket"`
+		}
+
+		modes := []niceyaml.UnknownFieldsMode{
+			niceyaml.UnknownFieldsReject,
+			niceyaml.UnknownFieldsWarn,
+			niceyaml.UnknownFieldsIgnore,
+		}
+
+		want := map[string]any{"base": map[string]any{"type": "s3"}, "type": "s3", "bucket": "x"}
+
+		for _, mode := range modes {
+			t.Run(mode.String(), func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, "base: &b\n  type: s3\n<<: *b\nbucket: x\n")
+				warnings := niceyaml.NewWarnings()
+
+				got, err := doc.Decode[loose](warnings.Context(t.Context()),
+					niceyaml.WithUnknownFields(mode), niceyaml.WithAllowedFields(paths.Doc().Child("base", "type")))
+				require.NoError(t, err)
+				require.NoError(t, warnings.Err())
+				assert.Equal(t, want, got.Extra)
+				assert.Equal(t, "x", got.Bucket)
+			})
+		}
+	})
+
+	// A struct that holds a map inline keeps the admitted key of an anchor
+	// that it reads. A struct without a field for the key that reads the
+	// same anchor through an alias then reports the key.
+	t.Run("an inline map and a strict struct share an anchor", func(t *testing.T) {
+		t.Parallel()
+
+		type loose struct {
+			Extra  map[string]any `yaml:",inline"`
+			Bucket string         `yaml:"bucket"`
+		}
+
+		type shared struct {
+			A loose `yaml:"a"`
+			B struct {
+				Bucket string `yaml:"bucket"`
+			} `yaml:"b"`
+		}
+
+		doc := yamltest.FirstDocument(t, "a: &x\n  type: s3\n  bucket: b\nb: *x\n")
+		allowed := niceyaml.WithAllowedFields(paths.Doc().Child("a", "type"))
+		want := map[string]any{"type": "s3", "bucket": "b"}
+
+		_, err := doc.Decode[shared](t.Context(), strict, allowed)
+		require.EqualError(t, err, `2:3: $.b.type~: unknown field "type"`)
+
+		w := niceyaml.NewWarnings()
+		got, err := doc.Decode[shared](w.Context(t.Context()),
+			niceyaml.WithUnknownFields(niceyaml.UnknownFieldsWarn), allowed)
+		require.NoError(t, err)
+		assert.Equal(t, want, got.A.Extra)
+		assert.Equal(t, "b", got.B.Bucket)
+		require.EqualError(t, w.Err(), `2:3: warning: $.b.type~: unknown field "type"`)
+
+		got, err = doc.Decode[shared](t.Context(),
+			niceyaml.WithUnknownFields(niceyaml.UnknownFieldsIgnore), allowed)
+		require.NoError(t, err)
+		assert.Equal(t, want, got.A.Extra)
+		assert.Equal(t, "b", got.B.Bucket)
+	})
+
+	// The inline map takes the admitted key under every mode, so a map
+	// whose value type cannot hold the value of the key fails the decode.
+	t.Run("an inline map whose values cannot hold an admitted key", func(t *testing.T) {
+		t.Parallel()
+
+		type counts struct {
+			Extra map[string]int `yaml:",inline"`
+		}
+
+		modes := []niceyaml.UnknownFieldsMode{
+			niceyaml.UnknownFieldsReject,
+			niceyaml.UnknownFieldsWarn,
+			niceyaml.UnknownFieldsIgnore,
+		}
+
+		for _, mode := range modes {
+			t.Run(mode.String(), func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, "a: 1\ntype: s3\n")
+				warnings := niceyaml.NewWarnings()
+
+				_, err := doc.Decode[counts](warnings.Context(t.Context()),
+					niceyaml.WithUnknownFields(mode), niceyaml.WithAllowedFields(rootType))
+				require.EqualError(t, err, "2:7: $.type: expected integer, got string")
+			})
+		}
+	})
 }
 
 // anchorReader reads an anchored mapping at base as a B. It reads the
@@ -11330,7 +11526,7 @@ type strictJSON strictOption
 
 func (*strictJSON) UnmarshalJSON([]byte) error { return nil }
 
-// strictLoose holds each key that no other field reads in an inline map.
+// strictLoose holds every key of the mapping in an inline map.
 type strictLoose struct {
 	Extra map[string]any `yaml:",inline"`
 	In    strictInner    `yaml:"in"`
@@ -12154,8 +12350,8 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 			}](),
 			input: "foo: 1\nbar: 2\n",
 		},
-		// An inline map takes every key that no other field reads, so its
-		// struct has no unknown field.
+		// An inline map takes every key of the mapping, so its struct has
+		// no unknown field.
 		"inline map": {
 			decode: decodeAs[strictLoose](strict),
 			input:  "port: 2\nfoo: bar\n",
