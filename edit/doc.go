@@ -53,7 +53,20 @@
 //
 // Renames, sets, and moves keep the comments of the entry that they
 // change, but a move into a flow collection drops them. Removals delete
-// them with the entry.
+// them with the entry. A Func reads those comments with [Node.HeadComment]
+// and [Node.LineComment], and it writes them with [Node.SetHeadComment]
+// and [Node.SetLineComment]. A Func that adds a note only once thus tests
+// the comment first:
+//
+//	if len(n.HeadComment()) == 0 {
+//		return n.SetHeadComment("moved from spec.wait by v2")
+//	}
+//
+// That test does not hold at the first entry or item of the document. The
+// lines written there reach the top of the document, so they belong to the
+// document, and HeadComment reads none there, as [Node.SetHeadComment]
+// describes.
+//
 // The comment lines after an entry or an item that the user indented past
 // its key or its "-" belong to it, so a new entry or item goes after them.
 // A new entry goes after the last entry of its mapping, or where [First],
@@ -145,16 +158,17 @@
 // stops the selector, as [go.jacobcolvin.com/niceyaml.Node.Nodes] binds it,
 // under the path of the value that holds the alias.
 //
-// Each edit through such a path fails. [Node.Decode] and [Node.Exists]
-// there return the error of the path, and [Node.Kind], [Node.Len], and
-// [Node.Scalar] answer as at a place that does not hold a value. A Func tells
-// such a place from a place without a value by the error of Exists. It reads
-// the value through the alias, or through the mapping that holds the merge
-// key, whose Decode reads the entries that the merge key brings in. The
-// References section of the go.jacobcolvin.com/niceyaml package describes
-// both. The root package binds the error of such a path as no fault of the
-// document. The edit package binds it as a problem of the edit, whether a
-// read, the path of an Apply, or a call meets it.
+// Each edit through such a path fails. [Node.Decode] and [Node.Exists] there
+// return the error of the path. [Node.Kind], [Node.Len], [Node.Scalar],
+// [Node.HeadComment], and [Node.LineComment] answer as at a place that does
+// not hold a value. A Func tells such a place from a place without a value
+// by the error of Exists. It reads the value through the alias, or through
+// the mapping that holds the merge key, whose Decode reads the entries that
+// the merge key brings in. The References section of the
+// go.jacobcolvin.com/niceyaml package describes both. The root package binds
+// the error of such a path as no fault of the document. The edit package
+// binds it as a problem of the edit, whether a read, the path of an Apply,
+// or a call meets it.
 // [go.jacobcolvin.com/niceyaml.IsInvalid] thus reports true for it, as for
 // a Set below a scalar.
 //
@@ -484,18 +498,24 @@
 // keeps them.
 //
 // A merge key in a refused form, a repeated key, and an explicit key each
-// hold a part of the text. So do a key that reads as another value than
-// its text, a comment inside a flow collection, and a pair without braces.
-// A call reaches such a construct when its place lies in that
-// part. So does a call whose path steps through the part, and a call whose
-// place the text lacks, where the deepest value on its path lies in the
-// part. A SetKey reaches only the key
-// and the values above it. A call that takes the whole part does not reach
-// it, such as a Remove or a Set of a value that holds it. A Move of such a
-// value reaches the part, because the Move writes the value again at its
-// target. The part of a merge key in a refused form holds the key sets of
-// its mapping and of each mapping that it brings in. A call reaches such a
-// part when it creates, removes, renames, or moves an entry there, or when
+// hold a part of the text. So do a key that reads as another value than its
+// text, a comment inside a flow collection, and a pair without braces. A
+// call reaches such a construct when its place lies in that part. So does a
+// call whose path steps through the part, and a call whose place the text
+// lacks, where the deepest value on its path lies in the part. A SetKey
+// reaches only the key and the values above it. [Node.SetHeadComment] and
+// [Node.SetLineComment] reach what a SetKey reaches. A SetLineComment of an
+// item whose mapping or sequence starts on the line of its "-" also reaches
+// what a SetLineComment of the first entry or item of that collection
+// reaches. The first entry of a mapping that starts on the line of the "-"
+// of an item takes its head comment from that item. So a SetHeadComment of
+// that entry also reaches what a SetHeadComment of the item reaches, at the
+// path of the item in the text. A call that takes the whole part does not
+// reach it, such as a Remove or a Set of a value that holds it. A Move of
+// such a value reaches the part, because the Move writes the value again at
+// its target. The part of a merge key in a refused form holds the key sets
+// of its mapping and of each mapping that it brings in. A call reaches such
+// a part when it creates, removes, renames, or moves an entry there, or when
 // its path looks a key up through the merge key. A Set of the value of an
 // existing key there passes. A read never reaches a refused construct, so a
 // read of such a part passes.
@@ -724,12 +744,13 @@
 // passes in the same Apply.
 //
 // [Node.At], [Node.Nodes], [Node.Exists], [Node.Decode], [Node.DecodeInto],
-// [Node.Scalar], [Node.Kind], and [Node.Len] are reads. Nodes, Exists,
-// Decode, and DecodeInto return the problem of a read that cannot answer to
-// the Func. Scalar, Kind, and Len answer as they do for a place that does
-// not hold a value. A Func that must tell the two apart calls Exists first.
-// The decode of a place that does not hold a value has a problem, which
-// matches [go.jacobcolvin.com/niceyaml/paths.ErrNotFound]. A read through a node of
+// [Node.Scalar], [Node.Kind], [Node.Len], [Node.HeadComment], and
+// [Node.LineComment] are reads. Nodes, Exists, Decode, and DecodeInto return
+// the problem of a read that cannot answer to the Func. Scalar, Kind, Len,
+// HeadComment, and LineComment answer as they do for a place that does not
+// hold a value. A Func that must tell the two apart calls Exists first. The
+// decode of a place that does not hold a value has a problem, which matches
+// [go.jacobcolvin.com/niceyaml/paths.ErrNotFound]. A read through a node of
 // At at a path that selects more than one value or a key has a problem, and
 // so does a Nodes of a path that selects a key. So does a read at a path
 // that a reference document decides, as the Edits section describes. A
@@ -781,6 +802,8 @@
 //     that holds an item takes the value before that item. A target at the
 //     path of the entry puts the entry where its placement option puts it
 //     in the same mapping.
+//   - [Node.SetHeadComment] and [Node.SetLineComment] leave the model as
+//     it is, because they change no value.
 //
 // Go-yaml's parser compares the keys of a mapping by their text, as a path
 // names them. A call that writes a key that its mapping holds already fails
@@ -1233,13 +1256,17 @@
 // or `<<` merge key, so two paths that reach one node protect it alike. The
 // node keeps its protection where only a path through an alias names it,
 // such as an entry of a `<<` merge source that the mapping of the merge key
-// hides. A call fails when it changes the text of a protected value,
-// removes it, renames its key, or writes inside it, through any path. A
-// set, a move, or a removal of a value that holds a protected value fails
-// too, because it takes the protected value out of its place. A rename of
-// such a value passes, and the protected value keeps its text under the new
-// path. The error of such a call matches [ErrProtected], and
-// [go.jacobcolvin.com/niceyaml.IsInvalid] reports false for it, because
+// hides. A call fails when it changes the text of a protected value, removes
+// it, renames its key, or writes inside it, through any path. A
+// [Node.SetHeadComment] or a [Node.SetLineComment] of a protected value, or
+// of a place inside one, fails too. A SetLineComment of an item whose
+// mapping or sequence starts on the line of its "-" writes the comment of
+// the first entry or item there. So it fails when the Apply protects that
+// entry or item. A set, a move, or a removal of a value that holds a
+// protected value fails too, because it takes the protected value out of its
+// place. A rename of such a value passes, and the protected value keeps its
+// text under the new path. The error of such a call matches [ErrProtected],
+// and [go.jacobcolvin.com/niceyaml.IsInvalid] reports false for it, because
 // the program declares the protected values and writes the calls.
 //
 // A call that sets, renames, or removes an alias or a merge key that only

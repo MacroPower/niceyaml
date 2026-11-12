@@ -1781,6 +1781,10 @@ const (
 	callRemove
 	// A callMove call moves the entry or the item at its place to a target.
 	callMove
+	// A callComment call writes a comment of the entry or the item at its
+	// place. It takes no value and changes no key, so it reaches what a
+	// callKey call reaches through the values above its place and the key.
+	callComment
 )
 
 // reachCall is a call whose reach [Doc.reachProblem] checks.
@@ -2034,7 +2038,7 @@ func (d *Doc) takenSpan(w *callWalk, kind callKind) (span, bool) {
 	}
 
 	switch kind {
-	case callKey:
+	case callKey, callComment:
 		return span{}, false
 
 	case callRemove, callMove:
@@ -2196,6 +2200,8 @@ func (d *Doc) keyChanges(c reachCall, w, tw *callWalk, skipMerge bool) []keyChan
 		}
 
 		created(tw)
+
+	case callComment:
 	}
 
 	return out
@@ -2365,7 +2371,7 @@ func (d *Doc) spansStep(
 		step, onPath = w.stepOf(len(w.steps)-1), true
 	}
 
-	if at, ok := d.walksIn(z, spans, w, c.kind == callKey); !whole && ok {
+	if at, ok := d.walksIn(z, spans, w, c.kind == callKey || c.kind == callComment); !whole && ok {
 		step, onPath = min(step, at), true
 	}
 

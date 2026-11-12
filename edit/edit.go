@@ -109,6 +109,9 @@ var (
 	//   - a Set of the root of a document that holds a value
 	//   - a SetKey, a Move, or a Remove of the root
 	//   - a SetKey of an item of a sequence
+	//   - a SetHeadComment or a SetLineComment of the root, or with a text
+	//     that holds a line break or a character that YAML does not allow
+	//     in a text
 	//   - an Insert at a path that does not end in an index
 	//   - a Move to a target that is no `$` path of names and indexes, to
 	//     `$`, or to a path inside the value that moves
@@ -351,12 +354,13 @@ func WithAppName(name string) Option {
 // `..name`, passes over each protected value and each value inside one. A
 // path of names and indexes selects such a value as it selects any other.
 // A [Func] cannot set, rename, move, or remove a protected value or a
-// value inside one, and it cannot set, move, or remove a value that holds
-// one. A path that holds no value when the Apply starts stays protected as
-// the Apply found it, so a call that creates a value there fails. A path
-// that a reference document decides protects the alias or the mapping
-// whose lookup reads that document, as a value that holds the protected
-// value. Each WithProtected adds to the paths before it. An Apply with
+// value inside one. It cannot write the comments of such a value either,
+// and it cannot set, move, or remove a value that holds one. A path that
+// holds no value when the Apply starts stays protected as the Apply found
+// it, so a call that creates a value there fails. A path that a reference
+// document decides protects the alias or the mapping whose lookup reads
+// that document, as a value that holds the protected value. Each
+// WithProtected adds to the paths before it. An Apply with
 // [WithoutProtection] runs without the protection. The Protected Values
 // section of the package documentation gives the rules.
 func WithProtected(ps ...paths.Path) Option {
