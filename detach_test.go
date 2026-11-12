@@ -11,6 +11,7 @@ import (
 	"testing"
 	"weak"
 
+	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
@@ -835,6 +836,56 @@ func TestDetach_ReleasesSource(t *testing.T) {
 			runtime.GC()
 
 			assert.Nil(t, source.Value())
+			assert.NotEmpty(t, niceyaml.FormatError(detached))
+		})
+	}
+}
+
+// TestDetach_ReleasesParse checks that a detached decode error does not keep
+// the parse of the document alive. The tokens of a parse link to each
+// other, so any node that the error keeps also keeps the first token.
+func TestDetach_ReleasesParse(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		decode func(context.Context, *niceyaml.Node) error
+		input  string
+	}{
+		"check below a map": {
+			input: "ports:\n  0x10:\n    name: \"\"\n",
+			decode: func(ctx context.Context, doc *niceyaml.Node) error {
+				_, err := doc.Decode[map[string]map[int]dataCheckedPort](ctx)
+
+				return err
+			},
+		},
+		"check that names a map entry": {
+			input: "cfg:\n  ports:\n    0x10:\n      name: \"\"\n",
+			decode: func(ctx context.Context, doc *niceyaml.Node) error {
+				_, err := doc.Decode[map[string]dataPorts](ctx)
+
+				return err
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			first, detached := func() (weak.Pointer[token.Token], error) {
+				source := niceyaml.NewSourceFromString(tc.input, niceyaml.WithName("check.yaml"))
+				doc := source.Documents()[0]
+
+				//nolint:wrapcheck // The test reads the detached error itself.
+				return weak.Make(doc.AST().GetToken()), niceyaml.Detach(tc.decode(t.Context(), doc))
+			}()
+			require.Error(t, detached)
+
+			runtime.GC()
+			runtime.GC()
+
+			assert.Nil(t, first.Value())
 			assert.NotEmpty(t, niceyaml.FormatError(detached))
 		})
 	}

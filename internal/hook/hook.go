@@ -108,6 +108,14 @@ var (
 	// the decode still see each key.
 	KnownKeys func(keys []paths.Path) any
 
+	// AtData returns a niceyaml.ErrorOption that locates an error at the
+	// value that names lead to in decoded data, at the key of its entry
+	// when key is set, as niceyaml.AtData and niceyaml.AtDataKey do. Before
+	// a binding translates the names, the error shows shown as their path,
+	// with a `~` at its end for a key. The path holds one selector for each
+	// name, such as `[n]` for an index.
+	AtData func(shown paths.Path, names []string, key bool) any
+
 	// Unmarshalers returns the unmarshalers that us, a
 	// []niceyaml.Unmarshaler, give a decode when it applies them in order
 	// to the zero unmarshaler.Options, as niceyaml.WithUnmarshalers

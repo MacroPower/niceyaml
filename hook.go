@@ -99,6 +99,12 @@ func init() {
 		return decodetree.Changes(d.root.Body, d.state.Facts(), len(d.node.source.references) > 0) &&
 			d.tree().Changed()
 	}
+	hook.AtData = func(shown paths.Path, names []string, key bool) any {
+		d := newDataNames(names, key)
+		d.shown = shown
+
+		return d.option()
+	}
 	hook.Unmarshalers = func(us any) unmarshaler.Options {
 		list, _ := us.([]Unmarshaler) //nolint:errcheck // The hook takes a []Unmarshaler.
 

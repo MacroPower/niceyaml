@@ -1095,9 +1095,12 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 // # Key Names
 //
 // ValidateValue does not hold a source, so each path names a key as the
-// decoder does, such as 16 for a key the document spells 0x10. A caller
-// that reports the errors in the document the data came from takes each
-// location from [niceyaml.Node.DataLocator].
+// decoder does, such as 16 for a key the document spells 0x10. Each path
+// holds the names of decoded data, as [niceyaml.AtData] sets them. A Node
+// that places the result reads the names from the value at the path where
+// the caller puts it, and it writes each key as the document spells it.
+// When line 3 of app.yaml reads "    0x10: 0", the bound error thus reads
+// "app.yaml:3:11: $.request.ports.0x10: 0 is less than 1".
 //
 // # Rejected Data
 //

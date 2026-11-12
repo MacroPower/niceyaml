@@ -19,7 +19,7 @@
 //	t = idx.Member(t, "16") // @.ports.0x10
 //	t = idx.Element(t, 0)   // @.ports.0x10[0]
 //
-// [Index.Locate] runs such a walk down a list of names, in the form that
+// [Index.Reach] runs such a walk down a list of names, in the form that
 // a caller who locates an error in decoded data writes them.
 //
 // A walk in the other direction starts from the decoded data and pairs it
@@ -756,11 +756,12 @@ func unordered(v any) any {
 	}
 }
 
-// Locate walks t down names and returns the path to the location they
+// Reach walks t down names and returns the path to the location they
 // lead to. With key set, the location is the key of the entry there. It
 // also returns the token to bind an error at where the path does not bind
 // at the location. The token is nil where the path binds there, or where
-// the walk did not reach a node to bind at.
+// the walk did not reach a node to bind at. Last, it returns how many of
+// the names the path holds.
 //
 // A name leads to an element when the step is at a sequence and the name
 // reads as an index, as [strconv.Itoa] writes one. Any other name leads to
@@ -777,29 +778,49 @@ func unordered(v any) any {
 // for the member.
 //
 // A missing value takes the path of the last value the walk reached, with
-// the rest of the names below it as the caller wrote them. That path binds
-// the way a path to a key that the document omits binds, and the token is
-// nil, unless the path binds elsewhere. The path binds elsewhere when the
-// path to the last value does not select that value. It also binds
-// elsewhere when a key of its mapping spells the missing name, as
-// [Index.SelectsEntry] reports. The token is then the one that
+// the missing name below it as the caller wrote it. The path does not hold
+// the names past that one, so the caller writes them below it in the form
+// it knows. That path binds the way a path to a key that the document
+// omits binds, and the token is nil, unless the path binds elsewhere. The
+// path binds elsewhere when the path to the last value does not select
+// that value. It also binds elsewhere when a key of its mapping spells the
+// missing name, as [Index.SelectsEntry] reports. The token is then the one that
 // [Target.Start] gives the last value with key set.
-func (idx *Index) Locate(t Target, names []string, key bool) (paths.Path, *token.Token) {
+//
+// The selectors read some steps as a path of the document reads them. A
+// `.name` or an `[n]` selector in selectors at the index of a name takes
+// the place of that name. Such a step matches a key by its source text, as
+// [paths.Resolver.Entry] does. The zero [paths.Selector] leaves the name as
+// it is, and so does a short list of selectors.
+func (idx *Index) Reach(
+	t Target,
+	names []string,
+	selectors []paths.Selector,
+	key bool,
+) (paths.Path, *token.Token, int) {
 	for i, name := range names {
-		next, lacks := idx.step(t, name)
+		var (
+			next  Target
+			lacks bool
+		)
+
+		if i < len(selectors) && selectors[i].Kind != 0 {
+			next, lacks = idx.selectorStep(t, selectors[i])
+		} else {
+			next, lacks = idx.step(t, name)
+		}
+
 		if !lacks {
 			t = next
 
 			continue
 		}
 
-		path := next.Path.Child(names[i+1:]...)
-
 		if t.Unspelled || idx.SelectsEntry(t.Node, name) {
-			return path, t.Start(true)
+			return next.Path, t.Start(true), i + 1
 		}
 
-		return path, nil
+		return next.Path, nil, i + 1
 	}
 
 	path := t.Path
@@ -807,10 +828,30 @@ func (idx *Index) Locate(t Target, names []string, key bool) (paths.Path, *token
 		path = path.Key()
 	}
 
-	return path, t.Token(key)
+	return path, t.Token(key), len(names)
 }
 
-// step returns the target one name down from t, as [Index.Locate] reads a
+// Find walks t down names as [Index.Reach] does and returns the path to
+// the location they lead to. It reports whether that path selects the
+// location. It reports false where the data lacks a value there, where the
+// walk did not reach a node, and where the walk wrote a decoded name that
+// might not select its member, as [Target.Unspelled] describes. A path that the
+// walk does not reach takes each name past the last value it reached as
+// a `.name` selector.
+func (idx *Index) Find(t Target, names []string) (paths.Path, bool) {
+	for i, name := range names {
+		next, lacks := idx.step(t, name)
+		if lacks {
+			return next.Path.Child(names[i+1:]...), false
+		}
+
+		t = next
+	}
+
+	return t.Path, !t.Unspelled && !astnode.IsNil(t.Node)
+}
+
+// step returns the target one name down from t, as [Index.Reach] reads a
 // name. It also reports whether the data lacks a value there for the
 // names to lead to. The target of a value the data lacks holds its path
 // and a nil node.
@@ -829,6 +870,36 @@ func (idx *Index) step(t Target, name string) (Target, bool) {
 	}
 
 	return idx.Member(t, name), false
+}
+
+// selectorStep returns the target one path selector down from t, as a path
+// of the document reads sel. It also reports whether the document lacks a
+// value there. An `[n]` selector selects an element as [Index.Element]
+// does. A `.name` selector selects the entry that [paths.Resolver.Entry]
+// finds by the source text of its key. The walk might not tell whether the
+// mapping holds that entry, such as behind an alias that does not resolve.
+// The target then holds a nil node, as a member that [Index.Member] cannot
+// follow does.
+func (idx *Index) selectorStep(t Target, sel paths.Selector) (Target, bool) {
+	if sel.Kind == paths.SelectorIndex {
+		next := idx.Element(t, sel.Index)
+
+		return next, astnode.IsNil(next.Node)
+	}
+
+	next := Target{Path: t.Path.Child(sel.Name), Unspelled: t.Unspelled}
+	if astnode.IsNil(t.Node) {
+		return next, false
+	}
+
+	entry, err := idx.finder.Entry(t.Node, sel.Name)
+	if err != nil {
+		return next, errors.Is(err, paths.ErrNotFound)
+	}
+
+	next.Node, next.Parent = entry.Value, astnode.Parent{Entry: entry}
+
+	return next, false
 }
 
 // elementIndex returns the index that name stands for, and true, when

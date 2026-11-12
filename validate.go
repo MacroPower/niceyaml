@@ -3,6 +3,7 @@ package niceyaml
 import (
 	"context"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"strings"
@@ -11,7 +12,6 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
-	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/datapath"
@@ -82,11 +82,19 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error 
 		return n.bindOwn(err)
 	}
 
-	failure, warnings := walkSelfValidators(ctx, v, n, cfg)
+	release, failure, warnings := walkSelfValidators(ctx, v, n, cfg)
 
-	deliver(ctx, n.Bind(warnings))
+	// The warnings and the failure can share the translators of the walk,
+	// and each binding writes to them until the release. So both bind
+	// before the release, and a goroutine that reads the collectors of ctx
+	// finds the translators finished.
+	warnings, failure = n.Bind(warnings), n.Bind(failure)
 
-	return n.Bind(failure)
+	release()
+
+	deliver(ctx, warnings)
+
+	return failure
 }
 
 // SelfValidateValue runs the self-validation step of [Node.DecodeInto]
@@ -99,12 +107,21 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error 
 //
 // The walk names a field as a YAML decode names it, by its yaml tag, its
 // json tag, or its lowercased name. A map key takes the text of its Go
-// value. When a document spells the key another way, such as 0x10 for
-// 16, an error below the entry binds at the key of the map. A caller that
-// holds the document validates through the Node of the value with
-// Node.SelfValidate instead. Several keys of one map that share a text,
-// such as 1 and "1", bind without a position, as [ErrAmbiguousPath]
-// describes.
+// value. The path of each value holds these names as names of decoded
+// data, as [AtData] sets them. A document that places the error reads them
+// as it reads the names of AtData. An entry whose key the document spells
+// another way, such as 0x10 for 16, thus binds at that entry. The names
+// that a check writes with AtData follow the names of its value, at any
+// depth. A check can put them under an `@` base of [Rebase] that holds
+// `.name` and `[n]` selectors alone. The document then reads that base as a
+// path between the two lists of names, as a decode reads it. Below a value
+// that decodes itself, the names read as Decode[any] of the document gives
+// them, as AtData describes. Every error below a slice, an array, or a map
+// that decodes itself binds at that value. So the names end there, and the
+// steps below it stay a path. The names that a check of such a value or of
+// a value below it writes with AtData stay a path too. Several keys of one
+// map that share a text, such as 1 and "1", bind without a position, as
+// [ErrAmbiguousPath] describes.
 //
 // SelfValidateValue runs each function of [WithValueCheck] in opts on the
 // values of its type, as Node.SelfValidate does. A server thus checks the
@@ -161,7 +178,7 @@ func SelfValidateValue(ctx context.Context, v any, opts ...DecodeOption) error {
 		return BindValue(err)
 	}
 
-	failure, warnings := walkSelfValidators(ctx, v, nil, newDecodeConfig(nil, opts))
+	_, failure, warnings := walkSelfValidators(ctx, v, nil, newDecodeConfig(nil, opts))
 
 	deliver(ctx, BindValue(warnings))
 
@@ -172,11 +189,18 @@ func SelfValidateValue(ctx context.Context, v any, opts ...DecodeOption) error {
 // [SelfValidatorContext] in v, which is a non-nil pointer or a value that is
 // not a pointer. It also runs the functions of cfg from [WithValueCheck] and
 // [WithNodeCheck] on the values of their types. It joins the errors under the
-// path of each value in the document of n, and it returns the failures and then
-// the warnings. A nil n stands for a value outside any document. The warnings
-// are those that each check returns and those that each check hands to its
-// context, whether the check passes or fails.
-func walkSelfValidators(ctx context.Context, v any, n *Node, cfg decodeConfig) (error, error) {
+// path of each value in the document of n. It returns a release function,
+// the failures, and then the warnings. A nil n stands for a value outside any
+// document. The warnings are those that each check returns and those that
+// each check hands to its context, whether the check passes or fails.
+//
+// The walk of a document translates the names of decoded data in each
+// error as the binding of the errors reads them, as [typedNames]
+// describes. The caller binds the errors and the warnings and then calls
+// the release function, so the errors do not keep v alive. A binding
+// writes to those translators until the release, so the caller hands
+// neither result to another goroutine before it.
+func walkSelfValidators(ctx context.Context, v any, n *Node, cfg decodeConfig) (func(), error, error) {
 	w := selfWalker{
 		ctx:      ctx,
 		keyCtx:   withoutWarnings(ctx),
@@ -189,11 +213,19 @@ func walkSelfValidators(ctx context.Context, v any, n *Node, cfg decodeConfig) (
 	}
 	w.walk(reflect.ValueOf(v), place{}, nil)
 
-	if w.ended != nil {
-		return w.ended, multierr.Join(w.warns)
+	release := func() {
+		for _, t := range w.typed {
+			t.release()
+		}
+
+		w.keyTexts, w.entries = nil, nil
 	}
 
-	return multierr.Join(w.errs), multierr.Join(w.warns)
+	if w.ended != nil {
+		return release, w.ended, multierr.Join(w.warns)
+	}
+
+	return release, multierr.Join(w.errs), multierr.Join(w.warns)
 }
 
 // selfWalker collects the errors of the [SelfValidator] and
@@ -203,10 +235,13 @@ func walkSelfValidators(ctx context.Context, v any, n *Node, cfg decodeConfig) (
 // slice once. A value that two paths share thus reports its errors under the
 // first path, and the walk does not follow a back edge of a cycle.
 type selfWalker struct {
-	ctx context.Context
+	// The error of ctx, which is nil until [selfWalker.stopped] finds that
+	// ctx ended.
+	ended error
 	// The context of the decodes that spell the map keys, which drops
 	// their warnings, as [withoutWarnings] describes.
 	keyCtx  context.Context
+	ctx     context.Context
 	node    *Node
 	decoder *yaml.Decoder
 	// The types that the functions of cfg check. The walk skips each value
@@ -226,12 +261,19 @@ type selfWalker struct {
 	// The warnings of the checks, which [selfWalker.report] takes out of
 	// their results.
 	warns []error
-	// The error of ctx, which is nil until [selfWalker.stopped] finds that
-	// ctx ended.
-	ended error
 	// The places of the values that the walk is inside of and that decode
 	// themselves, the outermost first, as [selfWalker.enter] records them.
 	within []place
+	// The translators of names of decoded data that the moves of the
+	// errors hold, which the walk releases after the binding.
+	typed []*typedNames
+	// The text of each key of each mapping, as [selfWalker.keyNames] reads
+	// it, which the walk drops when it releases typed.
+	keyTexts map[keyTextsID]map[any]string
+	// The index of each map that a translation of names of decoded data
+	// read, as [selfWalker.entriesOf] builds it, which the walk drops when
+	// it releases typed.
+	entries map[entriesID]*entryIndex
 	// The node of the value the walk starts at, held as a [step] holds the
 	// node of its own value, after [selfWalker.nodeOf] resolves it.
 	start step
@@ -660,7 +702,7 @@ func (w *selfWalker) children(v reflect.Value, at place, shadowed map[string]boo
 	case reflect.Map:
 		// [datapath.MapGroups] orders the entries by key, so the errors come
 		// back in one order however the map iterates.
-		names := w.keyNames(w.nodeOf(at.last), v.Type().Key())
+		names := maps.Clone(w.keyNames(w.nodeOf(at.last), v.Type().Key()))
 
 		// Keys that share a segment share a path, which can locate one of
 		// their entries at most, so the errors under it bind with no position.
@@ -1047,14 +1089,14 @@ func (w *selfWalker) validate(v reflect.Value, at place) {
 		validator, ok := reflect.TypeAssert[SelfValidatorContext](v.Addr())
 		if ok {
 			failure, warnings := runHook(w.ctx, validator.ValidateContext)
-			w.report(failure, warnings, at, presumed)
+			w.report(failure, warnings, v, at, presumed)
 		}
 
 	case plainSelfCheck:
 		validator, ok := reflect.TypeAssert[SelfValidator](v.Addr())
 		if ok {
 			failure, warnings := splitWarnings(validator.Validate())
-			w.report(failure, warnings, at, presumed)
+			w.report(failure, warnings, v, at, presumed)
 		}
 
 	case noSelfCheck:
@@ -1081,7 +1123,7 @@ func (w *selfWalker) validate(v reflect.Value, at place) {
 		failure, warnings := runHook(w.ctx, func(ctx context.Context) error {
 			return check.run(ctx, node, v.Addr())
 		})
-		w.report(failure, warnings, at, presumed)
+		w.report(failure, warnings, v, at, presumed)
 	}
 }
 
@@ -1115,10 +1157,22 @@ func (w *selfWalker) nodeAt(at place) *Node {
 	return w.node.scopedAt(w.node.base.Join(at.path()), node)
 }
 
-// report records the errors and the warnings of a check of one value. It
-// rebases each one with d under the place of that value. When the context
-// of the walk ended, report drops the failure, because the walk returns the
-// error of that context alone.
+// report records the errors and the warnings of a check of v, the value at
+// the place at. It rebases each one with d under that place. When the
+// context of the walk ended, report drops the failure, because the walk
+// returns the error of that context alone.
+//
+// The names of decoded data that an error reads from v, as [AtData] sets
+// them, read from v itself in the walk of a document, as
+// [selfWalker.dataPath] reads them. So do the names under an `@` base.
+// The names below a value that decodes itself read from the document,
+// unless v is or lies below a slice, an array, or a map that decodes
+// itself. The names there keep the path that the error shows for them. In
+// the walk of a value outside any document, the place of v becomes names
+// of decoded data in turn, so a later binding reads the whole location as
+// AtData reads names. An `@` base of `.name` and `[n]` selectors between the
+// place and the names of an error stays a path between them, as
+// [dataLocus.over] keeps it.
 //
 // A failure that matches the error of a context when the context of the
 // walk is live comes from a context of the check, such as a deadline of
@@ -1130,8 +1184,28 @@ func (w *selfWalker) nodeAt(at place) *Node {
 // declares its own fault stays one. A failure that holds a [PanicError]
 // rebases without a declaration the same way. A panic is a bug in code,
 // not a fault of the document.
-func (w *selfWalker) report(failure, warnings error, at place, d declaration) {
-	m := move{base: at.path(), ambiguous: w.ambiguous, fallback: w.fallback()}
+func (w *selfWalker) report(failure, warnings error, v reflect.Value, at place, d declaration) {
+	if failure == nil && warnings == nil {
+		return
+	}
+
+	m := move{base: at.path(), ambiguous: w.ambiguous, fallback: w.fallback(), seals: w.sealed}
+
+	if w.node == nil {
+		// Every error below a slice, an array, or a map that decodes itself
+		// binds at that value, and the keys and indices below it need not
+		// name its entries in the document. So the names end at such a
+		// value, and the steps below it stay a path.
+		depth := at.depth()
+		if w.sealed {
+			depth = w.within[len(w.within)-1].depth()
+		}
+
+		m.data = at.data(depth)
+	} else {
+		m.typed = &typedNames{walker: w, value: v, at: at, sealed: w.sealed}
+		w.typed = append(w.typed, m.typed)
+	}
 
 	if warnings != nil {
 		w.warns = append(w.warns, rebase(warnings, m, d))
@@ -1205,12 +1279,32 @@ func (w *selfWalker) nodeOf(s *step) ast.Node {
 	return s.node
 }
 
+// keyTextsID names a mapping and the type that its keys decode to.
+//
+//nolint:unused // The fields tell the keys of the walker's map apart.
+type keyTextsID struct {
+	node ast.Node
+	typ  reflect.Type
+}
+
 // keyNames maps each key of the mapping at node, by the value it decodes to
 // as type t, to the text a path resolves it by, such as 0x10 for 16. Of the
 // entries that set one key, merges included, the one that the decode keeps
-// wins.
+// wins. The walk reads each mapping once for each t, and every caller
+// shares the result, so a caller must not change it.
 func (w *selfWalker) keyNames(node ast.Node, t reflect.Type) map[any]string {
+	id := keyTextsID{node: node, typ: t}
+	if names, ok := w.keyTexts[id]; ok {
+		return names
+	}
+
 	names := map[any]string{}
+
+	if w.keyTexts == nil {
+		w.keyTexts = map[keyTextsID]map[any]string{}
+	}
+
+	w.keyTexts[id] = names
 
 	mapping, ok := astnode.Content(w.valueNode(node, false)).(*ast.MappingNode)
 	if !ok {
@@ -1343,144 +1437,6 @@ func (w *selfWalker) valueNode(node ast.Node, parsed bool) ast.Node {
 	return nil
 }
 
-// DataLocator finds where a location in decoded data lies in the document
-// the data came from. A check of decoded data, such as an adapter for
-// CUE, Open Policy Agent, or another JSON Schema library, names what it
-// finds by the member names and indices of that data. A path matches a key
-// by its source text instead. [AtPath] of those names thus misses a key
-// that the decoder respells, such as the key 0x10 of the member 16. A
-// DataLocator reads the names as the decoder does. Its options give an
-// error the same location that
-// [go.jacobcolvin.com/niceyaml/schema.Schema] gives a violation of the
-// same value:
-//
-//	loc := n.DataLocator()
-//
-//	for _, f := range findings {
-//		errs = append(errs, niceyaml.NewError(f.Msg, loc.At(f.Path...))) // $.ports.0x10.name
-//	}
-//
-// Create instances with [Node.DataLocator].
-//
-// The names are those of the data from Decode[any] of the Node. A string
-// key gives its text. Any other key gives its Go value as [fmt.Sprint]
-// prints it, so 0x10 is 16, 3.10 is 3.1, and True is true. An element has
-// its index in decimal digits, as [strconv.Itoa] writes it. A decode into
-// another type can name a key another way, such as 1e3 for the key 1000
-// of a map[int]string. Such a name leads nowhere. A check that reports
-// JSON Pointers splits each pointer into its names and unescapes `~1` and
-// `~0` in each.
-//
-// A DataLocator is safe for concurrent use, and it reads each mapping
-// once, so a check creates one for all the findings of a run. Its reads
-// of `<<` merge keys share one budget, as large as the budget that
-// [paths.ErrExcessiveMerging] allows one path selector. A check thus
-// creates a DataLocator for each run and does not keep one for the life
-// of the document.
-type DataLocator struct {
-	// The node the names read from.
-	root ast.Node
-	// Finds the members of each mapping by the names a decode gives them.
-	idx *datapath.Index
-	// The `$` path to root.
-	base paths.Path
-	// Guards idx, which two walks must not read at the same time.
-	mu sync.Mutex
-}
-
-// DataLocator creates a new [*DataLocator] for the data the Node decodes
-// to. The names it reads start at the Node, as the data from
-// [Node.Decode] does. A [Validator] thus creates one from the Node it got,
-// whatever the scope of that Node. Each path it writes starts at `$`, so
-// the errors bind through any Node of the document.
-//
-// A document that did not parse does not decode to any data, as
-// [Node.Err] describes. Every name then leads nowhere, and each error
-// binds without a position.
-func (n *Node) DataLocator() *DataLocator {
-	return &DataLocator{
-		root: n.valueNode(),
-		idx:  datapath.NewIndex(n.DocumentResolver(), n.keyReader()),
-		base: n.base,
-	}
-}
-
-// At returns an [ErrorOption] that locates an error at the value the
-// names lead to in the data of the [DataLocator]. An empty list of names
-// leads to the whole of that data. The option sets the `$` path of the
-// value, as [AtPath] does, with each key spelled as the source spells it:
-//
-//	niceyaml.NewError("must not be empty", loc.At("ports", "16", "name"))
-//	// cfg.yaml:3:11: $.ports.0x10.name: must not be empty
-//
-// When several keys of a mapping decode to one name, the names lead to
-// the last of them, whose value the decode keeps. When another key spells
-// the same text, a path cannot select the value. The option then also
-// sets its position, as [AtPosition] does, and the path names the member
-// as the decoder does.
-//
-// Names that lead past the data keep the form the caller wrote from there
-// on. The error binds where that path binds, as [SourceError.Nearest]
-// describes. A member that a mapping lacks binds at the key of the
-// mapping, and an index past the end of a sequence binds at the key of the
-// sequence. A name below a scalar binds at the scalar. A name that the
-// content of an anchor lacks directly below its alias binds at the alias.
-// A name that the content lacks deeper down binds inside the anchor, at
-// the nearest value that the content holds.
-//
-// A name can lead behind an alias that the document cannot follow, such
-// as an alias to an anchor of a document from [WithReferences]. So can a
-// name in a mapping whose `<<` merge key holds such an alias, where the
-// merge key brings in the entry of the name from that document, as the
-// paths package describes. Such a name keeps its form too, and so does
-// each name below it. The option does not set a position, so the error
-// binds where that path binds. A name such as 3.10 there binds where a path
-// through the key 3.10 binds. Elsewhere, a name that does not match a
-// member but whose text a path selects, such as 3.10 for the member 3.1,
-// binds at the last value the names lead to.
-func (l *DataLocator) At(names ...string) ErrorOption {
-	return l.option(names, false)
-}
-
-// AtKey returns an [ErrorOption] that locates an error at the key of the
-// mapping entry the names lead to. It suits an error about the key itself,
-// such as an unknown member. It reads the names as [DataLocator.At] does,
-// and the path it sets ends in `~`, as a path from [paths.Path.Key] does:
-//
-//	niceyaml.NewError("unknown port", loc.AtKey("ports", "16"))
-//	// cfg.yaml:2:3: $.ports.0x10~: unknown port
-//
-// An element of a sequence and the data as a whole do not have a key, so
-// the error binds at the value there. A member that the data lacks does
-// not have a key either, so the option locates it as [DataLocator.At]
-// does. A name behind an alias that the document cannot follow keeps its
-// form, as [DataLocator.At] describes, and the path still ends in `~`.
-func (l *DataLocator) AtKey(names ...string) ErrorOption {
-	return l.option(names, true)
-}
-
-// option returns the [ErrorOption] that sets the path [DataLocator.locate]
-// finds for names, and the position of the token it finds, if any.
-func (l *DataLocator) option(names []string, key bool) ErrorOption {
-	path, tk := l.locate(names, key)
-	place := atToken(tk)
-
-	return func(c *errorConfig) {
-		c.path, c.hasPath = path, true
-
-		place(c)
-	}
-}
-
-// locate returns the path names lead to from the node of l, and the token
-// to bind an error at, as [datapath.Index.Locate] finds them.
-func (l *DataLocator) locate(names []string, key bool) (paths.Path, *token.Token) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	return l.idx.Locate(datapath.Target{Path: l.base, Node: l.root}, names, key)
-}
-
 // SelfValidator is a type that validates itself after a decode.
 // [Node.Decode] and [Node.DecodeInto] call Validate on every value in the
 // result that implements it, through a value or a pointer receiver,
@@ -1521,6 +1477,11 @@ func (l *DataLocator) locate(names []string, key bool) (paths.Path, *token.Token
 //
 // The Validation section describes the order the values validate in, the
 // path of each value, and where each error binds.
+//
+// An `@` path names a map key as the document spells it, which Validate
+// does not know. A Validate that reports an entry of a map that it ranges
+// over locates the entry with [AtData] by its decoded key instead, as the
+// Validation section describes.
 //
 // A type whose check needs the context of the call, such as one that
 // does I/O, implements [SelfValidatorContext] instead.

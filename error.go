@@ -20,6 +20,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml/escape"
 	"go.jacobcolvin.com/niceyaml/internal/aliaslimit"
+	"go.jacobcolvin.com/niceyaml/internal/datapath"
 	"go.jacobcolvin.com/niceyaml/internal/excerpt"
 	"go.jacobcolvin.com/niceyaml/internal/fault"
 	"go.jacobcolvin.com/niceyaml/internal/multierr"
@@ -390,15 +391,15 @@ var (
 // Create instances with [NewError], [Invalid], [Unchecked], [Locate], or
 // [NewSummary].
 type Error struct {
-	err    error
-	move   *move
-	errors []error
+	err  error
+	move *move
 	// The text that the wrappers of the headings above the Error wrote, in
 	// the error that a [Warnings] or a hook of a call took the Error from.
 	// The Error does not write that text. [ErrorTree.Context] reports it
 	// for each problem of the Error. A problem thus has one context below
 	// those headings and outside them. It is empty for every other Error.
 	headings wrapperText
+	errors   []error
 	errorConfig
 	fault declaration
 	// The severity mark of the Error, which decides the severity of the
@@ -464,6 +465,19 @@ func (d declaration) under(x *Error) declaration {
 
 // move is how an [Error] from [Rebase] moves the paths below it.
 type move struct {
+	// The names of decoded data that base stands for, or nil when base is
+	// a path of the document. The self-validation walk of a value outside
+	// any document sets them, so a binding reads the base as [AtData]
+	// reads its names.
+	data *dataLocus
+	// Translates the names of decoded data below base into a path of the
+	// document, or nil. The self-validation walk of a document sets it, so
+	// it reads the names from the typed value that the check saw.
+	typed *typedNames
+	// The move that applies after this one, or nil. [move.then] chains two
+	// moves where one of them holds data or typed, or seals, because their
+	// fields do not join into one move.
+	next *move
 	// The path that the errors below write their `@` paths from. A path with
 	// no selectors is a base like any other.
 	base paths.Path
@@ -484,6 +498,11 @@ type move struct {
 	// not resolve in any document. [SourceError.Unresolved] reports
 	// ErrAmbiguousPath for every error below.
 	ambiguous bool
+	// The self-validation walk set base at or below a slice, an array, or
+	// a map that decodes itself. Every error below binds at that value. So
+	// each name of decoded data that an error reads from a value under base
+	// keeps the selector that the error shows for it.
+	seals bool
 }
 
 // NewError creates a new [*Error] with the given message. The Error is a
@@ -925,8 +944,12 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 // A path names a map key as the document spells it, so a base built from a
 // decoded key might miss. The key 0x10 of a map[int]Server decodes to 16,
 // and an error under `$.ports.16` then binds at the `ports:` key, as
-// [SourceError.Nearest] describes. A [DataLocator] finds an entry by its
-// decoded key.
+// [SourceError.Nearest] describes. A base that passes through a map key thus
+// stops at the map, and [AtData] names the entry by its decoded key below
+// it. The names then read from the value at the base, as AtData describes
+// for an error from a check of a decode:
+//
+//	niceyaml.Rebase(niceyaml.NewError("no host", niceyaml.AtData(strconv.Itoa(k), "host")), paths.Doc().Child("ports"))
 //
 // The result keeps the message of err, and [errors.Is] and [errors.As] see
 // through it, including through a join that Rebase rebuilds branch by
@@ -1018,18 +1041,18 @@ func markFault(err error, d declaration) error {
 
 // ErrorOption configures an [Error]. [NewError], [Invalid], [Unchecked],
 // [Locate], and [Error.With] take the same options. [AtPath] sets the path
-// of the Error. [AtPosition] or [AtRange] sets its position or range, and
-// the last one given wins. [WithDetails] adds the errors that explain it. A
-// [DataLocator] returns the options that locate an error by the names of
-// decoded data.
+// of the Error, and [AtData] and [AtDataKey] set it by the names of decoded
+// data. Of these three, the last one given wins. [AtPosition] or [AtRange]
+// sets its position or range, and the last one given wins.
+// [WithDetails] adds the errors that explain it.
 //
 // Available options:
 //   - [AtPath]
+//   - [AtData]
+//   - [AtDataKey]
 //   - [AtPosition]
 //   - [AtRange]
 //   - [WithDetails]
-//   - [DataLocator.At]
-//   - [DataLocator.AtKey]
 type ErrorOption func(*errorConfig)
 
 // errorConfig holds the settings an [ErrorOption] configures. An option
@@ -1039,6 +1062,9 @@ type errorConfig struct {
 	// The position or the range: a position.Position or a position.Range, or
 	// nil when no option sets either.
 	loc any
+	// The names of decoded data that path stands for, when [AtData] or
+	// [AtDataKey] set it. Path then holds the names as an `@` path.
+	data *dataNames
 	// The errors from WithDetails, without the nil ones.
 	details []error
 	// The path, when hasPath is true. A path with no selectors is a path like
@@ -1074,10 +1100,10 @@ type errorConfig struct {
 // enters an alias the document cannot follow binds at the alias, as
 // [SourceError.Nearest] describes. With [AtPosition] or [AtRange], the error
 // binds there instead, and the path names the value in the message alone.
-// [DataLocator.At] builds both from the names of decoded data.
+// [AtData] locates an error by the names of decoded data instead.
 func AtPath(p paths.Path) ErrorOption {
 	return func(c *errorConfig) {
-		c.path, c.hasPath = p, true
+		c.path, c.hasPath, c.data = p, true, nil
 	}
 }
 
@@ -1221,20 +1247,31 @@ func (e *Error) LogValue() slog.Value {
 // or a range in loc, or both. An ambiguous path names entries of several
 // keys of a decoded map, so [locate] does not resolve it in any document.
 type locus struct {
-	loc       any
-	path      paths.Path
+	loc  any
+	path paths.Path
+	// The names of decoded data that path stands for, or nil when path is a
+	// path of the document. A binding translates them, as
+	// [binder.translate] describes.
+	data      *dataLocus
 	fallback  fallback
 	hasPath   bool
 	ambiguous bool
 }
 
 // rebase returns l with base joined in front of its path and its fallback
-// paths, as [paths.Path.Join] joins them. It returns a locus without a path
-// unchanged, because a base moves paths alone.
+// paths, as [paths.Path.Join] joins them. The base goes in front of the
+// path that the names of decoded data read from too. It returns a locus
+// without a path unchanged, because a base moves paths alone.
 func (l locus) rebase(base paths.Path) locus {
 	if l.hasPath {
 		l.path = base.Join(l.path)
 		l.fallback = l.fallback.rebase(base)
+
+		if l.data != nil {
+			d := *l.data
+			d.base = base.Join(d.base)
+			l.data = &d
+		}
 	}
 
 	return l
@@ -1287,18 +1324,32 @@ func (f fallback) then(outer fallback) fallback {
 // locus returns the location e carries itself, without looking through
 // its cause chain or applying its base.
 func (e *Error) locus() locus {
-	return locus{loc: e.loc, path: e.path, hasPath: e.hasPath}
+	return locus{loc: e.loc, path: e.path, hasPath: e.hasPath, data: e.data.locus()}
 }
 
-// apply returns l moved as m moves the errors below it. A base that
-// replaces stands in place of the path of l, because the base is that
-// path as a layer holds it. An only fallback stands in for the path, so m
-// alone sets ambiguous.
+// apply returns l moved as m moves the errors below it, and then as each
+// move that m chains moves them.
 func (m *move) apply(l locus) locus {
+	l = m.applyOwn(l)
+	if m.next != nil {
+		l = m.next.apply(l)
+	}
+
+	return l
+}
+
+// applyOwn returns l moved as m alone moves it. A base that replaces
+// stands in place of the path of l, because the base is that path as a
+// layer holds it. An only fallback stands in for the path, so m alone
+// sets ambiguous. The names of decoded data that l reads from the value
+// at the base become a path where m translates them. Where m seals, the
+// names that m does not translate become the path that l shows for them.
+// Where the base of m names decoded data, l reads below those names.
+func (m *move) applyOwn(l locus) locus {
 	l.ambiguous = l.ambiguous || m.ambiguous
 
 	if m.replaces && l.hasPath {
-		l.path = m.base
+		l.path, l.data = m.base, nil
 
 		return l
 	}
@@ -1307,8 +1358,23 @@ func (m *move) apply(l locus) locus {
 		return l.rebase(m.base)
 	}
 
+	l = m.typed.translate(l)
+	if m.seals {
+		l.data = nil
+	}
+
+	var data *dataLocus
+
+	if m.data != nil {
+		data = m.data.over(l)
+	}
+
 	l = l.rebase(m.base)
 	l.fallback = l.fallback.then(m.fallback)
+
+	if m.data != nil {
+		l.data = data
+	}
 
 	if m.fallback.only {
 		l.ambiguous = m.ambiguous
@@ -1319,17 +1385,50 @@ func (m *move) apply(l locus) locus {
 
 // at returns the location that an [Error] that moves paths as m does gives
 // each problem below it that does not carry a location of its own. That
-// location is the base of m, with the fallback and the ambiguous mark of m.
+// location is the base of m, with the fallback, the names of decoded data,
+// and the ambiguous mark of m, moved by each move that m chains.
 func (m *move) at() locus {
-	return locus{path: m.base, hasPath: true, ambiguous: m.ambiguous, fallback: m.fallback}
+	l := locus{path: m.base, hasPath: true, ambiguous: m.ambiguous, fallback: m.fallback, data: m.data}
+	if m.next != nil {
+		l = m.next.apply(l)
+	}
+
+	return l
+}
+
+// chains reports whether m holds a field that [move.then] cannot join into
+// one move. Such fields are data, typed, seals, and next.
+func (m *move) chains() bool {
+	return m != nil && (m.data != nil || m.typed != nil || m.seals || m.next != nil)
 }
 
 // then returns the move of a child below m and then inner, with the bases,
 // fallbacks, and marks joined as [move.apply] joins them from below. A nil
-// inner does not move anything, and the result never replaces.
+// inner does not move anything, and the result never replaces. Where m or
+// inner [move.chains], the result is inner with m chained after it. The
+// inner move is the move of one [Error], which never chains a move of its
+// own, so m follows inner directly.
 func (m *move) then(inner *move) *move {
 	if inner == nil {
 		return m
+	}
+
+	if m.chains() || inner.chains() {
+		joined := *inner
+		joined.replaces = false
+
+		if m != nil {
+			// An only fallback of m covers the ambiguous mark of inner, as
+			// in the join below, unless the `$` base of inner stops m from
+			// reaching the paths below.
+			covered := m.fallback.only && !inner.base.IsAbsolute()
+
+			joined.movesOnly = joined.movesOnly || m.movesOnly
+			joined.ambiguous = joined.ambiguous && !covered
+			joined.next = m
+		}
+
+		return &joined
 	}
 
 	var outer move
@@ -1415,10 +1514,16 @@ func (e *Error) location() locus {
 
 // Path returns the [paths.Path] the [Error] is about and true, or the zero
 // Path and false when the Error does not carry one. The location is the one
-// [AtPath] set on the Error itself or on the nearest located Error along
-// its cause chain. An Error built with [Invalid] around a located Error
-// thus reports that location, with the base of every [Rebase] on the way
-// joined in front.
+// that [AtPath], [AtData], or [AtDataKey] set on the Error itself or on the
+// nearest located Error along its cause chain. An Error built with
+// [Invalid] around a located Error thus reports that location, with the
+// base of every [Rebase] on the way joined in front.
+//
+// Before a [*Node] binds the Error, the names of [AtData] show as an `@`
+// path, and the path of [AtDataKey] ends in `~`. So
+// AtDataKey("ports", "16") reports `@.ports.16~`, and a Rebase onto `$.cfg`
+// reports `$.cfg.ports.16~`. A binding writes the names as the document
+// spells them, as AtData describes.
 //
 // A [*SourceError] along the chain ends the walk. The Error then reports
 // the path [SourceError.Path] reports for that binding, without the base of
@@ -1981,8 +2086,12 @@ type boundTexts struct {
 // binder of the parser must not route, because the parse builds the
 // documents only when it ends.
 type binder struct {
-	src      *Source
-	node     *Node
+	src  *Source
+	node *Node
+	// The index of each document that the bind call translated names of
+	// decoded data in, as [binder.translate] reads them. Every binding of
+	// one call shares it, so the reads of `<<` merge keys share one budget.
+	indexes  map[*document]*datapath.Index
 	route    bool
 	locate   bool
 	unplaced bool
@@ -2232,6 +2341,10 @@ func bindTree(err error, b binder) error {
 
 	if isBound(err) {
 		return err
+	}
+
+	if b.indexes == nil {
+		b.indexes = map[*document]*datapath.Index{}
 	}
 
 	bound := newSourceError(b.located(err), b)
@@ -2768,7 +2881,8 @@ func newSourceError(err error, b binder) *SourceError {
 
 	switch a := found.err.(type) { //nolint:errorlint // The anchor itself, found by the walk.
 	case *Error:
-		e.loc, e.node, e.locErr = locate(b, found.locus)
+		l, translated := b.translate(found.locus)
+		e.loc, e.node, e.locErr = locate(b, l)
 
 		// The path looked in the one document of an empty source, and the
 		// binding stands in none.
@@ -2782,17 +2896,21 @@ func newSourceError(err error, b binder) *SourceError {
 
 		// The path of the error reads from the value the layers hold.
 		// The binding reports it as the layer it bound in holds it, as a
-		// bind through that layer would.
-		path := found.path
-
-		if held := e.loc.held; held != nil && !held.Equal(path) {
-			e.err = &Error{err: e.err, move: &move{base: *held, movesOnly: true, replaces: true}}
+		// bind through that layer would. A path that the binding translated
+		// from the names of decoded data replaces those names the same way.
+		path := l.path
+		if held := e.loc.held; held != nil {
+			translated = translated || !held.Equal(path)
 			path = *held
+		}
+
+		if translated {
+			e.err = &Error{err: e.err, move: &move{base: path, movesOnly: true, replaces: true}}
 		}
 
 		// No error binds in a derived Source, which is no file of the caller.
 		// A derived layer takes the path as its text holds it.
-		relocated = e.relocateAll(path, found.hasPath)
+		relocated = e.relocateAll(path, l.hasPath)
 
 	case *SourceError:
 		// The error wraps a binding, so it takes over what the binding

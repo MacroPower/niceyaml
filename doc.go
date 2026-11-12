@@ -296,6 +296,11 @@
 // path that a [SourceError] reports starts at `$`. Each such path names the
 // same value through any Node of the document.
 //
+// A path names a map key as the document spells it. [AtData] sets a path by
+// the names of decoded data instead, which read from the binding Node as an
+// `@` path does. The binding writes the path as the document spells it, so
+// a check of decoded values names an entry by its decoded key.
+//
 // A heading can carry a location, such as a join that [Invalid] locates or a
 // summary that [Error.With] locates. Such a heading gives its location to
 // each problem below it that does not carry one. A problem with a location of
@@ -423,7 +428,9 @@
 // value thus does not need a Rebase. A path names a map key as the document
 // spells it, so a base that a program builds from a decoded key can miss. For
 // example, the key 0x10 of a map[int]T decodes to 16, and a base with the key
-// 16 misses it. A [DataLocator] finds an entry by its decoded key.
+// 16 misses it. [AtData] locates an error by the names of decoded data
+// instead. The Node that binds the error writes the path as the document
+// spells it, and a Rebase puts its base in front of the names.
 //
 // Binding resolves each location once. A check for a required field names a
 // path to a value that the document does not hold. Such a path binds at the
@@ -1165,10 +1172,12 @@
 // runs. The decode of the validator still applies the unmarshalers of
 // [WithUnmarshalers], which belong to the Source. A check that runs after
 // Decode returns, such as one that runs its I/O in parallel, locates each
-// finding with [Node.DataLocator]. The decoder respells some keys, so the key
-// 0x10 sets the member 16. A DataLocator reads the names of decoded data as
-// the decoder does. A check of the data thus reports a finding where a schema
-// reports a violation of the same value.
+// finding with [AtData] and binds the findings with Node.Bind. The decoder
+// respells some keys, so the key 0x10 sets the member 16. The binding reads
+// the names of decoded data as the decoder does. A check of the data thus
+// reports a finding where a schema reports a violation of the same value. A
+// check that needs the path of a finding and not an error reads it from
+// [Node.DataLocator].
 //
 // Every check follows one rule for the fault of the document, as the Errors
 // section describes. When a validator, a Validate or ValidateContext method,
@@ -1280,13 +1289,25 @@
 //
 // A Validate method gets only its value. A ValidateContext method and a
 // function from WithValueCheck get the value and the context of the call. A
-// check that needs the Node of its value, such as one that
-// resolves a path beside the file or the layer that sets the value, uses
-// [WithNodeCheck]. Its function gets the Node of each value of its type
-// beside the value, or nil where the document does not hold the value. A
-// check of map entries belongs in a Validate or ValidateContext method or a
-// WithValueCheck function of the type of the entry. The decode puts the
-// paths of that check under the key as the document spells it.
+// check that needs the Node of its value, such as one that resolves a path
+// beside the file or the layer that sets the value, uses [WithNodeCheck].
+// Its function gets the Node of each value of its type beside the value, or
+// nil where the document does not hold the value.
+//
+// A path names a map key as the document spells it, and a check of decoded
+// values knows only the decoded key. A check of the type of a map entry
+// does not name the key, and the decode puts its paths under the key as the
+// document spells it. Some checks name an entry of a map that they range
+// over, such as a check of the parent of the map or of a map of builtin
+// values. Such a check locates the entry with [AtData] by its decoded key.
+// The decode reads those names from the value that the check saw and writes
+// each key as the document spells it:
+//
+//	for k, p := range c.Ports {
+//		if p.Name == "" {
+//			return niceyaml.NewError("name is empty", niceyaml.AtData("ports", strconv.Itoa(k), "name"))
+//		}
+//	}
 //
 // [Node.SelfValidate] runs the self-validation step on its own, for a program
 // whose library writes its environment or its flags into the value. The program

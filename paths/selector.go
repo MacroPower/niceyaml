@@ -78,8 +78,10 @@ func (k SelectorKind) String() string {
 // A JSON Pointer built from the names thus spells a key as the YAML
 // source does. That spelling can differ from the key that the JSON form
 // of the document holds. The key 0x10 gives /ports/0x10, but JSON holds
-// the key 16. [go.jacobcolvin.com/niceyaml.Node.DataLocator] maps the
-// names of decoded data to the document instead.
+// the key 16. [go.jacobcolvin.com/niceyaml.AtData] locates an error by the
+// names of decoded data instead, and
+// [go.jacobcolvin.com/niceyaml.Node.DataLocator] maps those names to a path
+// of the document.
 type Selector struct {
 	Name  string
 	Index int

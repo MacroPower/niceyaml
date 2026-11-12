@@ -2359,24 +2359,57 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 		err = ports.ValidateValue(t.Context(), data)
 
 		located := yamltest.RequireSourceError(t, err)
+		assert.Equal(t, "$.ports.16", yamltest.PathOf(t, located).String())
 
-		path := yamltest.PathOf(t, located)
-		assert.Equal(t, "$.ports.16", path.String())
+		// A binding reads the names as the decoder does, so it finds the
+		// entry and writes the path as the document spells it.
+		require.EqualError(t, hex.Bind(err), "app.yaml:2:9: $.ports.0x10: 0 is less than 1")
+		require.EqualError(t,
+			hex.Bind(niceyaml.Rebase(err, paths.Doc())),
+			"app.yaml:2:9: $.ports.0x10: 0 is less than 1",
+		)
+	})
 
-		// No key of the document has that spelling, so the path binds at
-		// the key of the mapping.
-		require.EqualError(t, hex.Bind(err), "app.yaml:1:1: $.ports.16: 0 is less than 1")
+	t.Run("names below a respelled key and an element", func(t *testing.T) {
+		t.Parallel()
 
-		// A DataLocator reads the names as the decoder does, so it finds
-		// the entry.
-		var names []string
+		cfg := compileSchema(t, `{
+			"properties": {
+				"ports": {"additionalProperties": {"required": ["name"], "properties": {"name": {"minLength": 1}}}},
+				"items": {"items": {"propertyNames": {"maxLength": 1}}}
+			}
+		}`)
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"request:",
+			"  ports:",
+			"    0x10:",
+			`      name: ""`,
+			"    0x20: {}",
+			"  items:",
+			"    - {ab: 1}",
+		), niceyaml.WithName("app.yaml"))
+		base := paths.Doc().Child("request")
 
-		for sel := range path.Selectors() {
-			names = append(names, sel.Name)
-		}
+		data, err := yamltest.At(t, doc, base).Decode[any](t.Context())
+		require.NoError(t, err)
 
-		found := niceyaml.NewError(located.Message(), hex.DataLocator().At(names...))
-		require.EqualError(t, hex.Bind(found), "app.yaml:2:9: $.ports.0x10: 0 is less than 1")
+		err = cfg.ValidateValue(t.Context(), data)
+
+		// The unbound text names each value as the decoder does, and each
+		// element as an index.
+		require.EqualError(t, err, stringtest.JoinLF(
+			"3 schema violations",
+			`$.items[0].ab~: property name "ab" is invalid`,
+			"$.ports.16.name: string length 0 is less than 1",
+			`$.ports.32.name: missing required property "name"`,
+		))
+
+		require.EqualError(t, doc.Bind(niceyaml.Rebase(err, base)), stringtest.JoinLF(
+			"app.yaml: 3 schema violations",
+			"app.yaml:4:13: $.request.ports.0x10.name: string length 0 is less than 1",
+			`app.yaml:5:5: $.request.ports.0x20.name: missing required property "name"`,
+			`app.yaml:7:8: $.request.items[0].ab~: property name "ab" is invalid`,
+		))
 	})
 }
 
