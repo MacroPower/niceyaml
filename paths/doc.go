@@ -152,6 +152,15 @@
 // rule binds it to, wherever a decode reads it, as at a merge key that
 // brings in the mapping that holds the alias.
 //
+// The decoder rejects a merge key that names an alias inside the content
+// of the anchor it refers to, as in "a: &a [{<<: *a}]". Such a merge key
+// brings in nothing, and the anchors behind it do not count again. The
+// decoder also rejects a cycle of merges, as in
+// "m: {<<: [&p {<<: *q}, &q {<<: *p}]}". In such a cycle the merges of a
+// mapping lead back to that mapping. The merge key that closes the cycle
+// brings in nothing, also where a later merge key brings in the mapping
+// that holds it.
+//
 // The decodes of go.jacobcolvin.com/niceyaml read each alias at the anchor
 // that a Resolver binds it to, and so do the keys that a decode names and
 // the edits of go.jacobcolvin.com/niceyaml/edit. The decoder of
