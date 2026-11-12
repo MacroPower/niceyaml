@@ -1608,11 +1608,13 @@ type SelfValidatorContext interface {
 // unbound.
 //
 // A validator that needs the whole document reaches it through
-// [Node.Document]. The context carries cancellation and deadlines to a
-// validator that does work it can stop, such as resolving a remote schema
-// reference. The Validation section of the package documentation
-// describes how a validator declares a fault and how one checks decoded
-// data.
+// [Node.Document]. A validator that walks the Node with [Node.Kind] and
+// [Node.Nodes] follows every alias, so it calls [Node.CheckAliasLimit]
+// before the walk and returns its error. The context carries cancellation
+// and deadlines to a validator that does work it can stop, such as
+// resolving a remote schema reference. The Validation section of the
+// package documentation describes how a validator declares a fault and how
+// one checks decoded data.
 //
 // A decode and Node.Validate return the error of a document that did not
 // parse before any validator runs. A caller that calls Check itself on such a

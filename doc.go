@@ -831,21 +831,27 @@
 //     that wraps [ErrNoWarnings].
 //  2. For a document that did not parse, the decode returns the error of its
 //     parse.
-//  3. Each [Validator] from [WithValidator] checks the node, in the order the
-//     caller gives them.
-//  4. A decode of a value that holds an alias fails with an error that
+//  3. A decode of a value that holds an alias fails with an error that
 //     matches [ErrExcessiveAliasing] when nested aliases make a decode of the
-//     document read far more than the document holds. The Alias Limit
-//     section names the value that a decode of a Node at an alias reads.
-//     The type of the target reads text when any type that a decode into it
-//     reaches reads text. Those types include the types of its fields and
-//     elements, and the key and value types of its maps. For such a target,
-//     the decode also fails when the aliases of the whole document repeat
-//     more text than the document byte limit of the [Source] allows. It
-//     fails as well when they nest the document past its depth limit, as
-//     the Limits section describes.
-//  5. The go-yaml decoder fills the target.
-//  6. Every value in the result that implements [SelfValidator] or
+//     document read far more than the document holds. [Node.CheckAliasLimit]
+//     returns the same error. The Alias Limit section names the value that a
+//     decode of a Node at an alias reads.
+//  4. Each [Validator] from [WithValidator] checks the node, in the order the
+//     caller gives them.
+//  5. For a target that reads text, a decode of a value that holds an alias
+//     also counts the text that the decoder writes out. It fails with an
+//     error that matches [ErrExcessiveAliasing] when aliases make up too
+//     much of that text. The decode also fails when the aliases of the whole
+//     document repeat more text than the document byte limit of the
+//     [Source] allows. It fails as well when they nest the document past its
+//     depth limit, as the Limits section describes. The error of either
+//     bound matches both
+//     [ErrExcessiveAliasing] and [ErrLimit]. The type of the target reads
+//     text when any type that a decode into it reaches reads text. Those
+//     types include the types of its fields and elements, and the key and
+//     value types of its maps.
+//  6. The go-yaml decoder fills the target.
+//  7. Every value in the result that implements [SelfValidator] or
 //     [SelfValidatorContext] validates itself, and each function from
 //     [WithValueCheck] or [WithNodeCheck] checks the values of its type.
 //     [WithSelfValidation] set to false turns this step off, and
@@ -2110,6 +2116,19 @@
 // merge keys than the document holds. [IsInvalid] reports either error,
 // because the aliases or the merge keys of the document cause it. The error
 // binds to the Node of the call without a location.
+//
+// A walk that lists the children of each Node with [Node.Kind] and
+// Node.Nodes follows every alias, but each call of Node.Nodes stays within
+// the limits of its own path. Such a walk must call [Node.CheckAliasLimit]
+// before it starts. The method returns the error that a decode of the Node
+// into a type that does not read text returns for the limit. A validator
+// that does not follow an alias can report on a document past the limit, so
+// [Node.Validate] leaves the check to the validator. A decode runs the
+// check before its validators, so a validator that [WithValidator] gives a
+// decode does not run when the check fails. A decode into a type that reads
+// text counts the text that the aliases write out after its validators, as
+// the Decoding section describes. [Source.LimitsAliases] reports whether
+// the limit applies to a Source.
 //
 // [WithAliasLimit] set to false turns the limit off for the documents of one
 // Source, for input that the program trusts, such as a file it ships. It also

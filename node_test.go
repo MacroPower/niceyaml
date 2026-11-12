@@ -400,6 +400,138 @@ func TestNode_Kind(t *testing.T) {
 	})
 }
 
+func TestNode_CheckAliasLimit(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		err   error
+		input string
+		path  paths.Path
+		opts  []niceyaml.SourceOption
+	}{
+		"document without an alias": {input: "a: 1\nb: [x, y]\n"},
+		"a few aliases": {
+			input: stringtest.LinesLF(
+				"base: &b {a: 1, b: 2}",
+				"x:",
+				"  <<: *b",
+				"y: [*b, *b]",
+			),
+		},
+		"nested lists": {
+			input: yamltest.AliasLevels(7),
+			err:   niceyaml.ErrExcessiveAliasing,
+		},
+		"nested merge keys": {
+			input: yamltest.MergeLevels(7),
+			err:   niceyaml.ErrExcessiveAliasing,
+		},
+		"node with an alias in a document past the limit": {
+			input: yamltest.MergeLevels(7),
+			path:  paths.Current().Child("m7"),
+			err:   niceyaml.ErrExcessiveAliasing,
+		},
+		"node without an alias in a document past the limit": {
+			input: yamltest.MergeLevels(7),
+			path:  paths.Current().Child("m0"),
+		},
+		"alias of an anchor without an alias in a document past the limit": {
+			input: yamltest.AliasLevels(7) + "s: &s {p: 1}\nt: *s\n",
+			path:  paths.Current().Child("t"),
+		},
+		"tagged alias in a document past the limit": {
+			input: yamltest.AliasLevels(7) + "s: &s {p: 1}\nt: !t *s\n",
+			path:  paths.Current().Child("t"),
+			err:   niceyaml.ErrExcessiveAliasing,
+		},
+		"nested lists with the limit off": {
+			input: yamltest.AliasLevels(7),
+			opts:  []niceyaml.SourceOption{niceyaml.WithAliasLimit(false)},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.AtOrSelf(t, yamltest.FirstDocument(t, tc.input, tc.opts...), tc.path)
+
+			err := doc.CheckAliasLimit()
+
+			// The verdict is the one that a decode returns.
+			var got any
+
+			decodeErr := doc.DecodeInto(t.Context(), &got)
+
+			if tc.err == nil {
+				require.NoError(t, err)
+				require.NoError(t, decodeErr)
+
+				return
+			}
+
+			require.ErrorIs(t, err, tc.err)
+			assert.True(t, niceyaml.IsInvalid(err))
+			require.Error(t, decodeErr)
+			assert.Equal(t, decodeErr.Error(), err.Error())
+		})
+	}
+
+	t.Run("binds at the alias that repeats the most", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocumentWithPath(t, yamltest.AliasLevels(7), "in.yaml")
+
+		err := doc.CheckAliasLimit()
+		require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
+		assert.Equal(t, "in.yaml:9:10: aliases expand the document past the alias limit", err.Error())
+	})
+
+	t.Run("nil node", func(t *testing.T) {
+		t.Parallel()
+
+		var n *niceyaml.Node
+
+		require.NoError(t, n.CheckAliasLimit())
+	})
+
+	t.Run("document that did not parse", func(t *testing.T) {
+		t.Parallel()
+
+		docs := niceyaml.NewSourceFromString("a: [\n").Documents()
+		require.NotEmpty(t, docs)
+
+		err := docs[0].CheckAliasLimit()
+		require.ErrorIs(t, err, niceyaml.ErrSyntax)
+		assert.Equal(t, docs[0].Err(), err)
+	})
+
+	t.Run("guards a walk in a validator", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, yamltest.AliasLevels(7))
+
+		// The validator returns the error of the check as it is, and stands
+		// for a walk that follows the aliases of the document.
+		walked := false
+
+		err := doc.Validate(t.Context(), niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
+			err := n.CheckAliasLimit()
+			if err != nil {
+				return err //nolint:wrapcheck // The error binds at the alias.
+			}
+
+			walked = true
+
+			return nil
+		}))
+		require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
+		assert.True(t, niceyaml.IsInvalid(err))
+		require.EqualError(t, err, doc.CheckAliasLimit().Error())
+		assert.False(t, walked)
+	})
+}
+
 func TestNode_Target(t *testing.T) {
 	t.Parallel()
 

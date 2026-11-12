@@ -8106,10 +8106,11 @@ func TestWithAliasLimit(t *testing.T) {
 			want:    "resolve schema: bomb.yaml:7:10: aliases expand the document past the alias limit",
 			resolve: true,
 		},
+		// The decode checks the limit before its validators, so the
+		// registry does not run.
 		"decode with a registry with a content matcher": {
-			read:    decode(niceyaml.WithValidator(routed)),
-			want:    "resolve schema: bomb.yaml:7:10: aliases expand the document past the alias limit",
-			resolve: true,
+			read: decode(niceyaml.WithValidator(routed)),
+			want: "bomb.yaml:7:10: aliases expand the document past the alias limit",
 		},
 		// The decode binds its refusal at the position of the alias that
 		// repeats the most, so a scoped node names no path in front of it.
@@ -9738,6 +9739,38 @@ func TestSource_AllowsDuplicateKeys(t *testing.T) {
 			t.Parallel()
 
 			assert.Equal(t, tc.want, tc.source.AllowsDuplicateKeys())
+		})
+	}
+}
+
+func TestSource_LimitsAliases(t *testing.T) {
+	t.Parallel()
+
+	var nilSource *niceyaml.Source
+
+	tcs := map[string]struct {
+		source *niceyaml.Source
+		want   bool
+	}{
+		"default": {source: niceyaml.NewSourceFromString("a: 1\n"), want: true},
+		"off":     {source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithAliasLimit(false))},
+		"on again": {
+			source: niceyaml.NewSourceFromString(
+				"a: 1\n",
+				niceyaml.WithAliasLimit(false),
+				niceyaml.WithAliasLimit(true),
+			),
+			want: true,
+		},
+		"zero value": {source: &niceyaml.Source{}, want: true},
+		"nil":        {source: nilSource, want: true},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.source.LimitsAliases())
 		})
 	}
 }

@@ -1377,6 +1377,13 @@ func (s *Source) AllowsDuplicateKeys() bool {
 	return s != nil && s.allowDuplicateKeys
 }
 
+// LimitsAliases reports whether the alias limit applies to the documents
+// of the [Source], as [WithAliasLimit] sets it. It reports true for a nil
+// Source, as it does for a Source without options.
+func (s *Source) LimitsAliases() bool {
+	return s == nil || !s.skipAliasLimit
+}
+
 // References returns the reference Sources of the [Source], those that
 // [WithReferences] gave, in the order given. Each of them holds its own
 // references. Each call returns a new slice, and References returns nil
