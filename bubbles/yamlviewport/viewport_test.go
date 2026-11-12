@@ -5084,6 +5084,69 @@ func TestViewport_Update(t *testing.T) {
 				assert.Empty(t, m.RevisionName()) // The revision takes the Source's name, which is empty.
 			},
 		},
+		"Behavior/GGotoTop": {
+			msg:  tea.KeyPressMsg{Code: 'g', Text: "g"},
+			yaml: verticalYAML,
+			setup: func(m *yamlviewport.Model) {
+				m.SetYOffset(3)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.True(t, m.AtTop())
+			},
+		},
+		"Behavior/HomeGotoTop": {
+			msg:  tea.KeyPressMsg{Code: tea.KeyHome},
+			yaml: verticalYAML,
+			setup: func(m *yamlviewport.Model) {
+				m.SetYOffset(3)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.True(t, m.AtTop())
+			},
+		},
+		"Behavior/ShiftGGotoBottom": {
+			msg:  tea.KeyPressMsg{Code: 'G', Text: "G"},
+			yaml: verticalYAML,
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Positive(t, m.YOffset())
+				assert.True(t, m.AtBottom())
+			},
+		},
+		"Behavior/EndGotoBottom": {
+			msg:  tea.KeyPressMsg{Code: tea.KeyEnd},
+			yaml: verticalYAML,
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Positive(t, m.YOffset())
+				assert.True(t, m.AtBottom())
+			},
+		},
+		"Behavior/NSearchNext": {
+			msg:  tea.KeyPressMsg{Code: 'n', Text: "n"},
+			yaml: verticalYAML,
+			setup: func(m *yamlviewport.Model) {
+				m.SetSearchTerm("line")
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, 1, m.SearchIndex())
+			},
+		},
+		"Behavior/ShiftNSearchPrevious": {
+			msg:  tea.KeyPressMsg{Code: 'N', Text: "N"},
+			yaml: verticalYAML,
+			setup: func(m *yamlviewport.Model) {
+				m.SetSearchTerm("line")
+				m.SetSearchIndex(2)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, 1, m.SearchIndex())
+			},
+		},
 		"Behavior/MToggleDiffMode": {
 			msg:   tea.KeyPressMsg{Code: 'm'},
 			yaml:  verticalYAML,

@@ -3238,6 +3238,18 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, m.KeyMap.Right):
 			m.ScrollRight(m.horizontalStep)
 
+		case key.Matches(msg, m.KeyMap.GotoTop):
+			m.GotoTop()
+
+		case key.Matches(msg, m.KeyMap.GotoBottom):
+			m.GotoBottom()
+
+		case key.Matches(msg, m.KeyMap.SearchNext):
+			m.SearchNext()
+
+		case key.Matches(msg, m.KeyMap.SearchPrevious):
+			m.SearchPrevious()
+
 		case key.Matches(msg, m.KeyMap.NextRevision):
 			m.NextRevision()
 

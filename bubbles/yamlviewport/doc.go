@@ -92,6 +92,12 @@
 // for a row, such as before the first [tea.WindowSizeMsg]. The viewport then
 // scrolls to the current match when the area has room.
 //
+// The default [KeyMap] steps through the matches with n and N. It has no
+// binding that sets or clears the term, because the parent owns the
+// search prompt and the key that cancels it. The parent calls
+// [Model.SetSearchTerm] when the user submits a term and
+// [Model.ClearSearch] on its own cancel key, such as esc.
+//
 // Search highlighting uses [kind.GenericHighlightDim] for regular matches and
 // [kind.GenericHighlight] for the current match.
 //
@@ -141,7 +147,15 @@
 // [Model.SetDiffer] swaps it at runtime, such as from a key binding that
 // toggles whitespace changes.
 //
-// Configure keybindings through the [KeyMap] field on [Model].
+// Configure keybindings through the [KeyMap] field on [Model]. A parent
+// that forwards every key press to [Model.Update] and wants a default key
+// for its own action replaces that binding or disables it:
+//
+//	m.KeyMap.SearchNext = key.NewBinding(
+//		key.WithKeys("ctrl+n"),
+//		key.WithHelp("ctrl+n", "next match"),
+//	)
+//	m.KeyMap.GotoTop.SetEnabled(false)
 //
 // The viewport supports both keyboard navigation (vim-style by default) and
 // mouse wheel scrolling.
