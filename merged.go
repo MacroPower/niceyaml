@@ -250,11 +250,12 @@ func MergeUnmarshalers(us ...Unmarshaler) MergeOption {
 // is. [Node.Origin] returns the Node at that path of the file.
 //
 // An error at the sequence itself binds in the highest layer that holds
-// the sequence, as an error at a mapping does. An error under an element
-// stays in the file of that element when it binds at a value above the
-// element, or at the key of such a value. An error below a sequence that
-// decodes itself thus binds at that sequence in the file that wrote the
-// element.
+// the sequence, as an error at a mapping does. A layer whose Source has
+// positions off, as [WithPositions] sets them, gives way to a lower layer
+// that holds the sequence. An error under an element stays in the file
+// of that element when it binds at a value above the element, or at the
+// key of such a value. An error below a sequence that decodes itself thus
+// binds at that sequence in the file that wrote the element.
 //
 // Each MergeAppend adds its paths to the ones before it. MergeAppend
 // copies the slice at, so the option keeps its paths when the caller
@@ -322,12 +323,14 @@ type Layer interface {
 // Layers section of the package documentation describes. The origin has
 // the lines, the positions, and the [Node.Path] of the document of that
 // layer. A mapping that several layers hold has its origin in the highest
-// of them. That Node holds the keys that its own layer sets, but not the
-// keys that the layers below add. The origin of the root is the highest
-// layer that holds a value, or else the highest layer of all.
+// of them whose Source reports positions, as [WithPositions] sets them,
+// or else in the highest of them. That Node holds the keys that its own
+// layer sets, but not the keys that the layers below add. The root
+// follows the same rule. When no layer holds a value, the origin of the
+// root lies in the highest layer of all.
 //
-// A sequence that [MergeAppend] names has its origin in the highest
-// layer that holds it too. That Node holds the elements of its own layer
+// A sequence that [MergeAppend] names has its origin in the same layer
+// as a mapping does. That Node holds the elements of its own layer
 // alone. Each element has its origin in the layer that wrote it, at the
 // index it has there.
 //
@@ -407,8 +410,9 @@ type layerPath func(paths.Path) paths.Path
 
 // layer returns the layer that an error at path binds in, where path is a
 // `$` path in doc. It also returns the [layerPath] of that layer for the
-// paths of doc. It picks the layer of the deepest value on path, or else
-// the highest, and continues into a layer that a merge built.
+// paths of doc. It picks the layer of the deepest value on path, as
+// [layermerge.Value.ErrorLayer] gives it, or else the highest, and
+// continues into a layer that a merge built.
 //
 // The error is about the value at through. Through is path itself,
 // unless the error binds at a value above its own path. Below path,
@@ -429,7 +433,7 @@ func (l *layering) layer(doc *Node, path, through paths.Path) (resolvedLayer, la
 	index := len(l.layers) - 1
 
 	if at, _ := l.root.Find(rel); at != nil {
-		index = at.Layer
+		index = at.ErrorLayer()
 	}
 
 	if _, ok := through.CutPrefix(path.Value()); ok {
@@ -601,6 +605,10 @@ func (l resolvedLayer) read(ctx context.Context, i int) (*layermerge.Value, erro
 		References: n.source.referenceAnchors(),
 		UnnamedKey: ErrUnnamedKey,
 		Layer:      i,
+		// A layer that a merge built reports positions as a whole when
+		// any of its layers does. Carry narrows that to each value, to
+		// the layer that holds the value inside the merge.
+		Positions: n.source.ReportsPositions(),
 	}
 
 	v, err := r.Read(n.valueNode())
@@ -757,7 +765,7 @@ func mergeLayers[L Layer](ctx context.Context, given []L, cfg mergeConfig) (*Sou
 		return nil, named.node.bindOwn(err)
 	}
 
-	src := newMergedSource(named.source, text, showsLayers(layers), cfg)
+	src := newMergedSource(named.source, text, showsLayers(layers), positionsLayers(layers), cfg)
 	src.layers = &layering{root: root, appends: appends, layers: layers, identity: identity}
 
 	return src, nil
@@ -782,10 +790,11 @@ func preambleText(n *Node) string {
 
 // showsLayers reports whether an error can show the merged text of layers.
 // That text holds values of every layer and of the reference documents they
-// read, so showsLayers reports false when any of them has excerpts off.
+// read, so showsLayers reports false when any of them has excerpts off,
+// which includes a Source with positions off.
 func showsLayers(layers []resolvedLayer) bool {
 	for _, layer := range layers {
-		if layer.source.noExcerpts || layer.source.noReferenceExcerpts {
+		if !layer.source.ShowsExcerpts() || layer.source.noReferenceExcerpts {
 			return false
 		}
 	}
@@ -793,12 +802,22 @@ func showsLayers(layers []resolvedLayer) bool {
 	return true
 }
 
+// positionsLayers reports whether the Source of any of layers reports
+// positions, as [WithPositions] sets them. A merged Source that holds
+// such a layer then reports positions as a layer of another merge.
+func positionsLayers(layers []resolvedLayer) bool {
+	return slices.ContainsFunc(layers, func(layer resolvedLayer) bool {
+		return layer.source.ReportsPositions()
+	})
+}
+
 // newMergedSource returns a new [*Source] that holds text, with the name,
 // the file, and the settings of from. It drops the references of from.
-// Its excerpts are on when excerpts is true. It takes the unmarshalers of
-// merge when merge sets its own. It parses text before it returns, so it
-// binds each syntax error before the caller sets layers.
-func newMergedSource(from *Source, text string, excerpts bool, merge mergeConfig) *Source {
+// Its excerpts are on when excerpts is true, and it reports positions
+// when positions is true. It takes the unmarshalers of merge when merge
+// sets its own. It parses text before it returns, so it binds each syntax
+// error before the caller sets layers.
+func newMergedSource(from *Source, text string, excerpts, positions bool, merge mergeConfig) *Source {
 	src := NewSourceFromString(text, func(c *sourceConfig) {
 		*c = from.sourceConfig
 
@@ -813,6 +832,7 @@ func newMergedSource(from *Source, text string, excerpts bool, merge mergeConfig
 		c.noReferenceExcerpts = false
 
 		c.noExcerpts = !excerpts
+		c.noPositions = !positions
 
 		// The merged text is text niceyaml wrote. It holds the content of
 		// the layers and no more than the bounds of their limits let their

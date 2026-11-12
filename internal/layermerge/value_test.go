@@ -73,6 +73,44 @@ func mergeAppending(tb testing.TB, appends layermerge.Appends, layers ...string)
 	return root
 }
 
+// readPositions returns the value a [layermerge.Reader] reads from the
+// document of input, as the layer at index layer, whose errors report
+// positions when positions is true.
+func readPositions(tb testing.TB, input string, layer int, positions bool) *layermerge.Value {
+	tb.Helper()
+
+	doc := yamltest.FirstDocument(tb, input)
+
+	r := layermerge.Reader{
+		Ctx:        tb.Context(),
+		Resolver:   doc.DocumentResolver(),
+		Enclosed:   aliasing.NewFacts(doc.AST(), doc.DocumentResolver()).Enclosed,
+		UnnamedKey: errUnnamed,
+		Layer:      layer,
+		Positions:  positions,
+	}
+
+	v, err := r.Read(doc.AST())
+	require.NoError(tb, err)
+
+	return v
+}
+
+// mergePositions reads each of layers and merges them, lowest first, with
+// the sequences that appends names. The errors of the layer at index i
+// report positions when positions[i] is true.
+func mergePositions(tb testing.TB, appends layermerge.Appends, positions []bool, layers ...string) *layermerge.Value {
+	tb.Helper()
+
+	var root *layermerge.Value
+
+	for i, input := range layers {
+		root = root.Merge(readPositions(tb, input, i, positions[i]), appends)
+	}
+
+	return root
+}
+
 func TestValue_Merge(t *testing.T) {
 	t.Parallel()
 
@@ -439,6 +477,41 @@ func TestValue_Find(t *testing.T) {
 	assert.False(t, found)
 }
 
+func TestValue_ErrorLayer(t *testing.T) {
+	t.Parallel()
+
+	// Layer 1 is a generated layer whose errors do not report positions.
+	root := mergePositions(t, layermerge.NewAppends(paths.Current().Child("s")),
+		[]bool{true, false, true},
+		stringtest.LinesLF("a: {b: 1}", "s: [x]", "g: {k: 1}"),
+		stringtest.LinesLF("a: {c: 2}", "s: [y]", "g: {k: 2}", "e: {k: 1}"),
+		stringtest.LinesLF("g: {k: 3}"),
+	)
+
+	tcs := map[string]struct {
+		path paths.Path
+		want int
+	}{
+		"a mapping a lower layer holds":   {path: paths.Current().Child("a"), want: 0},
+		"a scalar of the generated layer": {path: paths.Current().Child("a", "c"), want: 1},
+		"a sequence a lower layer holds":  {path: paths.Current().Child("s"), want: 0},
+		"an element of the generated one": {path: paths.Current().Child("s").Index(1), want: 1},
+		"a mapping only it holds":         {path: paths.Current().Child("e"), want: 1},
+		"a mapping a higher layer holds":  {path: paths.Current().Child("g"), want: 2},
+		"the root":                        {path: paths.Current(), want: 2},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			v, found := root.Find(tc.path)
+			require.True(t, found)
+			assert.Equal(t, tc.want, v.ErrorLayer())
+		})
+	}
+}
+
 func TestValue_Carry(t *testing.T) {
 	t.Parallel()
 
@@ -461,4 +534,42 @@ func TestValue_Carry(t *testing.T) {
 		stringtest.LinesLF("a: 1", "c: 3"),
 		layermerge.Text("", merge(t, "b: 9\n").Merge(v, layermerge.Appends{})),
 	)
+}
+
+func TestValue_Carry_Positions(t *testing.T) {
+	t.Parallel()
+
+	// The merged layers hold a file below a generated layer. The file holds
+	// a, and the generated layer alone holds e.
+	held := mergePositions(t, layermerge.Appends{}, []bool{true, false},
+		stringtest.LinesLF("a: {b: 1}"),
+		stringtest.LinesLF("a: {c: 2}", "e: {k: 1}"),
+	)
+
+	// The merged layers report positions as a whole, through the file.
+	v := readPositions(t, layermerge.Text("", held), 1, true)
+	v.Carry(held, 1)
+
+	// A file below the merged layers holds each mapping too.
+	root := readPositions(t, stringtest.LinesLF("a: {d: 3}", "e: {d: 3}"), 0, true).
+		Merge(v, layermerge.Appends{})
+
+	tcs := map[string]struct {
+		path paths.Path
+		want int
+	}{
+		"a mapping the merged file holds":    {path: paths.Current().Child("a"), want: 1},
+		"a mapping only the generated holds": {path: paths.Current().Child("e"), want: 0},
+		"a scalar of the generated layer":    {path: paths.Current().Child("e", "k"), want: 1},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			at, found := root.Find(tc.path)
+			require.True(t, found)
+			assert.Equal(t, tc.want, at.ErrorLayer())
+		})
+	}
 }

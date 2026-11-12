@@ -212,6 +212,10 @@ func TestSource_ZeroValue(t *testing.T) {
 			read: func(s *niceyaml.Source) any { return s.ShowsExcerpts() },
 			want: true,
 		},
+		"positions": {
+			read: func(s *niceyaml.Source) any { return s.ReportsPositions() },
+			want: true,
+		},
 		"text": {
 			read: func(s *niceyaml.Source) any { return s.Text() },
 			want: "",
@@ -7644,6 +7648,240 @@ func TestWithExcerpts(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
+}
+
+func TestWithPositions(t *testing.T) {
+	t.Parallel()
+
+	const input = "server:\n  port: http\n"
+
+	port := paths.Doc().Child("server", "port")
+
+	tcs := map[string]struct {
+		// The error the case binds in the Source.
+		err error
+		// FormatError of the bound error.
+		want string
+		opts []niceyaml.SourceOption
+	}{
+		"no option": {
+			err: niceyaml.NewError("bad port", niceyaml.AtPath(port)),
+			want: stringtest.JoinLF(
+				"env:2:9: $.server.port: bad port",
+				"",
+				"   1 | server:",
+				"   2 |   port: http",
+				"     |         ^^^^",
+			),
+		},
+		"on": {
+			err:  niceyaml.NewError("bad port", niceyaml.AtPath(port)),
+			opts: []niceyaml.SourceOption{niceyaml.WithPositions(true), niceyaml.WithExcerpts(false)},
+			want: "env:2:9: $.server.port: bad port",
+		},
+		"off": {
+			err:  niceyaml.NewError("bad port", niceyaml.AtPath(port)),
+			opts: []niceyaml.SourceOption{niceyaml.WithPositions(false)},
+			want: "env: $.server.port: bad port",
+		},
+		"off with a position alone": {
+			err:  niceyaml.NewError("bad port", niceyaml.AtPosition(position.New(1, 8))),
+			opts: []niceyaml.SourceOption{niceyaml.WithPositions(false)},
+			want: "env: $.server.port: bad port",
+		},
+		"off with a range alone": {
+			err: niceyaml.NewError(
+				"bad port",
+				niceyaml.AtRange(position.NewRange(position.New(1, 8), position.New(1, 12))),
+			),
+			opts: []niceyaml.SourceOption{niceyaml.WithPositions(false)},
+			want: "env: $.server.port: bad port",
+		},
+		"off with a position at a key": {
+			err:  niceyaml.NewError("bad key", niceyaml.AtPosition(position.New(1, 2))),
+			opts: []niceyaml.SourceOption{niceyaml.WithPositions(false)},
+			want: "env: $.server.port~: bad key",
+		},
+		"off at a key the mapping lacks": {
+			err:  niceyaml.NewError("host is required", niceyaml.AtPath(paths.Doc().Child("server", "host"))),
+			opts: []niceyaml.SourceOption{niceyaml.WithPositions(false)},
+			want: "env: $.server.host: host is required",
+		},
+		"the last option wins": {
+			err:  niceyaml.NewError("bad port", niceyaml.AtPath(port)),
+			opts: []niceyaml.SourceOption{niceyaml.WithPositions(true), niceyaml.WithPositions(false)},
+			want: "env: $.server.port: bad port",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(
+				input,
+				append([]niceyaml.SourceOption{niceyaml.WithName("env")}, tc.opts...)...,
+			)
+
+			err := yamltest.Bind(t, source, tc.err)
+			assert.Equal(t, tc.want, niceyaml.FormatError(err))
+
+			bound := yamltest.RequireSourceError(t, err)
+			assert.Same(t, source, bound.Source())
+			require.NoError(t, bound.Unresolved())
+
+			_, located := bound.Position()
+			assert.Equal(t, source.ReportsPositions(), located)
+
+			_, ranged := bound.Range()
+			assert.Equal(t, located, ranged)
+
+			_, excerpted := bound.Excerpt()
+			assert.Equal(t, source.ShowsExcerpts(), excerpted)
+		})
+	}
+
+	t.Run("positions off turn excerpts off", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(input, niceyaml.WithPositions(false))
+		assert.False(t, source.ReportsPositions())
+		assert.False(t, source.ShowsExcerpts())
+
+		source = niceyaml.NewSourceFromString(input)
+		assert.True(t, source.ReportsPositions())
+		assert.True(t, source.ShowsExcerpts())
+	})
+
+	t.Run("a bound error keeps its node and path", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(input, niceyaml.WithName("env"), niceyaml.WithPositions(false))
+		host := paths.Doc().Child("server", "host")
+
+		err := yamltest.Bind(t, source, niceyaml.NewError("host is required", niceyaml.AtPath(host)))
+		bound := yamltest.RequireSourceError(t, err)
+
+		node, ok := bound.Node()
+		require.True(t, ok)
+		assert.Same(t, source, node.Source())
+
+		path, ok := bound.Path()
+		require.True(t, ok)
+		assert.Equal(t, host, path)
+
+		_, near := bound.Nearest()
+		assert.False(t, near)
+
+		// No line of the view gets a mark, because the error lacks a
+		// position.
+		assert.False(t, niceyaml.Annotate(err, source.View()))
+
+		// No report lists the error as one without an excerpt.
+		rep := niceyaml.NewErrorReport(err)
+		assert.Empty(t, rep.Excerpts)
+		assert.Empty(t, rep.Unresolved)
+		assert.Equal(t, "env: $.server.host: host is required", niceyaml.FormatError(niceyaml.Detach(err)))
+	})
+
+	t.Run("a position alone names the value there", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("# env\n"+input, niceyaml.WithName("env"), niceyaml.WithPositions(false))
+
+		err := yamltest.Bind(t, source, niceyaml.NewError("bad port", niceyaml.AtPosition(position.New(2, 8))))
+		bound := yamltest.RequireSourceError(t, err)
+
+		path, ok := bound.Path()
+		require.True(t, ok)
+		assert.Equal(t, port, path)
+
+		// A comment holds no value, so the error keeps only the name.
+		err = yamltest.Bind(t, source, niceyaml.NewError("bad comment", niceyaml.AtPosition(position.New(0, 2))))
+		assert.Equal(t, "env: bad comment", niceyaml.FormatError(err))
+
+		_, ok = yamltest.RequireSourceError(t, err).Path()
+		assert.False(t, ok)
+
+		// A path of the error itself wins over the value at its position.
+		err = yamltest.Bind(t, source, niceyaml.NewError("bad server",
+			niceyaml.AtPath(paths.Doc().Child("server")), niceyaml.AtPosition(position.New(2, 8))))
+		assert.Equal(t, "env: $.server: bad server", niceyaml.FormatError(err))
+	})
+
+	t.Run("a located error gives way to the binding", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(input, niceyaml.WithName("env"), niceyaml.WithPositions(false))
+		inner := yamltest.Bind(t, source, niceyaml.NewError("bad port", niceyaml.AtPath(port)))
+
+		err := yamltest.Bind(
+			t,
+			source,
+			niceyaml.Locate(fmt.Errorf("read: %w", inner), niceyaml.AtPath(paths.Doc().Child("server"))),
+		)
+		assert.Equal(t, "env: $.server.port: read: bad port", niceyaml.FormatError(err))
+	})
+
+	t.Run("a problem without a location binds at its heading", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(input, niceyaml.WithName("env"), niceyaml.WithPositions(false))
+
+		err := yamltest.Bind(t, source, niceyaml.NewError("bad server",
+			niceyaml.AtPath(paths.Doc().Child("server")),
+			niceyaml.WithDetails(errors.New("port is not a number")),
+		))
+		assert.Equal(t, stringtest.JoinLF(
+			"env: $.server: bad server",
+			"`-- port is not a number",
+		), niceyaml.FormatError(err))
+
+		for bound := range niceyaml.Bindings(err) {
+			_, located := bound.Position()
+			assert.False(t, located)
+			require.NoError(t, bound.Unresolved())
+		}
+	})
+
+	t.Run("a document of several names its index", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("a: 1\n---\nport: http\n",
+			niceyaml.WithName("env"), niceyaml.WithPositions(false))
+
+		err := source.AllDocuments()[1].Bind(niceyaml.NewError("bad port", niceyaml.AtPath(paths.Doc().Child("port"))))
+		assert.Equal(t, "env: document 2: $.port: bad port", niceyaml.FormatError(err))
+	})
+
+	t.Run("a syntax error names the document of its line", func(t *testing.T) {
+		t.Parallel()
+
+		// The anchor without a value joins documents 2 and 3 in one parse,
+		// so they share one error, which the line of document 3 holds.
+		source := niceyaml.NewSourceFromString("k: 1\n---\na: &x\n---\nb: [1\n---\nc: 2\n",
+			niceyaml.WithName("env"), niceyaml.WithPositions(false))
+
+		_, err := source.File()
+		require.Error(t, err)
+		assert.Equal(t, "env: document 3: sequence end token ']' not found", niceyaml.FormatError(err))
+
+		var bindings int
+
+		for bound := range niceyaml.Bindings(err) {
+			bindings++
+
+			doc, ok := bound.Document()
+			require.True(t, ok)
+			assert.Equal(t, 2, doc.DocumentIndex())
+
+			_, located := bound.Position()
+			assert.False(t, located)
+			require.NoError(t, bound.Unresolved())
+		}
+
+		assert.Equal(t, 1, bindings)
+	})
 }
 
 func TestWithAliasLimit(t *testing.T) {

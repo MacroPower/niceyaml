@@ -11,8 +11,10 @@
 // a value. Its entry stays in the value as a removed one, so an error
 // about its key finds that null.
 //
-// Each value names the layer it came from by index, and [Value.Find]
-// finds the value at a path. A sequence that several layers append to
+// Each value names the layer it came from by index, and
+// [Value.ErrorLayer] names the layer that an error at it binds in, which
+// prefers a layer whose errors report positions. [Value.Find] finds the
+// value at a path. A sequence that several layers append to
 // holds an element at another index than the layer of the element does.
 // [Value.LayerPath] gives a path as one layer holds it, and
 // [Value.Element] finds the element that a path goes through. [Text]

@@ -122,6 +122,9 @@ const errorConnectorWidth = 4
 // A source with excerpts off, as [niceyaml.WithExcerpts] sets it for a
 // text that holds secrets, does not print an excerpt or a line in its
 // place. The tree names the position, the path, and the message of each
+// error bound in that source. A source with positions off, as
+// [niceyaml.WithPositions] sets it for a text that the program writes,
+// does not print either. The tree names the path and the message of each
 // error bound in that source.
 //
 // # Control Characters

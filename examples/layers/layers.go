@@ -136,7 +136,8 @@ func main() {
 		return
 	}
 
-	// The error binds in the environment, which shows no excerpt.
+	// The error binds in the environment, which reports neither a position
+	// nor an excerpt, because the program wrote its text.
 	_, err = merged.Decode[config](ctx, rule)
 	lipgloss.Println(p.PrintError(err))
 
@@ -234,10 +235,11 @@ func environment(ctx context.Context, closing string) (*niceyaml.Source, error) 
 		return nil, fmt.Errorf("encode environment: %w", err)
 	}
 
-	// WithExcerpts(false) keeps the lines of this layer, and the password
-	// among them, out of every error.
+	// The program wrote this text, so a line of it names nothing the user
+	// can open. WithPositions(false) keeps the positions and the lines of
+	// this layer, and the password among them, out of every error.
 	env := niceyaml.NewSourceFromBytes(data,
-		niceyaml.WithName("environment"), niceyaml.WithExcerpts(false))
+		niceyaml.WithName("environment"), niceyaml.WithPositions(false))
 
 	return env, nil
 }

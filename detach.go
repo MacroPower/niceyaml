@@ -674,11 +674,11 @@ func (d *detacher) keepLines() {
 }
 
 // keptSource is what a detached binding keeps of the [Source] it was bound
-// in. It holds the name, the file path, and the [WithExcerpts] setting of
-// the Source. It also holds the options [Detach] received and a copy of
-// the lines that the excerpts of its bindings show. One call of Detach
-// makes one keptSource per Source, which every binding it detaches from
-// that Source shares.
+// in. It holds the name, the file path, and whether the Source shows
+// excerpts, as [Source.ShowsExcerpts] reports. It also holds the options
+// [Detach] received and a copy of the lines that the excerpts of its
+// bindings show. One call of Detach makes one keptSource per Source, which
+// every binding it detaches from that Source shares.
 type keptSource struct {
 	// The Source the text came from. The weak pointer does not keep the
 	// Source alive, and [sameSource] compares a detached binding with a
@@ -695,8 +695,8 @@ type keptSource struct {
 	// The index in lines of the copy of each line of rows.
 	at  []int
 	cfg excerptConfig
-	// Whether the source shows its text in an excerpt, as [WithExcerpts]
-	// sets it.
+	// Whether the source shows its text in an excerpt, as
+	// [Source.ShowsExcerpts] reports.
 	shows bool
 }
 

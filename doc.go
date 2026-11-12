@@ -520,10 +520,13 @@
 //	logger.Error("decode", slog.Any("err", err), slog.Any("problems", problems))
 //
 // An excerpt shows lines of the source to whoever reads the log. A program
-// that loads a text with secrets in it, such as the values of its
-// environment, creates that [Source] with [WithExcerpts] set to false. Every
-// renderer then prints the position, the path, and the message of an error
-// that binds there, but not a line of the text.
+// that loads a file with secrets in it creates that [Source] with
+// [WithExcerpts] set to false. Every renderer then prints the position, the
+// path, and the message of an error that binds there, but not a line of the
+// text. A program that writes a text itself, such as the values of its
+// environment, creates that Source with [WithPositions] set to false. Every
+// renderer then prints the path and the message of an error that binds
+// there, but neither a position nor a line of the text.
 //
 // An excerpt bounds what one line adds to the output. A line longer than
 // [DefaultExcerptWidth] columns shows a window of that many columns around
@@ -1887,8 +1890,8 @@
 // Source of that layer. It also takes the unmarshalers of that Source, unless
 // a [MergeUnmarshalers] option sets them. Its text holds the values of every
 // layer. The Source thus does not show an excerpt when the Source of a layer,
-// or of a reference document that a layer reads, has [WithExcerpts] set to
-// false.
+// or of a reference document that a layer reads, has excerpts off, by
+// [WithExcerpts] or [WithPositions].
 //
 // That text is not a file of the program. [Node.View], [Node.Span],
 // [Node.Ranges], and [Node.PathAt] read the merged lines, so a position from
@@ -1934,7 +1937,9 @@
 // An error with a path binds in the highest layer whose document holds a
 // value at that path, through the aliases and merge keys of that layer. A
 // layer that leaves a null unwritten there does not hold a value. An error at
-// a mapping that several layers hold binds in the highest of them. An error
+// a mapping that several layers hold binds in the highest of them whose
+// Source reports positions, as [WithPositions] sets them. It binds in a layer
+// with positions off only when no other layer holds the mapping. An error
 // under a sequence binds in the layer that holds the sequence. An error with
 // a position or a range in the merged text binds at the value that lies
 // there.
@@ -1949,8 +1954,9 @@
 //
 // An error for a path that every layer misses binds at the nearest node that
 // a layer holds along the path, such as the key of the mapping that lacks a
-// key. It binds in the layer whose node lies deepest along the path, and in
-// the highest of several such layers. An error at a
+// key. It binds in the layer whose node lies deepest along the path. Among
+// several such layers, it binds in the highest that reports positions, as
+// an error at the mapping does. An error at a
 // key that a written null removes or does not add binds at that null, in the
 // highest layer that writes one there. An error without a location binds
 // without a position in the layer that the Source stands for, as in
@@ -1975,7 +1981,10 @@
 // not add, but the layer keeps the null. The null thus removes the key that a
 // layer below the merged Source holds. The merge binds each error in the file
 // that holds the value, so every error and every origin belongs to a document
-// that a merge did not build.
+// that a merge did not build. For an error at a mapping, a merged layer
+// reports positions only where a layer inside it that reports positions holds
+// the mapping. A nested merge thus binds as the flat merge of the same layers
+// does.
 //
 // The decode fills the Go value from the merged document as the Decoding
 // section describes. A default that the value holds thus survives where the
@@ -1990,20 +1999,32 @@
 // the value as it was, and each error binds without a position, as in
 // "$.servers[1].port: port is required".
 //
-// A layer that a program builds from its environment or its flags merges and
-// binds as a file does. It cannot set one element of a sequence. By default,
-// the decode ignores a key that the target does not read, and
-// [WithUnknownFields] reports such a key. After the layer sets one
-// key of a mapping, an error at that mapping binds in that layer, whichever
-// layer the fix belongs in. So does an error for a key that the mapping
-// lacks.
+// A layer that a program builds from its environment or its flags merges as
+// a file does. It cannot set one element of a sequence. By default, the
+// decode ignores a key that the target does not read, and [WithUnknownFields]
+// reports such a key. The program writes the text of the layer, so a line and
+// a column of that text name nothing the user can open. The program creates
+// the Source of the layer with [WithPositions] set to false, one Source for
+// each origin such as "environment" or "flags":
+//
+//	env := niceyaml.NewSourceFromBytes(data,
+//		niceyaml.WithName("environment"), niceyaml.WithPositions(false))
+//
+// An error at a value that the layer sets binds in that layer without a
+// position, as in "environment: $.server.port: expected integer, got
+// string". The path names the key at fault. An error at a mapping that the
+// layer shares with a file binds in the file, with its position and its
+// excerpt. So does an error for a key that the mapping lacks, such as
+// "app.yaml:2:1: $.server.host: host is required". It binds in the layer
+// only when no file holds the mapping.
 //
 // [go.jacobcolvin.com/niceyaml/encoder.Marshal] writes a nil pointer field of
 // a struct as `null`. A layer that a program encodes from a struct thus
 // removes the value under each nil pointer whose field lacks the omitempty
 // option. It does not set a null where the layers below lack the key.
-// [WithExcerpts] set to false keeps the lines of a layer that holds secrets
-// out of every excerpt.
+// [WithPositions] set to false keeps the lines of the layer, and the secrets
+// they hold, out of every excerpt. The merged text holds those lines too, so
+// the merged Source has excerpts off.
 //
 // # Alias Limit
 //

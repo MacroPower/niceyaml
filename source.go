@@ -52,7 +52,8 @@ import (
 // [Source.Name], [Source.FilePath], [Source.FS], [Source.Text],
 // [Source.Offset], [Source.PositionAt], [Source.Tokens], and
 // [Source.Lines] return zero values or false for it, [Source.View]
-// returns a view without lines, and [Source.ShowsExcerpts] reports true.
+// returns a view without lines, and [Source.ShowsExcerpts] and
+// [Source.ReportsPositions] report true.
 // The methods that need the parse panic on a nil Source. They are
 // [Source.Documents], [Source.AllDocuments], [Source.Document],
 // [Source.File], [Source.DecodeInto], [Source.Decode],
@@ -145,6 +146,7 @@ func (l *lazy[T]) get(f func() T) T {
 //   - [WithReferences]
 //   - [WithUnmarshalers]
 //   - [WithExcerpts]
+//   - [WithPositions]
 //   - [WithByteLimit]
 //   - [WithDocumentByteLimit]
 //   - [WithDepthLimit]
@@ -159,8 +161,9 @@ func (l *lazy[T]) get(f func() T) T {
 // [WithUnknownFields], stays a [DecodeOption] of each call.
 //
 // [WithExcerpts] sets whether errors show the text in excerpts, for
-// every renderer of the errors of the Source. [ExcerptOption] sets how
-// the renderer draws an excerpt.
+// every renderer of the errors of the Source. [WithPositions] sets
+// whether errors report positions in the text at all. [ExcerptOption]
+// sets how the renderer draws an excerpt.
 type SourceOption func(*sourceConfig)
 
 // sourceConfig holds the settings a [SourceOption] configures. An option
@@ -196,12 +199,17 @@ type sourceConfig struct {
 	// Whether errors must not show the text. Excerpts then do not hold any
 	// line of the Source.
 	noExcerpts bool
+	// Whether errors must not report a position in the text, for a text
+	// that the program wrote and the user cannot open. Excerpts are then
+	// off too.
+	noPositions bool
 	// Turns off the alias limit for every reader of the documents.
 	skipAliasLimit bool
 	// Whether a reference Source, or a Source that it reads, has excerpts
-	// off. Excerpts then do not hold any line of the text of a reference
-	// document. The lines of the Source do not hold that text, but the
-	// document that [NewSourceFromLayers] builds does.
+	// off, by [WithExcerpts] or [WithPositions]. Excerpts then do not hold
+	// any line of the text of a reference document. The lines of the
+	// Source do not hold that text, but the document that
+	// [NewSourceFromLayers] builds does.
 	noReferenceExcerpts bool
 	// Whether the parser accepts a mapping that holds the same key twice.
 	allowDuplicateKeys bool
@@ -703,7 +711,7 @@ func WithReferences(refs ...*Source) SourceOption {
 				_, c.referenceErr = ref.File()
 			}
 
-			if ref.noExcerpts || ref.noReferenceExcerpts {
+			if !ref.ShowsExcerpts() || ref.noReferenceExcerpts {
 				c.noReferenceExcerpts = true
 			}
 		}
@@ -752,12 +760,14 @@ func WithUnmarshalers(us ...Unmarshaler) SourceOption {
 }
 
 // WithExcerpts is a [SourceOption] that sets whether errors show the text
-// of the [Source] in excerpts. The default is true. Pass false for a
-// Source whose text holds secrets, such as the values a program read
-// from its environment.
+// of the [Source] in excerpts. The default is true. Pass false for a file
+// whose text holds secrets, such as a file of credentials that a user
+// edits. A text that the program writes itself, such as the values it
+// read from its environment, takes [WithPositions] set to false instead,
+// which turns excerpts off too.
 //
 // An error bound in a Source with excerpts off keeps its position, its
-// path, and its message, as in "environment:3:9: $.db.port: port must be
+// path, and its message, as in "secrets.yaml:3:9: $.db.port: port must be
 // at least 1". [SourceError.Excerpt] reports false for it, and its
 // [ErrorReport] does not hold an excerpt of the Source. [FormatError],
 // the %+v verb, and
@@ -781,10 +791,57 @@ func WithUnmarshalers(us ...Unmarshaler) SourceOption {
 //
 // The Source that [NewSourceFromLayers] builds has excerpts off when the
 // Source of any layer, or of a reference document a layer reads through
-// [WithReferences], has them off.
+// [WithReferences], has them off, by this option or by [WithPositions].
 func WithExcerpts(enabled bool) SourceOption {
 	return func(c *sourceConfig) {
 		c.noExcerpts = !enabled
+	}
+}
+
+// WithPositions is a [SourceOption] that sets whether errors report
+// positions in the text of the [Source]. The default is true. Pass false
+// for a text that the program writes and the user cannot open, such as
+// the values it read from its environment or its flags and encoded with
+// [go.jacobcolvin.com/niceyaml/encoder.Marshal]. A line and a column of
+// such a text name nothing the user can find, so errors name the key at
+// fault by its path:
+//
+//	env := niceyaml.NewSourceFromBytes(data,
+//		niceyaml.WithName("environment"), niceyaml.WithPositions(false))
+//
+// An error bound in a Source with positions off keeps its Source, its
+// [Node], its path, and its message, and loses its position, as in
+// "environment: $.server.port: expected integer, got string". An error
+// that carries a position, a range, or a token but no path takes the path
+// of the value there, which [SourceError.Path] then reports. An error at a
+// place that no path names, such as a comment or a key that is a
+// collection, keeps only the name of the Source in front of its message.
+// [SourceError.Position], [SourceError.Range], [SourceError.Nearest], and
+// [SourceError.Excerpt] report false for it. [SourceError.Unresolved]
+// returns nil, because the location resolved. A child of the error that
+// does not carry a location binds at the same node, as it does in any
+// Source.
+//
+// Positions off turn excerpts off too, as [WithExcerpts] set to false
+// does, so [Source.ShowsExcerpts] reports false. Renderers print neither
+// an excerpt nor a "no excerpt:" line for such an error. The text, the
+// lines, and the Nodes of the Source stay as they are. [Annotate] does
+// not mark an error that lacks a position, so it does not mark the
+// errors of such a Source.
+//
+// [NewSourceFromLayers] binds an error at a mapping that several layers
+// hold in the highest of them whose Source reports positions. So does an
+// error for a key that the mapping lacks. A layer with positions off thus
+// sets a key of a mapping and leaves the error about a missing key in the
+// file of the user. The Layers section of the package documentation
+// gives the rules. The Source that NewSourceFromLayers builds reports
+// positions when the Source of any of its layers does. It has excerpts
+// off when the Source of any layer, or of a reference document a layer
+// reads, has positions off, because its text holds the values of that
+// Source.
+func WithPositions(enabled bool) SourceOption {
+	return func(c *sourceConfig) {
+		c.noPositions = !enabled
 	}
 }
 
@@ -1229,12 +1286,21 @@ func (s *Source) FS() fs.FS {
 }
 
 // ShowsExcerpts reports whether errors show the text of the [Source] in
-// excerpts, as [WithExcerpts] sets. A renderer that builds an excerpt of
-// its own, from [Source.View] and [Annotate], checks ShowsExcerpts first.
-// A nil Source does not hold any text, so ShowsExcerpts reports true for
-// it, as it does for a Source without options.
+// excerpts, as [WithExcerpts] sets. It reports false for a Source with
+// positions off, as [WithPositions] sets them. A renderer that builds an
+// excerpt of its own, from [Source.View] and [Annotate], checks
+// ShowsExcerpts first. A nil Source does not hold any text, so
+// ShowsExcerpts reports true for it, as it does for a Source without
+// options.
 func (s *Source) ShowsExcerpts() bool {
-	return s == nil || !s.noExcerpts
+	return s == nil || (!s.noExcerpts && !s.noPositions)
+}
+
+// ReportsPositions reports whether errors bound in the [Source] report
+// positions in its text, as [WithPositions] sets. It reports true for a
+// nil Source, as it does for a Source without options.
+func (s *Source) ReportsPositions() bool {
+	return s == nil || !s.noPositions
 }
 
 // ByteLimit returns the most bytes the [Source] reads from a file or a
@@ -2312,7 +2378,7 @@ func bindSyntaxErrors(docs []*Node) {
 
 			bound.node = doc
 
-			if bound.locErr != nil {
+			if !resolved(bound) {
 				continue
 			}
 

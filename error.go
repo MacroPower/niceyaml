@@ -354,6 +354,12 @@ var (
 	// [SourceError.Unresolved] reports nil for it.
 	errUnlocated = errors.New("no location")
 
+	// The reason of a [SourceError] whose location resolved in a Source
+	// with positions off, as [WithPositions] sets them. The location
+	// resolved, so [SourceError.Unresolved] reports nil for it, and a
+	// located Error above the binding gives way to it.
+	errPositionsOff = errors.New("positions off")
+
 	// The mark of a problem the document is at fault for, which an error
 	// matches from its Is method. It lives in an internal package because
 	// the schema package matches the same value.
@@ -496,6 +502,12 @@ type move struct {
 	// base replaces the `$` path below it. A Rebase leaves such a path as
 	// it is.
 	replaces bool
+	// The move comes from a binding in a Source with positions off, as
+	// [WithPositions] sets them. Its base is the path of the value that
+	// the position or the range of the error points at. An error without
+	// a path of its own reports the base as its path, because the binding
+	// does not report the position. A path below stays as it is.
+	names bool
 	// The base names the entries of several keys of a decoded map, so it does
 	// not resolve in any document. [SourceError.Unresolved] reports
 	// ErrAmbiguousPath for every error below.
@@ -1340,7 +1352,8 @@ func (m *move) apply(l locus) locus {
 	return l
 }
 
-// applyOwn returns l moved as m alone moves it. A base that replaces
+// applyOwn returns l moved as m alone moves it. A base that names gives
+// a path to l when l does not have one. A base that replaces
 // stands in place of the path of l, because the base is that path as a
 // layer holds it. An only fallback stands in for the path, so m alone
 // sets ambiguous. The names of decoded data that l reads from the value
@@ -1349,6 +1362,14 @@ func (m *move) apply(l locus) locus {
 // Where the base of m names decoded data, l reads below those names.
 func (m *move) applyOwn(l locus) locus {
 	l.ambiguous = l.ambiguous || m.ambiguous
+
+	if m.names {
+		if !l.hasPath {
+			l.path, l.hasPath = m.base, true
+		}
+
+		return l
+	}
 
 	if m.replaces && l.hasPath {
 		l.path, l.data = m.base, nil
@@ -1406,7 +1427,7 @@ func (m *move) chains() bool {
 
 // then returns the move of a child below m and then inner, with the bases,
 // fallbacks, and marks joined as [move.apply] joins them from below. A nil
-// inner does not move anything, and the result never replaces. Where m or
+// inner does not move anything, and the result never names or replaces. Where m or
 // inner [move.chains], the result is inner with m chained after it. The
 // inner move is the move of one [Error], which never chains a move of its
 // own, so m follows inner directly.
@@ -1417,7 +1438,7 @@ func (m *move) then(inner *move) *move {
 
 	if m.chains() || inner.chains() {
 		joined := *inner
-		joined.replaces = false
+		joined.names, joined.replaces = false, false
 
 		if m != nil {
 			// An only fallback of m covers the ambiguous mark of inner, as
@@ -1575,7 +1596,10 @@ type location struct {
 	// holds it. It is set when the location resolved in a layer of a
 	// [NewSourceFromLayers] document and the error carries a path.
 	held *paths.Path
-	pos  position.Position
+	// The path of the value that a position or a range resolved to in a
+	// layer of a [NewSourceFromLayers] document, as that layer holds it.
+	at  *paths.Path
+	pos position.Position
 }
 
 // highlight returns the ranges to highlight for l in lines, as
@@ -1714,7 +1738,8 @@ func locateMerged(b binder, node *Node, at position.Position, l locus) (location
 		return location{}, node, errUnlocated
 	}
 
-	loc, layer, _, err := locatePath(b, path, l)
+	loc, layer, held, err := locatePath(b, path, l)
+	loc.at = &held
 
 	return loc, layer, err
 }
@@ -1737,8 +1762,10 @@ func locateMerged(b binder, node *Node, at position.Position, l locus) (location
 // them. A path that the document does not hold binds at the nearest node
 // above it, as [SourceError.Nearest] describes. Any other location that does not
 // resolve costs the SourceError its position, for the reason
-// [SourceError.Unresolved] returns. The Errors section of the package
-// documentation describes these cases.
+// [SourceError.Unresolved] returns. A location that resolves in a Source
+// with positions off, as [WithPositions] sets them, does not have a
+// position either. The Errors section of the package documentation
+// describes these cases.
 //
 // [FormatError] prints the tree and the excerpts as plain text, however a
 // caller wrapped or joined the error:
@@ -2762,9 +2789,10 @@ func anchorOf(err error) anchor {
 	return a
 }
 
-// resolved reports whether the location of e resolved.
+// resolved reports whether the location of e resolved, with a position
+// or in a Source with positions off.
 func resolved(e *SourceError) bool {
-	return e.locErr == nil
+	return e.locErr == nil || errors.Is(e.locErr, errPositionsOff)
 }
 
 // anchor returns the anchor of the error that e binds. A located [*Error]
@@ -2879,11 +2907,16 @@ func newSourceError(err error, b binder) *SourceError {
 
 	e := &SourceError{err: scoped.err, source: b.src, node: b.node, locErr: errUnlocated}
 
-	var relocated []relocatedDetails
+	var (
+		relocated []relocatedDetails
+		// Whether the error that the binding locates carries a path.
+		hasPath bool
+	)
 
 	switch a := found.err.(type) { //nolint:errorlint // The anchor itself, found by the walk.
 	case *Error:
 		l, translated := b.translate(found.locus)
+		hasPath = l.hasPath
 		e.loc, e.node, e.locErr = locate(b, l)
 
 		// The path looked in the one document of an empty source, and the
@@ -2950,6 +2983,12 @@ func newSourceError(err error, b binder) *SourceError {
 			e.locErr = checkInRange(e.loc, e.source.lines)
 		}
 
+		// A Source with positions off keeps the node and the path of the
+		// error but not its position.
+		if e.locErr == nil && !e.source.ReportsPositions() {
+			e.dropPosition(hasPath)
+		}
+
 		if e.locErr == nil {
 			e.ranges = e.loc.highlight(e.source.lines)
 			e.rng = excerpt.Cover(e.ranges, e.loc.pos)
@@ -2961,6 +3000,36 @@ func newSourceError(err error, b binder) *SourceError {
 	e.addRelocatedDetails(relocated)
 
 	return e
+}
+
+// dropPosition drops the position of e, whose location resolved in a
+// Source with positions off. When the error that e binds does not carry a
+// path, as hasPath reports, dropPosition gives it the path of the value
+// that its position or its range points at. That path names the value at
+// fault in place of the position. A position in a merged document takes
+// the path that the value has in the layer that holds it. A position that
+// does not point at a value leaves the error without a path.
+func (e *SourceError) dropPosition(hasPath bool) {
+	e.locErr = errPositionsOff
+
+	if hasPath {
+		return
+	}
+
+	var (
+		path paths.Path
+		ok   bool
+	)
+
+	if e.loc.at != nil {
+		path, ok = *e.loc.at, true
+	} else {
+		path, ok = e.node.tokenPathAt(e.loc.pos)
+	}
+
+	if ok {
+		e.err = &Error{err: e.err, move: &move{base: path, movesOnly: true, names: true}}
+	}
 }
 
 // reattach binds e in the [Source] that the binding e adopted came from,
@@ -3450,8 +3519,11 @@ func (e *SourceError) Message() string {
 // the go-yaml decoder that report the path where the document writes the
 // value. That path might lie outside the scope of the Node, as the Scoped
 // Nodes section describes. An error that binds at a range or a position beside its path
-// reports that path, resolved or not. A binding that wraps another reports
-// the path of the one it wraps, and a nil SourceError does not have a path.
+// reports that path, resolved or not. An error that binds at a range or a
+// position without a path, in a Source with positions off as
+// [WithPositions] sets them, reports the path of the value there. A
+// binding that wraps another reports the path of the one it wraps, and a
+// nil SourceError does not have a path.
 func (e *SourceError) Path() (paths.Path, bool) {
 	if e == nil {
 		return paths.Path{}, false
@@ -4495,7 +4567,8 @@ func (e *SourceError) LogValue() slog.Value {
 // reason, and one whose reason wraps
 // [go.jacobcolvin.com/niceyaml/paths.ErrNoDocument], does not get such a
 // line. A source with excerpts off, as [WithExcerpts] sets it, does not add
-// an excerpt or a line in its place.
+// an excerpt or a line in its place. Neither does a source with positions
+// off, as [WithPositions] sets it.
 //
 // FormatError looks through the wrappers and joins around a [SourceError]
 // and renders every problem in the tree, however many err holds. With
@@ -4631,8 +4704,9 @@ func writeString(f fmt.State, s string) {
 // [SourceError.Nearest] describes.
 //
 // Range reports false when the error does not carry a location or its
-// location did not resolve, as [SourceError.Unresolved] explains, and for a
-// nil SourceError.
+// location did not resolve, as [SourceError.Unresolved] explains. It also
+// reports false for an error bound in a Source with positions off, as
+// [WithPositions] sets them, and for a nil SourceError.
 func (e *SourceError) Range() (position.Range, bool) {
 	if e == nil || e.locErr != nil {
 		return position.Range{}, false
@@ -4652,8 +4726,10 @@ func (e *SourceError) Range() (position.Range, bool) {
 // that marks the text reads Range.
 //
 // Position reports false when Range does, for an error that does not carry
-// a location or whose location did not resolve. It also reports false for a
-// nil SourceError.
+// a location or whose location did not resolve. It reports false for an
+// error bound in a Source with positions off, as [WithPositions] sets them,
+// and [SourceError.Unresolved] then returns nil, because the location
+// resolved. It also reports false for a nil SourceError.
 func (e *SourceError) Position() (position.Position, bool) {
 	if e == nil || e.locErr != nil {
 		return position.Position{}, false
@@ -4663,9 +4739,10 @@ func (e *SourceError) Position() (position.Position, bool) {
 }
 
 // Unresolved returns why the location of the bound error did not resolve.
-// It returns nil when the location resolved. It also returns nil when the
-// error does not carry a location, such as an error from [fmt.Errorf] bound
-// through the root of a document. The reason is one of these:
+// It returns nil when the location resolved, which includes a location in a
+// Source with positions off, as [WithPositions] sets them. It also returns
+// nil when the error does not carry a location, such as an error from
+// [fmt.Errorf] bound through the root of a document. The reason is one of these:
 //
 //   - [ErrOutOfRange] for a location on a line the source does not hold or
 //     at a column before the first.
@@ -4692,7 +4769,7 @@ func (e *SourceError) Position() (position.Position, bool) {
 // document, which binds at the alias of the merge key. Unresolved returns
 // nil for a nil SourceError.
 func (e *SourceError) Unresolved() error {
-	if e == nil || errors.Is(e.locErr, errUnlocated) {
+	if e == nil || errors.Is(e.locErr, errUnlocated) || errors.Is(e.locErr, errPositionsOff) {
 		return nil
 	}
 
@@ -4709,7 +4786,8 @@ func (e *SourceError) Unresolved() error {
 // the document holds. [SourceError.Path] and the message keep the path the
 // error carries. Nearest reports false for an error bound at the node its
 // path selects, for one that lacks either a path or a position, and for a
-// nil SourceError. The nearest node is one of these:
+// nil SourceError. An error bound in a Source with positions off, as
+// [WithPositions] sets them, lacks a position. The nearest node is one of these:
 //
 //   - The longest part of the path that the document holds, whatever
 //     selector after it misses. That node can be a mapping that lacks a key
@@ -4805,7 +4883,9 @@ func (e *SourceError) Annotate(view *line.View) bool {
 // marks only the lines of its own source. A line keeps each mark once, so
 // marking a view again, or with a binding inside an error that marked it
 // already, does not double a message. Annotate marks a source with excerpts
-// off too, because the caller decides who sees the view. A binding that
+// off too, because the caller decides who sees the view. A binding in a
+// source with positions off, as [WithPositions] sets them, does not have a
+// position, so it does not add a mark. A binding that
 // [Detach] detached does not keep a line of any view, so it does not mark
 // anything. Annotate reports true when it marked a line, counting one that
 // held the marks already, and false for a nil err.
@@ -4855,9 +4935,9 @@ func Annotate(err error, view *line.View) bool {
 //
 // Excerpt leaves out a node bound to another source and a node whose
 // location does not resolve. It returns a nil view and false for a nil
-// SourceError and for a source with excerpts off, as [WithExcerpts]
-// describes. It does the same for a tree in which every location fails to
-// resolve in the source.
+// SourceError and for a source with excerpts off, as [WithExcerpts] and
+// [WithPositions] describe. It does the same for a tree in which every
+// location fails to resolve in the source.
 //
 // A binding that [Detach] detached builds its excerpt from the lines it
 // kept, with the context lines, the width, and the marks of the options

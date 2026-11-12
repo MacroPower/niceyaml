@@ -35,9 +35,26 @@ type Value struct {
 	// The index of the value in the sequence that holds it in its own
 	// layer. A sequence that several layers append to holds the element
 	// at another index.
-	index   int
+	index int
+	// The index of the highest layer that holds the value and whose
+	// errors report positions, when shows is set.
+	shown   int
 	kind    valueKind
 	written bool
+	shows   bool
+}
+
+// ErrorLayer returns the index of the layer that an error at v binds in.
+// That is the highest layer that holds v and whose errors report
+// positions, as [Reader.Positions] states. It is [Value.Layer] when no
+// such layer holds v. The two differ only for a mapping that several
+// layers hold, and for a sequence that several layers append to.
+func (v *Value) ErrorLayer() int {
+	if v.shows {
+		return v.shown
+	}
+
+	return v.Layer
 }
 
 // Appends names the sequences that [Value.Merge] appends to the sequence
@@ -236,6 +253,10 @@ func (v *Value) Merge(upper *Value, appends Appends) *Value {
 
 	v.Layer = upper.Layer
 
+	if upper.shows {
+		v.shown, v.shows = upper.shown, true
+	}
+
 	if upper.tag != "" {
 		v.tag = upper.tag
 	}
@@ -388,16 +409,31 @@ func (v *Value) child(sel paths.Selector) *Value {
 	return nil
 }
 
-// Carry adds to v each entry that held marks as removed, where v is a
-// value a [Reader] read for the layer at the given index. It serves a
-// layer that is a node of a merged document, and held is the value that
-// the layers of that document hold at the node. The reader read v from
-// the merged text, which leaves out each key that a layer removed. Carry
-// puts each such entry where held has it, as an entry that the layer
-// removes, so the layer removes what its own layers do. Carry does not
-// change v for a nil held.
+// Carry copies onto v what the layers of a merged document know about
+// it, where v is a value a [Reader] read for the layer at the given
+// index. It serves a layer that is a node of a merged document, and held
+// is the value that the layers of that document hold at the node.
+//
+// V and each value of its mappings report positions, for
+// [Value.ErrorLayer], when held does at the same place: when a layer of
+// that document that reports positions holds it. So a mapping that only a
+// layer with positions off holds there does not count as one that reports
+// positions, though the merged document reports positions as a whole.
+// [Value.Merge] never merges an element of a sequence with the value of
+// another layer, so Carry leaves the elements as the reader read them.
+//
+// The reader read v from the merged text, which leaves out each key that
+// a layer removed. Carry puts each such entry where held has it, as an
+// entry that the layer removes, so the layer removes what its own layers
+// do. Carry does not change v for a nil held.
 func (v *Value) Carry(held *Value, layer int) {
-	if held == nil || v.kind != kindMapping || held.kind != kindMapping {
+	if held == nil {
+		return
+	}
+
+	v.shows = held.shows
+
+	if v.kind != kindMapping || held.kind != kindMapping {
 		return
 	}
 
@@ -413,7 +449,7 @@ func (v *Value) Carry(held *Value, layer int) {
 			entries = append(entries, &mapEntry{
 				name:    entry.name,
 				key:     entry.key,
-				value:   &Value{Layer: layer},
+				value:   &Value{Layer: layer, shown: layer, shows: entry.value.shows},
 				removed: true,
 			})
 
