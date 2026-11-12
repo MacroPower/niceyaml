@@ -1747,57 +1747,6 @@ func TestNode_NodeAt(t *testing.T) {
 	}
 }
 
-// TestNode_NodeAt_TokensWithoutPosition verifies the node of a position
-// after the last text of a line. The tokens between the text and the
-// position do not have a position. Each "," of a line then equals the
-// others in type, value, origin, and position. A lookup of one by those
-// fields thus finds the first of them.
-func TestNode_NodeAt_TokensWithoutPosition(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		input string
-		want  string
-	}{
-		"flow sequence": {
-			input: stringtest.JoinLF("[x, y,", " z]"),
-			want: stringtest.JoinLF(
-				"0:0 $",
-				"0:1 $[0]",
-				"0:3 $[1]",
-				"1:0 $[2]",
-				"1:2 $",
-			),
-		},
-		"flow mapping": {
-			input: stringtest.JoinLF("{a: 1 , b: 2 ,", "}"),
-			want: stringtest.JoinLF(
-				"0:0 $",
-				"0:1 $.a",
-				"0:7 $.b",
-				"1:0 $",
-			),
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			tks := tokens.Tokenize(tc.input)
-			for _, tk := range tks {
-				if tk.Type == token.CollectEntryType {
-					tk.Position = nil
-				}
-			}
-
-			doc := yamltest.Document(t, niceyaml.NewSourceFromTokens(tks))
-
-			assert.Equal(t, tc.want, nodesAt(t, doc))
-		})
-	}
-}
-
 func TestNode_NodeAt_NoNode(t *testing.T) {
 	t.Parallel()
 

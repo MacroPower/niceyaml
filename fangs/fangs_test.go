@@ -21,7 +21,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/kind"
 	"go.jacobcolvin.com/niceyaml/style/theme"
-	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 // silentError wraps another error and blanks its message, so the
@@ -56,7 +55,7 @@ var nameValueYAML = stringtest.Input(`
 
 // nameValueSource returns a new source of [nameValueYAML].
 func nameValueSource(opts ...niceyaml.SourceOption) *niceyaml.Source {
-	return niceyaml.NewSourceFromTokens(tokens.Tokenize(nameValueYAML), opts...)
+	return niceyaml.NewSourceFromString(nameValueYAML, opts...)
 }
 
 // twoProblems returns an error that heads two problems in [nameValueYAML],
@@ -339,9 +338,9 @@ func TestNewErrorHandler_Width(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			src := niceyaml.NewSourceFromTokens(tokens.Tokenize(
+			src := niceyaml.NewSourceFromString(
 				"name: " + strings.Repeat("x", 3*tc.width) + "\n",
-			))
+			)
 
 			err := yamltest.Bind(t, src, errAt("invalid name", "$.name"))
 
@@ -358,7 +357,7 @@ func TestErrorHandler_WidthOffTerminal(t *testing.T) {
 
 	// A writer that is not a terminal has no width to fit, so the output
 	// of a printer without a width does not wrap.
-	src := niceyaml.NewSourceFromTokens(tokens.Tokenize("name: " + strings.Repeat("x", 300) + "\n"))
+	src := niceyaml.NewSourceFromString("name: " + strings.Repeat("x", 300) + "\n")
 	err := yamltest.Bind(t, src, errAt("invalid name", "$.name"))
 
 	want := report(printer.New().PrintError(err))

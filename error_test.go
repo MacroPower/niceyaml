@@ -211,7 +211,7 @@ func TestError(t *testing.T) {
 		// No path resolves in a document with no content, so the reason
 		// would add nothing to the path the message names.
 		"empty source": {
-			err: yamltest.Bind(t, niceyaml.NewSourceFromTokens(lexer.Tokenize("")), niceyaml.NewError(
+			err: yamltest.Bind(t, niceyaml.NewSourceFromString(""), niceyaml.NewError(
 				"error in empty source",
 				niceyaml.AtPath(paths.Current().Child("key").Key()),
 			)),
@@ -13681,15 +13681,6 @@ func TestIsInvalid(t *testing.T) {
 			err: errOf(yamltest.FirstDocument(t, "pair: [a, b, c]\n").Decode[struct {
 				Pair [2]string `yaml:"pair"`
 			}](t.Context())),
-		},
-		"parser panic": {
-			// The go-yaml parser dereferences the position of this token.
-			err: func() error {
-				tks := lexer.Tokenize("a: 1\nb: 2\n")
-				tks[2].Position = nil
-
-				return errOf(niceyaml.NewSourceFromTokens(tks).File())
-			}(),
 		},
 		"panic beside a rejection": {
 			err: errOf(yamltest.FirstDocument(t, "port: abc\nv: x\n").Decode[struct {

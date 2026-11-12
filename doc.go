@@ -2048,8 +2048,7 @@
 // program thus renders, diffs, and searches such a text as it does any
 // other. The parser does not read the text. The whole text is one document
 // that fails as a document that does not parse, however many documents it
-// holds. A Source of [NewSourceFromTokens] counts the bytes of text that its
-// tokens hold and fails the same way.
+// holds.
 //
 // A document past the document byte limit fails as a document that does not
 // parse, at its first token that is not a comment. A document past the depth

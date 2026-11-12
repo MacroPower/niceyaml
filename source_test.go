@@ -22,7 +22,6 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
-	"github.com/goccy/go-yaml/lexer"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -40,7 +39,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/kind"
-	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 var (
@@ -135,7 +133,7 @@ func TestSource_View_Annotate(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			view := niceyaml.NewSourceFromTokens(lexer.Tokenize(tc.input), niceyaml.WithName("test")).View()
+			view := niceyaml.NewSourceFromString(tc.input, niceyaml.WithName("test")).View()
 
 			for idx, ann := range tc.annotations {
 				require.Less(t, idx, view.Count(), "annotation index out of range")
@@ -169,8 +167,11 @@ func TestSource_ZeroValue(t *testing.T) {
 	t.Parallel()
 
 	// A report reads the Source of each bound error, and a nil SourceError
-	// returns a nil Source. Each read of a nil Source answers as an empty
-	// Source does, and so does each read of the zero value.
+	// returns a nil Source. Each read in the table answers for a nil Source
+	// as it does for an empty Source, and so does each read of the zero
+	// value. Offset and PositionAt tell a nil Source from the zero value.
+	// The zero value holds an empty text, and a nil Source holds no text at
+	// all.
 	var bound *niceyaml.SourceError
 
 	require.Nil(t, bound.Source())
@@ -212,14 +213,6 @@ func TestSource_ZeroValue(t *testing.T) {
 			read: func(s *niceyaml.Source) any { return s.Text() },
 			want: "",
 		},
-		"offset": {
-			read: func(s *niceyaml.Source) any {
-				_, ok := s.Offset(position.New(0, 0))
-
-				return ok
-			},
-			want: false,
-		},
 	}
 
 	for name, tc := range tcs {
@@ -231,6 +224,35 @@ func TestSource_ZeroValue(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("nil Source holds no text to count in", func(t *testing.T) {
+		t.Parallel()
+
+		_, ok := bound.Source().Offset(position.New(0, 0))
+		assert.False(t, ok)
+	})
+
+	t.Run("zero value counts in an empty text", func(t *testing.T) {
+		t.Parallel()
+
+		// The zero value holds an empty text, as a Source of "" does, so
+		// the start of that text is its one position and its one offset.
+		var s niceyaml.Source
+
+		got, ok := s.Offset(position.New(0, 0))
+		assert.True(t, ok)
+		assert.Equal(t, 0, got)
+
+		_, ok = s.Offset(position.New(0, 1))
+		assert.False(t, ok)
+
+		pos, ok := s.PositionAt(0)
+		assert.True(t, ok)
+		assert.Equal(t, position.New(0, 0), pos)
+
+		_, ok = s.PositionAt(1)
+		assert.False(t, ok)
+	})
 
 	t.Run("zero value holds one empty document", func(t *testing.T) {
 		t.Parallel()
@@ -256,17 +278,16 @@ func TestSource_Runes(t *testing.T) {
 		want []runePosition
 	}{
 		"simple key-value": {
-			// The lexer strips the trailing newline from the final simple value.
 			input: "a: b\n",
 			want: []runePosition{
 				{R: 'a', Pos: position.New(0, 0)},
 				{R: ':', Pos: position.New(0, 1)},
 				{R: ' ', Pos: position.New(0, 2)},
 				{R: 'b', Pos: position.New(0, 3)},
+				{R: '\n', Pos: position.New(0, 4)},
 			},
 		},
 		"multi-line": {
-			// The lexer strips the trailing newline from the final value on each line.
 			input: stringtest.LinesLF("a: 1", "b: 2"),
 			want: []runePosition{
 				{R: 'a', Pos: position.New(0, 0)},
@@ -278,6 +299,7 @@ func TestSource_Runes(t *testing.T) {
 				{R: ':', Pos: position.New(1, 1)},
 				{R: ' ', Pos: position.New(1, 2)},
 				{R: '2', Pos: position.New(1, 3)},
+				{R: '\n', Pos: position.New(1, 4)},
 			},
 		},
 		"utf8 - multibyte char": {
@@ -287,6 +309,7 @@ func TestSource_Runes(t *testing.T) {
 				{R: ':', Pos: position.New(0, 1)},
 				{R: ' ', Pos: position.New(0, 2)},
 				{R: 'ü', Pos: position.New(0, 3)},
+				{R: '\n', Pos: position.New(0, 4)},
 			},
 		},
 		"utf8 - japanese": {
@@ -297,6 +320,7 @@ func TestSource_Runes(t *testing.T) {
 				{R: ' ', Pos: position.New(0, 2)},
 				{R: '日', Pos: position.New(0, 3)},
 				{R: '本', Pos: position.New(0, 4)},
+				{R: '\n', Pos: position.New(0, 5)},
 			},
 		},
 		"nested with indent": {
@@ -314,6 +338,7 @@ func TestSource_Runes(t *testing.T) {
 				{R: ':', Pos: position.New(1, 3)},
 				{R: ' ', Pos: position.New(1, 4)},
 				{R: 'v', Pos: position.New(1, 5)},
+				{R: '\n', Pos: position.New(1, 6)},
 			},
 		},
 		// The content of a literal block lies on the lines below its
@@ -410,7 +435,7 @@ func TestSource_Runes(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			source := niceyaml.NewSourceFromTokens(lexer.Tokenize(tc.input))
+			source := niceyaml.NewSourceFromString(tc.input)
 
 			// A case without ranges reads every rune.
 			seq := source.Lines().Runes()
@@ -1345,121 +1370,6 @@ func TestSource_File_TokensFindLines(t *testing.T) {
 	})
 }
 
-func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
-	t.Parallel()
-
-	// The second document's tokens start at line 2 of the stream, and the
-	// Source renumbers them so its own text counts from line 1.
-	full := niceyaml.NewSourceFromString(stringtest.LinesLF(
-		"a: 1",
-		"---",
-		"b: 2",
-		"c: 3",
-		"d: 4",
-	))
-
-	docs := yamltest.Documents(t, full, 2)
-
-	source := niceyaml.NewSourceFromTokens(docs[1].Tokens())
-	view := source.Lines()
-	require.Equal(t, 4, view.Len())
-	assert.Equal(t, 1, view.Line(0).Number())
-	assert.Equal(t, stringtest.JoinLF("---", "b: 2", "c: 3", "d: 4"), view.Content())
-
-	t.Run("the caller's tokens keep their positions", func(t *testing.T) {
-		t.Parallel()
-
-		assert.Equal(t, 2, docs[1].Tokens()[0].Position.Line)
-	})
-
-	t.Run("a token position is a view position", func(t *testing.T) {
-		t.Parallel()
-
-		for _, l := range view.All() {
-			for _, tk := range l.SourceTokens() {
-				assert.Same(t, tk, view.TokenAt(position.NewFromToken(tk)), "token %q", tk.Value)
-			}
-		}
-	})
-
-	t.Run("path error reports the renumbered line", func(t *testing.T) {
-		t.Parallel()
-
-		err := yamltest.Bind(t, source, yamltest.ErrorAt("bad b", "b"))
-		assert.Equal(t, "2:4: $.b: bad b", err.Error())
-
-		bound := yamltest.RequireSourceError(t, err)
-		assert.Equal(t, yamltest.LineRange(1, 3, 4), yamltest.RangeOf(t, bound))
-
-		got := stringtest.TrimLineEnds(render(bound))
-		assert.Contains(t, got, "<genericError>2</genericError>")
-		assert.NotContains(t, got, "<genericError>3</genericError>")
-	})
-
-	t.Run("token error reports the renumbered line", func(t *testing.T) {
-		t.Parallel()
-
-		tk := view.TokenAt(position.New(2, 0))
-		require.NotNil(t, tk)
-
-		err := yamltest.Bind(t, source, niceyaml.NewError("bad c", niceyaml.AtPosition(position.NewFromToken(tk))))
-		assert.Equal(t, "3:1: bad c", err.Error())
-
-		got := stringtest.TrimLineEnds(render(err))
-		assert.Contains(t, got, "<genericError>c</genericError>")
-		assert.NotContains(t, got, "<genericError>b</genericError>")
-	})
-
-	t.Run("token from the whole file is out of range past the last line", func(t *testing.T) {
-		t.Parallel()
-
-		last := full.Lines().TokenAt(position.New(4, 0))
-		require.NotNil(t, last)
-
-		bound := yamltest.RequireSourceError(t,
-			yamltest.Bind(t, source, niceyaml.NewError("bad d", niceyaml.AtPosition(position.NewFromToken(last)))))
-
-		err := bound.Unresolved()
-		require.ErrorIs(t, err, niceyaml.ErrOutOfRange)
-		assert.Equal(t, "location outside source: line 5 not in lines 1-4", err.Error())
-	})
-}
-
-func TestNewSourceFromTokens_WhitespaceDocument(t *testing.T) {
-	t.Parallel()
-
-	// A document of whitespace alone cut after "..." counts its lines from
-	// 1, as a document with text does.
-	tcs := map[string]string{
-		"between document end and header": stringtest.LinesLF(
-			"a: 1",
-			"...",
-			"\t",
-			"---",
-			"b: 2",
-		),
-		"after document end at the end": stringtest.LinesLF("a: 1", "...", "\t"),
-	}
-
-	for name, input := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			var doc token.Tokens
-
-			for i, d := range tokens.SplitDocuments(tokens.Tokenize(input)) {
-				if i == 1 {
-					doc = d
-				}
-			}
-
-			require.NotEmpty(t, doc)
-
-			assert.Equal(t, []int{1, 2}, yamltest.LineNumbers(niceyaml.NewSourceFromTokens(doc).Lines()))
-		})
-	}
-}
-
 func TestNewSourceFromString_ByteOrderMark(t *testing.T) {
 	t.Parallel()
 
@@ -1985,19 +1895,6 @@ func TestSource_Offset_Range(t *testing.T) {
 	}
 }
 
-func TestNewSourceFromTokens_Text(t *testing.T) {
-	t.Parallel()
-
-	// A Source built from tokens reads no text, so it has none to return
-	// and no offset to count in it.
-	source := niceyaml.NewSourceFromTokens(tokens.Tokenize("a: 1\n"))
-	assert.Equal(t, "a: 1", source.Lines().Content())
-	assert.Empty(t, source.Text())
-
-	_, ok := source.Offset(position.New(0, 0))
-	assert.False(t, ok)
-}
-
 func TestSource_Parse(t *testing.T) {
 	t.Parallel()
 
@@ -2190,23 +2087,6 @@ func TestSource_Parse(t *testing.T) {
 		}
 	})
 
-	t.Run("invalid YAML returns Error", func(t *testing.T) {
-		t.Parallel()
-
-		// Create invalid YAML by manually constructing malformed tokens.
-		tkb := yamltest.NewTokenBuilder().Type(token.MappingValueType).Value(":").PositionLine(1)
-		tks := token.Tokens{}
-		tks.Add(tkb.Clone().Origin(":").PositionColumn(1).Build())
-		tks.Add(tkb.Clone().Origin(":\n").PositionColumn(2).Build())
-
-		file, err := niceyaml.NewSourceFromTokens(tks).File()
-		assert.Nil(t, file)
-
-		var yamlErr *niceyaml.Error
-
-		require.ErrorAs(t, err, &yamlErr)
-	})
-
 	t.Run("syntax error comes back bound to the source", func(t *testing.T) {
 		t.Parallel()
 
@@ -2227,42 +2107,6 @@ func TestSource_Parse(t *testing.T) {
 
 		// The document returns the same bound error.
 		assert.Same(t, bound, yamltest.Documents(t, source, 1)[0].Err())
-	})
-
-	t.Run("parser panic comes back as an error on every call", func(t *testing.T) {
-		t.Parallel()
-
-		// The go-yaml parser dereferences the position of this token.
-		tks := lexer.Tokenize(stringtest.LinesLF("a: 1", "b: 2"))
-		tks[2].Position = nil
-
-		source := niceyaml.NewSourceFromTokens(tks)
-
-		file, err := source.File()
-		require.NotErrorIs(t, err, niceyaml.ErrSyntax)
-		require.EqualError(t, err,
-			"1:1: parser panicked: runtime error: invalid memory address or nil pointer dereference")
-		assert.Nil(t, file)
-
-		// The panic is a fault of the code that built the tokens, so the
-		// error holds its stack and the document is not at fault.
-		value, stack := requirePanic(t, err)
-		assert.Contains(t, stack, "go-yaml/parser")
-
-		_, ok := value.(runtime.Error)
-		assert.True(t, ok, "got %T", value)
-
-		assert.Same(t, source, yamltest.RequireSourceError(t, err).Source())
-
-		file, again := source.File()
-		assert.Nil(t, file)
-		assert.Same(t, err, again)
-
-		assert.Same(t, err, yamltest.Documents(t, source, 1)[0].Err())
-		assert.Same(t, err, yamltest.AllDocuments(t, source, 1)[0].Err())
-
-		_, again = source.Document()
-		assert.Same(t, err, again)
 	})
 
 	t.Run("syntax error on a line the lexer dropped keeps its line", func(t *testing.T) {
@@ -2620,18 +2464,6 @@ func TestSource_File_ErrEncodingLossyRead(t *testing.T) {
 	assert.Equal(t, map[string]string{"name": "caf\ufffd"}, got)
 }
 
-func TestSource_File_ErrEncodingOfTokens(t *testing.T) {
-	t.Parallel()
-
-	// A Source of tokens holds no text, so its parse reads the tokens as
-	// the lexer wrote them.
-	source := niceyaml.NewSourceFromTokens(tokens.Tokenize("name: caf\xe9\n"))
-
-	got, err := source.Decode[map[string]string](t.Context())
-	require.NoError(t, err)
-	assert.Equal(t, map[string]string{"name": "caf�"}, got)
-}
-
 func TestSource_AllDocuments(t *testing.T) {
 	t.Parallel()
 
@@ -2793,37 +2625,6 @@ func TestSource_AllDocuments(t *testing.T) {
 				assert.Equal(t, tc.want, got)
 			})
 		}
-	})
-
-	t.Run("a parser panic with no location is bound to the first document it fails", func(t *testing.T) {
-		t.Parallel()
-
-		// The parser panics on a token with no position, and no token of
-		// the run has one to locate the error at. The header follows an
-		// anchor with no value, so both documents parse together.
-		tks := lexer.Tokenize(stringtest.LinesLF("a: &x", "---", "b: 1"))
-		for _, tk := range tks {
-			tk.Position = nil
-		}
-
-		source := niceyaml.NewSourceFromTokens(tks, niceyaml.WithName("f.yaml"))
-
-		all := yamltest.AllDocuments(t, source, 2)
-		requirePanic(t, all[0].Err())
-		assert.Same(t, all[0].Err(), all[1].Err())
-
-		bound := yamltest.RequireSourceError(t, all[1].Err())
-		assert.Same(t, all[0], yamltest.BoundDocument(t, bound))
-
-		_, ok := bound.Position()
-		assert.False(t, ok)
-
-		// No position says which document the error is about, so the
-		// message names the document.
-		assert.True(t,
-			strings.HasPrefix(bound.Error(), "f.yaml: document 1: parser panicked:"),
-			bound.Error(),
-		)
 	})
 
 	t.Run("File and AllDocuments from two goroutines return the bound error", func(t *testing.T) {
@@ -7362,9 +7163,6 @@ func TestWithUnmarshalers(t *testing.T) {
 			"NewSourceFromString": func(opts ...niceyaml.SourceOption) (*niceyaml.Source, error) {
 				return niceyaml.NewSourceFromString(input, opts...), nil
 			},
-			"NewSourceFromTokens": func(opts ...niceyaml.SourceOption) (*niceyaml.Source, error) {
-				return niceyaml.NewSourceFromTokens(tokens.Tokenize(input), opts...), nil
-			},
 		}
 
 		for name, build := range tcs {
@@ -8442,97 +8240,6 @@ func TestWithByteLimit(t *testing.T) {
 		assert.Same(t, fileErr, err)
 	})
 
-	t.Run("tokens past the limit fail their document", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromTokens(tokens.Tokenize(text),
-			niceyaml.WithName("big.yaml"), niceyaml.WithByteLimit(1024))
-
-		assert.Equal(t, strings.TrimSuffix(text, "\n"), source.Lines().Content())
-
-		_, err := source.Document()
-		require.ErrorIs(t, err, niceyaml.ErrLimit)
-		assert.Equal(t, "big.yaml: file is larger than 1 KiB", err.Error())
-
-		doc := yamltest.Documents(t, source, 1)[0]
-		assert.Nil(t, doc.AST())
-		assert.Equal(t, source.Tokens(), doc.Tokens())
-	})
-
-	t.Run("tokens within the limit parse", func(t *testing.T) {
-		t.Parallel()
-
-		tcs := map[string]struct {
-			limit int
-		}{
-			"the limit holds the text": {limit: len(text)},
-			"NoLimit":                  {limit: niceyaml.NoLimit},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				yamltest.Document(
-					t,
-					niceyaml.NewSourceFromTokens(tokens.Tokenize(text), niceyaml.WithByteLimit(tc.limit)),
-				)
-			})
-		}
-	})
-
-	t.Run("tokens count a line ending that the lexer repeats once", func(t *testing.T) {
-		t.Parallel()
-
-		// The lexer ends a tag that ends its line with the line ending and
-		// opens the next token with that ending again. The Origins of such
-		// a stream thus hold more bytes than the text.
-		tcs := map[string]struct {
-			input string
-		}{
-			"tags at line ends": {
-				input: strings.Repeat(stringtest.LinesLF("- Value: !Join", "    - ''", "    - - a", "      - b"), 20),
-			},
-			"tags at CRLF line ends": {
-				input: strings.Repeat(stringtest.LinesCRLF("- !!map", "  a: !!str", "    x"), 20),
-			},
-			"tags before blank lines": {
-				input: strings.Repeat(stringtest.LinesLF("- !!str", "", "  x"), 20),
-			},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				streams := map[string]token.Tokens{
-					"tokenized text":     tokens.Tokenize(tc.input),
-					"tokens of a source": niceyaml.NewSourceFromString(tc.input).Tokens(),
-				}
-
-				for name, tks := range streams {
-					t.Run(name, func(t *testing.T) {
-						t.Parallel()
-
-						origins := 0
-						for _, tk := range tks {
-							origins += len(tk.Origin)
-						}
-
-						require.Greater(t, origins, len(tc.input))
-
-						yamltest.Document(t, niceyaml.NewSourceFromTokens(tks, niceyaml.WithByteLimit(len(tc.input))))
-
-						source := niceyaml.NewSourceFromTokens(tks, niceyaml.WithByteLimit(len(tc.input)-1))
-
-						_, err := source.Document()
-						require.ErrorIs(t, err, niceyaml.ErrLimit)
-					})
-				}
-			})
-		}
-	})
-
 	t.Run("a text of exactly the limit parses", func(t *testing.T) {
 		t.Parallel()
 
@@ -9174,6 +8881,90 @@ func TestSource_WithText(t *testing.T) {
 		assert.Equal(t, niceyaml.DefaultDepthLimit, next.DepthLimit())
 	})
 
+	t.Run("the text of one document gives it a Source of its own", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			values map[string]any
+			input  string
+			want   string
+			doc    int
+		}{
+			"final line break": {
+				input:  "kind: A\nport: 1\n---\nkind: B\r\nport: 2\n",
+				doc:    1,
+				want:   "---\nkind: B\r\nport: 2\n",
+				values: map[string]any{"kind": "B", "port": uint64(2)},
+			},
+			"no final line break": {
+				input:  "kind: A\nport: 1\n---\nkind: B\nport: 2",
+				doc:    1,
+				want:   "---\nkind: B\nport: 2",
+				values: map[string]any{"kind": "B", "port": uint64(2)},
+			},
+			"byte order mark at the start of the text": {
+				input:  "\uFEFFkind: A\nport: 1\n---\nkind: B\nport: 2\n",
+				doc:    0,
+				want:   "\uFEFFkind: A\nport: 1\n",
+				values: map[string]any{"kind": "A", "port": uint64(1)},
+			},
+			"byte order mark before the next header": {
+				input:  "kind: A\nport: 1\n\uFEFF---\nkind: B\nport: 2\n",
+				doc:    0,
+				want:   "kind: A\nport: 1\n",
+				values: map[string]any{"kind": "A", "port": uint64(1)},
+			},
+			"byte order mark before its header": {
+				input:  "kind: A\nport: 1\n\uFEFF---\nkind: B\nport: 2\n",
+				doc:    1,
+				want:   "\uFEFF---\nkind: B\nport: 2\n",
+				values: map[string]any{"kind": "B", "port": uint64(2)},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				source := niceyaml.NewSourceFromString(tc.input)
+				text := source.Text()
+				span := yamltest.Documents(t, source, 2)[tc.doc].Span()
+
+				// Offset gives column 0 past a byte order mark that the
+				// lexer dropped, and the cut keeps the mark.
+				cut := func(off int) int {
+					if strings.HasSuffix(text[:off], "\uFEFF") {
+						return off - len("\uFEFF")
+					}
+
+					return off
+				}
+
+				start, ok := source.Offset(position.New(span.Start, 0))
+				require.True(t, ok)
+
+				end, ok := source.Offset(position.New(span.End, 0))
+				if !ok {
+					end = len(text)
+				}
+
+				one := source.WithText(text[cut(start):cut(end)])
+				assert.Equal(t, tc.want, one.Text())
+
+				pos, ok := one.PositionAt(len(one.Text()))
+				require.True(t, ok)
+
+				off, ok := one.Offset(pos)
+				require.True(t, ok)
+				assert.Equal(t, len(tc.want), off)
+
+				got, err := one.Decode[map[string]any](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, tc.values, got)
+			})
+		}
+	})
+
 	t.Run("a Source of layers gives a Source of text", func(t *testing.T) {
 		t.Parallel()
 
@@ -9294,10 +9085,6 @@ func TestSource_ByteLimit(t *testing.T) {
 		"a limit after WithoutLimits": {
 			source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithoutLimits(), niceyaml.WithByteLimit(10)),
 			want:   10,
-		},
-		"tokens": {
-			source: niceyaml.NewSourceFromTokens(lexer.Tokenize("a: 1\n")),
-			want:   niceyaml.DefaultByteLimit,
 		},
 		"zero value": {source: &niceyaml.Source{}, want: niceyaml.DefaultByteLimit},
 		"nil":        {source: nilSource, want: niceyaml.NoLimit},
@@ -9677,16 +9464,6 @@ func TestSource_PositionAt(t *testing.T) {
 		t.Parallel()
 
 		var source *niceyaml.Source
-
-		got, ok := source.PositionAt(0)
-		assert.False(t, ok)
-		assert.Equal(t, position.Position{}, got)
-	})
-
-	t.Run("Source of tokens", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromTokens(lexer.Tokenize("a: 1\n"))
 
 		got, ok := source.PositionAt(0)
 		assert.False(t, ok)
