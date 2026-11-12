@@ -26,25 +26,26 @@ type AliasError struct {
 	// Cause says why the alias does not resolve. It wraps [ErrAlias]. A
 	// nil Cause stands for ErrAlias itself.
 	Cause error
-	// Path is the path whose resolve read the alias, for the error of a
-	// resolve such as [Resolver.Node]. A call without a path, such as
-	// [Resolver.Deref], leaves it at the zero value.
+	// Path is the path whose resolve read the alias when HasPath is true,
+	// for the error of a resolve such as [Resolver.Node]. It is the zero
+	// Path when HasPath is false.
 	Path Path
-	// Whether a resolve of Path made the error. The zero Path is also the
-	// `@` path, so Path alone does not tell a resolve of `@` from a call
-	// without a path.
-	resolved bool
+	// HasPath reports whether a resolve of Path made the error. The zero
+	// Path is also the `@` path, so Path alone does not tell a resolve of
+	// `@` from a call without a path, such as [Resolver.Deref], which
+	// leaves HasPath false.
+	HasPath bool
 }
 
-// Error names Path in front of Cause, as in "resolve $.a.b: alias does
-// not resolve: *x forms a cycle". The error of a resolve of the `@` path
-// reads as in "resolve @: alias does not resolve: *x forms a cycle". An
-// AliasError of a call without a path, and one that a program builds
-// with a zero Path, reads as Cause alone.
+// Error names Path in front of Cause when HasPath is true, as in "resolve
+// $.a.b: alias does not resolve: *x forms a cycle". The error of a
+// resolve of the `@` path reads as in "resolve @: alias does not resolve:
+// *x forms a cycle". An AliasError with HasPath false reads as Cause
+// alone, whatever its Path holds.
 func (e *AliasError) Error() string {
 	cause := e.Unwrap().Error()
 
-	if !e.resolved && e.Path.Equal(Path{}) {
+	if !e.HasPath {
 		return cause
 	}
 

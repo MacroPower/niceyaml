@@ -1167,7 +1167,7 @@ func resolveError(p Path, err error) error {
 		cause = a.Cause
 	}
 
-	return &AliasError{Path: p, Alias: a.Alias, Cause: cause, resolved: true}
+	return &AliasError{Path: p, Alias: a.Alias, Cause: cause, HasPath: true}
 }
 
 // reasonError is the error of an alias that does not resolve for reason,

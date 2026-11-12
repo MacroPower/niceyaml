@@ -3473,7 +3473,7 @@ func TestRegistry_Load_DeprecationMarks(t *testing.T) {
 		"deprecated unversioned layout": {
 			opts: hours(manifest.Unversioned(manifest.Deprecated()), manifest.Version("x/v1")),
 			file: "spec: {}\n",
-			want: []string{"$: deprecated unversioned layout of Hours: version, deprecated"},
+			want: []string{"-: deprecated unversioned layout of Hours: version, deprecated"},
 		},
 		"deprecated kind": {
 			opts: hours(manifest.DeprecatedKind(), manifest.Version("x/v1")),
@@ -3488,7 +3488,7 @@ func TestRegistry_Load_DeprecationMarks(t *testing.T) {
 		"deprecated kind under the unversioned layout": {
 			opts: hours(manifest.DeprecatedKind(), manifest.Unversioned()),
 			file: "spec: {}\n",
-			want: []string{`$: deprecated kind "Hours": kind, deprecated`},
+			want: []string{`-: deprecated kind "Hours": kind, deprecated`},
 		},
 		"deprecated field": {
 			opts: hours(manifest.Version("x/v1", manifest.Schema(legacy))),
@@ -3567,7 +3567,7 @@ func TestRegistry_Load_DeprecationMarks(t *testing.T) {
 					}
 				}
 
-				got = append(got, fmt.Sprintf("%s: %s: %s", w.Path, w.Error(), strings.Join(matched, ", ")))
+				got = append(got, fmt.Sprintf("%s: %s: %s", problemPath(w), w.Error(), strings.Join(matched, ", ")))
 			}
 
 			assert.Equal(t, tc.want, got)
@@ -4472,7 +4472,7 @@ func TestRegistry_Load_Problems(t *testing.T) {
 			files: map[string]string{
 				"hours.yaml": "spec: [\n",
 			},
-			want: []string{`error "config/hours.yaml" "" "" $: sequence end token ']' not found`},
+			want: []string{`error "config/hours.yaml" "" "" -: sequence end token ']' not found`},
 		},
 		"required kind that the set lacks": {
 			opts: withKinds(
@@ -4482,7 +4482,7 @@ func TestRegistry_Load_Problems(t *testing.T) {
 			files: map[string]string{
 				"times.yaml": stringtest.LinesLF("apiVersion: x/v1", "kind: Times"),
 			},
-			want: []string{`error "" "" "" $: missing Hours`},
+			want: []string{`error "" "" "" -: missing Hours`},
 		},
 		"error of a check": {
 			opts: append(hours(manifest.Version("x/v1")),
@@ -4492,7 +4492,28 @@ func TestRegistry_Load_Problems(t *testing.T) {
 			files: map[string]string{
 				"hours.yaml": stringtest.LinesLF("apiVersion: x/v1", "kind: Hours"),
 			},
-			want: []string{`error "" "" "" $: dangling reference`},
+			want: []string{`error "" "" "" -: dangling reference`},
+		},
+		"errors of a check bound to a document": {
+			opts: append(hours(manifest.Version("x/v1")),
+				manifest.WithCheck(func(_ context.Context, set *manifest.Set) error {
+					var errs []error
+
+					for o := range set.Objects() {
+						errs = append(errs,
+							o.Bind(niceyaml.NewError("no location in the document")),
+							o.Bind(niceyaml.NewError("about the root value", niceyaml.AtPath(paths.Doc()))))
+					}
+
+					return errors.Join(errs...)
+				})),
+			files: map[string]string{
+				"hours.yaml": stringtest.LinesLF("apiVersion: x/v1", "kind: Hours"),
+			},
+			want: []string{
+				`error "config/hours.yaml" "Hours" "x/v1" $: about the root value`,
+				`error "config/hours.yaml" "Hours" "x/v1" -: no location in the document`,
+			},
 		},
 		"warning in strict mode": {
 			opts: hours(manifest.DeprecatedKind(), manifest.Version("x/v1")),
@@ -4532,12 +4553,22 @@ func TestRegistry_Load_Problems(t *testing.T) {
 				}
 
 				got = append(got, fmt.Sprintf("%s %q %q %q %s: %s",
-					level, p.File, p.Kind, p.Version, p.Path, row.Message()))
+					level, p.File, p.Kind, p.Version, problemPath(p), row.Message()))
 			}
 
 			assert.Equal(t, tc.want, got)
 		})
 	}
+}
+
+// problemPath returns the path of p, or "-" for a [*manifest.Problem]
+// without a path.
+func problemPath(p *manifest.Problem) string {
+	if !p.HasPath {
+		return "-"
+	}
+
+	return p.Path.String()
 }
 
 func TestProblem(t *testing.T) {

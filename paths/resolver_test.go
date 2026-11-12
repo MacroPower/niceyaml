@@ -6968,6 +6968,7 @@ func TestAliasError(t *testing.T) {
 
 			require.ErrorAs(t, err, &aliasErr)
 			assert.True(t, tc.path.Equal(aliasErr.Path), "path %s", aliasErr.Path)
+			assert.True(t, aliasErr.HasPath)
 			assert.Same(t, aliases[0], aliasErr.Alias)
 			require.ErrorIs(t, aliasErr.Cause, paths.ErrAlias)
 			assert.Equal(t, strings.TrimPrefix(tc.want, "resolve "+tc.path.String()+": "), aliasErr.Cause.Error())
@@ -6993,6 +6994,7 @@ func TestAliasError(t *testing.T) {
 
 		require.ErrorAs(t, err, &aliasErr)
 		assert.True(t, aliasErr.Path.Equal(paths.Path{}), "path %s", aliasErr.Path)
+		assert.False(t, aliasErr.HasPath)
 		assert.Same(t, alias, aliasErr.Alias)
 
 		pos, ok := aliasErr.Position()
@@ -7050,8 +7052,15 @@ func TestAliasError(t *testing.T) {
 		require.EqualError(t, err, "alias does not resolve")
 		require.ErrorIs(t, err, paths.ErrAlias)
 
-		err = &paths.AliasError{Path: paths.Doc().Child("a")}
+		// HasPath decides whether the message names Path.
+		err = &paths.AliasError{Path: paths.Doc().Child("a"), HasPath: true}
 		require.EqualError(t, err, "resolve $.a: alias does not resolve")
+
+		err = &paths.AliasError{Path: paths.Current(), HasPath: true}
+		require.EqualError(t, err, "resolve @: alias does not resolve")
+
+		err = &paths.AliasError{Path: paths.Doc().Child("a")}
+		require.EqualError(t, err, "alias does not resolve")
 	})
 
 	t.Run("nil alias", func(t *testing.T) {

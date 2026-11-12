@@ -557,7 +557,12 @@
 //
 //	for row := range niceyaml.Problems(err) {
 //		if p, ok := errors.AsType[*manifest.Problem](row.Err); ok {
-//			annotate(p.File, p.Kind, p.Version, p.Path, row.Message())
+//			path := ""
+//			if p.HasPath {
+//				path = p.Path.String()
+//			}
+//
+//			annotate(p.File, p.Kind, p.Version, path, row.Message())
 //		}
 //	}
 //
@@ -566,6 +571,12 @@
 // [KindName] or a layout without a kind field. It is empty for a document
 // that did not route, such as one with an unknown kind or a syntax error,
 // and for a problem of a whole file or of the whole set.
+//
+// [Problem.HasPath] reports whether the problem names a path, so the loop
+// passes an empty path for a row without one. A syntax error, a problem of
+// the whole set, and a warning that binds to a document without a location
+// name no path. Their Path is the zero Path, which prints as `@`, so a
+// reporter must read HasPath before it shows Path.
 //
 // [Registry.Check] runs the checks of a load and returns the manifests that
 // pass beside the problems, for an editor or a terminal UI that shows both.
