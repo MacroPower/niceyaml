@@ -1121,7 +1121,10 @@ func TestViolation_Is(t *testing.T) {
 			`{"properties": {"a": {"$ref": "https://example.invalid/nope.json"}}}`,
 			schema.WithRequireRefs(false),
 		)
-		registry := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(schema.Directive()))
+		registry := schema.NewRegistry(
+			schema.WithAccess(schema.Unrestricted()),
+			schema.WithResolvers(schema.Directive()),
+		)
 
 		check := func(s *schema.Schema, input string) func(t *testing.T) error {
 			return func(t *testing.T) error {

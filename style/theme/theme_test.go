@@ -210,15 +210,15 @@ func TestCharm(t *testing.T) {
 		mode    theme.Mode
 		isDark  bool
 	}{
-		"Charm": {
-			theme:   theme.Charm,
+		"Charm()": {
+			theme:   theme.Charm(),
 			name:    "charm",
 			mode:    theme.Dark,
 			isDark:  true,
 			surface: charmtone.Pepper,
 		},
-		"CharmLight": {
-			theme:   theme.CharmLight,
+		"CharmLight()": {
+			theme:   theme.CharmLight(),
 			name:    "charm-light",
 			mode:    theme.Light,
 			isDark:  false,
@@ -268,7 +268,7 @@ func TestCharmLight_ReadableOnSurface(t *testing.T) {
 	}
 
 	for _, k := range tokens {
-		st := theme.CharmLight.Style(k)
+		st := theme.CharmLight().Style(k)
 		assert.GreaterOrEqual(t, yamltest.Contrast(st.GetForeground(), st.GetBackground()), 4.5,
 			"%s draws %s", k, style.Encode(st))
 	}
@@ -543,7 +543,7 @@ func TestTheme_With(t *testing.T) {
 	t.Run("adjusts the styles and keeps the name and mode", func(t *testing.T) {
 		t.Parallel()
 
-		for _, th := range []theme.Theme{builtin(t, "dracula"), theme.CharmLight} {
+		for _, th := range []theme.Theme{builtin(t, "dracula"), theme.CharmLight()} {
 			got := th.With(italic)
 
 			assert.Equal(t, th.Name, got.Name)
@@ -1333,7 +1333,7 @@ func standsOut(token, marked lipgloss.Style) bool {
 // FromColors.
 func paletteThemes() []theme.Theme {
 	return slices.DeleteFunc(theme.Builtin().All(), func(th theme.Theme) bool {
-		return th.Name == theme.Charm.Name || th.Name == theme.CharmLight.Name
+		return th.Name == theme.Charm().Name || th.Name == theme.CharmLight().Name
 	})
 }
 
@@ -1413,9 +1413,9 @@ func TestTheme_Style(t *testing.T) {
 
 	var _ style.Styler = theme.Theme{}
 
-	assert.Equal(t, theme.Charm.Styles().Style(kind.Comment), theme.Charm.Style(kind.Comment))
+	assert.Equal(t, theme.Charm().Styles().Style(kind.Comment), theme.Charm().Style(kind.Comment))
 	assert.Equal(t, lipgloss.NewStyle(), theme.Theme{}.Style(kind.Comment))
 
-	p := printer.New(printer.WithStyles(theme.Charm))
-	assert.Equal(t, theme.Charm.Styles().Style(kind.NameTag), p.Style(kind.NameTag))
+	p := printer.New(printer.WithStyles(theme.Charm()))
+	assert.Equal(t, theme.Charm().Styles().Style(kind.NameTag), p.Style(kind.NameTag))
 }

@@ -409,12 +409,12 @@ func TestLoadError_Dependencies(t *testing.T) {
 		// still names the file.
 		"file the Access refuses": {
 			ref:  schema.File(outside),
-			opts: []schema.RegistryOption{schema.WithAccess(schema.NoAccess)},
+			opts: []schema.RegistryOption{schema.WithAccess(schema.NoAccess())},
 			want: []string{schema.File(outside).Name()},
 		},
 		"URL the Access refuses": {
 			ref:  schema.URL("https://schemas.test/s.json"),
-			opts: []schema.RegistryOption{schema.WithAccess(schema.NoAccess)},
+			opts: []schema.RegistryOption{schema.WithAccess(schema.NoAccess())},
 			want: []string{"https://schemas.test/s.json"},
 		},
 		// The Access refuses a $ref document too, whether a file or a URL.

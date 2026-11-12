@@ -27,7 +27,7 @@ func main() {
 	// Create a printer with a theme as it is. The box fills the rectangle
 	// behind the rows with the theme's surface.
 	p := printer.New(
-		printer.WithStyles(theme.Charm),
+		printer.WithStyles(theme.Charm()),
 		printer.WithBox(true),
 	)
 

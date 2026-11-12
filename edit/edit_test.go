@@ -11100,7 +11100,7 @@ func TestDoc_Node_Directive(t *testing.T) {
 	src, err := niceyaml.NewSourceFromFile(filepath.Join(dir, "f.yaml"))
 	require.NoError(t, err)
 
-	reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(schema.Directive()))
+	reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted()), schema.WithResolvers(schema.Directive()))
 	doc := src.Documents()[1]
 
 	require.NoError(t, doc.Validate(t.Context(), reg))

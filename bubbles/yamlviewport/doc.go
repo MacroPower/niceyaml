@@ -130,8 +130,9 @@
 //
 // Provide a custom [printer.Printer] via [WithPrinter] to control syntax
 // highlighting, line numbers, and annotations. Without one, the viewport
-// renders with [go.jacobcolvin.com/niceyaml/style/theme.Charm] inside the
-// box of [printer.WithBox].
+// renders with the theme from
+// [go.jacobcolvin.com/niceyaml/style/theme.Charm] inside the box of
+// [printer.WithBox].
 //
 // Provide a [finder.Finder] via [WithFinder] to change how search terms
 // match, such as the normalization it applies, or a custom [Searcher] via

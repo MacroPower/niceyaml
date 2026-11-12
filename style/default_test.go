@@ -152,7 +152,7 @@ func TestDefault_HighlightsReadable(t *testing.T) {
 
 	// The default styles draw on the terminal's own background. The test
 	// takes that background to be black for the dark palette and white for
-	// the light one. The themes theme.Charm and theme.CharmLight draw the
+	// the light one. The themes theme.Charm() and theme.CharmLight() draw the
 	// same palettes on a Pepper surface and a Salt surface, and a blended
 	// highlight mixes into each.
 	dark, light := style.Default(true), style.Default(false)
@@ -241,7 +241,7 @@ func TestDefault_HeadingFillsShow(t *testing.T) {
 
 	// A title bar draws its quiet segments in these kinds. Each fill shows
 	// against the terminal's own background and against the surface that
-	// theme.Charm or theme.CharmLight paints.
+	// theme.Charm() or theme.CharmLight() paints.
 	tcs := map[string]struct {
 		background color.Color
 		isDark     bool
@@ -275,7 +275,7 @@ func TestDefault_AccentDimMovesAwayFromBackground(t *testing.T) {
 	// is a shade of the accent that moves away from the background. It
 	// reads brighter on a dark terminal and darker on a light one. Each
 	// palette keeps that relation against the terminal's own background and
-	// against the surface that theme.Charm or theme.CharmLight paints.
+	// against the surface that theme.Charm() or theme.CharmLight() paints.
 	tcs := map[string]struct {
 		background color.Color
 		isDark     bool

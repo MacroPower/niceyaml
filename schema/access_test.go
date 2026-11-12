@@ -62,7 +62,7 @@ func TestNewAccess(t *testing.T) {
 		}{
 			"no options":  {access: none},
 			"zero Access": {access: &schema.Access{}},
-			"NoAccess":    {access: schema.NoAccess},
+			"NoAccess()":  {access: schema.NoAccess()},
 		}
 
 		for name, tc := range tcs {
@@ -177,9 +177,22 @@ func TestUnrestricted(t *testing.T) {
 	tcs := map[string]struct {
 		opts []schema.RegistryOption
 	}{
-		"WithAccess(Unrestricted)": {opts: []schema.RegistryOption{schema.WithAccess(schema.Unrestricted)}},
-		"no WithAccess":            {},
+		"WithAccess(Unrestricted())": {opts: []schema.RegistryOption{schema.WithAccess(schema.Unrestricted())}},
+		"no WithAccess":              {},
 	}
+
+	t.Run("returns a new Access on each call", func(t *testing.T) {
+		t.Parallel()
+
+		first := schema.Unrestricted()
+		*first = schema.Access{}
+
+		reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted()))
+
+		data, err := reg.Load(t.Context(), schema.File(path))
+		require.NoError(t, err)
+		assert.JSONEq(t, objectSchema, string(data))
+	})
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
@@ -285,12 +298,12 @@ func TestWithAccess(t *testing.T) {
 	t.Run("the last option wins", func(t *testing.T) {
 		t.Parallel()
 
-		reg := schema.NewRegistry(withAccess(t), schema.WithAccess(schema.Unrestricted))
+		reg := schema.NewRegistry(withAccess(t), schema.WithAccess(schema.Unrestricted()))
 
 		_, err := reg.Load(t.Context(), schema.File(path))
 		require.NoError(t, err)
 
-		reg = schema.NewRegistry(schema.WithAccess(schema.Unrestricted), withAccess(t))
+		reg = schema.NewRegistry(schema.WithAccess(schema.Unrestricted()), withAccess(t))
 
 		_, err = reg.Load(t.Context(), schema.File(path))
 		requireLoadError(t, err, schema.ErrFileNotAllowed)
@@ -303,7 +316,7 @@ func TestWithAccess(t *testing.T) {
 		require.NoError(t, err)
 
 		opt := schema.WithAccess(access)
-		*access = *schema.Unrestricted
+		*access = *schema.Unrestricted()
 
 		client, requests := recordingClient(anySchema)
 		reg := schema.NewRegistry(schema.WithHTTPClient(client), opt)
@@ -463,7 +476,7 @@ func TestAllowRoot(t *testing.T) {
 			schema.WithResolvers(schema.File(filepath.Join(tenant, "out.json"))),
 		)
 
-		// Under Unrestricted, the same schema reads the file outside.
+		// Without an Access option, the same schema reads the file outside.
 		disk := schema.NewRegistry(schema.WithResolvers(schema.File(filepath.Join(tenant, "out.json"))))
 		requireRejects(t, disk, "out: 5\n", `$.out: expected "string", got "integer"`)
 	})
@@ -1074,9 +1087,9 @@ func TestAllowRoot(t *testing.T) {
 }
 
 // A relative document resolves against the working directory, as it does
-// under Unrestricted, and not against the directory of the root. The test
-// changes the process's working directory, so it does not run in
-// parallel.
+// under the Access from Unrestricted, and not against the directory of the
+// root. The test changes the process's working directory, so it does not
+// run in parallel.
 //
 //nolint:paralleltest // See above.
 func TestAllowRoot_RelativeDocument(t *testing.T) {

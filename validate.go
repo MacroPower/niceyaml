@@ -541,28 +541,31 @@ func visitOf(v reflect.Value) visit {
 	return key
 }
 
-var (
-	// NoValidator is a [Validator] that passes every Node. Every function of
-	// the package that takes a Validator panics for a nil one, so a missing
-	// check never reads as a document that passed. A program that validates
-	// only on some condition starts from NoValidator, and the call site then
-	// shows that the check can be off:
-	//
-	//	v := niceyaml.NoValidator
-	//	if strict {
-	//		v = reg
-	//	}
-	//
-	//	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(v))
-	//
-	// Its Check method returns only the error of a document that did not
-	// parse. [Source.ValidateDocuments] with NoValidator thus checks the
-	// syntax of a file. A program compares a Validator with NoValidator to
-	// learn whether the check is off.
-	// [go.jacobcolvin.com/niceyaml/schema.AcceptAll] is the schema that passes
-	// every document.
-	NoValidator Validator = noValidator{}
+// NoValidator returns a [Validator] that passes every Node. Every function
+// of the package that takes a Validator panics for a nil one, so a missing
+// check never reads as a document that passed. A program that validates
+// only on some condition starts from the Validator from NoValidator, and
+// the call site then shows that the check can be off:
+//
+//	v := niceyaml.NoValidator()
+//	if strict {
+//		v = reg
+//	}
+//
+//	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(v))
+//
+// Its Check method returns only the error of a document that did not
+// parse. [Source.ValidateDocuments] with the Validator from NoValidator
+// thus checks the syntax of a file. Every call returns an equal
+// Validator, so a program compares a Validator with NoValidator() to
+// learn whether the check is off.
+// [go.jacobcolvin.com/niceyaml/schema.AcceptAll] returns the schema that
+// passes every document.
+func NoValidator() Validator {
+	return noValidator{}
+}
 
+var (
 	// The result of [selfCheckOf] for each type it has read.
 	ownsValidator unmarshaler.TypeCache[selfCheck]
 
@@ -1536,8 +1539,8 @@ type SelfValidatorContext interface {
 // See [ValidatorFunc], [MultiValidator], [ChainValidator], [SkipEmpty],
 // [Each], [go.jacobcolvin.com/niceyaml/schema.Schema], and
 // [go.jacobcolvin.com/niceyaml/schema.Registry] for implementations.
-// [NoValidator] is the ready-made Validator that passes every Node, for a
-// caller that does not have a check to run.
+// [NoValidator] returns the ready-made Validator that passes every
+// Node, for a caller that does not have a check to run.
 //
 // Check gets the Node that runs it, the root of a document or a Node from
 // [Node.At] or [Node.Nodes]. An `@` path in an error of Check reads from
@@ -1704,8 +1707,8 @@ func mustValidators(fn string, validators []Validator) {
 // Validator.
 //
 // MultiValidator panics if a validator is nil, including one that holds a
-// nil pointer or func. [NoValidator] is the validator that passes every
-// Node.
+// nil pointer or func. [NoValidator] returns the validator that passes
+// every Node.
 func MultiValidator(validators ...Validator) Validator {
 	// The check covers the copy, which holds the validators that run.
 	validators = slices.Clone(validators)
@@ -1760,8 +1763,8 @@ func MultiValidator(validators ...Validator) Validator {
 // the slice it passed does not change the Validator.
 //
 // ChainValidator panics if a validator is nil, including one that holds a
-// nil pointer or func. [NoValidator] is the validator that passes every
-// Node.
+// nil pointer or func. [NoValidator] returns the validator that passes
+// every Node.
 func ChainValidator(validators ...Validator) Validator {
 	// The check covers the copy, which holds the validators that run.
 	validators = slices.Clone(validators)
@@ -1917,7 +1920,7 @@ func Each(path paths.Path, v Validator) Validator {
 //
 // Validate panics if v is nil, including a v that holds a nil pointer or
 // func, whether or not the document parsed. A caller that does not have a
-// check to run passes [NoValidator].
+// check to run passes the Validator from [NoValidator].
 func (n *Node) Validate(ctx context.Context, v Validator) error {
 	mustValidator("Node.Validate", v)
 

@@ -82,14 +82,15 @@ type Printer struct {
 }
 
 // New creates a new [*Printer].
-// By default it uses the dark palette of [style.Default], [DefaultGutter],
-// [DefaultAnnotation], and an empty container style, so each row of the
-// output is as wide as its content. [WithContainerWidth] pins a width
-// instead. [WithStyles] covers the styles for a light terminal.
+// By default it uses the dark palette of [style.Default], the gutter
+// from [DefaultGutter], [DefaultAnnotation], and an empty container
+// style, so each row of the output is as wide as its content.
+// [WithContainerWidth] pins a width instead. [WithStyles] covers the
+// styles for a light terminal.
 func New(opts ...Option) *Printer {
 	p := &Printer{
 		styles:         style.Default(true),
-		gutter:         DefaultGutter,
+		gutter:         defaultGutter,
 		annotationFunc: DefaultAnnotation,
 		blends:         newBlendCache(),
 	}
@@ -291,9 +292,9 @@ func (c GutterContext) styler() style.Styler {
 //	})
 //	p := printer.New(printer.WithGutter(marker))
 //
-// [DefaultGutter], [DiffGutter], [LineNumberGutter], and [NoGutter] are
-// ready-made gutters. [FixedGutter] and [GutterFunc] adapt a function.
-// [WithGutter] sets the gutter a printer uses.
+// [DefaultGutter], [DiffGutter], [LineNumberGutter], and [NoGutter]
+// return ready-made gutters. [FixedGutter] and [GutterFunc] adapt a
+// function. [WithGutter] sets the gutter a printer uses.
 type Gutter interface {
 	// Width returns the width in cells of the gutter on every row of a
 	// view. The context holds the styles the gutter renders with. Both
@@ -809,22 +810,32 @@ func numberWidth(maxNumber int) int {
 	return max(4, len(strconv.Itoa(maxNumber)))
 }
 
-var (
-	// DefaultGutter is the [Gutter] [New] uses. It renders the line number
-	// followed by the diff marker.
-	DefaultGutter Gutter = numberGutter{marker: true}
+// DefaultGutter returns the [Gutter] [New] uses. It renders the line
+// number followed by the diff marker.
+func DefaultGutter() Gutter {
+	return defaultGutter
+}
 
-	// DiffGutter is a [Gutter] that renders only diff markers (" ", "+",
-	// "-"), styled with [kind.GenericInserted] and [kind.GenericDeleted].
-	DiffGutter Gutter = diffGutter{}
+// DiffGutter returns a [Gutter] that renders only diff markers (" ", "+",
+// "-"), styled with [kind.GenericInserted] and [kind.GenericDeleted].
+func DiffGutter() Gutter {
+	return diffGutter{}
+}
 
-	// LineNumberGutter is a [Gutter] that renders only line numbers, in
-	// [kind.UILineNumber]. Soft-wrapped continuation rows show " - ".
-	LineNumberGutter Gutter = numberGutter{}
+// LineNumberGutter returns a [Gutter] that renders only line numbers, in
+// [kind.UILineNumber]. Soft-wrapped continuation rows show " - ".
+func LineNumberGutter() Gutter {
+	return numberGutter{}
+}
 
-	// NoGutter is a [Gutter] that renders nothing.
-	NoGutter Gutter = noGutter{}
-)
+// NoGutter returns a [Gutter] that renders nothing.
+func NoGutter() Gutter {
+	return noGutter{}
+}
+
+// The gutter behind [DefaultGutter], which [New] and [WithGutter] read
+// directly.
+var defaultGutter Gutter = numberGutter{marker: true}
 
 // numberGutter is the [Gutter] behind [DefaultGutter] and
 // [LineNumberGutter]. It renders the line number column, followed by the
@@ -903,17 +914,17 @@ func WithContainerStyle(s lipgloss.Style) Option {
 // the [kind.Text] style of the theme. The box adds one cell of right
 // padding to the container. Every row reaches the width of the widest row
 // plus one cell. When [WithContainerWidth] pins a width, every row reaches
-// that width instead. A theme that sets a surface, such as
-// [go.jacobcolvin.com/niceyaml/style/theme.Charm], fills the box with that
-// color. Use WithBox for a full-screen viewer, where the document shows as
-// one block of the theme's background. WithBox(false), the default, turns
-// the box off.
+// that width instead. A theme that sets a surface, such as the one from
+// [go.jacobcolvin.com/niceyaml/style/theme.Charm], fills the box with
+// that color. Use WithBox for a full-screen viewer, where the document
+// shows as one block of the theme's background. WithBox(false), the
+// default, turns the box off.
 //
 // The box fills the frame of [WithContainerStyle], so a border goes around
 // a filled box:
 //
 //	p := printer.New(
-//		printer.WithStyles(theme.Charm),
+//		printer.WithStyles(theme.Charm()),
 //		printer.WithBox(true),
 //		printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.RoundedBorder())),
 //	)
@@ -978,15 +989,15 @@ func WithStyles(s style.Styler) Option {
 }
 
 // WithGutter is an [Option] that sets the [Gutter] the printer renders with.
-// By default, [DefaultGutter] renders line numbers and diff markers. A nil
-// g, or a g that is itself a nil func or nil pointer such as a nil
-// [GutterFunc], selects that same default. A [FixedGutter] with a nil
-// function keeps its blank column of the width it declares instead.
-// [NoGutter] turns the gutter off.
+// By default, the gutter from [DefaultGutter] renders line numbers and
+// diff markers. A nil g, or a g that is itself a nil func or nil
+// pointer such as a nil [GutterFunc], selects that same default. A
+// [FixedGutter] with a nil function keeps its blank column of the width
+// it declares instead. The gutter from [NoGutter] turns the gutter off.
 func WithGutter(g Gutter) Option {
 	return func(c *config) {
 		if nilness.IsNil(g) {
-			g = DefaultGutter
+			g = defaultGutter
 		}
 
 		c.gutter = g
@@ -1060,8 +1071,8 @@ func WithMaxNumber(n int) Option {
 // [kind.GenericInserted] thus draws every token of an inserted line in
 // bold. The overlays of the view apply over the tint, as they apply over
 // the diff kind by default. The option does not change the gutter, so
-// [DefaultGutter] draws the marker of the flag in the diff kind. The
-// marker sits on the same fill as the line.
+// the gutter from [DefaultGutter] draws the marker of the flag in the
+// diff kind. The marker sits on the same fill as the line.
 //
 // The tint suits a theme that gives the two diff kinds a background,
 // such as [style.Default]. A theme that sets only a foreground for them
@@ -1317,11 +1328,11 @@ func (p *Printer) PrintSideBySide(left, right *line.View) string {
 
 // Pad returns row with spaces in [kind.Text] after it, out to width
 // cells, as [WithContainerWidth] pads each row that [Printer.Print]
-// renders. A theme that sets a surface, such as
-// [go.jacobcolvin.com/niceyaml/style/theme.Charm], fills the spaces with
-// its background, which a plain space leaves out. A row that takes width
-// cells or more comes back as it is, so Pad never cuts. A viewer that
-// scrolls horizontally pads each row it cuts to its window:
+// renders. A theme that sets a surface, such as the one from
+// [go.jacobcolvin.com/niceyaml/style/theme.Charm], fills the spaces
+// with its background, which a plain space leaves out. A row that takes
+// width cells or more comes back as it is, so Pad never cuts. A viewer
+// that scrolls horizontally pads each row it cuts to its window:
 //
 //	window := p.Pad(printer.Cut(row, left, right), right-left)
 func (p *Printer) Pad(row string, width int) string {

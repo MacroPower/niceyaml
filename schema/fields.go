@@ -81,7 +81,7 @@ func CheckFields[T any](us ...niceyaml.Unmarshaler) error {
 // schema, the type, and the decode options that the program decodes
 // with, such as those it passes to [niceyaml.Node.Decode] beside
 // [niceyaml.WithValidator]. CheckType returns nil for a nil s and for a
-// schema that checks nothing, such as [AcceptAll].
+// schema that checks nothing, such as one from [AcceptAll].
 //
 // CheckType reports each property that s requires and marks deprecated.
 // A user who follows the warning and removes the property fails the

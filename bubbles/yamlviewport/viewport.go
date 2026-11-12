@@ -277,9 +277,9 @@ type config struct {
 
 // WithPrinter is an [Option] that sets the [*printer.Printer] the viewport
 // renders with. Without it, the viewport creates a printer that renders with
-// [theme.Charm] inside the box of [printer.WithBox]. A nil p selects that
-// same default. Pass [printer.WithBox] to a printer of your own to draw the
-// same box, with one cell of padding at the right of each row.
+// the theme from [theme.Charm] inside the box of [printer.WithBox]. A nil p
+// selects that same default. Pass [printer.WithBox] to a printer of your own
+// to draw the same box, with one cell of padding at the right of each row.
 //
 // The viewport never modifies the printer. Each render derives a copy with
 // [printer.Printer.With] and the viewport's wrap width, so other renderers
@@ -583,10 +583,10 @@ func (m *Model) setInitialValues() {
 }
 
 // defaultPrinter returns the printer that a [Model] renders with when the
-// caller does not set one. It renders with [theme.Charm] inside the box of
-// [printer.WithBox].
+// caller does not set one. It renders with the theme from [theme.Charm]
+// inside the box of [printer.WithBox].
 func defaultPrinter() *printer.Printer {
-	return printer.New(printer.WithStyles(theme.Charm), printer.WithBox(true))
+	return printer.New(printer.WithStyles(theme.Charm()), printer.WithBox(true))
 }
 
 // Init returns the command that starts the viewport. The viewport does not

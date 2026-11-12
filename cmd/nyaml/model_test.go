@@ -273,8 +273,8 @@ func TestNewModelDefaultTheme(t *testing.T) {
 				lineNumbers: tc.lineNumbers,
 			})
 
-			assert.Equal(t, theme.Charm.Name, m.themeList[m.themeIndex].Name)
-			assert.Equal(t, theme.Charm.Styles(), m.styles)
+			assert.Equal(t, theme.Charm().Name, m.themeList[m.themeIndex].Name)
+			assert.Equal(t, theme.Charm().Styles(), m.styles)
 
 			// The first frame renders as the theme picker would after
 			// switching to the default theme.
@@ -291,7 +291,7 @@ func TestNewModelDefaultTheme(t *testing.T) {
 func TestBuildPrinterOpts(t *testing.T) {
 	t.Parallel()
 
-	styles := theme.Charm.Styles()
+	styles := theme.Charm().Styles()
 
 	for _, lineNumbers := range []bool{false, true} {
 		p := printer.New(buildPrinterOpts(lineNumbers, styles)...)

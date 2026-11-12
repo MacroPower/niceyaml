@@ -67,21 +67,21 @@ func TestViewPrintOnTerminal(t *testing.T) {
 	}{
 		"no color": {
 			env:     []string{"NO_COLOR=1"},
-			styles:  theme.Charm,
+			styles:  theme.Charm(),
 			profile: colorprofile.ASCII,
 		},
 		"light background": {
 			env:     []string{"COLORTERM=truecolor"},
 			reply:   "\x1b]11;rgb:ffff/ffff/ffff\x07\x1b[?62c",
-			styles:  theme.CharmLight,
-			other:   theme.Charm,
+			styles:  theme.CharmLight(),
+			other:   theme.Charm(),
 			profile: colorprofile.TrueColor,
 		},
 		"dark background": {
 			env:     []string{"COLORTERM=truecolor"},
 			reply:   "\x1b]11;rgb:0000/0000/0000\x07\x1b[?62c",
-			styles:  theme.Charm,
-			other:   theme.CharmLight,
+			styles:  theme.Charm(),
+			other:   theme.CharmLight(),
 			profile: colorprofile.TrueColor,
 		},
 	}

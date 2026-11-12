@@ -50,9 +50,9 @@ func main() {
 	// A directive lets the document name its schema, so the registry needs
 	// an Access that says what the document can reach. The document and its
 	// schemas live in the embedded file system, which serves the files that
-	// a directive names. NoAccess keeps the disk and the network out of
-	// reach.
-	access := schema.WithAccess(schema.NoAccess)
+	// a directive names. The Access from NoAccess keeps the disk and the
+	// network out of reach.
+	access := schema.WithAccess(schema.NoAccess())
 
 	reg := schema.NewRegistry(access, resolvers)
 

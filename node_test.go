@@ -3761,10 +3761,10 @@ func TestDocument_Err(t *testing.T) {
 
 				return err //nolint:wrapcheck // The test inspects the error of the call.
 			}},
-			"Validate with NoValidator": {call: func(t *testing.T, doc *niceyaml.Node) error {
+			"Validate with NoValidator()": {call: func(t *testing.T, doc *niceyaml.Node) error {
 				t.Helper()
 
-				return doc.Validate(t.Context(), niceyaml.NoValidator)
+				return doc.Validate(t.Context(), niceyaml.NoValidator())
 			}},
 			"Validate": {call: func(t *testing.T, doc *niceyaml.Node) error {
 				t.Helper()
@@ -5174,7 +5174,7 @@ func TestDocument_View(t *testing.T) {
 		))
 		last := yamltest.Documents(t, src, 2)[1]
 
-		p := yamltest.NewXMLPrinter(printer.WithGutter(printer.LineNumberGutter))
+		p := yamltest.NewXMLPrinter(printer.WithGutter(printer.LineNumberGutter()))
 
 		got := p.Print(src.View().Slice(last.Span()))
 		assert.NotContains(t, got, "a</nameTag>")

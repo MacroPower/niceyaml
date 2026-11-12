@@ -2224,7 +2224,7 @@ log:
 		log.Fatal(err)
 	}
 
-	registry := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(schema.Directive()))
+	registry := schema.NewRegistry(schema.WithAccess(schema.Unrestricted()), schema.WithResolvers(schema.Directive()))
 	fmt.Println(merged.ValidateDocuments(ctx, registry))
 
 	// Output:
@@ -2887,7 +2887,7 @@ func TestMergeAs(t *testing.T) {
 
 	sources := []*niceyaml.Source{defaults, user, env}
 
-	registry := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(schema.Directive()))
+	registry := schema.NewRegistry(schema.WithAccess(schema.Unrestricted()), schema.WithResolvers(schema.Directive()))
 
 	t.Run("the merged Source stands for one layer", func(t *testing.T) {
 		t.Parallel()
@@ -5644,11 +5644,11 @@ func TestNewSourceFromLayers_Validate(t *testing.T) {
 		))
 	})
 
-	t.Run("NoValidator passes", func(t *testing.T) {
+	t.Run("NoValidator() passes", func(t *testing.T) {
 		t.Parallel()
 
 		require.NoError(t,
-			layerFiles(t, baseInput, layerProdHost).ValidateDocuments(t.Context(), niceyaml.NoValidator))
+			layerFiles(t, baseInput, layerProdHost).ValidateDocuments(t.Context(), niceyaml.NoValidator()))
 	})
 }
 

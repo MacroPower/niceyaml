@@ -92,20 +92,20 @@ func notifyContext(parent context.Context) (context.Context, context.CancelFunc)
 	return ctx, stop
 }
 
-// helpColorScheme colors help output with [theme.Charm] on a dark terminal
-// and with [theme.CharmLight] on a light one. Help text sits on the
-// terminal's own background, where the pale text of a dark theme is hard to
-// read on white.
+// helpColorScheme colors help output with the theme from [theme.Charm]
+// on a dark terminal and with the theme from [theme.CharmLight] on a
+// light one. Help text sits on the terminal's own background, where the
+// pale text of a dark theme is hard to read on white.
 func helpColorScheme() fang.ColorSchemeFunc {
-	return fangs.LightDarkColorSchemeFunc(theme.CharmLight, theme.Charm)
+	return fangs.LightDarkColorSchemeFunc(theme.CharmLight(), theme.Charm())
 }
 
-// errorHandler renders errors with [theme.Charm] on a dark terminal and
-// with [theme.CharmLight] on a light one, as [helpColorScheme] colors help
-// output. The excerpts of an error wrap to the width of the terminal on
-// stderr.
+// errorHandler renders errors with the theme from [theme.Charm] on a
+// dark terminal and with the theme from [theme.CharmLight] on a light
+// one, as [helpColorScheme] colors help output. The excerpts of an
+// error wrap to the width of the terminal on stderr.
 func errorHandler() fang.ErrorHandler {
-	return fangs.NewErrorHandler(fangs.WithLightDarkStyles(theme.CharmLight, theme.Charm))
+	return fangs.NewErrorHandler(fangs.WithLightDarkStyles(theme.CharmLight(), theme.Charm()))
 }
 
 // newRootCmd builds the nyaml root command and the function that stops

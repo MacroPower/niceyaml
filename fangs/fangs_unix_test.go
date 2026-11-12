@@ -197,7 +197,7 @@ func TestNewErrorHandler_WithLightDarkStylesOnTerminal(t *testing.T) {
 	light := yamltest.NewXMLStyles(yamltest.XMLStyleInclude(kind.GenericError))
 	dark := yamltest.NewXMLStyles()
 
-	charmLight := theme.CharmLight.Styles()
+	charmLight := theme.CharmLight().Styles()
 	plainCharmLight := charmLight.With(style.WithSurface(nil))
 
 	const cols = 80
@@ -239,7 +239,7 @@ func TestNewErrorHandler_WithLightDarkStylesOnTerminal(t *testing.T) {
 		},
 		"light theme without its surface": {
 			writer: throughColorProfile,
-			light:  theme.CharmLight,
+			light:  theme.CharmLight(),
 			bg:     lightBackground,
 			want:   plainCharmLight,
 		},

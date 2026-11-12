@@ -583,7 +583,7 @@ func TestCheckType(t *testing.T) {
 			schema: written(`{"deprecated": true, "properties": {"name": {"type": "string"}}}`),
 		},
 		"accept all": {
-			schema:   func(*testing.T) *schema.Schema { return schema.AcceptAll },
+			schema:   func(*testing.T) *schema.Schema { return schema.AcceptAll() },
 			defaults: []niceyaml.DecodeOption{niceyaml.WithDefaults(func(c *typeConfig) { c.Seats = 20 })},
 		},
 		"nil schema": {

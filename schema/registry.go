@@ -117,7 +117,7 @@ const defaultRetryAfter = 1 * time.Minute
 //	reg := schema.NewRegistry(
 //	    // The documents come from the user of the program, so a directive
 //	    // names any file or URL.
-//	    schema.WithAccess(schema.Unrestricted),
+//	    schema.WithAccess(schema.Unrestricted()),
 //	    schema.WithResolvers(
 //	        // Directive matching first, for explicit user intent.
 //	        schema.Directive(),
@@ -198,7 +198,7 @@ type registryConfig struct {
 //	client := &http.Client{Timeout: 10 * time.Second}
 //
 //	reg := schema.NewRegistry(
-//	    schema.WithAccess(schema.Unrestricted),
+//	    schema.WithAccess(schema.Unrestricted()),
 //	    schema.WithHTTPClient(client),
 //	    schema.WithResolvers(
 //	        schema.Directive(),
@@ -335,7 +335,7 @@ func WithRefreshAfter(interval time.Duration) RegistryOption {
 // before file path conventions:
 //
 //	reg := schema.NewRegistry(
-//	    schema.WithAccess(schema.Unrestricted),
+//	    schema.WithAccess(schema.Unrestricted()),
 //	    schema.WithResolvers(
 //	        schema.Directive(),
 //	        schema.When(matcher.Content(kindPath, "Deployment"), schema.Embedded(deploymentSchema)),
@@ -378,17 +378,18 @@ func WithResolvers(res ...Resolver) RegistryOption {
 // [niceyaml.WithValidator]:
 //
 //	reg := schema.NewRegistry(
-//	    schema.WithAccess(schema.Unrestricted),
+//	    schema.WithAccess(schema.Unrestricted()),
 //	    schema.WithResolvers(schema.Directive(), schemastore.New()),
 //	    schema.WithRequireSchema(false),
 //	)
 //
 //	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))
 //
-// [Directive] lets each document pick its own schema, and [Unrestricted]
-// lets that schema be any file or URL. A program that decodes documents
-// from another trust domain should confine the registry instead, as the
-// Untrusted Documents section of the package documentation describes.
+// [Directive] lets each document pick its own schema, and the Access
+// from [Unrestricted] lets that schema be any file or URL. A program
+// that decodes documents from another trust domain should confine the
+// registry instead, as the Untrusted Documents section of the package
+// documentation describes.
 //
 // [Registry.Lookup] reports [ErrNoMatch] either way, because a caller
 // that asks for the validator must learn when the lookup does not find
@@ -948,7 +949,7 @@ func (e reasonError) Unwrap() error {
 // false. Check then accepts the document:
 //
 //	reg := schema.NewRegistry(
-//	    schema.WithAccess(schema.Unrestricted),
+//	    schema.WithAccess(schema.Unrestricted()),
 //	    schema.WithResolvers(schema.Directive()),
 //	    schema.WithRequireSchema(false),
 //	)

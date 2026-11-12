@@ -320,7 +320,7 @@ func TestErrorHandler(t *testing.T) {
 	// A writer that is not a terminal does not report its background, so
 	// the excerpt takes the dark theme, drawn on the terminal's own
 	// background.
-	plainCharm := theme.Charm.Styles().With(style.WithSurface(nil))
+	plainCharm := theme.Charm().Styles().With(style.WithSurface(nil))
 	want := fangs.NewErrorHandler(fangs.WithPrinter(printer.New(printer.WithStyles(plainCharm))))
 
 	render := func(handler fang.ErrorHandler) string {
@@ -343,8 +343,8 @@ func TestHelpColorScheme(t *testing.T) {
 		isDark bool
 		want   fang.ColorScheme
 	}{
-		"light terminal": {isDark: false, want: fangs.ColorScheme(theme.CharmLight)},
-		"dark terminal":  {isDark: true, want: fangs.ColorScheme(theme.Charm)},
+		"light terminal": {isDark: false, want: fangs.ColorScheme(theme.CharmLight())},
+		"dark terminal":  {isDark: true, want: fangs.ColorScheme(theme.Charm())},
 	}
 
 	for name, tc := range tcs {

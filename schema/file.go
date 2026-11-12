@@ -239,7 +239,7 @@ func file(path string, physical bool) (Ref, error) {
 // serves bundled schemas and schemas on disk:
 //
 //	reg := schema.NewRegistry(
-//	    schema.WithAccess(schema.Unrestricted),
+//	    schema.WithAccess(schema.Unrestricted()),
 //	    schema.WithResolvers(
 //	        schema.Directive(),
 //	        schema.When(isWidget, schema.FileFS(bundle, "schemas/widget.json")),

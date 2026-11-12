@@ -98,7 +98,7 @@ func TestWithLoader(t *testing.T) {
 		})
 
 		reg := schema.NewRegistry(
-			schema.WithAccess(schema.NoAccess),
+			schema.WithAccess(schema.NoAccess()),
 			schema.WithHTTPClient(refusingClient(t)),
 			schema.WithLoader(prefix, func(_ context.Context, uri string) ([]byte, error) {
 				return fs.ReadFile(bundle, "schemas/"+path.Base(uri))
@@ -120,7 +120,7 @@ func TestWithLoader(t *testing.T) {
 		load, calls := bundleLoader(map[string]string{"defs.json": defsSchema})
 
 		reg := schema.NewRegistry(
-			schema.WithAccess(schema.NoAccess),
+			schema.WithAccess(schema.NoAccess()),
 			schema.WithHTTPClient(refusingClient(t)),
 			schema.WithLoader(prefix, load),
 		)
@@ -173,7 +173,7 @@ func TestWithLoader(t *testing.T) {
 		load, calls := bundleLoader(map[string]string{"defs.json": defsSchema})
 
 		reg := schema.NewRegistry(
-			schema.WithAccess(schema.NoAccess),
+			schema.WithAccess(schema.NoAccess()),
 			schema.WithHTTPClient(refusingClient(t)),
 			schema.WithLoader(prefix, load),
 		)
@@ -205,7 +205,7 @@ func TestWithLoader(t *testing.T) {
 		// A URL that no loader serves goes to the client of the
 		// registry, under an access that allows no URL.
 		reg := schema.NewRegistry(
-			schema.WithAccess(schema.NoAccess),
+			schema.WithAccess(schema.NoAccess()),
 			schema.WithHTTPClient(refusingClient(t)),
 			schema.WithLoader("https://s.test/", serving("host")),
 			schema.WithLoader("https://s.test/v1", serving("replaced")),

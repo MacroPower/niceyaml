@@ -26,11 +26,12 @@
 // the rows with it. The Surfaces section covers how to draw a theme on the
 // terminal's own background instead.
 //
-// [Charm] paints the dark CharmTone palette of [style.Default] on a Pepper
-// surface, and [CharmLight] paints the light palette on a Salt surface.
-// Each is a Theme so a program can name it without a lookup:
+// The theme from [Charm] paints the dark CharmTone palette of
+// [style.Default] on a Pepper surface, and the theme from [CharmLight]
+// paints the light palette on a Salt surface. Each returns a Theme, so
+// a program can name it without a lookup:
 //
-//	p := printer.New(printer.WithStyles(theme.Charm), printer.WithBox(true))
+//	p := printer.New(printer.WithStyles(theme.Charm()), printer.WithBox(true))
 //
 // To print on the terminal's own background, a program passes
 // [style.Default] the background it detects in place of either theme.
@@ -38,7 +39,7 @@
 // [Theme.Styles] returns the [style.Styles] behind a theme, for a program
 // that overrides some of its kinds with [style.Styles.With]:
 //
-//	styles := theme.Charm.Styles().With(style.Set(kind.Comment, dim))
+//	styles := theme.Charm().Styles().With(style.Set(kind.Comment, dim))
 //	p := printer.New(printer.WithStyles(styles), printer.WithBox(true))
 //
 // [Theme.With] applies the same options and returns a Theme with the same
@@ -190,11 +191,11 @@
 // the kinds it customizes, and every other kind takes the style of its
 // parent.
 //
-// Every built-in theme other than [Charm] and [CharmLight] comes from a
-// [Palette]. Each of these themes lists a base foreground and background,
-// an accent color, OK, warning, and error colors, and the token kinds it
-// colors. [Derive] derives the remaining kinds from those colors, so
-// every built-in theme presents the same set of kinds.
+// Every built-in theme other than those from [Charm] and [CharmLight]
+// comes from a [Palette]. Each of these themes lists a base foreground
+// and background, an accent color, OK, warning, and error colors, and
+// the token kinds it colors. [Derive] derives the remaining kinds from
+// those colors, so every built-in theme presents the same set of kinds.
 //
 // # Surfaces
 //

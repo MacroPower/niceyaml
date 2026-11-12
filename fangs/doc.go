@@ -28,9 +28,9 @@
 //
 //	err := fang.Execute(ctx, rootCmd,
 //	    fang.WithErrorHandler(fangs.NewErrorHandler(
-//	        fangs.WithLightDarkStyles(theme.CharmLight, theme.Charm),
+//	        fangs.WithLightDarkStyles(theme.CharmLight(), theme.Charm()),
 //	    )),
-//	    fang.WithColorSchemeFunc(fangs.LightDarkColorSchemeFunc(theme.CharmLight, theme.Charm)),
+//	    fang.WithColorSchemeFunc(fangs.LightDarkColorSchemeFunc(theme.CharmLight(), theme.Charm())),
 //	)
 //
 // # Color Schemes
@@ -41,7 +41,7 @@
 // The YAML viewer and CLI help output then use the same colors:
 //
 //	err := fang.Execute(ctx, rootCmd,
-//	    fang.WithColorSchemeFunc(fangs.ColorSchemeFunc(theme.Charm)),
+//	    fang.WithColorSchemeFunc(fangs.ColorSchemeFunc(theme.Charm())),
 //	)
 //
 // Help output draws most of its text on the terminal's own background.
@@ -51,7 +51,7 @@
 // fang detects:
 //
 //	err := fang.Execute(ctx, rootCmd,
-//	    fang.WithColorSchemeFunc(fangs.LightDarkColorSchemeFunc(theme.CharmLight, theme.Charm)),
+//	    fang.WithColorSchemeFunc(fangs.LightDarkColorSchemeFunc(theme.CharmLight(), theme.Charm())),
 //	)
 //
 // A nil theme selects the palette of [style.Default] for its background,

@@ -636,7 +636,7 @@ func TestPrinter_PrintError_MarksWithoutStyles(t *testing.T) {
 		},
 		"range behind line numbers": {
 			err:    badSLA,
-			gutter: printer.DefaultGutter,
+			gutter: printer.DefaultGutter(),
 			want: stringtest.JoinLF(
 				"2:8: $.spec.sla: bad",
 				"",
@@ -718,7 +718,7 @@ func TestPrinter_PrintError_MarksWithoutStyles(t *testing.T) {
 			err: yamltest.Bind(t, items, niceyaml.NewError("bad", niceyaml.AtRange(
 				yamltest.LineRange(0, 24, 54),
 			))),
-			gutter: printer.DefaultGutter,
+			gutter: printer.DefaultGutter(),
 			width:  40,
 			want: stringtest.JoinLF(
 				"1:25: bad",
@@ -737,7 +737,7 @@ func TestPrinter_PrintError_MarksWithoutStyles(t *testing.T) {
 		// its first word.
 		"message below an earlier wrapped row": {
 			err:    badItem(5),
-			gutter: printer.DefaultGutter,
+			gutter: printer.DefaultGutter(),
 			opts:   []niceyaml.ExcerptOption{niceyaml.WithExcerptWidth(0)},
 			width:  40,
 			want: stringtest.JoinLF(slices.Concat(
@@ -752,7 +752,7 @@ func TestPrinter_PrintError_MarksWithoutStyles(t *testing.T) {
 		},
 		"message below the wrapped row before the last": {
 			err:    badItem(16),
-			gutter: printer.DefaultGutter,
+			gutter: printer.DefaultGutter(),
 			opts:   []niceyaml.ExcerptOption{niceyaml.WithExcerptWidth(0)},
 			width:  40,
 			want: stringtest.JoinLF(slices.Concat(
@@ -766,7 +766,7 @@ func TestPrinter_PrintError_MarksWithoutStyles(t *testing.T) {
 		// on a row below the last wrapped row.
 		"more problems on one line than the default marks": {
 			err:    badItems(12),
-			gutter: printer.DefaultGutter,
+			gutter: printer.DefaultGutter(),
 			width:  40,
 			want: stringtest.JoinLF(slices.Concat(
 				[]string{"12 violations"},
@@ -782,7 +782,7 @@ func TestPrinter_PrintError_MarksWithoutStyles(t *testing.T) {
 		},
 		"marks from the options": {
 			err:    badItems(12),
-			gutter: printer.DefaultGutter,
+			gutter: printer.DefaultGutter(),
 			opts:   []niceyaml.ExcerptOption{niceyaml.WithExcerptMarks(2)},
 			width:  40,
 			want: stringtest.JoinLF(slices.Concat(
@@ -800,7 +800,7 @@ func TestPrinter_PrintError_MarksWithoutStyles(t *testing.T) {
 		},
 		"every mark of a line": {
 			err:    badItems(12),
-			gutter: printer.DefaultGutter,
+			gutter: printer.DefaultGutter(),
 			opts:   []niceyaml.ExcerptOption{niceyaml.WithExcerptMarks(0)},
 			width:  40,
 			want: stringtest.JoinLF(slices.Concat(
@@ -818,7 +818,7 @@ func TestPrinter_PrintError_MarksWithoutStyles(t *testing.T) {
 		},
 		"long line clipped to the default width": {
 			err:    badForty,
-			gutter: printer.DefaultGutter,
+			gutter: printer.DefaultGutter(),
 			want: stringtest.JoinLF(
 				"1:169: $.items[20]: expected number",
 				"",
@@ -828,7 +828,7 @@ func TestPrinter_PrintError_MarksWithoutStyles(t *testing.T) {
 		},
 		"long line clipped to the width from the options": {
 			err:    badForty,
-			gutter: printer.DefaultGutter,
+			gutter: printer.DefaultGutter(),
 			opts:   []niceyaml.ExcerptOption{niceyaml.WithExcerptWidth(24)},
 			want: stringtest.JoinLF(
 				"1:169: $.items[20]: expected number",
@@ -839,7 +839,7 @@ func TestPrinter_PrintError_MarksWithoutStyles(t *testing.T) {
 		},
 		"long line shown whole": {
 			err:    badForty,
-			gutter: printer.DefaultGutter,
+			gutter: printer.DefaultGutter(),
 			opts:   []niceyaml.ExcerptOption{niceyaml.WithExcerptWidth(0)},
 			want: stringtest.JoinLF(
 				"1:169: $.items[20]: expected number",
@@ -1021,7 +1021,7 @@ func TestPrinter_PrintError_JoinOfNothing(t *testing.T) {
 func TestPrinter_PrintError_ExcerptsOff(t *testing.T) {
 	t.Parallel()
 
-	p := testPrinterWithGutter(printer.DefaultGutter)
+	p := testPrinterWithGutter(printer.DefaultGutter())
 
 	// Every line but the one that holds the port holds a secret, so any
 	// excerpt of the source shows one.
@@ -1273,7 +1273,7 @@ func TestPrinter_PrintError_Excerpt(t *testing.T) {
 func TestPrinter_PrintReport(t *testing.T) {
 	t.Parallel()
 
-	p := testPrinterWithGutter(printer.DefaultGutter)
+	p := testPrinterWithGutter(printer.DefaultGutter())
 
 	first := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: 2"), niceyaml.WithName("first.yaml"))
 	second := niceyaml.NewSourceFromString("c: 3\n", niceyaml.WithName("second.yaml"))
@@ -1380,7 +1380,7 @@ func TestPrinter_PrintReport(t *testing.T) {
 func TestPrinter_PrintReport_SharedReport(t *testing.T) {
 	t.Parallel()
 
-	p := testPrinterWithGutter(printer.DefaultGutter)
+	p := testPrinterWithGutter(printer.DefaultGutter())
 
 	lines := make([]string, 20)
 	errs := make([]error, 20)
@@ -1484,7 +1484,7 @@ func TestPrinter_PrintError_Warnings(t *testing.T) {
 		want string
 	}{
 		"each severity gets its own row": {
-			p: testPrinterWithGutter(printer.DefaultGutter),
+			p: testPrinterWithGutter(printer.DefaultGutter()),
 			want: stringtest.JoinLF(
 				"├── item.yaml:2:15: $.spec.price: 0 is less than 1",
 				`└── item.yaml:2:18: warning: $.spec.legacyPricing~: deprecated field "legacyPricing"`,

@@ -95,18 +95,19 @@
 //
 //	var gutter printer.Gutter
 //	if numbered {
-//		gutter = printer.LineNumberGutter
+//		gutter = printer.LineNumberGutter()
 //	}
 //
-//	p := printer.New(printer.WithGutter(gutter)) // DefaultGutter when numbered is false
+//	p := printer.New(printer.WithGutter(gutter)) // the default gutter otherwise
 //
-// Turning a feature off takes a named value or option, such as
+// Turning a feature off takes a named function or option, such as
 // [go.jacobcolvin.com/niceyaml/printer.NoGutter] or
-// [go.jacobcolvin.com/niceyaml/finder.Exact], so the off state is visible
-// at the call site. The exception is an option whose value is a security
-// boundary, such as [go.jacobcolvin.com/niceyaml/schema.WithAccess]. A nil
-// there is a bug, such as the result of an ignored error, and the option
-// panics rather than fail open.
+// [go.jacobcolvin.com/niceyaml/finder.Exact], so the off state is
+// visible at the call site. The exception is an option whose value is a
+// security boundary, such as
+// [go.jacobcolvin.com/niceyaml/schema.WithAccess]. A nil there is a
+// bug, such as the result of an ignored error, and the option panics
+// rather than fail open.
 //
 // A check is a value that helps decide whether a document passes, such as
 // a [Validator], a matcher, a schema resolver, or the function of
@@ -119,8 +120,8 @@
 // through the error of NewRegistry instead, beside the other mistakes of
 // its options.
 //
-// A program that checks only on some condition passes a named value that
-// passes every document, such as [NoValidator] or
+// A program that checks only on some condition passes a check that
+// passes every document, such as the result of [NoValidator] or
 // [go.jacobcolvin.com/niceyaml/schema.AcceptAll]. A function that only
 // drops warnings, such as the function of
 // [go.jacobcolvin.com/niceyaml/manifest.WithWarningFilter], is not a
@@ -1131,11 +1132,11 @@
 //	err := source.ValidateDocuments(ctx, niceyaml.MultiValidator(schema, names))
 //
 // Every function that takes a Validator panics for a nil one, as the
-// Options section describes. [NoValidator] passes every node, so a program
-// that validates only on some condition passes it where it does not have
-// a check:
+// Options section describes. The Validator from [NoValidator] passes
+// every node, so a program that validates only on some condition passes
+// it where it does not have a check:
 //
-//	v := niceyaml.NoValidator
+//	v := niceyaml.NoValidator()
 //	if strict {
 //		v = schema
 //	}

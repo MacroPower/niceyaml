@@ -92,38 +92,32 @@ var (
 	// The error for a value that made the encoder panic wraps
 	// errEncoderPanic.
 	errEncoderPanic = errors.New("encoder panic")
-
-	// AcceptAll is the [*Schema] that passes every document and value without
-	// reading it. For the directive "$schema=none", [Directive] names a
-	// Schema of its own that passes every document as AcceptAll does. A
-	// program that changes AcceptAll does not change the schema that the
-	// directive names. A resolver names AcceptAll for the documents that a
-	// registry must not check:
-	//
-	//	reg := schema.NewRegistry(
-	//	    schema.WithAccess(schema.Unrestricted),
-	//	    schema.WithResolvers(
-	//	        schema.When(matcher.Exists(paths.Doc().Child("x-skip")), schema.AcceptAll),
-	//	        schema.Directive(),
-	//	    ),
-	//	)
-	//
-	// [Schema.Check] on AcceptAll returns only the error of the document,
-	// without a decode, so a document with an undefined alias passes.
-	// [Schema.ValidateValue] returns nil for every value. A schema compiled
-	// from "true" also passes every document, but its check decodes the
-	// document first. [Schema.JSONSchema] on AcceptAll returns nil.
-	// [Schema.AcceptsAll] reports true for AcceptAll and for the schema
-	// that the directive names, so a program tests for either with it
-	// rather than by comparing pointers.
-	AcceptAll = &Schema{acceptAll: true}
-
-	// The schema that [Directive] names for "$schema=none". It passes every
-	// document as [AcceptAll] does. It holds a Schema of its own, so a write
-	// to the variable AcceptAll or through its pointer does not reach the
-	// directive.
-	acceptAllSchema = &Schema{acceptAll: true}
 )
+
+// AcceptAll returns a [*Schema] that passes every document and value
+// without reading it. For the directive "$schema=none", [Directive] names
+// such a Schema too. A resolver names the Schema from AcceptAll for the
+// documents that a registry must not check:
+//
+//	reg := schema.NewRegistry(
+//	    schema.WithAccess(schema.Unrestricted()),
+//	    schema.WithResolvers(
+//	        schema.When(matcher.Exists(paths.Doc().Child("x-skip")), schema.AcceptAll()),
+//	        schema.Directive(),
+//	    ),
+//	)
+//
+// [Schema.Check] on the Schema returns only the error of the document,
+// without a decode, so a document with an undefined alias passes.
+// [Schema.ValidateValue] returns nil for every value. A schema compiled
+// from "true" also passes every document, but its check decodes the
+// document first. [Schema.JSONSchema] on the Schema returns nil.
+//
+// Each call returns a new Schema, so a program tests for one with
+// [Schema.AcceptsAll] rather than by comparing pointers.
+func AcceptAll() *Schema {
+	return &Schema{acceptAll: true}
+}
 
 // CompileOption configures [Compile] and [MustCompile], and
 // [WithCompileOptions] hands the same options to a [Registry].
@@ -196,7 +190,7 @@ func WithJSONSchemaOptions(opts ...jsonschema.ValidateOption) CompileOption {
 // name a missing document under a rare branch:
 //
 //	reg := schema.NewRegistry(
-//	    schema.WithAccess(schema.Unrestricted),
+//	    schema.WithAccess(schema.Unrestricted()),
 //	    schema.WithResolvers(schema.Directive(), schemastore.New()),
 //	    schema.WithCompileOptions(schema.WithRequireRefs(false)),
 //	)
@@ -536,7 +530,8 @@ func FromJSONSchema(v *jsonschema.Validator) *Schema {
 // validator and does not see the fields it names.
 //
 // A Schema is safe for concurrent use. Create instances with [Compile],
-// [MustCompile], or [FromJSONSchema]. [AcceptAll] passes every document.
+// [MustCompile], or [FromJSONSchema]. A Schema from [AcceptAll] passes
+// every document.
 type Schema struct {
 	compiled *jsonschema.Validator
 	// The documents that the compile of a registry, and each validation
@@ -558,15 +553,15 @@ type Schema struct {
 // It returns the validator that [FromJSONSchema] took, or the one that
 // [Compile] built. A program reads the validator for what the schema
 // declares, such as the properties that an editor completes. It returns
-// nil for [AcceptAll], which checks nothing.
+// nil for a schema from [AcceptAll], which checks nothing.
 func (s *Schema) JSONSchema() *jsonschema.Validator {
 	return s.compiled
 }
 
 // AcceptsAll reports whether s passes every document and value without
-// reading it. It reports true for [AcceptAll], for the schema that a
-// "$schema=none" directive of [Directive] names, and for a schema derived
-// from either of them, such as by [Schema.WithoutDeprecations]. A program
+// reading it. It reports true for a schema from [AcceptAll] and for a
+// schema derived from one, such as by [Schema.WithoutDeprecations]. A
+// "$schema=none" directive of [Directive] names such a schema. A program
 // tells a document whose validation is off by it:
 //
 //	m, err := reg.Lookup(ctx, doc)

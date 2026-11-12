@@ -30,7 +30,7 @@ func main() {
 	source := niceyaml.NewSourceFromString(example)
 
 	// The Charm theme paints a surface behind every token.
-	p := printer.New(printer.WithStyles(theme.Charm))
+	p := printer.New(printer.WithStyles(theme.Charm()))
 
 	doc, err := source.Document()
 	if err != nil {

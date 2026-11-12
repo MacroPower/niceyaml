@@ -409,19 +409,19 @@ func TestViewport_SearchHighlightsMatchAcrossLines(t *testing.T) {
 // container frame, for predictable golden output. Its gutter marks the
 // lines of a diff.
 func testPrinter() *printer.Printer {
-	return yamltest.NewPlainPrinter(printer.WithGutter(printer.DiffGutter))
+	return yamltest.NewPlainPrinter(printer.WithGutter(printer.DiffGutter()))
 }
 
 // testPrinterWithLineNumbers returns [testPrinter] with the default gutter,
 // which numbers the lines.
 func testPrinterWithLineNumbers() *printer.Printer {
-	return testPrinter().With(printer.WithGutter(printer.DefaultGutter))
+	return testPrinter().With(printer.WithGutter(printer.DefaultGutter()))
 }
 
 // testPrinterWithColors returns [testPrinterWithLineNumbers] with the
 // default syntax highlighting.
 func testPrinterWithColors() *printer.Printer {
-	return testPrinterWithLineNumbers().With(printer.WithStyles(theme.Charm.Styles()))
+	return testPrinterWithLineNumbers().With(printer.WithStyles(theme.Charm().Styles()))
 }
 
 // testPrinterWithSearch returns [testPrinter] with styles that wrap the
@@ -5987,7 +5987,7 @@ func TestViewport_NilPrinterSelectsDefault(t *testing.T) {
 
 	// The default printer draws the Charm theme in a box.
 	ref := yamlviewport.New(yamlviewport.WithPrinter(
-		printer.New(printer.WithStyles(theme.Charm), printer.WithBox(true)),
+		printer.New(printer.WithStyles(theme.Charm()), printer.WithBox(true)),
 	))
 	setup(&ref)
 
@@ -7459,7 +7459,7 @@ func TestViewport_RevisionOverPartOfTheSource(t *testing.T) {
 	// A view over part of a source keeps the indices of the source, so the
 	// viewport windows it by those indices, and a search covers the whole
 	// source but keeps the matches on the lines the view holds.
-	p := testPrinterWithSearch().With(printer.WithGutter(printer.LineNumberGutter))
+	p := testPrinterWithSearch().With(printer.WithGutter(printer.LineNumberGutter()))
 
 	m := testModel(p, 80, 2)
 

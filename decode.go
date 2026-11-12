@@ -137,7 +137,7 @@ func newDecodeConfig(s *Source, opts []DecodeOption) decodeConfig {
 // WithValidator panics if dv is nil, including a dv that holds a nil
 // pointer or func, such as the nil schema that a dropped error leaves
 // behind. A program that loads a schema only on some condition passes
-// [NoValidator] where it does not have one.
+// the Validator from [NoValidator] where it does not have one.
 //
 // An empty document validates as any other does. Wrap a validator in
 // [SkipEmpty] to pass an empty document, so the decode returns the zero

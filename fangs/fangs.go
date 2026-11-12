@@ -98,9 +98,9 @@ func WithPrinter(p *printer.Printer) Option {
 //
 //	err := fang.Execute(ctx, rootCmd,
 //	    fang.WithErrorHandler(fangs.NewErrorHandler(
-//	        fangs.WithLightDarkStyles(theme.CharmLight, theme.Charm),
+//	        fangs.WithLightDarkStyles(theme.CharmLight(), theme.Charm()),
 //	    )),
-//	    fang.WithColorSchemeFunc(fangs.LightDarkColorSchemeFunc(theme.CharmLight, theme.Charm)),
+//	    fang.WithColorSchemeFunc(fangs.LightDarkColorSchemeFunc(theme.CharmLight(), theme.Charm())),
 //	)
 //
 // For each error it renders with color, the handler asks the terminal
@@ -181,7 +181,7 @@ func WithExcerptOptions(opts ...niceyaml.ExcerptOption) Option {
 // source. Each option in opts configures one setting of the handler, such
 // as the [printer.Printer] it renders with:
 //
-//	p := printer.New(printer.WithGutter(printer.NoGutter))
+//	p := printer.New(printer.WithGutter(printer.NoGutter()))
 //
 //	err := fang.Execute(ctx, rootCmd,
 //	    fang.WithErrorHandler(fangs.NewErrorHandler(fangs.WithPrinter(p))),

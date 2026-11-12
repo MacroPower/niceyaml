@@ -143,7 +143,7 @@ func TestPrinter_RenderSideBySide(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := testPrinterWithGutter(printer.DefaultGutter).With(tc.opts...)
+			p := testPrinterWithGutter(printer.DefaultGutter()).With(tc.opts...)
 			left, right := tc.views()
 			got := p.RenderSideBySide(left, right)
 
@@ -190,7 +190,7 @@ func TestPrinter_RenderSideBySide_Layouts(t *testing.T) {
 	right := niceyaml.NewSourceFromString(stringtest.LinesLF("a: one two three four", "b: 2", "c: 3")).View()
 	right.AnnotateLine(2, line.Annotation{Content: "a note", Placement: line.Above})
 
-	p := testPrinterWithGutter(printer.DefaultGutter).With(
+	p := testPrinterWithGutter(printer.DefaultGutter()).With(
 		printer.WithWrapWidth(33),
 		printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())),
 		printer.WithContainerWidth(33),
@@ -233,7 +233,7 @@ func TestSideBySide_Lines(t *testing.T) {
 	t.Parallel()
 
 	left, right := unevenPanes()
-	got := testPrinterWithGutter(printer.DefaultGutter).
+	got := testPrinterWithGutter(printer.DefaultGutter()).
 		With(printer.WithWrapWidth(31)).
 		RenderSideBySide(left, right.Slice(position.NewSpan(0, 2)))
 
@@ -282,7 +282,7 @@ func TestSideBySide_PaneRow(t *testing.T) {
 	t.Parallel()
 
 	left, right := unevenPanes()
-	got := testPrinterWithGutter(printer.DefaultGutter).
+	got := testPrinterWithGutter(printer.DefaultGutter()).
 		With(printer.WithWrapWidth(31)).
 		RenderSideBySide(left, right)
 
@@ -327,7 +327,7 @@ func TestSideBySide_PaneRow_MissingLine(t *testing.T) {
 	// line is a filler row.
 	source := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: 2", "c: 3"))
 	left := source.View().Slice(position.NewSpan(0, 1), position.NewSpan(2, 3))
-	got := testPrinterWithGutter(printer.DefaultGutter).RenderSideBySide(left, source.View())
+	got := testPrinterWithGutter(printer.DefaultGutter()).RenderSideBySide(left, source.View())
 
 	_, ok := got.PaneRow(false, 1)
 	assert.False(t, ok)
@@ -347,7 +347,7 @@ func TestSideBySide_PositionAt(t *testing.T) {
 	// A viewer maps a cell of a zipped row to a position through the row
 	// and the start of its pane.
 	left, right := unevenPanes()
-	got := testPrinterWithGutter(printer.DefaultGutter).
+	got := testPrinterWithGutter(printer.DefaultGutter()).
 		With(printer.WithWrapWidth(31)).
 		RenderSideBySide(left, right)
 	leftLayout, rightLayout := got.Layouts()
@@ -400,7 +400,7 @@ func TestSideBySide_Rows(t *testing.T) {
 		t.Parallel()
 
 		view := func() *line.View { return niceyaml.NewSourceFromString("a: 1\n").View() }
-		got := testPrinterWithGutter(printer.DefaultGutter).RenderSideBySide(view(), view())
+		got := testPrinterWithGutter(printer.DefaultGutter()).RenderSideBySide(view(), view())
 
 		rows := got.Rows()
 		rows[0] = "changed"

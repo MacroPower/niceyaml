@@ -66,7 +66,7 @@ func newModel(opts *modelOptions) model {
 	}
 
 	m.selectTheme(slices.IndexFunc(themes, func(t theme.Theme) bool {
-		return t.Name == theme.Charm.Name
+		return t.Name == theme.Charm().Name
 	}))
 
 	revisions := make([]yamlviewport.Revision, len(opts.sources))
@@ -614,7 +614,7 @@ func buildPrinterOpts(lineNumbers bool, styles style.Styles) []printer.Option {
 	opts := []printer.Option{printer.WithStyles(styles), printer.WithBox(true)}
 
 	if !lineNumbers {
-		opts = append(opts, printer.WithGutter(printer.DiffGutter))
+		opts = append(opts, printer.WithGutter(printer.DiffGutter()))
 	}
 
 	return opts

@@ -204,27 +204,28 @@ func printFiles(ctx context.Context, w io.Writer, lineNumbers bool, paths []stri
 // converts each color to one that w supports. It drops the colors under
 // NO_COLOR, and it drops every escape sequence when w is not a terminal.
 //
-// The printer draws [theme.Charm] on a dark terminal and
-// [theme.CharmLight] on a light one. It leaves out the surface of each
-// theme, so the text shows the terminal's own background. When w is not a terminal, or
-// when the terminal does not report its background, the printer draws
-// [theme.Charm]. The gutter shows line numbers and diff markers, or diff
-// markers alone when lineNumbers is false.
+// The printer draws the theme from [theme.Charm] on a dark terminal and
+// the theme from [theme.CharmLight] on a light one. It leaves out the
+// surface of each theme, so the text shows the terminal's own
+// background. When w is not a terminal, or when the terminal does not
+// report its background, the printer draws the theme from
+// [theme.Charm]. The gutter shows line numbers and diff markers, or
+// diff markers alone when lineNumbers is false.
 func newPrintOutput(w io.Writer, lineNumbers bool) (*colorprofile.Writer, *printer.Printer) {
 	out := colorprofile.NewWriter(w, os.Environ())
 
-	styles := theme.Charm
+	styles := theme.Charm()
 
 	// The query of the background waits for the terminal to answer, so a
 	// run without color skips it.
 	if f, ok := terminal(w); ok && out.Profile > colorprofile.ASCII &&
 		!lipgloss.HasDarkBackground(replyInput(f), f) {
-		styles = theme.CharmLight
+		styles = theme.CharmLight()
 	}
 
-	gutter := printer.DefaultGutter
+	gutter := printer.DefaultGutter()
 	if !lineNumbers {
-		gutter = printer.DiffGutter
+		gutter = printer.DiffGutter()
 	}
 
 	p := printer.New(
