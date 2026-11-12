@@ -1853,9 +1853,11 @@ func TestResolver_Anchor(t *testing.T) {
 			input: "v: *a\na: &a x\n",
 			err:   paths.ErrAlias,
 		},
-		"not an alias": {
-			input: "v: &a x\n",
-			err:   paths.ErrAlias,
+		"alias under a tag": {
+			// The tag holds the alias, which the caller passes to Anchor.
+			input: "a: &a 1\nv: !!str *a\n",
+			want:  "&a 1",
+			line:  1,
 		},
 	}
 
@@ -1865,7 +1867,12 @@ func TestResolver_Anchor(t *testing.T) {
 
 			doc := documentOf(t, tc.input)
 
-			got, err := paths.NewResolver(doc).Anchor(valueOfV(t, doc))
+			value := valueOfV(t, doc)
+			if tag, ok := value.(*ast.TagNode); ok {
+				value = tag.Value
+			}
+
+			got, err := paths.NewResolver(doc).Anchor(requireAs[*ast.AliasNode](t, value))
 			if tc.err != nil {
 				require.ErrorIs(t, err, tc.err)
 
@@ -1894,7 +1901,7 @@ func TestResolver_Anchor(t *testing.T) {
 		y := requireAs[*ast.AnchorNode](t, mapping.Values[1].Value)
 		y.Value = x.Value
 
-		got, err := paths.NewResolver(doc).Anchor(mapping.Values[2].Value)
+		got, err := paths.NewResolver(doc).Anchor(requireAs[*ast.AliasNode](t, mapping.Values[2].Value))
 		require.NoError(t, err)
 		assert.Same(t, x, got)
 	})
@@ -3801,7 +3808,7 @@ func TestWithReferenceAnchors(t *testing.T) {
 		t.Parallel()
 
 		doc := documentOf(t, "server: *shared\n")
-		alias := requireAs[*ast.MappingNode](t, doc.Body).Values[0].Value
+		alias := requireAs[*ast.AliasNode](t, requireAs[*ast.MappingNode](t, doc.Body).Values[0].Value)
 
 		_, err := paths.NewResolver(doc, shared).Anchor(alias)
 		require.ErrorIs(t, err, paths.ErrAlias)
@@ -6662,22 +6669,19 @@ func TestAliasError(t *testing.T) {
 		assert.Equal(t, position.Position{Line: 0, Col: 3}, pos)
 	})
 
-	t.Run("anchor of a node that is not an alias", func(t *testing.T) {
+	t.Run("anchor of a nil alias", func(t *testing.T) {
 		t.Parallel()
 
 		doc := documentOf(t, "a: 1\n")
 
-		_, err := paths.NewResolver(doc).Anchor(doc.Body)
-		require.EqualError(t, err, "anchor: alias does not resolve: not an alias")
-		require.ErrorIs(t, err, paths.ErrAlias)
+		_, err := paths.NewResolver(doc).Anchor(nil)
+		require.EqualError(t, err, "anchor: not found: nil alias")
+		require.ErrorIs(t, err, paths.ErrNotFound)
+		require.NotErrorIs(t, err, paths.ErrAlias)
 
 		var aliasErr *paths.AliasError
 
-		require.ErrorAs(t, err, &aliasErr)
-		assert.Nil(t, aliasErr.Alias)
-
-		_, ok := aliasErr.Position()
-		assert.False(t, ok)
+		assert.NotErrorAs(t, err, &aliasErr)
 	})
 
 	t.Run("alias without a token", func(t *testing.T) {
@@ -6717,5 +6721,14 @@ func TestAliasError(t *testing.T) {
 
 		err = &paths.AliasError{Path: paths.Doc().Child("a")}
 		require.EqualError(t, err, "resolve $.a: alias does not resolve")
+	})
+
+	t.Run("nil alias", func(t *testing.T) {
+		t.Parallel()
+
+		// A program can build an AliasError without an Alias. It then
+		// has no position to report.
+		_, ok := (&paths.AliasError{}).Position()
+		assert.False(t, ok)
 	})
 }

@@ -90,11 +90,10 @@ func inside(s span, off int) bool {
 
 // ref is an anchor or an alias of one name in the current text.
 type ref struct {
+	// The [*ast.AnchorNode] or the [*ast.AliasNode].
 	node ast.Node
 	// The offset of its first byte.
 	start int
-	// Whether node is an anchor.
-	anchor bool
 }
 
 // refs returns the anchors and the aliases of name, in the order of the
@@ -129,7 +128,7 @@ func (d *Doc) readRefs() *parseIndex {
 
 	for _, a := range facts.Anchors {
 		if s, ok := d.tokenSpan(a.Node.Start); ok && a.Name != "" {
-			t.refs[a.Name] = append(t.refs[a.Name], ref{node: a.Node, start: s.start, anchor: true})
+			t.refs[a.Name] = append(t.refs[a.Name], ref{node: a.Node, start: s.start})
 			t.anchors[a.Node] = s.start
 		}
 	}
@@ -173,11 +172,12 @@ func (d *Doc) readersOf(name string, a *ast.AnchorNode) []ref {
 	var out []ref
 
 	for _, r := range d.refs(name) {
-		if r.anchor {
+		alias, ok := r.node.(*ast.AliasNode)
+		if !ok {
 			continue
 		}
 
-		read, err := res.Anchor(r.node)
+		read, err := res.Anchor(alias)
 		if err == nil && read == a {
 			out = append(out, r)
 		}
@@ -201,7 +201,7 @@ func (d *Doc) anchorOf(alias *ast.AliasNode) (ref, bool) {
 		return ref{}, false
 	}
 
-	return ref{node: anchor, start: s.start, anchor: true}, true
+	return ref{node: anchor, start: s.start}, true
 }
 
 // readerPath returns the path in the current text of the value that reads

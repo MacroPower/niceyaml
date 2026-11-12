@@ -2487,12 +2487,7 @@ func (d *Doc) nullPlace(holder *place, content ast.Node) (*place, bool) {
 		return holder, true
 	}
 
-	alias, ok := aliases[len(aliases)-1].(*ast.AliasNode)
-	if !ok {
-		return nil, false
-	}
-
-	anchor, err := d.node.DocumentResolver().Anchor(alias)
+	anchor, err := d.node.DocumentResolver().Anchor(aliases[len(aliases)-1])
 	if err != nil {
 		return nil, false
 	}
