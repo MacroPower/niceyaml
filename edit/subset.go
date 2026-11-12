@@ -4173,8 +4173,8 @@ func (d *Doc) mergeKeysProblem(k keptMerge, at *site, key string, made bool, nam
 	in := instance{
 		construct: ConstructMergeKeys,
 		at:        merge,
-		but: fmt.Sprintf(", but %s at %d:%d also brings in %s, so %s still reads %s",
-			mergeText(k), pos.Line+1, pos.Col+1, key, mapping, key),
+		but: fmt.Sprintf(", but %s at %s also brings in %s, so %s still reads %s",
+			mergeText(k), pos.OneBased(), key, mapping, key),
 		fix: fmt.Sprintf("set %s to the value it needs, or remove %s from %s too",
 			mapping.Child(key), key, source),
 	}
@@ -4185,8 +4185,8 @@ func (d *Doc) mergeKeysProblem(k keptMerge, at *site, key string, made bool, nam
 	}
 
 	if made {
-		in.but = fmt.Sprintf(", but %s at %d:%d also brings in %s, so %s then hides the %s of %s",
-			mergeText(k), pos.Line+1, pos.Col+1, key, mapping, key, source)
+		in.but = fmt.Sprintf(", but %s at %s also brings in %s, so %s then hides the %s of %s",
+			mergeText(k), pos.OneBased(), key, mapping, key, source)
 		in.fix = fmt.Sprintf("write a key that %s does not hold, or remove %s from %s first", source, key, source)
 	}
 
@@ -4325,8 +4325,8 @@ func (d *Doc) mergeSourceProblem(w *callWalk, mapping bool, reads func() []keptM
 		return d.refusal(&instance{
 			construct: ConstructMergeForm,
 			at:        merge,
-			reach: fmt.Sprintf("leaves %s at %d:%d reading a value other than a mapping",
-				mergeText(k), pos.Line+1, pos.Col+1),
+			reach: fmt.Sprintf("leaves %s at %s reading a value other than a mapping",
+				mergeText(k), pos.OneBased()),
 			object:  "merge a value other than a mapping",
 			fix:     "set a mapping there, or set the entries of the mapping one at a time",
 			related: []relatedSite{{site: d.mappingSite(k.m), note: "this mapping merges the value"}},
@@ -4427,7 +4427,7 @@ func (d *Doc) aliasCopyProblem(k *keeper, top ast.Node, named string, at paths.P
 	reads := "this alias"
 	if isMerge {
 		pos := d.nodeSite(merge.Key, true)
-		reads = fmt.Sprintf("the merge key at %d:%d of %s", pos.at.Start.Line+1, pos.at.Start.Col+1, pos.path)
+		reads = fmt.Sprintf("the merge key at %s of %s", pos.at.Start.OneBased(), pos.path)
 	}
 
 	words := "which " + reads + " reads"
@@ -4683,10 +4683,10 @@ func (d *Doc) orderPart(
 	place := func(se *ast.MappingValueNode, last bool) (int, string) {
 		s, ok := d.nodeSpan(se)
 		if !ok {
-			return ks.start, "at " + placeText(d.nodeSite(e.Key, true).at.Start)
+			return ks.start, "at " + d.nodeSite(e.Key, true).at.Start.OneBased()
 		}
 
-		return s.start, "at " + placeText(d.entrySite(d.sourceEntry(e, held, se, last, memo)).at.Start)
+		return s.start, "at " + d.entrySite(d.sourceEntry(e, held, se, last, memo)).at.Start.OneBased()
 	}
 
 	first, firstAt := place(ses[0], false)
@@ -4694,7 +4694,7 @@ func (d *Doc) orderPart(
 
 	name, _ := d.node.DocumentResolver().KeyName(ses[len(ses)-1].Key)
 	at := d.nodeSite(e.Key, true)
-	mergeAt := placeText(at.at.Start)
+	mergeAt := at.at.Start.OneBased()
 
 	// No path names a mapping below a key without a name of its own, such
 	// as an alias key, so the message then names the key alone.
@@ -4959,7 +4959,7 @@ func (d *Doc) precedencePart(e, own *ast.MappingValueNode, later bool) (misreadF
 
 	// The merge key of the edited text keeps its place in the user's text
 	// when a call did not write it.
-	merge := "the merge key at " + placeText(d.nodeSite(e.Key, true).at.Start)
+	merge := "the merge key at " + d.nodeSite(e.Key, true).at.Start.OneBased()
 
 	msg := fmt.Sprintf("go-yaml's decoder reads %s from %s, but the merge spec keeps the own entry written before it",
 		what, merge)
@@ -5039,8 +5039,8 @@ func (d *Doc) mergeKept(h *Node, named string) error {
 			return d.refusal(&instance{
 				construct: ConstructMergeForm,
 				at:        merge,
-				reach: fmt.Sprintf("leaves %s at %d:%d reading a value other than a mapping",
-					mergeText(k), pos.Line+1, pos.Col+1),
+				reach: fmt.Sprintf("leaves %s at %s reading a value other than a mapping",
+					mergeText(k), pos.OneBased()),
 				object:  "merge a value other than a mapping",
 				fix:     "keep a mapping at the anchor that the merge key reads",
 				related: []relatedSite{{site: d.mappingSite(k.m), note: "this mapping merges the value"}},
@@ -5176,8 +5176,8 @@ func (d *Doc) referenceProblem(c reachCall, w *callWalk, e *ast.MappingValueNode
 
 	ref := d.referenceWords(name)
 
-	msg := fmt.Sprintf("%s %s, but %s at %d:%d reads %s, which decides which names %s reads",
-		d.subject(), c.named, mergeText(k), pos.Line+1, pos.Col+1, ref, holder)
+	msg := fmt.Sprintf("%s %s, but %s at %s reads %s, which decides which names %s reads",
+		d.subject(), c.named, mergeText(k), pos.OneBased(), ref, holder)
 
 	at := d.entrySite(w.p.entry)
 	details := []error{
@@ -5327,7 +5327,7 @@ func (d *Doc) moveOrderProblem(o int, named string) error {
 
 		if merge, ok := d.mergeReader(r.node); ok {
 			pos := d.nodeSite(merge.Key, true)
-			reads = fmt.Sprintf("the merge key at %d:%d of %s", pos.at.Start.Line+1, pos.at.Start.Col+1, pos.path)
+			reads = fmt.Sprintf("the merge key at %s of %s", pos.at.Start.OneBased(), pos.path)
 		}
 	}
 
@@ -5439,16 +5439,16 @@ func (d *Doc) commentProblem(h *Node, named string) error {
 			s, ok := d.nodeSpan(lit)
 
 			if hok && ok && s.start <= i && i < s.end && hs.start < len(d.origin) && d.origin[hs.start] < 0 {
-				return d.bug(h, fmt.Errorf("go-yaml reads the comment at %d:%d as text of the block scalar that %s "+
-					"writes", pos.Line+1, pos.Col+1, d.subject()))
+				return d.bug(h, fmt.Errorf("go-yaml reads the comment at %s as text of the block scalar that %s "+
+					"writes", pos.OneBased(), d.subject()))
 			}
 		}
 
 		return d.refusal(&instance{
 			construct: ConstructBlockScalar,
 			at:        at,
-			but: fmt.Sprintf(", after which the comment at %d:%d is text of a value, and %s does not change the "+
-				"text of a value of the user's text", pos.Line+1, pos.Col+1, d.appName()),
+			but: fmt.Sprintf(", after which the comment at %s is text of a value, and %s does not change the "+
+				"text of a value of the user's text", pos.OneBased(), d.appName()),
 			fix: "indent the comment less than the value before it, or edit another place",
 		}, named)
 	}

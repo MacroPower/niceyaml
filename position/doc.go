@@ -15,7 +15,8 @@
 //
 // The tokens of go-yaml count lines and columns from 1. [NewFromToken]
 // converts the position of such a token to the 0-indexed coordinates of this
-// package.
+// package. [Position.OneBased] prints a position counted from 1, as editors
+// and the messages of bound errors count.
 //
 // The JSON encoding of each type keeps those coordinates. A [Position]
 // writes as {"line":0,"col":5}, and a [Range] or a [Span] writes its bounds

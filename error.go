@@ -4022,17 +4022,10 @@ func (e *SourceError) ordered(shown int) []*SourceError {
 // build tools read, or "line:col" when name is empty.
 func formatPosition(name string, pos position.Position) string {
 	if name == "" {
-		return editorPosition(pos)
+		return pos.OneBased()
 	}
 
-	return name + ":" + editorPosition(pos)
-}
-
-// editorPosition returns pos as "line:col" counted from 1, as editors and
-// build tools count. [position.Position.String] counts from 0, as the
-// fields do.
-func editorPosition(pos position.Position) string {
-	return oneBased(pos.Line) + ":" + oneBased(pos.Col)
+	return name + ":" + pos.OneBased()
 }
 
 // oneBased returns the decimal text of n + 1. It prints [math.MaxInt] + 1
@@ -4592,7 +4585,8 @@ func (e *SourceError) Range() (position.Range, bool) {
 
 // Position returns the position [SourceError.Error] puts in front of the
 // message and true. It counts from 0 as [position.Position] does, so a
-// message that opens with "3:9:" has the position `{Line: 2, Col: 8}`. For
+// message that opens with "3:9:" has the position `{Line: 2, Col: 8}`, and
+// [position.Position.OneBased] returns the "3:9" of the message. For
 // a range or a path, it is the start of [SourceError.Range]. Position
 // returns a position from [AtPosition] as the error gave it, but Range
 // starts at the content of the token the position falls in. A report that

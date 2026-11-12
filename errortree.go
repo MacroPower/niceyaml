@@ -1935,7 +1935,7 @@ func appendBoundChildren(kids []positioned, bound *SourceError, named bool) []po
 		if !kid.named && child.origin() == parent.origin() && row.Location != "" {
 			switch {
 			case kid.located:
-				row.Location = editorPosition(kid.pos)
+				row.Location = kid.pos.OneBased()
 
 			case !sameDocument(child, parent):
 				// The parent names another document of the source, or

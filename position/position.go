@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/goccy/go-yaml/token"
@@ -53,10 +54,29 @@ func NewFromToken(tk *token.Token) Position {
 // String returns the position as "line:col" with the fields unchanged.
 // Both fields count from 0, like every value in this package, so a logged
 // position matches the values the fields hold. An error bound to a source
-// prints its position counted from 1 in its message, the way editors and
-// build tools count.
+// prints its position counted from 1 in its message, in the form that
+// [Position.OneBased] returns.
 func (p Position) String() string {
 	return fmt.Sprintf("%d:%d", p.Line, p.Col)
+}
+
+// OneBased returns the position as "line:col" with both fields counted
+// from 1, the way editors and build tools count, so position.New(1, 6)
+// returns "2:7". An error bound to a source prints its position in this
+// form. A field that holds [math.MaxInt] prints as the decimal text of
+// [math.MaxInt] + 1, and not as the negative number the int sum wraps to.
+func (p Position) OneBased() string {
+	return oneBased(p.Line) + ":" + oneBased(p.Col)
+}
+
+// oneBased returns the decimal text of n + 1. It prints [math.MaxInt] + 1
+// through a uint64, because the sum wraps to a negative int.
+func oneBased(n int) string {
+	if n == math.MaxInt {
+		return strconv.FormatUint(uint64(n)+1, 10)
+	}
+
+	return strconv.Itoa(n + 1)
 }
 
 // Range represents a half-open range [Start, End) between two [Position] values.

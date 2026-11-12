@@ -537,12 +537,14 @@
 // yields one node of the [ErrorTree] per problem, with its details below it.
 // A row takes its fields from the node through [ErrorTree.Message],
 // [ErrorTree.Context], [ErrorTree.Path], [ErrorTree.Name], and
-// [ErrorTree.Position], rather than from its label. The message is that of
-// the problem alone. The context is the text that each wrapper above the
-// problem added, such as "decode price", whether the wrapper holds that
-// problem alone or heads several. A tool that opens the file, such as an
-// editor, reads [ErrorTree.FilePath] in place of the name. [errors.As] on
-// the Err field of the node finds the typed error of that problem.
+// [ErrorTree.Position], rather than from its label. The position counts from
+// 0, and [position.Position.OneBased] prints it counted from 1, as the row
+// shows it. The message is that of the problem alone. The context is the
+// text that each wrapper above the problem added, such as "decode price",
+// whether the wrapper holds that problem alone or heads several. A tool that
+// opens the file, such as an editor, reads [ErrorTree.FilePath] in place of
+// the name. [errors.As] on the Err field of the node finds the typed error
+// of that problem.
 //
 // A report in JSON encodes each node. [ErrorTree.MarshalJSON] writes the
 // message, the context, the name, the file path, and the path as its text.
