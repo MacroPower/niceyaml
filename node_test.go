@@ -13,6 +13,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
@@ -7393,6 +7394,339 @@ func TestNode_At_Span(t *testing.T) {
 			assert.Same(t, doc, root)
 			assert.Equal(t, doc.Span(), root.Span())
 		}
+	})
+}
+
+// credsFile is a file of credentials whose ttl must be a number.
+type credsFile struct {
+	Creds struct {
+		TTL int `yaml:"ttl"`
+	} `yaml:"creds"`
+}
+
+func TestNode_Bind_GoYAMLError(t *testing.T) {
+	t.Parallel()
+
+	const (
+		text     = "creds:\n  user: admin\n  password: hunter2\n  ttl: forever\n"
+		rejected = "cannot unmarshal string into Go struct field credsFile.Creds of type int"
+	)
+
+	// The source has excerpts off, so no message may hold its text.
+	doc := yamltest.FirstDocument(t, text, niceyaml.WithName("secrets.yaml"), niceyaml.WithExcerpts(false))
+	creds := yamltest.At(t, doc, paths.Current().Child("creds"))
+
+	// The go-yaml decoder rejects the ttl at a token of the document.
+	held := yaml.NodeToValue(doc.AST(), &credsFile{})
+	require.Error(t, held)
+
+	// The same rejection at a token of another parse of the text.
+	foreign := yaml.Unmarshal([]byte(text), &credsFile{})
+	require.Error(t, foreign)
+
+	tcs := map[string]struct {
+		node *niceyaml.Node
+		err  error
+		// The message of the binding, the message of its problem alone, and
+		// whether the binding has a position.
+		want    string
+		message string
+		placed  bool
+	}{
+		"an error at a token of the document binds at its path": {
+			node:    doc,
+			err:     held,
+			want:    "secrets.yaml:4:8: $.creds.ttl: " + rejected,
+			message: rejected,
+			placed:  true,
+		},
+		"a wrapper keeps its own text": {
+			node:    doc,
+			err:     fmt.Errorf("check creds: %w", held),
+			want:    "secrets.yaml:4:8: $.creds.ttl: check creds: " + rejected,
+			message: rejected,
+			placed:  true,
+		},
+		"a scoped node binds at the path in the document": {
+			node:    creds,
+			err:     held,
+			want:    "secrets.yaml:4:8: $.creds.ttl: " + rejected,
+			message: rejected,
+			placed:  true,
+		},
+		"a wrapper that holds the text twice reads both": {
+			node:    doc,
+			err:     fmt.Errorf("%v (%w)", held, held), //nolint:errorlint // The %v writes the text again.
+			want:    "secrets.yaml:4:8: $.creds.ttl: " + rejected + " (" + rejected + ")",
+			message: rejected,
+			placed:  true,
+		},
+		"a wrapper with several branches that holds the text twice reads both": {
+			node: doc,
+			//nolint:errorlint // The %v writes the text again.
+			err:     fmt.Errorf("%v (%w); %w", held, held, errDocumentRejected),
+			want:    "secrets.yaml:4:8: $.creds.ttl: " + rejected + " (" + rejected + "); document rejected",
+			message: rejected,
+			placed:  true,
+		},
+		"a wrapper with a branch that wraps the same error reads both": {
+			node: doc,
+			err:  fmt.Errorf("%w; %w", held, fmt.Errorf("w: %w", held)),
+			want: "secrets.yaml: " + rejected + "; w: " + rejected +
+				"\nsecrets.yaml:4:8: $.creds.ttl: " + rejected +
+				"\nsecrets.yaml:4:8: $.creds.ttl: w: " + rejected,
+			message: rejected + "; w: " + rejected,
+		},
+		"an error at a token of another parse keeps its message alone": {
+			node:    doc,
+			err:     foreign,
+			want:    "secrets.yaml: " + rejected,
+			message: rejected,
+		},
+		"an error at a token of another parse beside a sentinel": {
+			node:    doc,
+			err:     fmt.Errorf("%w: %w", errNameRequired, foreign),
+			want:    "secrets.yaml: name is required: " + rejected,
+			message: "name is required: " + rejected,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tc.node.Bind(tc.err)
+			require.EqualError(t, err, tc.want)
+			assert.NotContains(t, niceyaml.FormatError(err), "hunter2")
+
+			var typeErr *yaml.TypeError
+
+			require.ErrorAs(t, err, &typeErr)
+
+			bound := yamltest.RequireSourceError(t, err)
+
+			_, placed := bound.Position()
+			assert.Equal(t, tc.placed, placed)
+
+			assert.Equal(t, tc.message, niceyaml.NewErrorTree(err).Message())
+		})
+	}
+
+	// A wrapper above a join takes the shorter text of each go-yaml error
+	// in that join, even when no other branch reads as a go-yaml error.
+	t.Run("a wrapper above a join takes the shorter text", func(t *testing.T) {
+		t.Parallel()
+
+		join := errors.Join(held, errNameRequired)
+		located := "\nsecrets.yaml:4:8: $.creds.ttl: " + rejected
+		children := located + "\nsecrets.yaml: name is required"
+		password := yamltest.At(t, doc, paths.Current().Child("creds").Child("password")).AST().GetToken()
+		syntaxErr := &yaml.SyntaxError{Message: "bad password", Token: password}
+
+		tcs := map[string]struct {
+			err  error
+			want string
+		}{
+			// A wrapper from fmt.Errorf whose message lists its branches one
+			// per line reads as a join, so each go-yaml error in the join
+			// binds on its own too.
+			"a wrapper that lists a join and a go-yaml error one per line": {
+				err:  fmt.Errorf("%w\n%w", join, syntaxErr),
+				want: "secrets.yaml:3:13: $.creds.password: bad password" + children,
+			},
+			// The heading cuts the copy that the %w writes.
+			"a wrapper that writes the join twice": {
+				err:  fmt.Errorf("%v (%w)", join, join), //nolint:errorlint // The %v writes the text again.
+				want: "secrets.yaml: " + rejected + "\nname is required ()" + children,
+			},
+			"a wrapper with several branches that writes the join twice": {
+				//nolint:errorlint // The %v writes the text again.
+				err:  fmt.Errorf("%v %w; %w", join, join, errDocumentRejected),
+				want: "secrets.yaml: " + rejected + "\nname is required ; document rejected" + children,
+			},
+			// The heading prints the whole message of a wrapper whose two
+			// branches are problems.
+			"a wrapper with the join as two branches that writes it again": {
+				err: fmt.Errorf("%v; %w; %w", join, join, join), //nolint:errorlint // The %v writes the text again.
+				want: "secrets.yaml: " + rejected + "\nname is required; " + rejected + "\nname is required; " + rejected +
+					"\nname is required\nsecrets.yaml:4:8: $.creds.ttl: " + rejected + "\nsecrets.yaml:4:8: $.creds.ttl: " + rejected,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				err := doc.Bind(tc.err)
+				require.EqualError(t, err, tc.want)
+				assert.NotContains(t, niceyaml.FormatError(err), "hunter2")
+				require.ErrorIs(t, err, errNameRequired)
+
+				var typeErr *yaml.TypeError
+
+				require.ErrorAs(t, err, &typeErr)
+			})
+		}
+
+		// A wrapper that writes the join once leaves its text out of the
+		// heading, so the wrapper keeps its message.
+		require.EqualError(t, doc.Bind(fmt.Errorf("w: %w", join)), "secrets.yaml: w:"+children)
+
+		// A join of its own type above the join binds as a join from
+		// errors.Join does.
+		outer := errors.Join(join, errDocumentRejected)
+		require.EqualError(t,
+			doc.Bind(headedError{msg: outer.Error(), errs: []error{join, errDocumentRejected}}),
+			doc.Bind(outer).Error(),
+		)
+	})
+
+	// The heading of the binding cuts the text of the join out of the
+	// message of the wrapper above it. A wrapper above that wrapper keeps
+	// the copy of the join whole, so the heading can still cut it.
+	t.Run("a wrapper above a wrapper of a join keeps the text of the join", func(t *testing.T) {
+		t.Parallel()
+
+		join := errors.Join(held, errNameRequired)
+		wrapped := fmt.Errorf("w: %w", join)
+		branched := fmt.Errorf("i: %w; %w", join, errDocumentRejected)
+
+		tcs := map[string]struct {
+			err     error
+			heading string
+			// The context of each problem, the heading without the text
+			// that the heading cuts.
+			context string
+		}{
+			"a wrapper above a wrapper of the join": {
+				err:     fmt.Errorf("a: %w", fmt.Errorf("w: %w", join)),
+				heading: "a: w:",
+				context: "a: w",
+			},
+			"a wrapper above a wrapper of a sentinel and the join": {
+				err:     fmt.Errorf("load: %w", fmt.Errorf("%w: %w", errDocumentRejected, join)),
+				heading: "load: document rejected:",
+				context: "load: document rejected",
+			},
+			"two wrappers above a wrapper of a sentinel and the join": {
+				err:     fmt.Errorf("a: %w", fmt.Errorf("b: %w", fmt.Errorf("%w: %w", errDocumentRejected, join))),
+				heading: "a: b: document rejected:",
+				context: "a: b: document rejected",
+			},
+			"a wrapper with several branches above one that holds the join": {
+				err:     fmt.Errorf("o: %w; %w", fmt.Errorf("i: %w; %w", join, errDocumentRejected), errSpan),
+				heading: "o: i: ; document rejected; to is below from",
+				context: "o: i: ; document rejected; to is below from",
+			},
+			// The wrapper below takes the shorter text in the copy that its
+			// %v writes, and it keeps the copy that its %w writes whole.
+			"a wrapper above a wrapper that writes the join twice": {
+				//nolint:errorlint // The %v writes the text again.
+				err:     fmt.Errorf("a: %w", fmt.Errorf("%v (%w)", join, join)),
+				heading: "a: " + rejected + "\nname is required ()",
+				context: "a: " + rejected + "\nname is required ( )",
+			},
+			"a wrapper with several branches above one that writes the join twice": {
+				//nolint:errorlint // The %v writes the text again.
+				err:     fmt.Errorf("o: %w; %w", fmt.Errorf("%v (%w)", join, join), errSpan),
+				heading: "o: " + rejected + "\nname is required (); to is below from",
+				context: "o: " + rejected + "\nname is required ( ); to is below from",
+			},
+			// The wrapper below keeps its message, so the wrapper above
+			// takes the shorter text in each copy but the last.
+			"a wrapper that writes a wrapper of the join twice": {
+				err:     fmt.Errorf("%v (%w)", wrapped, wrapped), //nolint:errorlint // The %v writes the text again.
+				heading: "w: " + rejected + "\nname is required (w: )",
+				context: "w: " + rejected + "\nname is required (w: )",
+			},
+			"a wrapper with several branches that writes a wrapper of the join twice": {
+				//nolint:errorlint // The %v writes the text again.
+				err:     fmt.Errorf("%v (%w); %w", wrapped, wrapped, errSpan),
+				heading: "w: " + rejected + "\nname is required (w: ); to is below from",
+				context: "w: " + rejected + "\nname is required (w: ); to is below from",
+			},
+			"a wrapper that writes a wrapper with several branches twice": {
+				err:     fmt.Errorf("%v (%w)", branched, branched), //nolint:errorlint // The %v writes the text again.
+				heading: "i: " + rejected + "\nname is required; document rejected (i: ; document rejected)",
+				context: "i: " + rejected + "\nname is required; document rejected (i: ; document rejected)",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				err := doc.Bind(tc.err)
+				require.EqualError(t, err, "secrets.yaml: "+tc.heading+
+					"\nsecrets.yaml:4:8: $.creds.ttl: "+rejected+"\nsecrets.yaml: name is required")
+				assert.NotContains(t, niceyaml.FormatError(err), "hunter2")
+
+				problems := yamltest.ProblemsOf(err)
+				require.Len(t, problems, 2)
+
+				for _, problem := range problems {
+					assert.Equal(t, tc.context, problem.Context())
+				}
+			})
+		}
+	})
+
+	// BindValue holds no document, so it reduces the message alone. A
+	// document that places the result reads the token again.
+	t.Run("a document places what BindValue bound", func(t *testing.T) {
+		t.Parallel()
+
+		free := niceyaml.BindValue(errors.Join(held, errNameRequired))
+		require.EqualError(t, free, rejected+"\nname is required")
+
+		err := doc.Bind(free)
+		require.EqualError(t, err, "secrets.yaml:4:8: $.creds.ttl: "+rejected+"\nsecrets.yaml: name is required")
+
+		// Each problem of the result places on its own too.
+		problems := yamltest.ProblemsOf(free)
+		require.Len(t, problems, 2)
+		require.EqualError(t, doc.Bind(problems[0].Err), "secrets.yaml:4:8: $.creds.ttl: "+rejected)
+	})
+
+	// Go-yaml copies the key into the message, so the bind escapes its
+	// control characters as a decode does.
+	t.Run("a control character reads as a decode reads it", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, "name: x\n\"ev\\e[31mil\": 1\n",
+			niceyaml.WithName("c.yaml"), niceyaml.WithExcerpts(false))
+
+		var v struct {
+			Name string `yaml:"name"`
+		}
+
+		unknown := yaml.NodeToValue(doc.AST(), &v, yaml.DisallowUnknownField())
+		require.Error(t, unknown)
+
+		err := doc.Bind(unknown)
+		require.EqualError(t, err, "c.yaml:2:1: $.'ev\\u001b[31mil'~: unknown field \"ev␛[31mil\"")
+		assert.NotContains(t, err.Error(), "\x1b")
+
+		decoded := doc.DecodeInto(t.Context(), &v, niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject))
+		require.EqualError(t, decoded, err.Error())
+	})
+
+	// A wrapper can hold a nil go-yaml error, which has no token or
+	// message to read.
+	t.Run("a nil go-yaml error stays as it was", func(t *testing.T) {
+		t.Parallel()
+
+		var err error
+
+		require.NotPanics(t, func() {
+			err = doc.Bind(fmt.Errorf("x: %w", (*yaml.SyntaxError)(nil)))
+		})
+		require.EqualError(t, err, "secrets.yaml: x: <nil>")
+
+		bound := yamltest.RequireSourceError(t, err)
+
+		_, placed := bound.Position()
+		assert.False(t, placed)
 	})
 }
 

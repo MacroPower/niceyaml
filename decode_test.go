@@ -162,6 +162,103 @@ func TestDecode_GoYAMLErrorReachable(t *testing.T) {
 		}
 	})
 
+	// A hook that wraps a go-yaml error at its own node binds at that
+	// node, and the message keeps the text of the wrapper.
+	t.Run("hook error that wraps a go-yaml error", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, stringtest.LinesLF("password: hunter2", "ttl: forever"),
+			niceyaml.WithName("secrets.yaml"), niceyaml.WithExcerpts(false))
+
+		_, err := dd.Decode[struct {
+			TTL wrappedTTL `yaml:"ttl"`
+		}](t.Context())
+		require.EqualError(t, err, "secrets.yaml:2:6: $.ttl: ttl: must be a number")
+
+		var syntaxErr *yaml.SyntaxError
+
+		require.ErrorAs(t, err, &syntaxErr)
+
+		for _, msg := range chainMessages(err) {
+			assert.NotContains(t, msg, "hunter2", "the go-yaml excerpt leaked into the chain")
+		}
+	})
+
+	// A hook that decodes the bytes go-yaml hands it parses them again, so
+	// the token of its error is not one of the document. The error has no
+	// location, and its message is one line.
+	t.Run("hook error at a token of another parse", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, stringtest.LinesLF("password: hunter2", "ttl: forever"),
+			niceyaml.WithName("secrets.yaml"), niceyaml.WithExcerpts(false))
+
+		_, err := dd.Decode[reparsedTTL](t.Context())
+		require.EqualError(t, err,
+			"secrets.yaml: cannot unmarshal string into Go struct field plainReparsedTTL.TTL of type int")
+
+		var typeErr *yaml.TypeError
+
+		require.ErrorAs(t, err, &typeErr)
+
+		for _, msg := range chainMessages(err) {
+			assert.NotContains(t, msg, "hunter2", "the go-yaml excerpt leaked into the chain")
+		}
+	})
+
+	// The decode tree renames an anchor name that two anchors share, and
+	// the message spells the name as the document does. The excerpt that
+	// go-yaml draws stays out of the message.
+	renamed := map[string]struct {
+		decode func(*testing.T, *niceyaml.Node) error
+		want   string
+	}{
+		"hook error that wraps a go-yaml error at a renamed alias": {
+			decode: func(t *testing.T, n *niceyaml.Node) error {
+				t.Helper()
+
+				_, err := n.Decode[struct {
+					B wrappedAlias `yaml:"b"`
+				}](t.Context())
+
+				return err
+			},
+			want: `s.yaml:5:6: $.b.j: b: could not find alias "x"`,
+		},
+		"hook error that locates a go-yaml error at a renamed alias": {
+			decode: func(t *testing.T, n *niceyaml.Node) error {
+				t.Helper()
+
+				_, err := n.Decode[struct {
+					B invalidAlias `yaml:"b"`
+				}](t.Context())
+
+				return err
+			},
+			want: `s.yaml:5:6: $.b.j: b: could not find alias "x"`,
+		},
+	}
+
+	for name, tc := range renamed {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dd := yamltest.FirstDocument(t,
+				stringtest.LinesLF("a: &x 1", "c: &x 3", "b:", "  password: hunter2", "  j: *x"),
+				niceyaml.WithName("s.yaml"), niceyaml.WithExcerpts(false))
+
+			err := tc.decode(t, dd)
+			require.EqualError(t, err, tc.want)
+
+			_, ok := errors.AsType[yaml.Error](err)
+			require.True(t, ok, "errors.As finds no yaml.Error: %v", err)
+
+			for _, msg := range chainMessages(err) {
+				assert.NotContains(t, msg, "hunter2", "the go-yaml excerpt leaked into the chain")
+			}
+		})
+	}
+
 	t.Run("parse error", func(t *testing.T) {
 		t.Parallel()
 
@@ -176,6 +273,56 @@ func TestDecode_GoYAMLErrorReachable(t *testing.T) {
 			assert.NotContains(t, msg, "a: [", "the go-yaml excerpt leaked into the chain")
 		}
 	})
+}
+
+// wrappedTTL rejects the node go-yaml hands it with a go-yaml error at
+// the token of that node, which it wraps.
+type wrappedTTL struct{}
+
+func (*wrappedTTL) UnmarshalYAML(node ast.Node) error {
+	return fmt.Errorf("ttl: %w", &yaml.SyntaxError{Message: "must be a number", Token: node.GetToken()})
+}
+
+// wrappedAlias decodes the node go-yaml hands it with [yaml.NodeToValue]
+// and wraps the error of that decode.
+type wrappedAlias struct {
+	M map[string]any
+}
+
+func (w *wrappedAlias) UnmarshalYAML(node ast.Node) error {
+	err := yaml.NodeToValue(node, &w.M)
+	if err != nil {
+		return fmt.Errorf("b: %w", err)
+	}
+
+	return nil
+}
+
+// invalidAlias is [wrappedAlias] with the error of the decode inside an
+// [*niceyaml.Error].
+type invalidAlias struct {
+	M map[string]any
+}
+
+func (i *invalidAlias) UnmarshalYAML(node ast.Node) error {
+	err := yaml.NodeToValue(node, &i.M)
+	if err != nil {
+		return niceyaml.Invalid(fmt.Errorf("b: %w", err))
+	}
+
+	return nil
+}
+
+// reparsedTTL decodes itself from the bytes go-yaml hands it, through a
+// type without the method.
+type reparsedTTL struct {
+	TTL int `yaml:"ttl"`
+}
+
+type plainReparsedTTL reparsedTTL
+
+func (r *reparsedTTL) UnmarshalYAML(data []byte) error {
+	return yaml.Unmarshal(data, (*plainReparsedTTL)(r)) //nolint:wrapcheck // The test inspects the error as it is.
 }
 
 func TestDocument_Decode(t *testing.T) {
@@ -3746,8 +3893,10 @@ func TestCustomUnmarshaler(t *testing.T) {
 	})
 
 	// The go-yaml decoder returns the type error it finds in the error of
-	// a struct field in place of that error.
-	t.Run("an error that wraps a go-yaml type error keeps its text", func(t *testing.T) {
+	// a struct field in place of that error. The token of the type error
+	// is one of the bytes the hook parsed, so the error keeps no location
+	// of its own, and its message leaves out the excerpt of those bytes.
+	t.Run("an error that wraps a go-yaml type error keeps its message", func(t *testing.T) {
 		t.Parallel()
 
 		counted := niceyaml.OverrideTypeRules(
@@ -3779,7 +3928,7 @@ func TestCustomUnmarshaler(t *testing.T) {
 		var typeErr *yaml.TypeError
 
 		require.ErrorAs(t, err, &typeErr)
-		require.EqualError(t, err, "2:8: $.level: unknown level: "+typeErr.Error())
+		require.EqualError(t, err, "2:8: $.level: unknown level: "+typeErr.GetMessage())
 	})
 
 	t.Run("a null leaves a pointer nil without a call", func(t *testing.T) {

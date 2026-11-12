@@ -12,6 +12,7 @@ import (
 	"weak"
 
 	"github.com/goccy/go-yaml"
+	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/parser"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
@@ -859,6 +860,21 @@ func TestDetach_ReleasesSource(t *testing.T) {
 			},
 			yamlError: &yaml.UnknownFieldError{},
 		},
+		"hook error at a renamed alias": {
+			input: aroundExcerpt(stringtest.LinesLF("a: &x 1", "c: &x 3", "b:", "  j: *x")),
+			check: func(ctx context.Context, source *niceyaml.Source) error {
+				type config struct {
+					Before []int        `yaml:"before"`
+					After  []int        `yaml:"after"`
+					B      wrappedAlias `yaml:"b"`
+				}
+
+				_, err := documentOf(source).Decode[config](ctx)
+
+				return err
+			},
+			yamlError: &yaml.SyntaxError{},
+		},
 		"path with no single document": {
 			input: "a: 1\n---\nb: 2\n",
 			check: func(_ context.Context, source *niceyaml.Source) error {
@@ -1106,6 +1122,26 @@ func TestDetach_YAMLError(t *testing.T) {
 		},
 		"go-yaml error alone": {
 			err:  raw,
+			want: &yaml.SyntaxError{},
+		},
+		"hook error at a renamed alias": {
+			err: func(t *testing.T) error {
+				t.Helper()
+
+				// The decode renames the anchor name that two anchors
+				// share, and the message of the error spells it as the
+				// document does.
+				var v struct {
+					Before []int        `yaml:"before"`
+					After  []int        `yaml:"after"`
+					B      wrappedAlias `yaml:"b"`
+				}
+
+				err := decode(t, around(stringtest.LinesLF("a: &x 1", "c: &x 3", "b:", "  j: *x")), &v)
+				require.ErrorContains(t, err, `b: could not find alias "x"`)
+
+				return err
+			},
 			want: &yaml.SyntaxError{},
 		},
 		"invalid": {
@@ -1376,6 +1412,20 @@ func TestDetach_ReleasesParse(t *testing.T) {
 				_, err := doc.Decode[map[string]dataPorts](ctx)
 
 				return err
+			},
+		},
+		"hook error that spells a renamed alias": {
+			input: "a: &x 1\nc: &x 3\nb:\n  j: *x\n",
+			decode: func(ctx context.Context, doc *niceyaml.Node) error {
+				// The node that the hook gets spells the new name of the
+				// anchor. The message of the error spells the name as the
+				// document does. No go-yaml error lies below the hook
+				// error, and the copy still drops the parse.
+				var v struct {
+					B renamedAliasText `yaml:"b"`
+				}
+
+				return doc.DecodeInto(ctx, &v)
 			},
 		},
 	}
@@ -1903,4 +1953,12 @@ func retainedBytes(build func() any) float64 {
 	runtime.KeepAlive(kept)
 
 	return float64(after.HeapAlloc) - float64(before.HeapAlloc)
+}
+
+// renamedAliasText rejects the node go-yaml hands it with a message that
+// holds the text of the node.
+type renamedAliasText struct{}
+
+func (*renamedAliasText) UnmarshalYAML(node ast.Node) error {
+	return fmt.Errorf("value %q", node.String())
 }

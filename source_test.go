@@ -4816,6 +4816,65 @@ func TestSource_Bind(t *testing.T) {
 	})
 }
 
+func TestSource_Bind_GoYAMLError(t *testing.T) {
+	t.Parallel()
+
+	src := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "---", "b: x"),
+		niceyaml.WithName("f.yaml"), niceyaml.WithExcerpts(false))
+	docs := yamltest.Documents(t, src, 2)
+
+	var target struct {
+		B int `yaml:"b"`
+	}
+
+	// The go-yaml decoder rejects the value of b at a token of the second
+	// document. The source holds two documents, so the error binds in the
+	// one that holds the token, at the path of the value.
+	err := src.Bind(yaml.NodeToValue(docs[1].AST(), &target))
+	require.EqualError(t, err, "f.yaml:3:4: $.b: cannot unmarshal string into Go struct field .B of type int")
+
+	var typeErr *yaml.TypeError
+
+	require.ErrorAs(t, err, &typeErr)
+	assert.Same(t, docs[1], yamltest.BoundDocument(t, yamltest.RequireSourceError(t, err)))
+
+	// The Source builds the tokens of Source.Tokens and Node.Tokens apart
+	// from its parse. A go-yaml error at one of them thus binds as an
+	// error without a location does.
+	t.Run("an error at a token of Source.Tokens has no location", func(t *testing.T) {
+		t.Parallel()
+
+		srcTokens, docTokens := src.Tokens(), docs[1].Tokens()
+
+		bound := src.Bind(&yaml.SyntaxError{Message: "m", Token: srcTokens[len(srcTokens)-1]})
+		require.EqualError(t, bound, "f.yaml: m")
+
+		_, placed := yamltest.RequireSourceError(t, bound).Position()
+		assert.False(t, placed)
+
+		// The document binds an error without a location at itself.
+		unlocated := docs[1].Bind(errors.New("m"))
+		require.EqualError(t, docs[1].Bind(&yaml.SyntaxError{Message: "m", Token: docTokens[len(docTokens)-1]}),
+			unlocated.Error())
+	})
+
+	// A go-yaml error without a token has nothing to locate, so it binds
+	// with its message alone.
+	t.Run("an error without a token has no location", func(t *testing.T) {
+		t.Parallel()
+
+		err := src.Bind(fmt.Errorf("check: %w", &yaml.SyntaxError{Message: "must be a number"}))
+		require.EqualError(t, err, "f.yaml: check: must be a number")
+
+		var syntaxErr *yaml.SyntaxError
+
+		require.ErrorAs(t, err, &syntaxErr)
+
+		_, placed := yamltest.RequireSourceError(t, err).Position()
+		assert.False(t, placed)
+	})
+}
+
 func TestSource_Bind_RoutesDocuments(t *testing.T) {
 	t.Parallel()
 

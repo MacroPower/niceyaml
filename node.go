@@ -1462,11 +1462,15 @@ func (n *Node) holdsToken(tk *token.Token) bool {
 		return false
 	}
 
-	if _, ok := n.source.parsed.get(n.source.parse).result.Index[tk]; ok {
-		return true
-	}
+	return n.source.holdsToken(tk) || n.doc.tree().Holds(tk)
+}
 
-	return n.doc.tree().Holds(tk)
+// holdsToken reports whether tk is a token of the parse of s. It compares
+// pointers, as [Node.holdsToken] does, so a nil tk never matches.
+func (s *Source) holdsToken(tk *token.Token) bool {
+	_, ok := s.parsed.get(s.parse).result.Index[tk]
+
+	return ok
 }
 
 // newDecodeTree creates the [*decodetree.Tree] of the document.
@@ -1513,14 +1517,32 @@ func (d *document) restoreError(err error) error {
 		return err
 	}
 
-	msg := err.Error()
+	tree := d.tree()
 
-	restored := d.tree().RestoreNames(msg)
-	if restored == msg {
+	msg := err.Error()
+	if tree.RestoreNames(msg) == msg {
 		return err
 	}
 
-	return &markedError{err: err, msg: restored}
+	return &namedError{err: err, tree: tree}
+}
+
+// namedError is an error whose message spells each anchor name that a
+// [decodetree.Tree] gave as the document spells it. It unwraps to the
+// error it holds. The binding reads a go-yaml error below it and spells
+// the names in the message of the result again.
+type namedError struct {
+	err  error
+	tree *decodetree.Tree
+}
+
+func (e *namedError) Error() string {
+	return e.tree.RestoreNames(e.err.Error())
+}
+
+// Unwrap returns the error e holds.
+func (e *namedError) Unwrap() error {
+	return e.err
 }
 
 // spellingTexts returns the texts that a new anchor name must not spell.

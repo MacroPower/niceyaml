@@ -16,6 +16,7 @@ import (
 	"unicode"
 	"weak"
 
+	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/escape"
@@ -26,6 +27,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/excerpt"
 	"go.jacobcolvin.com/niceyaml/internal/fault"
 	"go.jacobcolvin.com/niceyaml/internal/multierr"
+	"go.jacobcolvin.com/niceyaml/internal/nilness"
 	"go.jacobcolvin.com/niceyaml/internal/quantity"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -2531,7 +2533,8 @@ func bindTree(err error, b binder) error {
 		b.indexes = map[*document]*datapath.Index{}
 	}
 
-	bound := newSourceError(b.located(err), b)
+	read, _ := b.readYAML(err)
+	bound := newSourceError(b.located(read), b)
 	if b.unplaced {
 		bound.free = err
 	}
@@ -2699,11 +2702,338 @@ func mapWrapper(wrapper error, branches []error, f func(error) (error, bool)) (e
 // replaced by with. A message that holds old exactly once shows where that
 // text stands, so replaceText returns any other message as it is.
 func replaceText(msg, old, with string) string {
-	if old == "" || strings.Count(msg, old) != 1 {
+	if !placesText(msg, old) {
 		return msg
 	}
 
 	return strings.Replace(msg, old, with, 1)
+}
+
+// placesText reports whether [replaceText] replaces old in msg.
+func placesText(msg, old string) bool {
+	return old != "" && strings.Count(msg, old) == 1
+}
+
+// readYAML returns err with each go-yaml error on its chain read as
+// [binder.yamlProblem] reads it, and reports whether it read one. The
+// walk stops at a binding, and it leaves each branch of a join to the
+// binding of that branch. Each wrapper above a go-yaml error becomes a
+// stand-in whose message is the message of the wrapper with the text of
+// that error replaced. The heading of the binding cuts the text of the
+// error below a wrapper out of the message of that wrapper. So the
+// stand-in keeps that copy whole. The heading prints any other copy of
+// the text of a go-yaml error in a join below a wrapper. A wrapper whose
+// message holds such a copy becomes a stand-in too, and readYAML reports
+// it as read. A wrapper that spells the anchor names of a decode tree
+// spells them in the read text.
+func (b binder) readYAML(err error) (error, bool) {
+	var texts []yamlText
+
+	return b.readYAMLText(err, &texts)
+}
+
+// yamlText pairs the full text of a go-yaml error, which holds the
+// excerpt that go-yaml draws, with the text that [binder.yamlProblem]
+// reads it as.
+type yamlText struct {
+	full, read string
+}
+
+// replaceYAMLText returns msg with each occurrence of each full text in
+// texts replaced by its read text. A message can hold the text of a
+// go-yaml error more than once, as a wrapper that formats it with both
+// %v and %w does, and [replaceText] leaves such a message as it is. The
+// full text of a go-yaml error at a token holds its excerpt, so that
+// text does not match other text by accident.
+func replaceYAMLText(msg string, texts []yamlText) string {
+	for _, t := range texts {
+		if t.full != "" {
+			msg = strings.ReplaceAll(msg, t.full, t.read)
+		}
+	}
+
+	return msg
+}
+
+// replaceOwnYAMLText returns msg with each full text of texts replaced by
+// its read text, except in the last copy of link, the message of the
+// error that msg wraps. The heading of the binding cuts that copy out of
+// msg. Only the copies that the wrapper writes itself thus take the
+// shorter text. An empty link leaves no copy whole.
+func replaceOwnYAMLText(msg, link string, texts []yamlText) string {
+	i := strings.LastIndex(msg, link)
+	if link == "" || i < 0 {
+		return replaceYAMLText(msg, texts)
+	}
+
+	return replaceYAMLText(msg[:i], texts) + link + replaceYAMLText(msg[i+len(link):], texts)
+}
+
+// errorText returns the message of err, or "" for a nil err, such as a
+// nil pointer of an error type.
+func errorText(err error) string {
+	if nilness.IsNil(err) {
+		return ""
+	}
+
+	return err.Error()
+}
+
+// readYAMLText reads err as [binder.readYAML] does, and appends the text
+// of each go-yaml error that it reads to texts.
+func (b binder) readYAMLText(err error, texts *[]yamlText) (error, bool) {
+	switch x := err.(type) { //nolint:errorlint // Walks the chain one node at a time.
+	case nil, *SourceError:
+		return err, false
+
+	case *Error:
+		if x == nil {
+			return err, false
+		}
+
+		read, ok := b.readYAMLText(x.err, texts)
+		if !ok {
+			return err, false
+		}
+
+		// The copy keeps what the Error declared.
+		c := *x
+		c.err = read
+
+		return &c, true
+
+	case *namedError:
+		// The message of x spells the anchor names of the whole text of
+		// the error below. A go-yaml error below thus does not write its
+		// text into that message unchanged, and the stand-in of a wrapper
+		// cannot replace it. The result spells the names of the read text.
+		read, ok := b.readYAMLText(x.err, texts)
+		if !ok {
+			return err, false
+		}
+
+		return &namedError{err: read, tree: x.tree}, true
+
+	case yaml.Error:
+		if nilness.IsNil(x) {
+			return err, false
+		}
+
+		read := b.yamlProblem(x)
+		*texts = append(*texts, yamlText{full: x.Error(), read: read.Error()})
+
+		return read, true
+
+	case interface{ Unwrap() error }:
+		below := x.Unwrap()
+		held := len(*texts)
+
+		read, ok := b.readYAMLText(below, texts)
+		if !ok {
+			// A join below binds each of its branches on its own. The
+			// heading of the binding leaves out the text of the join. It
+			// prints any other copy of a go-yaml text in the message.
+			if len(*texts) == held {
+				return err, false
+			}
+
+			msg := err.Error()
+
+			// A wrapper that keeps its message stays unread. A wrapper
+			// above it then keeps the last copy of its text whole even when
+			// that wrapper writes the text twice.
+			own := replaceOwnYAMLText(msg, errorText(below), *texts)
+			if own == msg {
+				return err, false
+			}
+
+			return multierr.Replace(err, below, own, nil), true
+		}
+
+		msg := err.Error()
+		if link := below.Error(); placesText(msg, link) {
+			// The heading cuts the text of read out of the message, so the
+			// stand-in keeps that copy whole.
+			msg = replaceOwnYAMLText(replaceText(msg, link, read.Error()), read.Error(), *texts)
+		} else {
+			msg = replaceYAMLText(msg, *texts)
+		}
+
+		return multierr.Replace(err, read, msg, nil), true
+
+	case interface{ Unwrap() []error }:
+		branches := x.Unwrap()
+
+		// Each branch of a join binds on its own.
+		if multierr.IsJoin(err) {
+			b.readJoinText(branches, texts)
+
+			return err, false
+		}
+
+		if !multierr.IsWrapErrors(err) {
+			return err, false
+		}
+
+		// Unlike mapWrapper, the walk reads the sentinels too, because a
+		// go-yaml error without a location reads as one.
+		var (
+			mapped []error
+			msg    string
+			whole  []bool
+		)
+
+		held := len(*texts)
+
+		for i, branch := range branches {
+			r, ok := b.readYAMLText(branch, texts)
+			if !ok {
+				continue
+			}
+
+			if mapped == nil {
+				mapped, msg, whole = slices.Clone(branches), err.Error(), wholeBranches(len(branches))
+			}
+
+			// The message holds the read text of the branch only when
+			// replaceText places it.
+			whole[i] = placesText(msg, branch.Error())
+			msg = replaceText(msg, branch.Error(), r.Error())
+			mapped[i] = r
+		}
+
+		if mapped == nil {
+			// No branch reads, but a join among them can hold a go-yaml
+			// error. A wrapper that reads as a join keeps its text.
+			if len(*texts) == held {
+				return err, false
+			}
+
+			own := err.Error()
+			if multierr.JoinMessage(own, branches) {
+				return err, false
+			}
+
+			// A wrapper that keeps its message stays unread, as a wrapper
+			// of one error does.
+			msg = replaceBranchesYAMLText(err, own, branches, wholeBranches(len(branches)), *texts)
+			if msg == own {
+				return err, false
+			}
+
+			mapped = slices.Clone(branches)
+		} else {
+			msg = replaceBranchesYAMLText(err, msg, mapped, whole, *texts)
+		}
+
+		return multierr.Rewrap(err, mapped, msg), true
+
+	default:
+		return err, false
+	}
+}
+
+// wholeBranches returns a report for n branches that each hold their text
+// in the message of their wrapper, as [replaceBranchesYAMLText] takes it.
+func wholeBranches(n int) []bool {
+	whole := make([]bool, n)
+	for i := range whole {
+		whole[i] = true
+	}
+
+	return whole
+}
+
+// replaceBranchesYAMLText returns msg, the message of the stand-in for
+// wrapper over branches, with each full text of texts replaced by its read
+// text. The heading of the binding prints the message of a wrapper of a
+// type of its own whole. It cuts the text of the one branch that a wrapper
+// from [fmt.Errorf] links to, as [keepBranches] picks it, and prints the
+// rest. So the copy of that branch keeps its text when whole reports that
+// msg holds that copy. A wrapper from [fmt.Errorf] whose message lists its
+// branches one per line reads as a join, so its stand-in keeps msg.
+func replaceBranchesYAMLText(wrapper error, msg string, branches []error, whole []bool, texts []yamlText) string {
+	if !multierr.IsWrapErrors(wrapper) {
+		return replaceYAMLText(msg, texts)
+	}
+
+	if multierr.JoinMessage(msg, branches) {
+		return msg
+	}
+
+	_, at := keepBranches(multierr.Rewrap(wrapper, branches, msg), branches)
+	if at < 0 || !whole[at] {
+		return replaceYAMLText(msg, texts)
+	}
+
+	return replaceOwnYAMLText(msg, errorText(branches[at]), texts)
+}
+
+// readJoinText appends to texts the text of each go-yaml error that
+// branches, the branches of a join, hold. It leaves the branches as they
+// are, because each binds on its own. A wrapper above the join that
+// writes the message of the join thus takes the shorter text.
+func (b binder) readJoinText(branches []error, texts *[]yamlText) {
+	for _, branch := range branches {
+		_, _ = b.readYAMLText(branch, texts) //nolint:errcheck // The walk reads the texts alone.
+	}
+}
+
+// yamlProblem returns err, a go-yaml error, as b binds it. Its message is
+// the message of err without the excerpt that go-yaml draws. Go-yaml
+// copies document text into messages, so the message escapes each
+// control character. A message about a token of a document spells each anchor
+// name as that document does, so the text matches the text of a decode.
+// The result seals that message as [yamlMessage] seals it, so
+// [errors.As] still finds err. An err at a token that b holds binds at
+// that token, by the `$` path that [Node.rejectionLocation] gives its
+// node. An err at any other token carries no location, so it binds as
+// any error without one does. A token of a parse that UnmarshalYAML ran
+// is such a token.
+func (b binder) yamlProblem(err yaml.Error) error {
+	opts, doc, ok := b.yamlLocation(err.GetToken())
+
+	text := err.GetMessage()
+	if doc != nil {
+		text = doc.tree().RestoreNames(text)
+	}
+
+	msg := yamlMessage(err, escape.Control(text))
+	if !ok {
+		return msg
+	}
+
+	return wrapUndeclared(msg, opts...)
+}
+
+// yamlLocation returns the options that locate an error at tk and the
+// document that holds tk, and reports false when b does not hold tk. A
+// binder with a node reads the path from that node. A binder that routes
+// reads it from the document that holds tk, and adds the position of the
+// node of tk. The error then binds in that document even in a source of
+// several documents. The document is nil when b holds tk but finds no
+// document at its line.
+func (b binder) yamlLocation(tk *token.Token) ([]ErrorOption, *document, bool) {
+	if b.node != nil {
+		if !b.node.holdsToken(tk) {
+			return nil, nil, false
+		}
+
+		return b.node.rejectionLocation(tk), b.node.doc, true
+	}
+
+	if !b.src.holdsToken(tk) || tk.Position == nil {
+		return nil, nil, false
+	}
+
+	node := b.nodeAt(position.NewFromToken(tk).Line)
+	if node == nil {
+		return []ErrorOption{atToken(tk)}, nil, true
+	}
+
+	opts := append([]ErrorOption{atToken(node.doc.pathIndex().OwnerToken(tk))}, node.rejectionLocation(tk)...)
+
+	return opts, node.doc, true
 }
 
 // isBound reports whether err is a [*SourceError] or wraps one without an
@@ -3479,7 +3809,10 @@ func (e *SourceError) addChild(n error, b binder, base childBase, detail bool) {
 	// The base returns a binding as it is unless it marks the binding
 	// invalid, so the child is a binding when n is one that gains no mark.
 	// A binding that stands in no document binds here as its error does.
-	child := base.rebase(placeable(n), detail)
+	placed := placeable(n)
+	read, changed := b.readYAML(placed)
+
+	child := base.rebase(read, detail)
 	if isNothing(child) {
 		return
 	}
@@ -3499,9 +3832,13 @@ func (e *SourceError) addChild(n error, b binder, base childBase, detail bool) {
 		bound = newSourceError(child, b)
 
 		// A child that took over a binding of a document stands where
-		// that binding does.
+		// that binding does. It keeps each go-yaml error as it was, so a
+		// document that places it reads the token of that error.
 		if b.unplaced && !bound.adopted {
 			bound.free = child
+			if changed {
+				bound.free = base.rebase(placed, detail)
+			}
 		}
 	}
 

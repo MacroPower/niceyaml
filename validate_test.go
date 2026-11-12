@@ -7795,6 +7795,37 @@ func TestNode_Validate(t *testing.T) {
 		assert.Same(t, scoped, got[0])
 	})
 
+	// A validator that decodes the node with go-yaml gets an error at a
+	// token of the document. The error binds there, and its message holds
+	// no excerpt of the text.
+	t.Run("a go-yaml error binds at its token", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF("creds:", "  password: hunter2", "  ttl: forever"),
+			niceyaml.WithName("secrets.yaml"), niceyaml.WithExcerpts(false))
+
+		err := doc.Validate(t.Context(), niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
+			var creds struct {
+				Creds struct {
+					TTL int `yaml:"ttl"`
+				} `yaml:"creds"`
+			}
+
+			return yaml.NodeToValue(n.AST(), &creds)
+		}))
+		require.EqualError(t, err,
+			"secrets.yaml:3:8: $.creds.ttl: cannot unmarshal string into Go struct field .Creds of type int")
+		assert.NotContains(t, niceyaml.FormatError(err), "hunter2")
+
+		var typeErr *yaml.TypeError
+
+		require.ErrorAs(t, err, &typeErr)
+
+		got, ok := yamltest.RequireSourceError(t, err).Position()
+		require.True(t, ok)
+		assert.Equal(t, position.New(2, 7), got)
+	})
+
 	t.Run("a typed nil pointer is no failure", func(t *testing.T) {
 		t.Parallel()
 
