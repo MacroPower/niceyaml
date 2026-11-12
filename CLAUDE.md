@@ -53,6 +53,7 @@ task docs # Print all package docs
 - The codebase uses the functional options pattern throughout (e.g., `printer.Option`, `SourceOption`, `ErrorOption`).
 - 0-indexed positioning convention for `position.Position` (line and column start at 0).
 - Half-open ranges `[Start, End)` for `position.Range`.
+- Setting enums are those that a program passes in as an option or setter argument, which a user names in a flag or a file. They implement `String`, `MarshalText`, and `UnmarshalText`. Their text methods return an error that wraps a sentinel such as `ErrUnknownViewMode`, and `UnmarshalText` leaves the receiver unchanged on text that names no constant. Enums that the library only reports implement `String` alone.
 - Prefer consistency over performance. Avoid "fast paths" that could lead to unpredictable behavior.
 
 ### Documentation
