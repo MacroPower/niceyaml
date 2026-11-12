@@ -15,6 +15,7 @@ import (
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/edit"
 	"go.jacobcolvin.com/niceyaml/input"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -1202,11 +1203,12 @@ func TestPlanFile_Diff(t *testing.T) {
 		configFS(files, input.WithSourceOptions(niceyaml.WithExcerpts(false))))
 	require.NoError(t, err)
 	require.Len(t, hidden.Files(), 1)
-	assert.Equal(
-		t,
-		"   1  3 lines removed, 3 added",
-		stringtest.TrimLineEnds(p.Print(requirePlanDiff(t, hidden.Files()[0], 3))),
-	)
+
+	// A Source that hides its excerpts leaves the lines of the file out,
+	// so the view holds no rows.
+	view := requirePlanDiff(t, hidden.Files()[0], 3)
+	assert.Equal(t, 0, view.Count())
+	assert.Empty(t, p.Print(view))
 }
 
 func TestPlanFile_Diff_Context(t *testing.T) {
@@ -1221,6 +1223,50 @@ func TestPlanFile_Diff_Context(t *testing.T) {
 	got, err := plan.Files()[0].Diff(ctx, 3)
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Nil(t, got)
+}
+
+func TestPlanFile_Stats(t *testing.T) {
+	t.Parallel()
+
+	files := map[string]string{"hours.yaml": hoursDoc}
+
+	tcs := map[string]struct {
+		opts []niceyaml.SourceOption
+	}{
+		"excerpts shown": {},
+		"excerpts hidden": {
+			opts: []niceyaml.SourceOption{niceyaml.WithExcerpts(false)},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			plan, err := newCafeRegistry(t).PlanMigration(t.Context(),
+				configFS(files, input.WithSourceOptions(tc.opts...)))
+			require.NoError(t, err)
+			require.Len(t, plan.Files(), 1)
+
+			got, err := plan.Files()[0].Stats(t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, diff.Stats{Added: 3, Removed: 3}, got)
+		})
+	}
+}
+
+func TestPlanFile_Stats_Context(t *testing.T) {
+	t.Parallel()
+
+	plan := planOf(t, cafeOptions(), map[string]string{"hours.yaml": hoursDoc})
+	require.Len(t, plan.Files(), 1)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	got, err := plan.Files()[0].Stats(ctx)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, diff.Stats{}, got)
 }
 
 // requirePlanDiff returns the view that [manifest.PlanFile.Diff] returns
