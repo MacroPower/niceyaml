@@ -148,13 +148,13 @@ func (e *LoadError) Unwrap() error {
 // or HTTPS URL that does not parse fails before any fetch too. When the
 // Access does not allow every URL, the Access refuses such a URL, and
 // its FetchError has an Err of ErrURLNotAllowed. When the Access allows
-// every URL, as [AllowAnyURL] and [Unrestricted] do, the fetch refuses
-// it, and its error does not hold a FetchError.
+// every URL, as [AllowAnyURL] and the Access from [Unrestricted] do, the
+// fetch refuses it. Its error does not hold a FetchError.
 //
 // Off Windows, a drive-letter path on disk fails before any read with
-// [fs.ErrInvalid] under an Access that allows any file, as [Unrestricted]
-// does. A path that names a directory, or anything else that is not a
-// regular file, fails with [fs.ErrInvalid] too.
+// [fs.ErrInvalid] under an Access that allows any file, as the Access
+// from [Unrestricted] does. A path that names a directory, or anything
+// else that is not a regular file, fails with [fs.ErrInvalid] too.
 //
 // The message reads as "fetch https://example.com/s.json: status 404"
 // for a URL and as "read /srv/schemas/s.json: ..." for a file. The

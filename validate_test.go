@@ -6270,25 +6270,25 @@ func TestNoValidator(t *testing.T) {
 		empty := yamltest.FirstDocument(t, "")
 
 		for _, n := range []*niceyaml.Node{docs[0], name, empty} {
-			require.NoError(t, niceyaml.NoValidator.Check(t.Context(), n))
-			require.NoError(t, n.Validate(t.Context(), niceyaml.NoValidator))
+			require.NoError(t, niceyaml.NoValidator().Check(t.Context(), n))
+			require.NoError(t, n.Validate(t.Context(), niceyaml.NoValidator()))
 		}
 	})
 
 	t.Run("returns the error of a document that did not parse", func(t *testing.T) {
 		t.Parallel()
 
-		assert.Same(t, docs[1].Err(), niceyaml.NoValidator.Check(t.Context(), docs[1]))
+		assert.Same(t, docs[1].Err(), niceyaml.NoValidator().Check(t.Context(), docs[1]))
 	})
 
 	t.Run("passes inside each combinator", func(t *testing.T) {
 		t.Parallel()
 
 		tcs := map[string]niceyaml.Validator{
-			"MultiValidator": niceyaml.MultiValidator(niceyaml.NoValidator, niceyaml.NoValidator),
-			"ChainValidator": niceyaml.ChainValidator(niceyaml.NoValidator),
-			"SkipEmpty":      niceyaml.SkipEmpty(niceyaml.NoValidator),
-			"Each":           niceyaml.Each(paths.Current().ChildAll(), niceyaml.NoValidator),
+			"MultiValidator": niceyaml.MultiValidator(niceyaml.NoValidator(), niceyaml.NoValidator()),
+			"ChainValidator": niceyaml.ChainValidator(niceyaml.NoValidator()),
+			"SkipEmpty":      niceyaml.SkipEmpty(niceyaml.NoValidator()),
+			"Each":           niceyaml.Each(paths.Current().ChildAll(), niceyaml.NoValidator()),
 		}
 
 		for name, v := range tcs {
@@ -6305,9 +6305,9 @@ func TestNoValidator(t *testing.T) {
 
 		// The comparison of two interface values panics when both hold a
 		// func, so it runs here as a program writes it.
-		off := func(v niceyaml.Validator) bool { return v == niceyaml.NoValidator }
+		off := func(v niceyaml.Validator) bool { return v == niceyaml.NoValidator() }
 
-		assert.True(t, off(niceyaml.NoValidator))
+		assert.True(t, off(niceyaml.NoValidator()))
 		assert.False(t, off(typedNilValidator()))
 		assert.False(t, off(&fieldValidator{}))
 	})
@@ -6811,8 +6811,8 @@ func TestChainValidator(t *testing.T) {
 				b:    unboundSecond,
 				want: "x.yaml:3:7: $.name: second rule",
 			},
-			"the first is NoValidator": {
-				a:    niceyaml.NoValidator,
+			"the first is NoValidator()": {
+				a:    niceyaml.NoValidator(),
 				b:    second,
 				want: "x.yaml:3:7: $.name: second rule",
 			},
@@ -7816,7 +7816,7 @@ func TestNode_Validate(t *testing.T) {
 		assert.Same(t, want, dd.Validate(t.Context(), rejectingValidator(want)))
 	})
 
-	t.Run("NoValidator returns what Err returns", func(t *testing.T) {
+	t.Run("NoValidator() returns what Err returns", func(t *testing.T) {
 		t.Parallel()
 
 		docs := yamltest.AllDocuments(t, niceyaml.NewSourceFromString(stringtest.LinesLF(
@@ -7829,16 +7829,16 @@ func TestNode_Validate(t *testing.T) {
 
 		name := yamltest.At(t, docs[0], paths.Current().Child("name"))
 
-		require.NoError(t, docs[0].Validate(t.Context(), niceyaml.NoValidator))
-		require.NoError(t, name.Validate(t.Context(), niceyaml.NoValidator))
-		assert.Same(t, docs[1].Err(), docs[1].Validate(t.Context(), niceyaml.NoValidator))
+		require.NoError(t, docs[0].Validate(t.Context(), niceyaml.NoValidator()))
+		require.NoError(t, name.Validate(t.Context(), niceyaml.NoValidator()))
+		assert.Same(t, docs[1].Err(), docs[1].Validate(t.Context(), niceyaml.NoValidator()))
 
 		// A context that ended changes neither result.
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 
-		require.NoError(t, docs[0].Validate(ctx, niceyaml.NoValidator))
-		assert.Same(t, docs[1].Err(), docs[1].Validate(ctx, niceyaml.NoValidator))
+		require.NoError(t, docs[0].Validate(ctx, niceyaml.NoValidator()))
+		assert.Same(t, docs[1].Err(), docs[1].Validate(ctx, niceyaml.NoValidator()))
 	})
 
 	t.Run("panics for a nil validator", func(t *testing.T) {

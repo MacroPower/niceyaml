@@ -86,7 +86,7 @@ func (x *XMLStyles) Style(s kind.Kind) lipgloss.Style {
 func NewXMLPrinter(opts ...printer.Option) *printer.Printer {
 	defaults := []printer.Option{
 		printer.WithStyles(NewXMLStyles()),
-		printer.WithGutter(printer.NoGutter),
+		printer.WithGutter(printer.NoGutter()),
 		printer.WithContainerStyle(lipgloss.NewStyle()),
 	}
 
@@ -99,7 +99,7 @@ func NewXMLPrinter(opts ...printer.Option) *printer.Printer {
 func NewPlainPrinter(opts ...printer.Option) *printer.Printer {
 	defaults := []printer.Option{
 		printer.WithStyles(style.Styles{}),
-		printer.WithGutter(printer.NoGutter),
+		printer.WithGutter(printer.NoGutter()),
 		printer.WithContainerStyle(lipgloss.NewStyle()),
 	}
 

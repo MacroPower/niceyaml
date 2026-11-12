@@ -311,7 +311,7 @@
 //	reg := schema.NewRegistry(
 //	    // The documents come from the user of the program, so a directive
 //	    // names any file or URL.
-//	    schema.WithAccess(schema.Unrestricted),
+//	    schema.WithAccess(schema.Unrestricted()),
 //	    schema.WithResolvers(
 //	        // Directive matching first, for explicit user intent.
 //	        schema.Directive(),
@@ -340,7 +340,7 @@
 // registry with [WithRequireSchema] set false:
 //
 //	reg := schema.NewRegistry(
-//	    schema.WithAccess(schema.Unrestricted),
+//	    schema.WithAccess(schema.Unrestricted()),
 //	    schema.WithResolvers(schema.Directive(), schemastore.New()),
 //	    schema.WithRequireSchema(false),
 //	)
@@ -349,12 +349,12 @@
 //
 // [Directive] lets each document pick its own schema, so the registry
 // loads that schema only under an [Access] from [WithAccess]. The Access
-// states which files and URLs the documents can name. [Unrestricted]
-// allows them all, which suits a program whose documents come from its
-// own user. [NoAccess] suits documents in a file system, and the
-// Untrusted Documents section covers documents from another trust
-// domain. In a registry without the option, the schema of a directive
-// fails to load with [ErrAccessNotSet].
+// states which files and URLs the documents can name. The Access from
+// [Unrestricted] allows them all, which suits a program whose documents
+// come from its own user. The Access from [NoAccess] suits documents in
+// a file system, and the Untrusted Documents section covers documents
+// from another trust domain. In a registry without the option, the
+// schema of a directive fails to load with [ErrAccessNotSet].
 //
 // # Loaders
 //
@@ -376,7 +376,7 @@
 //	var Config = schema.MustCompile(configJSON)
 //
 //	reg := schema.NewRegistry(
-//	    schema.WithAccess(schema.Unrestricted),
+//	    schema.WithAccess(schema.Unrestricted()),
 //	    schema.WithResolvers(
 //	        schema.Directive(),
 //	        schema.When(matcher.Content(kindPath, "Config"), Config),
@@ -496,7 +496,7 @@
 // a fetched document:
 //
 //	reg := schema.NewRegistry(
-//	    schema.WithAccess(schema.NoAccess),
+//	    schema.WithAccess(schema.NoAccess()),
 //	    schema.WithLoader("https://schemas.example.com/v1/",
 //	        func(_ context.Context, uri string) ([]byte, error) {
 //	            return bundle.ReadFile("schemas/" + path.Base(uri))
@@ -523,8 +523,8 @@
 // program names. It loads a Ref from [File], [URL], or [FileOrURL], and
 // each schema that a
 // [go.jacobcolvin.com/niceyaml/schema/schemastore.Store] names from its
-// catalog, as it does under [Unrestricted]. It refuses each Ref that
-// [Directive] or [RefBeside] builds for a document, with
+// catalog, as it does under the Access from [Unrestricted]. It refuses
+// each Ref that [Directive] or [RefBeside] builds for a document, with
 // [ErrAccessNotSet], before it reads or fetches anything.
 //
 // [FileOrURL] routes a reference that might be a file path or a URL, such
@@ -541,7 +541,7 @@
 //	client := &http.Client{Timeout: 10 * time.Second}
 //
 //	reg := schema.NewRegistry(
-//	    schema.WithAccess(schema.Unrestricted),
+//	    schema.WithAccess(schema.Unrestricted()),
 //	    schema.WithHTTPClient(client),
 //	    schema.WithResolvers(
 //	        schema.Directive(),
@@ -560,7 +560,7 @@
 // content-based matching, then file path conventions:
 //
 //	reg := schema.NewRegistry(
-//	    schema.WithAccess(schema.Unrestricted),
+//	    schema.WithAccess(schema.Unrestricted()),
 //	    schema.WithResolvers(
 //	        schema.Directive(),                                          // Explicit user intent.
 //	        schema.When(matcher.Content(...), schema.Embedded(...)),     // By content.
@@ -595,14 +595,14 @@
 // more files and URLs through its $refs. A registry therefore loads such
 // a schema only under the [Access] that [WithAccess] gave it. A registry
 // without the option refuses the schema with [ErrAccessNotSet].
-// [Unrestricted] allows any file and any URL, so it does not suit
-// documents from another trust domain, such as uploads or pull requests.
-// A program that validates those gives Directive a registry of its own.
-// It confines that registry with [WithAccess], [WithCacheLimit], and
-// [WithLoadLimit]. The Access acts on every load that registry performs:
-// the schema a [Ref] names, each $ref, and each redirect. The loaders of
-// [WithLoader] are code of the program, so the Access does not apply to
-// the URLs under their prefixes.
+// The Access from [Unrestricted] allows any file and any URL, so it
+// does not suit documents from another trust domain, such as uploads or
+// pull requests. A program that validates those gives Directive a
+// registry of its own. It confines that registry with [WithAccess],
+// [WithCacheLimit], and [WithLoadLimit]. The Access acts on every load
+// that registry performs: the schema a [Ref] names, each $ref, and each
+// redirect. The loaders of [WithLoader] are code of the program, so the
+// Access does not apply to the URLs under their prefixes.
 //
 // A second registry, without those limits, holds the program's schemas,
 // the catalog, and the confined registry as its first resolver. The
@@ -676,7 +676,7 @@
 // [os.DirFS] follows symbolic links out of its directory. The URLs that
 // such a document and its schemas name still go through the Access. A
 // registry whose uploads all live in file systems, and that must not
-// fetch anything, takes [NoAccess].
+// fetch anything, takes the Access from [NoAccess].
 //
 // [AllowURLPrefixes] confines the fetches to the URLs under its prefixes.
 // An Access allows URLs only through AllowURLPrefixes or [AllowAnyURL].

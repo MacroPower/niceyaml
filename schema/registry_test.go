@@ -329,7 +329,7 @@ func TestRegistry_Lookup(t *testing.T) {
 				t.Parallel()
 
 				reg := schema.NewRegistry(
-					schema.WithAccess(schema.Unrestricted),
+					schema.WithAccess(schema.Unrestricted()),
 					schema.WithResolvers(
 						schema.When(matcher.Content(kindPath, "Deployment"), compileSchema(t, `false`)),
 						tc.resolver,
@@ -483,7 +483,7 @@ func TestRegistry_Lookup(t *testing.T) {
 		require.ErrorIs(t, err, schema.ErrLoad)
 		assert.False(t, niceyaml.IsInvalid(err))
 
-		err = doc.Validate(t.Context(), niceyaml.MultiValidator(reg, niceyaml.NoValidator))
+		err = doc.Validate(t.Context(), niceyaml.MultiValidator(reg, niceyaml.NoValidator()))
 		require.ErrorIs(t, err, schema.ErrLoad)
 		assert.False(t, niceyaml.IsInvalid(err))
 	})
@@ -659,7 +659,7 @@ func TestRegistry_Resolve(t *testing.T) {
 		errNoLabel := fmt.Errorf("%w: no label", schema.ErrNoMatch)
 
 		inner := schema.NewRegistry(
-			schema.WithAccess(schema.Unrestricted),
+			schema.WithAccess(schema.Unrestricted()),
 			schema.WithResolvers(schema.Directive(), failing(errNoKind)),
 		)
 		reg := schema.NewRegistry(schema.WithResolvers(inner, failing(errNoLabel)))
@@ -692,7 +692,7 @@ func TestRegistry_Resolve(t *testing.T) {
 
 		errNoLabel := fmt.Errorf("%w: no label", schema.ErrNoMatch)
 
-		inner := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(schema.Directive()))
+		inner := schema.NewRegistry(schema.WithAccess(schema.Unrestricted()), schema.WithResolvers(schema.Directive()))
 
 		tcs := map[string]struct {
 			resolver schema.Resolver
@@ -1284,7 +1284,7 @@ func TestRegistry_Check_Unparsed(t *testing.T) {
 		},
 		"registry that accepts a document no resolver applies to": {
 			reg: schema.NewRegistry(
-				schema.WithAccess(schema.Unrestricted),
+				schema.WithAccess(schema.Unrestricted()),
 				schema.WithResolvers(schema.Directive()),
 				schema.WithRequireSchema(false),
 			),
@@ -1292,7 +1292,10 @@ func TestRegistry_Check_Unparsed(t *testing.T) {
 			err:   niceyaml.ErrSyntax,
 		},
 		"directive that turns validation off": {
-			reg:   schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(schema.Directive())),
+			reg: schema.NewRegistry(
+				schema.WithAccess(schema.Unrestricted()),
+				schema.WithResolvers(schema.Directive()),
+			),
 			input: yamltest.SchemaDirective("none", "kind: [\n"),
 			err:   niceyaml.ErrSyntax,
 		},
@@ -2343,7 +2346,7 @@ func TestRegistry_WithRetryAfter(t *testing.T) {
 		handler, requests := countingHandler(schemaHandler(files))
 
 		reg := schema.NewRegistry(append([]schema.RegistryOption{
-			schema.WithAccess(schema.Unrestricted),
+			schema.WithAccess(schema.Unrestricted()),
 			schema.WithHTTPClient(handlerTransport(handler).Client()),
 			schema.WithResolvers(schema.Directive()),
 		}, opts...)...)
@@ -3160,7 +3163,7 @@ func TestRegistry_FileFS(t *testing.T) {
 
 		doc := yamltest.Document(t, source)
 
-		reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(schema.Directive()))
+		reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted()), schema.WithResolvers(schema.Directive()))
 
 		require.NoError(t, reg.Check(t.Context(), doc))
 
@@ -3188,7 +3191,7 @@ func TestRegistry_FileFS(t *testing.T) {
 			"configs/defs.json": `{"$defs": {"Foo": {"$ref": "#/$defs/Name"}, "Name": {"required": ["name"]}}}`,
 		})
 
-		reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(schema.Directive()))
+		reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted()), schema.WithResolvers(schema.Directive()))
 
 		// Each document names a subschema of defs.json by its pointer.
 		app := func(pointer, body string) *niceyaml.Node {
@@ -3301,7 +3304,7 @@ func TestRegistry_FileFS(t *testing.T) {
 			yamltest.SchemaDirective("./app.schema.json", "kind: App\n"),
 			niceyaml.WithFilePath(filepath.Join(wd, "configs", "app.yaml")), niceyaml.WithFS(bundle))
 
-		reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(schema.Directive()))
+		reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted()), schema.WithResolvers(schema.Directive()))
 
 		err := reg.Check(t.Context(), doc)
 		requireLoadError(t, err, schema.ErrFileNotAllowed)
@@ -3448,7 +3451,7 @@ func TestRegistry_FileSystems(t *testing.T) {
 		"configs/defs.json":   `{"type": "boolean"}`,
 	})
 
-	reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(schema.Directive()))
+	reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted()), schema.WithResolvers(schema.Directive()))
 
 	open := map[string]func() (*niceyaml.Source, error){
 		"strings": func() (*niceyaml.Source, error) {
@@ -3752,7 +3755,7 @@ func TestRegistry_Forget(t *testing.T) {
 				t.Parallel()
 
 				reg := schema.NewRegistry(
-					schema.WithAccess(schema.Unrestricted),
+					schema.WithAccess(schema.Unrestricted()),
 					schema.WithResolvers(schema.Directive()),
 				)
 				h := newHeldFS(files, tc.wrap)
@@ -4861,7 +4864,7 @@ func TestRegistry_ReleaseNested(t *testing.T) {
 				})
 
 				inner := schema.NewRegistry(
-					schema.WithAccess(schema.Unrestricted),
+					schema.WithAccess(schema.Unrestricted()),
 					schema.WithResolvers(schema.Directive()),
 				)
 				reg := nc.nest(inner)
@@ -5042,7 +5045,7 @@ func TestRegistry_DocumentOutsideFileSystem(t *testing.T) {
 		source []niceyaml.SourceOption
 	}{
 		"file system on the source": {
-			opts:   []schema.RegistryOption{schema.WithAccess(schema.Unrestricted)},
+			opts:   []schema.RegistryOption{schema.WithAccess(schema.Unrestricted())},
 			source: []niceyaml.SourceOption{niceyaml.WithFS(os.DirFS(tenant))},
 			err:    schema.ErrFileNotAllowed,
 			want:   "an absolute path names no file",
@@ -5053,7 +5056,7 @@ func TestRegistry_DocumentOutsideFileSystem(t *testing.T) {
 			want: "not under " + tenant,
 		},
 		"no file system": {
-			opts: []schema.RegistryOption{schema.WithAccess(schema.Unrestricted)},
+			opts: []schema.RegistryOption{schema.WithAccess(schema.Unrestricted())},
 			want: `expected "string", got "integer"`,
 		},
 	}
@@ -5576,7 +5579,7 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 		embedded := schema.Embedded([]byte(`{}`))
 		isPod := matcher.Func(func(context.Context, *niceyaml.Node) (bool, error) { return false, nil })
 
-		reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(
+		reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted()), schema.WithResolvers(
 			schema.Directive(),
 			schema.When(matcher.MustFilePath("menus/*.{yaml,yml}"), embedded),
 			// A Func does not describe itself, so its guard gives no reason.
@@ -5628,7 +5631,7 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 	t.Run("names the document in a file that holds several", func(t *testing.T) {
 		t.Parallel()
 
-		reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(schema.Directive()))
+		reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted()), schema.WithResolvers(schema.Directive()))
 
 		source := niceyaml.NewSourceFromString(stringtest.Input(`
 			a: 1
@@ -5682,7 +5685,7 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 
 		typed := failing(&kindError{kind: "Service"})
 		reg := schema.NewRegistry(
-			schema.WithAccess(schema.Unrestricted),
+			schema.WithAccess(schema.Unrestricted()),
 			schema.WithResolvers(schema.Directive(), typed, byKind),
 		)
 
@@ -5752,7 +5755,7 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 	t.Run("Check passes the reasons through when it requires a schema", func(t *testing.T) {
 		t.Parallel()
 
-		reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(schema.Directive()))
+		reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted()), schema.WithResolvers(schema.Directive()))
 
 		doc := yamltest.FirstDocument(t, "kind: Service\n")
 
@@ -5761,7 +5764,7 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 		require.ErrorIs(t, err, schema.ErrNoDirective)
 
 		lenient := schema.NewRegistry(
-			schema.WithAccess(schema.Unrestricted),
+			schema.WithAccess(schema.Unrestricted()),
 			schema.WithResolvers(schema.Directive()),
 			schema.WithRequireSchema(false),
 		)
@@ -5779,7 +5782,7 @@ func TestRegistry_Lookup_AtDirective(t *testing.T) {
 	yamltest.WriteFile(t, dir, "broken.json", `{"type": 5}`)
 
 	app := filepath.Join(dir, "app.yaml")
-	plain := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(schema.Directive()))
+	plain := schema.NewRegistry(schema.WithAccess(schema.Unrestricted()), schema.WithResolvers(schema.Directive()))
 	confined := schema.NewRegistry(withAccess(t), schema.WithResolvers(schema.Directive()))
 	nested := schema.NewRegistry(schema.WithResolvers(confined))
 
@@ -5904,7 +5907,7 @@ func TestRegistry_Lookup_AtDirective(t *testing.T) {
 		ref, err := schema.Directive().Resolve(t.Context(), base.Documents()[0])
 		require.NoError(t, err)
 
-		reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(ref))
+		reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted()), schema.WithResolvers(ref))
 
 		// The directive stands on the third line of base.yaml, and the
 		// third line of other.yaml holds a value that does not name any
@@ -7440,13 +7443,13 @@ func TestRegistry_AccessNotSet(t *testing.T) {
 			ref    string
 			source []niceyaml.SourceOption
 		}{
-			"Unrestricted reads a file on disk": {
-				access: schema.WithAccess(schema.Unrestricted),
+			"Unrestricted() reads a file on disk": {
+				access: schema.WithAccess(schema.Unrestricted()),
 				ref:    "./schema.json",
 				source: []niceyaml.SourceOption{niceyaml.WithFilePath(app)},
 			},
-			"Unrestricted fetches a URL": {
-				access: schema.WithAccess(schema.Unrestricted),
+			"Unrestricted() fetches a URL": {
+				access: schema.WithAccess(schema.Unrestricted()),
 				ref:    schemaURL,
 			},
 			"AllowRoot reads a file under the root": {
@@ -7454,8 +7457,8 @@ func TestRegistry_AccessNotSet(t *testing.T) {
 				ref:    "./schema.json",
 				source: []niceyaml.SourceOption{niceyaml.WithFilePath(app)},
 			},
-			"NoAccess reads a file in the file system of the document": {
-				access: schema.WithAccess(schema.NoAccess),
+			"NoAccess() reads a file in the file system of the document": {
+				access: schema.WithAccess(schema.NoAccess()),
 				ref:    "./schema.json",
 				source: inBundle,
 			},
@@ -7555,7 +7558,7 @@ func TestRegistry_AccessNotSet(t *testing.T) {
 		_, ok := yamltest.RequireSourceError(t, err).Position()
 		assert.False(t, ok)
 
-		allowed := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(beside))
+		allowed := schema.NewRegistry(schema.WithAccess(schema.Unrestricted()), schema.WithResolvers(beside))
 
 		err = allowed.Check(t.Context(), doc)
 		require.ErrorContains(t, err, violation)
@@ -7602,7 +7605,7 @@ func TestRegistry_AccessNotSet(t *testing.T) {
 		requireRefused(t, err)
 		requireLoadErrorOf(t, err, named, schema.ErrLoad)
 
-		data, err := schema.NewRegistry(schema.WithAccess(schema.Unrestricted)).Load(t.Context(), named)
+		data, err := schema.NewRegistry(schema.WithAccess(schema.Unrestricted())).Load(t.Context(), named)
 		require.NoError(t, err)
 		assert.JSONEq(t, stringName, string(data))
 	})
@@ -7614,7 +7617,7 @@ func TestRegistry_AccessNotSet(t *testing.T) {
 
 		// A registry that is a resolver hands over a compiled schema, so
 		// the registry that asked does not load anything.
-		inner := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(schema.Directive()))
+		inner := schema.NewRegistry(schema.WithAccess(schema.Unrestricted()), schema.WithResolvers(schema.Directive()))
 		outer := schema.NewRegistry(schema.WithResolvers(inner))
 
 		err := outer.Check(t.Context(), doc)
@@ -7623,7 +7626,7 @@ func TestRegistry_AccessNotSet(t *testing.T) {
 		// The Access of the registry that asked does not reach the
 		// registry that loads.
 		inner = schema.NewRegistry(schema.WithResolvers(schema.Directive()))
-		outer = schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(inner))
+		outer = schema.NewRegistry(schema.WithAccess(schema.Unrestricted()), schema.WithResolvers(inner))
 
 		err = outer.Check(t.Context(), doc)
 		requireRefused(t, err)

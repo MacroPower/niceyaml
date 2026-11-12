@@ -593,7 +593,7 @@ func TestStyles_Style(t *testing.T) {
 		dracula, ok := theme.Builtin().Get("dracula")
 		require.True(t, ok)
 
-		for _, th := range []theme.Theme{theme.Charm, dracula} {
+		for _, th := range []theme.Theme{theme.Charm(), dracula} {
 			styles := th.Styles()
 
 			assert.Equal(t, styles.Style(kind.GenericHighlight), styles.Style(match), th.Name)

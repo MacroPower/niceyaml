@@ -1697,8 +1697,8 @@ func (s *Source) AllDocuments() []*Node {
 //
 // ValidateDocuments panics if v is nil, including a v that holds a nil
 // pointer or func. A caller that checks only the syntax of a file passes
-// [NoValidator]. With a ctx that has not ended, ValidateDocuments then
-// returns the error [Source.File] returns.
+// the Validator from [NoValidator]. With a ctx that has not ended,
+// ValidateDocuments then returns the error [Source.File] returns.
 //
 // ValidateDocuments checks ctx before each document and one more time
 // after the last. After ctx ends, ValidateDocuments does not validate

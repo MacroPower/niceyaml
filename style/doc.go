@@ -42,7 +42,7 @@
 //		return s.Italic(true)
 //	})
 //
-//	styles := theme.Charm.Styles().With(italic)
+//	styles := theme.Charm().Styles().With(italic)
 //
 // A custom kind, such as one a program names for its own overlay, inherits
 // from the parent that [kind.Parent] gives it. A program names the kind
@@ -51,7 +51,7 @@
 //
 //	const match = kind.GenericHighlight + ".match"
 //
-//	p := printer.New(printer.WithStyles(theme.Charm))
+//	p := printer.New(printer.WithStyles(theme.Charm()))
 //
 // A [Set] or an [Update] on the custom kind still wins over the inherited
 // style. A custom kind without a '.' in its name, such as
@@ -68,7 +68,7 @@
 // Because [WithSurface] holds the surface separately, a theme without its
 // surface draws on the terminal's own background and keeps each fill:
 //
-//	plain := theme.Charm.Styles().With(style.WithSurface(nil))
+//	plain := theme.Charm().Styles().With(style.WithSurface(nil))
 //
 // Each theme picks its colors for its own surface. On a terminal
 // background of another color, some of its text might be hard to read.

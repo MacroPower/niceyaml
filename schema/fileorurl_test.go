@@ -442,7 +442,7 @@ func TestRefBeside(t *testing.T) {
 	onDisk := yamltest.FirstDocumentWithPath(t, "kind: App\n", filepath.Join(dir, "app.yaml"))
 	noPath := yamltest.FirstDocument(t, "kind: App\n")
 
-	reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted))
+	reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted()))
 
 	t.Run("a relative path names a file beside a document in a file system", func(t *testing.T) {
 		t.Parallel()
@@ -638,7 +638,7 @@ func TestRefBeside(t *testing.T) {
 				require.NoError(t, err)
 				assert.Equal(t, tc.want, ref.Key())
 
-				byField := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(ref))
+				byField := schema.NewRegistry(schema.WithAccess(schema.Unrestricted()), schema.WithResolvers(ref))
 
 				err = byField.Check(t.Context(), tc.doc)
 				require.ErrorContains(t, err, `missing required property "foo"`)
@@ -669,7 +669,7 @@ func TestRefBeside(t *testing.T) {
 			return schema.RefBeside(doc, "schema.json")
 		})
 
-		byName := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(beside))
+		byName := schema.NewRegistry(schema.WithAccess(schema.Unrestricted()), schema.WithResolvers(beside))
 
 		require.NoError(t, byName.Check(t.Context(), inBundle))
 		require.NoError(t, byName.Check(t.Context(), onDisk))
@@ -701,7 +701,7 @@ func TestRefBeside_DotDotAfterSymlink(t *testing.T) {
 	ref, err := schema.RefBeside(doc, "../schema.json")
 	require.NoError(t, err)
 
-	data, err := schema.NewRegistry(schema.WithAccess(schema.Unrestricted)).Load(t.Context(), ref)
+	data, err := schema.NewRegistry(schema.WithAccess(schema.Unrestricted())).Load(t.Context(), ref)
 	require.NoError(t, err)
 	assert.Equal(t, plainFileURL(filepath.Join(dir, "schema.json")), ref.Key())
 	assert.JSONEq(t, `{"type": "integer"}`, string(data))
@@ -727,7 +727,7 @@ func TestRefBeside_WorkingDirectory(t *testing.T) {
 
 	t.Chdir(wd)
 
-	reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(schema.Directive()))
+	reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted()), schema.WithResolvers(schema.Directive()))
 
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)

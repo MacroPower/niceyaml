@@ -8613,12 +8613,12 @@ func TestDocument_Decode_Validator(t *testing.T) {
 		}
 	})
 
-	t.Run("NoValidator passes every document", func(t *testing.T) {
+	t.Run("NoValidator() passes every document", func(t *testing.T) {
 		t.Parallel()
 
 		dd := yamltest.FirstDocument(t, decodeNameValueDoc)
 
-		result, err := dd.Decode[plainConfig](t.Context(), niceyaml.WithValidator(niceyaml.NoValidator))
+		result, err := dd.Decode[plainConfig](t.Context(), niceyaml.WithValidator(niceyaml.NoValidator()))
 		require.NoError(t, err)
 		assert.Equal(t, plainConfig{Name: "test", Value: 42}, result)
 	})

@@ -98,7 +98,7 @@ func TestPrinter_Render(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := testPrinterWithGutter(printer.DefaultGutter).With(tc.opts...)
+			p := testPrinterWithGutter(printer.DefaultGutter()).With(tc.opts...)
 			v := tc.view()
 			got := p.Render(v)
 
@@ -130,7 +130,7 @@ func TestPrinter_Render_LayoutRows(t *testing.T) {
 	view.AnnotateLine(0, line.Annotation{Content: "a note", Placement: line.Above})
 
 	p := printer.New(
-		printer.WithStyles(theme.Charm),
+		printer.WithStyles(theme.Charm()),
 		printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1)),
 		printer.WithWrapWidth(24),
 	)
@@ -152,7 +152,7 @@ func TestRendered_Rows(t *testing.T) {
 		t.Parallel()
 
 		view := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: 2")).View()
-		got := testPrinterWithGutter(printer.DefaultGutter).Render(view)
+		got := testPrinterWithGutter(printer.DefaultGutter()).Render(view)
 
 		rows := got.Rows()
 		rows[0] = "changed"

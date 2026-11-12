@@ -239,7 +239,7 @@ func TestValidateFileEmpty(t *testing.T) {
 		},
 		"document end marker with no schema": {
 			reg: schema.NewRegistry(
-				schema.WithAccess(schema.Unrestricted),
+				schema.WithAccess(schema.Unrestricted()),
 				schema.WithResolvers(schema.Directive()),
 				schema.WithRequireSchema(false),
 			),
@@ -307,7 +307,7 @@ func TestValidateFileDotDotAfterSymlink(t *testing.T) {
 	// Joining the name with filepath.Join would clean it to x.yaml.
 	path := dir + "/ldir/../x.yaml"
 
-	reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(schema.Directive()))
+	reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted()), schema.WithResolvers(schema.Directive()))
 
 	require.NoError(t, validateFile(t.Context(), path, reg))
 }
@@ -329,7 +329,7 @@ func TestBuildRegistryRefs(t *testing.T) {
 	t.Run("--schema fails before any file", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := buildRegistry(t.Context(), schemaPath, schema.Unrestricted, nil)
+		_, err := buildRegistry(t.Context(), schemaPath, schema.Unrestricted(), nil)
 		require.ErrorIs(t, err, schema.ErrLoad)
 		require.ErrorIs(t, err, fs.ErrNotExist)
 		assert.True(t, strings.HasPrefix(err.Error(), "--schema: "), err.Error())
@@ -339,7 +339,7 @@ func TestBuildRegistryRefs(t *testing.T) {
 	t.Run("a directive fails only the document that reaches the ref", func(t *testing.T) {
 		t.Parallel()
 
-		reg, err := buildRegistry(t.Context(), "", schema.Unrestricted, nil)
+		reg, err := buildRegistry(t.Context(), "", schema.Unrestricted(), nil)
 		require.NoError(t, err)
 
 		require.NoError(t, validateFile(t.Context(), filepath.Join(dir, "skips.yaml"), reg))
@@ -376,7 +376,7 @@ func TestBuildRegistrySchemaDotDotAfterSymlink(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			reg, err := buildRegistry(t.Context(), tc.ref, schema.Unrestricted, nil)
+			reg, err := buildRegistry(t.Context(), tc.ref, schema.Unrestricted(), nil)
 			require.NoError(t, err)
 
 			require.NoError(t, validateFile(t.Context(), yamlPath, reg))
@@ -420,7 +420,7 @@ func TestBuildRegistrySchemaColonDotDotAfterSymlink(t *testing.T) {
 	for name, tc := range tcs {
 		//nolint:paralleltest // See above.
 		t.Run(name, func(t *testing.T) {
-			reg, err := buildRegistry(t.Context(), tc.ref, schema.Unrestricted, nil)
+			reg, err := buildRegistry(t.Context(), tc.ref, schema.Unrestricted(), nil)
 			require.NoError(t, err)
 
 			require.NoError(t, validateFile(t.Context(), yamlPath, reg))
@@ -1063,7 +1063,7 @@ func TestValidateCmdDetaches(t *testing.T) {
 	err := quietValidateCmd(io.Discard, io.Discard, append([]string{"--schema", schemaPath}, paths...)...).Execute()
 	require.Error(t, err)
 
-	reg, regErr := buildRegistry(t.Context(), schemaPath, schema.Unrestricted, nil)
+	reg, regErr := buildRegistry(t.Context(), schemaPath, schema.Unrestricted(), nil)
 	require.NoError(t, regErr)
 
 	// The errors that validateFile returns hold their sources. The

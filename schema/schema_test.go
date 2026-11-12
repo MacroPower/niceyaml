@@ -4947,7 +4947,7 @@ func TestSchema_Dependencies(t *testing.T) {
 		t.Parallel()
 
 		assert.Nil(t, compileSchema(t, stringDefs).Dependencies())
-		assert.Nil(t, schema.AcceptAll.Dependencies())
+		assert.Nil(t, schema.AcceptAll().Dependencies())
 	})
 }
 
@@ -4962,7 +4962,7 @@ func TestSchema_JSONSchema(t *testing.T) {
 	}{
 		"from a validator":     {schema: schema.FromJSONSchema(v), want: v},
 		"without deprecations": {schema: schema.FromJSONSchema(v).WithoutDeprecations(), want: v},
-		"accept all":           {schema: schema.AcceptAll, want: nil},
+		"accept all":           {schema: schema.AcceptAll(), want: nil},
 	}
 
 	for name, tc := range tcs {
@@ -5004,8 +5004,8 @@ func TestSchema_AcceptsAll(t *testing.T) {
 		schema *schema.Schema
 		want   bool
 	}{
-		"accept all":                          {schema: schema.AcceptAll, want: true},
-		"accept all without deprecations":     {schema: schema.AcceptAll.WithoutDeprecations(), want: true},
+		"accept all":                          {schema: schema.AcceptAll(), want: true},
+		"accept all without deprecations":     {schema: schema.AcceptAll().WithoutDeprecations(), want: true},
 		"directive none":                      {schema: none, want: true},
 		"directive none without deprecations": {schema: none.WithoutDeprecations(), want: true},
 		"compiled true":                       {schema: compileSchema(t, `true`), want: false},
@@ -5087,7 +5087,7 @@ func TestSchema_WithoutDeprecations(t *testing.T) {
 	t.Run("accept all", func(t *testing.T) {
 		t.Parallel()
 
-		quiet := schema.AcceptAll.WithoutDeprecations()
+		quiet := schema.AcceptAll().WithoutDeprecations()
 		require.NoError(t, quiet.ValidateValue(t.Context(), "value"))
 		assert.Nil(t, quiet.JSONSchema())
 	})
@@ -5235,7 +5235,7 @@ func TestSchema_WithoutFields(t *testing.T) {
 	t.Run("accept all", func(t *testing.T) {
 		t.Parallel()
 
-		require.NoError(t, schema.AcceptAll.WithoutFields(kind).ValidateValue(t.Context(), "value"))
+		require.NoError(t, schema.AcceptAll().WithoutFields(kind).ValidateValue(t.Context(), "value"))
 	})
 
 	t.Run("panics", func(t *testing.T) {
@@ -5280,12 +5280,23 @@ func TestSchema_WithoutFields(t *testing.T) {
 func TestAcceptAll(t *testing.T) {
 	t.Parallel()
 
+	t.Run("returns a new schema on each call", func(t *testing.T) {
+		t.Parallel()
+
+		first := schema.AcceptAll()
+		*first = schema.Schema{}
+
+		again := schema.AcceptAll()
+		assert.NotSame(t, first, again)
+		assert.True(t, again.AcceptsAll())
+	})
+
 	t.Run("passes every value", func(t *testing.T) {
 		t.Parallel()
 
 		warnings := niceyaml.NewWarnings()
-		require.NoError(t, schema.AcceptAll.ValidateValue(warnings.Context(t.Context()), "value"))
-		require.NoError(t, schema.AcceptAll.ValidateValue(t.Context(), nil))
+		require.NoError(t, schema.AcceptAll().ValidateValue(warnings.Context(t.Context()), "value"))
+		require.NoError(t, schema.AcceptAll().ValidateValue(t.Context(), nil))
 		require.NoError(t, warnings.Err())
 	})
 
@@ -5305,7 +5316,7 @@ func TestAcceptAll(t *testing.T) {
 				t.Parallel()
 
 				doc := yamltest.FirstDocument(t, tc.body)
-				require.NoError(t, doc.Validate(t.Context(), schema.AcceptAll))
+				require.NoError(t, doc.Validate(t.Context(), schema.AcceptAll()))
 			})
 		}
 	})
@@ -5315,7 +5326,7 @@ func TestAcceptAll(t *testing.T) {
 
 		docs := yamltest.AllDocuments(t, niceyaml.NewSourceFromString("a: 1\n---\nb: [\n"), 2)
 		require.ErrorIs(t, docs[1].Err(), niceyaml.ErrSyntax)
-		require.ErrorIs(t, docs[1].Validate(t.Context(), schema.AcceptAll), niceyaml.ErrSyntax)
+		require.ErrorIs(t, docs[1].Validate(t.Context(), schema.AcceptAll()), niceyaml.ErrSyntax)
 	})
 
 	t.Run("resolves itself", func(t *testing.T) {
@@ -5323,11 +5334,12 @@ func TestAcceptAll(t *testing.T) {
 
 		doc := yamltest.FirstDocument(t, "a: *nope\n")
 
-		ref, err := schema.AcceptAll.Resolve(t.Context(), doc)
+		all := schema.AcceptAll()
+		ref, err := all.Resolve(t.Context(), doc)
 		require.NoError(t, err)
-		assert.Same(t, schema.AcceptAll, ref.Schema())
+		assert.Same(t, all, ref.Schema())
 
-		reg := schema.NewRegistry(schema.WithResolvers(schema.AcceptAll, compileSchema(t, `false`)))
+		reg := schema.NewRegistry(schema.WithResolvers(schema.AcceptAll(), compileSchema(t, `false`)))
 		require.NoError(t, reg.Check(t.Context(), doc))
 	})
 }

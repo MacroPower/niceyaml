@@ -174,8 +174,8 @@ type directiveResolver struct{}
 //
 // A directive of "$schema=none", in any letter case, turns validation off
 // for the document, as it does in yaml-language-server. Resolve names a
-// schema that passes every document without decoding it, as [AcceptAll]
-// does, and [Schema.AcceptsAll] reports true for it. The lookup thus
+// schema from [AcceptAll], which passes every document without decoding
+// it, and [Schema.AcceptsAll] reports true for it. The lookup thus
 // ends at the directive, and the document does not need a file path.
 // Such a directive does not name a file or a URL, so it resolves in a
 // registry without [WithAccess] too.
@@ -198,19 +198,20 @@ type directiveResolver struct{}
 // lookup of a document with a directive fails with [ErrAccessNotSet].
 // The registry does not read or fetch anything for it. A program whose
 // documents come from its own user, such as an editor or a command-line
-// tool, passes [Unrestricted]:
+// tool, passes the Access from [Unrestricted]:
 //
 //	reg := schema.NewRegistry(
-//	    schema.WithAccess(schema.Unrestricted),
+//	    schema.WithAccess(schema.Unrestricted()),
 //	    schema.WithResolvers(schema.Directive()),
 //	)
 //
 // A directive there can name any file that the process can read,
 // including a path outside the document's directory. It can also name
 // any host that the client can reach. A program whose documents live in
-// a file system passes [NoAccess], which keeps each directive to the
-// files of that file system. A loader of [WithLoader] sits outside the
-// Access, so a directive can still name any URL under its prefix.
+// a file system passes the Access from [NoAccess], which keeps each
+// directive to the files of that file system. A loader of [WithLoader]
+// sits outside the Access, so a directive can still name any URL under
+// its prefix.
 //
 // A program that validates documents from another trust domain gives
 // Directive a registry of its own, and confines that registry with
@@ -255,7 +256,7 @@ func (directiveResolver) Resolve(_ context.Context, doc *niceyaml.Node) (Ref, er
 	// Only the bare token turns validation off, as in yaml-language-server;
 	// "./none" and "none.json" still name files.
 	if strings.EqualFold(directive.Schema, "none") {
-		return acceptAllSchema.Ref(), nil
+		return AcceptAll().Ref(), nil
 	}
 
 	// The directive names the schema in the text of the document, so its

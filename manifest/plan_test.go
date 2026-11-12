@@ -1163,7 +1163,7 @@ func TestPlan_Counts(t *testing.T) {
 func TestPlanFile_Diff(t *testing.T) {
 	t.Parallel()
 
-	p := yamltest.NewPlainPrinter(printer.WithGutter(printer.DefaultGutter))
+	p := yamltest.NewPlainPrinter(printer.WithGutter(printer.DefaultGutter()))
 	files := map[string]string{"hours.yaml": hoursDoc}
 
 	plan := planOf(t, cafeOptions(), files)

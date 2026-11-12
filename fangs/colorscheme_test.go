@@ -18,7 +18,7 @@ import (
 func TestColorScheme(t *testing.T) {
 	t.Parallel()
 
-	styles := theme.Charm.Styles()
+	styles := theme.Charm().Styles()
 	text := styles.Style(kind.Text)
 	comment := styles.Style(kind.Comment)
 	genericError := styles.Style(kind.GenericError)
@@ -193,7 +193,7 @@ func TestColorSchemeFunc(t *testing.T) {
 	light, ok := theme.Builtin().Get("github")
 	require.True(t, ok)
 
-	dark := theme.Charm
+	dark := theme.Charm()
 
 	// Equal schemes would let a function that ignores the background pass.
 	require.NotEqual(t, fangs.ColorScheme(light), fangs.ColorScheme(dark))

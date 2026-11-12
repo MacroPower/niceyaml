@@ -29,9 +29,9 @@ func main() {
 	reg := schema.NewRegistry(
 		// A registry loads the schema of a directive only under an Access.
 		// The files of the café live in the embedded file system, which
-		// serves each file that a directive names. NoAccess keeps the disk
-		// and the network out of reach.
-		schema.WithAccess(schema.NoAccess),
+		// serves each file that a directive names. The Access from NoAccess
+		// keeps the disk and the network out of reach.
+		schema.WithAccess(schema.NoAccess()),
 		schema.WithResolvers(
 			schema.Directive(),
 			// A relative pattern matches the relative path of a document

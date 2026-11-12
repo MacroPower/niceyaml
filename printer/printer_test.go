@@ -45,7 +45,7 @@ var tenThousandLines = strings.Repeat("k: v\n", 10000)
 
 // testPrinter returns a printer without styles or padding for predictable output.
 func testPrinter() *printer.Printer {
-	return testPrinterWithGutter(printer.NoGutter)
+	return testPrinterWithGutter(printer.NoGutter())
 }
 
 // testPrinterWithGutter returns a printer without styles but with a custom
@@ -60,10 +60,11 @@ func testPrinterWithGutter(gutter printer.Gutter) *printer.Printer {
 	)
 }
 
-// orNoGutter returns gutter, or [printer.NoGutter] for a nil gutter.
+// orNoGutter returns gutter, or the gutter from [printer.NoGutter] for a
+// nil gutter.
 func orNoGutter(gutter printer.Gutter) printer.Gutter {
 	if gutter == nil {
-		return printer.NoGutter
+		return printer.NoGutter()
 	}
 
 	return gutter
@@ -431,7 +432,7 @@ func TestWithBox(t *testing.T) {
 		text := style.New(lipgloss.NewStyle().Background(lipgloss.Color("#000000")))
 		p := printer.New(
 			printer.WithStyles(text),
-			printer.WithGutter(printer.NoGutter),
+			printer.WithGutter(printer.NoGutter()),
 			printer.WithBox(true),
 			printer.WithContainerStyle(lipgloss.NewStyle().MarginLeft(1)),
 		)
@@ -448,7 +449,7 @@ func TestWithBox(t *testing.T) {
 	t.Run("container style passed back with the box off keeps the output", func(t *testing.T) {
 		t.Parallel()
 
-		p := printer.New(printer.WithStyles(theme.Charm), printer.WithBox(true))
+		p := printer.New(printer.WithStyles(theme.Charm()), printer.WithBox(true))
 		got := p.With(printer.WithContainerStyle(p.ContainerStyle()), printer.WithBox(false))
 
 		assert.Equal(t, p.ContainerStyle(), got.ContainerStyle())
@@ -458,7 +459,7 @@ func TestWithBox(t *testing.T) {
 	t.Run("container style passed back with the box on adds the box again", func(t *testing.T) {
 		t.Parallel()
 
-		p := printer.New(printer.WithStyles(theme.Charm), printer.WithBox(true))
+		p := printer.New(printer.WithStyles(theme.Charm()), printer.WithBox(true))
 		got := p.With(printer.WithContainerStyle(p.ContainerStyle()))
 
 		assert.Equal(t, 1, p.ContainerStyle().GetPaddingRight())
@@ -605,7 +606,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 		},
 		"full range with line numbers": {
 			spans:  position.Spans{position.NewSpan(0, 5)},
-			gutter: printer.LineNumberGutter,
+			gutter: printer.LineNumberGutter(),
 			want: stringtest.JoinLF(
 				"   1 first: 1",
 				"   2 second: 2",
@@ -624,7 +625,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 		},
 		"bounded middle with line numbers": {
 			spans:  position.Spans{position.NewSpan(1, 4)},
-			gutter: printer.LineNumberGutter,
+			gutter: printer.LineNumberGutter(),
 			want: stringtest.JoinLF(
 				"   2 second: 2",
 				"   3 third: 3",
@@ -651,7 +652,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 		},
 		"single line with line numbers": {
 			spans:  position.Spans{position.NewSpan(2, 3)},
-			gutter: printer.LineNumberGutter,
+			gutter: printer.LineNumberGutter(),
 			want:   "   3 third: 3",
 		},
 		"empty result": {
@@ -674,7 +675,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 				position.NewSpan(0, 1),
 				position.NewSpan(3, 5),
 			},
-			gutter: printer.LineNumberGutter,
+			gutter: printer.LineNumberGutter(),
 			want: stringtest.JoinLF(
 				"   1 first: 1",
 				"   4 fourth: 4",
@@ -751,7 +752,7 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		gutter   printer.Gutter // Nil for DefaultGutter.
+		gutter   printer.Gutter // Nil for DefaultGutter().
 		before   string
 		after    string
 		want     string
@@ -955,7 +956,7 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 			),
 		},
 		"no gutter": {
-			gutter: printer.NoGutter,
+			gutter: printer.NoGutter(),
 			before: "a: 1\n",
 			after:  "a: 2\n",
 			want: stringtest.JoinLF(
@@ -964,7 +965,7 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 			),
 		},
 		"diff gutter keeps a deleted line inline": {
-			gutter: printer.DiffGutter,
+			gutter: printer.DiffGutter(),
 			before: stringtest.LinesLF(
 				"a: 1",
 				"b: 2",
@@ -981,7 +982,7 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 			),
 		},
 		"diff gutter shows the delete before the insert": {
-			gutter: printer.DiffGutter,
+			gutter: printer.DiffGutter(),
 			before: "key: old\n",
 			after:  "key: new\n",
 			want: stringtest.JoinLF(
@@ -1011,7 +1012,7 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 		// Line 1 is the inserted line. The overlay covers "dddd", which
 		// wraps to the third row.
 		"overlay on a continuation row": {
-			gutter:   printer.DiffGutter,
+			gutter:   printer.DiffGutter(),
 			before:   "key: x\n",
 			after:    "key: aaaa bbbb cccc dddd\n",
 			overlays: []position.Range{yamltest.LineRange(1, 20, 24)},
@@ -1025,7 +1026,7 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 		},
 		// Each ESC byte prints as a control picture one column wide.
 		"wrapped escape sequence": {
-			gutter: printer.DiffGutter,
+			gutter: printer.DiffGutter(),
 			before: "b: x\n",
 			after:  "b: \"\x1b[31mred\x1b[0m and more words here\"\n",
 			width:  13,
@@ -1040,7 +1041,7 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 		// Each tab prints as a control picture, so a wrap point cannot drop
 		// the run as whitespace.
 		"wrapped tab run": {
-			gutter: printer.DiffGutter,
+			gutter: printer.DiffGutter(),
 			before: "b: x\n",
 			after:  "b: \"x\t\t\t\t\t\t\t\t\t\ty\tz\tw\"\n",
 			width:  13,
@@ -1052,7 +1053,7 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 			),
 		},
 		"diff lines wrap correctly": {
-			gutter: printer.DiffGutter,
+			gutter: printer.DiffGutter(),
 			before: "key: short\n",
 			after:  "key: this is a very long value that should wrap\n",
 			width:  30,
@@ -1063,7 +1064,7 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 			),
 		},
 		"wrapped diff continuation": {
-			gutter: printer.DiffGutter,
+			gutter: printer.DiffGutter(),
 			before: "key: original value\n",
 			after:  "key: new very long value that definitely wraps\n",
 			width:  25,
@@ -1074,7 +1075,7 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 			),
 		},
 		"modification with wrap": {
-			gutter: printer.DiffGutter,
+			gutter: printer.DiffGutter(),
 			before: "name: old-hyphenated-name-value\n",
 			after:  "name: new-hyphenated-name-value\n",
 			width:  20,
@@ -1095,7 +1096,7 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 
 			gutter := tc.gutter
 			if gutter == nil {
-				gutter = printer.DefaultGutter
+				gutter = printer.DefaultGutter()
 			}
 
 			p := testPrinterWithGutter(gutter).With(printer.WithWrapWidth(tc.width))
@@ -1169,7 +1170,7 @@ func TestPrinter_WordWrap(t *testing.T) {
 		"wrapped line continuation marker": {
 			input:  "key: this is a very long value",
 			width:  22,
-			gutter: printer.LineNumberGutter,
+			gutter: printer.LineNumberGutter(),
 			// Wraps at word boundaries within width.
 			// Width 22 - 5 (line number gutter) = 17 for content.
 			want: stringtest.JoinLF(
@@ -1183,7 +1184,7 @@ func TestPrinter_WordWrap(t *testing.T) {
 				"second: this is a very long line that wraps",
 			),
 			width:  30,
-			gutter: printer.LineNumberGutter,
+			gutter: printer.LineNumberGutter(),
 			// First line fits, second line wraps.
 			// Width 30 - 5 (line number gutter) = 25 for content.
 			want: stringtest.JoinLF(
@@ -1193,26 +1194,26 @@ func TestPrinter_WordWrap(t *testing.T) {
 			),
 		},
 		// A width of zero disables wrapping.
-		"zero width with NoGutter": {
+		"zero width with NoGutter()": {
 			input:  "key: this is a very long value that should not wrap",
 			width:  0,
-			gutter: printer.NoGutter,
+			gutter: printer.NoGutter(),
 			want:   "key: this is a very long value that should not wrap",
 		},
-		"zero width with LineNumberGutter": {
+		"zero width with LineNumberGutter()": {
 			input:  "key: this is a very long value that should not wrap",
 			width:  0,
-			gutter: printer.LineNumberGutter,
+			gutter: printer.LineNumberGutter(),
 			want:   "   1 key: this is a very long value that should not wrap",
 		},
-		"zero width with DefaultGutter": {
+		"zero width with DefaultGutter()": {
 			input:  "key: this is a very long value that should not wrap",
 			width:  0,
-			gutter: printer.DefaultGutter,
+			gutter: printer.DefaultGutter(),
 			want:   "   1  key: this is a very long value that should not wrap",
 		},
 		"line numbers on a multi-line value": {
-			gutter: printer.LineNumberGutter,
+			gutter: printer.LineNumberGutter(),
 			input: stringtest.JoinLF(
 				"key: |",
 				"  line1",
@@ -1261,7 +1262,7 @@ func TestPrinter_WordWrap(t *testing.T) {
 		// drops the space at the break, as it drops the space at any other
 		// break, rather than showing it on a row of its own.
 		"hyphen after a full row": {
-			gutter: printer.DefaultGutter,
+			gutter: printer.DefaultGutter(),
 			input:  "key: value -x",
 			width:  16,
 			want:   stringtest.JoinLF("   1  key: value", "   -  -x"),
@@ -1286,7 +1287,7 @@ func TestPrinter_WordWrap(t *testing.T) {
 			rows:  map[int]int{7: 0, 8: 0, 9: 1},
 		},
 		"space before a breakpoint past a hard wrap": {
-			gutter: printer.DefaultGutter,
+			gutter: printer.DefaultGutter(),
 			input:  "k: aa/-/- /b",
 			width:  9,
 			want:   stringtest.JoinLF("   1  k:", "   -  aa/", "   -  -/-", "   -  /b"),
@@ -1354,7 +1355,7 @@ func TestPrinter_WordWrap(t *testing.T) {
 
 		// The gutter leaves one column of content.
 		view := niceyaml.NewSourceFromString("image: nginx-alpine").View()
-		p := testPrinterWithGutter(printer.DefaultGutter).With(printer.WithWrapWidth(7))
+		p := testPrinterWithGutter(printer.DefaultGutter()).With(printer.WithWrapWidth(7))
 
 		rows := strings.Split(p.Print(view), "\n")
 		for _, row := range rows {
@@ -1397,7 +1398,7 @@ func TestPrinter_WordWrap_RowsFit(t *testing.T) {
 			t.Parallel()
 
 			view := niceyaml.NewSourceFromString(tc.input).View()
-			p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWrapWidth(tc.width))
+			p := testPrinterWithGutter(printer.LineNumberGutter()).With(printer.WithWrapWidth(tc.width))
 
 			got := p.Print(view)
 			rows := strings.Split(got, "\n")
@@ -1471,7 +1472,7 @@ func TestPrinter_WordWrap_RowOfRunes(t *testing.T) {
 		},
 		"gutter leaves one column": {
 			keep:   wide,
-			gutter: printer.DefaultGutter,
+			gutter: printer.DefaultGutter(),
 			input:  "k: 日本語",
 			width:  7,
 			want: stringtest.JoinLF(
@@ -1576,7 +1577,7 @@ func TestPrinter_WordWrap_RowOfRunes(t *testing.T) {
 				t.Parallel()
 
 				view := niceyaml.NewSourceFromString(tc.input).View()
-				p := printer.New(printer.WithGutter(printer.NoGutter), printer.WithWrapWidth(1))
+				p := printer.New(printer.WithGutter(printer.NoGutter()), printer.WithWrapWidth(1))
 
 				rows := strings.Split(ansi.Strip(p.Print(view)), "\n")
 
@@ -1960,10 +1961,10 @@ func TestGutter(t *testing.T) {
 		t.Parallel()
 
 		for name, g := range map[string]printer.Gutter{
-			"default": printer.DefaultGutter,
-			"diff":    printer.DiffGutter,
-			"number":  printer.LineNumberGutter,
-			"none":    printer.NoGutter,
+			"default": printer.DefaultGutter(),
+			"diff":    printer.DiffGutter(),
+			"number":  printer.LineNumberGutter(),
+			"none":    printer.NoGutter(),
 		} {
 			for _, maxNumber := range []int{0, 1, 9999, 10000, 123456} {
 				sample := printer.GutterContext{Number: maxNumber, MaxNumber: maxNumber, Styles: style.Styles{}}
@@ -2001,7 +2002,7 @@ func TestGutterFunctions(t *testing.T) {
 		cases  map[string]gutterCase
 	}{
 		"default": {
-			gutter: printer.DefaultGutter,
+			gutter: printer.DefaultGutter(),
 			cases: map[string]gutterCase{
 				// A zero context renders with the default styles.
 				"zero context": {
@@ -2049,7 +2050,7 @@ func TestGutterFunctions(t *testing.T) {
 			},
 		},
 		"diff": {
-			gutter: printer.DiffGutter,
+			gutter: printer.DiffGutter(),
 			cases: map[string]gutterCase{
 				"zero context": {
 					ctx:  printer.GutterContext{},
@@ -2131,7 +2132,7 @@ func TestGutterFunctions(t *testing.T) {
 			},
 		},
 		"lineNumber": {
-			gutter: printer.LineNumberGutter,
+			gutter: printer.LineNumberGutter(),
 			cases: map[string]gutterCase{
 				"zero context": {
 					ctx:  printer.GutterContext{},
@@ -2197,8 +2198,8 @@ func TestGutterContext_NilStyles(t *testing.T) {
 	}
 
 	gutters := map[string]printer.Gutter{
-		"DefaultGutter": printer.DefaultGutter,
-		"DiffGutter":    printer.DiffGutter,
+		"DefaultGutter()": printer.DefaultGutter(),
+		"DiffGutter()":    printer.DiffGutter(),
 	}
 
 	tcs := map[string]struct {
@@ -2433,7 +2434,7 @@ func TestPrinter_PrintSideBySide(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := testPrinterWithGutter(printer.DefaultGutter).With(tc.opts...)
+			p := testPrinterWithGutter(printer.DefaultGutter()).With(tc.opts...)
 			left, right := tc.views()
 			got := p.PrintSideBySide(left, right)
 
@@ -2513,7 +2514,7 @@ func TestPrinter_PrintSideBySide_Golden(t *testing.T) {
 			result.Carry(left, viewBefore, viewAfter)
 			result.Carry(right, viewBefore, viewAfter)
 
-			p := printer.New(printer.WithStyles(theme.Charm), printer.WithWrapWidth(tc.wrap))
+			p := printer.New(printer.WithStyles(theme.Charm()), printer.WithWrapWidth(tc.wrap))
 			golden.RequireEqual(t, p.PrintSideBySide(left, right))
 		})
 	}
@@ -2524,7 +2525,7 @@ func TestPrinter_Pad(t *testing.T) {
 
 	// The Charm theme sets a surface, so the spaces of the padding carry
 	// its background.
-	p := printer.New(printer.WithStyles(theme.Charm))
+	p := printer.New(printer.WithStyles(theme.Charm()))
 	text := p.Style(kind.Text)
 
 	tcs := map[string]struct {
@@ -2606,7 +2607,7 @@ func TestPrinter_Segments(t *testing.T) {
 				tc.decorate(view)
 			}
 
-			p := printer.New(append([]printer.Option{printer.WithStyles(theme.Charm)}, tc.opts...)...)
+			p := printer.New(append([]printer.Option{printer.WithStyles(theme.Charm())}, tc.opts...)...)
 
 			// The segments come as line.View.Segments yields them, with
 			// their own kinds and overlays.
@@ -2680,7 +2681,7 @@ func TestPrinter_Segments_MatchPrint(t *testing.T) {
 			view := niceyaml.NewSourceFromString("name: kaffe # x\n").View()
 			tc.decorate(view)
 
-			p := printer.New(append([]printer.Option{printer.WithStyles(theme.Charm)}, tc.opts...)...)
+			p := printer.New(append([]printer.Option{printer.WithStyles(theme.Charm())}, tc.opts...)...)
 			printed := p.Print(view)
 
 			var found bool
@@ -3180,7 +3181,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := testPrinterWithGutter(printer.DefaultGutter)
+			p := testPrinterWithGutter(printer.DefaultGutter())
 
 			assert.Equal(t, tc.want, p.Print(yamltest.Diff(t, tc.before, tc.after).Hunks(tc.context)))
 		})
@@ -3348,7 +3349,7 @@ func TestPrinter_With(t *testing.T) {
 
 	source := niceyaml.NewSourceFromString("key: this is a very long value that should wrap")
 
-	base := testPrinterWithGutter(printer.NoGutter)
+	base := testPrinterWithGutter(printer.NoGutter())
 	narrow := base.With(printer.WithWrapWidth(20))
 
 	assert.Equal(t, 0, base.WrapWidth())
@@ -3620,8 +3621,8 @@ func TestWithFlagBlend_Colors(t *testing.T) {
 		"default dark":  style.Default(true),
 		"default light": style.Default(false),
 		// Charm gives every kind the background of its surface.
-		"charm":                           theme.Charm,
-		"charm light":                     theme.CharmLight,
+		"charm":                           theme.Charm(),
+		"charm light":                     theme.CharmLight(),
 		"diff kinds without a background": fgOnly,
 	}
 
@@ -3719,7 +3720,7 @@ func TestWithFlagBlend_MarkerFill(t *testing.T) {
 	after := niceyaml.NewSourceFromString("a: 1\nb: 3 # new\n")
 	view := yamltest.DiffLines(t, before.Lines(), after.Lines()).Unified()
 
-	p := printer.New(printer.WithStyles(theme.Charm), printer.WithFlagBlend(true))
+	p := printer.New(printer.WithStyles(theme.Charm()), printer.WithFlagBlend(true))
 	rows := strings.Split(p.Print(view), "\n")
 	require.Len(t, rows, 3)
 
@@ -3748,33 +3749,33 @@ func TestPrinter_Golden(t *testing.T) {
 		wrap      int
 	}{
 		"default colors": {
-			styles: theme.Charm.Styles(),
-			gutter: printer.NoGutter,
+			styles: theme.Charm().Styles(),
+			gutter: printer.NoGutter(),
 		},
 		"word wrap with colors": {
-			styles: theme.Charm.Styles(),
-			gutter: printer.DefaultGutter,
+			styles: theme.Charm().Styles(),
+			gutter: printer.DefaultGutter(),
 			wrap:   40,
 		},
 		"default colors with line numbers": {
-			styles: theme.Charm.Styles(),
-			gutter: printer.DefaultGutter,
+			styles: theme.Charm().Styles(),
+			gutter: printer.DefaultGutter(),
 		},
 		"no colors": {
 			styles: style.Styles{},
-			gutter: printer.NoGutter,
+			gutter: printer.NoGutter(),
 		},
 		"no colors with line numbers": {
 			styles: style.Styles{},
-			gutter: printer.DefaultGutter,
+			gutter: printer.DefaultGutter(),
 		},
 		"find and highlight": {
-			styles: theme.Charm.Styles().With(
+			styles: theme.Charm().Styles().With(
 				style.Set(testOverlayHighlight, lipgloss.NewStyle().
 					Background(lipgloss.Color("#FFFF00")).
 					Foreground(lipgloss.Color("#000000"))),
 			),
-			gutter: printer.NoGutter,
+			gutter: printer.NoGutter(),
 			setupFunc: func(view *line.View) {
 				// Search for "日本" (Japan) which appears multiple times in full.yaml.
 				ranges := finder.New().Load(view).Find("日本")
@@ -4665,7 +4666,7 @@ func TestPrinter_Annotation(t *testing.T) {
 	}{
 		"below rows align under the marker within the width": {
 			input:  "key: value",
-			gutter: printer.LineNumberGutter,
+			gutter: printer.LineNumberGutter(),
 			width:  40,
 			annotation: line.Annotation{
 				Content:   "this is a fairly long annotation message that will wrap",
@@ -4800,7 +4801,7 @@ func TestPrinter_Annotation(t *testing.T) {
 		},
 		"column on a wrapped row pads from that row's start past the gutter": {
 			input:      "key: aaaa bbbb cccc",
-			gutter:     printer.LineNumberGutter,
+			gutter:     printer.LineNumberGutter(),
 			width:      15,
 			annotation: line.Annotation{Content: "x", Placement: line.Below, Cols: position.NewSpan(15, 15)},
 			want: stringtest.JoinLF(
@@ -5056,7 +5057,7 @@ func TestPrinter_Annotation(t *testing.T) {
 			),
 		},
 		"above annotation with line numbers": {
-			gutter:     printer.LineNumberGutter,
+			gutter:     printer.LineNumberGutter(),
 			input:      "key: value",
 			annotation: line.Annotation{Content: "@@ -1 +1 @@", Placement: line.Above},
 			want: stringtest.JoinLF(
@@ -5065,7 +5066,7 @@ func TestPrinter_Annotation(t *testing.T) {
 			),
 		},
 		"below annotation with line numbers": {
-			gutter:     printer.LineNumberGutter,
+			gutter:     printer.LineNumberGutter(),
 			input:      "key: value",
 			annotation: line.Annotation{Content: "error", Placement: line.Below, Cols: position.NewSpan(5, 5)},
 			want: stringtest.JoinLF(
@@ -5074,7 +5075,7 @@ func TestPrinter_Annotation(t *testing.T) {
 			),
 		},
 		"below annotation with col padding and line numbers": {
-			gutter: printer.LineNumberGutter,
+			gutter: printer.LineNumberGutter(),
 			input: stringtest.JoinLF(
 				"first: 1",
 				"second: 2",
@@ -5499,7 +5500,7 @@ func TestPrinter_LineNumbers_MaxNumber(t *testing.T) {
 	view := source.View().Slice(position.NewSpan(10000, source.Lines().Len()))
 	view.AnnotateLine(10000, line.Annotation{Content: "note", Placement: line.Below, Cols: position.NewSpan(6, 6)})
 
-	p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWrapWidth(30))
+	p := testPrinterWithGutter(printer.LineNumberGutter()).With(printer.WithWrapWidth(30))
 
 	got := p.Print(view)
 	assertRowsFit(t, got, 30)
@@ -5521,7 +5522,7 @@ func TestPrinter_LineNumbers_Placeholder(t *testing.T) {
 		"b: 2",
 		"c: 3",
 	), "a: 1")
-	p := testPrinterWithGutter(printer.DefaultGutter)
+	p := testPrinterWithGutter(printer.DefaultGutter())
 
 	assert.Equal(t, stringtest.JoinLF(
 		"   1  a: 1",
@@ -5676,7 +5677,7 @@ func TestPrinter_WithMaxNumber(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithMaxNumber(tc.given))
+			p := testPrinterWithGutter(printer.LineNumberGutter()).With(printer.WithMaxNumber(tc.given))
 
 			assert.Equal(t, tc.want, p.MaxNumber(tc.view))
 			assert.Equal(t, tc.wantWidth, p.Layout(tc.view).GutterWidth())
@@ -5690,11 +5691,11 @@ func TestPrinter_WithGutter_Nil(t *testing.T) {
 	view := niceyaml.NewSourceFromString("key: value").View()
 	view.AnnotateLine(0, line.Annotation{Content: "note", Placement: line.Below, Cols: position.NewSpan(5, 5)})
 
-	want := yamltest.NewPlainPrinter(printer.WithGutter(printer.DefaultGutter)).Print(view)
+	want := yamltest.NewPlainPrinter(printer.WithGutter(printer.DefaultGutter())).Print(view)
 
-	// A nil Gutter, or one that is a nil func or nil pointer, selects
-	// DefaultGutter rather than panicking on the first Width or Render
-	// call. NoGutter turns the gutter off.
+	// A nil Gutter, or one that is a nil func or nil pointer, selects the
+	// gutter from DefaultGutter rather than panicking on the first Width or
+	// Render call. The gutter from NoGutter turns the gutter off.
 	tcs := map[string]struct {
 		gutter printer.Gutter
 	}{
@@ -5721,7 +5722,7 @@ func TestPrinter_WithGutter_Nil(t *testing.T) {
 	}
 
 	// A FixedGutter with a nil func is a gutter of its own width, so it
-	// does not select DefaultGutter.
+	// does not select the gutter from DefaultGutter.
 	t.Run("FixedGutter with a nil func", func(t *testing.T) {
 		t.Parallel()
 
@@ -5925,7 +5926,7 @@ func TestPrinter_WrapWidth_FitsFrame(t *testing.T) {
 			width: 40,
 		},
 		"gutterless": {
-			opts:  []printer.Option{printer.WithGutter(printer.NoGutter)},
+			opts:  []printer.Option{printer.WithGutter(printer.NoGutter())},
 			width: 40,
 		},
 	}
@@ -6164,8 +6165,8 @@ func TestCut_LayoutCells(t *testing.T) {
 	tcs := map[string]struct {
 		gutter printer.Gutter
 	}{
-		"no gutter":      {gutter: printer.NoGutter},
-		"default gutter": {gutter: printer.DefaultGutter},
+		"no gutter":      {gutter: printer.NoGutter()},
+		"default gutter": {gutter: printer.DefaultGutter()},
 	}
 
 	// Each column that starts a cluster, with the cluster it starts.
@@ -6211,7 +6212,7 @@ func TestCut_KeepsCells(t *testing.T) {
 	view := niceyaml.NewSourceFromString(content + "\n").View()
 	view.BlendOverlay(kind.GenericHighlight, position.NewRange(position.New(0, 5), position.New(0, 7)))
 
-	p := printer.New(printer.WithGutter(printer.NoGutter), printer.WithStyles(theme.Charm))
+	p := printer.New(printer.WithGutter(printer.NoGutter()), printer.WithStyles(theme.Charm()))
 	l := p.Layout(view)
 	row := p.Print(view)
 	rowWidth := ansi.StringWidth(row)

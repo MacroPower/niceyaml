@@ -90,7 +90,7 @@ func TestPrinter_Layout(t *testing.T) {
 		return view
 	}
 
-	p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWrapWidth(20))
+	p := testPrinterWithGutter(printer.LineNumberGutter()).With(printer.WithWrapWidth(20))
 
 	t.Run("rows match print", func(t *testing.T) {
 		t.Parallel()
@@ -448,7 +448,7 @@ func TestPrinter_Layout_LineLead(t *testing.T) {
 		Cols:      position.NewSpan(11, 16),
 	})
 
-	layout := testPrinterWithGutter(printer.DefaultGutter).
+	layout := testPrinterWithGutter(printer.DefaultGutter()).
 		With(printer.WithWrapWidth(18)).
 		Layout(view)
 
@@ -518,7 +518,7 @@ func TestPrinter_Layout_ContainerFrame(t *testing.T) {
 			view := niceyaml.NewSourceFromString(stringtest.LinesLF("a: one two three four", "b: 2")).View()
 			view.AnnotateLine(1, line.Annotation{Content: "a note", Placement: line.Above})
 
-			p := testPrinterWithGutter(printer.DefaultGutter).With(tc.opt, printer.WithWrapWidth(24))
+			p := testPrinterWithGutter(printer.DefaultGutter()).With(tc.opt, printer.WithWrapWidth(24))
 			got := p.Render(view)
 			rows := got.Rows()
 			printed := strings.Split(p.Print(view), "\n")
@@ -554,37 +554,37 @@ func TestPrinter_Layout_GutterWidth(t *testing.T) {
 	}{
 		"no gutter": {
 			view:   short,
-			gutter: printer.NoGutter,
+			gutter: printer.NoGutter(),
 			want:   0,
 		},
 		"diff gutter": {
 			view:   short,
-			gutter: printer.DiffGutter,
+			gutter: printer.DiffGutter(),
 			want:   1,
 		},
 		"line numbers": {
 			view:   short,
-			gutter: printer.LineNumberGutter,
+			gutter: printer.LineNumberGutter(),
 			want:   5,
 		},
 		"default gutter": {
 			view:   short,
-			gutter: printer.DefaultGutter,
+			gutter: printer.DefaultGutter(),
 			want:   6,
 		},
 		"default gutter with five digit numbers": {
 			view:   long,
-			gutter: printer.DefaultGutter,
+			gutter: printer.DefaultGutter(),
 			want:   7,
 		},
 		"slice keeps the width of its largest number": {
 			view:   long.Slice(position.NewSpan(10000, long.Count())),
-			gutter: printer.LineNumberGutter,
+			gutter: printer.LineNumberGutter(),
 			want:   6,
 		},
 		"empty view": {
 			view:   line.NewView(line.Lines{}),
-			gutter: printer.DefaultGutter,
+			gutter: printer.DefaultGutter(),
 			want:   6,
 		},
 	}
@@ -634,7 +634,7 @@ func TestPrinter_Layout_Width(t *testing.T) {
 		},
 		"gutter adds to every row": {
 			view:   uneven,
-			gutter: printer.DefaultGutter,
+			gutter: printer.DefaultGutter(),
 			want:   13,
 		},
 		"wide characters take two cells each": {
@@ -645,7 +645,7 @@ func TestPrinter_Layout_Width(t *testing.T) {
 		// rest of the cluster stays with the digit instead.
 		"keycap at a wrap boundary": {
 			view:   niceyaml.NewSourceFromString("1\ufe0f\u20e3: bb").View(),
-			gutter: printer.DefaultGutter,
+			gutter: printer.DefaultGutter(),
 			wrap:   7,
 			want:   8,
 		},
@@ -670,7 +670,7 @@ func TestPrinter_Layout_Width(t *testing.T) {
 		},
 		"empty view": {
 			view:   line.NewView(line.Lines{}),
-			gutter: printer.DefaultGutter,
+			gutter: printer.DefaultGutter(),
 			want:   0,
 		},
 	}
@@ -725,7 +725,7 @@ func TestPrinter_Layout_LineWidth(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := testPrinterWithGutter(printer.DefaultGutter)
+			p := testPrinterWithGutter(printer.DefaultGutter())
 			sliced := view.Slice(tc.spans...)
 			l := p.Layout(sliced)
 
@@ -805,7 +805,7 @@ func TestPrinter_Layout_StyledAnnotationRows(t *testing.T) {
 		},
 		"gutter": {
 			style:  lipgloss.NewStyle().Width(6),
-			gutter: printer.DefaultGutter,
+			gutter: printer.DefaultGutter(),
 		},
 	}
 
@@ -867,7 +867,7 @@ func TestPrinter_Layout_TallGutter(t *testing.T) {
 			style: lipgloss.NewStyle().Border(lipgloss.NormalBorder()),
 		},
 		"diff marker margin": {
-			gutter: printer.DiffGutter,
+			gutter: printer.DiffGutter(),
 			kind:   kind.GenericInserted,
 			style:  lipgloss.NewStyle().MarginBottom(1),
 		},
@@ -910,7 +910,7 @@ func TestPrinter_Layout_TallGutter(t *testing.T) {
 
 			// Without a gutter, the view prints the same content rows, so
 			// each printed row holds one of them from the gutter width on.
-			bare := strings.Split(p.With(printer.WithGutter(printer.NoGutter)).Print(view), "\n")
+			bare := strings.Split(p.With(printer.WithGutter(printer.NoGutter())).Print(view), "\n")
 			require.Len(t, bare, len(printed))
 
 			for i, row := range printed {
@@ -1627,7 +1627,7 @@ func TestPrinter_Layout_PositionAt_Inverse(t *testing.T) {
 			},
 		},
 		"full.yaml with a gutter": {
-			printer: testPrinterWithGutter(printer.DefaultGutter).With(printer.WithWrapWidth(40)),
+			printer: testPrinterWithGutter(printer.DefaultGutter()).With(printer.WithWrapWidth(40)),
 			input:   full,
 		},
 		"clipped": {
@@ -1665,7 +1665,7 @@ func TestPrinter_Layout_PositionAt_Inverse(t *testing.T) {
 			},
 		},
 		"full.yaml clipped with a gutter": {
-			printer: testPrinterWithGutter(printer.DefaultGutter).With(printer.WithWrapWidth(30)),
+			printer: testPrinterWithGutter(printer.DefaultGutter()).With(printer.WithWrapWidth(30)),
 			input:   full,
 			clip:    20,
 		},

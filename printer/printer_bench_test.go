@@ -205,10 +205,10 @@ func BenchmarkPrinterWithGutter(b *testing.B) {
 		gutter printer.Gutter
 		name   string
 	}{
-		{printer.NoGutter, "no_gutter"},
-		{printer.DefaultGutter, "default_gutter"},
-		{printer.DiffGutter, "diff_gutter"},
-		{printer.LineNumberGutter, "line_number_gutter"},
+		{printer.NoGutter(), "no_gutter"},
+		{printer.DefaultGutter(), "default_gutter"},
+		{printer.DiffGutter(), "diff_gutter"},
+		{printer.LineNumberGutter(), "line_number_gutter"},
 	}
 
 	yaml := yamltest.GenerateYAML(500)

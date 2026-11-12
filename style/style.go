@@ -95,7 +95,7 @@ func Set(s kind.Kind, ls lipgloss.Style) Option {
 //		return s.Italic(true)
 //	})
 //
-//	styles := theme.Charm.Styles().With(italic)
+//	styles := theme.Charm().Styles().With(italic)
 //
 // The style that fn takes does not carry the surface of [WithSurface],
 // which [Styles.Style] adds to the styles it returns. The kind therefore
@@ -128,7 +128,7 @@ func Update(k kind.Kind, fn func(lipgloss.Style) lipgloss.Style) Option {
 //
 // To remove the surface of a theme, pass nil:
 //
-//	plain := theme.Charm.Styles().With(style.WithSurface(nil))
+//	plain := theme.Charm().Styles().With(style.WithSurface(nil))
 //
 // The colors of a built-in theme keep their contrast on the surface the
 // theme sets. A theme without its surface draws them on the terminal's

@@ -187,19 +187,12 @@ var (
 	// [Light] nor [Dark]. The unset zero Mode is such a value.
 	ErrUnknownMode = errors.New("unknown mode")
 
-	// Charm is the theme of CharmTone colors for a dark background. It
-	// paints the dark palette of [style.Default] on a Pepper surface, which
-	// [style.Default] leaves out. The catalog lists it so a picker can
-	// offer it by name.
-	Charm = New("charm", Dark, func() style.Styles {
+	// The themes behind [Charm] and [CharmLight]. Every copy of a Theme
+	// shares the styles it builds, so each one builds them once.
+	charm = New("charm", Dark, func() style.Styles {
 		return style.Default(true).With(style.WithSurface(charmtone.Pepper))
 	})
-
-	// CharmLight is the theme of CharmTone colors for a light background.
-	// It paints the light palette of [style.Default] on a Salt surface,
-	// which [style.Default] leaves out. The catalog lists it under the
-	// name "charm-light".
-	CharmLight = New("charm-light", Light, func() style.Styles {
+	charmLight = New("charm-light", Light, func() style.Styles {
 		return style.Default(false).With(style.WithSurface(charmtone.Salt))
 	})
 
@@ -210,7 +203,7 @@ var (
 			themes = append(themes, fromColors(name, p.unchecked(), p.Tokens))
 		}
 
-		themes = append(themes, Charm, CharmLight)
+		themes = append(themes, charm, charmLight)
 
 		slices.SortFunc(themes, func(a, b Theme) int {
 			return strings.Compare(a.Name, b.Name)
@@ -219,6 +212,22 @@ var (
 		return Catalog{}.With(themes...)
 	}()
 )
+
+// Charm returns the theme of CharmTone colors for a dark background. It
+// paints the dark palette of [style.Default] on a Pepper surface, which
+// [style.Default] leaves out. The catalog of [Builtin] lists it so a
+// picker can offer it by name.
+func Charm() Theme {
+	return charm
+}
+
+// CharmLight returns the theme of CharmTone colors for a light
+// background. It paints the light palette of [style.Default] on a Salt
+// surface, which [style.Default] leaves out. The catalog of [Builtin]
+// lists it under the name "charm-light".
+func CharmLight() Theme {
+	return charmLight
+}
 
 // Catalog is an ordered set of [Theme] values, one per name.
 //

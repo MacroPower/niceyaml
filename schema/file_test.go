@@ -398,7 +398,7 @@ func TestFile_NoWorkingDirectory(t *testing.T) {
 		source, err := niceyaml.NewSourceFromFS(bundle, "configs/app.yaml")
 		require.NoError(t, err)
 
-		reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(schema.Directive()))
+		reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted()), schema.WithResolvers(schema.Directive()))
 
 		err = source.ValidateDocuments(t.Context(), reg)
 		require.ErrorContains(t, err, `$.name: expected "string", got "integer"`)

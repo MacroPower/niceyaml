@@ -136,11 +136,11 @@ func main() {
 
 	fmt.Println("\nValidate the third document in an unrestricted registry:")
 
-	// Under Unrestricted, a registry reads any file that a directive
-	// names. The violation then tells the author the limit that the
+	// Under the Access from Unrestricted, a registry reads any file that a
+	// directive names. The violation then tells the author the limit that the
 	// private schema sets.
 	unrestricted := schema.NewRegistry(
-		schema.WithAccess(schema.Unrestricted),
+		schema.WithAccess(schema.Unrestricted()),
 		schema.WithResolvers(schema.Directive()),
 	)
 	report(p, docs[2], docs[2].Validate(ctx, unrestricted))

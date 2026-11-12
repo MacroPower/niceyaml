@@ -24,17 +24,17 @@
 //	isDark := lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
 //	p := printer.New(printer.WithStyles(style.Default(isDark)))
 //
-// A theme that sets a surface, such as
-// [go.jacobcolvin.com/niceyaml/style/theme.Charm], paints it behind each
-// token. For a full-screen viewer, [WithBox] fills the rest of the
+// A theme that sets a surface, such as the one from
+// [go.jacobcolvin.com/niceyaml/style/theme.Charm], paints it behind
+// each token. For a full-screen viewer, [WithBox] fills the rest of the
 // rectangle around the rows with the surface:
 //
-//	p := printer.New(printer.WithStyles(theme.Charm), printer.WithBox(true))
+//	p := printer.New(printer.WithStyles(theme.Charm()), printer.WithBox(true))
 //
 // To draw such a theme on the terminal's own background instead, remove
 // its surface with [style.WithSurface]:
 //
-//	styles := theme.Charm.Styles().With(style.WithSurface(nil))
+//	styles := theme.Charm().Styles().With(style.WithSurface(nil))
 //	p := printer.New(printer.WithStyles(styles))
 //
 // # Color Profiles
@@ -145,8 +145,8 @@
 //	p := printer.New(printer.WithFlagBlend(true))
 //	lipgloss.Println(p.Print(result.Unified()))
 //
-// Either way, [DefaultGutter] draws the marker of the flag in the diff
-// kind, on the same background as the line.
+// Either way, the gutter from [DefaultGutter] draws the marker of the
+// flag in the diff kind, on the same background as the line.
 //
 // # Overlays
 //

@@ -9,66 +9,64 @@ import (
 	"strings"
 )
 
-var (
-	// Unrestricted is the [*Access] that allows every file on disk and
-	// every HTTP or HTTPS URL, as [AllowAnyFile] and [AllowAnyURL] do
-	// together. It suits a program whose documents and schemas come from
-	// its own user, such as an editor or a command-line tool. A directive
-	// there names local paths and URLs, as it does in
-	// yaml-language-server. Such a program passes Unrestricted to
-	// [WithAccess] where it builds the registry:
-	//
-	//	reg := schema.NewRegistry(
-	//	    schema.WithAccess(schema.Unrestricted),
-	//	    schema.WithResolvers(schema.Directive()),
-	//	)
-	//
-	// A registry takes a copy of the Access when the program passes it.
-	// Assigning to Unrestricted does not change a registry that already
-	// took it or a registry built without WithAccess.
-	Unrestricted = &Access{accessConfig{anyFile: true, anyURL: true}}
+// Unrestricted returns an [*Access] that allows every file on disk and
+// every HTTP or HTTPS URL, as [AllowAnyFile] and [AllowAnyURL] do
+// together. It suits a program whose documents and schemas come from its
+// own user, such as an editor or a command-line tool. A directive there
+// names local paths and URLs, as it does in yaml-language-server. Such a
+// program passes the Access from Unrestricted to [WithAccess] where it
+// builds the registry:
+//
+//	reg := schema.NewRegistry(
+//	    schema.WithAccess(schema.Unrestricted()),
+//	    schema.WithResolvers(schema.Directive()),
+//	)
+//
+// Each call returns a new Access.
+func Unrestricted() *Access {
+	return &Access{accessConfig{anyFile: true, anyURL: true}}
+}
 
-	// NoAccess is the [*Access] that does not allow any file on disk or
-	// any URL, as the zero Access does. It suits a program whose documents
-	// live in a file system, such as an [embed.FS] or the archive of an
-	// upload. A directive there reads the schema file that it names from
-	// the file system of its document, as Access describes. A directive
-	// that names a URL fails to load with [ErrURLNotAllowed]:
-	//
-	//	reg := schema.NewRegistry(
-	//	    schema.WithAccess(schema.NoAccess),
-	//	    schema.WithResolvers(schema.Directive()),
-	//	)
-	//
-	// The Access covers every resolver of the registry, so a [Ref] from
-	// [File] or [URL] fails to load there too. A Ref from [FileFS],
-	// [Embedded], or [Loadable] still loads.
-	//
-	// A registry takes a copy of the Access when the program passes it.
-	// Assigning to NoAccess does not change a registry that already took
-	// it.
-	NoAccess = &Access{}
+// NoAccess returns an [*Access] that does not allow any file on disk or
+// any URL, as the zero Access does. It suits a program whose documents
+// live in a file system, such as an [embed.FS] or the archive of an
+// upload. A directive there reads the schema file that it names from the
+// file system of its document, as Access describes. A directive that
+// names a URL fails to load with [ErrURLNotAllowed]:
+//
+//	reg := schema.NewRegistry(
+//	    schema.WithAccess(schema.NoAccess()),
+//	    schema.WithResolvers(schema.Directive()),
+//	)
+//
+// The Access covers every resolver of the registry, so a [Ref] from
+// [File] or [URL] fails to load there too. A Ref from [FileFS],
+// [Embedded], or [Loadable] still loads.
+//
+// Each call returns a new Access.
+func NoAccess() *Access {
+	return &Access{}
+}
 
-	// ErrAccessNotSet indicates that a document named a schema in a
-	// registry built without [WithAccess]. [RefBeside] marks each [Ref]
-	// that it builds for a document, and [Directive] names its schemas
-	// through RefBeside. The author of the document picks the file or URL
-	// of such a Ref. So the program must state what the registry reads and
-	// fetches for it. A registry without the option refuses the Ref before
-	// it checks its cache, reads a file, or sends a request.
-	// [Registry.Schema] and [Registry.Load] return the refusal as a
-	// [*LoadError] that matches [ErrLoad], and a lookup binds it at the
-	// directive:
-	//
-	//	app.yaml:1:1: load schema: "https://example.com/s.json": registry needs schema.WithAccess to load a schema that a document names
-	//
-	// The program built the registry, so the document is not at fault, and
-	// [niceyaml.IsInvalid] reports false for the error. A registry with an
-	// Access reports a schema outside that Access with [ErrFileNotAllowed]
-	// or [ErrURLNotAllowed] instead. A server can thus tell its own
-	// missing option from a document that reached outside its Access.
-	ErrAccessNotSet = errors.New("registry needs schema.WithAccess to load a schema that a document names")
-)
+// ErrAccessNotSet indicates that a document named a schema in a
+// registry built without [WithAccess]. [RefBeside] marks each [Ref]
+// that it builds for a document, and [Directive] names its schemas
+// through RefBeside. The author of the document picks the file or URL
+// of such a Ref. So the program must state what the registry reads and
+// fetches for it. A registry without the option refuses the Ref before
+// it checks its cache, reads a file, or sends a request.
+// [Registry.Schema] and [Registry.Load] return the refusal as a
+// [*LoadError] that matches [ErrLoad], and a lookup binds it at the
+// directive:
+//
+//	app.yaml:1:1: load schema: "https://example.com/s.json": registry needs schema.WithAccess to load a schema that a document names
+//
+// The program built the registry, so the document is not at fault, and
+// [niceyaml.IsInvalid] reports false for the error. A registry with an
+// Access reports a schema outside that Access with [ErrFileNotAllowed]
+// or [ErrURLNotAllowed] instead. A server can thus tell its own
+// missing option from a document that reached outside its Access.
+var ErrAccessNotSet = errors.New("registry needs schema.WithAccess to load a schema that a document names")
 
 // Access decides which files a [Registry] reads from disk and which URLs
 // it fetches. [WithAccess] gives a registry an Access. The registry
@@ -78,9 +76,9 @@ var (
 // file or send a request for the URL.
 //
 // The zero Access does not allow any file on disk or any URL, and
-// neither does [NoAccess] or a nil *Access. [NewAccess] allows what its
-// options allow, and [Unrestricted] allows every file and every HTTP or
-// HTTPS URL:
+// neither does the Access from [NoAccess] or a nil *Access. [NewAccess]
+// allows what its options allow, and the Access from [Unrestricted]
+// allows every file and every HTTP or HTTPS URL:
 //
 //	root, err := os.OpenRoot(tenantDir)
 //	if err != nil {
@@ -204,12 +202,12 @@ func NewAccess(opts ...AccessOption) (*Access, error) {
 // directory that root holds. It serves every [Ref] that names a file on
 // disk, such as one from [File]. [Directive], [RefBeside], and
 // [FileOrURL] build such a Ref for a document on disk. The registry
-// resolves each path as it does under [Unrestricted], so a relative path
-// resolves against the working directory at the time File runs. It then
-// reads the path relative to the directory through root. A path outside
-// the directory does not name a file, so it fails to load with
-// [ErrFileNotAllowed]. Off Windows, a path with a drive letter fails the
-// same way.
+// resolves each path as it does under the Access from [Unrestricted]. A
+// relative path resolves against the working directory at the time File
+// runs. The registry then reads the path relative to the directory
+// through root. A path outside the directory does not name a file, so it
+// fails to load with [ErrFileNotAllowed]. Off Windows, a path with a
+// drive letter fails the same way.
 //
 // The registry reads only regular files within the limit of
 // [WithLoadLimit], as [File] describes. The registry reads through root,
@@ -301,7 +299,8 @@ func NewAccess(opts ...AccessOption) (*Access, error) {
 // # Keys and URLs
 //
 // [Ref.Key], the cache, and the URL that a $ref resolves against stay
-// the same as under [Unrestricted]. Each error names the path on disk.
+// the same as under the Access from [Unrestricted]. Each error names the
+// path on disk.
 func AllowRoot(root *os.Root) AccessOption {
 	return func(c *accessConfig) error {
 		if root == nil {
@@ -378,17 +377,18 @@ func AllowAnyURL() AccessOption {
 // which is a Ref from [RefBeside] or [Directive]. Without the option,
 // such a Ref fails to load with [ErrAccessNotSet], and the registry does
 // not read or fetch anything for it. A program whose documents come from
-// its own user passes [Unrestricted]. A program whose documents live in a
-// file system passes [NoAccess]. The Untrusted Documents section of the
-// package documentation covers documents from another trust domain.
+// its own user passes the Access from [Unrestricted]. A program whose
+// documents live in a file system passes the Access from [NoAccess]. The
+// Untrusted Documents section of the package documentation covers
+// documents from another trust domain.
 //
 // The option does not gate the Refs that the resolvers of the program
 // name, such as a Ref from [File], [URL], or [FileOrURL]. It does not
 // gate a Ref that a
 // [go.jacobcolvin.com/niceyaml/schema/schemastore.Store] names from its
 // catalog either. A registry without the option loads them, and the
-// documents that their $refs and redirects name, as it does under
-// Unrestricted.
+// documents that their $refs and redirects name, as it does under the
+// Access from [Unrestricted].
 //
 // The registry tells the two kinds of Refs apart only by the mark of
 // RefBeside. A resolver that reads a reference from a document and

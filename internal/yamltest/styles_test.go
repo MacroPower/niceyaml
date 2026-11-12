@@ -94,7 +94,7 @@ func TestNewPrinters(t *testing.T) {
 		"plain defaults": {newPrinter: yamltest.NewPlainPrinter, want: "a: 1"},
 		"plain option after the defaults": {
 			newPrinter: yamltest.NewPlainPrinter,
-			opts:       []printer.Option{printer.WithGutter(printer.LineNumberGutter)},
+			opts:       []printer.Option{printer.WithGutter(printer.LineNumberGutter())},
 			want:       "   1 a: 1",
 		},
 	}

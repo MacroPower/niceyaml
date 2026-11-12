@@ -3228,7 +3228,7 @@ func TestError_Width(t *testing.T) {
 	// Bare creates a printer with no gutter or container that wraps at width.
 	bare := func(width int) *printer.Printer {
 		return printer.New(
-			printer.WithGutter(printer.NoGutter),
+			printer.WithGutter(printer.NoGutter()),
 			printer.WithContainerStyle(lipgloss.NewStyle()),
 			printer.WithWrapWidth(width),
 		)
@@ -8154,12 +8154,12 @@ func TestSourceError_Document(t *testing.T) {
 			index: 1,
 		},
 		"syntax error from the document that holds it": {
-			err:   brokenDocs[1].Validate(t.Context(), niceyaml.NoValidator),
+			err:   brokenDocs[1].Validate(t.Context(), niceyaml.NoValidator()),
 			want:  brokenDocs[1],
 			index: 1,
 		},
 		"syntax error from the document that parsed together with its own": {
-			err:   together[0].Validate(t.Context(), niceyaml.NoValidator),
+			err:   together[0].Validate(t.Context(), niceyaml.NoValidator()),
 			want:  together[1],
 			index: 1,
 		},
@@ -8212,7 +8212,7 @@ func TestSourceError_Document(t *testing.T) {
 		// A syntax error, a violation in a document that parsed, and an
 		// error bound to no source, which has no binding to read.
 		err := errors.Join(
-			broken.ValidateDocuments(t.Context(), niceyaml.NoValidator),
+			broken.ValidateDocuments(t.Context(), niceyaml.NoValidator()),
 			brokenDocs[2].Bind(yamltest.ErrorAt("bad c", "c")),
 			errors.New("schema server unreachable"),
 		)
@@ -13204,7 +13204,10 @@ func TestIsInvalid(t *testing.T) {
 		)
 	}
 
-	byDirective := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(schema.Directive()))
+	byDirective := schema.NewRegistry(
+		schema.WithAccess(schema.Unrestricted()),
+		schema.WithResolvers(schema.Directive()),
+	)
 
 	doc := yamltest.FirstDocument(t, input)
 	hours := yamltest.At(t, doc, hoursPath)
@@ -13630,7 +13633,7 @@ func TestIsInvalid(t *testing.T) {
 		},
 		"no matching schema with reasons": {
 			err: validated(
-				schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(schema.Directive())),
+				schema.NewRegistry(schema.WithAccess(schema.Unrestricted()), schema.WithResolvers(schema.Directive())),
 			),
 			is:   schema.ErrNoDirective,
 			want: true,

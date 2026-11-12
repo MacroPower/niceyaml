@@ -324,7 +324,8 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry, ex
 // --offline flags. Each schema that the run reads from disk must lie under
 // the directory of root, or anywhere when root is nil. Offline, the Access
 // allows no URL. Otherwise it allows every HTTP and HTTPS URL. Without
-// either flag, the Access allows what [schema.Unrestricted] allows.
+// either flag, the Access allows what the Access from
+// [schema.Unrestricted] allows.
 func newAccess(root *os.Root, offline bool) (*schema.Access, error) {
 	fileOpt := schema.AllowAnyFile()
 	if root != nil {

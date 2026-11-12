@@ -38,8 +38,8 @@ var (
 // detect the background passes true. A printer without styles renders
 // with that same dark palette.
 //
-// [go.jacobcolvin.com/niceyaml/style/theme.Charm] paints the dark palette
-// on a Pepper surface, and
+// The theme from [go.jacobcolvin.com/niceyaml/style/theme.Charm] paints
+// the dark palette on a Pepper surface, and the theme from
 // [go.jacobcolvin.com/niceyaml/style/theme.CharmLight] paints the light
 // palette on a Salt surface.
 //

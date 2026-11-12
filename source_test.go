@@ -2480,7 +2480,7 @@ func TestSource_File_ErrEncoding(t *testing.T) {
 			_, err = source.Decode[any](t.Context())
 			require.ErrorIs(t, err, niceyaml.ErrEncoding)
 
-			err = source.ValidateDocuments(t.Context(), niceyaml.NoValidator)
+			err = source.ValidateDocuments(t.Context(), niceyaml.NoValidator())
 			require.ErrorIs(t, err, niceyaml.ErrEncoding)
 		})
 	}
@@ -2565,7 +2565,7 @@ func TestSource_AllDocuments(t *testing.T) {
 		assert.Same(t, all[0].Err(), all[1].Err())
 
 		// ValidateDocuments reports the error both documents return once.
-		assert.Same(t, all[0].Err(), source.ValidateDocuments(t.Context(), niceyaml.NoValidator))
+		assert.Same(t, all[0].Err(), source.ValidateDocuments(t.Context(), niceyaml.NoValidator()))
 
 		// The one error is bound to the document that holds its location,
 		// whichever of the two returns it.
@@ -3516,7 +3516,7 @@ func TestSource_ValidateDocuments(t *testing.T) {
 		})
 	}
 
-	t.Run("NoValidator returns the error File returns", func(t *testing.T) {
+	t.Run("NoValidator() returns the error File returns", func(t *testing.T) {
 		t.Parallel()
 
 		tcs := map[string]string{
@@ -3544,7 +3544,7 @@ func TestSource_ValidateDocuments(t *testing.T) {
 
 		// A validator that passes every Node of its own returns the same.
 		validators := map[string]niceyaml.Validator{
-			"NoValidator":   niceyaml.NoValidator,
+			"NoValidator()": niceyaml.NoValidator(),
 			"ValidatorFunc": niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error { return nil }),
 		}
 
@@ -3639,8 +3639,8 @@ func TestSource_ValidateDocuments(t *testing.T) {
 			// The message of each binding the result holds, in file order.
 			want []string
 		}{
-			"NoValidator reports the syntax alone": {
-				v:    niceyaml.NoValidator,
+			"NoValidator() reports the syntax alone": {
+				v:    niceyaml.NoValidator(),
 				want: []string{"f.yaml:3:7: " + unclosedSequence},
 			},
 			"one validator": {
@@ -4126,8 +4126,8 @@ func TestSource_ValidateDocuments_Context(t *testing.T) {
 
 		assert.Same(t, source, yamltest.RequireSourceError(t, err).Source())
 
-		// With NoValidator, the ended ctx still fails the call.
-		err = source.ValidateDocuments(ctx, niceyaml.NoValidator)
+		// With the Validator from NoValidator, the ended ctx still fails the call.
+		err = source.ValidateDocuments(ctx, niceyaml.NoValidator())
 		require.ErrorIs(t, err, context.Canceled)
 		assert.Equal(t, []string{"f.yaml: context canceled"}, bindingMessages(err))
 	})
@@ -5151,7 +5151,7 @@ func TestNewSourceFromFile_DotDotAfterSymlink(t *testing.T) {
 			assert.Equal(t, tc.wantFilePath, source.FilePath())
 
 			reg := schema.NewRegistry(
-				schema.WithAccess(schema.Unrestricted),
+				schema.WithAccess(schema.Unrestricted()),
 				schema.WithResolvers(schema.Directive()),
 			)
 
@@ -6381,7 +6381,7 @@ func TestWithReferences(t *testing.T) {
 					"base: &base",
 					"  port: 0",
 				),
-				validator: niceyaml.NoValidator,
+				validator: niceyaml.NoValidator(),
 				want:      "app.yaml:2:9: $.server.port: port must be at least 1",
 			},
 			"key the reference leaves out": {
@@ -6389,7 +6389,7 @@ func TestWithReferences(t *testing.T) {
 					"base: &base",
 					"  host: localhost",
 				),
-				validator: niceyaml.NoValidator,
+				validator: niceyaml.NoValidator(),
 				want:      "app.yaml:2:9: $.server.port: port must be at least 1",
 			},
 			"violation of a schema": {
@@ -8409,7 +8409,7 @@ func TestWithByteLimit(t *testing.T) {
 		require.True(t, ok)
 		assert.Same(t, doc, at)
 
-		err := source.ValidateDocuments(t.Context(), niceyaml.NoValidator)
+		err := source.ValidateDocuments(t.Context(), niceyaml.NoValidator())
 		assert.Same(t, fileErr, err)
 	})
 

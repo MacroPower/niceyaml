@@ -22,8 +22,8 @@ func main() {
 	// The box fills the rectangle behind the rows with the surface of the
 	// theme, so every row shows the same background.
 	p := printer.New(
-		printer.WithStyles(theme.Charm),
-		printer.WithGutter(printer.DefaultGutter),
+		printer.WithStyles(theme.Charm()),
+		printer.WithGutter(printer.DefaultGutter()),
 		printer.WithBox(true),
 	)
 

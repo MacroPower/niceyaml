@@ -97,7 +97,7 @@ func handleAs(handler fang.ErrorHandler, profile colorprofile.Profile, err error
 func xmlPrinter() *printer.Printer {
 	return printer.New(
 		printer.WithStyles(yamltest.NewXMLStyles()),
-		printer.WithGutter(printer.NoGutter),
+		printer.WithGutter(printer.NoGutter()),
 		printer.WithContainerStyle(lipgloss.NewStyle()),
 	)
 }
@@ -370,7 +370,7 @@ func TestNewErrorHandler_WithLightDarkStyles(t *testing.T) {
 
 	err := yamltest.Bind(t, nameValueSource(), errAt("bad name", "$.name~"))
 
-	charm := theme.Charm.Styles()
+	charm := theme.Charm().Styles()
 	plainCharm := charm.With(style.WithSurface(nil))
 
 	// The light styles tag only errors, so output in them differs from
@@ -394,7 +394,7 @@ func TestNewErrorHandler_WithLightDarkStyles(t *testing.T) {
 			dark:  (*style.Styles)(nil),
 			want:  style.Default(true),
 		},
-		"theme without its surface":          {dark: theme.Charm, want: plainCharm},
+		"theme without its surface":          {dark: theme.Charm(), want: plainCharm},
 		"styles value without its surface":   {dark: charm, want: plainCharm},
 		"styles pointer without its surface": {dark: &charm, want: plainCharm},
 	}

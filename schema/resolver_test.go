@@ -36,7 +36,7 @@ func loadFor(t *testing.T, r schema.Resolver, doc *niceyaml.Node) (string, []byt
 	ref, err := r.Resolve(t.Context(), doc)
 	require.NoError(t, err)
 
-	data, err := schema.NewRegistry(schema.WithAccess(schema.Unrestricted)).Load(t.Context(), ref)
+	data, err := schema.NewRegistry(schema.WithAccess(schema.Unrestricted())).Load(t.Context(), ref)
 
 	return ref.Key(), data, err //nolint:wrapcheck // Tests inspect the loader's own error.
 }
@@ -457,7 +457,7 @@ func TestRef_NamedAt(t *testing.T) {
 		return ref.NamedAt(doc, at), nil
 	})
 
-	reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(field))
+	reg := schema.NewRegistry(schema.WithAccess(schema.Unrestricted()), schema.WithResolvers(field))
 
 	t.Run("binds the error of the schema at the field", func(t *testing.T) {
 		t.Parallel()
@@ -494,7 +494,7 @@ func TestRef_NamedAt(t *testing.T) {
 		ref, err := field.Resolve(t.Context(), base.Documents()[0])
 		require.NoError(t, err)
 
-		reused := schema.NewRegistry(schema.WithAccess(schema.Unrestricted), schema.WithResolvers(ref))
+		reused := schema.NewRegistry(schema.WithAccess(schema.Unrestricted()), schema.WithResolvers(ref))
 
 		other := niceyaml.NewSourceFromString("a: 1\n$schema: ./missing.json\n", niceyaml.WithName("other.yaml"))
 

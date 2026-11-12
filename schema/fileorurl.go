@@ -237,9 +237,9 @@ func fileOrURL(baseDir, ref string, physical bool) (Ref, error) {
 // option, [Registry.Schema] and [Registry.Load] fail with
 // [ErrAccessNotSet]. The rule covers a document in a file system too,
 // because the URLs that the document and its schema name go through the
-// Access. [NoAccess] serves such a document. The Untrusted Documents
-// section of the package documentation gives the registry options that
-// confine a reference from another trust domain.
+// Access. The Access from [NoAccess] serves such a document. The
+// Untrusted Documents section of the package documentation gives the
+// registry options that confine a reference from another trust domain.
 func RefBeside(doc *niceyaml.Node, ref string) (Ref, error) {
 	r, err := refBeside(doc, ref)
 	if err != nil {
