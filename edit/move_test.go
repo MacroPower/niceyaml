@@ -242,6 +242,18 @@ func TestNode_Move(t *testing.T) {
 				"  seats: 40",
 			),
 		},
+		"entry after a double-quoted string with a line like a comment": {
+			before: stringtest.LinesLF("m:", `  a: "x`, `  # y"`, "  b: 1"),
+			moves:  [][2]paths.Path{{paths.MustParse("$.m.b"), paths.Doc().Child("z")}},
+			want:   stringtest.LinesLF("m:", `  a: "x`, `  # y"`, "z: 1"),
+			value:  map[string]any{"m": map[string]any{"a": "x # y"}, "z": uint64(1)},
+		},
+		"entry after a single-quoted string with a line like a comment": {
+			before: stringtest.LinesLF("m:", "  a: 'x", "  # y'", "  b: 1"),
+			moves:  [][2]paths.Path{{paths.MustParse("$.m.b"), paths.Doc().Child("z")}},
+			want:   stringtest.LinesLF("m:", "  a: 'x", "  # y'", "z: 1"),
+			value:  map[string]any{"m": map[string]any{"a": "x # y"}, "z": uint64(1)},
+		},
 		"with comments and a block value": {
 			before: stringtest.LinesLF(
 				"listen:",

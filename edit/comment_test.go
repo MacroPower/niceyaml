@@ -88,6 +88,23 @@ func TestNode_HeadComment(t *testing.T) {
 			before: stringtest.LinesLF("? a", ": - x"),
 			path:   paths.MustParse("$.a[0]"),
 		},
+		"line of a double-quoted string above an entry": {
+			before: stringtest.LinesLF("m:", `  a: "x`, `  # y"`, "  b: 1"),
+			path:   paths.MustParse("$.m.b"),
+		},
+		"line of a single-quoted string above an entry": {
+			before: stringtest.LinesLF("m:", "  a: 'x", "  # y'", "  b: 1"),
+			path:   paths.MustParse("$.m.b"),
+		},
+		"line of a double-quoted string above an item": {
+			before: stringtest.LinesLF("l:", `  - "x`, `  # y"`, "  - b"),
+			path:   paths.MustParse("$.l[1]"),
+		},
+		"lines below a quoted string above an entry": {
+			before: stringtest.LinesLF("m:", `  a: "x`, `  # y"`, "  # note", "  b: 1"),
+			path:   paths.MustParse("$.m.b"),
+			want:   []string{"note"},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -499,6 +516,23 @@ func TestNode_SetHeadComment(t *testing.T) {
 			lines:  []string{"new"},
 			err:    "which goes through a merge key that merges a sequence that holds a mapping",
 			is:     edit.ErrUnsupported,
+		},
+		"after a double-quoted string with a line like a comment": {
+			before: stringtest.LinesLF("m:", `  a: "x`, `  # y"`, "  b: 1"),
+			path:   paths.MustParse("$.m.b"),
+			lines:  []string{"h"},
+			want:   stringtest.LinesLF("m:", `  a: "x`, `  # y"`, "  # h", "  b: 1"),
+		},
+		"after a single-quoted string with a line like a comment": {
+			before: stringtest.LinesLF("m:", "  a: 'x", "  # y'", "  b: 1"),
+			path:   paths.MustParse("$.m.b"),
+			lines:  []string{"h"},
+			want:   stringtest.LinesLF("m:", "  a: 'x", "  # y'", "  # h", "  b: 1"),
+		},
+		"remove the lines below a quoted string": {
+			before: stringtest.LinesLF("m:", `  a: "x`, `  # y"`, "  # old", "  b: 1"),
+			path:   paths.MustParse("$.m.b"),
+			want:   stringtest.LinesLF("m:", `  a: "x`, `  # y"`, "  b: 1"),
 		},
 		"entry beside a merge of a sequence of aliases": {
 			// A SetKey of the entry changes the keys of the merge and

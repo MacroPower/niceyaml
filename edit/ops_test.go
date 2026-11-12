@@ -659,6 +659,18 @@ func TestNode_Remove(t *testing.T) {
 			path:   paths.Doc().Child("a"),
 			err:    "test.yaml:4:4: $.b: cafe.jacobcolvin.com/v1 removes $.a, which this alias reads, and cafe does not write a copy of a value at its alias",
 		},
+		"entry after a double-quoted string with a line like a comment": {
+			before: stringtest.LinesLF("m:", `  a: "x`, `  # y"`, "  b: 1"),
+			path:   paths.MustParse("$.m.b"),
+			want:   stringtest.LinesLF("m:", `  a: "x`, `  # y"`),
+			value:  map[string]any{"m": map[string]any{"a": "x # y"}},
+		},
+		"entry after a single-quoted string with a line like a comment": {
+			before: stringtest.LinesLF("m:", "  a: 'x", "  # y'", "  b: 1"),
+			path:   paths.MustParse("$.m.b"),
+			want:   stringtest.LinesLF("m:", "  a: 'x", "  # y'"),
+			value:  map[string]any{"m": map[string]any{"a": "x # y"}},
+		},
 		"entry with its comments": {
 			before: stringtest.LinesLF(
 				"spec:",

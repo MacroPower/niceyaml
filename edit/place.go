@@ -1143,7 +1143,8 @@ func (d *Doc) isBlankLine(line int) bool {
 }
 
 // commentColumn returns the column where line starts a comment, and true,
-// for a line that holds only a comment.
+// for a line that holds only a comment. The "#" that starts a line of a
+// quoted string is a byte of the string, so that line holds no comment.
 func (d *Doc) commentColumn(line int) (int, bool) {
 	text := d.lineText(line)
 	trimmed := strings.TrimLeft(text, " \t")
@@ -1152,7 +1153,14 @@ func (d *Doc) commentColumn(line int) (int, bool) {
 		return 0, false
 	}
 
-	return len(text) - len(trimmed), true
+	col := len(text) - len(trimmed)
+
+	tk := d.src.Lines().TokenAt(positionIn(d.cur, d.curLines, d.lineStart(line)+col))
+	if tk != nil && tk.Type != token.CommentType {
+		return 0, false
+	}
+
+	return col, true
 }
 
 // indentOf returns the number of spaces that start line.
