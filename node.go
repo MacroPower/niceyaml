@@ -1355,8 +1355,10 @@ func (n *Node) bindAlias(path paths.Path, reason error) (error, bool) {
 // location, as the Errors section of the package documentation describes.
 // A Node from [Node.At] or [Node.Nodes] binds a problem without a location
 // at its own value, as the Scoped Nodes section describes. The message of
-// an error without a location names the source, and the document in a
-// source of several, as in "name: document 3: msg". To keep several errors
+// an error without a location names the source. In a source of several
+// documents, it also names the first line of the document and the
+// document, as in "name:11: document 3: msg". [SourceError.DocumentSpan]
+// reports that line. To keep several errors
 // as separate bindings, bind each one before joining them.
 //
 // Bind returns nil for a nil err, and for a nil [*Error] or

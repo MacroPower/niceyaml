@@ -14016,7 +14016,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 
 		err := docs[1].DecodeInto(t.Context(), &cfg)
 		require.EqualError(t, err, stringtest.JoinLF(
-			"app.yaml: document 2: 2 problems",
+			"app.yaml:2: document 2: 2 problems",
 			"app.yaml:3:11: $.replicas: expected integer, got string",
 			"app.yaml:4:10: $.timeout: expected integer, got string",
 		))

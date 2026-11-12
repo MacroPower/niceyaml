@@ -3388,7 +3388,7 @@ func TestRegistry_Load_Checks(t *testing.T) {
 
 				return item.Bind(errors.New("no Hours serve kanelbulle"))
 			},
-			err: "config/menu.yaml: document 1: no Hours serve kanelbulle",
+			err: "config/menu.yaml:1: document 1: no Hours serve kanelbulle",
 		},
 		"warning": {
 			check: func(_ context.Context, set *manifest.Set) error {
@@ -5782,10 +5782,10 @@ func TestRegistry_Load_SchemaTypeFields(t *testing.T) {
 			doc:    stream,
 			err: stringtest.JoinLF(
 				"brew.yaml: 2 errors",
-				"|-- brew.yaml: document 1: this program cannot tell whether its schema of Brew v2 reads $.kind",
+				"|-- brew.yaml:1: document 1: this program cannot tell whether its schema of Brew v2 reads $.kind",
 				"|   |-- "+why,
 				"|   `-- "+remedy("$.kind"),
-				"`-- brew.yaml: document 2: this program cannot tell whether its schema of Brew v2 reads $.kind",
+				"`-- brew.yaml:5: document 2: this program cannot tell whether its schema of Brew v2 reads $.kind",
 				"    |-- "+why,
 				"    `-- "+remedy("$.kind"),
 			),

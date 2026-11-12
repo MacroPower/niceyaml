@@ -5645,10 +5645,10 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 
 		err := docs[2].Validate(t.Context(), reg)
 		require.ErrorIs(t, err, schema.ErrNoMatch)
-		require.EqualError(t, err, "m.yaml: document 3: no matching schema")
+		require.EqualError(t, err, "m.yaml:4: document 3: no matching schema")
 
 		wantTree := stringtest.JoinLF(
-			"m.yaml: document 3: no matching schema",
+			"m.yaml:4: document 3: no matching schema",
 			"`-- no schema directive",
 		)
 		assert.Equal(t, wantTree, niceyaml.FormatError(err, niceyaml.WithContextLines(0)))

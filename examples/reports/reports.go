@@ -176,9 +176,14 @@ func workflowCommand(level string, node niceyaml.ErrorTree, title string) string
 		props = append(props, "file="+propertyEscaper.Replace(name))
 	}
 
-	// A position counts from 0, and a workflow command counts from 1.
+	// A position counts from 0, and a workflow command counts from 1. A
+	// problem bound to a whole document, such as a document that no schema
+	// matches, does not have a position. The command gives it the first
+	// line of its document and no column.
 	if pos, ok := node.Position(); ok {
 		props = append(props, fmt.Sprintf("line=%d", pos.Line+1), fmt.Sprintf("col=%d", pos.Col+1))
+	} else if span, ok := node.DocumentSpan(); ok {
+		props = append(props, fmt.Sprintf("line=%d", span.Start+1))
 	}
 
 	if title != "" {

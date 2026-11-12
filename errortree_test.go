@@ -940,7 +940,7 @@ func TestErrorTree_New(t *testing.T) {
 		},
 		"wrapper around a join of bindings in a later document names the document": {
 			err: second.Bind(fmt.Errorf("ctx: %w", errors.Join(second.Bind(badA()), second.Bind(badB())))),
-			want: textNode("m.yaml: document 2: ctx:",
+			want: textNode("m.yaml:2: document 2: ctx:",
 				textNode("3:4: $.a: bad a"),
 				textNode("4:4: $.b: bad b"),
 			),
@@ -1311,7 +1311,7 @@ func TestErrorTree_Row(t *testing.T) {
 		"binding without a position names its document": {
 			err: second.Bind(niceyaml.NewError("bad x", niceyaml.AtPath(paths.Current().Child("x").IndexAll()))),
 			want: []niceyaml.ErrorRow{
-				{Location: "m.yaml: document 2", Path: "$.x[*]", Text: "bad x"},
+				{Location: "m.yaml:2: document 2", Path: "$.x[*]", Text: "bad x"},
 			},
 		},
 		"unbound warning": {
@@ -4184,6 +4184,10 @@ func TestErrorTree_Accessors(t *testing.T) {
 		index, ok := node.DocumentIndex()
 		require.True(t, ok)
 		assert.Zero(t, index)
+
+		span, ok := node.DocumentSpan()
+		require.True(t, ok)
+		assert.Equal(t, docs[0].Span(), span)
 	})
 
 	t.Run("a node reads the file path of its source", func(t *testing.T) {
@@ -4228,6 +4232,10 @@ func TestErrorTree_Accessors(t *testing.T) {
 		index, ok := node.DocumentIndex()
 		require.True(t, ok)
 		assert.Equal(t, 1, index)
+
+		span, ok := node.DocumentSpan()
+		require.True(t, ok)
+		assert.Equal(t, docs[1].Span(), span)
 	})
 
 	t.Run("a node bound to no source returns zero values", func(t *testing.T) {
@@ -4261,6 +4269,10 @@ func TestErrorTree_Accessors(t *testing.T) {
 				index, ok := tc.node.DocumentIndex()
 				assert.False(t, ok)
 				assert.Zero(t, index)
+
+				span, ok := tc.node.DocumentSpan()
+				assert.False(t, ok)
+				assert.Zero(t, span)
 			})
 		}
 	})

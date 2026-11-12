@@ -817,7 +817,11 @@ func WithExcerpts(enabled bool) SourceOption {
 // place that no path names, such as a comment or a key that is a
 // collection, keeps only the name of the Source in front of its message.
 // [SourceError.Position], [SourceError.Range], [SourceError.Nearest], and
-// [SourceError.Excerpt] report false for it. [SourceError.Unresolved]
+// [SourceError.Excerpt] report false for it. [SourceError.DocumentSpan]
+// reports false for every error bound in such a Source, although
+// [SourceError.DocumentIndex] reports its document. The message of an
+// error without a position names its document without a line, as in
+// "environment: document 2: msg". [SourceError.Unresolved]
 // returns nil, because the location resolved. A child of the error that
 // does not carry a location binds at the same node, as it does in any
 // Source.

@@ -3727,10 +3727,10 @@ func TestSource_ValidateDocuments_SeveralDocuments(t *testing.T) {
 				"x: [",
 			),
 			want: stringtest.JoinLF(
-				"f.yaml: document 1: 2 schema violations",
+				"f.yaml:1: document 1: 2 schema violations",
 				"f.yaml:1:4: $.a: string length 2 is greater than 1",
 				"f.yaml:2:4: $.b: string length 2 is greater than 1",
-				"f.yaml: document 2: 2 schema violations",
+				"f.yaml:3: document 2: 2 schema violations",
 				"f.yaml:4:4: $.a: string length 2 is greater than 1",
 				"f.yaml:5:4: $.b: string length 2 is greater than 1",
 				"f.yaml:7:4: "+unclosedSequence,
@@ -3895,7 +3895,7 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 		"registry, headers alone": {
 			v:      registry,
 			input:  stringtest.LinesLF("---", "---"),
-			strict: []string{"f.yaml: document 1: " + noMatch},
+			strict: []string{"f.yaml:1: document 1: " + noMatch},
 		},
 		"schema, template that renders a comment alone": {
 			v:      manifest,
@@ -3917,8 +3917,8 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 		"registry, explicit null": {
 			v:      registry,
 			input:  stringtest.LinesLF("kind: Pod", "--- null"),
-			strict: []string{"f.yaml: document 2: " + noMatch},
-			want:   []string{"f.yaml: document 2: " + noMatch},
+			strict: []string{"f.yaml:2: document 2: " + noMatch},
+			want:   []string{"f.yaml:2: document 2: " + noMatch},
 		},
 		"schema, alias with no anchor": {
 			v:      manifest,
@@ -3937,8 +3937,8 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 		"registry, document below an empty one": {
 			v:      registry,
 			input:  spaced,
-			strict: []string{"f.yaml: document 3: " + noMatch},
-			want:   []string{"f.yaml: document 3: " + noMatch},
+			strict: []string{"f.yaml:3: document 3: " + noMatch},
+			want:   []string{"f.yaml:3: document 3: " + noMatch},
 		},
 		"registry, syntax error beside an empty document": {
 			v: registry,
@@ -3950,8 +3950,8 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 				"---",
 				"kind: B",
 			),
-			strict: []string{"f.yaml:3:7: " + unclosedSequence, "f.yaml: document 4: " + noMatch},
-			want:   []string{"f.yaml:3:7: " + unclosedSequence, "f.yaml: document 4: " + noMatch},
+			strict: []string{"f.yaml:3:7: " + unclosedSequence, "f.yaml:5: document 4: " + noMatch},
+			want:   []string{"f.yaml:3:7: " + unclosedSequence, "f.yaml:5: document 4: " + noMatch},
 		},
 		// A document that did not parse is not empty, so the empty one
 		// beside it passes.
@@ -4147,7 +4147,7 @@ func TestSource_ValidateDocuments_Context(t *testing.T) {
 		}{
 			"validator that reports it": {
 				result: func(ctx context.Context) error { return ctx.Err() },
-				want:   []string{"f.yaml:1:1: $: bad", "f.yaml: document 2: context canceled"},
+				want:   []string{"f.yaml:1:1: $: bad", "f.yaml:2: document 2: context canceled"},
 			},
 			"validator that passes": {
 				result: func(context.Context) error { return nil },
@@ -4460,7 +4460,7 @@ func TestSource_Bind(t *testing.T) {
 			"column before the first binds to the document holding the line": {
 				pos:        position.New(2, -3),
 				doc:        1,
-				want:       "two.yaml: document 2: bad",
+				want:       "two.yaml:2: document 2: bad",
 				unresolved: niceyaml.ErrOutOfRange,
 			},
 		}
@@ -7852,6 +7852,25 @@ func TestWithPositions(t *testing.T) {
 
 		err := source.AllDocuments()[1].Bind(niceyaml.NewError("bad port", niceyaml.AtPath(paths.Doc().Child("port"))))
 		assert.Equal(t, "env: document 2: $.port: bad port", niceyaml.FormatError(err))
+
+		// A problem about the whole document names the document without
+		// its first line.
+		whole := source.AllDocuments()[1].Bind(errors.New("no matching schema"))
+		assert.Equal(t, "env: document 2: no matching schema", whole.Error())
+		assert.Equal(t, "env: document 2: no matching schema", niceyaml.FormatError(whole))
+
+		// The lines of the source name nothing the user can find, so the
+		// binding reports no lines of its document, detached or not.
+		for _, e := range []error{err, niceyaml.Detach(err)} {
+			bound := yamltest.RequireSourceError(t, e)
+
+			_, ok := bound.DocumentSpan()
+			assert.False(t, ok)
+
+			index, ok := bound.DocumentIndex()
+			require.True(t, ok)
+			assert.Equal(t, 1, index)
+		}
 	})
 
 	t.Run("a syntax error names the document of its line", func(t *testing.T) {

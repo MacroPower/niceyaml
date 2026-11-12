@@ -33,11 +33,13 @@ import (
 //
 // A detached binding keeps its message, its position, its range, its
 // path, and its nearest path. It keeps the reason its location did not
-// resolve and the index of its document. It keeps the name and the file
-// path of its source, which [SourceError.Name] and [SourceError.FilePath]
-// report. [SourceError.Source] returns nil for it, and [SourceError.Node]
-// and [SourceError.Document] report false, as they do for a binding
-// outside any document.
+// resolve, and the index and the lines of its document, which
+// [SourceError.DocumentIndex] and [SourceError.DocumentSpan] report. It
+// keeps the name and the file path of its source, which
+// [SourceError.Name] and [SourceError.FilePath] report.
+// [SourceError.Source] returns nil for it, and [SourceError.Node] and
+// [SourceError.Document] report false, as they do for a binding outside
+// any document.
 //
 // Detach detaches each binding below a binding too. The copy keeps the
 // errors the binding wraps, so [errors.Is], [errors.As], [IsInvalid], and
@@ -649,7 +651,13 @@ func (d *detacher) keep(x *SourceError) (*keptSource, *keptDocument) {
 
 	doc, ok := d.docs[x.node]
 	if !ok {
-		doc = &keptDocument{index: x.node.DocumentIndex(), label: documentName(x.node), path: x.node.Path()}
+		doc = &keptDocument{
+			index: x.node.DocumentIndex(),
+			label: documentName(x.node),
+			path:  x.node.Path(),
+			span:  x.node.Document().Span(),
+			spans: x.source.ReportsPositions(),
+		}
 		d.docs[x.node] = doc
 	}
 
@@ -822,8 +830,13 @@ type keptDocument struct {
 	label string
 	// The path of the Node, as [Node.Path] reports it.
 	path paths.Path
+	// The lines of the document, as [SourceError.DocumentSpan] reports them.
+	span position.Span
 	// The index of the document among every document of its file.
 	index int
+	// Whether [SourceError.DocumentSpan] reports span, which it does not
+	// for a source with positions off.
+	spans bool
 }
 
 // copyLines returns copies of the lines of src at held, and the index of

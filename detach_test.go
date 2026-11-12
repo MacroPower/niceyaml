@@ -1446,6 +1446,12 @@ func TestDetach_Bindings(t *testing.T) {
 			assert.Equal(t, tc.wantDocument, ok)
 			assert.Equal(t, tc.wantIndex, index)
 
+			liveSpan, liveOK := live.DocumentSpan()
+			span, ok := bound.DocumentSpan()
+			assert.Equal(t, tc.wantDocument, ok)
+			assert.Equal(t, liveOK, ok)
+			assert.Equal(t, liveSpan, span)
+
 			assert.Equal(t, live.Message(), bound.Message())
 
 			livePath, liveOK := live.Path()

@@ -36,7 +36,9 @@ import (
 // JSON lines, CI annotations, and editor diagnostics. They read
 // [ErrorTree.Message], [ErrorTree.Context], and [ErrorTree.Path] from the
 // node, and [ErrorTree.Name], [ErrorTree.FilePath], and
-// [ErrorTree.Position] from its binding. [Problems] yields the nodes that
+// [ErrorTree.Position] from its binding. A problem bound to a whole
+// document does not have a position, so such a report takes its line from
+// [ErrorTree.DocumentSpan] instead. [Problems] yields the nodes that
 // such a report lists, one per problem, and [ErrorTree.All] yields every
 // node of the tree. [ErrorTree.MarshalJSON] encodes a node as a JSON object
 // of the message, the context, the name, the file path, and the text of the
@@ -99,10 +101,13 @@ type ErrorTree struct {
 //   - The root of a binding reads "name:line:col".
 //   - Each child bound to the same source drops the name and reads
 //     "line:col".
-//   - A binding without a position reads "name: document 2", or either
-//     part alone.
+//   - A binding without a position reads "name". In a source of several
+//     documents, it names its document behind the first line of that
+//     document, as "name:4: document 2". A Source with positions off
+//     leaves the line out, as in "name: document 2". A source without a
+//     name drops the name, as in "4: document 2".
 //   - Each child in another document of the same source names that
-//     document, as "document 2".
+//     document, as "4: document 2".
 //   - A node that is not bound to a source does not have a location.
 //
 // The line and column of a location count from 1, as an editor does.
@@ -122,8 +127,8 @@ type ErrorTree struct {
 // The zero ErrorRow stands for a node that does not have text.
 type ErrorRow struct {
 	// Location is the place of the problem as the row shows it, without the
-	// colon after it, such as "cfg.yaml:3:6", "3:6", or "cfg.yaml: document
-	// 1". It is empty for a row that does not show a location.
+	// colon after it, such as "cfg.yaml:3:6", "3:6", or "cfg.yaml:4:
+	// document 2". It is empty for a row that does not show a location.
 	Location string
 	// Severity is "warning" for the row of a warning that shows the label,
 	// and empty for every other row. A warning detail shows the label too.
@@ -193,7 +198,8 @@ func (t ErrorTree) Label() string {
 // wrapper follows the position and the path, although the message that
 // [fmt.Errorf] builds for the wrapper holds it in front. Each child reads
 // "line:col:" without the name. A child bound to a document other than
-// that of its parent names its document instead, as "document 2: msg".
+// that of its parent names its document and the first line of it
+// instead, as "4: document 2: msg".
 // The children of a binding sort by position within their source, with
 // the sources in the order they first appear and the children whose
 // location did not resolve last. Outside a binding, children keep the
@@ -1152,6 +1158,16 @@ func (t ErrorTree) DocumentIndex() (int, bool) {
 	return t.Bound.DocumentIndex()
 }
 
+// DocumentSpan returns the lines of the document the node is bound to and
+// true, as [SourceError.DocumentSpan] returns them for Bound. A report
+// reads the first line of the span for a node that [ErrorTree.Position]
+// reports false for, such as a document that no schema matches. It returns
+// the zero Span and false where [ErrorTree.DocumentIndex] reports false,
+// and for a binding in a Source with positions off.
+func (t ErrorTree) DocumentSpan() (position.Span, bool) {
+	return t.Bound.DocumentSpan()
+}
+
 // errorTreeJSON holds the fields that [ErrorTree.MarshalJSON] writes for
 // one node.
 type errorTreeJSON struct {
@@ -1939,8 +1955,8 @@ func appendBoundChildren(kids []positioned, bound *SourceError, named bool) []po
 
 			case !sameDocument(child, parent):
 				// The parent names another document of the source, or
-				// none, so the child keeps the one it wrote.
-				row.Location = child.documentLabel()
+				// none, so the child keeps the one it wrote, with its line.
+				row.Location = child.documentPlace()
 
 			default:
 				row.Location = ""

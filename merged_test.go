@@ -1945,7 +1945,7 @@ func TestNewSourceFromLayers_Context(t *testing.T) {
 		require.Same(t, docs[0].Err(), docs[1].Err())
 
 		merged, err = niceyaml.NewSourceFromLayers(ctx, docs)
-		require.EqualError(t, err, "docs.yaml: document 1: context canceled")
+		require.EqualError(t, err, "docs.yaml:1: document 1: context canceled")
 		require.ErrorIs(t, err, context.Canceled)
 		require.NotErrorIs(t, err, niceyaml.ErrSyntax)
 		assert.Nil(t, merged)
