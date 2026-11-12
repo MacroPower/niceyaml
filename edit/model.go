@@ -986,6 +986,8 @@ func (d *Doc) alignModel(x *model) {
 // returns nil for a node whose Apply returned. A Set, as sets tells, starts
 // as [Doc.startCall] describes.
 func (d *Doc) modelStart(n *Node, named string, sets bool) *modelCall {
+	d.settle()
+
 	if n.ended || !d.applying {
 		return nil
 	}
@@ -1111,9 +1113,36 @@ func (d *Doc) placeCall(x *model, p *place) modelCall {
 	return c
 }
 
-// modelEnd ends c, a call of an edit that returned err, in the model.
+// modelEnd ends c, a call of an edit through a [Node] that returned err,
+// as [Doc.endModel] ends it. A problem that the check after a write finds
+// fails the Apply, as [Doc.failApply] records it, and the method returns
+// nil. The call still leaves the Doc as it found it. A problem that the
+// method found before it wrote comes back from the method.
+func (d *Doc) modelEnd(c *modelCall, err error, change func() bool) error {
+	wrote := err == nil && c != nil
+
+	problem := d.endModel(c, err, change)
+	if wrote && problem != nil {
+		d.failApply(problem)
+
+		return nil
+	}
+
+	return problem
+}
+
+// failApply keeps problem as the problem of the Apply running, unless the
+// Apply has one already. The Apply fails with it after the [Func] returns,
+// whatever the Func returns, as [Doc.endCall] tells.
+func (d *Doc) failApply(problem error) {
+	if d.callErr == nil {
+		d.callErr = problem
+	}
+}
+
+// endModel ends c, a call of an edit that returned err, in the model.
 // When the edit passed, change makes the change of the call in the model,
-// and modelEnd reads the text after the call, as [model.align] describes.
+// and endModel reads the text after the call, as [model.align] describes.
 // The problem of an alias whose value the call changed fails the call. So
 // does a change that the model cannot make, which shows a call that the
 // model does not describe. So do a character that YAML does not allow, as
@@ -1123,7 +1152,7 @@ func (d *Doc) placeCall(x *model, p *place) modelCall {
 // [Doc.undoCall] describes.
 //
 //nolint:contextcheck // The decode of a text whose alias reads another value reads no state that a context carries.
-func (d *Doc) modelEnd(c *modelCall, err error, change func() bool) (problem error) {
+func (d *Doc) endModel(c *modelCall, err error, change func() bool) (problem error) {
 	changed := false
 
 	defer func() {
@@ -1227,18 +1256,15 @@ func (d *Doc) modelEnd(c *modelCall, err error, change func() bool) (problem err
 		return nil
 	}
 
-	d.stuck = d.differProblem(x)
-
-	return d.stuck
+	return d.differProblem(x)
 }
 
 // differProblem returns the problem of a call after which the current text
 // differs from x, the model of the calls. The engine can write a text that
 // does not decode, and a call that the engine wrote wrong can make an alias
-// read another value. Either shows a bug in the engine, so the call fails at
-// once, and each later call of the Apply returns the problem, as [Node]
-// describes. The problem names the first difference. A text that does not
-// decode gives the problem of its decode.
+// read another value. Either shows a bug in the engine, so the problem
+// fails the Apply, as [Doc.Apply] describes. The problem names the first
+// difference. A text that does not decode gives the problem of its decode.
 //
 //nolint:contextcheck // The decode of a text that differs from the model reads no state that a context carries.
 func (d *Doc) differProblem(x *model) error {

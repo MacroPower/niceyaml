@@ -2282,6 +2282,10 @@ func TestNode_Set(t *testing.T) {
 
 			err = applyAt(t, d, tc.path, set)
 
+			requireEachCall(t, d, err, tc.before, opts, func(d *edit.Doc) error {
+				return applyAt(t, d, tc.path, set)
+			})
+
 			switch {
 			case tc.engine:
 				require.ErrorIs(t, err, edit.ErrEngine)

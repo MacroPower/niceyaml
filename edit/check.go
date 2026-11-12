@@ -52,7 +52,7 @@ func (d *Doc) begin(label string) {
 // a later Apply read none of that state, and the state holds the parses of
 // the texts that the calls left.
 func (d *Doc) endCalls() {
-	d.callErr, d.stuck = nil, nil
+	d.callErr = nil
 	d.plain = nil
 	d.lastEdit = nil
 	d.model, d.zones, d.zoneKeys, d.groups = nil, nil, nil, nil
@@ -69,11 +69,19 @@ func (d *Doc) endCalls() {
 
 // endCall ends one call of a [Func] on the node n, and takes err, the
 // error that the Func returned. It returns the problem that fails the
-// Apply. A method of the call can record a problem that matches
-// [ErrEngine], such as the error of a difference. That problem came
-// before err, so it fails the Apply whatever the Func returns. Otherwise
-// endCall binds err at n and returns it, or returns nil for a nil err.
+// Apply. A call can record a problem that fails the Apply whatever the
+// Func returns. Such a problem matches [ErrEngine], or the check after a
+// write found it. It can also be the problem of a Set that waited, or the
+// error of the context of the Apply, as [Doc.replay] records them. That
+// problem came before err, so endCall returns
+// it. Otherwise endCall binds err at n and returns it, or returns nil for
+// a nil err.
 func (d *Doc) endCall(n *Node, err error) error {
+	// A Set that waits can fail the Apply before the error of the Func.
+	if err != nil {
+		d.settle()
+	}
+
 	callErr := d.callErr
 	d.callErr = nil
 

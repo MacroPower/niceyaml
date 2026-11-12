@@ -80,6 +80,8 @@ type Change struct {
 //
 // During an Apply, Changes reads the text as Doc.Text does.
 func (d *Doc) Changes() []Change {
+	d.settle()
+
 	src := d.user.Source()
 	text := src.Text()
 

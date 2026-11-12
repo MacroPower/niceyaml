@@ -33,6 +33,8 @@ func init() {
 // the text, as the check of an Apply does after its last call. A failed
 // write leaves the Doc as it found it, as a failed Apply does.
 func (d *Doc) setField(ctx context.Context, path paths.Path, text string) error {
+	d.settle()
+
 	saved := d.save()
 	x := d.syncModel()
 	d.callStart, d.calling = saved, true
@@ -63,7 +65,7 @@ func (d *Doc) setField(ctx context.Context, path paths.Path, text string) error 
 		d.lastEdit = &editRecord{desc: desc, named: desc, path: path.Key()}
 	}
 
-	err = d.modelEnd(&modelCall{x: x, path: path}, err, change.apply)
+	err = d.endModel(&modelCall{x: x, path: path}, err, change.apply)
 
 	d.checking = true
 

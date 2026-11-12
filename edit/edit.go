@@ -304,10 +304,10 @@ func (e *sentinelError) DetachErrors(detach func(error) error) error {
 // [Doc.Apply] selects. An error fails the Apply, and an error without a
 // location binds at the value of n.
 //
-// Each edit through a [Node] parses and checks the whole text, as
-// [Doc.Apply] describes. Apply checks ctx between calls, not inside one. A
-// Func that makes many edits in one call should check ctx between them and
-// return its error.
+// An edit through a [Node] parses and checks the whole text, unless the
+// edit waits for the edits after it, as [Doc.Apply] describes. Apply checks
+// ctx between calls, not inside one. A Func that makes many edits in one
+// call should check ctx between them and return its error.
 type Func func(ctx context.Context, n *Node) error
 
 // Option configures a [Doc].
@@ -443,13 +443,10 @@ func WithoutProtection() ApplyOption {
 //
 // Create instances with [New].
 type Doc struct {
-	// The first problem of the call that runs that matches [ErrEngine],
-	// which fails the Apply whatever the Func returns.
+	// The first problem of the Apply running that fails it whatever the
+	// Func returns, as [Doc.failApply] keeps it. Such a problem matches
+	// [ErrEngine], or the check after a write found it.
 	callErr error
-	// The problem of the first call of the Apply running after which the
-	// text differed from the model of the calls, which each later call of
-	// the Apply returns, or nil.
-	stuck error
 	// The document as the user wrote it.
 	user *niceyaml.Node
 	// The parse of the current text, and its document.
@@ -534,6 +531,12 @@ type Doc struct {
 	// each, while deferring is true, as [Doc.writeValue] adds them. The
 	// next [Doc.apply] makes them with its own edits.
 	deferred []edit
+	// The Sets of the Apply running whose edits wait for one parse, as
+	// [Doc.queues] tells, or nil.
+	queue *queue
+	// The context of the Apply running, which [Doc.replay] checks between
+	// the Sets that it runs again, or nil.
+	applyCtx context.Context //nolint:containedctx // A flush outside a call of the Func checks the context of the Apply.
 	// The capture of the site of an error that the edit package binds again,
 	// as [Doc.sitePlace] fills it, or nil.
 	capture *capture
@@ -572,6 +575,9 @@ type Doc struct {
 	// Whether [Doc.writeValue] adds its edits to deferred instead of
 	// making them.
 	deferring bool
+	// Whether a Set of the queue runs, and whether [Doc.replay] runs the
+	// Sets of a queue again.
+	queueing, replaying bool
 	// Whether the error that binds in the current text is a problem that the
 	// edit package found, as [Doc.bindOwn] binds it, and not an error that a
 	// caller binds by a path.
@@ -975,26 +981,51 @@ func headerEnd(src *niceyaml.Source, line int) int {
 // Each call sees the edits of the calls before it. A read after the write of
 // an earlier call thus reads the written value, through an alias too. Apply
 // skips each place that an earlier call removed, either directly or by
-// replacing a value above it. When a method of [Node] cannot make its edit,
-// it returns its problem to fn and leaves the Doc as it found it. The
-// Apply fails with that problem only when fn returns it or when the
-// problem matches [ErrEngine]. So fn can skip the edit or try another. The
-// calls act in order, so a later call can edit a value that an earlier
-// call edited, through any path.
+// replacing a value above it. When a method of [Node] finds a problem
+// before it writes, it returns the problem to fn and leaves the Doc as it
+// found it. The Apply fails with that problem only when fn returns it or
+// when the problem matches [ErrEngine]. So fn can skip the edit or try
+// another. The calls act in order, so a later call can edit a value that
+// an earlier call edited, through any path.
 //
-// After each call, the text must hold the values of a model of the calls,
-// and each alias must read the value that the model holds at its place.
-// Otherwise the call fails with [ErrEngine] at the first difference, and
-// each later call of the Apply returns that error. A call also fails with
+// After the write of each call, Apply parses the text and checks it. The
+// text must hold the values of a model of the calls, and each alias must
+// read the value that the model holds at its place. Otherwise the call
+// fails with [ErrEngine] at the first difference. A call also fails with
 // ErrEngine when it leaves a text that [New] refuses with [ErrMisread] for
-// its `<<` merge keys, or when it moves a byte order mark to a place where
-// the tokenizer of the Source drops it, as the package documentation
-// describes.
+// its `<<` merge keys. So does a call that moves a byte order mark to a
+// place where the tokenizer of the Source drops it, as the package
+// documentation describes. A call that writes YAML that the engine does
+// not edit fails with [ErrUnsupported], as the Supported YAML section of
+// the package documentation lists it. A Set of a new key after a block
+// scalar that ends the text without a line break is one such call. The
+// lines that it adds change the string of the scalar. A read never fails
+// so.
 //
-// A call fails with [ErrUnsupported] when it reaches YAML that the engine
-// does not edit, as the Supported YAML section of the package
-// documentation lists it. A rename that makes a mapping hide an entry that
-// its `<<` merge key brings in is one such call. A read never fails so.
+// The method of such a call returns nil and leaves the Doc as it found it.
+// So the reads and the calls after it find the text before it. The Apply
+// fails with the problem of the check whatever fn returns. The problem
+// names the call that failed the check.
+//
+// A Set of some values waits, so that Apply parses and checks the text
+// once for many Sets. Such a Set writes a Go bool, number, or string in
+// place of a scalar on one line of a block collection. The text must hold
+// no anchor, no alias, and no `<<` merge key, and the Doc must have no
+// marshaler of [WithMarshalers]. The edit of the Set waits until a later
+// call edits the text or a read reaches a value that a waiting Set writes.
+// An error of fn and the return of the last call end the wait too, and so
+// do [Doc.Text] and the other methods of the Doc.
+//
+// When the check of the waiting Sets fails, they run again one at a time
+// until one of them fails. So the problem names the Set that failed the
+// check, as it does for a Set that does not wait. Apply can thus call fn
+// again after the call of that Set, before it fails. The text and the
+// error of the Apply do not depend on whether a Set waits, unless ctx ends
+// during the Apply. Apply checks ctx before each Set that runs again after
+// the first. When ctx has ended, Apply fails with its error. Suppose that
+// ctx ends after the call of a failing Set, and that the Set is not the
+// first that waits. Then the Apply fails with the error of ctx. On a Doc
+// whose Sets do not wait, it fails with the problem of the Set.
 //
 // After the last call, Apply checks the text. The text must decode, and it
 // must hold the values of the model, as the package documentation
@@ -1002,17 +1033,28 @@ func headerEnd(src *niceyaml.Source, line int) int {
 // misread of go-yaml. Its error matches [ErrEngine] and binds where the
 // user's text holds the value that differs.
 //
-// Each call parses and checks the whole text that it leaves. So the cost
-// of a path that selects several places grows with the number of places
-// times the size of the text. A rename of each key of a text of 400 keys,
-// 3.7 KiB, took 0.5 s and allocated more than 900 MiB. A program that edits
-// untrusted input should keep the byte limits and the alias limit of its
-// Source on, which [niceyaml.WithByteLimit],
+// Each call that does not wait parses and checks the whole text that it
+// leaves. So the cost of a path that selects several places grows with the
+// number of such calls times the size of the text. A rename of each key of
+// a text of 400 keys, 3.7 KiB, took 0.5 s and allocated more than 900 MiB.
+// A Set of each of 800 counts in 130 KiB of text, half of the default byte
+// limit, took 15.9 s when each Set parsed and checked the text. The Sets
+// that wait parse and check it once, so a like Apply took 0.12 s.
+//
+// Each Set, waiting or not, still scans the nodes of the Apply and the
+// text before it writes. So the cost of the Sets that wait still grows
+// with the number of matches times the work per match. A Set of each key
+// of a mapping of 20000 keys, 189 KiB of text, took 8.3 s.
+//
+// A program that edits untrusted input should keep the byte limits and the
+// alias limit of its Source on, which [niceyaml.WithByteLimit],
 // [niceyaml.WithDocumentByteLimit], and [niceyaml.WithAliasLimit] set.
 // Those limits bound the text that the Apply starts from, so they bound
-// the cost of each call that does not grow the text. The calls read
-// the text without the limits, and Apply checks the limits again only
-// after the last call. A deadline on ctx bounds the number of calls.
+// the cost of each call that does not grow the text. They do not bound the
+// number of calls, so the byte limit alone does not bound the cost of an
+// Apply. The calls read the text without the limits, and Apply checks the
+// limits again only after the last call. A deadline on ctx bounds the
+// number of calls, and the number of Sets that run again.
 //
 // Apply checks ctx before each call of fn. When ctx has ended, Apply
 // returns its error, bound to the user's Source, and the Doc drops the
@@ -1070,6 +1112,7 @@ func (d *Doc) Apply(ctx context.Context, path paths.Path, fn Func, opts ...Apply
 // describes, and checks the result.
 func (d *Doc) run(ctx context.Context, path paths.Path, fn Func, cfg applyConfig) error {
 	start := d.save()
+	d.applyCtx = ctx
 
 	// A text whose aliases take a decode past the alias limit fails with the
 	// error of that decode, before the calls read its aliases.
@@ -1096,10 +1139,20 @@ func (d *Doc) run(ctx context.Context, path paths.Path, fn Func, cfg applyConfig
 			continue
 		}
 
-		// Each call parses and checks the whole text, so the context bounds
-		// the number of calls.
+		// Each call that does not wait parses and checks the whole text, so
+		// the context bounds the number of such calls.
 		err := ctx.Err()
 		if err != nil {
+			// The first Set that waits runs again before the check of the
+			// context. So its problem fails the Apply in place of the error
+			// of the context. A later Set that waits finds the context
+			// ended, and the Apply fails with its error.
+			d.settle()
+
+			if d.callErr != nil {
+				return d.callErr
+			}
+
 			return d.user.Bind(err) //nolint:wrapcheck // The error binds in the user's text.
 		}
 
@@ -1107,6 +1160,12 @@ func (d *Doc) run(ctx context.Context, path paths.Path, fn Func, cfg applyConfig
 		if err != nil {
 			return err
 		}
+	}
+
+	d.settle()
+
+	if d.callErr != nil {
+		return d.callErr
 	}
 
 	return d.check(ctx, start)
@@ -1132,6 +1191,8 @@ func (d *Doc) endApply() {
 
 	d.nodes, d.guards = nil, nil
 	d.applying = false
+	d.queue, d.queueing, d.replaying, d.deferring, d.deferred = nil, false, false, false, nil
+	d.applyCtx = nil
 	d.endCalls()
 }
 
@@ -1149,6 +1210,8 @@ func (d *Doc) endApply() {
 // bytes that [niceyaml.Node.Text] returns for the document, without a mark
 // at its start.
 func (d *Doc) Text() string {
+	d.settle()
+
 	return d.withMarks(d.textMarks())
 }
 
@@ -1322,12 +1385,16 @@ func FileText(src *niceyaml.Source, docs ...*Doc) (string, error) {
 //	n := d.Node()
 //	work := niceyaml.NewSourceFromDerived(n.Source().Text(), n, nil)
 func (d *Doc) Node() *niceyaml.Node {
+	d.settle()
+
 	return d.node
 }
 
 // Edited reports whether the text of the document differs from the text
 // that [New] took.
 func (d *Doc) Edited() bool {
+	d.settle()
+
 	return d.cur != d.orig
 }
 
@@ -1335,5 +1402,7 @@ func (d *Doc) Edited() bool {
 // in the order of the calls. It omits each value that an earlier edit
 // created.
 func (d *Doc) Removals() []Removal {
+	d.settle()
+
 	return slices.Clone(d.removals)
 }
