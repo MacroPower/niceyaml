@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
-	"maps"
 	"math"
 	"slices"
 	"strconv"
@@ -21,7 +20,6 @@ import (
 	"github.com/goccy/go-yaml/ast"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.jacobcolvin.com/x/jsonschema"
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
@@ -165,104 +163,6 @@ var (
 
 		return nil
 	})
-
-	// The documents the locator tests share.
-	// The key 0x10 sets the member 16, and items holds an element.
-	respelledDoc = stringtest.LinesLF(
-		"ports:",
-		"  0x10:",
-		`    name: ""`,
-		"items:",
-		`  - name: ""`,
-	)
-	// The mapping under 0x10 holds no name.
-	lackingDoc = stringtest.LinesLF(
-		"ports:",
-		"  0x10:",
-		"    proto: tcp",
-	)
-	// The key 3.10 sets the member 3.1, so no member has the name 3.10.
-	pythonDoc = stringtest.LinesLF(
-		"python:",
-		"  3.10:",
-		"    image: a",
-	)
-	// Both keys of m set the member 16, and a decode keeps b.
-	sameNameDoc = stringtest.LinesLF(
-		"m:",
-		"  16: aaaa",
-		"  0x10: b",
-	)
-	// The merge key sets the member 16 to x. The quoted key sets the
-	// member 0x10, and a path through 0x10 selects that entry.
-	hiddenDoc = stringtest.LinesLF(
-		"user:",
-		"  <<: {0x10: x}",
-		`  "0x10": 1`,
-	)
-	// The merge key of m sets the member true to b, the last value b1
-	// gives that name.
-	mergeDoc = stringtest.LinesLF(
-		"b0: &b0",
-		"  True: xxxx",
-		"b1: &b1",
-		"  <<: *b0",
-		"  true: aaaa",
-		"  True: b",
-		"m:",
-		"  <<: *b1",
-	)
-	// A sequence, a mapping with keys of digits, an alias to the
-	// sequence, a sequence in a sequence, a scalar, and a null.
-	shapesDoc = stringtest.LinesLF(
-		"seq: &s",
-		"  - a",
-		"  - b",
-		"map:",
-		"  0: x",
-		"  1: y",
-		"al: *s",
-		"nested:",
-		"  - - p",
-		"    - q",
-		"scalar: v",
-		"none: ~",
-	)
-	// The anchors a document of the tests refers to through
-	// [niceyaml.WithReferences].
-	referenceDoc = stringtest.LinesLF(
-		"defaults: &defaults",
-		"  timeout: 0",
-		"  3.10: r",
-		"list: &list [u, {0x10: v}]",
-	)
-	// The mapping server merges an anchor of referenceDoc, and items is
-	// an alias to one.
-	referringDoc = stringtest.LinesLF(
-		"server:",
-		"  <<: *defaults",
-		"  port: 0x10",
-		"  3.10: mine",
-		"items: *list",
-	)
-	// The tagged alias key of python has no name the locator can tell, so
-	// it may set a member of any name, such as one a key before it sets.
-	unnamedKeyDoc = stringtest.LinesLF(
-		"k: &k 0x10",
-		"python:",
-		"  3.10: {image: a}",
-		"  a: 1",
-		"  !!str *k : v",
-		"  b: 2",
-	)
-	// The key a/b~c holds both characters a JSON Pointer escapes, and the
-	// empty key takes an empty name.
-	pointerDoc = stringtest.LinesLF(
-		`"a/b~c":`,
-		`  "": x`,
-		"items:",
-		"  - 0x10: y",
-	)
 )
 
 // countStrings returns an option whose function decodes every string of
@@ -4042,9 +3942,10 @@ func TestSelfValidateValue_Place(t *testing.T) {
 	// Each value stands under the request key of its document. The walk
 	// held no document, so Rebase and Bind place its errors there.
 	type request struct {
-		ByPort map[int]upstream `yaml:"by_port"`
-		ByAny  map[any]signed   `yaml:"by_any"`
-		Items  []upstream       `yaml:"items"`
+		ByPort map[int]upstream    `yaml:"by_port"`
+		ByName map[string]upstream `yaml:"by_name"`
+		ByAny  map[any]signed      `yaml:"by_any"`
+		Items  []upstream          `yaml:"items"`
 	}
 
 	tcs := map[string]struct {
@@ -4086,16 +3987,25 @@ func TestSelfValidateValue_Place(t *testing.T) {
 			value: request{ByPort: map[int]upstream{16: {URL: "ftp://y"}}},
 			want:  `app.yaml:4:12: $.request.by_port.16.url: url "ftp://y" is not http`,
 		},
-		"a key the document spells another way places at the key of its map": {
+		"a key the document spells another way places at its entry": {
 			input: stringtest.LinesLF(
 				"request:",
 				"  by_port:",
 				"    0x10:",
 				"      url: ftp://y",
 			),
-			value:   request{ByPort: map[int]upstream{16: {URL: "ftp://y"}}},
-			want:    `app.yaml:2:3: $.request.by_port.16.url: url "ftp://y" is not http`,
-			through: `app.yaml:4:12: $.request.by_port.0x10.url: url "ftp://y" is not http`,
+			value: request{ByPort: map[int]upstream{16: {URL: "ftp://y"}}},
+			want:  `app.yaml:4:12: $.request.by_port.0x10.url: url "ftp://y" is not http`,
+		},
+		"a string key the decoder respells places at its entry": {
+			input: stringtest.LinesLF(
+				"request:",
+				"  by_name:",
+				"    1.10:",
+				"      url: ftp://y",
+			),
+			value: request{ByName: map[string]upstream{"1.1": {URL: "ftp://y"}}},
+			want:  `app.yaml:4:12: $.request.by_name.'1.10'.url: url "ftp://y" is not http`,
 		},
 		"keys that share a path place with no position": {
 			input: stringtest.LinesLF(
@@ -5528,6 +5438,143 @@ func (m *serversByHost) UnmarshalYAML(unmarshal func(any) error) error {
 	return nil
 }
 
+// limit is an entry of [checkedLimits].
+type limit struct {
+	N int `yaml:"n"`
+}
+
+// checkedLimits decodes two limits from a sequence into a map whose keys
+// share a path, as [limitsByAny] does. Its check names an entry by its
+// decoded key.
+type checkedLimits map[any]limit
+
+func (m *checkedLimits) UnmarshalYAML(unmarshal func(any) error) error {
+	var raw [2]limit
+
+	err := unmarshal(&raw)
+	if err != nil {
+		return err
+	}
+
+	*m = checkedLimits{1: raw[0], "1": raw[1]}
+
+	return nil
+}
+
+func (m checkedLimits) Validate() error {
+	if m["1"].N < 0 {
+		return niceyaml.NewError("negative string-one", niceyaml.AtData("1", "n"))
+	}
+
+	return nil
+}
+
+// portName is an entry of [checkedPorts].
+type portName struct {
+	Name string `yaml:"name"`
+}
+
+// checkedPorts decodes itself through a plain copy of its type. Its check
+// names an entry by its decoded key.
+type checkedPorts map[int]portName
+
+func (m *checkedPorts) UnmarshalYAML(unmarshal func(any) error) error {
+	return unmarshal((*map[int]portName)(m))
+}
+
+func (m checkedPorts) Validate() error {
+	for k, p := range m {
+		if p.Name == "" {
+			return niceyaml.NewError("name is empty", niceyaml.AtData(strconv.Itoa(k), "name"))
+		}
+	}
+
+	return nil
+}
+
+// rebasedPorts checks the entries of its map in the parent. Each error
+// names the entry by its decoded key, below the map that a [niceyaml.Rebase]
+// names as base. With byKey set, the base names the entry too, by its
+// decoded key.
+type rebasedPorts struct {
+	Ports map[int]portName `yaml:"ports"`
+	byKey bool
+}
+
+func (c rebasedPorts) Validate() error {
+	var errs []error
+
+	for k, p := range c.Ports {
+		if p.Name != "" {
+			continue
+		}
+
+		if c.byKey {
+			errs = append(errs, niceyaml.Rebase(niceyaml.NewError("name is empty", niceyaml.AtData("name")),
+				paths.Current().Child("ports", strconv.Itoa(k))))
+
+			continue
+		}
+
+		errs = append(errs,
+			niceyaml.Rebase(niceyaml.NewError("name is empty", niceyaml.AtData(strconv.Itoa(k), "name")),
+				paths.Current().Child("ports")),
+			niceyaml.Rebase(niceyaml.NewError("port is empty", niceyaml.AtData(strconv.Itoa(k))),
+				paths.Current().Child("ports")),
+		)
+	}
+
+	return errors.Join(errs...)
+}
+
+// rebasedItems checks the entries of the maps of its list in the parent.
+// Each error names the entry by its decoded key, below the element that a
+// [niceyaml.Rebase] names as base.
+type rebasedItems struct {
+	Items []map[int]string `yaml:"items"`
+}
+
+func (c rebasedItems) Validate() error {
+	var errs []error
+
+	for i, m := range c.Items {
+		for k, v := range m {
+			if v == "" {
+				errs = append(
+					errs,
+					niceyaml.Rebase(niceyaml.NewError("item is empty", niceyaml.AtData(strconv.Itoa(k))),
+						paths.Current().Child("items").Index(i)),
+				)
+			}
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
+// wildItems names a member of each element of its list, below a
+// [niceyaml.Rebase] whose base selects every element.
+type wildItems struct {
+	Items []portName `yaml:"items"`
+}
+
+func (wildItems) Validate() error {
+	//nolint:wrapcheck // The walk places the error as the check returns it.
+	return niceyaml.Rebase(niceyaml.NewError("wild", niceyaml.AtData("name")),
+		paths.Current().Child("items").IndexAll())
+}
+
+// checkedKey is a map key that checks itself.
+type checkedKey int
+
+func (k checkedKey) Validate() error {
+	if k == 16 {
+		return errors.New("bad key")
+	}
+
+	return nil
+}
+
 // limitsByAny decodes two limits into a map whose keys share a path.
 type limitsByAny map[any]signed
 
@@ -5714,943 +5761,6 @@ func (l *sharedKeysList) UnmarshalYAML(unmarshal func(any) error) error {
 	*l = raw
 
 	return nil
-}
-
-// locatorDoc returns the first document of input, from a source named
-// f.yaml that resolves the anchors of [referenceDoc].
-func locatorDoc(tb testing.TB, input string) *niceyaml.Node {
-	tb.Helper()
-
-	return yamltest.FirstDocument(tb, input, niceyaml.WithName("f.yaml"), yamltest.References(referenceDoc))
-}
-
-// located binds an error with the location opt gives it through n. It
-// returns the message of the binding, which puts the position and the
-// path in front. It also returns the path of the node the error binds at
-// when the document holds no value at its own path, as
-// [niceyaml.SourceError.Nearest] reports it.
-func located(tb testing.TB, n *niceyaml.Node, opt niceyaml.ErrorOption) (string, string) {
-	tb.Helper()
-
-	bound := yamltest.RequireSourceError(tb, n.Bind(niceyaml.NewError("x", opt)))
-
-	near := ""
-	if path, ok := bound.Nearest(); ok {
-		near = path.String()
-	}
-
-	return bound.Error(), near
-}
-
-// pointerNames returns the names in a JSON Pointer, as the documentation
-// of [niceyaml.DataLocator] splits one.
-func pointerNames(pointer string) []string {
-	if pointer == "" {
-		return nil
-	}
-
-	unescape := strings.NewReplacer("~1", "/", "~0", "~")
-
-	parts := strings.Split(strings.TrimPrefix(pointer, "/"), "/")
-	for i, part := range parts {
-		parts[i] = unescape.Replace(part)
-	}
-
-	return parts
-}
-
-func ExampleDataLocator() {
-	doc, err := niceyaml.NewSourceFromString(
-		stringtest.LinesLF(
-			"ports:",
-			"  0x10:",
-			`    name: ""`,
-			"items:",
-			`  - name: ""`,
-		),
-		niceyaml.WithName("cfg.yaml"),
-	).Document()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// A check of the decoded data reports each finding as a JSON Pointer.
-	findings := []string{"/ports/16/name", "/items/0/name"}
-
-	loc := doc.DataLocator()
-
-	for _, pointer := range findings {
-		fmt.Println(doc.Bind(niceyaml.NewError("must not be empty", loc.At(pointerNames(pointer)...))))
-	}
-
-	// Output:
-	// cfg.yaml:3:11: $.ports.0x10.name: must not be empty
-	// cfg.yaml:5:11: $.items[0].name: must not be empty
-}
-
-func TestDataLocator(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		input string
-		names []string
-		// Whether the names go through AtKey, which locates the key of the
-		// member they name, rather than through At.
-		key  bool
-		want string
-		// The path of the node the error binds at, for names the document
-		// holds no value for: the nearest node the document holds, or an
-		// alias the document cannot follow.
-		wantNear string
-	}{
-		"key the decoder respells": {
-			input: respelledDoc,
-			names: []string{"ports", "16", "name"},
-			want:  "f.yaml:3:11: $.ports.0x10.name: x",
-		},
-		"element of a sequence": {
-			input: respelledDoc,
-			names: []string{"items", "0", "name"},
-			want:  "f.yaml:5:11: $.items[0].name: x",
-		},
-		"no names": {
-			input: respelledDoc,
-			want:  "f.yaml:1:1: $: x",
-		},
-		"float key with a trailing zero": {
-			input: pythonDoc,
-			names: []string{"python", "3.1", "image"},
-			want:  "f.yaml:3:12: $.python.'3.10'.image: x",
-		},
-		"last of two keys with one name": {
-			input: sameNameDoc,
-			names: []string{"m", "16"},
-			want:  "f.yaml:3:9: $.m.0x10: x",
-		},
-		"last merge source with the name": {
-			input: mergeDoc,
-			names: []string{"m", "true"},
-			want:  "f.yaml:6:9: $.m.True: x",
-		},
-		"member no path selects": {
-			input: hiddenDoc,
-			names: []string{"user", "16"},
-			want:  "f.yaml:2:14: $.user.16: x",
-		},
-		"member beside one no path selects": {
-			input: hiddenDoc,
-			names: []string{"user", "0x10"},
-			want:  "f.yaml:3:11: $.user.0x10: x",
-		},
-		"element of a root sequence": {
-			input: `- name: ""` + "\n",
-			names: []string{"0", "name"},
-			want:  "f.yaml:1:9: $[0].name: x",
-		},
-		"element behind an alias": {
-			input: shapesDoc,
-			names: []string{"al", "1"},
-			want:  "f.yaml:3:5: $.al[1]: x",
-		},
-		"element of an element": {
-			input: shapesDoc,
-			names: []string{"nested", "0", "1"},
-			want:  "f.yaml:10:7: $.nested[0][1]: x",
-		},
-		"digits in a mapping name a member": {
-			input: shapesDoc,
-			names: []string{"map", "1"},
-			want:  "f.yaml:6:6: $.map.1: x",
-		},
-
-		// A member the data lacks.
-		"member a mapping lacks": {
-			input:    lackingDoc,
-			names:    []string{"ports", "16", "name"},
-			want:     "f.yaml:2:3: $.ports.0x10.name: x",
-			wantNear: "$.ports.0x10",
-		},
-		"names below a member a mapping lacks": {
-			input:    lackingDoc,
-			names:    []string{"ports", "16", "tls", "0"},
-			want:     "f.yaml:2:3: $.ports.0x10.tls.0: x",
-			wantNear: "$.ports.0x10",
-		},
-		"member the root lacks": {
-			input:    lackingDoc,
-			names:    []string{"nope", "x"},
-			want:     "f.yaml:1:1: $.nope.x: x",
-			wantNear: "$",
-		},
-		"member a null lacks": {
-			input:    shapesDoc,
-			names:    []string{"none", "x"},
-			want:     "f.yaml:12:1: $.none.x: x",
-			wantNear: "$.none",
-		},
-		"name a key spells for another member": {
-			input: pythonDoc,
-			names: []string{"python", "3.10"},
-			want:  "f.yaml:1:1: $.python.'3.10': x",
-		},
-		"names below a name a key spells for another member": {
-			input: pythonDoc,
-			names: []string{"python", "3.10", "image"},
-			want:  "f.yaml:1:1: $.python.'3.10'.image: x",
-		},
-		"member lacking below one no path selects": {
-			input: stringtest.LinesLF("user:", "  <<: {0x10: {a: b}}", `  "0x10": 1`),
-			names: []string{"user", "16", "name"},
-			want:  "f.yaml:2:8: $.user.16.name: x",
-		},
-		"name of a decode into map[int]": {
-			input: stringtest.LinesLF(
-				"m:",
-				"  1e3:",
-				`    n: ""`,
-			),
-			names:    []string{"m", "1000", "n"},
-			want:     "f.yaml:1:1: $.m.1000.n: x",
-			wantNear: "$.m",
-		},
-		"name of a decode into map[string]": {
-			input: stringtest.LinesLF(
-				"m:",
-				"  ~:",
-				`    n: ""`,
-			),
-			names:    []string{"m", "", "n"},
-			want:     "f.yaml:1:1: $.m.''.n: x",
-			wantNear: "$.m",
-		},
-
-		// A name that is no index of its sequence binds at the sequence,
-		// and a name below a scalar binds at the scalar.
-		"index past the end": {
-			input:    shapesDoc,
-			names:    []string{"seq", "9"},
-			want:     "f.yaml:1:1: $.seq[9]: x",
-			wantNear: "$.seq",
-		},
-		"names below an index past the end": {
-			input:    shapesDoc,
-			names:    []string{"seq", "9", "x"},
-			want:     "f.yaml:1:1: $.seq[9].x: x",
-			wantNear: "$.seq",
-		},
-		"index with a leading zero": {
-			input:    shapesDoc,
-			names:    []string{"seq", "01"},
-			want:     "f.yaml:1:1: $.seq.01: x",
-			wantNear: "$.seq",
-		},
-		"index with a sign": {
-			input:    shapesDoc,
-			names:    []string{"seq", "+1"},
-			want:     "f.yaml:1:1: $.seq.+1: x",
-			wantNear: "$.seq",
-		},
-		"index too large for an int": {
-			input:    shapesDoc,
-			names:    []string{"seq", "99999999999999999999"},
-			want:     "f.yaml:1:1: $.seq.99999999999999999999: x",
-			wantNear: "$.seq",
-		},
-		"member name in a sequence": {
-			input:    shapesDoc,
-			names:    []string{"seq", "name"},
-			want:     "f.yaml:1:1: $.seq.name: x",
-			wantNear: "$.seq",
-		},
-		"name below a scalar": {
-			input:    shapesDoc,
-			names:    []string{"scalar", "x"},
-			want:     "f.yaml:11:9: $.scalar.x: x",
-			wantNear: "$.scalar",
-		},
-		"index past the end below a member no path selects": {
-			input: stringtest.LinesLF("user:", "  <<: {0x10: [a]}", `  "0x10": 1`),
-			names: []string{"user", "16", "1"},
-			want:  "f.yaml:2:8: $.user.16[1]: x",
-		},
-
-		// A value only a reference document holds, which the locator
-		// cannot follow. A path that enters the alias binds there.
-		"member after a merge of a reference document": {
-			input: referringDoc,
-			names: []string{"server", "port"},
-			want:  "f.yaml:3:9: $.server.port: x",
-		},
-		"member a merge of a reference document sets": {
-			input:    referringDoc,
-			names:    []string{"server", "timeout"},
-			want:     "f.yaml:2:7: $.server.timeout: x",
-			wantNear: "$.server",
-		},
-		"name a key spells beside a merge of a reference document": {
-			input: referringDoc,
-			names: []string{"server", "3.10"},
-			want:  "f.yaml:1:1: $.server.'3.10': x",
-		},
-		"member below an alias to a reference document": {
-			input:    referringDoc,
-			names:    []string{"items", "1", "16"},
-			want:     "f.yaml:5:8: $.items.1.16: x",
-			wantNear: "$.items",
-		},
-
-		// A mapping with a key the locator cannot name.
-		"member before a key with no name": {
-			input: unnamedKeyDoc,
-			names: []string{"python", "a"},
-			want:  "f.yaml:4:6: $.python.a: x",
-		},
-		"member after a key with no name": {
-			input: unnamedKeyDoc,
-			names: []string{"python", "b"},
-			want:  "f.yaml:6:6: $.python.b: x",
-		},
-		"name a key spells before a key with no name": {
-			input: unnamedKeyDoc,
-			names: []string{"python", "3.10"},
-			want:  "f.yaml:2:1: $.python.'3.10': x",
-		},
-
-		// A document with no mapping at its root.
-		"member a null root lacks": {
-			input:    "~\n",
-			names:    []string{"a"},
-			want:     "f.yaml:1:1: $.a: x",
-			wantNear: "$",
-		},
-		"name below a scalar root": {
-			input:    "scalar\n",
-			names:    []string{"a", "0"},
-			want:     "f.yaml:1:1: $.a.0: x",
-			wantNear: "$",
-		},
-		"empty document": {
-			input: "",
-			names: []string{"a", "0"},
-			want:  "f.yaml: $.a.0: x",
-		},
-		"document of a comment alone": {
-			input: "# empty\n",
-			names: []string{"a"},
-			want:  "f.yaml: $.a: x",
-		},
-
-		// The names of a JSON Pointer.
-		"pointer with an escaped slash and tilde": {
-			input: pointerDoc,
-			names: pointerNames("/a~1b~0c"),
-			want:  "f.yaml:1:1: $.'a/b~c': x",
-		},
-		"pointer with an empty name": {
-			input: pointerDoc,
-			names: pointerNames("/a~1b~0c/"),
-			want:  "f.yaml:2:7: $.'a/b~c'.'': x",
-		},
-		"pointer with an index and a respelled key": {
-			input: pointerDoc,
-			names: pointerNames("/items/0/16"),
-			want:  "f.yaml:4:11: $.items[0].0x10: x",
-		},
-		"pointer with an escape of an escape": {
-			input:    pointerDoc,
-			names:    pointerNames("/~01"),
-			want:     "f.yaml:1:1: $.'~1': x",
-			wantNear: "$",
-		},
-
-		// The key of the member the names lead to.
-		"AtKey: key the decoder respells": {
-			key:   true,
-			input: respelledDoc,
-			names: []string{"ports", "16"},
-			want:  "f.yaml:2:3: $.ports.0x10~: x",
-		},
-		"AtKey: explicit key": {
-			key:   true,
-			input: stringtest.LinesLF("? 0x10", ": x"),
-			names: []string{"16"},
-			want:  "f.yaml:1:3: $.0x10~: x",
-		},
-		"AtKey: key of a merge source": {
-			key:   true,
-			input: mergeDoc,
-			names: []string{"m", "true"},
-			want:  "f.yaml:6:3: $.m.True~: x",
-		},
-		"AtKey: key no path selects": {
-			key:   true,
-			input: hiddenDoc,
-			names: []string{"user", "16"},
-			want:  "f.yaml:2:8: $.user.16~: x",
-		},
-		"AtKey: element has no key": {
-			key:   true,
-			input: respelledDoc,
-			names: []string{"items", "0"},
-			want:  "f.yaml:5:3: $.items[0]~: x",
-		},
-		"AtKey: no names": {
-			key:   true,
-			input: respelledDoc,
-			want:  "f.yaml:1:1: $~: x",
-		},
-		"AtKey: member a mapping lacks": {
-			key:      true,
-			input:    lackingDoc,
-			names:    []string{"ports", "16", "name"},
-			want:     "f.yaml:2:3: $.ports.0x10.name: x",
-			wantNear: "$.ports.0x10",
-		},
-		"AtKey: name a key spells for another member": {
-			key:   true,
-			input: pythonDoc,
-			names: []string{"python", "3.10"},
-			want:  "f.yaml:1:1: $.python.'3.10': x",
-		},
-		"AtKey: index past the end": {
-			key:      true,
-			input:    shapesDoc,
-			names:    []string{"seq", "9"},
-			want:     "f.yaml:1:1: $.seq[9]: x",
-			wantNear: "$.seq",
-		},
-		"AtKey: member below an alias to a reference document": {
-			key:      true,
-			input:    referringDoc,
-			names:    []string{"items", "1", "16"},
-			want:     "f.yaml:5:8: $.items.1.16~: x",
-			wantNear: "$.items",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			doc := locatorDoc(t, tc.input)
-
-			loc := doc.DataLocator()
-
-			locate := loc.At
-			if tc.key {
-				locate = loc.AtKey
-			}
-
-			got, gotNear := located(t, doc, locate(tc.names...))
-
-			assert.Equal(t, tc.want, got)
-			assert.Equal(t, tc.wantNear, gotNear)
-		})
-	}
-}
-
-func TestDataLocator_At_Options(t *testing.T) {
-	t.Parallel()
-
-	doc := locatorDoc(t, hiddenDoc)
-	loc := doc.DataLocator()
-
-	other := niceyaml.AtPath(paths.Doc().Child("other"))
-	marked := niceyaml.AtRange(yamltest.LineRange(0, 0, 4))
-
-	tcs := map[string]struct {
-		want string
-		opts []niceyaml.ErrorOption
-	}{
-		"replaces a path set before it": {
-			opts: []niceyaml.ErrorOption{other, loc.At("user", "0x10")},
-			want: "f.yaml:3:11: $.user.0x10: x",
-		},
-		"a later path replaces it": {
-			opts: []niceyaml.ErrorOption{loc.At("user", "0x10"), niceyaml.AtPath(paths.Doc().Child("user"))},
-			want: "f.yaml:1:1: $.user: x",
-		},
-		"keeps a range set before it where the path selects the value": {
-			opts: []niceyaml.ErrorOption{marked, loc.At("user", "0x10")},
-			want: "f.yaml:1:1: $.user.0x10: x",
-		},
-		"replaces a range set before it where no path selects the value": {
-			opts: []niceyaml.ErrorOption{marked, loc.At("user", "16")},
-			want: "f.yaml:2:14: $.user.16: x",
-		},
-		"a later range replaces its position": {
-			opts: []niceyaml.ErrorOption{loc.At("user", "16"), marked},
-			want: "f.yaml:1:1: $.user.16: x",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			err := doc.Bind(niceyaml.NewError("x", tc.opts...))
-
-			require.EqualError(t, err, tc.want)
-		})
-	}
-}
-
-func TestDataLocator_Names(t *testing.T) {
-	t.Parallel()
-
-	// The names a locator reads are those go-yaml gives the keys of a
-	// decode into any, so each key here pins one of them.
-	input := stringtest.LinesLF(
-		"0x10: a",
-		"3.10: b",
-		"True: c",
-		"~: d",
-		"1234567.0: e",
-		"!!binary aGk=: f",
-		"1e3: g",
-		`"0x20": h`,
-	)
-	doc := locatorDoc(t, input)
-
-	// Each name, with the line of the key that sets its member.
-	want := map[string]int{
-		"16":           1,
-		"3.1":          2,
-		"true":         3,
-		"null":         4,
-		"1.234567e+06": 5,
-		"[104 105]":    6,
-		"1e3":          7,
-		"0x20":         8,
-	}
-
-	data, err := doc.Decode[any](t.Context())
-	require.NoError(t, err)
-
-	members, ok := data.(map[string]any)
-	require.True(t, ok, "decode into any gave %T", data)
-
-	assert.ElementsMatch(t, slices.Collect(maps.Keys(want)), slices.Collect(maps.Keys(members)))
-
-	loc := doc.DataLocator()
-
-	for name, line := range want {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			bound := yamltest.RequireSourceError(t, doc.Bind(niceyaml.NewError("x", loc.AtKey(name))))
-			assert.Equal(t, line-1, yamltest.PositionOf(t, bound).Line)
-		})
-	}
-
-	// A decode into another type names some of those keys another way,
-	// so the names of such a decode lead nowhere.
-	t.Run("typed decodes", func(t *testing.T) {
-		t.Parallel()
-
-		ints, err := locatorDoc(t, "1e3: a\n").Decode[map[int]string](t.Context())
-		require.NoError(t, err)
-		assert.Equal(t, map[int]string{1000: "a"}, ints)
-
-		texts, err := locatorDoc(t, "~: a\n").Decode[map[string]string](t.Context())
-		require.NoError(t, err)
-		assert.Equal(t, map[string]string{"": "a"}, texts)
-	})
-}
-
-func TestDataLocator_Scope(t *testing.T) {
-	t.Parallel()
-
-	doc := locatorDoc(t, stringtest.LinesLF(
-		`- name: ""`,
-		"- spec:",
-		"    ports:",
-		"      0x10:",
-		`        name: ""`,
-	))
-	spec := yamltest.At(t, doc, paths.Doc().Index(1).Child("spec"))
-
-	// The names read from the scoped Node, and the path starts at the root
-	// of the document.
-	err := niceyaml.NewError("x", spec.DataLocator().At("ports", "16", "name"))
-	assert.Equal(t, "$[1].spec.ports.0x10.name", yamltest.PathOf(t, err).String())
-
-	const want = "f.yaml:5:15: $[1].spec.ports.0x10.name: x"
-
-	require.EqualError(t, spec.Bind(err), want)
-	require.EqualError(t, doc.Bind(err), want)
-
-	// A base moves `@` paths alone, so the error binds at the same value
-	// under any base.
-	require.EqualError(t, doc.Bind(niceyaml.Rebase(err, paths.Doc().Child("other"))), want)
-
-	t.Run("names of the document miss from the scope", func(t *testing.T) {
-		t.Parallel()
-
-		got, _ := located(t, spec, spec.DataLocator().At("1", "spec", "ports"))
-
-		assert.Equal(t, "f.yaml:2:3: $[1].spec.1.spec.ports: x", got)
-	})
-
-	t.Run("scope behind an alias", func(t *testing.T) {
-		t.Parallel()
-
-		aliased := locatorDoc(t, stringtest.LinesLF("base: &base", "  0x10: x", "al: *base"))
-		al := yamltest.At(t, aliased, paths.Doc().Child("al"))
-
-		got, _ := located(t, al, al.DataLocator().At("16"))
-
-		assert.Equal(t, "f.yaml:2:9: $.al.0x10: x", got)
-	})
-}
-
-func TestDataLocator_SyntaxError(t *testing.T) {
-	t.Parallel()
-
-	doc := yamltest.UnparsedDocument(t, "a: [1\n", niceyaml.WithName("f.yaml"))
-	require.ErrorIs(t, doc.Err(), niceyaml.ErrSyntax)
-
-	bound := yamltest.RequireSourceError(t, doc.Bind(niceyaml.NewError("x", doc.DataLocator().At("a", "0"))))
-	require.EqualError(t, bound, "f.yaml: $.a.0: x")
-	require.ErrorIs(t, bound.Unresolved(), niceyaml.ErrPathNeedsDocument)
-}
-
-// schemaLocations returns where each violation of v in doc binds: its
-// position, its path, and the mapping it binds at for a member the
-// mapping lacks.
-func schemaLocations(t *testing.T, doc *niceyaml.Node, v *jsonschema.Validator) []string {
-	t.Helper()
-
-	err := doc.Validate(t.Context(), schema.FromJSONSchema(v))
-	require.Error(t, err)
-	require.True(t, niceyaml.IsInvalid(err), "validation did not run: %v", err)
-
-	var got []string
-
-	// The summary of several violations is no violation, so Problems
-	// passes over it.
-	for problem := range niceyaml.Problems(err) {
-		got = append(got, describeLocation(problem.Bound))
-	}
-
-	slices.Sort(got)
-
-	return got
-}
-
-// locatorLocations returns where a [niceyaml.DataLocator] of doc binds an
-// error for each failure v finds in the data of doc. The locator takes
-// the instance location of the failure as names. A failure about a
-// missing member takes the name of that member too. One about a key,
-// which additionalProperties and propertyNames report, goes through
-// [niceyaml.DataLocator.AtKey].
-func locatorLocations(t *testing.T, doc *niceyaml.Node, v *jsonschema.Validator) []string {
-	t.Helper()
-
-	data, err := doc.Decode[any](t.Context())
-	require.NoError(t, err)
-
-	var failure *jsonschema.ValidationError
-
-	require.ErrorAs(t, v.Validate(t.Context(), data), &failure)
-
-	loc := doc.DataLocator()
-
-	var got []string
-
-	for _, leaf := range failure.Leaves() {
-		var names []string
-
-		for _, seg := range leaf.InstanceSegments() {
-			if seg.IsIndex {
-				names = append(names, strconv.Itoa(seg.Index))
-			} else {
-				names = append(names, seg.Key)
-			}
-		}
-
-		// Each failure takes one lookup, as it does in the schema, so both
-		// read the merge sources of a document the same number of times.
-		var opt niceyaml.ErrorOption
-
-		quoted, required := strings.CutPrefix(leaf.Message, "missing required property ")
-
-		switch {
-		case required:
-			missing, err := strconv.Unquote(quoted)
-			require.NoError(t, err)
-
-			opt = loc.At(append(names, missing)...)
-
-		case leaf.Keyword == jsonschema.KeywordAdditionalProperties,
-			leaf.Keyword == jsonschema.KeywordPropertyNames:
-			opt = loc.AtKey(names...)
-
-		default:
-			opt = loc.At(names...)
-		}
-
-		bound := yamltest.RequireSourceError(t, doc.Bind(niceyaml.NewError("x", opt)))
-
-		got = append(got, describeLocation(bound))
-	}
-
-	slices.Sort(got)
-
-	return got
-}
-
-// describeLocation returns where bound binds: its position, its path,
-// and the mapping it binds at when its path names a key the document
-// leaves out.
-func describeLocation(bound *niceyaml.SourceError) string {
-	at := "-"
-	if pos, ok := bound.Position(); ok {
-		at = fmt.Sprintf("%d:%d", pos.Line+1, pos.Col+1)
-	}
-
-	path, _ := bound.Path()
-
-	near := "-"
-	if nearest, ok := bound.Nearest(); ok {
-		near = nearest.String()
-	}
-
-	return fmt.Sprintf("%s %s near %s", at, path, near)
-}
-
-func TestDataLocator_Schema(t *testing.T) {
-	t.Parallel()
-
-	// Each schema fails many values of a document: every scalar, every
-	// key, or every mapping, for members it lacks. Some of those members
-	// have the name another key is spelled with.
-	schemas := map[string]string{
-		"every scalar": `{
-			"$ref": "#/$defs/node",
-			"$defs": {"node": {
-				"if": {"type": ["object", "array"]},
-				"then": {
-					"additionalProperties": {"$ref": "#/$defs/node"},
-					"items": {"$ref": "#/$defs/node"}
-				},
-				"else": false
-			}}
-		}`,
-		"every key": `{
-			"$ref": "#/$defs/node",
-			"$defs": {"node": {
-				"propertyNames": false,
-				"additionalProperties": {"$ref": "#/$defs/node"},
-				"items": {"$ref": "#/$defs/node"}
-			}}
-		}`,
-		"every mapping": `{
-			"$ref": "#/$defs/node",
-			"$defs": {"node": {
-				"required": ["zz", "0x10", "16", "3.10", "True", "~", "0", "name"],
-				"additionalProperties": {"$ref": "#/$defs/node"},
-				"items": {"$ref": "#/$defs/node"}
-			}}
-		}`,
-	}
-
-	inputs := map[string]string{
-		"respelled keys":           respelledDoc,
-		"missing member":           lackingDoc,
-		"key spelled as no member": pythonDoc,
-		"two keys with one name":   sameNameDoc,
-		"member no path selects":   hiddenDoc,
-		"merge precedence":         mergeDoc,
-		"sequences and scalars":    shapesDoc,
-		"key with no name":         unnamedKeyDoc,
-		"alias key": stringtest.LinesLF(
-			"k: &k 0x10",
-			"m:",
-			"  *k : {0x20: v}",
-			`  "16": w`,
-		),
-		"merge sources in a list": stringtest.LinesLF(
-			"a: &a {0x10: 1, b: 2}",
-			"b: &b {16: 3, 0x10: 4}",
-			"m:",
-			"  <<: [*a, *b]",
-			"  b: 5",
-			"  <<: *a",
-		),
-		"merge key after its keys": stringtest.LinesLF(
-			"base: &base {0x10: {a: 1}}",
-			"m:",
-			"  0x10: {b: 2}",
-			"  0o20: {c: 3}",
-			"  <<: *base",
-		),
-		"keys below one no path selects": stringtest.LinesLF(
-			"user:",
-			"  <<: {0x10: {0x20: [x, {0x30: y}]}}",
-			`  "0x10": 1`,
-		),
-		"aliased mapping in a sequence": stringtest.LinesLF(
-			"base: &base {0x10: x, 3.10: y}",
-			"seq:",
-			"  - *base",
-			"  - [*base, {True: z}]",
-		),
-		"null and bool keys": stringtest.LinesLF(
-			"~: a",
-			"null: b",
-			"True: {true: c}",
-			"false: [d]",
-		),
-		// The lookups of both runs pass the limit on the merge sources they
-		// read, so each writes the same names past it.
-		"more merge reads than the limit allows": yamltest.WideMerge(2000),
-	}
-
-	for schemaName, schemaJSON := range schemas {
-		v, err := jsonschema.CompileJSON(t.Context(), []byte(schemaJSON))
-		require.NoError(t, err)
-
-		for inputName, input := range inputs {
-			t.Run(schemaName+"/"+inputName, func(t *testing.T) {
-				t.Parallel()
-
-				// The second key of some documents repeats the member of
-				// the first.
-				doc := yamltest.FirstDocument(t, input, niceyaml.WithAllowDuplicateKeys(true))
-
-				want := schemaLocations(t, doc, v)
-				require.NotEmpty(t, want)
-
-				got := locatorLocations(t, doc, v)
-				require.Len(t, got, len(want))
-
-				// A document of thousands of locations reports the first
-				// few that differ.
-				var differ []string
-
-				for i := range want {
-					if want[i] != got[i] && len(differ) < 10 {
-						differ = append(differ, fmt.Sprintf("schema %q, locator %q", want[i], got[i]))
-					}
-				}
-
-				assert.Empty(t, differ)
-			})
-		}
-	}
-}
-
-func TestDataLocator_Concurrent(t *testing.T) {
-	t.Parallel()
-
-	// Each mapping of the document respells its keys, so every lookup
-	// reads a mapping and asks which entry a spelling selects.
-	const (
-		mappings = 24
-		members  = 24
-	)
-
-	var sb strings.Builder
-
-	sb.WriteString("base: &base {0x1: x}\n")
-
-	for m := range mappings {
-		fmt.Fprintf(&sb, stringtest.LinesLF("m%d:", "  <<: *base"), m)
-
-		for i := range members {
-			fmt.Fprintf(&sb, stringtest.LinesLF(`  %#x: {name: ""}`), 0x10+i)
-		}
-	}
-
-	doc := locatorDoc(t, sb.String())
-
-	names := func(m, i int) []string {
-		return []string{"m" + strconv.Itoa(m), strconv.Itoa(0x10 + i), "name"}
-	}
-
-	// One goroutine finds every location first.
-	single := doc.DataLocator()
-	want := make([]string, 0, mappings*members)
-
-	for m := range mappings {
-		for i := range members {
-			got, _ := located(t, doc, single.At(names(m, i)...))
-			want = append(want, got)
-		}
-	}
-
-	require.Equal(t, "f.yaml:4:16: $.m0.0x10.name: x", want[0])
-
-	shared := doc.DataLocator()
-	results := make([][]niceyaml.ErrorOption, 8)
-
-	var wg sync.WaitGroup
-
-	for g := range results {
-		wg.Go(func() {
-			opts := make([]niceyaml.ErrorOption, 0, mappings*members)
-
-			for m := range mappings {
-				for i := range members {
-					opts = append(opts, shared.At(names(m, i)...))
-				}
-			}
-
-			// Each goroutine also reads members the others do not.
-			_ = shared.AtKey(names(g, g)...)
-			_ = shared.At("m"+strconv.Itoa(g), "1", "missing")
-
-			results[g] = opts
-		})
-	}
-
-	wg.Wait()
-
-	for _, opts := range results {
-		got := make([]string, 0, len(opts))
-
-		for _, opt := range opts {
-			message, _ := located(t, doc, opt)
-			got = append(got, message)
-		}
-
-		assert.Equal(t, want, got)
-	}
-}
-
-func TestDataLocator_MergeReads(t *testing.T) {
-	t.Parallel()
-
-	// To spell a key of m, the locator reads the whole list of its merge
-	// key, and the locations of one locator share one limit on those
-	// reads. Past it, each path keeps the decoded name of its key, and the
-	// error still binds at the value, by its position.
-	const members = 2000
-
-	doc := locatorDoc(t, yamltest.WideMerge(members))
-	loc := doc.DataLocator()
-
-	spelled := 0
-
-	for i := range members {
-		err := niceyaml.NewError("x", loc.At("m", strconv.Itoa(0x1000+i)))
-		path := yamltest.PathOf(t, err)
-
-		bound := yamltest.RequireSourceError(t, doc.Bind(err))
-		require.Equal(t, i+2, yamltest.PositionOf(t, bound).Line, "member %d", i)
-
-		if strings.HasPrefix(path.String(), "$.m.0x") {
-			spelled++
-
-			continue
-		}
-
-		require.Equal(t, "$.m."+strconv.Itoa(0x1000+i), path.String())
-	}
-
-	assert.Positive(t, spelled)
-	assert.Less(t, spelled, members)
 }
 
 // TestValidator_DirectCall calls the Check method of every validator the
@@ -8925,4 +8035,337 @@ func TestDocument_Validate_NodePaths(t *testing.T) {
 			require.EqualError(t, err, want)
 		})
 	}
+}
+
+func TestSelfValidateValue_AtData(t *testing.T) {
+	t.Parallel()
+
+	// The walk names each entry by its decoded key, so a document that
+	// places the result reads those names as it reads the names of AtData.
+	// The names go on below a value that decodes itself.
+	tcs := map[string]struct {
+		value   any
+		doc     string
+		unbound string
+		want    string
+	}{
+		"value that does not decode itself": {
+			value:   dataPorts{Ports: map[int]dataPort{16: {}}, Unknown: -1},
+			doc:     stringtest.LinesLF("request:", "  ports:", "    0x10:", `      name: ""`),
+			unbound: "$.ports.16.name: name is empty",
+			want:    "f.yaml:4:13: $.request.ports.0x10.name: name is empty",
+		},
+		"entry below a root that decodes itself": {
+			value:   dataDefaultPorts{Ports: map[int]dataCheckedPort{16: {}}},
+			doc:     stringtest.LinesLF("request:", "  ports:", "    0x10:", `      name: ""`),
+			unbound: "$.ports.16: port name empty",
+			want:    "f.yaml:3:5: $.request.ports.0x10: port name empty",
+		},
+		"entry below a field that decodes itself": {
+			value: dataDefaultPortsHolder{Cfg: dataDefaultPorts{Ports: map[int]dataCheckedPort{16: {}}}},
+			doc: stringtest.LinesLF(
+				"request:",
+				"  cfg:",
+				"    ports:",
+				"      0x10:",
+				`        name: ""`,
+			),
+			unbound: "$.cfg.ports.16: port name empty",
+			want:    "f.yaml:4:7: $.request.cfg.ports.0x10: port name empty",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := niceyaml.SelfValidateValue(t.Context(), tc.value)
+			require.EqualError(t, err, tc.unbound)
+
+			doc := locatorDoc(t, tc.doc)
+			require.EqualError(t, doc.Bind(niceyaml.Rebase(err, paths.Doc().Child("request"))), tc.want)
+		})
+	}
+
+	t.Run("a check inside a collection key", func(t *testing.T) {
+		t.Parallel()
+
+		// Go-yaml does not parse a collection as a key, so these cases read
+		// the unbound text alone. A path through a key that holds a check
+		// stays a path. Below a key that decodes itself, the path past the
+		// key stays a path under the names.
+		tcs := map[string]struct {
+			value any
+			want  string
+		}{
+			"a struct key holds a key that checks itself": {
+				value: struct {
+					M map[checkedKeyHolder]int `yaml:"m"`
+				}{M: map[checkedKeyHolder]int{{F: 16}: 1}},
+				want: "$.m.{16}~.f: bad key",
+			},
+			"an array key decodes itself": {
+				value: struct {
+					M map[selfArray]int `yaml:"m"`
+				}{M: map[selfArray]int{{1}: 1}},
+				want: "$.m.'[1]'~[0]: bad element",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				require.EqualError(t, niceyaml.SelfValidateValue(t.Context(), tc.value), tc.want)
+			})
+		}
+	})
+
+	t.Run("the names bind as the decode binds them", func(t *testing.T) {
+		t.Parallel()
+
+		type limitsHolder struct {
+			Limits checkedLimits `yaml:"limits"`
+		}
+
+		type portsHolder struct {
+			Ports checkedPorts `yaml:"ports"`
+		}
+
+		type keysHolder struct {
+			M map[checkedKey]int `yaml:"m"`
+		}
+
+		type rebasedHolder struct {
+			Inner rebasedPorts `yaml:"inner"`
+		}
+
+		type rebasedList struct {
+			Items []rebasedHolder `yaml:"items"`
+		}
+
+		type itemsHolder struct {
+			Inner rebasedItems `yaml:"inner"`
+		}
+
+		type wildHolder struct {
+			Inner wildItems `yaml:"inner"`
+		}
+
+		rebasedInput := stringtest.LinesLF(
+			"inner:",
+			"  ports:",
+			"    0x10:",
+			`      name: ""`,
+		)
+
+		// Each case decodes input without self-validation. It then places the
+		// errors of SelfValidateValue of the whole value at `$`, and those of
+		// the value at member at `$.member`. Both must bind as the decode
+		// binds them.
+		tcs := map[string]struct {
+			decode func(t *testing.T, doc *niceyaml.Node) (any, any, error)
+			input  string
+			member string
+			want   string
+		}{
+			"a map that decodes itself from a sequence keeps the names of its own check": {
+				input: stringtest.LinesLF(
+					"limits:",
+					"  - {n: -1}",
+					"  - {n: -2}",
+				),
+				decode: func(t *testing.T, doc *niceyaml.Node) (any, any, error) {
+					t.Helper()
+
+					var v limitsHolder
+
+					require.NoError(t, doc.DecodeInto(t.Context(), &v, niceyaml.WithSelfValidation(false)))
+
+					_, err := doc.Decode[limitsHolder](t.Context())
+
+					return &v, v.Limits, err
+				},
+				member: "limits",
+				want:   "f.yaml:1:1: $.limits.1.n: negative string-one",
+			},
+			"a map that decodes itself keeps the names of its own check": {
+				input: stringtest.LinesLF(
+					"ports:",
+					"  0x10:",
+					`    name: ""`,
+				),
+				decode: func(t *testing.T, doc *niceyaml.Node) (any, any, error) {
+					t.Helper()
+
+					var v portsHolder
+
+					require.NoError(t, doc.DecodeInto(t.Context(), &v, niceyaml.WithSelfValidation(false)))
+
+					_, err := doc.Decode[portsHolder](t.Context())
+
+					return &v, v.Ports, err
+				},
+				member: "ports",
+				want:   "f.yaml:1:1: $.ports.16.name: name is empty",
+			},
+			"a key that checks itself binds at the key the document spells": {
+				input: stringtest.LinesLF(
+					"m:",
+					"  0x10: 1",
+				),
+				decode: func(t *testing.T, doc *niceyaml.Node) (any, any, error) {
+					t.Helper()
+
+					var v keysHolder
+
+					require.NoError(t, doc.DecodeInto(t.Context(), &v, niceyaml.WithSelfValidation(false)))
+
+					_, err := doc.Decode[keysHolder](t.Context())
+
+					return &v, v.M, err
+				},
+				member: "m",
+				want:   "f.yaml:2:3: $.m.0x10~: bad key",
+			},
+			"a key that checks itself places its error below the key": {
+				input: stringtest.LinesLF(
+					"m:",
+					"  0x10: 1",
+				),
+				decode: func(t *testing.T, doc *niceyaml.Node) (any, any, error) {
+					t.Helper()
+
+					var v pathKeys
+
+					require.NoError(t, doc.DecodeInto(t.Context(), &v, niceyaml.WithSelfValidation(false)))
+
+					_, err := doc.Decode[pathKeys](t.Context())
+
+					return &v, v.M, err
+				},
+				member: "m",
+				want:   "f.yaml:2:3: $.m.0x10~.a: key below",
+			},
+			"names under the @ base of a rebase in a check": {
+				input: rebasedInput,
+				decode: func(t *testing.T, doc *niceyaml.Node) (any, any, error) {
+					t.Helper()
+
+					var v rebasedHolder
+
+					require.NoError(t, doc.DecodeInto(t.Context(), &v, niceyaml.WithSelfValidation(false)))
+
+					_, err := doc.Decode[rebasedHolder](t.Context())
+
+					return &v, v.Inner, err
+				},
+				member: "inner",
+				want: stringtest.JoinLF(
+					"f.yaml:3:5: $.inner.ports.0x10: port is empty",
+					"f.yaml:4:13: $.inner.ports.0x10.name: name is empty",
+				),
+			},
+			"an @ base that names an entry by its decoded key misses it": {
+				input: rebasedInput,
+				decode: func(t *testing.T, doc *niceyaml.Node) (any, any, error) {
+					t.Helper()
+
+					var v rebasedHolder
+
+					require.NoError(t, doc.DecodeInto(t.Context(), &v, niceyaml.WithSelfValidation(false)))
+
+					// A decode does not set the unexported field, so the walk of
+					// SelfValidate stands in for the decode.
+					v.Inner.byKey = true
+
+					return &v, v.Inner, doc.SelfValidate(t.Context(), &v)
+				},
+				member: "inner",
+				want:   "f.yaml:2:3: $.inner.ports.16.name: name is empty",
+			},
+			"names under an @ base of a rebase that ends in an index": {
+				input: stringtest.LinesLF(
+					"inner:",
+					"  items:",
+					`    - 0x10: ""`,
+				),
+				decode: func(t *testing.T, doc *niceyaml.Node) (any, any, error) {
+					t.Helper()
+
+					var v itemsHolder
+
+					require.NoError(t, doc.DecodeInto(t.Context(), &v, niceyaml.WithSelfValidation(false)))
+
+					_, err := doc.Decode[itemsHolder](t.Context())
+
+					return &v, v.Inner, err
+				},
+				member: "inner",
+				want:   `f.yaml:3:13: $.inner.items[0].0x10: item is empty`,
+			},
+			"names under an @ base of a rebase with a wildcard": {
+				input: stringtest.LinesLF(
+					"inner:",
+					"  items:",
+					"    - name: a",
+				),
+				decode: func(t *testing.T, doc *niceyaml.Node) (any, any, error) {
+					t.Helper()
+
+					var v wildHolder
+
+					require.NoError(t, doc.DecodeInto(t.Context(), &v, niceyaml.WithSelfValidation(false)))
+
+					_, err := doc.Decode[wildHolder](t.Context())
+
+					return &v, v.Inner, err
+				},
+				member: "inner",
+				want:   "f.yaml: $.inner.items[*].name: wild",
+			},
+			"names under the @ base of a rebase below an element": {
+				input: stringtest.LinesLF(
+					"items:",
+					"  - inner:",
+					"      ports:",
+					"        0x10:",
+					`          name: ""`,
+				),
+				decode: func(t *testing.T, doc *niceyaml.Node) (any, any, error) {
+					t.Helper()
+
+					var v rebasedList
+
+					require.NoError(t, doc.DecodeInto(t.Context(), &v, niceyaml.WithSelfValidation(false)))
+
+					_, err := doc.Decode[rebasedList](t.Context())
+
+					return &v, v.Items, err
+				},
+				member: "items",
+				want: stringtest.JoinLF(
+					"f.yaml:4:9: $.items[0].inner.ports.0x10: port is empty",
+					"f.yaml:5:17: $.items[0].inner.ports.0x10.name: name is empty",
+				),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input, niceyaml.WithName("f.yaml"))
+
+				whole, member, decoded := tc.decode(t, doc)
+				require.EqualError(t, decoded, tc.want)
+
+				err := niceyaml.SelfValidateValue(t.Context(), whole)
+				require.EqualError(t, doc.Bind(niceyaml.Rebase(err, paths.Doc())), tc.want)
+
+				err = niceyaml.SelfValidateValue(t.Context(), member)
+				require.EqualError(t, doc.Bind(niceyaml.Rebase(err, paths.Doc().Child(tc.member))), tc.want)
+			})
+		}
+	})
 }

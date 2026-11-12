@@ -1395,7 +1395,7 @@ func kept(sets iter.Seq2[int, string]) map[string]string {
 	return out
 }
 
-func TestIndex_Locate(t *testing.T) {
+func TestIndex_Reach(t *testing.T) {
 	t.Parallel()
 
 	input := stringtest.LinesLF(
@@ -1406,13 +1406,47 @@ func TestIndex_Locate(t *testing.T) {
 		"  3.10: {image: a}",
 	)
 
+	selector := func(p paths.Path) paths.Selector {
+		sel, _ := p.Last()
+
+		return sel
+	}
+
 	tcs := map[string]struct {
-		names []string
-		key   bool
-		want  string
-		token string
+		input     string
+		names     []string
+		selectors []paths.Selector
+		key       bool
+		want      string
+		token     string
 	}{
-		"member":               {names: []string{"ports", "16", "name"}, want: "@.ports.0x10.name"},
+		"member": {names: []string{"ports", "16", "name"}, want: "@.ports.0x10.name"},
+		"selector that the document spells": {
+			names:     []string{"ports", "0x10", "name"},
+			selectors: []paths.Selector{{}, selector(paths.Current().Child("0x10"))},
+			want:      "@.ports.0x10.name",
+		},
+		"selector that the document lacks": {
+			names:     []string{"ports", "16", "name"},
+			selectors: []paths.Selector{{}, selector(paths.Current().Child("16"))},
+			want:      "@.ports.16.name",
+		},
+		"index selector": {
+			names:     []string{"list", "1"},
+			selectors: []paths.Selector{{}, selector(paths.Current().Index(1))},
+			want:      "@.list[1]",
+		},
+		"selector below a member the walk cannot follow": {
+			input:     aliasKeyInput,
+			names:     []string{"m", "a", "x"},
+			selectors: []paths.Selector{{}, {}, selector(paths.Current().Child("x"))},
+			want:      "@.m.a.x",
+		},
+		"index selector past the end": {
+			names:     []string{"list", "5"},
+			selectors: []paths.Selector{{}, selector(paths.Current().Index(5))},
+			want:      "@.list[5]",
+		},
 		"key of a member":      {names: []string{"ports", "16"}, key: true, want: "@.ports.0x10~"},
 		"element":              {names: []string{"list", "1"}, want: "@.list[1]"},
 		"element past the end": {names: []string{"list", "5", "x"}, want: "@.list[5].x"},
@@ -1428,9 +1462,15 @@ func TestIndex_Locate(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			idx, root := find(t, input)
+			in := input
+			if tc.input != "" {
+				in = tc.input
+			}
 
-			path, tk := idx.Locate(root, tc.names, tc.key)
+			idx, root := find(t, in)
+
+			path, tk, n := idx.Reach(root, tc.names, tc.selectors, tc.key)
+			path = path.Child(tc.names[n:]...)
 
 			assert.Equal(t, tc.want, path.String())
 			assert.Equal(t, tc.token, yamltest.TokenPlace(tk))

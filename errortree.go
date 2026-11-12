@@ -1891,7 +1891,10 @@ func (c childBase) inherit(n error) error {
 		return n
 	}
 
-	return &Error{err: placed, loc: c.at.loc, path: c.at.path, hasPath: c.at.hasPath}
+	return &Error{
+		err: placed,
+		loc: c.at.loc, path: c.at.path, data: c.at.data, hasPath: c.at.hasPath,
+	}
 }
 
 // trees returns the nodes of kids in position order within the source

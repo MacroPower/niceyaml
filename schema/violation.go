@@ -12,6 +12,8 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/datapath"
 	"go.jacobcolvin.com/niceyaml/internal/fault"
+	"go.jacobcolvin.com/niceyaml/internal/hook"
+	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
@@ -370,8 +372,10 @@ func (c converter) leaf(e *jsonschema.ValidationError) error {
 //
 // The path spells each key as the source does. So a key that the decoder
 // respells, such as 0x10 for the member name 16, still names its member.
-// Without a root, the path spells each key as the decoder does. A caller
-// of [Schema.ValidateValue] does not pass a root.
+// A caller of [Schema.ValidateValue] does not pass a root. Without a root,
+// the option locates the error by the names of decoded data, as
+// [niceyaml.AtData] does, and the path shows each key as the decoder
+// spells it.
 //
 // When the walk cannot write a spelling that selects the member, as
 // [sourcePath] describes, the path keeps the decoded name. That path then
@@ -395,6 +399,10 @@ func (c converter) atTarget(target datapath.Target, key bool) []niceyaml.ErrorOp
 	path := target.Path
 	if key {
 		path = path.Key()
+	}
+
+	if c.root == nil {
+		return []niceyaml.ErrorOption{atData(target.Path, key)}
 	}
 
 	opts := []niceyaml.ErrorOption{niceyaml.AtPath(path)}
@@ -437,6 +445,10 @@ func constrainsKey(e *jsonschema.ValidationError) bool {
 // such a key sets has another name. For example, the key 0x10 sets the
 // member 16 under a schema that requires 0x10.
 func (c converter) atMissing(target datapath.Target, name string) []niceyaml.ErrorOption {
+	if c.root == nil {
+		return []niceyaml.ErrorOption{atData(target.Path.Child(name), false)}
+	}
+
 	opts := []niceyaml.ErrorOption{niceyaml.AtPath(target.Path.Child(name))}
 
 	if !target.Unspelled && !c.idx.SelectsEntry(target.Node, name) {
@@ -448,6 +460,29 @@ func (c converter) atMissing(target datapath.Target, name string) []niceyaml.Err
 	}
 
 	return opts
+}
+
+// atData returns the option that locates an error at the value that the
+// path names leads to in decoded data, as [niceyaml.AtData] does. With key
+// set, the option locates the error at the key of the entry there, as
+// [niceyaml.AtDataKey] does. The path names is a path of decoded data,
+// such as a walk without a root writes, and it holds only `.name` and
+// `[n]` selectors. Before a binding translates the names, the error shows
+// that path, which writes an element as `[n]`.
+func atData(names paths.Path, key bool) niceyaml.ErrorOption {
+	var list []string
+
+	for sel := range names.Selectors() {
+		if sel.Kind == paths.SelectorIndex {
+			list = append(list, strconv.Itoa(sel.Index))
+		} else {
+			list = append(list, sel.Name)
+		}
+	}
+
+	opt, _ := hook.AtData(names, list, key).(niceyaml.ErrorOption) //nolint:errcheck // The hook returns an ErrorOption.
+
+	return opt
 }
 
 // The text that the validator puts in front of the name of a missing
