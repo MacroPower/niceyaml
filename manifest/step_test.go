@@ -53,9 +53,9 @@ func drinkOptions(lagging bool) []manifest.RegistryOption {
 			manifest.Version("cafe.jacobcolvin.com/v1beta1", mark...),
 			manifest.Version("cafe.jacobcolvin.com/v1",
 				manifest.Migrate(spec.Child("size"), func(ctx context.Context, n *edit.Node) error {
-					size, ok := sizes[n.Text()]
+					size, ok := sizes[n.Scalar()]
 					if !ok {
-						return niceyaml.NewError(fmt.Sprintf("no cafe.jacobcolvin.com/v1 size for %q", n.Text()),
+						return niceyaml.NewError(fmt.Sprintf("no cafe.jacobcolvin.com/v1 size for %q", n.Scalar()),
 							niceyaml.WithDetails(errors.New("use S, M, or L")))
 					}
 

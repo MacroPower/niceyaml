@@ -945,30 +945,10 @@ func newStringSource(src string, cfg sourceConfig) *Source {
 //	next = source.WithText(formatted, niceyaml.WithName("formatted"))
 //
 // A program gives one document of a file a Source of its own through the
-// text that the lines of its [Node.Span] cover. [Source.Offset] gives
-// column 0 of a line past a byte order mark that the lexer dropped. The
-// cut moves each end back to the start of such a mark, so the mark goes
-// to the document that it opens. [Source.Offset] reports false for the
-// line after the last when the text does not end in a line break. The
-// last document then runs to the end of the text:
+// [Node.Text] of the root of the document. That text holds the byte order
+// mark that opens the document:
 //
-//	text := source.Text()
-//	cut := func(off int) int {
-//		if strings.HasSuffix(text[:off], "\uFEFF") {
-//			return off - len("\uFEFF")
-//		}
-//
-//		return off
-//	}
-//
-//	span := doc.Span()
-//	start, _ := source.Offset(position.New(span.Start, 0))
-//	end, ok := source.Offset(position.New(span.End, 0))
-//	if !ok {
-//		end = len(text)
-//	}
-//
-//	one := source.WithText(text[cut(start):cut(end)])
+//	one := source.WithText(doc.Text())
 //
 // The limits of the new Source are those of the Source, as
 // [Source.ByteLimit], [Source.DocumentByteLimit], and [Source.DepthLimit]
@@ -1409,6 +1389,25 @@ func (s *Source) Offset(pos position.Position) (int, bool) {
 	}
 
 	return s.offsets.get(func() bom.Index { return bom.NewIndex(s.input) }).Offset(pos.Line, pos.Col)
+}
+
+// lineStart returns the byte offset in [Source.Text] where line ln starts,
+// before a byte order mark that the tokenizer dropped from its start. It
+// returns the length of the text for a line past the last.
+func (s *Source) lineStart(ln int) int {
+	off, ok := s.Offset(position.New(ln, 0))
+	if !ok {
+		return len(s.input)
+	}
+
+	// Column 0 of a line lies past a mark that the tokenizer dropped. The
+	// line before it ends with a line break, so a mark in front of the
+	// column is such a mark.
+	if strings.HasSuffix(s.input[:off], bom.Mark) {
+		off -= len(bom.Mark)
+	}
+
+	return off
 }
 
 // PositionAt returns the position in the coordinates of [Source.Lines] of

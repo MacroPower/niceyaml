@@ -773,6 +773,75 @@ func (n *Node) Tokens() token.Tokens {
 	return slices.Clone(n.content)
 }
 
+// Text returns the text of the node as [Source.Text] writes it, with the
+// line endings, the quotes, and the escapes of the source. Like
+// [Node.Tokens], Text treats the root of a document differently from a
+// Node below it.
+//
+// For the root of a document, Text holds each line of [Node.Span] with its
+// line ending. It ends with the final line ending of the document when the
+// text has one. A byte order mark at the start of the first line of a
+// document belongs to that document. The texts of the documents that
+// [Source.AllDocuments] returns thus join into Source.Text:
+//
+//	for _, doc := range source.AllDocuments() {
+//		out.WriteString(doc.Text())
+//	}
+//
+// The root of a document that did not parse has a Text too, so a stream
+// splitter copies every document of a file. The text that
+// [go.jacobcolvin.com/niceyaml/edit.Doc.Text] returns for a document
+// leaves out the byte order mark at its start, so it can differ from Text.
+//
+// For a Node that [Node.At], [Node.Nodes], or [Node.NodeAt] scopes below
+// the root, Text holds the bytes of [Node.Range]. For `image: "nginx:1.25"`,
+// the Text of `$.image` is `"nginx:1.25"` with its quotes. The text of a
+// block mapping or a block sequence keeps the indentation of the file on
+// every line but the first. It is thus not a document of its own.
+//
+// Text returns "" for a nil Node and for a scope that does not select
+// anything.
+func (n *Node) Text() string {
+	if n == nil {
+		return ""
+	}
+
+	src := n.source
+	text := src.Text()
+
+	if n.base.IsRoot() {
+		// The first document starts the text and the last one ends it, even
+		// where they hold no line, as in a text of a byte order mark alone.
+		start, end := 0, len(text)
+		if n.doc.index > 0 {
+			start = src.lineStart(n.span.Start)
+		}
+
+		if n.span.End < src.lines.Len() {
+			end = src.lineStart(n.span.End)
+		}
+
+		return text[start:max(start, end)]
+	}
+
+	r, ok := n.Range()
+	if !ok {
+		return ""
+	}
+
+	start, ok := src.Offset(r.Start)
+	if !ok {
+		return ""
+	}
+
+	end, ok := src.Offset(r.End)
+	if !ok {
+		return ""
+	}
+
+	return text[start:end]
+}
+
 // Preamble returns the tokens before the content of the document the Node
 // belongs to. They are the comments and %YAML or %TAG directives above
 // its "---" header, the header itself, and the comments between the

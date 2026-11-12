@@ -25,7 +25,7 @@ import (
 // A node can lose its place to an earlier edit of the Apply. Each later
 // edit, each Decode, each Exists, and each Nodes of an `@` path through
 // such a node then returns a problem that matches [ErrDisplaced]. Kind,
-// Len, and Text answer as they do for a place that does not hold a value.
+// Len, and Scalar answer as they do for a place that does not hold a value.
 // They do so even when a later edit writes that place again. A new node
 // from [Node.At] reads and edits the place.
 //
@@ -52,7 +52,7 @@ import (
 // which the text differs from the model of the Apply fails with an error
 // that matches [ErrEngine], as the package documentation describes. Each
 // later edit, each Decode, each Exists, and each Nodes of the Apply then
-// returns that error. Kind, Len, and Text then answer as they do for a
+// returns that error. Kind, Len, and Scalar then answer as they do for a
 // place that does not hold a value. The Apply fails with that error
 // whatever the Func returns.
 //
@@ -66,7 +66,7 @@ import (
 // returns it or when the error matches [ErrEngine]. A node takes edits
 // until the Apply that gave it returns. After that, each method that edits
 // or decodes returns [ErrEnded], and so do [Node.Exists] and [Node.Nodes].
-// Kind, Len, and Text then answer as they do for a place that does not
+// Kind, Len, and Scalar then answer as they do for a place that does not
 // hold a value.
 //
 // The methods that run code of the caller take a context. Set and Insert
@@ -1099,7 +1099,7 @@ func (n *Node) stepProblem() error {
 // details name the call, as [Doc.callDetails] names the call that runs.
 type pathProblem func(verb string) error
 
-// read returns the place of n for Kind, Len, and Text, with its value as a
+// read returns the place of n for Kind, Len, and Scalar, with its value as a
 // [*niceyaml.Node] of the current text. They answer as they do for a place
 // that does not hold a value when read reports false. Read reports false
 // where [Node.Exists] does not report true: after the Apply of n returned,
@@ -1246,21 +1246,23 @@ func (n *Node) Append(ctx context.Context, v any) error {
 	return n.At(paths.Current().Index(n.Len())).Insert(ctx, v)
 }
 
-// Text returns the string that a decode reads from a scalar, before a tag
-// converts it, so 0x10 gives "0x10". The string has the quotes, the
-// escapes, and the folding of the scalar resolved. For a block scalar, it
-// holds the lines after the header, such as "|" or ">-", with the
-// indentation, the folding, and the chomping of the block applied. Text
-// returns "" for a mapping, a sequence, and a place that does not hold a
-// value. At an alias, Text reads the anchor as a decode does. It thus
-// returns the text of the scalar that the anchor holds, in the document
-// or in a reference document of [niceyaml.WithReferences]. Text returns ""
+// Scalar returns the string that a decode reads from a scalar, before a
+// tag converts it, so 0x10 gives "0x10". The string has the quotes, the
+// escapes, and the folding of the scalar resolved, so `image: "nginx:1.25"`
+// gives nginx:1.25 without its quotes. [niceyaml.Node.Text] returns the
+// scalar as the source writes it. For a block scalar, Scalar holds the
+// lines after the header, such as "|" or ">-", with the indentation, the
+// folding, and the chomping of the block applied. Scalar returns "" for a
+// mapping, a sequence, and a place that does not hold a value. At an
+// alias, Scalar reads the anchor as a decode does. It thus returns the
+// string of the scalar that the anchor holds, in the document or in a
+// reference document of [niceyaml.WithReferences]. Scalar returns ""
 // whenever [Node.Exists] does not return true, both for a place that does
 // not hold a value and for a node that Exists returns a problem for, as
 // [Node.Kind] describes.
 //
 //nolint:contextcheck // The decode of such a scalar reads no state that a context carries.
-func (n *Node) Text() string {
+func (n *Node) Scalar() string {
 	p, doc, ok := n.read()
 	if !ok {
 		return ""

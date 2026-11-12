@@ -147,7 +147,7 @@
 //
 // Each edit through such a path fails. [Node.Decode] and [Node.Exists]
 // there return the error of the path, and [Node.Kind], [Node.Len], and
-// [Node.Text] answer as at a place that does not hold a value. A Func tells
+// [Node.Scalar] answer as at a place that does not hold a value. A Func tells
 // such a place from a place without a value by the error of Exists. It reads
 // the value through the alias, or through the mapping that holds the merge
 // key, whose Decode reads the entries that the merge key brings in. The
@@ -707,9 +707,9 @@
 // can set each alias to the value that it reads, and the Remove then
 // passes in the same Apply.
 //
-// [Node.At], [Node.Nodes], [Node.Exists], [Node.Decode], [Node.Text],
+// [Node.At], [Node.Nodes], [Node.Exists], [Node.Decode], [Node.Scalar],
 // [Node.Kind], and [Node.Len] are reads. Nodes, Exists, and Decode return
-// the problem of a read that cannot answer to the Func. Text, Kind, and Len
+// the problem of a read that cannot answer to the Func. Scalar, Kind, and Len
 // answer as they do for a place that does not hold a value. A Func that
 // must tell the two apart calls Exists first. The Decode of a place that
 // does not hold a value has a problem, which matches
@@ -792,7 +792,7 @@
 // misread of go-yaml. The first difference fails the call that made it with
 // an error that matches [ErrEngine], and the call leaves the text as it
 // found it. Each later call, each [Node.Decode], each [Node.Exists], and
-// each [Node.Nodes] of the Apply then returns that error. [Node.Text],
+// each [Node.Nodes] of the Apply then returns that error. [Node.Scalar],
 // [Node.Kind], and [Node.Len] answer as they do for a place that does not
 // hold a value, as [Node] describes.
 //

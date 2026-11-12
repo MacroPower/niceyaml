@@ -9100,28 +9100,9 @@ func TestSource_WithText(t *testing.T) {
 				t.Parallel()
 
 				source := niceyaml.NewSourceFromString(tc.input)
-				text := source.Text()
-				span := yamltest.Documents(t, source, 2)[tc.doc].Span()
+				doc := yamltest.Documents(t, source, 2)[tc.doc]
 
-				// Offset gives column 0 past a byte order mark that the
-				// lexer dropped, and the cut keeps the mark.
-				cut := func(off int) int {
-					if strings.HasSuffix(text[:off], "\uFEFF") {
-						return off - len("\uFEFF")
-					}
-
-					return off
-				}
-
-				start, ok := source.Offset(position.New(span.Start, 0))
-				require.True(t, ok)
-
-				end, ok := source.Offset(position.New(span.End, 0))
-				if !ok {
-					end = len(text)
-				}
-
-				one := source.WithText(text[cut(start):cut(end)])
+				one := source.WithText(doc.Text())
 				assert.Equal(t, tc.want, one.Text())
 
 				pos, ok := one.PositionAt(len(one.Text()))

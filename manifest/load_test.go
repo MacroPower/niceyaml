@@ -4264,6 +4264,61 @@ func TestRegistry_Load_AliasExpansion(t *testing.T) {
 	}
 }
 
+func TestRegistry_Load_ByteOrderMark(t *testing.T) {
+	t.Parallel()
+
+	// The level reads text through a function from
+	// niceyaml.CustomUnmarshaler, so the load decodes the working copy of
+	// each document. A byte order mark that opens a later document belongs
+	// to that document, not to the working copy of the one before it.
+	alarm := func(name string) string {
+		return stringtest.LinesLF(
+			"apiVersion: alarm.jacobcolvin.com/v1",
+			"kind: Alarm",
+			"metadata:",
+			"  name: "+name,
+			"spec:",
+			"  level: high",
+		)
+	}
+
+	stream := alarm("a") + "\uFEFF---\n" + alarm("b")
+
+	reg := manifest.MustNewRegistry(
+		manifest.WithUnmarshalers(niceyaml.CustomUnmarshaler(decodeAlarmLevel)),
+		manifest.WithKinds(manifest.NewKind[Alarm]("Alarm",
+			manifest.NameField(meta.Child("name")), manifest.Version("alarm.jacobcolvin.com/v1"))),
+	)
+
+	tcs := map[string]struct {
+		text string
+	}{
+		"LF line endings": {
+			text: stream,
+		},
+		"CRLF line endings": {
+			text: strings.ReplaceAll(stream, "\n", "\r\n"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			in := input.Sources(niceyaml.NewSourceFromString(tc.text, niceyaml.WithName("alarm.yaml")))
+
+			set, err := reg.Load(t.Context(), in)
+			require.NoError(t, err)
+
+			for _, name := range []string{"a", "b"} {
+				got, ok := set.Get[Alarm](name)
+				require.True(t, ok, name)
+				assert.Equal(t, alarmHigh, got.Value.Spec.Level, name)
+			}
+		})
+	}
+}
+
 func TestLoadError(t *testing.T) {
 	t.Parallel()
 

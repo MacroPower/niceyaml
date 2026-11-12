@@ -100,12 +100,12 @@ func TestNode_Read(t *testing.T) {
 	err := d.Apply(t.Context(), paths.MustParse("$.spec.*"), func(_ context.Context, n *edit.Node) error {
 		missing := n.At(paths.Current().Child("missing"))
 		assert.Equal(t, niceyaml.NodeNone, missing.Kind())
-		assert.Empty(t, missing.Text())
+		assert.Empty(t, missing.Scalar())
 
 		got = append(got, read{
 			Path:    n.Path().String(),
 			Key:     n.Key(),
-			Text:    n.Text(),
+			Text:    n.Scalar(),
 			Kind:    n.Kind(),
 			Exists:  exists(t, n),
 			Missing: exists(t, missing),
@@ -1901,7 +1901,7 @@ func TestNode_Own_Shared(t *testing.T) {
 	}
 }
 
-func TestNode_Text(t *testing.T) {
+func TestNode_Scalar(t *testing.T) {
 	t.Parallel()
 
 	refs := niceyaml.NewSourceFromString(stringtest.LinesLF(
@@ -2031,7 +2031,7 @@ func TestNode_Text(t *testing.T) {
 
 			err = d.Apply(t.Context(), paths.Doc(), func(_ context.Context, n *edit.Node) error {
 				a := n.At(at)
-				assert.Equal(t, tc.want, a.Text())
+				assert.Equal(t, tc.want, a.Scalar())
 				assert.Equal(t, tc.kind, a.Kind())
 
 				return nil
@@ -3627,7 +3627,7 @@ func TestNode_Nodes(t *testing.T) {
 			}
 
 			for _, m := range nodes {
-				got = append(got, m.Path().String()+"="+m.Text())
+				got = append(got, m.Path().String()+"="+m.Scalar())
 			}
 
 			return nil
@@ -3650,7 +3650,7 @@ func TestNode_Nodes(t *testing.T) {
 
 		err := d.Apply(t.Context(), paths.MustParse("$.*"), func(_ context.Context, n *edit.Node) error {
 			// The first call reads the hidden entry of a.
-			if hidden || n.At(paths.MustParse("@.x")).Text() != "1" {
+			if hidden || n.At(paths.MustParse("@.x")).Scalar() != "1" {
 				return nil
 			}
 

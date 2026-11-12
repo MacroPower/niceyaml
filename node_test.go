@@ -1900,6 +1900,161 @@ func TestNode_Range_NoRange(t *testing.T) {
 	}
 }
 
+func TestNode_Text_Document(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  []string
+	}{
+		"crlf line endings": {
+			input: "a: 1\r\n---\r\nb: 2 # pinned\r\n",
+			want:  []string{"a: 1\r\n", "---\r\nb: 2 # pinned\r\n"},
+		},
+		"no final line break": {
+			input: "a: 1\n---\nb: 2",
+			want:  []string{"a: 1\n", "---\nb: 2"},
+		},
+		"comments between documents": {
+			input: "a: 1\n# between\n---\nb: 2\n",
+			want:  []string{"a: 1\n", "# between\n---\nb: 2\n"},
+		},
+		"end marker with comments after it": {
+			input: "a: 1\n...\n# after\n---\nb: 2\n",
+			want:  []string{"a: 1\n...\n", "# after\n---\nb: 2\n"},
+		},
+		"empty document between two": {
+			input: "a: 1\n---\n---\nb: 2\n",
+			want:  []string{"a: 1\n", "---\n", "---\nb: 2\n"},
+		},
+		"byte order mark at the start of each document": {
+			input: "\ufeffa: 1\n\ufeff---\nb: 2\n",
+			want:  []string{"\ufeffa: 1\n", "\ufeff---\nb: 2\n"},
+		},
+		"byte order mark alone": {
+			input: "\ufeff",
+			want:  []string{"\ufeff"},
+		},
+		"comments alone": {
+			input: "# note\n",
+			want:  []string{"# note\n"},
+		},
+		"empty text": {
+			input: "",
+			want:  []string{""},
+		},
+		"document that does not parse": {
+			input: "a: 1\n---\nb: [\n",
+			want:  []string{"a: 1\n", "---\nb: [\n"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input)
+			docs := yamltest.AllDocuments(t, source, len(tc.want))
+
+			var joined strings.Builder
+
+			for i, doc := range docs {
+				assert.Equal(t, tc.want[i], doc.Text(), "document %d", i)
+
+				joined.WriteString(doc.Text())
+			}
+
+			assert.Equal(t, source.Text(), joined.String())
+		})
+	}
+}
+
+func TestNode_Text(t *testing.T) {
+	t.Parallel()
+
+	doc := yamltest.FirstDocument(t, stringtest.JoinCRLF(
+		`image: "nginx:1.25"  # pinned`,
+		"flow: {a: 1, b: 2}",
+		"spec:",
+		"  ports:",
+		"    - 80",
+		"    - 443",
+		"block: |",
+		"  line1",
+		"  line2",
+		"y:",
+		"",
+	))
+
+	tcs := map[string]struct {
+		path paths.Path
+		want string
+	}{
+		"quoted scalar keeps its quotes": {
+			path: paths.Doc().Child("image"),
+			want: `"nginx:1.25"`,
+		},
+		"key path covers the key": {
+			path: paths.Doc().Child("image").Key(),
+			want: "image",
+		},
+		"flow mapping covers its braces": {
+			path: paths.Doc().Child("flow"),
+			want: "{a: 1, b: 2}",
+		},
+		"block mapping keeps the indentation of later lines": {
+			path: paths.Doc().Child("spec"),
+			want: "ports:\r\n    - 80\r\n    - 443",
+		},
+		"block sequence": {
+			path: paths.Doc().Child("spec", "ports"),
+			want: "- 80\r\n    - 443",
+		},
+		"block scalar covers its indicator through its last line": {
+			path: paths.Doc().Child("block"),
+			want: "|\r\n  line1\r\n  line2",
+		},
+		"implicit null is empty": {
+			path: paths.Doc().Child("y"),
+			want: "",
+		},
+		"root path gives the whole document": {
+			path: paths.Doc(),
+			want: doc.Source().Text(),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			n := yamltest.At(t, doc, tc.path)
+			assert.Equal(t, tc.want, n.Text())
+
+			matches, err := doc.Nodes(tc.path)
+			require.NoError(t, err)
+			require.Len(t, matches, 1)
+			assert.Equal(t, tc.want, matches[0].Text())
+		})
+	}
+
+	t.Run("node at a position", func(t *testing.T) {
+		t.Parallel()
+
+		n, ok := doc.NodeAt(position.New(4, 6))
+		require.True(t, ok)
+		assert.Equal(t, "80", n.Text())
+	})
+}
+
+func TestNode_Text_Nil(t *testing.T) {
+	t.Parallel()
+
+	var node *niceyaml.Node
+
+	assert.Empty(t, node.Text())
+}
+
 func TestNode_KeyRange(t *testing.T) {
 	t.Parallel()
 
