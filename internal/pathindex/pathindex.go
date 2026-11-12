@@ -6,11 +6,15 @@
 // are the nodes that a path selector names. [Index.PathAt] finds the
 // innermost step around an offset and spells its path. [Index.OwnerPath]
 // finds the node that the go-yaml decoder names when it reports a token.
+// [Index.NodePath] finds the path of a node of the tree.
 package pathindex
 
 import (
+	"errors"
+	"reflect"
 	"slices"
 	"sort"
+	"strings"
 
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
@@ -341,6 +345,188 @@ func (x *Index) OwnerPath(r *paths.Resolver, tk *token.Token) (paths.Path, bool,
 
 	at, key := x.owner(tk)
 
+	return x.selectPath(r, at, key)
+}
+
+// NodePath returns the path of node and true when that path selects node.
+// The node is one of the document, or one of another parse of the same
+// text, such as the second parse of the decoder. NodePath finds the node
+// by the offset of its token, as [Index.OwnerPath] does, and tells apart
+// the nodes that share that offset by their types. A block mapping has
+// the token of its first entry, [*ast.MappingValueNode]. That token is
+// the ":" of the entry, or the first token after the "?" of the key when
+// the entry has a "?" key and leaves out its value. That token is the
+// first token of the content of the key, such as a scalar, a tag, or an
+// anchor. The entry thus gives its own path,
+// and the mapping the path of the node that holds it. The empty content of
+// a block scalar has the offset of the node after it, and gives the path
+// of its block scalar.
+//
+// NodePath reports false for a nil node, a comment, a document node, and
+// a node whose path does not select it. An alias that does not resolve
+// still gives its path. It cannot tell a node of another
+// text apart, so such a node gives the path of whatever node the document
+// holds at its offset.
+func (x *Index) NodePath(r *paths.Resolver, node ast.Node) (paths.Path, bool) {
+	if astnode.IsNil(node) {
+		return paths.Path{}, false
+	}
+
+	switch node.(type) {
+	case *ast.CommentGroupNode, *ast.CommentNode, *ast.DocumentNode:
+		return paths.Path{}, false
+	}
+
+	tk := node.GetToken()
+	if tk == nil || tk.Position == nil || !x.body.Holds(tk.Position.Offset) {
+		return paths.Path{}, false
+	}
+
+	off := tk.Position.Offset
+	at, key := x.owner(tk)
+
+	switch {
+	case isEntry(node):
+		at, key = x.stepAt(off), false
+	case x.firstEntryOf(x.stepAt(off), node):
+		// A block mapping has the token of its first entry, which is not a
+		// ":" when that entry has a "?" key and leaves out its value. So
+		// the mapping, and not the type of its token, tells the entry
+		// apart from the mapping that holds it.
+		at, key = x.steps[x.stepAt(off)].parent, false
+	case isEmptyText(node) && x.endsInBlockText(x.stepEndingAt(off), off):
+		// The parser gives the empty content of a block scalar the offset
+		// of the node after it. So the content belongs to the step that
+		// ends at that offset, and not to the step that starts there.
+		// Other empty text, such as the value of a tag that a flow
+		// element writes alone, starts the step it belongs to.
+		at = x.stepEndingAt(off)
+		key = x.inKey(at, off)
+
+	case key && node != astnode.Content(x.steps[at].entry().Key) &&
+		sameNode(x.steps[at].entry().Value, node):
+		// The parser gives the null of a value that an entry with a "?"
+		// key leaves out the offset of the key. A null that the key holds,
+		// as `? !!null` writes one, can have the same type and position
+		// too. So the key of the step itself tells the two nulls apart.
+		// For a node of another parse they stay alike, and the key's null
+		// gives the entry path.
+		key = false
+	}
+
+	path, ok := x.spell(r, at, key, false)
+	if !ok || !x.selects(r, at) {
+		return paths.Path{}, false
+	}
+
+	// The index holds no step below an alias, so an alias that does not
+	// resolve can only be the node at the path itself. Its path still
+	// names where the document writes it, as [Index.PathAt] gives it.
+	// Other errors reject a node, such as one inside a collection that a
+	// tag converts to a scalar.
+	var aliasErr *paths.AliasError
+
+	_, err := r.Node(path)
+	if err != nil && !errors.As(err, &aliasErr) {
+		return paths.Path{}, false
+	}
+
+	return path, true
+}
+
+// isEmptyText reports whether node is a string whose token holds no text,
+// such as the empty content of a block scalar.
+func isEmptyText(node ast.Node) bool {
+	if _, ok := node.(*ast.StringNode); !ok {
+		return false
+	}
+
+	return strings.Trim(node.GetToken().Origin, " \t\r\n") == ""
+}
+
+// stepEndingAt returns the index of the innermost step that starts before
+// the offset off and whose tokens hold it, or -1 when no step does. Where
+// [Index.stepAt] picks the step that starts at off, stepEndingAt picks the
+// step that holds a token without text at off as its last token.
+func (x *Index) stepEndingAt(off int) int {
+	i := sort.Search(len(x.steps), func(i int) bool { return x.steps[i].lo >= off }) - 1
+
+	for i >= 0 && off > x.steps[i].hi {
+		i = x.steps[i].parent
+	}
+
+	return i
+}
+
+// endsInBlockText reports whether the key or the value of the step at
+// index at is a block scalar whose content has its token at the offset
+// off. It reports false for -1, which stands for the body.
+func (x *Index) endsInBlockText(at, off int) bool {
+	if at < 0 {
+		return false
+	}
+
+	step := x.steps[at]
+	if entry := step.entry(); entry != nil {
+		return blockTextAt(entry.Key, off) || blockTextAt(entry.Value, off)
+	}
+
+	return blockTextAt(step.seq.Values[step.index], off)
+}
+
+// blockTextAt reports whether node, behind any anchor, tag, or `?`, is a
+// block scalar whose content has its token at the offset off.
+func blockTextAt(node ast.Node, off int) bool {
+	block, ok := astnode.Content(node).(*ast.LiteralNode)
+	if !ok || block.Value == nil {
+		return false
+	}
+
+	tk := block.Value.GetToken()
+
+	return tk != nil && tk.Position != nil && tk.Position.Offset == off
+}
+
+// firstEntryOf reports whether the step at index at is the first entry of
+// node, a mapping. It reports false for -1, which stands for the body.
+func (x *Index) firstEntryOf(at int, node ast.Node) bool {
+	if at < 0 || x.steps[at].index != 0 || x.steps[at].mapping == nil {
+		return false
+	}
+
+	return sameNode(x.steps[at].mapping, node)
+}
+
+// isEntry reports whether node is an entry of a mapping.
+func isEntry(node ast.Node) bool {
+	_, ok := node.(*ast.MappingValueNode)
+
+	return ok
+}
+
+// sameNode reports whether a and b have the same type and the same
+// position, as two parses of one text give one node. The position holds
+// the line and the column as well as the offset, because the parser
+// gives some nulls one offset and different columns.
+func sameNode(a, b ast.Node) bool {
+	if astnode.IsNil(a) || reflect.TypeOf(a) != reflect.TypeOf(b) {
+		return false
+	}
+
+	ta, tb := a.GetToken(), b.GetToken()
+	if ta == nil || ta.Position == nil || tb == nil || tb.Position == nil {
+		return false
+	}
+
+	pa, pb := ta.Position, tb.Position
+
+	return pa.Offset == pb.Offset && pa.Line == pb.Line && pa.Column == pb.Column
+}
+
+// selectPath returns the path of the node of the step at index at, ending
+// in `~` when key is set, as [Index.OwnerPath] returns it with its two
+// reports.
+func (x *Index) selectPath(r *paths.Resolver, at int, key bool) (paths.Path, bool, bool) {
 	path, ok := x.spell(r, at, key, false)
 	if !ok || !x.selects(r, at) {
 		return path, false, ok

@@ -1634,6 +1634,723 @@ func TestNode_PathAt_ScopedNode(t *testing.T) {
 	})
 }
 
+// nodeCollector is an [ast.Visitor] that passes each node it visits to its
+// function, with the node that holds it, or nil for the node the walk
+// starts at.
+type nodeCollector struct {
+	visit  func(node, parent ast.Node)
+	parent ast.Node
+}
+
+func (c nodeCollector) Visit(node ast.Node) ast.Visitor {
+	c.visit(node, c.parent)
+
+	return nodeCollector{visit: c.visit, parent: node}
+}
+
+// pathsOf lists what [niceyaml.Node.PathOf] reports for every node of the
+// tree of doc, one row per node in the order of a walk of the tree. Each
+// row holds the position and the type of the node and its path, or "-"
+// where PathOf reports false. It fails the test when a path it lists does
+// not select the node, as [writes] tells.
+func pathsOf(t *testing.T, doc *niceyaml.Node) string {
+	t.Helper()
+
+	parents := map[ast.Node]ast.Node{}
+
+	var nodes []ast.Node
+
+	ast.Walk(nodeCollector{visit: func(node, parent ast.Node) {
+		parents[node] = parent
+		nodes = append(nodes, node)
+	}}, doc.DocumentAST().Body)
+
+	rows := make([]string, 0, len(nodes))
+
+	for _, node := range nodes {
+		got := "-"
+
+		if path, ok := doc.PathOf(node); ok {
+			at, err := doc.At(path)
+			require.NoError(t, err, "path %s of %T", path, node)
+			assert.True(t, writes(parents, at.AST(), node), "path %s of %T selects %T", path, node, at.AST())
+
+			got = path.String()
+		}
+
+		pos := position.NewFromToken(node.GetToken())
+		rows = append(rows, fmt.Sprintf("%s %s %s", pos, strings.TrimPrefix(fmt.Sprintf("%T", node), "*ast."), got))
+	}
+
+	return strings.Join(rows, "\n")
+}
+
+// writes reports whether the entry or element that writes selected, the
+// node that a path selects, also writes node. Each parent maps a node to
+// the node that holds it. The entry or element writes selected, each
+// anchor, tag, or `?` around it, and each anchor or tag inside it. The
+// entry writes itself too. It also writes the name of such an anchor, the
+// name of an alias, and the content of a block scalar.
+func writes(parents map[ast.Node]ast.Node, selected, node ast.Node) bool {
+	written := map[ast.Node]bool{}
+
+	for at := selected; at != nil; {
+		written[at] = true
+
+		switch n := at.(type) {
+		case *ast.AnchorNode:
+			at = n.Value
+		case *ast.TagNode:
+			at = n.Value
+		default:
+			at = nil
+		}
+	}
+
+	for at := selected; ; {
+		parent := parents[at]
+
+		switch p := parent.(type) {
+		case *ast.AnchorNode, *ast.TagNode, *ast.MappingKeyNode:
+			written[parent] = true
+			at = parent
+
+			continue
+
+		case *ast.MappingValueNode:
+			written[p] = p.Value == at
+		}
+
+		break
+	}
+
+	if written[node] {
+		return true
+	}
+
+	switch parent := parents[node].(type) {
+	case *ast.AnchorNode, *ast.AliasNode, *ast.LiteralNode:
+		return written[parent]
+	}
+
+	return false
+}
+
+func TestNode_PathOf(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  string
+		opts  []niceyaml.SourceOption
+	}{
+		"block collections": {
+			input: stringtest.LinesLF(
+				"spec:",
+				"  a: 1",
+				"list:",
+				"  - x",
+				"  - k: v",
+			),
+			want: stringtest.JoinLF(
+				"0:4 MappingNode $",
+				"0:4 MappingValueNode $.spec",
+				"0:0 StringNode $.spec~",
+				"1:3 MappingNode $.spec",
+				"1:3 MappingValueNode $.spec.a",
+				"1:2 StringNode $.spec.a~",
+				"1:5 IntegerNode $.spec.a",
+				"2:4 MappingValueNode $.list",
+				"2:0 StringNode $.list~",
+				"3:2 SequenceNode $.list",
+				"3:4 StringNode $.list[0]",
+				"4:5 MappingNode $.list[1]",
+				"4:5 MappingValueNode $.list[1].k",
+				"4:4 StringNode $.list[1].k~",
+				"4:7 StringNode $.list[1].k",
+			),
+		},
+		"flow collections": {
+			input: "m: {x: 1}\ns: [1, [2]]\n",
+			want: stringtest.JoinLF(
+				"0:1 MappingNode $",
+				"0:1 MappingValueNode $.m",
+				"0:0 StringNode $.m~",
+				"0:3 MappingNode $.m",
+				"0:5 MappingValueNode $.m.x",
+				"0:4 StringNode $.m.x~",
+				"0:7 IntegerNode $.m.x",
+				"1:1 MappingValueNode $.s",
+				"1:0 StringNode $.s~",
+				"1:3 SequenceNode $.s",
+				"1:4 IntegerNode $.s[0]",
+				"1:7 SequenceNode $.s[1]",
+				"1:8 IntegerNode $.s[1][0]",
+			),
+		},
+		"anchor alias and merge key": {
+			input: stringtest.LinesLF(
+				"base: &b",
+				"  k: v",
+				"merged:",
+				"  <<: *b",
+				"  k: w",
+			),
+			want: stringtest.JoinLF(
+				"0:4 MappingNode $",
+				"0:4 MappingValueNode $.base",
+				"0:0 StringNode $.base~",
+				"0:6 AnchorNode $.base",
+				"0:7 StringNode $.base",
+				"1:3 MappingNode $.base",
+				"1:3 MappingValueNode $.base.k",
+				"1:2 StringNode $.base.k~",
+				"1:5 StringNode $.base.k",
+				"2:6 MappingValueNode $.merged",
+				"2:0 StringNode $.merged~",
+				"3:4 MappingNode $.merged",
+				"3:4 MappingValueNode $.merged.<<",
+				"3:2 MergeKeyNode $.merged.<<~",
+				"3:6 AliasNode $.merged.<<",
+				"3:7 StringNode $.merged.<<",
+				"4:3 MappingValueNode $.merged.k",
+				"4:2 StringNode $.merged.k~",
+				"4:5 StringNode $.merged.k",
+			),
+		},
+		"tags": {
+			input: stringtest.LinesLF(
+				"t: !!map",
+				"  a: !!str 1",
+			),
+			want: stringtest.JoinLF(
+				"0:1 MappingNode $",
+				"0:1 MappingValueNode $.t",
+				"0:0 StringNode $.t~",
+				"0:3 TagNode $.t",
+				"1:3 MappingNode $.t",
+				"1:3 MappingValueNode $.t.a",
+				"1:2 StringNode $.t.a~",
+				"1:5 TagNode $.t.a",
+				"1:11 IntegerNode $.t.a",
+			),
+		},
+		"tag that converts a collection": {
+			input: "p: !!str &k {a: 1}\n",
+			want: stringtest.JoinLF(
+				"0:1 MappingNode $",
+				"0:1 MappingValueNode $.p",
+				"0:0 StringNode $.p~",
+				"0:3 TagNode $.p",
+				"0:9 AnchorNode $.p",
+				"0:10 StringNode $.p",
+				"0:12 MappingNode $.p",
+				"0:14 MappingValueNode -",
+				"0:13 StringNode -",
+				"0:16 IntegerNode -",
+			),
+		},
+		"omitted values": {
+			input: stringtest.LinesLF(
+				"a:",
+				"s:",
+				"  -",
+				"  - x",
+			),
+			want: stringtest.JoinLF(
+				"0:1 MappingNode $",
+				"0:1 MappingValueNode $.a",
+				"0:0 StringNode $.a~",
+				"0:2 NullNode $.a",
+				"1:1 MappingValueNode $.s",
+				"1:0 StringNode $.s~",
+				"2:2 SequenceNode $.s",
+				"2:3 NullNode $.s[0]",
+				"3:4 StringNode $.s[1]",
+			),
+		},
+		"explicit key": {
+			input: "? k\n: v\n? s\n? t\n",
+			want: stringtest.JoinLF(
+				"1:0 MappingNode $",
+				"1:0 MappingValueNode $.k",
+				"0:0 MappingKeyNode $.k~",
+				"0:2 StringNode $.k~",
+				"1:2 StringNode $.k",
+				"2:2 MappingValueNode $.s",
+				"2:0 MappingKeyNode $.s~",
+				"2:2 StringNode $.s~",
+				"2:3 NullNode $.s",
+				"3:2 MappingValueNode $.t",
+				"3:0 MappingKeyNode $.t~",
+				"3:2 StringNode $.t~",
+				"3:4 NullNode $.t",
+			),
+		},
+		"explicit key without a value first": {
+			input: stringtest.LinesLF(
+				"a:",
+				"  ? b",
+				"  ? c",
+				"s:",
+				"  - ? d",
+			),
+			want: stringtest.JoinLF(
+				"0:1 MappingNode $",
+				"0:1 MappingValueNode $.a",
+				"0:0 StringNode $.a~",
+				"1:4 MappingNode $.a",
+				"1:4 MappingValueNode $.a.b",
+				"1:2 MappingKeyNode $.a.b~",
+				"1:4 StringNode $.a.b~",
+				"1:5 NullNode $.a.b",
+				"2:4 MappingValueNode $.a.c",
+				"2:2 MappingKeyNode $.a.c~",
+				"2:4 StringNode $.a.c~",
+				"2:5 NullNode $.a.c",
+				"3:1 MappingValueNode $.s",
+				"3:0 StringNode $.s~",
+				"4:2 SequenceNode $.s",
+				"4:6 MappingNode $.s[0]",
+				"4:6 MappingValueNode $.s[0].d",
+				"4:4 MappingKeyNode $.s[0].d~",
+				"4:6 StringNode $.s[0].d~",
+				"4:8 NullNode $.s[0].d",
+			),
+		},
+		"explicit key without a value first in the body": {
+			input: "? a\n? b\n",
+			want: stringtest.JoinLF(
+				"0:2 MappingNode $",
+				"0:2 MappingValueNode $.a",
+				"0:0 MappingKeyNode $.a~",
+				"0:2 StringNode $.a~",
+				"0:3 NullNode $.a",
+				"1:2 MappingValueNode $.b",
+				"1:0 MappingKeyNode $.b~",
+				"1:2 StringNode $.b~",
+				"1:4 NullNode $.b",
+			),
+		},
+		"tagged empty key without a value": {
+			input: "? !!null\n",
+			want: stringtest.JoinLF(
+				"0:2 MappingNode $",
+				"0:2 MappingValueNode $.null",
+				"0:0 MappingKeyNode $.null~",
+				"0:2 TagNode $.null~",
+				"0:3 NullNode $.null~",
+				"0:4 NullNode $.null",
+			),
+		},
+		"tagged empty key without a value before an entry": {
+			// The two nulls of the first entry share a type and a position.
+			input: "? !!null\n? b\n",
+			want: stringtest.JoinLF(
+				"0:2 MappingNode $",
+				"0:2 MappingValueNode $.null",
+				"0:0 MappingKeyNode $.null~",
+				"0:2 TagNode $.null~",
+				"0:3 NullNode $.null~",
+				"0:3 NullNode $.null",
+				"1:2 MappingValueNode $.b",
+				"1:0 MappingKeyNode $.b~",
+				"1:2 StringNode $.b~",
+				"1:4 NullNode $.b",
+			),
+		},
+		"nested tagged empty key without a value before an entry": {
+			input: "x:\n  ? !!null\n  ? b\n",
+			want: stringtest.JoinLF(
+				"0:1 MappingNode $",
+				"0:1 MappingValueNode $.x",
+				"0:0 StringNode $.x~",
+				"1:4 MappingNode $.x",
+				"1:4 MappingValueNode $.x.null",
+				"1:2 MappingKeyNode $.x.null~",
+				"1:4 TagNode $.x.null~",
+				"1:5 NullNode $.x.null~",
+				"1:5 NullNode $.x.null",
+				"2:4 MappingValueNode $.x.b",
+				"2:2 MappingKeyNode $.x.b~",
+				"2:4 StringNode $.x.b~",
+				"2:6 NullNode $.x.b",
+			),
+		},
+		"tagged empty key with a value": {
+			input: "? !!null\n: v\n",
+			want: stringtest.JoinLF(
+				"1:0 MappingNode $",
+				"1:0 MappingValueNode $.null",
+				"0:0 MappingKeyNode $.null~",
+				"0:2 TagNode $.null~",
+				"0:3 NullNode $.null~",
+				"1:2 StringNode $.null",
+			),
+		},
+		"empty block scalars": {
+			input: stringtest.LinesLF(
+				"a: |",
+				"",
+				"b: >",
+				"c:",
+				"  d: |",
+				"e:",
+				"  - |",
+				"  - x",
+				"f: |",
+				"  text",
+				"g: |",
+			),
+			want: stringtest.JoinLF(
+				"0:1 MappingNode $",
+				"0:1 MappingValueNode $.a",
+				"0:0 StringNode $.a~",
+				"0:3 LiteralNode $.a",
+				"2:0 StringNode $.a",
+				"2:1 MappingValueNode $.b",
+				"2:0 StringNode $.b~",
+				"2:3 LiteralNode $.b",
+				"3:0 StringNode $.b",
+				"3:1 MappingValueNode $.c",
+				"3:0 StringNode $.c~",
+				"4:3 MappingNode $.c",
+				"4:3 MappingValueNode $.c.d",
+				"4:2 StringNode $.c.d~",
+				"4:5 LiteralNode $.c.d",
+				"5:0 StringNode $.c.d",
+				"5:1 MappingValueNode $.e",
+				"5:0 StringNode $.e~",
+				"6:2 SequenceNode $.e",
+				"6:4 LiteralNode $.e[0]",
+				"7:2 StringNode $.e[0]",
+				"7:4 StringNode $.e[1]",
+				"8:1 MappingValueNode $.f",
+				"8:0 StringNode $.f~",
+				"8:3 LiteralNode $.f",
+				"9:2 StringNode $.f",
+				"10:1 MappingValueNode $.g",
+				"10:0 StringNode $.g~",
+				"10:3 LiteralNode $.g",
+				"10:3 StringNode $.g",
+			),
+		},
+		"tag without a value in a flow sequence": {
+			input: stringtest.LinesLF(
+				"a: [!!str , b]",
+				"c:",
+				"  - [!!str , w]",
+			),
+			want: stringtest.JoinLF(
+				"0:1 MappingNode $",
+				"0:1 MappingValueNode $.a",
+				"0:0 StringNode $.a~",
+				"0:3 SequenceNode $.a",
+				"0:4 TagNode $.a[0]",
+				"0:5 StringNode $.a[0]",
+				"0:12 StringNode $.a[1]",
+				"1:1 MappingValueNode $.c",
+				"1:0 StringNode $.c~",
+				"2:2 SequenceNode $.c",
+				"2:4 SequenceNode $.c[0]",
+				"2:5 TagNode $.c[0][0]",
+				"2:6 StringNode $.c[0][0]",
+				"2:13 StringNode $.c[0][1]",
+			),
+		},
+		"comment and earlier entry with one key": {
+			input: stringtest.LinesLF(
+				"a: 1 # first",
+				"a: 2",
+				"b: 3 # last",
+			),
+			opts: []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
+			want: stringtest.JoinLF(
+				"0:1 MappingNode $",
+				"0:1 MappingValueNode -",
+				"0:0 StringNode -",
+				"0:3 IntegerNode -",
+				"0:5 CommentGroupNode -",
+				"1:1 MappingValueNode $.a",
+				"1:0 StringNode $.a~",
+				"1:3 IntegerNode $.a",
+				"2:1 MappingValueNode $.b",
+				"2:0 StringNode $.b~",
+				"2:3 IntegerNode $.b",
+				"2:5 CommentGroupNode -",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input, tc.opts...)
+			assert.Equal(t, tc.want, pathsOf(t, doc))
+		})
+	}
+}
+
+func TestNode_PathOf_SelectsNode(t *testing.T) {
+	t.Parallel()
+
+	// Every Node that a recursive path lists, including one that an alias
+	// reads, has a path that selects its node where the document writes it.
+	source := niceyaml.NewSourceFromString(yamltest.ReadFile(t, filepath.Join("testdata", "full.yaml")))
+	docs := yamltest.Documents(t, source, 2)
+
+	found := 0
+
+	for _, doc := range docs {
+		nodes, err := doc.Nodes(paths.Doc().RecursiveAll())
+		require.NoError(t, err)
+
+		for _, node := range nodes {
+			path, ok := doc.PathOf(node.AST())
+			require.True(t, ok, "%s", node.Path())
+
+			at := yamltest.At(t, doc, path)
+			assert.Same(t, node.AST(), at.AST(), "%s at %s", node.Path(), path)
+
+			found++
+		}
+	}
+
+	assert.Greater(t, found, 100)
+}
+
+func TestNode_PathOf_UnresolvedAlias(t *testing.T) {
+	t.Parallel()
+
+	// An alias that does not resolve keeps the path where the document
+	// writes it, as PathAt gives it. [niceyaml.Node.At] reports the alias
+	// there, so each row binds an error at the path instead and lists the
+	// position it binds to.
+	tcs := map[string]struct {
+		input string
+		want  string
+	}{
+		"forward alias": {
+			input: "a: *x\nb: &x 1\n",
+			want: stringtest.JoinLF(
+				"0:1 MappingNode $ 0:0",
+				"0:1 MappingValueNode $.a 0:3",
+				"0:0 StringNode $.a~ 0:0",
+				"0:3 AliasNode $.a 0:3",
+				"0:4 StringNode $.a 0:3",
+				"1:1 MappingValueNode $.b 1:6",
+				"1:0 StringNode $.b~ 1:0",
+				"1:3 AnchorNode $.b 1:6",
+				"1:4 StringNode $.b 1:6",
+				"1:6 IntegerNode $.b 1:6",
+			),
+		},
+		"undefined alias": {
+			input: "a: *x\nb:\n  c: *x\n",
+			want: stringtest.JoinLF(
+				"0:1 MappingNode $ 0:0",
+				"0:1 MappingValueNode $.a 0:3",
+				"0:0 StringNode $.a~ 0:0",
+				"0:3 AliasNode $.a 0:3",
+				"0:4 StringNode $.a 0:3",
+				"1:1 MappingValueNode $.b 1:0",
+				"1:0 StringNode $.b~ 1:0",
+				"2:3 MappingNode $.b 1:0",
+				"2:3 MappingValueNode $.b.c 2:5",
+				"2:2 StringNode $.b.c~ 2:2",
+				"2:5 AliasNode $.b.c 2:5",
+				"2:6 StringNode $.b.c 2:5",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input)
+
+			var rows []string
+
+			ast.Walk(nodeCollector{visit: func(node, _ ast.Node) {
+				got := "-"
+
+				if path, ok := doc.PathOf(node); ok {
+					var bound *niceyaml.SourceError
+
+					require.ErrorAs(t, doc.Bind(niceyaml.NewError("x", niceyaml.AtPath(path))), &bound)
+					require.NoError(t, bound.Unresolved(), "path %s of %T", path, node)
+
+					at, ok := bound.Position()
+					require.True(t, ok, "path %s of %T", path, node)
+
+					got = fmt.Sprintf("%s %s", path, at)
+				}
+
+				pos := position.NewFromToken(node.GetToken())
+				kind := strings.TrimPrefix(fmt.Sprintf("%T", node), "*ast.")
+				rows = append(rows, fmt.Sprintf("%s %s %s", pos, kind, got))
+			}}, doc.DocumentAST().Body)
+
+			assert.Equal(t, tc.want, strings.Join(rows, "\n"))
+		})
+	}
+}
+
+func TestNode_PathOf_MergeSources(t *testing.T) {
+	t.Parallel()
+
+	doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+		"base: &b",
+		"  k: v",
+		"flow: &f {z: 1}",
+		"set: &s !!set",
+		"  ? x",
+		"  ? y",
+		"merged:",
+		"  <<: [*b, *f, *s]",
+		"  k: w",
+	))
+
+	merged := yamltest.At(t, doc, paths.Doc().Child("merged"))
+
+	sources, err := doc.DocumentResolver().MergeSources(merged.AST())
+	require.NoError(t, err)
+
+	var got []string
+
+	for _, src := range sources {
+		path, ok := doc.PathOf(src)
+		require.True(t, ok)
+
+		got = append(got, path.String())
+	}
+
+	assert.Equal(t, []string{"$.base", "$.flow", "$.set"}, got)
+}
+
+func TestNode_PathOf_DecodedNode(t *testing.T) {
+	t.Parallel()
+
+	// Two anchors with one name make the decoder read a second parse of
+	// the text.
+	doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+		"a: &n 1",
+		"b: &n 2",
+		"steps:",
+		"  - with:",
+		"      x: *n",
+		"  - with: {z: 3}",
+		"  - with:",
+		"      - y",
+	))
+
+	type fields struct {
+		Steps []struct {
+			With ast.Node `yaml:"with"`
+		} `yaml:"steps"`
+	}
+
+	type selfDecoded struct {
+		Steps []struct {
+			With nodeText `yaml:"with"`
+		} `yaml:"steps"`
+	}
+
+	byField, err := doc.Decode[fields](t.Context())
+	require.NoError(t, err)
+	require.Len(t, byField.Steps, 3)
+
+	bySelf, err := doc.Decode[selfDecoded](t.Context())
+	require.NoError(t, err)
+	require.Len(t, bySelf.Steps, 3)
+
+	for i := range 3 {
+		want := paths.Doc().Child("steps").Index(i).Child("with")
+		node := yamltest.At(t, doc, want)
+
+		// A field of type ast.Node holds the node of the document.
+		got, ok := doc.PathOf(byField.Steps[i].With)
+		require.True(t, ok, "step %d", i)
+		assert.Equal(t, want, got)
+		assert.Same(t, node.AST(), byField.Steps[i].With, "step %d", i)
+
+		// A value that decodes itself keeps the node of the second parse,
+		// which has the same path.
+		kept := bySelf.Steps[i].With.node
+		assert.NotSame(t, node.AST(), kept, "step %d", i)
+
+		got, ok = doc.PathOf(kept)
+		require.True(t, ok, "step %d", i)
+		assert.Equal(t, want, got)
+	}
+}
+
+func TestNode_PathOf_NoPath(t *testing.T) {
+	t.Parallel()
+
+	two := yamltest.Documents(t, niceyaml.NewSourceFromString("a: 1\n---\nb: 2\n"), 2)
+	unparsed := yamltest.UnparsedDocument(t, "a: [")
+	other := yamltest.FirstDocument(t, "a: 1\n").DocumentAST().Body
+
+	commented := yamltest.FirstDocument(t, "a: 1 # note\n")
+	comment := yamltest.At(t, commented, paths.Doc().Child("a")).AST().GetComment()
+	require.NotNil(t, comment)
+	require.NotEmpty(t, comment.Comments)
+
+	var typedNil *ast.MappingNode
+
+	tcs := map[string]struct {
+		doc  *niceyaml.Node
+		node ast.Node
+	}{
+		"nil Node":       {node: other},
+		"nil node":       {doc: two[0]},
+		"typed nil node": {doc: two[0], node: typedNil},
+		"comment group":  {doc: commented, node: comment},
+		"comment":        {doc: commented, node: comment.Comments[0]},
+		"document node":  {doc: two[1], node: two[1].DocumentAST()},
+		"other document": {doc: two[0], node: two[1].DocumentAST().Body},
+		"unparsed":       {doc: unparsed, node: other},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := tc.doc.PathOf(tc.node)
+			assert.False(t, ok)
+			assert.Equal(t, paths.Path{}, got)
+		})
+	}
+}
+
+func TestNode_PathOf_ScopedNode(t *testing.T) {
+	t.Parallel()
+
+	doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+		"spec:",
+		"  hours:",
+		"    open: 9",
+		"name: x",
+	))
+	hours := yamltest.At(t, doc, paths.Doc().Child("spec", "hours"))
+	name := yamltest.At(t, doc, paths.Doc().Child("name"))
+
+	// A scoped Node answers for the nodes it holds, as PathAt does.
+	got, ok := hours.PathOf(hours.AST())
+	require.True(t, ok)
+	assert.Equal(t, hours.Path(), got)
+
+	_, ok = hours.PathOf(name.AST())
+	assert.False(t, ok)
+
+	got, ok = hours.Document().PathOf(name.AST())
+	require.True(t, ok)
+	assert.Equal(t, name.Path(), got)
+}
+
 // TestNode_Nodes_OneLine verifies that the nodes of a document on a single
 // line, as a minified JSON document is, each find their own columns of
 // that line.

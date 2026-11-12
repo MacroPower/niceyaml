@@ -1592,6 +1592,15 @@ func spellingTexts(tks token.Tokens) []string {
 // content. It reports false inside an entry that paths cannot select,
 // such as the earlier of two entries with one key. Every path it returns
 // selects the node at pos and does not hold a wildcard selector.
+//
+// The position of a node from [Node.AST] or [paths.Resolver] does not
+// name that node in every case. The parser gives a block mapping the
+// token of its first entry, such as its ":", and a block sequence the "-"
+// of its first element. PathAt thus gives the path of that entry or element at
+// such a position. [Node.PathOf] returns the path of the node itself. A
+// caller that visits every value of a document asks [Node.Nodes] for
+// them, as with `doc.Nodes(paths.Doc().RecursiveAll())`, and each Node
+// it returns carries its path.
 func (n *Node) PathAt(pos position.Position) (paths.Path, bool) {
 	if n == nil || n.doc.err != nil {
 		return paths.Path{}, false
@@ -1603,6 +1612,69 @@ func (n *Node) PathAt(pos position.Position) (paths.Path, bool) {
 	}
 
 	path, ok := n.doc.pathIndex().PathAt(n.doc.pathResolver(), tk.Position.Offset)
+	if !ok {
+		return paths.Path{}, false
+	}
+
+	if _, under := path.CutPrefix(n.base); !under {
+		return paths.Path{}, false
+	}
+
+	return path, true
+}
+
+// PathOf returns the `$` path of node, a go-yaml node of the document,
+// and true. The node comes from the tree of the document, such as from
+// [Node.AST], [Source.File], or a [paths.Resolver] lookup, or from a field
+// of type [ast.Node] that a decode of the document fills. A caller can
+// pass the path to [Node.At] for the Node of the value, or to [AtPath]
+// for an error there:
+//
+//	sources, _ := doc.DocumentResolver().MergeSources(merged.AST())
+//	for _, src := range sources {
+//		path, ok := doc.PathOf(src) // $.base, the mapping that "<<" reads
+//		// ...
+//	}
+//
+// The path names where the document writes the node, as [Node.PathAt]
+// does, and holds no wildcard selector. A mapping or a sequence, in block
+// or flow style, gives the path of the entry or element that holds it.
+// The body of the document gives the root path. An anchor, a tag, or
+// an alias gives the path of the entry or element that writes it. The
+// content that an alias reads thus gives the path where its anchor
+// defines it. An alias that does not resolve, such as one before its
+// anchor, also gives its path, as PathAt gives it. [Node.At] reports a
+// [*paths.AliasError] at that path, and [AtPath] binds an error there.
+// A key gives the path of its entry with a trailing `~`, as
+// [paths.Path.Key] writes one. An [*ast.MappingValueNode] gives the path
+// of its entry, and so does the null that the parser makes for a value
+// that the entry leaves out. An element works the same way.
+//
+// PathOf answers within the scope of the Node, as PathAt does. It reports
+// false for a nil Node or node, for a comment, and for an
+// [*ast.DocumentNode], whose body gives the root path. It also reports
+// false for a node whose path does not select it, such as one inside the
+// earlier of two entries with one key. A document that did not parse and
+// a node outside the document report false too.
+//
+// PathOf finds the node by the offset of its token and by its type. It
+// thus finds a node of a second parse of the same text, such as the one
+// that a decode might read. It cannot tell a node of another text apart.
+// Such a node gets the path of whatever node lies at its offset in the
+// document.
+//
+// In one case two nodes of a parse share a type and a position. An entry
+// with a "?" key that holds a null, as `? !!null` writes one, leaves out
+// its value, and another entry follows it. PathOf tells the two nulls
+// apart for a node of the document. For a node of a second parse, the
+// null of the key gets the path of its entry, and not the path that ends
+// in `~`.
+func (n *Node) PathOf(node ast.Node) (paths.Path, bool) {
+	if n == nil || n.doc.err != nil {
+		return paths.Path{}, false
+	}
+
+	path, ok := n.doc.pathIndex().NodePath(n.doc.pathResolver(), node)
 	if !ok {
 		return paths.Path{}, false
 	}

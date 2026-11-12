@@ -674,7 +674,9 @@
 // [SourceError.Excerpt] returns those hunks for one binding. [Node.Ranges]
 // returns the ranges that an error at a path highlights. [Node.PathAt]
 // returns the path of the node at a position, for a viewer that names the
-// value under its cursor.
+// value under its cursor. [Node.PathOf] returns the path of a go-yaml node
+// of the document, for an error at a node that a [paths.Resolver] lookup
+// or a decode hands out.
 //
 // A unified diff shows each unchanged line as the line of the after revision.
 // An error of the before revision thus marks only the lines that the diff

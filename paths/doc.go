@@ -67,6 +67,16 @@
 // above it with [Resolver.NodeFrom]. Each path then stays short, however
 // deep the walk goes.
 //
+// A caller that visits every value of a document does not need a walk of
+// its own. [go.jacobcolvin.com/niceyaml.Node.Nodes] with
+// `paths.Doc().RecursiveAll()` lists each value with its path. A caller
+// that holds one node, such as one that [Resolver.MergeSources] returns,
+// gets its path from [go.jacobcolvin.com/niceyaml.Node.PathOf]. The
+// position of the token of a node does not name every node. The parser
+// gives a block mapping the token of its first entry, such as its ":",
+// and a block sequence the "-" of its first element. The path at that position
+// thus names the first entry or element.
+//
 // A [go.jacobcolvin.com/niceyaml.Node] holds a Resolver for its document,
 // and its Resolver method returns it. A caller with a Node can use that
 // Resolver rather than create one.
