@@ -3253,103 +3253,59 @@ func TestViewport_ViewFitsHeight(t *testing.T) {
 	}
 }
 
-func TestViewport_FixedSizeContainerStyle(t *testing.T) {
+func TestViewport_ContainerStyleSizeIgnored(t *testing.T) {
 	t.Parallel()
 
-	box := normalBorder()
+	box := normalBorder().Margin(1, 2)
 
-	// A fixed Width or Height on the container style caps the box as
-	// lipgloss draws it, and margins add to that size.
+	// The viewport owns the size and the alignment of its container. A
+	// style that sets them, or rewrites the rows it wraps, renders the
+	// same view as its frame alone, so each content row maps to one row
+	// of the view and a page moves by the rows on screen.
 	tcs := map[string]struct {
-		style      lipgloss.Style
-		wantWidth  int
-		wantHeight int
+		style lipgloss.Style
 	}{
-		"fixed size": {
-			style:      box.Width(30).Height(8),
-			wantWidth:  30,
-			wantHeight: 8,
-		},
-		"fixed size with margins": {
-			style:      box.Margin(1, 3).Width(30).Height(8),
-			wantWidth:  36,
-			wantHeight: 10,
-		},
-		"fixed width with margins": {
-			style:      box.Margin(1, 3).Width(30),
-			wantWidth:  36,
-			wantHeight: 40,
-		},
-		"fixed height with margins": {
-			style:      box.Margin(1, 3).Height(8),
-			wantWidth:  60,
-			wantHeight: 10,
-		},
+		"fixed size":   {style: box.Width(30).Height(8)},
+		"max size":     {style: box.MaxWidth(12).MaxHeight(6)},
+		"align":        {style: box.Align(lipgloss.Right, lipgloss.Bottom)},
+		"wide width":   {style: box.Width(80).Align(lipgloss.Center)},
+		"inline":       {style: box.Inline(true)},
+		"transform":    {style: box.Transform(strings.ToUpper)},
+		"string":       {style: box.SetString("prefix")},
+		"all of these": {style: box.Width(5).Height(3).MaxWidth(4).MaxHeight(2).Align(lipgloss.Center).Inline(true)},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := testModel(testPrinter(), 60, 40, yamlviewport.WithContainerStyle(tc.style))
-			setRevision(&m, stringtest.LinesLF("a: 1", "b: 2"))
+			content := yamltest.GenerateLines(50, "k%d: v")
 
-			view := m.View()
-			assert.Equal(t, tc.wantWidth, lipgloss.Width(view))
-			assert.Equal(t, tc.wantHeight, lipgloss.Height(view))
-		})
-	}
-}
+			want := testModel(testPrinter(), 40, 12, yamlviewport.WithContainerStyle(box))
+			setRevision(&want, content)
 
-func TestViewport_MaxSizeContainerStyle(t *testing.T) {
-	t.Parallel()
+			// The option and the setter drop the same properties.
+			for _, m := range []yamlviewport.Model{
+				testModel(testPrinter(), 40, 12, yamlviewport.WithContainerStyle(tc.style)),
+				func() yamlviewport.Model {
+					m := testModel(testPrinter(), 40, 12)
+					m.SetContainerStyle(tc.style)
 
-	box := normalBorder()
+					return m
+				}(),
+			} {
+				setRevision(&m, content)
 
-	// A MaxWidth or MaxHeight on the container style caps the box, margins
-	// included, so the whole border shows and a page moves by the rows on
-	// screen.
-	tcs := map[string]struct {
-		style      lipgloss.Style
-		wantWidth  int
-		wantHeight int
-		wantRows   int
-	}{
-		"max size": {
-			style:      box.MaxWidth(12).MaxHeight(6),
-			wantWidth:  12,
-			wantHeight: 6,
-			wantRows:   4,
-		},
-		"max size with margins": {
-			style:      box.Margin(1, 2).MaxWidth(16).MaxHeight(8),
-			wantWidth:  16,
-			wantHeight: 8,
-			wantRows:   4,
-		},
-		"max size above fixed size": {
-			style:      box.Width(12).Height(6).MaxWidth(14).MaxHeight(8),
-			wantWidth:  12,
-			wantHeight: 6,
-			wantRows:   4,
-		},
-	}
+				assert.Equal(t, box.Render("a\nbb"), m.ContainerStyle().Render("a\nbb"))
+				assert.Equal(t, want.View(), m.View())
+				assert.Equal(t, 40, lipgloss.Width(m.View()))
+				assert.Equal(t, 12, lipgloss.Height(m.View()))
+				assert.Equal(t, 8, m.VisibleRowCount())
 
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			m := testModel(testPrinter(), 20, 12, yamlviewport.WithContainerStyle(tc.style))
-			setRevision(&m, yamltest.GenerateLines(50, "k%d: v"))
-
-			view := m.View()
-			assert.Equal(t, tc.wantWidth, lipgloss.Width(view))
-			assert.Equal(t, tc.wantHeight, lipgloss.Height(view))
-			assert.Contains(t, view, "┘")
-			assert.Equal(t, tc.wantRows, m.VisibleRowCount())
-
-			m.PageDown()
-			assert.Equal(t, tc.wantRows, m.YOffset())
+				m.PageDown()
+				assert.Equal(t, 8, m.YOffset())
+				assert.Equal(t, want.TotalRowCount(), m.TotalRowCount())
+			}
 		})
 	}
 }
@@ -6121,7 +6077,7 @@ func TestViewport_UnchangedLayoutKeepsRowCache(t *testing.T) {
 	// pane width, and the search matches as they are keeps the row counts,
 	// so the next read lays out nothing. Without a diff, the full and hunks
 	// view modes show the same lines at the same pane width.
-	frame := normalBorder().Width(30)
+	frame := normalBorder()
 
 	tcs := map[string]struct {
 		// Steps that run before the row counts fill, if any.
@@ -6131,8 +6087,10 @@ func TestViewport_UnchangedLayoutKeepsRowCache(t *testing.T) {
 		"same width": {
 			change: func(m *yamlviewport.Model, _ *printer.Printer) { m.SetWidth(m.Width()) },
 		},
-		"width capped by style": {
-			change: func(m *yamlviewport.Model, _ *printer.Printer) { m.SetWidth(50) },
+		"size and alignment on style": {
+			change: func(m *yamlviewport.Model, _ *printer.Printer) {
+				m.SetContainerStyle(frame.Width(10).MaxWidth(10).MaxHeight(4).Align(lipgloss.Center))
+			},
 		},
 		"same word wrap": {
 			change: func(m *yamlviewport.Model, _ *printer.Printer) { m.SetWordWrap(m.WordWrap()) },
