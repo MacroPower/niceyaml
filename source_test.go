@@ -803,7 +803,7 @@ func TestSource_File_BlankLineBeforeFirstKey(t *testing.T) {
 
 			doc := yamltest.Document(t, source)
 
-			keyTk, err := paths.NewResolver(doc.DocumentAST()).Token(paths.Current().Child("a").Key())
+			keyTk, err := paths.NewResolver(doc.DocumentAST()).Token(paths.Doc().Child("a").Key())
 			require.NoError(t, err)
 			require.NotNil(t, keyTk)
 
@@ -1314,7 +1314,7 @@ func TestSource_File_TokensFindLines(t *testing.T) {
 
 		// The parser holds copies of the Source's tokens, and a copy finds
 		// the ranges the original does.
-		tk, err := paths.NewResolver(doc.DocumentAST()).Token(paths.Current().Child("other"))
+		tk, err := paths.NewResolver(doc.DocumentAST()).Token(paths.Doc().Child("other"))
 		require.NoError(t, err)
 		require.NotNil(t, tk)
 
@@ -1329,13 +1329,13 @@ func TestSource_File_TokensFindLines(t *testing.T) {
 
 		// A path to a key resolves to the key token, and a block scalar to
 		// its indicator, each of which finds its own columns.
-		keyTk, err := paths.NewResolver(doc.DocumentAST()).Token(paths.Current().Child("other").Key())
+		keyTk, err := paths.NewResolver(doc.DocumentAST()).Token(paths.Doc().Child("other").Key())
 		require.NoError(t, err)
 		assert.Equal(t, position.Ranges{
 			yamltest.LineRange(3, 0, 5),
 		}, source.Lines().ContentRanges(keyTk))
 
-		blockTk, err := paths.NewResolver(doc.DocumentAST()).Token(paths.Current().Child("key"))
+		blockTk, err := paths.NewResolver(doc.DocumentAST()).Token(paths.Doc().Child("key"))
 		require.NoError(t, err)
 		assert.Equal(t, position.Ranges{
 			yamltest.LineRange(0, 5, 6),

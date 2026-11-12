@@ -625,6 +625,152 @@ func TestResolver_Wildcard(t *testing.T) {
 	}
 }
 
+func TestResolver_NoCurrentNode(t *testing.T) {
+	t.Parallel()
+
+	// The root holds name too, so a resolve of the `@` path from the root
+	// would find a node.
+	input := stringtest.LinesLF(
+		"name: root",
+		"spec:",
+		"  containers:",
+		"    - name: web",
+		"    - name: db",
+	)
+
+	tcs := map[string]struct {
+		path string
+	}{
+		"current node":        {path: "@"},
+		"name":                {path: "@.name"},
+		"key":                 {path: "@.name~"},
+		"index":               {path: "@.spec.containers[0]"},
+		"missing name":        {path: "@.missing"},
+		"sequence wildcard":   {path: "@.spec.containers[*]"},
+		"recursive name":      {path: "@..name"},
+		"key of every entry":  {path: "@.*~"},
+		"name below an index": {path: "@.spec.containers[1].name"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			r := paths.NewResolver(documentOf(t, input))
+			path := paths.MustParse(tc.path)
+			want := "resolve " + tc.path + ": @ path needs a current node"
+
+			// Each method that starts at the root rejects the `@` path,
+			// rather than read it from the root or report it missing.
+			_, err := r.Node(path)
+			require.EqualError(t, err, want)
+			require.ErrorIs(t, err, paths.ErrNoCurrentNode)
+			require.NotErrorIs(t, err, paths.ErrNotFound)
+
+			_, err = r.Token(path)
+			require.EqualError(t, err, want)
+			require.ErrorIs(t, err, paths.ErrNoCurrentNode)
+
+			_, err = r.Nodes(path)
+			require.EqualError(t, err, want)
+			require.ErrorIs(t, err, paths.ErrNoCurrentNode)
+
+			_, err = r.Matches(path)
+			require.EqualError(t, err, want)
+			require.ErrorIs(t, err, paths.ErrNoCurrentNode)
+
+			near, ok := r.Nearest(path)
+			assert.False(t, ok)
+			assert.Equal(t, paths.Path{}, near)
+
+			// Doc joined with the path reads it from the root.
+			_, err = r.Matches(paths.Doc().Join(path))
+			require.NoError(t, err)
+		})
+	}
+
+	t.Run("no document", func(t *testing.T) {
+		t.Parallel()
+
+		r := paths.NewResolver(nil)
+
+		// The `@` path lacks a current node whatever the document holds.
+		current := paths.Current().Child("name")
+
+		_, err := r.Node(current)
+		require.ErrorIs(t, err, paths.ErrNoCurrentNode)
+		require.NotErrorIs(t, err, paths.ErrNoDocument)
+
+		_, err = r.Token(current)
+		require.ErrorIs(t, err, paths.ErrNoCurrentNode)
+		require.NotErrorIs(t, err, paths.ErrNoDocument)
+
+		_, err = r.Nodes(current)
+		require.ErrorIs(t, err, paths.ErrNoCurrentNode)
+		require.NotErrorIs(t, err, paths.ErrNoDocument)
+
+		_, err = r.Matches(current)
+		require.ErrorIs(t, err, paths.ErrNoCurrentNode)
+		require.NotErrorIs(t, err, paths.ErrNoDocument)
+
+		// The `$` path reports the missing document.
+		root := paths.Doc().Child("name")
+
+		_, err = r.Node(root)
+		require.ErrorIs(t, err, paths.ErrNoDocument)
+		require.NotErrorIs(t, err, paths.ErrNoCurrentNode)
+
+		_, err = r.Token(root)
+		require.ErrorIs(t, err, paths.ErrNoDocument)
+
+		_, err = r.Nodes(root)
+		require.ErrorIs(t, err, paths.ErrNoDocument)
+
+		_, err = r.Matches(root)
+		require.ErrorIs(t, err, paths.ErrNoDocument)
+	})
+
+	t.Run("doc joined with a path", func(t *testing.T) {
+		t.Parallel()
+
+		r := paths.NewResolver(documentOf(t, input))
+
+		tk, err := r.Token(paths.Doc().Join(paths.Current().Child("name")))
+		require.NoError(t, err)
+		assert.Equal(t, "root", tk.Value)
+
+		// The join leaves a `$` path as it is.
+		tk, err = r.Token(paths.Doc().Join(paths.Doc().Child("spec", "containers").Index(0).Child("name")))
+		require.NoError(t, err)
+		assert.Equal(t, "web", tk.Value)
+	})
+
+	t.Run("path of a match from a node", func(t *testing.T) {
+		t.Parallel()
+
+		r := paths.NewResolver(documentOf(t, input))
+		specPath := paths.Doc().Child("spec")
+
+		spec, err := r.Node(specPath)
+		require.NoError(t, err)
+
+		matches, err := r.MatchesFrom(spec, paths.Current().Child("containers").IndexAll().Child("name"))
+		require.NoError(t, err)
+		require.Len(t, matches, 2)
+		assertPathText(t, matches[0].Path, "@.containers[0].name")
+
+		// The path of the match reads from spec, which the Resolver does
+		// not have.
+		_, err = r.Token(matches[0].Path)
+		require.ErrorIs(t, err, paths.ErrNoCurrentNode)
+
+		// Joined with the path of spec, it reads from the root.
+		tk, err := r.Token(specPath.Join(matches[0].Path))
+		require.NoError(t, err)
+		assert.Equal(t, "web", tk.Value)
+	})
+}
+
 func TestResolver_Nearest(t *testing.T) {
 	t.Parallel()
 
@@ -856,11 +1002,10 @@ func TestResolver_Nearest(t *testing.T) {
 			require.True(t, ok)
 			assert.Positive(t, rest.Len())
 
-			// The resolver reads an `@` path from the root, and the path
-			// it returns starts at `$`.
+			// The resolver does not have a current node for an `@` path.
 			fromCurrent, ok := r.Nearest(paths.MustParse("@" + tc.path[1:]))
-			require.True(t, ok)
-			assert.Equal(t, got, fromCurrent)
+			assert.False(t, ok)
+			assert.Equal(t, paths.Path{}, fromCurrent)
 		})
 	}
 }
@@ -5294,14 +5439,6 @@ func TestResolver_Matches_Paths(t *testing.T) {
 			path: "$.missing[*]",
 			want: nil,
 		},
-		"relative path reads from the root": {
-			path: "@.items[*]",
-			want: []string{"$.items[0]", "$.items[1]"},
-		},
-		"relative path with no wildcard": {
-			path: "@.spec.name",
-			want: []string{"$.spec.name"},
-		},
 	}
 
 	for name, tc := range tcs {
@@ -6352,7 +6489,9 @@ func TestAliasError(t *testing.T) {
 				opts = append(opts, tc.opt)
 			}
 
-			_, err := paths.NewResolver(doc, opts...).Node(tc.path)
+			// NodeFrom reads an `@` path from the root it gets, and a `$`
+			// path as Node does.
+			_, err := paths.NewResolver(doc, opts...).NodeFrom(doc.Body, tc.path)
 			require.EqualError(t, err, tc.want)
 			require.ErrorIs(t, err, paths.ErrAlias)
 

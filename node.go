@@ -240,10 +240,11 @@ func (n *Node) Err() error {
 
 // DocumentResolver returns the [*paths.Resolver] of the whole document the
 // Node belongs to, which every Node of the document shares. It resolves
-// every path from the document root, whether it starts at `$` or `@`, as
-// [paths.Resolver] describes. An `@` path thus reads from the root, where
-// [Node.At] reads it from the Node. A path below the Node therefore starts
-// with [Node.Path], which [paths.Path.Join] puts in front of an `@` path:
+// a `$` path from the document root, as [paths.Resolver] describes. It
+// does not have the Node as a current node. It thus returns an error that
+// wraps [paths.ErrNoCurrentNode] for an `@` path, where [Node.At] reads
+// one from the Node. A path below the Node therefore starts with
+// [Node.Path], which [paths.Path.Join] puts in front of an `@` path:
 //
 //	c, err := b.DocumentResolver().Node(b.Path().Join(paths.Current().Child("c")))
 //
@@ -269,8 +270,9 @@ func (n *Node) Err() error {
 //
 // A document that did not parse does not have a tree, as [Node.Err]
 // describes. Its resolver is thus the one that [paths.NewResolver] creates
-// for a nil document. Every path it resolves returns an error wrapping
-// [paths.ErrNoDocument]. In an empty document that parsed,
+// for a nil document. Every `$` path it resolves returns an error wrapping
+// [paths.ErrNoDocument]. An `@` path still returns an error wrapping
+// [paths.ErrNoCurrentNode] instead. In an empty document that parsed,
 // [paths.Resolver.Matches] instead returns an empty result and a nil
 // error.
 func (n *Node) DocumentResolver() *paths.Resolver {

@@ -1349,8 +1349,9 @@
 // A scoped Node reads from its scope. [Node.PathAt] and [Node.NodeAt] answer
 // for the positions inside the scope alone, and [Node.Document] returns the
 // root, which answers for the whole document. [Node.DocumentResolver]
-// belongs to the whole document, so an `@` path that it resolves reads from
-// the root, where an `@` path of [Node.At] reads from the Node.
+// belongs to the whole document and resolves a `$` path from its root. It
+// does not have a current node, so it rejects an `@` path, where [Node.At]
+// reads one from the Node.
 //
 // A path that ends at an alias scopes the alias, as the document writes it,
 // whether the alias carries a tag and wherever its anchor lies.

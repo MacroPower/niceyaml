@@ -3788,7 +3788,7 @@ func TestDocument_Node(t *testing.T) {
 		node := yamltest.At(t, dd, paths.Current().Child("meta")).AST()
 		assert.Equal(t, "  name: app", node.String())
 
-		want, err := paths.NewResolver(dd.DocumentAST()).Node(paths.Current().Child("meta"))
+		want, err := paths.NewResolver(dd.DocumentAST()).Node(paths.Doc().Child("meta"))
 		require.NoError(t, err)
 		assert.Same(t, want, node)
 	})
@@ -7247,6 +7247,17 @@ func TestNode_DocumentResolver(t *testing.T) {
 		got, err := item.DocumentResolver().Node(item.Path())
 		require.NoError(t, err)
 		assert.Same(t, item.AST(), got)
+
+		// The resolver does not have the Node as a current node, so an
+		// `@` path below the Node starts with the path of the Node.
+		name := paths.Current().Child("name")
+
+		_, err = item.DocumentResolver().Token(name)
+		require.ErrorIs(t, err, paths.ErrNoCurrentNode)
+
+		tk, err := item.DocumentResolver().Token(item.Path().Join(name))
+		require.NoError(t, err)
+		assert.Equal(t, "other", tk.Value)
 	})
 
 	t.Run("an alias in a scoped node reaches its anchor", func(t *testing.T) {
@@ -7257,7 +7268,7 @@ func TestNode_DocumentResolver(t *testing.T) {
 		got, err := item.DocumentResolver().Deref(item.AST())
 		require.NoError(t, err)
 
-		want, err := paths.NewResolver(docs[0].DocumentAST()).Node(paths.Current().Child("base"))
+		want, err := paths.NewResolver(docs[0].DocumentAST()).Node(paths.Doc().Child("base"))
 		require.NoError(t, err)
 		assert.Same(t, want, got)
 		assert.Equal(t, "  name: app", got.String())

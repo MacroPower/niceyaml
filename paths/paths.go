@@ -24,13 +24,25 @@ var (
 	// such a document, so the errors that wrap ErrNoDocument also wrap
 	// [ErrNotFound]. The root path of such a document under a "---" header
 	// still resolves, to the null at the header. [Resolver.Node] and
-	// [Resolver.Token] return ErrNoDocument for each of these documents.
-	// [Resolver.Nodes] and [Resolver.Matches] return it only for a nil
-	// document, and do not select anything in the others.
+	// [Resolver.Token] return ErrNoDocument for a `$` path in each of
+	// these documents. [Resolver.Nodes] and [Resolver.Matches] return it
+	// for a `$` path only in a nil document, and do not select anything in
+	// the others. For an `@` path, each of these methods returns
+	// [ErrNoCurrentNode] instead, whatever the document holds.
 	ErrNoDocument = errors.New("document has no content")
 
 	// ErrNotFound indicates that nothing exists at the path in the document.
 	ErrNotFound = errors.New("not found")
+
+	// ErrNoCurrentNode indicates an `@` path given to a method that does
+	// not have a current node for it to read from. [Resolver.Node],
+	// [Resolver.Token], [Resolver.Nodes], and [Resolver.Matches] start at
+	// the document root, so each of them returns an error wrapping
+	// ErrNoCurrentNode for an `@` path. [Resolver.NodeFrom] and
+	// [Resolver.MatchesFrom] take the node that an `@` path reads from. A
+	// caller that knows the `$` path q of that node can resolve q joined
+	// with the `@` path instead, as [Path.Join] gives it.
+	ErrNoCurrentNode = errors.New("@ path needs a current node")
 
 	// ErrAlias indicates an alias on the path that does not name an anchor
 	// or that leads back to itself. Such an alias does not resolve to any
@@ -253,7 +265,8 @@ func forcesQuotes(r rune) bool {
 // library returns, such as [go.jacobcolvin.com/niceyaml.Node.Path] or the
 // path of a bound error, starts at `$`. Such a path names the same node
 // from any Node of the document. A resolve without a current node, such as
-// [Resolver.Node], reads an `@` path from the document root.
+// [Resolver.Node], returns an error wrapping [ErrNoCurrentNode] for an `@`
+// path. [Doc] joined with an `@` path reads it from the root.
 //
 // A Path is a value and never changes. Each selector method returns a new
 // Path and leaves the receiver as it was, so a Path is safe to share as a
@@ -263,12 +276,13 @@ func forcesQuotes(r rune) bool {
 //	replicas := spec.Child("replicas") // $.spec.replicas
 //	image := spec.Child("image")       // $.spec.image
 //
-// The zero value is `@` with no selectors, the same as [Current]. A path
-// selects a node, and for a mapping entry that node is the value.
-// [Path.Key] appends the `~` selector, which picks the key of the entry
-// instead. One Path thus names either node of an entry. [Resolver.Token],
-// [go.jacobcolvin.com/niceyaml.AtPath], and every other function that
-// takes a Path read the key or the value from the Path alone.
+// The zero value is `@` with no selectors, the same as [Current], so a path
+// built on it needs a current node. A path selects a node, and for a
+// mapping entry that node is the value. [Path.Key] appends the `~`
+// selector, which picks the key of the entry instead. One Path thus names
+// either node of an entry. [Resolver.Token],
+// [go.jacobcolvin.com/niceyaml.AtPath], and every other function that takes
+// a Path read the key or the value from the Path alone.
 //
 // [Path.String] returns the path as a path expression, `$` or `@` and the
 // selectors after it, and [Parse] reads it back as an equal Path. The
@@ -801,9 +815,14 @@ func (p Path) wildcard() bool {
 // body is a placeholder scalar, and [astnode.HasContent] does not find
 // content in it.
 //
-// Returns an error wrapping [ErrNotFound] and [ErrNoDocument] when doc is
-// nil.
+// Returns an error wrapping [ErrNoCurrentNode] for an `@` path, because a
+// document does not have a current node. Returns an error wrapping
+// [ErrNotFound] and [ErrNoDocument] when doc is nil.
 func (p Path) matches(r *resolver, doc *ast.DocumentNode) ([]match, error) {
+	if !p.absolute {
+		return nil, fmt.Errorf("resolve %s: %w", p, ErrNoCurrentNode)
+	}
+
 	if doc != nil && doc.Start != nil && !astnode.HasContent(doc.Body) && p.selectsRoot() {
 		return []match{{
 			node: ast.Null(doc.Start),
@@ -850,10 +869,15 @@ func (p Path) selectsRoot() bool {
 // keyless match of that `~`, as [match.key] describes. The caller decides
 // whether such a match serves it.
 //
-// Returns [ErrWildcard] for a path with a `.*`, `[*]`, or `..` selector and
-// wraps [ErrNotFound] when nothing exists at the path, together with
-// [ErrNoDocument] when doc is nil or does not hold content.
+// Wraps [ErrNoCurrentNode] for an `@` path. Returns [ErrWildcard] for a
+// path with a `.*`, `[*]`, or `..` selector and wraps [ErrNotFound] when
+// nothing exists at the path, together with [ErrNoDocument] when doc is
+// nil or does not hold content.
 func (p Path) single(r *resolver, doc *ast.DocumentNode) (match, error) {
+	if !p.absolute {
+		return match{}, fmt.Errorf("resolve %s: %w", p, ErrNoCurrentNode)
+	}
+
 	if p.wildcard() {
 		return match{}, fmt.Errorf("resolve %s: %w", p, ErrWildcard)
 	}
@@ -903,11 +927,12 @@ func (p Path) singleFrom(r *resolver, node ast.Node) (match, error) {
 // by the name of the entry, as [Resolver.KeyName] gives it. In place of
 // each `..name` or `..*` selector, the path holds the selectors from the
 // node that selector applied to down to the node it found. The path thus
-// names the node wherever it lies. The path of a match of
-// [Resolver.Matches] starts at `$` because the node lies in the document,
-// so each match of an `@` path holds the `$` path with its selectors. The
-// path of a match of an `@` path of [Resolver.MatchesFrom] starts at `@`,
-// because it reads from the node that MatchesFrom starts at.
+// names the node wherever it lies. The path of a match of a `$` path
+// starts at `$`. The path of a match of an `@` path of
+// [Resolver.MatchesFrom] starts at `@`, because it reads from the node
+// that MatchesFrom starts at. A caller that knows the `$` path of that
+// node can join it with the path of the match, as [Path.Join] gives it,
+// to resolve the match from the root.
 //
 // A match also carries what holds its node in the document. That holder
 // is the mapping entry whose value the node is, or the sequence that holds
