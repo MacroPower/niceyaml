@@ -104,9 +104,10 @@
 // A path selects each node of the text once. A wildcard or a recursive
 // descent selects a node at its first path in the order of the text. Each
 // path that reaches the node through an alias or a `<<` merge key selects
-// the same node, as [Doc.Apply] describes. The nodes that [Node.At] returns
-// in different calls of a Func can still reach one node of the text that
-// way. [Node.Own] returns the same path for each of them.
+// the same node, as [Doc.Apply] describes. The nodes that [Node.At] and
+// [Node.Nodes] return in different calls of a Func can still reach one
+// node of the text that way. [Node.Own] returns the same path for each of
+// them.
 //
 // A path that ends at an alias that reads a reference document of
 // [go.jacobcolvin.com/niceyaml.WithReferences] selects the alias. An edit
@@ -668,6 +669,31 @@
 // returns. A problem of a call that matches [ErrEngine] fails the Apply
 // too, whatever the Func returns.
 //
+// A Func of the Doc cannot call Apply, so one transaction runs one Apply.
+// To edit the places of several paths at once, apply at `$` and select
+// them with [Node.Nodes], which takes paths with wildcards and recursive
+// descents. [Node.Append] appends an item to a sequence, and creates the
+// sequence where the document lacks it:
+//
+//	err = d.Apply(ctx, paths.Doc(), func(ctx context.Context, root *edit.Node) error {
+//		legacy, err := root.Nodes(paths.MustParse("$.legacy[*]"))
+//		if err != nil {
+//			return err
+//		}
+//
+//		for _, n := range legacy {
+//			err := n.Remove()
+//			if err != nil {
+//				return err
+//			}
+//		}
+//
+//		return root.At(paths.MustParse("$.env")).Append(ctx, "two")
+//	})
+//
+// The two edits pass or fail together. Each node follows the removals
+// before it, so the loop removes each item.
+//
 // A method of Node that cannot make its edit returns its problem to the
 // Func. The method leaves the Doc as it found it, whichever check fails.
 // So a later read of the Func reads the text before the failed edit, and
@@ -681,16 +707,18 @@
 // can set each alias to the value that it reads, and the Remove then
 // passes in the same Apply.
 //
-// [Node.At], [Node.Exists], [Node.Decode], [Node.Text], [Node.Kind], and
-// [Node.Len] are reads. Exists and Decode return the problem of a read that
-// cannot answer to the Func. Text, Kind, and Len answer as they do for a place
-// that does not hold a value. A Func that must tell the two apart calls Exists
-// first. The Decode of a place that does not hold a value has a problem, which
-// matches [go.jacobcolvin.com/niceyaml/paths.ErrNotFound]. A read at a path
-// that selects more than one value or a key has a problem. So does a read at a
-// path that a reference document decides, as the Edits section describes. A
-// problem of a read that does not match [ErrEngine] fails the Apply only when
-// the Func returns it, as for the problem of an edit.
+// [Node.At], [Node.Nodes], [Node.Exists], [Node.Decode], [Node.Text],
+// [Node.Kind], and [Node.Len] are reads. Nodes, Exists, and Decode return
+// the problem of a read that cannot answer to the Func. Text, Kind, and Len
+// answer as they do for a place that does not hold a value. A Func that
+// must tell the two apart calls Exists first. The Decode of a place that
+// does not hold a value has a problem, which matches
+// [go.jacobcolvin.com/niceyaml/paths.ErrNotFound]. A read through a node of
+// At at a path that selects more than one value or a key has a problem, and
+// so does a Nodes of a path that selects a key. So does a read at a path
+// that a reference document decides, as the Edits section describes. A
+// problem of a read that does not match [ErrEngine] fails the Apply only
+// when the Func returns it, as for the problem of an edit.
 //
 // The calls of an Apply act in order. Each call edits the text that the
 // calls before it left, through any path, alias, or `<<` merge key, and the
@@ -763,10 +791,10 @@
 // reads equal values from them. A difference shows a bug in the engine or a
 // misread of go-yaml. The first difference fails the call that made it with
 // an error that matches [ErrEngine], and the call leaves the text as it
-// found it. Each later call and each [Node.Decode] of the Apply then
-// returns that error, and so does [Node.Exists]. [Node.Text], [Node.Kind],
-// and [Node.Len] answer as they do for a place that does not hold a value,
-// as [Node] describes.
+// found it. Each later call, each [Node.Decode], each [Node.Exists], and
+// each [Node.Nodes] of the Apply then returns that error. [Node.Text],
+// [Node.Kind], and [Node.Len] answer as they do for a place that does not
+// hold a value, as [Node] describes.
 //
 // The error of a difference binds where the user's text holds the value
 // that differs, as an error at that value does. A value that the call left
@@ -969,7 +997,7 @@
 // the Doc as it found it, so the Doc does not keep any of the edits of that
 // Apply. A Node works only during the Apply that gave it. After that Apply
 // returns, each method of the node that edits or decodes returns
-// [ErrEnded], and so does [Node.Exists].
+// [ErrEnded], and so do [Node.Exists] and [Node.Nodes].
 //
 // # Errors
 //

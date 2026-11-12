@@ -90,10 +90,13 @@ func main() {
 
 	// A command such as `cafe set` applies the value that its user typed,
 	// here a closing time that does not exist. Its label names the command
-	// in the errors that the value causes. A Go string keeps the quotes of
-	// the scalar that it replaces, and the comment stays on its line.
-	err = d.Apply(ctx, closePath, func(ctx context.Context, n *edit.Node) error {
-		return n.Set(ctx, "25:00")
+	// in the errors that the value causes. An Apply at the path itself calls
+	// the Func zero times on a file without that key. So the command applies
+	// at the root, and Set creates the key when the file lacks it. A Go
+	// string keeps the quotes of the scalar that it replaces, and the
+	// comment stays on its line.
+	err = d.Apply(ctx, paths.Doc(), func(ctx context.Context, root *edit.Node) error {
+		return root.At(closePath).Set(ctx, "25:00")
 	}, edit.WithLabel("the cafe set command"))
 	if err != nil {
 		lipgloss.Println(p.PrintError(err))

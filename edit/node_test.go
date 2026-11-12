@@ -3454,3 +3454,385 @@ func TestNode_Append(t *testing.T) {
 		})
 	}
 }
+
+func TestNode_Nodes(t *testing.T) {
+	t.Parallel()
+
+	ref := niceyaml.NewSourceFromString("r: &r {x: 1}\n", niceyaml.WithName("ref.yaml"))
+
+	tcs := map[string]struct {
+		before string
+		// The path of the node whose Nodes the Func calls.
+		from paths.Path
+		path paths.Path
+		want []string
+		err  string
+		// Whether the error matches edit.ErrUsage.
+		usage bool
+		// Whether the Source allows duplicate keys.
+		dups bool
+	}{
+		"children in document order": {
+			before: stringtest.LinesLF("spec:", "  b: 1", "  a: 2", "  c: [x, y]"),
+			path:   paths.MustParse("$.spec.*"),
+			want:   []string{"$.spec.b", "$.spec.a", "$.spec.c"},
+		},
+		"items": {
+			before: "s: [x, y, z]\n",
+			path:   paths.MustParse("$.s[*]"),
+			want:   []string{"$.s[0]", "$.s[1]", "$.s[2]"},
+		},
+		"recursive name": {
+			before: stringtest.LinesLF("a:", "  x: 1", "  b:", "    x: 2", "x: 3"),
+			path:   paths.MustParse("$..x"),
+			want:   []string{"$.a.x", "$.a.b.x", "$.x"},
+		},
+		"@ path from a node": {
+			before: stringtest.LinesLF("a: {x: 1, y: 2}", "b: {x: 3}"),
+			from:   paths.MustParse("$.a"),
+			path:   paths.MustParse("@.*"),
+			want:   []string{"$.a.x", "$.a.y"},
+		},
+		"$ path from a node": {
+			before: stringtest.LinesLF("a: {x: 1}", "b: {x: 3}"),
+			from:   paths.MustParse("$.a"),
+			path:   paths.MustParse("$.*.x"),
+			want:   []string{"$.a.x", "$.b.x"},
+		},
+		"@ path that selects the node": {
+			before: "a: 1\n",
+			from:   paths.MustParse("$.a"),
+			path:   paths.Current(),
+			want:   []string{"$.a"},
+		},
+		"single place": {
+			before: "a: {b: 1}\n",
+			path:   paths.MustParse("$.a.b"),
+			want:   []string{"$.a.b"},
+		},
+		"place without a value": {
+			before: "a: 1\n",
+			path:   paths.MustParse("$.b[*]"),
+		},
+		"@ path from a place without a value": {
+			before: "a: 1\n",
+			from:   paths.MustParse("$.b"),
+			path:   paths.MustParse("@.*"),
+		},
+		"root of an empty document": {
+			before: "# c\n",
+			path:   paths.Doc(),
+			want:   []string{"$"},
+		},
+		"entry that an alias reaches too": {
+			// The alias reaches the entry of the anchor, so the entry takes
+			// one node.
+			before: stringtest.LinesLF("a: &a {x: 1}", "b: *a"),
+			path:   paths.MustParse("$.*.x"),
+			want:   []string{"$.a.x"},
+		},
+		"entry that a merge key reaches too": {
+			before: stringtest.LinesLF("base: &b {x: 1}", "c: {<<: *b, y: 2}"),
+			path:   paths.MustParse("$.*.*"),
+			want:   []string{"$.base.x", "$.c.y"},
+		},
+		"protected values": {
+			before: stringtest.LinesLF("apiVersion: v1", "kind: Cafe", "spec: {}"),
+			path:   paths.MustParse("$.*"),
+			want:   []string{"$.spec"},
+		},
+		"entries of a repeated key": {
+			before: stringtest.LinesLF("a: 1", "a: 2", "b: 3"),
+			path:   paths.MustParse("$.*"),
+			want:   []string{"$.a", "$.a", "$.b"},
+			dups:   true,
+		},
+		"path that selects a key": {
+			before: "a: 1\n",
+			path:   paths.MustParse("$.a~"),
+			err:    "test.yaml:1:1: $: cafe.jacobcolvin.com/v1 reads $.a~, which selects a key",
+			usage:  true,
+		},
+		"@ path from a node whose path At refused": {
+			before: "a: [{x: 1}]\n",
+			from:   paths.MustParse("$.a[*]"),
+			path:   paths.MustParse("@.x"),
+			err:    "cafe.jacobcolvin.com/v1 reads $.a[*], which selects more than one value",
+			usage:  true,
+		},
+		"path through an alias of a reference document at a merge key": {
+			before: "a: {<<: *r}\n",
+			path:   paths.MustParse("$.*.*"),
+			err:    "test.yaml:1:9: $.a: cafe.jacobcolvin.com/v1 reads $.*.*, which goes through <<: *r at 1:5, a merge key that reads the reference document ref.yaml",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d := newDoc(t, tc.before, niceyaml.WithReferences(ref), niceyaml.WithAllowDuplicateKeys(tc.dups))
+
+			var (
+				got     []string
+				nodeErr error
+			)
+
+			err := d.Apply(t.Context(), paths.Doc(), func(_ context.Context, root *edit.Node) error {
+				n := root
+				if tc.from.Len() > 0 {
+					n = root.At(tc.from)
+				}
+
+				nodes, err := n.Nodes(tc.path)
+				nodeErr = err
+
+				for _, m := range nodes {
+					got = append(got, m.Path().String())
+				}
+
+				return nil
+			}, label)
+			require.NoError(t, err)
+
+			if tc.err != "" {
+				require.Error(t, nodeErr)
+				assert.Contains(t, niceyaml.FormatError(nodeErr), tc.err)
+				assert.Equal(t, tc.usage, errors.Is(nodeErr, edit.ErrUsage))
+
+				return
+			}
+
+			require.NoError(t, nodeErr)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+
+	t.Run("@ path from an entry that a later entry hides", func(t *testing.T) {
+		t.Parallel()
+
+		d := newDoc(t, stringtest.LinesLF("a: {x: 1}", "a: {x: 2}"), niceyaml.WithAllowDuplicateKeys(true))
+
+		var got []string
+
+		err := d.Apply(t.Context(), paths.MustParse("$.*"), func(_ context.Context, n *edit.Node) error {
+			nodes, err := n.Nodes(paths.MustParse("@.*"))
+			if err != nil {
+				return err
+			}
+
+			for _, m := range nodes {
+				got = append(got, m.Path().String()+"="+m.Text())
+			}
+
+			return nil
+		})
+		require.NoError(t, err)
+
+		assert.Equal(t, []string{"$.a.x=1", "$.a.x=2"}, got)
+	})
+
+	t.Run("@ path from a place without a value below an entry that a later entry hides", func(t *testing.T) {
+		t.Parallel()
+
+		d := newDoc(t, stringtest.LinesLF("a: {x: 1}", "a: {x: 2}", "zz: {x: 3}"),
+			niceyaml.WithAllowDuplicateKeys(true))
+
+		var (
+			hidden bool
+			got    []string
+		)
+
+		err := d.Apply(t.Context(), paths.MustParse("$.*"), func(_ context.Context, n *edit.Node) error {
+			// The first call reads the hidden entry of a.
+			if hidden || n.At(paths.MustParse("@.x")).Text() != "1" {
+				return nil
+			}
+
+			hidden = true
+			below := n.At(paths.MustParse("@.zz"))
+
+			for _, path := range []string{"@", "@.*", "@..*", "@..x", "@.zz.x"} {
+				nodes, err := below.Nodes(paths.MustParse(path))
+				if err != nil {
+					return err
+				}
+
+				for _, m := range nodes {
+					got = append(got, path+": "+m.Path().String())
+				}
+			}
+
+			return nil
+		})
+		require.NoError(t, err)
+
+		assert.True(t, hidden)
+		assert.Empty(t, got)
+	})
+
+	t.Run("edits of several paths in one Apply", func(t *testing.T) {
+		t.Parallel()
+
+		d := newDoc(t, stringtest.LinesLF(
+			"legacy:",
+			"  - x",
+			"  - y",
+			"  - z",
+			"spec:",
+			"  a: {cost: 1}",
+			"  b: {cost: 2}",
+		))
+
+		err := d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, root *edit.Node) error {
+			legacy, err := root.Nodes(paths.MustParse("$.legacy[*]"))
+			if err != nil {
+				return err
+			}
+
+			// Each node follows the removals before it.
+			for _, n := range legacy {
+				err := n.Remove()
+				if err != nil {
+					return err
+				}
+			}
+
+			costs, err := root.Nodes(paths.MustParse("$.spec.*.cost"))
+			if err != nil {
+				return err
+			}
+
+			for _, n := range costs {
+				err := n.SetKey("price")
+				if err != nil {
+					return err
+				}
+			}
+
+			return root.At(paths.MustParse("$.env")).Append(ctx, "two")
+		}, label)
+
+		requireEdit(t, d, err, "", stringtest.LinesLF(
+			"legacy: []",
+			"spec:",
+			"  a: {price: 1}",
+			"  b: {price: 2}",
+			"env:",
+			"  - two",
+		))
+	})
+
+	t.Run("node whose place an earlier edit took away", func(t *testing.T) {
+		t.Parallel()
+
+		d := newDoc(t, stringtest.LinesLF("a:", "  x:", "    x: 1", "b: 2"))
+
+		err := d.Apply(t.Context(), paths.Doc(), func(_ context.Context, root *edit.Node) error {
+			nodes, err := root.Nodes(paths.MustParse("$..x"))
+			require.NoError(t, err)
+			require.Len(t, nodes, 2)
+
+			err = nodes[0].Remove()
+			if err != nil {
+				return err
+			}
+
+			// The removal of $.a.x took $.a.x.x away.
+			ok, err := nodes[1].Exists()
+			assert.False(t, ok)
+			require.ErrorIs(t, err, edit.ErrDisplaced)
+			require.ErrorIs(t, nodes[1].Remove(), edit.ErrDisplaced)
+
+			// An @ path from such a node returns the problem of the node.
+			_, err = nodes[1].Nodes(paths.Current())
+			require.ErrorIs(t, err, edit.ErrDisplaced)
+
+			return nil
+		}, label)
+
+		requireEdit(t, d, err, "", stringtest.LinesLF("a: {}", "b: 2"))
+	})
+
+	t.Run("removal of each place of a recursive descent", func(t *testing.T) {
+		t.Parallel()
+
+		d := newDoc(t, stringtest.LinesLF("a:", "  x:", "    x: 1", "b: 2"))
+
+		var skipped int
+
+		err := d.Apply(t.Context(), paths.Doc(), func(_ context.Context, root *edit.Node) error {
+			nodes, err := root.Nodes(paths.MustParse("$..x"))
+			if err != nil {
+				return err
+			}
+
+			for _, n := range nodes {
+				_, err := n.Exists()
+				if errors.Is(err, edit.ErrDisplaced) {
+					skipped++
+
+					continue
+				}
+
+				if err != nil {
+					return err
+				}
+
+				err = n.Remove()
+				if err != nil {
+					return err
+				}
+			}
+
+			return nil
+		}, label)
+
+		requireEdit(t, d, err, "", stringtest.LinesLF("a: {}", "b: 2"))
+		assert.Equal(t, 1, skipped)
+	})
+
+	t.Run("after its Apply", func(t *testing.T) {
+		t.Parallel()
+
+		d := newDoc(t, "s: [a, b]\n")
+
+		var kept *edit.Node
+
+		err := d.Apply(t.Context(), paths.Doc(), func(_ context.Context, root *edit.Node) error {
+			kept = root
+
+			return nil
+		})
+		require.NoError(t, err)
+
+		_, err = kept.Nodes(paths.MustParse("$.s[*]"))
+		require.ErrorIs(t, err, edit.ErrEnded)
+	})
+
+	t.Run("after a call that leaves the text apart from the model", func(t *testing.T) {
+		t.Parallel()
+
+		// As in TestNode_Own_FailedCall, the Set of a new key fails with
+		// ErrEngine after it wrote.
+		before := stringtest.LinesLF("x: &d {k: 1}", "c: *d", "a: !t")
+
+		d := newDoc(t, before)
+
+		err := d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, root *edit.Node) error {
+			err := root.At(paths.Doc().Child("b")).Set(ctx, 9)
+			require.ErrorIs(t, err, edit.ErrEngine)
+
+			for _, path := range []string{"$.*", "@.*", "$.a~"} {
+				nodes, err := root.Nodes(paths.MustParse(path))
+				require.ErrorIs(t, err, edit.ErrEngine, path)
+				assert.Empty(t, nodes, path)
+			}
+
+			return nil
+		})
+		require.ErrorIs(t, err, edit.ErrEngine)
+
+		assert.Equal(t, before, d.Text())
+	})
+}
