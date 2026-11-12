@@ -234,6 +234,14 @@ func (d *detacher) rebuild(err error) (error, bool) {
 
 		return &c, true
 
+	case *namedError:
+		// The decode tree of x holds the tree and the tokens of the whole
+		// document. The copy keeps the text that x spells and drops the
+		// tree, even when nothing below x changes.
+		inner, _ := d.walk(x.err)
+
+		return &markedError{err: inner, msg: x.Error()}, true
+
 	case *PanicError:
 		value, wraps := x.Value.(error)
 		if !wraps {

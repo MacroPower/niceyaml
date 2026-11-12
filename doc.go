@@ -291,6 +291,27 @@
 // fault. An Error with both binds at the characters and names the path in its
 // message without resolving it.
 //
+// A go-yaml error holds a token. [Node.Bind], [Source.Bind],
+// [Node.Validate], and a decode each read that token, whether the error
+// comes bare or inside wrappers. A go-yaml error at a token of the
+// document, such as the [*yaml.TypeError] of [yaml.NodeToValue] on
+// [Node.AST], binds at that token with the `$` path of its value. A
+// go-yaml error at a token of another parse, such as the parse of the bytes
+// that an UnmarshalYAML method decodes again, does not carry a location.
+//
+// A decode words each rejection of the decoder as the Decoding section
+// describes. A bare go-yaml error from an UnmarshalYAML method at a token
+// of the document is such a rejection. Every other go-yaml error takes its
+// own message without the excerpt that go-yaml draws, so the message is
+// one line. That message escapes each control character, as the message of
+// a decode does. [errors.As] still finds the go-yaml error, and a program
+// that prints that error itself prints the excerpt of go-yaml. A wrapper
+// that [fmt.Errorf] builds and a wrapper with an Unwrap method that returns
+// one error take the shorter text in their own message. A wrapper of
+// another type whose Unwrap method returns several errors keeps the text of
+// go-yaml in its own message. Each error that it holds still binds without
+// the excerpt.
+//
 // A path starts at one of two points, as in RFC 9535 JSONPath. A `$` path
 // reads from the root of the document, and an `@` path reads from the [Node]
 // that binds the error. A check for a type thus writes `@` paths from the

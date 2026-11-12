@@ -13,6 +13,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
@@ -7393,6 +7394,172 @@ func TestNode_At_Span(t *testing.T) {
 			assert.Same(t, doc, root)
 			assert.Equal(t, doc.Span(), root.Span())
 		}
+	})
+}
+
+// credsFile is a file of credentials whose ttl must be a number.
+type credsFile struct {
+	Creds struct {
+		TTL int `yaml:"ttl"`
+	} `yaml:"creds"`
+}
+
+func TestNode_Bind_GoYAMLError(t *testing.T) {
+	t.Parallel()
+
+	const (
+		text     = "creds:\n  user: admin\n  password: hunter2\n  ttl: forever\n"
+		rejected = "cannot unmarshal string into Go struct field credsFile.Creds of type int"
+	)
+
+	// The source has excerpts off, so no message may hold its text.
+	doc := yamltest.FirstDocument(t, text, niceyaml.WithName("secrets.yaml"), niceyaml.WithExcerpts(false))
+	creds := yamltest.At(t, doc, paths.Current().Child("creds"))
+
+	// The go-yaml decoder rejects the ttl at a token of the document.
+	held := yaml.NodeToValue(doc.AST(), &credsFile{})
+	require.Error(t, held)
+
+	// The same rejection at a token of another parse of the text.
+	foreign := yaml.Unmarshal([]byte(text), &credsFile{})
+	require.Error(t, foreign)
+
+	tcs := map[string]struct {
+		node *niceyaml.Node
+		err  error
+		// The message of the binding, the message of its problem alone, and
+		// whether the binding has a position.
+		want    string
+		message string
+		placed  bool
+	}{
+		"an error at a token of the document binds at its path": {
+			node:    doc,
+			err:     held,
+			want:    "secrets.yaml:4:8: $.creds.ttl: " + rejected,
+			message: rejected,
+			placed:  true,
+		},
+		"a wrapper keeps its own text": {
+			node:    doc,
+			err:     fmt.Errorf("check creds: %w", held),
+			want:    "secrets.yaml:4:8: $.creds.ttl: check creds: " + rejected,
+			message: rejected,
+			placed:  true,
+		},
+		"a scoped node binds at the path in the document": {
+			node:    creds,
+			err:     held,
+			want:    "secrets.yaml:4:8: $.creds.ttl: " + rejected,
+			message: rejected,
+			placed:  true,
+		},
+		"a wrapper that holds the text twice reads both": {
+			node:    doc,
+			err:     fmt.Errorf("%v (%w)", held, held), //nolint:errorlint // The %v writes the text again.
+			want:    "secrets.yaml:4:8: $.creds.ttl: " + rejected + " (" + rejected + ")",
+			message: rejected,
+			placed:  true,
+		},
+		"a wrapper with a branch that wraps the same error reads both": {
+			node: doc,
+			err:  fmt.Errorf("%w; %w", held, fmt.Errorf("w: %w", held)),
+			want: "secrets.yaml: " + rejected + "; w: " + rejected +
+				"\nsecrets.yaml:4:8: $.creds.ttl: " + rejected +
+				"\nsecrets.yaml:4:8: $.creds.ttl: w: " + rejected,
+			message: rejected + "; w: " + rejected,
+		},
+		"an error at a token of another parse keeps its message alone": {
+			node:    doc,
+			err:     foreign,
+			want:    "secrets.yaml: " + rejected,
+			message: rejected,
+		},
+		"an error at a token of another parse beside a sentinel": {
+			node:    doc,
+			err:     fmt.Errorf("%w: %w", errNameRequired, foreign),
+			want:    "secrets.yaml: name is required: " + rejected,
+			message: "name is required: " + rejected,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tc.node.Bind(tc.err)
+			require.EqualError(t, err, tc.want)
+			assert.NotContains(t, niceyaml.FormatError(err), "hunter2")
+
+			var typeErr *yaml.TypeError
+
+			require.ErrorAs(t, err, &typeErr)
+
+			bound := yamltest.RequireSourceError(t, err)
+
+			_, placed := bound.Position()
+			assert.Equal(t, tc.placed, placed)
+
+			assert.Equal(t, tc.message, niceyaml.NewErrorTree(err).Message())
+		})
+	}
+
+	// BindValue holds no document, so it reduces the message alone. A
+	// document that places the result reads the token again.
+	t.Run("a document places what BindValue bound", func(t *testing.T) {
+		t.Parallel()
+
+		free := niceyaml.BindValue(errors.Join(held, errNameRequired))
+		require.EqualError(t, free, rejected+"\nname is required")
+
+		err := doc.Bind(free)
+		require.EqualError(t, err, "secrets.yaml:4:8: $.creds.ttl: "+rejected+"\nsecrets.yaml: name is required")
+
+		// Each problem of the result places on its own too.
+		problems := yamltest.ProblemsOf(free)
+		require.Len(t, problems, 2)
+		require.EqualError(t, doc.Bind(problems[0].Err), "secrets.yaml:4:8: $.creds.ttl: "+rejected)
+	})
+
+	// Go-yaml copies the key into the message, so the bind escapes its
+	// control characters as a decode does.
+	t.Run("a control character reads as a decode reads it", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, "name: x\n\"ev\\e[31mil\": 1\n",
+			niceyaml.WithName("c.yaml"), niceyaml.WithExcerpts(false))
+
+		var v struct {
+			Name string `yaml:"name"`
+		}
+
+		unknown := yaml.NodeToValue(doc.AST(), &v, yaml.DisallowUnknownField())
+		require.Error(t, unknown)
+
+		err := doc.Bind(unknown)
+		require.EqualError(t, err, "c.yaml:2:1: $.'ev\\u001b[31mil'~: unknown field \"ev␛[31mil\"")
+		assert.NotContains(t, err.Error(), "\x1b")
+
+		decoded := doc.DecodeInto(t.Context(), &v, niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject))
+		require.EqualError(t, decoded, err.Error())
+	})
+
+	// A wrapper can hold a nil go-yaml error, which has no token or
+	// message to read.
+	t.Run("a nil go-yaml error stays as it was", func(t *testing.T) {
+		t.Parallel()
+
+		var err error
+
+		require.NotPanics(t, func() {
+			err = doc.Bind(fmt.Errorf("x: %w", (*yaml.SyntaxError)(nil)))
+		})
+		require.EqualError(t, err, "secrets.yaml: x: <nil>")
+
+		bound := yamltest.RequireSourceError(t, err)
+
+		_, placed := bound.Position()
+		assert.False(t, placed)
 	})
 }
 

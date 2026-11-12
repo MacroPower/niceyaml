@@ -4816,6 +4816,45 @@ func TestSource_Bind(t *testing.T) {
 	})
 }
 
+func TestSource_Bind_GoYAMLError(t *testing.T) {
+	t.Parallel()
+
+	src := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "---", "b: x"),
+		niceyaml.WithName("f.yaml"), niceyaml.WithExcerpts(false))
+	docs := yamltest.Documents(t, src, 2)
+
+	var target struct {
+		B int `yaml:"b"`
+	}
+
+	// The go-yaml decoder rejects the value of b at a token of the second
+	// document. The source holds two documents, so the error binds in the
+	// one that holds the token, at the path of the value.
+	err := src.Bind(yaml.NodeToValue(docs[1].AST(), &target))
+	require.EqualError(t, err, "f.yaml:3:4: $.b: cannot unmarshal string into Go struct field .B of type int")
+
+	var typeErr *yaml.TypeError
+
+	require.ErrorAs(t, err, &typeErr)
+	assert.Same(t, docs[1], yamltest.BoundDocument(t, yamltest.RequireSourceError(t, err)))
+
+	// A go-yaml error without a token has nothing to locate, so it binds
+	// with its message alone.
+	t.Run("an error without a token has no location", func(t *testing.T) {
+		t.Parallel()
+
+		err := src.Bind(fmt.Errorf("check: %w", &yaml.SyntaxError{Message: "must be a number"}))
+		require.EqualError(t, err, "f.yaml: check: must be a number")
+
+		var syntaxErr *yaml.SyntaxError
+
+		require.ErrorAs(t, err, &syntaxErr)
+
+		_, placed := yamltest.RequireSourceError(t, err).Position()
+		assert.False(t, placed)
+	})
+}
+
 func TestSource_Bind_RoutesDocuments(t *testing.T) {
 	t.Parallel()
 
