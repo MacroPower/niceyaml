@@ -300,7 +300,7 @@
 // another parse, such as the parse of the bytes that an UnmarshalYAML
 // method decodes again, are such tokens. So are the tokens of
 // [Source.Tokens] and [Node.Tokens], because the Source builds them apart
-// from its parse.
+// from its parse. [AtToken] locates an [Error] at a token of Source.Tokens.
 //
 // A decode words each rejection of the decoder as the Decoding section
 // describes. A bare go-yaml error from an UnmarshalYAML method at a token

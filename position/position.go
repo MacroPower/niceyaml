@@ -40,7 +40,10 @@ func New(line, col int) Position {
 // from a parse over such tokens. The Line and Column of such a token name
 // the rune where its text starts, so the result names the same rune in the
 // lines of the source. NewFromToken returns the zero position when tk or
-// its position is nil.
+// its position is nil. That position names the first rune of the text.
+// To locate an error at a token that might be nil, use
+// [go.jacobcolvin.com/niceyaml.AtToken]. AtToken sets no position for such
+// a token.
 func NewFromToken(tk *token.Token) Position {
 	var line, col int
 

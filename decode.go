@@ -1391,17 +1391,17 @@ func (n *Node) aliasingError(err error) error {
 			limit.Kind = LimitDepth
 		}
 
-		return n.Bind(Invalid(limit, atToken(expansion.Alias.GetToken())))
+		return n.Bind(Invalid(limit, AtToken(expansion.Alias.GetToken())))
 	}
 
 	ratio, ok := errors.AsType[*aliasing.RatioError](err)
 	if ok && ratio.Alias != nil {
 		excessive := &markedError{err: errors.New(ratio.Error()), marks: []error{ErrExcessiveAliasing}}
 
-		return n.Bind(Invalid(excessive, atToken(ratio.Alias.GetToken())))
+		return n.Bind(Invalid(excessive, AtToken(ratio.Alias.GetToken())))
 	}
 
-	return n.Bind(Invalid(err, atToken(astnode.StartToken(n.AST()))))
+	return n.Bind(Invalid(err, AtToken(astnode.StartToken(n.AST()))))
 }
 
 // checkDecode returns the error of a decode into v with cfg that cannot
@@ -1966,7 +1966,7 @@ func (n *Node) rejection(err error, scope ast.Node, order readOrder) error {
 
 	rejected := markDecode(fmt.Errorf("decoder rejected the value: %w", cause), errPlaced)
 
-	return Invalid(rejected, atToken(at))
+	return Invalid(rejected, AtToken(at))
 }
 
 // referenceRejection returns err, a rejection at a token of a reference
@@ -2059,7 +2059,7 @@ func (n *Node) referenceRead(
 // The rejection binds at the alias without a path when the anchor reaches
 // tk on more than one path, or a path cannot spell the way there.
 func (n *Node) referenceLocation(alias decodetree.ReferenceAlias, tk *token.Token) []ErrorOption {
-	at := atToken(alias.Token)
+	at := AtToken(alias.Token)
 
 	table := n.source.referenceAnchors()
 
@@ -2194,7 +2194,7 @@ func decodeAtWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, 
 		}
 
 		err = Unchecked(panicked("decoder", &PanicError{Value: p, Stack: debug.Stack()}, errPlaced),
-			atToken(astnode.StartToken(at)))
+			AtToken(astnode.StartToken(at)))
 	}()
 
 	err = dec.DecodeFromNodeContext(ctx, node, v)
@@ -2967,7 +2967,7 @@ func (n *Node) useRejection(err yaml.Error, path paths.Path, alias *token.Token)
 		problem.path = path.String()
 
 	case alias != nil && owner != nil && n.bindsAt(path, alias):
-		problem.loc = []ErrorOption{AtPath(path), atToken(owner)}
+		problem.loc = []ErrorOption{AtPath(path), AtToken(owner)}
 		problem.path = path.String()
 
 	default:
@@ -3794,7 +3794,7 @@ func (n *Node) rejectionLocation(tk *token.Token) []ErrorOption {
 
 	path, selects, ok := index.OwnerPath(resolver, tk)
 	if !ok {
-		return []ErrorOption{atToken(tk)}
+		return []ErrorOption{AtToken(tk)}
 	}
 
 	if n.readsRoot(tk) {
@@ -3809,7 +3809,7 @@ func (n *Node) rejectionLocation(tk *token.Token) []ErrorOption {
 		return []ErrorOption{AtPath(path)}
 	}
 
-	return []ErrorOption{AtPath(path), atToken(index.OwnerToken(tk))}
+	return []ErrorOption{AtPath(path), AtToken(index.OwnerToken(tk))}
 }
 
 // locateDecodeError rebases err under the path of the value that reported

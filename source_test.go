@@ -4840,7 +4840,8 @@ func TestSource_Bind_GoYAMLError(t *testing.T) {
 
 	// The Source builds the tokens of Source.Tokens and Node.Tokens apart
 	// from its parse. A go-yaml error at one of them thus binds as an
-	// error without a location does.
+	// error without a location does. AtToken locates an Error at such a
+	// token.
 	t.Run("an error at a token of Source.Tokens has no location", func(t *testing.T) {
 		t.Parallel()
 
@@ -4856,6 +4857,9 @@ func TestSource_Bind_GoYAMLError(t *testing.T) {
 		unlocated := docs[1].Bind(errors.New("m"))
 		require.EqualError(t, docs[1].Bind(&yaml.SyntaxError{Message: "m", Token: docTokens[len(docTokens)-1]}),
 			unlocated.Error())
+
+		located := src.Bind(niceyaml.NewError("m", niceyaml.AtToken(srcTokens[len(srcTokens)-1])))
+		require.EqualError(t, located, "f.yaml:3:4: m")
 	})
 
 	// A go-yaml error without a token has nothing to locate, so it binds

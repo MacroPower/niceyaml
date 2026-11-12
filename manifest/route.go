@@ -651,7 +651,7 @@ func aliasProblem(p paths.Path, name string, alias *ast.AliasNode) error {
 // key at tk brings in.
 func mergeProblem(p paths.Path, name string, tk *token.Token) error {
 	return newProblem(ErrFieldAlias, name+" must not come from a merge key",
-		niceyaml.AtPath(p), atToken(tk),
+		niceyaml.AtPath(p), niceyaml.AtToken(tk),
 		niceyaml.WithDetails(fmt.Errorf("write the %s in the document itself", name)))
 }
 
@@ -683,7 +683,7 @@ func atKey(entry *ast.MappingValueNode) niceyaml.ErrorOption {
 		return atAlias(alias)
 	}
 
-	return atToken(astnode.KeyToken(entry))
+	return niceyaml.AtToken(astnode.KeyToken(entry))
 }
 
 // keyText returns the key of entry as the document writes it, such as 0x10
@@ -718,25 +718,15 @@ func undecodedProblem(p paths.Path, name string, other *ast.MappingValueNode) er
 // The detail gives advice, as [mergeAdvice] writes it.
 func unreadProblem(p paths.Path, name, advice string, tk *token.Token) error {
 	return newProblem(ErrFieldAlias, name+" might come from a merge key that reads a reference document",
-		niceyaml.AtPath(p), atToken(tk),
+		niceyaml.AtPath(p), niceyaml.AtToken(tk),
 		niceyaml.WithDetails(errors.New(advice)))
-}
-
-// atToken returns an [niceyaml.ErrorOption] that locates an error at the
-// token tk, which the excerpt marks whole.
-func atToken(tk *token.Token) niceyaml.ErrorOption {
-	if tk == nil || tk.Position == nil {
-		return niceyaml.WithDetails()
-	}
-
-	return niceyaml.AtPosition(position.NewFromToken(tk))
 }
 
 // atAlias returns an [niceyaml.ErrorOption] that locates an error at
 // alias, from its "*" through its name.
 func atAlias(alias *ast.AliasNode) niceyaml.ErrorOption {
 	if alias.Start == nil || alias.Start.Position == nil {
-		return atToken(alias.GetToken())
+		return niceyaml.AtToken(alias.GetToken())
 	}
 
 	start := position.NewFromToken(alias.Start)
@@ -753,7 +743,7 @@ func atAlias(alias *ast.AliasNode) niceyaml.ErrorOption {
 // startOf returns an [niceyaml.ErrorOption] that locates an error at the
 // start of the document doc, its first token that is not a comment.
 func startOf(doc *niceyaml.Node) niceyaml.ErrorOption {
-	return atToken(astnode.StartToken(doc.AST()))
+	return niceyaml.AtToken(astnode.StartToken(doc.AST()))
 }
 
 // route is where a document goes, its kind and its version, after the load

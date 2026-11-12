@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"math"
@@ -22,6 +23,7 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
+	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/lexer"
 	"github.com/goccy/go-yaml/token"
@@ -3649,6 +3651,147 @@ func TestError_With(t *testing.T) {
 	assert.Empty(t, yamltest.DetailsOf(located))
 	assert.Equal(t, []error{reason}, yamltest.ErrsOf(yamltest.DetailsOf(detailed)))
 	assert.Len(t, yamltest.DetailsOf(more), 2)
+}
+
+func TestAtToken(t *testing.T) {
+	t.Parallel()
+
+	const (
+		text   = "name: app\nport: eighty\n"
+		stream = "name: a\n---\nname: b\nport: eighty\n"
+	)
+
+	// The helper returns the token of src whose value is value.
+	tokenOf := func(t *testing.T, src *niceyaml.Source, value string) *token.Token {
+		t.Helper()
+
+		for _, tk := range src.Tokens() {
+			if tk.Value == value {
+				return tk
+			}
+		}
+
+		require.FailNow(t, "no token "+value)
+
+		return nil
+	}
+
+	tcs := map[string]struct {
+		err  func(t *testing.T, src *niceyaml.Source) error
+		text string
+		want string
+	}{
+		"token of the source": {
+			err: func(t *testing.T, src *niceyaml.Source) error {
+				t.Helper()
+
+				return niceyaml.NewError("bad port", niceyaml.AtToken(tokenOf(t, src, "eighty")))
+			},
+			want: "f.yaml:2:7: bad port",
+		},
+		"nil token": {
+			err: func(*testing.T, *niceyaml.Source) error {
+				return niceyaml.NewError("bad port", niceyaml.AtToken(nil))
+			},
+			want: "f.yaml: bad port",
+		},
+		"token without a position": {
+			err: func(*testing.T, *niceyaml.Source) error {
+				return niceyaml.NewError("bad port", niceyaml.AtToken(&token.Token{Value: "eighty"}))
+			},
+			want: "f.yaml: bad port",
+		},
+		"document start without a header": {
+			err: func(t *testing.T, src *niceyaml.Source) error {
+				t.Helper()
+
+				file, err := src.File()
+				require.NoError(t, err)
+				require.Len(t, file.Docs, 1)
+
+				doc := file.Docs[0]
+				require.Nil(t, doc.Start)
+
+				return niceyaml.NewError("document needs a --- header", niceyaml.AtToken(doc.Start))
+			},
+			want: "f.yaml: document needs a --- header",
+		},
+		"nil token keeps an earlier position": {
+			err: func(*testing.T, *niceyaml.Source) error {
+				return niceyaml.NewError("bad port",
+					niceyaml.AtPosition(position.New(1, 0)), niceyaml.AtToken(nil))
+			},
+			want: "f.yaml:2:1: bad port",
+		},
+		"token replaces an earlier position": {
+			err: func(t *testing.T, src *niceyaml.Source) error {
+				t.Helper()
+
+				return niceyaml.NewError("bad port",
+					niceyaml.AtPosition(position.New(0, 0)), niceyaml.AtToken(tokenOf(t, src, "eighty")))
+			},
+			want: "f.yaml:2:7: bad port",
+		},
+		"go-yaml error of a decode of the same text": {
+			err: func(t *testing.T, _ *niceyaml.Source) error {
+				t.Helper()
+
+				var cfg struct {
+					Name string `yaml:"name"`
+					Port int    `yaml:"port"`
+				}
+
+				err := yaml.UnmarshalWithOptions([]byte(text), &cfg, yaml.Strict())
+
+				var ye yaml.Error
+
+				require.ErrorAs(t, err, &ye)
+
+				return niceyaml.NewError(ye.GetMessage(), niceyaml.AtToken(ye.GetToken()))
+			},
+			want: "f.yaml:2:7: cannot unmarshal string into Go struct field .Port of type int",
+		},
+		"go-yaml error of a stream decode of every document": {
+			text: stream,
+			err: func(t *testing.T, _ *niceyaml.Source) error {
+				t.Helper()
+
+				dec := yaml.NewDecoder(strings.NewReader(stream), yaml.Strict())
+
+				for {
+					var cfg struct {
+						Name string `yaml:"name"`
+						Port int    `yaml:"port"`
+					}
+
+					err := dec.Decode(&cfg)
+					require.NotErrorIs(t, err, io.EOF)
+
+					if ye, ok := errors.AsType[yaml.Error](err); ok {
+						return niceyaml.NewError(ye.GetMessage(), niceyaml.AtToken(ye.GetToken()))
+					}
+
+					require.NoError(t, err)
+				}
+			},
+			want: "f.yaml:4:7: cannot unmarshal string into Go struct field .Port of type int",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			in := text
+			if tc.text != "" {
+				in = tc.text
+			}
+
+			src := niceyaml.NewSourceFromString(in, niceyaml.WithName("f.yaml"), niceyaml.WithExcerpts(false))
+
+			require.EqualError(t, src.Bind(tc.err(t, src)), tc.want)
+		})
+	}
 }
 
 func TestNewSummary(t *testing.T) {

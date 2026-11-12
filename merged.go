@@ -612,7 +612,7 @@ func (l resolvedLayer) read(ctx context.Context, i int) (*layermerge.Value, erro
 	v, err := r.Read(n.valueNode())
 	if err != nil {
 		if nodeErr, ok := errors.AsType[*layermerge.NodeError](err); ok {
-			err = Invalid(nodeErr.Err, atToken(nodeErr.Token))
+			err = Invalid(nodeErr.Err, AtToken(nodeErr.Token))
 		}
 
 		return nil, n.bindOwn(err)
