@@ -30,10 +30,10 @@ import (
 const defaultHorizontalStep = 6
 
 // Searcher builds an [Index] over the content of a view. The viewport calls
-// Load the first time it searches for a term after its content changes. It
-// runs every term through the Index it gets back until the content changes
-// again. A side-by-side diff has two panes, and the viewport calls Load
-// once for each of them.
+// Load the first time it searches for a term after its content changes or
+// after a call to [Model.SetSearcher]. It runs every term through the Index
+// it gets back until the next such change. A side-by-side diff has two
+// panes, and the viewport calls Load once for each of them.
 //
 // Load receives the view as a [line.Sequence], which yields the lines the
 // view holds, each with its index in the content of the view. The ranges
@@ -42,6 +42,14 @@ const defaultHorizontalStep = 6
 // In hunks mode the view skips the lines between the hunks, so a match does
 // not start on one of them. A nil Index, or one holding a nil pointer, does
 // not match any term.
+//
+// The viewport keeps the matches of a term until the content or the term
+// changes, or until a call to [Model.SetSearcher]. Between calls to
+// [Model.SetSearcher], a Searcher must therefore find the same matches each
+// time it searches the same content for the same term. To change how terms
+// match, a parent calls [Model.SetSearcher] with another Searcher, or with
+// the same one after it changes its behavior. Each call loads the content
+// again and searches again.
 //
 // [WithFinder] adapts a [finder.Finder] to this interface.
 type Searcher interface {
@@ -298,7 +306,7 @@ func WithContainerStyle(s lipgloss.Style) Option {
 // through. Without it, and without [WithFinder], the viewport creates a
 // [finder.Finder] with [finder.New], which folds case and ignores
 // diacritics. A nil s, or one holding a nil pointer, selects that same
-// default.
+// default. [Model.SetSearcher] swaps the searcher at runtime.
 func WithSearcher(s Searcher) Option {
 	return func(c *config) {
 		c.searcher = s
@@ -311,12 +319,19 @@ func WithSearcher(s Searcher) Option {
 //	yamlviewport.WithFinder(finder.New(finder.Exact()))
 //
 // A nil f selects the default searcher, as a nil [WithSearcher] does.
+// [Model.SetFinder] swaps the finder at runtime.
 func WithFinder(f *finder.Finder) Option {
+	return WithSearcher(finderAdapter(f))
+}
+
+// finderAdapter adapts f to [Searcher]. It returns nil for a nil f, so the
+// caller selects the default searcher.
+func finderAdapter(f *finder.Finder) Searcher {
 	if f == nil {
-		return WithSearcher(nil)
+		return nil
 	}
 
-	return WithSearcher(finderSearcher{finder: f})
+	return finderSearcher{finder: f}
 }
 
 // WithDiffer is an [Option] that sets the [*diff.Differ] that computes the
@@ -370,8 +385,9 @@ func New(opts ...Option) Model {
 //
 // A zero Model does not have a printer, keymap, or searcher. It does not
 // have rows, so [Model.View] returns "" and both scroll offsets stay at 0.
-// Searching needs the searcher that [New] creates, so a zero Model does not
-// match any term. Construct every Model with [New] and any [Option] values.
+// Searching needs a searcher, which [New] or [Model.SetSearcher] sets, so a
+// zero Model does not match any term until one of them runs. Construct
+// every Model with [New] and any [Option] values.
 //
 // # Rows
 //
@@ -420,8 +436,9 @@ type Model struct {
 	config
 
 	// Index over the lines on display. The Model loads it from the searcher
-	// on the first search after the lines change. In side-by-side mode,
-	// index covers the left pane and indexRight covers the right one.
+	// on the first search after the lines or the searcher change. In
+	// side-by-side mode, index covers the left pane and indexRight covers
+	// the right one.
 	index      Index
 	indexRight Index
 	// Revision history. The revIndex field selects the revision on display.
@@ -496,8 +513,8 @@ type Model struct {
 	// row counts from the first row of the frame.
 	anchorLine int
 	anchorRow  int
-	// Reports that the base views changed since the searcher last loaded
-	// them.
+	// Reports that the base views or the searcher changed since the
+	// searcher last loaded them.
 	searcherStale bool
 	// MouseWheelEnabled enables mouse wheel scrolling.
 	// Default: true.
@@ -636,7 +653,9 @@ func (m *Model) relayout() {
 // hold any counts to keep, so remeasure drops it as relayout does. A call
 // without ranges does not lay out any line, so the cache stays as it is.
 func (m *Model) remeasure(ranges ...position.Range) {
-	if m.rows == nil || !m.rows.filled() {
+	// A Model without a printer, such as a zero Model, fills its cache
+	// without measuring any line, so it has no counts to keep.
+	if m.rows == nil || !m.rows.filled() || m.printer == nil {
 		m.relayout()
 
 		return
@@ -781,6 +800,58 @@ func (m *Model) SetPrinter(p *printer.Printer) {
 
 	m.printer = p
 	m.relayout()
+}
+
+// SetSearcher sets the [Searcher] that search terms run through. See
+// [WithSearcher]. A nil s, or one holding a nil pointer, selects the default
+// searcher, as a nil [WithSearcher] does.
+//
+// SetSearcher drops the indexes the old searcher loaded, so the next search
+// loads the content through s. With a search term set, it runs the term
+// through s at once, as a new term does in [Model.SetSearchTerm]. The search
+// then starts at the first match and scrolls to it. The revisions, the diff,
+// and the view settings stay as they are. A key binding can thus switch
+// between a search that folds case and one that does not:
+//
+//	if exact {
+//		m.viewport.SetFinder(finder.New(finder.Exact()))
+//	} else {
+//		m.viewport.SetFinder(nil)
+//	}
+//
+// SetSearcher refreshes the search on every call, even when s is the
+// searcher already set.
+func (m *Model) SetSearcher(s Searcher) {
+	if isNil(s) {
+		s = finderSearcher{finder: finder.New()}
+	}
+
+	m.searcher = s
+	m.index = nil
+	m.indexRight = nil
+	m.searcherStale = true
+
+	if m.searchTerm == "" {
+		return
+	}
+
+	// Only the lines of the old matches and of the new ones change style,
+	// so only they need new row counts.
+	changed := m.matchRanges()
+
+	// The match index of the old searcher points at an arbitrary match of
+	// the new one.
+	m.searchIndex = -1
+	m.refreshSearch()
+	m.remeasure(append(changed, m.matchRanges()...)...)
+	m.scrollToCurrentMatch()
+}
+
+// SetFinder sets the [finder.Finder] that builds the search index. It is
+// [Model.SetSearcher] with f adapted to [Searcher], as [WithFinder] adapts
+// it. A nil f selects the default searcher, as a nil [WithFinder] does.
+func (m *Model) SetFinder(f *finder.Finder) {
+	m.SetSearcher(finderAdapter(f))
 }
 
 // SetDiffer sets the [*diff.Differ] that computes the diff between two
@@ -1335,8 +1406,8 @@ func (m *Model) loadViews() {
 
 // refreshSearch recomputes the search matches of the current base views and
 // the lines each match covers, without rebuilding the views. A zero Model
-// does not have the searcher that [New] creates, so refreshSearch does not
-// find a match for any term there.
+// has no searcher until [Model.SetSearcher] sets one, so refreshSearch does
+// not find a match for any term there.
 //
 // The caller updates the row counts for the new highlights. They change
 // only on the lines of the old and the new matches, so a caller that changes
@@ -1353,8 +1424,9 @@ func (m *Model) refreshSearch() {
 		m.updateSearchState()
 	}
 
-	// Every caller but reloadViews resets the index before a new term or
-	// new content, so the search starts over at the first match.
+	// Every caller but reloadViews resets searchIndex before a new term,
+	// new content, or a new searcher, so the search starts over at the
+	// first match.
 	// SetSearchTerm returns before this point for the term already set,
 	// which keeps its match.
 	switch {
@@ -1514,9 +1586,9 @@ type searchMatch struct {
 // an equal line counts once, but each match on a deleted or inserted line
 // counts on its own.
 func (m *Model) updateSideBySideSearchState() {
-	// Load both panes once per change of content, as the unified path
-	// does, so typing a term does not rebuild the indexes on every
-	// keystroke. A nil Index counts as loaded.
+	// Load both panes once per change of content or of searcher, as the
+	// unified path does. Typing a term then does not rebuild the indexes
+	// on every keystroke. A nil Index counts as loaded.
 	if m.searcherStale {
 		m.index = m.searcher.Load(m.baseLeft)
 		m.indexRight = m.searcher.Load(m.baseRight)
@@ -1580,9 +1652,9 @@ func (m *Model) updateSideBySideSearchState() {
 // unified view, which shows every match in the left base view. It needs a
 // searcher, and it leaves the match index to refreshSearch.
 //
-// It reloads the searcher only when the content changed since the last load,
-// so typing a search term does not rebuild the index on every keystroke. A
-// nil Index counts as loaded.
+// It reloads the searcher only when the content or the searcher changed
+// since the last load, so typing a search term does not rebuild the index
+// on every keystroke. A nil Index counts as loaded.
 func (m *Model) updateSearchState() {
 	if m.searcherStale {
 		m.index = m.searcher.Load(m.baseLeft)
@@ -2833,8 +2905,8 @@ func (m *Model) SetSearchTerm(term string) {
 	// The same term keeps the current match, its highlights, and the scroll
 	// position, so a parent that pushes the term on every update does not
 	// snap the view back to the match or lay out the content again. Every
-	// change of content refreshes the search, and the searcher stays the
-	// one New set, so the matches of the same term still hold.
+	// change of content refreshes the search, and so does SetSearcher, so
+	// the matches of the same term still hold.
 	if term == m.searchTerm {
 		return
 	}

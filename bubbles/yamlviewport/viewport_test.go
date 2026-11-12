@@ -5894,7 +5894,7 @@ func TestViewport_ZeroValue(t *testing.T) {
 	assert.Equal(t, 0, m.TotalRowCount())
 	assert.Empty(t, m.View())
 
-	// Searching needs the searcher New creates, so a zero Model finds no
+	// A zero Model has no searcher until SetSearcher runs, so it finds no
 	// match instead of panicking on the nil one.
 	for _, mode := range []yamlviewport.ViewMode{yamlviewport.ViewModeFull, yamlviewport.ViewModeSideBySide} {
 		m.SetViewMode(mode)
@@ -6376,6 +6376,295 @@ func TestViewport_WithSearcher(t *testing.T) {
 				assert.Equal(t, 1, m.SearchCount())
 			})
 		}
+	})
+}
+
+func TestViewport_SetSearcher(t *testing.T) {
+	t.Parallel()
+
+	// Line 10 matches "value" exactly, and line 30 matches it only when the
+	// search folds case.
+	doc := yamltest.GenerateLines(40, "k%d: x")
+	doc = replaceLine(doc, 10, "k10: value")
+	doc = replaceLine(doc, 30, "k30: Value")
+
+	exact := finder.New(finder.Exact())
+
+	t.Run("a new searcher searches the term again", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]func(*yamlviewport.Model){
+			"SetFinder":   func(m *yamlviewport.Model) { m.SetFinder(exact) },
+			"SetSearcher": func(m *yamlviewport.Model) { m.SetSearcher(reverseSearcher{finder: exact}) },
+		}
+
+		for name, set := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				m := testModel(testPrinter(), 80, 5)
+				setRevision(&m, doc)
+				m.SetSearchTerm("value")
+				require.Equal(t, 2, m.SearchCount())
+
+				// The second match sits at line 30, so the view scrolls away
+				// from the first.
+				m.SearchNext()
+				require.Equal(t, 1, m.SearchIndex())
+
+				set(&m)
+
+				// The search starts again at the first match of the new
+				// searcher and scrolls to it, as on a fresh Model.
+				want := testModel(testPrinter(), 80, 5, yamlviewport.WithFinder(exact))
+				setRevision(&want, doc)
+				want.SetSearchTerm("value")
+
+				assert.Equal(t, "value", m.SearchTerm())
+				assert.Equal(t, 1, m.SearchCount())
+				assert.Equal(t, 0, m.SearchIndex())
+				assert.Equal(t, want.YOffset(), m.YOffset())
+				assert.Equal(t, want.TotalRowCount(), m.TotalRowCount())
+				assert.Equal(t, want.View(), m.View())
+			})
+		}
+	})
+
+	t.Run("the search starts again at the first match", func(t *testing.T) {
+		t.Parallel()
+
+		// Every searcher finds "value" on the keys k10, k20, and k30, so the
+		// second match is still a match after the call.
+		same := yamltest.GenerateLines(40, "k%d: x")
+		for _, i := range []int{10, 20, 30} {
+			same = replaceLine(same, i, fmt.Sprintf("k%d: value", i))
+		}
+
+		tcs := map[string]func(*yamlviewport.Model){
+			"another finder":    func(m *yamlviewport.Model) { m.SetFinder(exact) },
+			"the default again": func(m *yamlviewport.Model) { m.SetFinder(nil) },
+		}
+
+		for name, set := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				m := testModel(testPrinter(), 80, 5)
+				setRevision(&m, same)
+				m.SetSearchTerm("value")
+				require.Equal(t, 3, m.SearchCount())
+
+				m.SearchNext()
+				require.Equal(t, 1, m.SearchIndex())
+
+				set(&m)
+
+				want := testModel(testPrinter(), 80, 5)
+				setRevision(&want, same)
+				want.SetSearchTerm("value")
+
+				assert.Equal(t, 3, m.SearchCount())
+				assert.Equal(t, 0, m.SearchIndex())
+				assert.Equal(t, want.YOffset(), m.YOffset())
+				assert.Equal(t, want.View(), m.View())
+			})
+		}
+	})
+
+	t.Run("the row counts follow the new matches", func(t *testing.T) {
+		t.Parallel()
+
+		// Both highlight styles widen the text they style, so the lines whose
+		// matches change take a new number of rows and a new width. The
+		// default finder matches all four words of a line, and the exact one
+		// matches two. Lines 2, 5, and 8 match only the default finder, so
+		// the switch to the exact one drops every match on them.
+		widen := bracketStyle("<<", ">>")
+		p := yamltest.NewPlainPrinter(printer.WithStyles(highlightStyles(widen, widen)))
+
+		before := yamltest.GenerateLines(12, "k%d: aaaa AAAA aaaa AAAA")
+		for _, i := range []int{2, 5, 8} {
+			before = replaceLine(before, i, fmt.Sprintf("k%d: AAAA AAAA AAAA AAAA", i))
+		}
+
+		after := replaceLine(before, 3, "k3: changed")
+
+		tcs := map[string]struct {
+			viewMode yamlviewport.ViewMode
+			widths   []int
+			wrap     bool
+		}{
+			"unified wrapped": {
+				viewMode: yamlviewport.ViewModeFull,
+				widths:   []int{13, 14, 15, 16, 17, 18, 20, 24},
+				wrap:     true,
+			},
+			"unified unwrapped": {
+				viewMode: yamlviewport.ViewModeFull,
+				widths:   []int{16},
+			},
+			"side by side wrapped": {
+				viewMode: yamlviewport.ViewModeSideBySide,
+				widths:   []int{30, 32, 34, 36, 38, 40, 42, 44, 46, 48},
+				wrap:     true,
+			},
+			"side by side unwrapped": {
+				viewMode: yamlviewport.ViewModeSideBySide,
+				widths:   []int{34},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				for _, width := range tc.widths {
+					m := testModel(p, width, 5)
+					m.SetWordWrap(tc.wrap)
+					addRevisions(&m, before, after)
+					m.SetViewMode(tc.viewMode)
+					m.SetSearchTerm("aaaa")
+
+					_ = m.View()
+
+					for step, f := range []*finder.Finder{exact, nil} {
+						m.SetFinder(f)
+
+						fresh := remeasured(m)
+						msg := fmt.Sprintf("width %d, step %d", width, step)
+
+						assert.Equal(t, fresh.TotalRowCount(), m.TotalRowCount(), msg)
+						assert.Equal(t, maxXOffset(fresh), maxXOffset(m), msg)
+						assert.Equal(t, fresh.View(), m.View(), msg)
+					}
+				}
+			})
+		}
+	})
+
+	t.Run("a nil searcher or finder selects the default", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]func(*yamlviewport.Model){
+			"nil searcher":         func(m *yamlviewport.Model) { m.SetSearcher(nil) },
+			"nil finder":           func(m *yamlviewport.Model) { m.SetFinder(nil) },
+			"nil pointer searcher": func(m *yamlviewport.Model) { m.SetSearcher((*countingSearcher)(nil)) },
+		}
+
+		for name, set := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				m := testModel(testPrinter(), 80, 5, yamlviewport.WithFinder(exact))
+				setRevision(&m, doc)
+				m.SetSearchTerm("value")
+				require.Equal(t, 1, m.SearchCount())
+
+				// The default finder folds case.
+				set(&m)
+				assert.Equal(t, 2, m.SearchCount())
+				assert.Equal(t, 0, m.SearchIndex())
+			})
+		}
+	})
+
+	t.Run("the same searcher loads the content again", func(t *testing.T) {
+		t.Parallel()
+
+		// A searcher whose matches depend on state the parent changes
+		// refreshes when the parent passes it again.
+		searcher := &countingSearcher{finder: finder.New()}
+		m := testModel(testPrinter(), 80, 5, yamlviewport.WithSearcher(searcher))
+		setRevision(&m, doc)
+		m.SetSearchTerm("value")
+		require.Equal(t, 1, searcher.loads)
+		require.Equal(t, 2, m.SearchCount())
+
+		searcher.finder = exact
+		m.SetSearcher(searcher)
+
+		assert.Equal(t, 2, searcher.loads)
+		assert.Equal(t, 1, m.SearchCount())
+	})
+
+	t.Run("side by side loads both panes", func(t *testing.T) {
+		t.Parallel()
+
+		searcher := &countingSearcher{finder: exact}
+		m := testModel(testPrinter(), 80, 5)
+		addRevisions(&m, alphaYAML, alphaTwiceYAML)
+		m.SetViewMode(yamlviewport.ViewModeSideBySide)
+		m.SetSearchTerm("alpha")
+		require.Equal(t, 2, m.SearchCount())
+
+		m.SetSearcher(searcher)
+
+		assert.Equal(t, 2, searcher.loads, "one load per pane")
+		assert.Equal(t, 2, m.SearchCount())
+		assert.Equal(t, yamlviewport.ViewModeSideBySide, m.ViewMode())
+		assert.Equal(t, 1, m.RevisionIndex())
+	})
+
+	t.Run("without a term the searcher waits for one", func(t *testing.T) {
+		t.Parallel()
+
+		searcher := &countingSearcher{finder: exact}
+		m := testModel(testPrinter(), 80, 5)
+		setRevision(&m, doc)
+		m.SetYOffset(20)
+
+		m.SetSearcher(searcher)
+
+		assert.Zero(t, searcher.loads)
+		assert.Equal(t, 20, m.YOffset())
+		assert.Equal(t, -1, m.SearchIndex())
+
+		m.SetSearchTerm("value")
+		assert.Equal(t, 1, searcher.loads)
+		assert.Equal(t, 1, m.SearchCount())
+	})
+
+	t.Run("a zero Model searches after the call", func(t *testing.T) {
+		t.Parallel()
+
+		// A zero Model has no searcher, so it matches no term until
+		// SetSearcher gives it one.
+		var m yamlviewport.Model
+
+		setRevision(&m, doc)
+		m.SetSearchTerm("value")
+		require.Equal(t, 0, m.SearchCount())
+
+		m.SetSearcher(nil)
+
+		assert.Equal(t, 2, m.SearchCount())
+		assert.Equal(t, 0, m.SearchIndex())
+
+		// The calls that move a highlight remeasure lines, which a Model
+		// without a printer must survive.
+		require.NotPanics(t, func() { m.SearchNext() })
+		assert.Equal(t, 1, m.SearchIndex())
+
+		require.NotPanics(t, func() { m.SearchPrevious() })
+		assert.Equal(t, 0, m.SearchIndex())
+
+		require.NotPanics(t, func() { m.SetSearchIndex(1) })
+		assert.Equal(t, 1, m.SearchIndex())
+
+		require.NotPanics(t, func() { m.SetSearcher(nil) })
+		assert.Equal(t, 2, m.SearchCount())
+		assert.Equal(t, 0, m.SearchIndex())
+
+		require.NotPanics(t, func() { m.SetSearchTerm("no such text") })
+		assert.Equal(t, 0, m.SearchCount())
+
+		require.NotPanics(t, func() { m.SetSearchTerm("value") })
+		assert.Equal(t, 2, m.SearchCount())
+
+		require.NotPanics(t, func() { m.ClearSearch() })
+		assert.Equal(t, 0, m.SearchCount())
+
+		require.NotPanics(t, func() { _ = m.View() })
 	})
 }
 
