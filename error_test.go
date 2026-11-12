@@ -1823,12 +1823,54 @@ func TestError_Location(t *testing.T) {
 			),
 			want: errorLocation{path: path, rng: rng},
 		},
-		"own location wins over a wrapped one": {
+		"a wrapped location wins over the own one whole": {
 			err: wrapError(t,
 				yamltest.ErrorAt("test", "foo"),
 				niceyaml.AtPosition(pos),
 			),
-			want: errorLocation{pos: pos},
+			want: errorLocation{path: path},
+		},
+		"a wrapped range wins over the own path": {
+			err: wrapError(t,
+				fmt.Errorf("context: %w", niceyaml.NewError("test", niceyaml.AtRange(rng))),
+				niceyaml.AtPath(path),
+			),
+			want: errorLocation{rng: rng},
+		},
+		"the own location wins over a wrapped summary": {
+			err: wrapError(t,
+				niceyaml.NewSummary("2 problems",
+					yamltest.ErrorAt("first", "foo"),
+					niceyaml.NewError("second", niceyaml.AtPosition(pos)),
+				),
+				niceyaml.AtRange(rng),
+			),
+			want: errorLocation{rng: rng},
+		},
+		"With puts a path beside the range of the Error it is called on": {
+			err:  niceyaml.NewError("test", niceyaml.AtRange(rng)).With(niceyaml.AtPath(path)),
+			want: errorLocation{path: path, rng: rng},
+		},
+		"With on a wrapper replaces the wrapped location": {
+			err: wrapError(t,
+				niceyaml.NewError("test", niceyaml.AtRange(rng)),
+				niceyaml.AtPath(path),
+			).With(niceyaml.AtPosition(pos)),
+			want: errorLocation{path: path, pos: pos},
+		},
+		"With on the Error that errors.As finds replaces the wrapped location": {
+			err: yamltest.RequireError(t, fmt.Errorf("context: %w", niceyaml.Locate(
+				niceyaml.NewError("test", niceyaml.AtRange(rng)),
+				niceyaml.AtPosition(pos),
+			))).With(niceyaml.AtPath(path)),
+			want: errorLocation{path: path, pos: pos},
+		},
+		"With of details alone leaves the wrapped location": {
+			err: wrapError(t,
+				niceyaml.NewError("test", niceyaml.AtRange(rng)),
+				niceyaml.AtPath(path),
+			).With(niceyaml.WithDetails(errors.New("detail"))),
+			want: errorLocation{rng: rng},
 		},
 	}
 
@@ -4113,13 +4155,13 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 			unbound: "document 1: bad token",
 			bound:   "3:7: document 1: bad token",
 		},
-		// The path anchor resolves in the first document, and the message
-		// carries that one position, which agrees with the highlight.
-		"a path anchor resolves its path rather than the error it wraps": {
+		// The located error nearest the problem wins, so the path anchor
+		// gives way to the position of the error it wraps.
+		"a path anchor gives way to the location of the error it wraps": {
 			err:     niceyaml.Invalid(badToken, niceyaml.AtPath(namePath)),
 			is:      badToken,
 			unbound: "bad token",
-			bound:   "1:7: $.name: bad token",
+			bound:   "3:7: bad token",
 		},
 	}
 
@@ -4229,7 +4271,7 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 		}
 	})
 
-	t.Run("a path anchor replaces the path of the error it wraps", func(t *testing.T) {
+	t.Run("a path anchor gives way to the path of the error it wraps", func(t *testing.T) {
 		t.Parallel()
 
 		inner := yamltest.ErrorAt("bad token", "other")
@@ -4237,10 +4279,21 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 
 		// The tree and the binding name the one location Path reports, not
 		// both.
-		assert.Equal(t, namePath, yamltest.PathOf(t, outer))
+		otherPath := paths.Current().Child("other")
+		assert.Equal(t, otherPath, yamltest.PathOf(t, outer))
 		assert.Equal(t, "bad token", outer.Error())
-		assert.Equal(t, "@.name: bad token", niceyaml.FormatError(outer, niceyaml.WithContextLines(0)))
-		assert.Equal(t, "1:7: $.name: bad token", docs[0].Bind(outer).Error())
+		assert.Equal(t, "@.other: bad token", niceyaml.FormatError(outer, niceyaml.WithContextLines(0)))
+		assert.Equal(t, "1:1: $.other: bad token", docs[0].Bind(outer).Error())
+	})
+
+	t.Run("With replaces the path of the Error it is called on", func(t *testing.T) {
+		t.Parallel()
+
+		moved := yamltest.ErrorAt("bad token", "other").With(niceyaml.AtPath(namePath))
+
+		assert.Equal(t, namePath, yamltest.PathOf(t, moved))
+		assert.Equal(t, "@.name: bad token", niceyaml.FormatError(moved, niceyaml.WithContextLines(0)))
+		assert.Equal(t, "1:7: $.name: bad token", docs[0].Bind(moved).Error())
 	})
 
 	t.Run("a second binding adds no position", func(t *testing.T) {
@@ -9497,10 +9550,12 @@ func TestBindValue_Place(t *testing.T) {
 				problems: 1,
 				want:     "app.yaml:2:9: $.request.port: check: 0 is less than 1",
 			},
+			// The problem keeps its own location for one problem, as each
+			// does for two.
 			"location above one problem": {
 				wrap:     func(err error) error { return niceyaml.Invalid(err, at) },
 				problems: 1,
-				want:     "app.yaml:1:1: $.request: 0 is less than 1",
+				want:     "app.yaml:2:9: $.request.port: 0 is less than 1",
 			},
 			"location above two problems": {
 				wrap:     func(err error) error { return niceyaml.Invalid(err, at) },
@@ -12135,6 +12190,230 @@ func TestLocate(t *testing.T) {
 		}
 	})
 
+	t.Run("gives way to a located error below it", func(t *testing.T) {
+		t.Parallel()
+
+		hoursPath := paths.Current().Child("hours")
+		hoursClose := hoursPath.Child("close")
+		hoursDoc := paths.Doc().Child("hours")
+		licenseDoc := paths.Doc().Child("license")
+		closeRange := yamltest.LineRange(2, 9, 10)
+		tooEarly := func() error { return niceyaml.NewError("closes early", niceyaml.AtPath(hoursClose)) }
+
+		// The located error nearest the problem wins whole, so the count of
+		// problems and the kind of heading do not move a problem.
+		tcs := map[string]struct {
+			err  error
+			want string
+		}{
+			"one located error": {
+				err:  niceyaml.Locate(tooEarly(), niceyaml.AtPath(hoursPath)),
+				want: "cfg.yaml:3:10: $.hours.close: closes early",
+			},
+			"a wrapper around one located error": {
+				err:  niceyaml.Locate(fmt.Errorf("check: %w", tooEarly()), niceyaml.AtPath(hoursPath)),
+				want: "cfg.yaml:3:10: $.hours.close: check: closes early",
+			},
+			"a summary of one located error": {
+				err:  niceyaml.Invalid(niceyaml.NewSummary("1 violation", tooEarly()), niceyaml.AtPath(hoursPath)),
+				want: "cfg.yaml:3:10: $.hours.close: closes early",
+			},
+			"a join of one located error": {
+				err:  niceyaml.Invalid(errors.Join(tooEarly()), niceyaml.AtPath(hoursPath)),
+				want: "cfg.yaml:3:10: $.hours.close: closes early",
+			},
+			"a range below a path": {
+				// The path of the options does not join the range below.
+				err: niceyaml.Locate(
+					niceyaml.NewError("bad license", niceyaml.AtRange(licenseRange)),
+					niceyaml.AtPath(closePath),
+				),
+				want: "cfg.yaml:4:10: bad license",
+			},
+			"nested results take the innermost location": {
+				err: niceyaml.Locate(
+					niceyaml.Locate(
+						niceyaml.NewError("closes early", niceyaml.AtRange(closeRange)),
+						niceyaml.AtPath(hoursClose),
+					),
+					niceyaml.AtPath(licensePath),
+				),
+				want: "cfg.yaml:3:10: closes early",
+			},
+			"a Rebase of a summary of one problem": {
+				// The Rebase lies nearer the problem, so its base wins, as
+				// it does for each problem of a summary of two.
+				err: niceyaml.Locate(
+					niceyaml.Rebase(niceyaml.NewSummary("1 violation", errors.New("opens late")), hoursDoc),
+					niceyaml.AtPath(licensePath),
+				),
+				want: "cfg.yaml:1:1: $.hours: opens late",
+			},
+			"a Rebase of a summary of two problems": {
+				err: niceyaml.Locate(
+					niceyaml.Rebase(niceyaml.NewSummary("2 violations",
+						errors.New("opens late"),
+						errors.New("closes early"),
+					), hoursDoc),
+					niceyaml.AtPath(licensePath),
+				),
+				want: "cfg.yaml:4:10: $.license: 2 violations\n" +
+					"cfg.yaml:1:1: $.hours: opens late\n" +
+					"cfg.yaml:1:1: $.hours: closes early",
+			},
+			"a Rebase of one problem": {
+				err: niceyaml.Locate(
+					niceyaml.Rebase(errors.New("opens late"), hoursDoc),
+					niceyaml.AtPath(licensePath),
+				),
+				want: "cfg.yaml:1:1: $.hours: opens late",
+			},
+			"a Rebase of a join of one problem": {
+				err: niceyaml.Locate(
+					niceyaml.Rebase(errors.Join(errors.New("opens late")), hoursDoc),
+					niceyaml.AtPath(licensePath),
+				),
+				want: "cfg.yaml:1:1: $.hours: opens late",
+			},
+			"With on the result moves it to a coarser place": {
+				// With replaces the location on the cause chain of the
+				// Error it is called on, whatever wraps that Error.
+				err: yamltest.RequireError(t, fmt.Errorf("check: %w", niceyaml.Locate(
+					niceyaml.NewError("closes early", niceyaml.AtRange(closeRange)),
+					niceyaml.AtPath(hoursClose),
+				))).With(niceyaml.AtPath(hoursPath)),
+				want: "cfg.yaml:1:1: $.hours: closes early",
+			},
+			"With on a wrapper of a join leaves each problem in place": {
+				// With reaches only the cause chain of its receiver, and a
+				// join ends that chain.
+				err: yamltest.RequireError(t, niceyaml.Invalid(errors.Join(
+					niceyaml.NewError("opens late", niceyaml.AtPath(hoursPath.Child("open"))),
+					tooEarly(),
+				), niceyaml.AtPath(hoursPath))).With(niceyaml.AtPath(licensePath)),
+				want: "cfg.yaml:2:9: $.hours.open: opens late\ncfg.yaml:3:10: $.hours.close: closes early",
+			},
+			"With above a located heading moves the problems of the heading": {
+				// With replaces the location of the heading around the join,
+				// so the problem without a location of its own takes the
+				// location that With sets.
+				err: yamltest.RequireError(t, niceyaml.Locate(fmt.Errorf("check: %w", niceyaml.Invalid(errors.Join(
+					errors.New("opens late"),
+					tooEarly(),
+				), niceyaml.AtPath(hoursPath))), niceyaml.AtPath(closePath))).With(niceyaml.AtPath(licensePath)),
+				want: "cfg.yaml:4:10: $.license: check:\n" +
+					"cfg.yaml:3:10: $.hours.close: closes early\n" +
+					"cfg.yaml:4:10: $.license: opens late",
+			},
+			"With above a Rebase leaves the heading below it in place": {
+				// The Rebase moves the location of the heading below it. The
+				// location that With sets thus does not replace it, on the
+				// line of the heading or on the lines of its problems.
+				err: yamltest.RequireError(t, niceyaml.Locate(niceyaml.Rebase(niceyaml.Invalid(niceyaml.NewSummary(
+					"2 violations",
+					errors.New("opens late"),
+					errors.New("no owner"),
+				), niceyaml.AtPath(paths.Current().Child("open"))), hoursDoc), niceyaml.AtPath(closePath))).
+					With(niceyaml.AtPath(licensePath)),
+				want: "cfg.yaml:2:9: $.hours.open: 2 violations\n" +
+					"cfg.yaml:2:9: $.hours.open: opens late\n" +
+					"cfg.yaml:2:9: $.hours.open: no owner",
+			},
+			"With above a Rebase leaves a located summary below it in place": {
+				err: yamltest.RequireError(t, niceyaml.Locate(niceyaml.Rebase(
+					yamltest.RequireError(t, niceyaml.NewSummary("2 violations",
+						errors.New("opens late"),
+						errors.New("no owner"),
+					)).With(niceyaml.AtPath(paths.Current().Child("open"))),
+					hoursDoc,
+				), niceyaml.AtPath(closePath))).With(niceyaml.AtPath(licensePath)),
+				want: "cfg.yaml:2:9: $.hours.open: 2 violations\n" +
+					"cfg.yaml:2:9: $.hours.open: opens late\n" +
+					"cfg.yaml:2:9: $.hours.open: no owner",
+			},
+			"With above a Rebase moves a single problem": {
+				err: yamltest.RequireError(t, niceyaml.Locate(niceyaml.Rebase(
+					niceyaml.NewError("opens late", niceyaml.AtPath(paths.Current().Child("open"))),
+					hoursDoc,
+				), niceyaml.AtPath(closePath))).With(niceyaml.AtPath(licensePath)),
+				want: "cfg.yaml:4:10: $.license: opens late",
+			},
+			"With on a Rebase of a summary moves the summary and its problems": {
+				// Errors.As finds the Error from Rebase first.
+				err: yamltest.RequireError(t, niceyaml.Rebase(niceyaml.NewSummary("2 violations",
+					errors.New("opens late"),
+					errors.New("no owner"),
+				), hoursDoc)).With(niceyaml.AtPath(licenseDoc)),
+				want: "cfg.yaml:4:10: $.license: 2 violations\n" +
+					"cfg.yaml:4:10: $.license: opens late\n" +
+					"cfg.yaml:4:10: $.license: no owner",
+			},
+			"With on a Rebase of a located summary moves the summary and its problems": {
+				err: yamltest.RequireError(t, niceyaml.Rebase(niceyaml.Invalid(niceyaml.NewSummary("2 violations",
+					errors.New("opens late"),
+					errors.New("no owner"),
+				), niceyaml.AtPath(paths.Current().Child("open"))), hoursDoc)).With(niceyaml.AtPath(licenseDoc)),
+				want: "cfg.yaml:4:10: $.license: 2 violations\n" +
+					"cfg.yaml:4:10: $.license: opens late\n" +
+					"cfg.yaml:4:10: $.license: no owner",
+			},
+			"With on a Rebase moves its location under the base": {
+				// The Rebase moves the `@` path that With sets, on the line
+				// of the summary and on the lines of its problems.
+				err: yamltest.RequireError(t, niceyaml.Rebase(niceyaml.Invalid(niceyaml.NewSummary("2 violations",
+					errors.New("opens late"),
+					errors.New("no owner"),
+				), niceyaml.AtPath(paths.Current().Child("open"))), hoursDoc)).With(niceyaml.AtPath(closePath)),
+				want: "cfg.yaml:3:10: $.hours.close: 2 violations\n" +
+					"cfg.yaml:3:10: $.hours.close: opens late\n" +
+					"cfg.yaml:3:10: $.hours.close: no owner",
+			},
+			"With above a With on a Rebase leaves the heading below it in place": {
+				// The location that With sets on the Error from Rebase
+				// reaches the problems of the summary. It thus wins on the
+				// line of the summary too.
+				err: yamltest.RequireError(t, niceyaml.Locate(
+					yamltest.RequireError(t, niceyaml.Rebase(niceyaml.Invalid(niceyaml.NewSummary("2 violations",
+						errors.New("opens late"),
+						errors.New("no owner"),
+					), niceyaml.AtPath(paths.Current().Child("open"))), hoursDoc)).With(niceyaml.AtPath(closePath)),
+					niceyaml.AtPath(hoursPath),
+				)).With(niceyaml.AtPath(licensePath)),
+				want: "cfg.yaml:3:10: $.hours.close: 2 violations\n" +
+					"cfg.yaml:3:10: $.hours.close: opens late\n" +
+					"cfg.yaml:3:10: $.hours.close: no owner",
+			},
+			"With above a located summary moves the summary and its problems": {
+				err: yamltest.RequireError(t, niceyaml.Locate(niceyaml.Invalid(niceyaml.NewSummary("2 violations",
+					tooEarly(),
+					errors.New("no owner"),
+				), niceyaml.AtPath(hoursPath)), niceyaml.AtPath(closePath))).With(niceyaml.AtPath(licensePath)),
+				want: "cfg.yaml:4:10: $.license: 2 violations\n" +
+					"cfg.yaml:3:10: $.hours.close: closes early\n" +
+					"cfg.yaml:4:10: $.license: no owner",
+			},
+			"With on a summary leaves a located problem in place": {
+				// The location of the summary reaches only the problem
+				// that does not carry one.
+				err: yamltest.RequireError(t, niceyaml.NewSummary("2 violations",
+					tooEarly(),
+					errors.New("no owner"),
+				)).With(niceyaml.AtPath(licensePath)),
+				want: "cfg.yaml:4:10: $.license: 2 violations\n" +
+					"cfg.yaml:3:10: $.hours.close: closes early\n" +
+					"cfg.yaml:4:10: $.license: no owner",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				require.EqualError(t, doc.Bind(tc.err), tc.want)
+			})
+		}
+	})
+
 	t.Run("takes every option", func(t *testing.T) {
 		t.Parallel()
 
@@ -12597,32 +12876,6 @@ func TestLocate(t *testing.T) {
 				message: "no owner",
 				excerpt: "no excerpt: resolve $.license.*: wildcard path matches any number of nodes",
 			},
-			"before the bind, a result at the path of the binding around one at its parent names it once": {
-				// A bind takes the location of the outer result alone, so the
-				// row leaves out the location of the inner one.
-				err: niceyaml.Locate(
-					niceyaml.Locate(
-						doc.Bind(niceyaml.NewError("no owner", niceyaml.AtPath(ownerPath))),
-						niceyaml.AtPath(licensePath),
-					),
-					niceyaml.AtPath(ownerPath),
-				),
-				want:    "cfg.yaml: $.license.*: no owner",
-				message: "no owner",
-				excerpt: "no excerpt: resolve $.license.*: wildcard path matches any number of nodes",
-			},
-			"before the bind, a result at the path of the binding around one at a position names it once": {
-				err: niceyaml.Locate(
-					niceyaml.Locate(
-						doc.Bind(niceyaml.NewError("no owner", niceyaml.AtPath(ownerPath))),
-						niceyaml.AtPosition(position.New(0, 0)),
-					),
-					niceyaml.AtPath(ownerPath),
-				),
-				want:    "cfg.yaml: $.license.*: no owner",
-				message: "no owner",
-				excerpt: "no excerpt: resolve $.license.*: wildcard path matches any number of nodes",
-			},
 			"of a warning whose path did not resolve labels the row once": {
 				// The row of the result carries the warning label, so the
 				// line of the binding behind it leaves the label out.
@@ -12690,6 +12943,30 @@ func TestLocate(t *testing.T) {
 				assert.Equal(t, stringtest.JoinLF(tc.want, "", excerpt), niceyaml.FormatError(tc.err))
 			})
 		}
+
+		t.Run("before the bind, a result around a located one reads as the inner one", func(t *testing.T) {
+			t.Parallel()
+
+			// The location of the inner result is nearer the binding, so the
+			// location of the outer one does not show, before the bind or
+			// after it.
+			owner := doc.Bind(niceyaml.NewError("no owner", niceyaml.AtPath(ownerPath)))
+
+			for name, inner := range map[string]error{
+				"at its parent": niceyaml.Locate(owner, niceyaml.AtPath(licensePath)),
+				"at a position": niceyaml.Locate(owner, niceyaml.AtPosition(position.New(0, 0))),
+			} {
+				outer := niceyaml.Locate(inner, niceyaml.AtPath(ownerPath))
+
+				assert.Equal(t, inner.Error(), outer.Error(), name)
+				assert.Equal(t,
+					yamltest.OnlyProblem(t, inner).Message(),
+					yamltest.OnlyProblem(t, outer).Message(), name,
+				)
+				assert.Equal(t, niceyaml.FormatError(inner), niceyaml.FormatError(outer), name)
+				assert.Equal(t, doc.Bind(inner).Error(), doc.Bind(outer).Error(), name)
+			}
+		})
 
 		t.Run("detached, whose location resolved binds in the source again", func(t *testing.T) {
 			t.Parallel()
@@ -13004,17 +13281,19 @@ func TestLocate(t *testing.T) {
 						return niceyaml.Locate(errors.New("closes early"),
 							niceyaml.AtPath(hoursClose), niceyaml.WithDetails(detach(doc.Bind(tooEarly()))))
 					},
+					// The located result in the error is nearer the problem, so
+					// it keeps its location.
 					wrap: func(err error) error { return niceyaml.Locate(err, niceyaml.AtPath(licensePath)) },
 					want: stringtest.JoinLF(
-						"cfg.yaml:4:10: $.license: closes early",
+						"cfg.yaml:3:10: $.hours.close: closes early",
 						"`-- 2:9: $.hours.open: too early",
 						"",
 						"   1 | hours:",
 						"   2 |   open: 9",
 						"     |         ^ too early",
 						"   3 |   close: 5",
+						"     |          ^",
 						"   4 | license: /root/x",
-						"     |          ^^^^^^^",
 					),
 				},
 			}

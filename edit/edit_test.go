@@ -2173,6 +2173,52 @@ func TestDoc_Apply(t *testing.T) {
 			fn:     at(paths.Current().Child("b"), set(7)),
 			err:    `test.yaml:1:8: $.x.A: the edit sets $.x.A.b, which reaches "A", a key that its mapping repeats, and cafe does not edit the entries of a repeated key`,
 		},
+		"error of the Func below an entry that a later entry hides, with a rebased summary": {
+			// No path selects the place of the summary, so the summary and
+			// each of its problems bind at the site of that place.
+			before: stringtest.LinesLF("o: 0", "a:", "  x: {k: 1, m: 2}", "a:", "  y: 2"),
+			dup:    true,
+			path:   paths.MustParse("$..x"),
+			fn: func(context.Context, *edit.Node) error {
+				return niceyaml.Rebase(niceyaml.Invalid(niceyaml.NewSummary("2 violations",
+					errors.New("opens late"),
+					errors.New("no owner"),
+				), niceyaml.AtPath(paths.Current().Child("k"))), paths.Current())
+			},
+			err: "test.yaml:3:10: $.a.x.k: 2 violations\n" +
+				"|-- 3:10: $.a.x.k: opens late\n" +
+				"`-- 3:10: $.a.x.k: no owner",
+		},
+		"error of the Func below an entry that a later entry hides, with a summary rebased below the node": {
+			before: stringtest.LinesLF("o: 0", "a:", "  x: {k: 1, m: 2}", "a:", "  y: 2"),
+			dup:    true,
+			path:   paths.MustParse("$..x"),
+			fn: func(context.Context, *edit.Node) error {
+				return niceyaml.Rebase(niceyaml.Invalid(niceyaml.NewSummary("2 violations",
+					errors.New("opens late"),
+					errors.New("no owner"),
+				), niceyaml.AtPath(paths.Current().Child("k"))), paths.Current().Child("m"))
+			},
+			err: "test.yaml:3:16: $.a.x.m.k: 2 violations\n" +
+				"|-- 3:16: $.a.x.m.k: opens late\n" +
+				"`-- 3:16: $.a.x.m.k: no owner",
+		},
+		"error of the Func below an entry that a later entry hides, with a summary rebased to a base below the node": {
+			// No path selects the base of the Rebase, so each problem
+			// binds at the site rather than at that base.
+			before: stringtest.LinesLF("o: 0", "a:", "  x: {k: 1, m: 2}", "a:", "  y: 2"),
+			dup:    true,
+			path:   paths.MustParse("$..x"),
+			fn: func(context.Context, *edit.Node) error {
+				return niceyaml.Rebase(niceyaml.NewSummary("2 violations",
+					errors.New("opens late"),
+					errors.New("no owner"),
+				), paths.Current().Child("m"))
+			},
+			err: "test.yaml:3:3: $.a.x: 2 violations\n" +
+				"|-- 3:3: $.a.x: opens late\n" +
+				"`-- 3:3: $.a.x: no owner",
+		},
 		"value that a merge key shares changes twice": {
 			// The call at soy sets the price that the merge key brings in from oat,
 			// after the call at oat set it.
@@ -12366,6 +12412,68 @@ func TestDoc_Apply_duplicateKeys(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("With on the error of a Func below an entry that a later entry hides", func(t *testing.T) {
+		t.Parallel()
+
+		d := newDoc(t, stringtest.LinesLF("o: 0", "a:", "  x: {k: 1, m: 2}", "a:", "  y: 2"),
+			niceyaml.WithAllowDuplicateKeys(true))
+
+		err := d.Apply(t.Context(), paths.MustParse("$..x"), func(context.Context, *edit.Node) error {
+			return niceyaml.Rebase(niceyaml.Invalid(niceyaml.NewSummary("2 violations",
+				errors.New("opens late"),
+				errors.New("no owner"),
+			), niceyaml.AtPath(paths.Current().Child("k"))), paths.Current())
+		})
+
+		var site *niceyaml.Error
+
+		require.ErrorAs(t, err, &site)
+
+		// The location that With sets replaces the site, which replaces the
+		// location of the summary below the Rebase. The summary and each of
+		// its problems thus bind at the location that With sets.
+		var located *niceyaml.Error
+
+		require.ErrorAs(t, niceyaml.Locate(site, niceyaml.AtPath(paths.Doc().Child("a"))), &located)
+
+		want := stringtest.JoinLF(
+			"test.yaml:1:4: $.o: 2 violations",
+			"|-- 1:4: $.o: opens late",
+			"`-- 1:4: $.o: no owner",
+		)
+
+		bound := d.Node().Bind(located.With(niceyaml.AtPath(paths.Doc().Child("o"))))
+		assert.Contains(t, niceyaml.FormatError(bound), want)
+
+		// A copy of the site replaces the location of the summary too. The
+		// path joins the range of the site.
+		bound = d.Node().Bind(site.With(niceyaml.AtPath(paths.Doc().Child("o"))))
+		assert.Contains(t, niceyaml.FormatError(bound), stringtest.JoinLF(
+			"test.yaml:3:10: $.o: 2 violations",
+			"|-- 3:10: $.o: opens late",
+			"`-- 3:10: $.o: no owner",
+		))
+
+		// The site replaces the base of a Rebase below it that no located
+		// Error lies below, and With passes that replacement on. The
+		// problems of the summary thus bind at the location that With sets.
+		d = newDoc(t, stringtest.LinesLF("o: 0", "a:", "  x: {k: 1, m: {z: 3}}", "a:", "  y: 2"),
+			niceyaml.WithAllowDuplicateKeys(true))
+
+		err = d.Apply(t.Context(), paths.MustParse("$..x"), func(context.Context, *edit.Node) error {
+			return niceyaml.Rebase(niceyaml.NewSummary("2 violations",
+				errors.New("opens late"),
+				errors.New("no owner"),
+			), paths.Current().Child("m"))
+		})
+
+		require.ErrorAs(t, err, &site)
+		require.ErrorAs(t, niceyaml.Locate(site, niceyaml.AtPath(paths.Doc().Child("a"))), &located)
+
+		bound = d.Node().Bind(located.With(niceyaml.AtPath(paths.Doc().Child("o"))))
+		assert.Contains(t, niceyaml.FormatError(bound), want)
+	})
 }
 
 func TestWithProtected(t *testing.T) {

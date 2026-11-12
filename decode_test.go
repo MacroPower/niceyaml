@@ -3405,10 +3405,11 @@ func TestCustomUnmarshaler(t *testing.T) {
 		reversed := stringtest.LinesLF("boxes:", "  - item: {from: 9, to: 3}")
 
 		tcs := map[string]struct {
-			report error
-			input  string
-			want   string
-			detail string
+			report        error
+			input         string
+			want          string
+			detail        string
+			problemDetail string
 		}{
 			"path": {
 				input:  reversed,
@@ -3431,6 +3432,132 @@ func TestCustomUnmarshaler(t *testing.T) {
 					"2:5: $.boxes[0].item: to is odd",
 				),
 			},
+			"rebased summary at a position of the text": {
+				// The range counts the lines of the text of the value, so the
+				// summary and the problem without a location bind at the path
+				// that the Rebase moves. The Rebase moves the path of the
+				// other problem too.
+				input: reversed,
+				report: niceyaml.Rebase(niceyaml.Invalid(niceyaml.NewSummary("2 violations",
+					errors.New("from is odd"),
+					niceyaml.NewError("to is odd", niceyaml.AtPath(paths.Current())),
+				), niceyaml.AtPath(paths.Current()), niceyaml.AtRange(yamltest.LineRange(0, 0, 1))),
+					paths.Current().Child("to")),
+				want: stringtest.JoinLF(
+					"2:25: $.boxes[0].item.to: 2 violations",
+					"2:25: $.boxes[0].item.to: from is odd",
+					"2:25: $.boxes[0].item.to: to is odd",
+				),
+			},
+			"rebased summary of problems without a location at a position of the text": {
+				// The range counts the lines of the text of the value, so the
+				// location of the summary binds at its path. No located
+				// Error lies below the Rebase, so each problem binds at the
+				// base of the Rebase.
+				input: reversed,
+				report: niceyaml.Locate(niceyaml.Rebase(niceyaml.NewSummary("2 violations",
+					errors.New("from is odd"),
+					errors.New("to is odd"),
+				), paths.Current().Child("to")),
+					niceyaml.AtPath(paths.Current().Child("from")), niceyaml.AtRange(yamltest.LineRange(0, 0, 1))),
+				want: stringtest.JoinLF(
+					"2:18: $.boxes[0].item.from: 2 violations",
+					"2:25: $.boxes[0].item.to: from is odd",
+					"2:25: $.boxes[0].item.to: to is odd",
+				),
+			},
+			"wrapped rebased summary of problems without a location at a position of the text": {
+				input: reversed,
+				report: fmt.Errorf("check: %w", niceyaml.Locate(niceyaml.Rebase(niceyaml.NewSummary("2 violations",
+					errors.New("from is odd"),
+					errors.New("to is odd"),
+				), paths.Current().Child("to")),
+					niceyaml.AtPath(paths.Current().Child("from")), niceyaml.AtRange(yamltest.LineRange(0, 0, 1)))),
+				want: stringtest.JoinLF(
+					"2:18: $.boxes[0].item.from: check: 2 violations",
+					"2:25: $.boxes[0].item.to: from is odd",
+					"2:25: $.boxes[0].item.to: to is odd",
+				),
+			},
+			"rebased summary of problems without a location below a summary at a position of the text": {
+				// The range counts the lines of the text of the value, so the
+				// location of the outer summary binds at its path. No located
+				// Error lies below the Rebase, so each problem of the inner
+				// summary binds at the base of the Rebase.
+				input: reversed,
+				report: niceyaml.Locate(niceyaml.NewSummary("2 violations",
+					errors.New("from is odd"),
+					niceyaml.Rebase(niceyaml.NewSummary("2 more",
+						errors.New("to is odd"),
+						errors.New("to is low"),
+					), paths.Current().Child("to")),
+				), niceyaml.AtPath(paths.Current().Child("from")), niceyaml.AtRange(yamltest.LineRange(0, 0, 1))),
+				want: stringtest.JoinLF(
+					"2:18: $.boxes[0].item.from: 2 violations",
+					"2:18: $.boxes[0].item.from: from is odd",
+					"2:18: $.boxes[0].item.from: 2 more",
+					"2:25: $.boxes[0].item.to: to is odd",
+					"2:25: $.boxes[0].item.to: to is low",
+				),
+			},
+			"rebased summary of problems without a location below nested summaries at a position of the text": {
+				// The inner summary has no location, so it and its own problem
+				// take the location of the outer summary. The problems of the
+				// rebased summary below it bind at the base of the Rebase.
+				input: reversed,
+				report: niceyaml.Locate(niceyaml.NewSummary("2 violations",
+					errors.New("from is odd"),
+					niceyaml.NewSummary("2 checks",
+						errors.New("from is high"),
+						niceyaml.Rebase(niceyaml.NewSummary("2 more",
+							errors.New("to is odd"),
+							errors.New("to is low"),
+						), paths.Current().Child("to")),
+					),
+				), niceyaml.AtPath(paths.Current().Child("from")), niceyaml.AtRange(yamltest.LineRange(0, 0, 1))),
+				want: stringtest.JoinLF(
+					"2:18: $.boxes[0].item.from: 2 violations",
+					"2:18: $.boxes[0].item.from: from is odd",
+					"2:18: $.boxes[0].item.from: 2 checks",
+					"2:18: $.boxes[0].item.from: from is high",
+					"2:18: $.boxes[0].item.from: 2 more",
+					"2:25: $.boxes[0].item.to: to is odd",
+					"2:25: $.boxes[0].item.to: to is low",
+				),
+			},
+			"located summary at a position of the text": {
+				// The decode of the value puts the summary below a Rebase of
+				// its own. The location of the summary replaces the range
+				// below that Rebase, on the lines of the problems too.
+				input: reversed,
+				report: niceyaml.Locate(niceyaml.NewSummary("2 violations",
+					errors.New("from is odd"),
+					errors.New("to is odd"),
+				), niceyaml.AtPath(paths.Current().Child("from")), niceyaml.AtRange(yamltest.LineRange(0, 0, 1))),
+				want: stringtest.JoinLF(
+					"2:18: $.boxes[0].item.from: 2 violations",
+					"2:18: $.boxes[0].item.from: from is odd",
+					"2:18: $.boxes[0].item.from: to is odd",
+				),
+			},
+			"detail of a problem of a rebased summary at a position of the text": {
+				// The Rebase moves the path of the detail of the problem that
+				// takes the location of the summary.
+				input: reversed,
+				report: niceyaml.Rebase(niceyaml.Invalid(niceyaml.NewSummary("2 violations",
+					niceyaml.NewError("from is odd", niceyaml.WithDetails(
+						niceyaml.NewError("to set here", niceyaml.AtPath(paths.Current())),
+					)),
+					errors.New("to is odd"),
+				), niceyaml.AtPath(paths.Current()), niceyaml.AtRange(yamltest.LineRange(0, 0, 1))),
+					paths.Current().Child("to")),
+				want: stringtest.JoinLF(
+					"2:25: $.boxes[0].item.to: 2 violations",
+					"2:25: $.boxes[0].item.to: from is odd",
+					"2:25: $.boxes[0].item.to: to is odd",
+				),
+				problemDetail: "2:25: $.boxes[0].item.to: to set here",
+			},
 			// The position counts the lines of the text of the value, so
 			// the error binds at the value in its place.
 			"position an unmarshaler built from its node": {
@@ -3452,6 +3579,21 @@ func TestCustomUnmarshaler(t *testing.T) {
 				}](context.WithValue(t.Context(), reportKey{}, tc.report), boxes)
 				require.EqualError(t, err, tc.want)
 				require.ErrorIs(t, err, niceyaml.ErrDecode)
+
+				if tc.problemDetail != "" {
+					var details []niceyaml.ErrorTree
+
+					for _, problem := range yamltest.ProblemsOf(err) {
+						for _, child := range problem.Children {
+							if child.Detail {
+								details = append(details, child)
+							}
+						}
+					}
+
+					require.Len(t, details, 1)
+					require.EqualError(t, details[0].Bound, tc.problemDetail)
+				}
 
 				if tc.detail == "" {
 					return

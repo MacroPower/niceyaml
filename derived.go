@@ -164,9 +164,7 @@ func (e *SourceError) relocate(r *relocation, path paths.Path, hasPath bool) (pa
 	// document spells it. The place can give a path to an error without
 	// one, such as a refusal of the parser at a byte that an edit wrote.
 	if place.HasPath {
-		moved := &Error{err: e.err}
-		moved.path, moved.hasPath = place.Path, true
-		e.err = moved
+		e.err = relocated(e.err, AtPath(place.Path))
 		path, hasPath = place.Path, true
 	}
 

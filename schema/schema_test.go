@@ -2220,9 +2220,11 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 			want        string
 			wantDetails []string
 		}{
+			// The violation keeps its own location for one violation, as
+			// each does for two.
 			"location above one violation": {
 				err:  niceyaml.Invalid(one, at),
-				want: "app.yaml:1:1: $.request: 0 is less than 1",
+				want: "app.yaml:2:9: $.request.port: 0 is less than 1",
 			},
 			"location above two violations": {
 				err: niceyaml.Invalid(two, at),

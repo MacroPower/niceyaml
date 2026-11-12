@@ -226,11 +226,11 @@ func (t ErrorTree) Label() string {
 // Bound. So does the node of a located [*Error] above a binding whose
 // location resolved, because the binding keeps its own location, as
 // [Locate] describes. The node of a located Error that names the path of
-// a binding whose location did not resolve holds that binding too,
-// whatever the located Errors between the two name. The line of the
-// binding shows that path already. Above any other binding, the Error
-// names a location that a source never resolved, so Bound is nil for its
-// node.
+// a binding whose location did not resolve holds that binding too. The
+// line of the binding shows that path already. A located Error between
+// the two lies nearer the binding, so its location wins instead. Above
+// any other binding, the Error names a location that a source never
+// resolved, so Bound is nil for its node.
 //
 // Until a source binds the Error, the binding below it keeps its location
 // whatever its source. The node of a located Error around an error of an
@@ -1081,13 +1081,13 @@ func wrapperMessage(err error, bound *SourceError) string {
 //
 //   - For a node with a binding, it is the [SourceError.Path] of Bound.
 //   - For a node that is not bound to a source, it is the path of the
-//     first located [*Error] along the cause chain of Err. Path puts the
-//     base of every [Rebase] on the way in front of that path. A problem
-//     that does not carry a location takes the path of the nearest
-//     heading above it that carries one, unless a [Rebase] lies between
-//     them. The Errors section of the package documentation describes a
-//     location on a heading. The label of the node puts the same path in
-//     front of the message.
+//     located [*Error] nearest the problem along the cause chain of Err,
+//     as [Locate] describes. Path puts the base of every [Rebase] on the
+//     way in front of that path. A problem that does not carry a location
+//     takes the path of the nearest heading above it that carries one,
+//     unless a [Rebase] lies between them. The Errors section of the
+//     package documentation describes a location on a heading. The label
+//     of the node puts the same path in front of the message.
 //
 // The source and the position come from Bound, which resolved them, and
 // [ErrorTree.Source] and [ErrorTree.Position] read them for any node. An
@@ -1262,10 +1262,10 @@ func (t ErrorTree) MarshalJSON() ([]byte, error) {
 // anchors the chain itself, so bindingOf returns nil for such an error.
 // An Error that names the path of that binding is the exception. The line
 // of the binding shows that path already, so bindingOf returns the
-// binding, a summary included. Other located Errors can sit between the
-// two, as when a helper and its caller both locate an error. A source
-// that binds err takes the location of the outermost Error, so the
-// location of each Error between does not show, whatever it names.
+// binding, a summary included. Other located Errors can sit above the
+// Error that anchors err, as when a helper and its caller both locate an
+// error. The anchor is the located Error nearest the binding, so the
+// location of each Error above it does not show, whatever it names.
 func bindingOf(err error) *SourceError {
 	a := anchorOf(err)
 	if bound, ok := a.err.(*SourceError); ok { //nolint:errorlint // The anchor itself, found by the walk.
@@ -1396,9 +1396,10 @@ func holdsBinding(err error) bool {
 	return false
 }
 
-// unboundRow gives row the path of the first located [*Error] on the cause
-// chain of err, as a binding does. The binding that [bindingOf] finds for
-// err names its own path, so row then stays as it is.
+// unboundRow gives row the path of the located [*Error] nearest the
+// problem on the cause chain of err, as a binding does. The binding that
+// [bindingOf] finds for err names its own path, so row then stays as it
+// is.
 func unboundRow(err error, row ErrorRow) ErrorRow {
 	if bindingOf(err) != nil {
 		return row
@@ -1785,6 +1786,28 @@ type childBase struct {
 	// problem below that does not carry a location of its own takes that
 	// location, as [childBase.inherit] gives it.
 	at *Error
+	// The joined move of every Error from Rebase above at and of at
+	// itself, which moves the location that the problems take from at.
+	atMove *move
+	// The joined move of every Error from Rebase between at and the
+	// children, or nil when the walk did not meet one. Only an at that
+	// replaces across a Rebase lies above one.
+	under *move
+	// Whether at replaces the location of each located Error below it on
+	// the chain, as [errorConfig.relocates] marks it. A [Rebase] below
+	// ends the replacement, unless crosses is set.
+	replacing bool
+	// Whether the replacement of at goes on across each Rebase below, as
+	// [errorConfig.crosses] marks it.
+	crosses bool
+	// Whether the replacement of at also replaces the base of a Rebase
+	// below, as [errorConfig.replacesBases] marks it.
+	replacesBases bool
+	// Whether the walk crossed a Rebase below at whose base at does not
+	// replace, with no located Error between that Rebase and the
+	// children. Each problem below that does not carry a location then
+	// binds at the base of the Rebase.
+	atBase bool
 	// The fault that the Errors above the children declare, as
 	// [declaration.under] passes it down.
 	fault declaration
@@ -1797,21 +1820,59 @@ type childBase struct {
 // cross returns the base below x. The base is c with the move of x after
 // its own, as [move.then] joins them. It also takes the fault that x
 // passes down, as [declaration.under] gives it. A location on x becomes
-// the location that the children below inherit. A Rebase that does not
-// carry a location points the children below it at its base, so it ends
-// what they inherit from above. The base below x stands in the error of
-// a located Error when c does.
+// the location that the children below inherit, unless an Error above x
+// replaces it. A Rebase ends the replacement, so a location on the Rebase
+// itself becomes the location that the children inherit, as [findAnchor]
+// lets it win for the line of the heading. A Rebase that does not carry a
+// location points the children below it at its base, so it ends what
+// they inherit from above. An Error with the mark of [replacing] keeps
+// its location for the children across a Rebase, as findAnchor keeps it
+// for the line of the heading. An Error with the mark of [relocating]
+// keeps it across a Rebase only when a located Error lies below that
+// Rebase. Its location replaces only the locations that it meets, so the
+// children below a Rebase without one bind at its base. The base
+// below x stands in the error of a located Error when c does.
 func (c childBase) cross(x *Error) childBase {
-	at := c.at
+	next := c
+	next.move = c.move.then(x.move)
+	next.fault = c.fault.under(x)
 
-	switch {
-	case x.hasLocation():
-		at = x
-	case x.move != nil:
-		at = nil
+	locate := func() {
+		next.at, next.atMove, next.under, next.atBase = x, next.move, nil, false
+		next.replacing, next.crosses, next.replacesBases = x.relocates, x.crosses, x.replacesBases
 	}
 
-	return childBase{move: c.move.then(x.move), at: at, fault: c.fault.under(x), inLocated: c.inLocated}
+	switch {
+	case c.crosses:
+		if x.move != nil {
+			next.under = c.under.then(x.move)
+			next.atBase = next.atBase || (!x.move.movesOnly && !x.move.repeats && !c.replacesBases)
+		}
+
+		// The location of at replaces the location of x, so the base of
+		// a Rebase above x does not reach the children.
+		if x.hasLocation() {
+			next.atBase = false
+		}
+
+	case x.move != nil:
+		next.at, next.atMove, next.under, next.atBase = nil, nil, nil, false
+		next.replacing, next.crosses, next.replacesBases = false, false, false
+
+		if x.hasLocation() {
+			locate()
+		}
+
+	case x.hasLocation() && !c.replacing:
+		locate()
+
+	case x.hasLocation():
+		// The location of at replaces the location of x, so it also
+		// replaces each location that x replaces.
+		next.crosses, next.replacesBases = x.crosses, x.replacesBases
+	}
+
+	return next
 }
 
 // rebase returns n under the base. A detail explains the error above it,
@@ -1824,21 +1885,26 @@ func (c childBase) cross(x *Error) childBase {
 // of Unchecked, so a fault presumed later does not reach it apart from
 // that Error either.
 func (c childBase) rebase(n error, detail bool) error {
-	d := c.fault
+	d, m := c.fault, c.move
 	if detail {
 		d = undeclared
 	} else {
 		n = c.inherit(n)
+
+		// The moves below at applied to n already.
+		if c.under != nil {
+			m = c.atMove
+		}
 	}
 
-	if c.move == nil {
+	if m == nil {
 		return markFault(n, d)
 	}
 
-	m := *c.move
-	m.movesOnly = m.movesOnly || detail
+	moved := *m
+	moved.movesOnly = moved.movesOnly || detail
 
-	return rebase(n, m, d)
+	return rebase(n, moved, d)
 }
 
 // markTree returns t with the declaration of the base on the error of each
@@ -1877,9 +1943,14 @@ func (c childBase) markTree(t ErrorTree) ErrorTree {
 // one and each of its branches takes the location on its own. Any other
 // heading n gives the location to each of its own problems that does not
 // carry one. A [BindValue] binding takes the location as the error it was
-// made from, as a document places it. The moves of the base apply to the
-// location as they apply to the heading, because a Rebase never lies
-// between the two.
+// made from, as a document places it. The moves of the base above the
+// heading apply to the location as they apply to the heading. Only a
+// heading with the mark of [replacing] or [relocating] lies above a Rebase
+// that lies above n. The moves of that Rebase apply to each problem of n.
+// The Error that carries the location of the heading goes above them, so
+// they do not move that location. A problem below a Rebase whose base the
+// heading does not replace binds at that base instead, as
+// [childBase.cross] describes.
 func (c childBase) inherit(n error) error {
 	if c.at == nil || isNothing(n) {
 		return n
@@ -1903,14 +1974,30 @@ func (c childBase) inherit(n error) error {
 	}
 
 	placed := placeable(n)
-	if anchorOf(placed).err != nil {
+	located := anchorOf(placed).err != nil
+
+	if c.under != nil {
+		under := *c.under
+		under.repeats = true
+		n, placed = rebase(n, under, undeclared), rebase(placed, under, undeclared)
+	}
+
+	if located || c.atBase {
 		return n
 	}
 
-	return &Error{
+	e := &Error{
 		err: placed,
 		loc: c.at.loc, path: c.at.path, data: c.at.data, hasPath: c.at.hasPath,
 	}
+
+	// The location of the heading replaces the location that the Rebase
+	// below it gives the problem, as it does for the heading.
+	if c.under != nil {
+		e.relocates, e.crosses, e.replacesBases = true, true, c.replacesBases
+	}
+
+	return e
 }
 
 // trees returns the nodes of kids in position order within the source

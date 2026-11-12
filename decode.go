@@ -3888,11 +3888,12 @@ func valueProblem(problem error) error {
 			return problem
 		}
 
-		return wrapUndeclared(problem, AtPath(at.path))
+		return relocated(problem, AtPath(at.path))
 	}
 
 	located := *x
 	located.loc = nil
+	located.relocates = true
 
 	if placed, ok := x.err.(*markedError); ok { //nolint:errorlint // The decode placed the error it built.
 		located.err = placed.without(errPlaced)
