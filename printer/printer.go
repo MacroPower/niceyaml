@@ -451,8 +451,9 @@ func annotationCol(content string, col int) int {
 // plus one cell for every column past the end of the content. The content
 // is the text of a line without its line ending.
 //
-// The width is that of the row the printer renders. In that row, a
-// control character shows as the one-cell rune that
+// The width is that of the row the printer renders. In that row, each
+// control character and each bidirectional embedding, override, or
+// isolate shows as the one-cell rune that
 // [go.jacobcolvin.com/niceyaml/escape.Control] draws for it. A grapheme
 // cluster, such as a letter with a combining mark or an emoji ZWJ
 // sequence, takes its display width once. A column inside a cluster does

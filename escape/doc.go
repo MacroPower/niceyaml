@@ -26,8 +26,21 @@
 // does each byte that is not valid UTF-8. A C1 control written as one
 // byte, such as 0x9B, is not valid UTF-8.
 //
-// Control leaves every other rune as it is. Among them are the Unicode
-// format characters, such as the right-to-left override U+202E, and the
+// A display that applies the Unicode bidirectional algorithm, such as a
+// browser that shows a CI log, reorders the runes of a row at an explicit
+// embedding, override, or isolate. A name that holds the right-to-left
+// override U+202E can thus show as another name, and the carets under an
+// excerpt can seem to point at other text. Control replaces the
+// embeddings and overrides, U+202A through U+202E, and the isolates,
+// U+2066 through U+2069, with U+FFFD too. It leaves the implicit
+// direction marks U+200E, U+200F, and U+061C, because right-to-left text
+// needs them. A mark never reorders the letters of left-to-right text, but
+// it can move the digits and punctuation next to it. A name that holds
+// U+200F can thus still show "file-1.yaml" as "file1-.yaml".
+//
+// Each replacement is one rune, so a column of the text stays where it
+// was. Control leaves every other rune as it is. Among them are the other
+// Unicode format characters, such as the zero width space U+200B, and the
 // line and paragraph separators, U+2028 and U+2029. [strconv.Quote]
 // escapes those, and Control does not.
 //

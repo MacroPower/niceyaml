@@ -176,6 +176,24 @@ const lineSeparator = '\u2028'
 // paragraphSeparator is the Unicode paragraph separator, U+2029.
 const paragraphSeparator = '\u2029'
 
+// reordersText reports whether r is an explicit bidirectional embedding
+// or override, U+202A through U+202E, or a bidirectional isolate, U+2066
+// through U+2069. A display that applies the Unicode bidirectional
+// algorithm reorders the text around each of them.
+func reordersText(r rune) bool {
+	return (r >= '\u202a' && r <= '\u202e') || (r >= '\u2066' && r <= '\u2069')
+}
+
+// escapesInName reports whether [singleQuote] writes an escape sequence,
+// such as `\n` or `\u202e`, in place of r, so that r itself does not
+// reach the output. It reports each control character, the Unicode line
+// and paragraph separators, and each rune that [reordersText] reports.
+// It does not report `'` or `\`, which singleQuote writes after a
+// backslash.
+func escapesInName(r rune) bool {
+	return unicode.IsControl(r) || r == lineSeparator || r == paragraphSeparator || reordersText(r)
+}
+
 // quoteName returns name as [Path.String] writes it in a child or
 // recursive selector. It wraps the name in single quotes when the name is
 // empty or holds a character that [forcesQuotes] reports. [Parse] reads an
@@ -187,9 +205,11 @@ const paragraphSeparator = '\u2029'
 // line feed, `\r` for a carriage return, `\t` for a tab, and `\u` with
 // four hexadecimal digits for any other control character. The Unicode
 // line and paragraph separators, U+2028 and U+2029, are not control
-// characters, but they also come back as `\u` escapes. A path thus stays
-// on one line and does not send a control character to a terminal,
-// whatever key it names.
+// characters, but they also come back as `\u` escapes. So do the
+// bidirectional embeddings, overrides, and isolates that [reordersText]
+// reports. A path thus stays on one line and does not send a control
+// character to a terminal, whatever key it names. Its text also keeps its
+// order on a display that applies the Unicode bidirectional algorithm.
 func quoteName(name string) string {
 	if name != "" && !strings.ContainsFunc(name, forcesQuotes) {
 		return name
@@ -220,7 +240,7 @@ func singleQuote(name string) string {
 			sb.WriteString(`\r`)
 		case r == '\t':
 			sb.WriteString(`\t`)
-		case unicode.IsControl(r) || r == lineSeparator || r == paragraphSeparator:
+		case escapesInName(r):
 			fmt.Fprintf(&sb, `\u%04x`, r)
 		default:
 			// The bytes go out as they are, so a name that is no valid
@@ -242,9 +262,12 @@ func singleQuote(name string) string {
 // A `:` or whitespace reads as part of the text around a path, such as the
 // ": " that follows a path in an error message. The quotes also keep a
 // space at either end of a name visible. A control character changes how
-// a terminal shows that text.
+// a terminal shows that text, and a bidirectional embedding, override,
+// or isolate changes the order in which a display shows it. Each rune
+// that [escapesInName] reports thus forces the quotes, so that
+// singleQuote can escape it.
 func forcesQuotes(r rune) bool {
-	return strings.ContainsRune(reservedNameChars, r) || r == ':' || unicode.IsSpace(r) || unicode.IsControl(r)
+	return strings.ContainsRune(reservedNameChars, r) || r == ':' || unicode.IsSpace(r) || escapesInName(r)
 }
 
 // Path is a location in a YAML document, given as a sequence of selectors
@@ -583,17 +606,21 @@ func (p Path) Equal(q Path) bool {
 // "@.name", which [Parse] reads back. It starts with `$` or `@`.
 //
 // A name comes back in single quotes, as in "$.'x: y'", when it is empty
-// or holds whitespace, a control character, or one of the characters `.`,
-// `*`, `[`, `]`, `$`, `~`, `:`, `'`, `"`, and `\`. Parse reads a name
-// without quotes only when String writes it without them. Inside the
-// quotes, a `\` comes before each `'` and each `\` of the name, as in
-// `$.'a\\b'` for the name `a\b`.
+// or holds whitespace, a control character, a bidirectional embedding,
+// override, or isolate, or one of the characters `.`, `*`, `[`, `]`,
+// `$`, `~`, `:`, `'`, `"`, and `\`. Parse reads a name without quotes only
+// when String writes it without them. Inside the quotes, a `\` comes
+// before each `'` and each `\` of the name, as in `$.'a\\b'` for the name
+// `a\b`.
 //
 // A control character in a name comes back as an escape inside the
 // quotes, as in `$.'a\nb'` for a line feed and `$.'a\u001bb'` for an
 // escape. A Unicode line or paragraph separator also comes back as an
-// escape. The expression thus stays on one line and does not send a
-// control character to a terminal that prints it.
+// escape. So does each bidirectional embedding, override, or isolate,
+// U+202A through U+202E and U+2066 through U+2069. The expression thus
+// stays on one line and does not send a control character to a terminal
+// that prints it. It also keeps its order on a display that applies the
+// Unicode bidirectional algorithm.
 func (p Path) String() string {
 	var sb strings.Builder
 

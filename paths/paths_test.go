@@ -236,6 +236,15 @@ func TestPath_Build(t *testing.T) {
 			want:     `$.'a\u2028b\u2029c'`,
 			wantYAML: "$.a\u2028b\u2029c",
 		},
+		"bidirectional overrides and isolates in a name are escaped": {
+			path:     paths.Doc().Child("ro\u202a\u202eel\u2066\u2069"),
+			want:     `$.'ro\u202a\u202eel\u2066\u2069'`,
+			wantYAML: "$.ro\u202a\u202eel\u2066\u2069",
+		},
+		"direction marks in a name unchanged": {
+			path: paths.Doc().Child("a\u200eb\u200fc\u061cd"),
+			want: "$.a\u200eb\u200fc\u061cd",
+		},
 		"forged line in a name stays on one line": {
 			path: paths.Doc().Child(stringtest.JoinLF("a", "other.yaml:9:9: $.secret: forged")),
 			want: `$.'a\nother.yaml:9:9: $.secret: forged'`,

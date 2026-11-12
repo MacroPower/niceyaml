@@ -131,9 +131,10 @@ const errorConnectorWidth = 4
 // spaces and a line feed starts a new row. It draws the name of a source,
 // each "no excerpt:" line, and the message an excerpt carries beside its
 // carets as [go.jacobcolvin.com/niceyaml/escape.Line] draws them. A C0
-// control and DEL thus show as their Unicode Control Pictures, and a C1
-// control shows as U+FFFD. An excerpt draws each control character of its
-// source lines as [go.jacobcolvin.com/niceyaml/escape.Control] draws it.
+// control and DEL thus show as their Unicode Control Pictures. A C1
+// control and a bidirectional embedding, override, or isolate show as
+// U+FFFD. An excerpt draws each control character of its source lines as
+// [go.jacobcolvin.com/niceyaml/escape.Control] draws it.
 // A printer with [WithTabWidth] draws each tab of an excerpt as spaces
 // instead, which hides a tab that the error points at. Print errors
 // through a printer that p.With(printer.WithTabWidth(0)) derives to keep

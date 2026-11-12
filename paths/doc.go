@@ -359,16 +359,16 @@
 //   - Empty quotes after `.` name the empty key. go-yaml rejects them.
 //   - An index has one spelling, so `[01]` is malformed. go-yaml reads it
 //     as `[1]`.
-//   - An unquoted name does not hold whitespace, a control character,
-//     `:`, `'`, `"`, or `\`. go-yaml reads each of them as part of an
-//     unquoted name, and it prints such a name without quotes, as in
-//     `$.my key`.
+//   - An unquoted name does not hold whitespace, a control character, a
+//     bidirectional embedding, override, or isolate, or one of `:`, `'`,
+//     `"`, and `\`. go-yaml reads each of them as part of an unquoted
+//     name, and it prints such a name without quotes, as in `$.my key`.
 //   - Inside quotes, `\n` is a line feed, `\r` is a carriage return, `\t`
 //     is a tab, and `\u` with four hexadecimal digits is the character
-//     with that code. [Path.String] writes a control character as one of
-//     these escapes. go-yaml reads the character after a `\` as itself,
-//     so `\n` is the letter n there. It prints a control character as it
-//     is.
+//     with that code. [Path.String] writes a control character or a
+//     bidirectional embedding, override, or isolate as one of these
+//     escapes. go-yaml reads the character after a `\` as itself, so `\n`
+//     is the letter n there. It prints a control character as it is.
 //
 // The string of one syntax is thus not always an expression of the other.
 // Convert a Path with [Path.YAMLPath], not with [yaml.PathString] on the

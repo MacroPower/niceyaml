@@ -8,12 +8,20 @@ import "strings"
 // delPicture is the picture for del. The C1 controls do not have
 // pictures, so replacementCharacter stands in for each of them, and for
 // each byte that is not valid UTF-8.
+//
+// The explicit bidirectional embeddings and overrides run from lre through
+// rlo, and the bidirectional isolates from lri through pdi. Neither group
+// has a picture, so replacementCharacter stands in for each of them too.
 const (
 	nul = 0x00
 	us  = 0x1F
 	pad = 0x80
 	apc = 0x9F
 	del = 0x7F
+	lre = 0x202A
+	rlo = 0x202E
+	lri = 0x2066
+	pdi = 0x2069
 
 	nulPicture           = 0x2400
 	delPicture           = 0x2421
@@ -33,6 +41,9 @@ const TabWidth = 4
 //   - DEL, U+007F, becomes its picture, U+2421.
 //   - A C1 control, U+0080 through U+009F, does not have a picture, so
 //     it becomes the replacement character, U+FFFD.
+//   - An explicit bidirectional embedding or override, U+202A through
+//     U+202E, or a bidirectional isolate, U+2066 through U+2069, becomes
+//     U+FFFD too.
 //   - A byte that is not valid UTF-8 becomes U+FFFD too.
 //
 // The escape sequence "\x1b[31m" thus becomes "␛[31m". A line feed and a
@@ -40,8 +51,16 @@ const TabWidth = 4
 // text that takes one row. [Line] draws a tab as spaces instead, and
 // [Rows] keeps each line feed.
 //
-// Control leaves every other rune as it is. Among them are the Unicode
-// format characters, such as U+202E, and the line and paragraph
+// A display that applies the Unicode bidirectional algorithm reorders the
+// runes of a row at an embedding, override, or isolate. Text that a
+// program did not write can thus make a name or a key read as another,
+// so Control replaces those runes. It leaves the implicit direction marks
+// U+200E, U+200F, and U+061C as they are, because right-to-left text
+// needs them. A mark can move the digits and punctuation next to it. It
+// never reorders the letters of left-to-right text.
+//
+// Control leaves every other rune as it is. Among them are the other
+// Unicode format characters, such as U+200B, and the line and paragraph
 // separators, U+2028 and U+2029. [strconv.Quote] escapes those runes, and
 // Control does not.
 func Control(s string) string {
@@ -55,7 +74,9 @@ func Control(s string) string {
 			sb.WriteRune(r + nulPicture)
 		case r == del:
 			sb.WriteRune(delPicture)
-		case r >= pad && r <= apc:
+		case r >= pad && r <= apc,
+			r >= lre && r <= rlo,
+			r >= lri && r <= pdi:
 			sb.WriteRune(replacementCharacter)
 		default:
 			sb.WriteRune(r)

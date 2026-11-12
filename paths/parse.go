@@ -50,16 +50,17 @@ var (
 //
 // Inside quotes, `\` escapes the next character, so `\'` is a quote and
 // `\\` is a backslash. Parse reads the escapes that [Path.String] writes
-// for a control character. The escape `\n` is a line feed, `\r` is a
-// carriage return, and `\t` is a tab. The escape `\u` with four
-// hexadecimal digits is the character with that code, such as `\u001b`
-// for the escape character. Any other character after `\` stands for
-// itself.
+// for a control character or a bidirectional embedding, override, or
+// isolate. The escape `\n` is a line feed, `\r` is a carriage return, and
+// `\t` is a tab. The escape `\u` with four hexadecimal digits is the
+// character with that code, such as `\u001b` for the escape character.
+// Any other character after `\` stands for itself.
 //
 // An unquoted name ends at the next `.`, `[`, or `~`, and it must be a
 // name that [Path.String] writes without quotes. Parse thus rejects an
-// unquoted name that holds whitespace, a control character, `:`, `'`,
-// `"`, `\`, `$`, `*`, or `]`, and the error shows the selector with the
+// unquoted name that holds whitespace, a control character, a
+// bidirectional embedding, override, or isolate, or one of `:`, `'`, `"`,
+// `\`, `$`, `*`, and `]`, and the error shows the selector with the
 // quotes. An expression with a space or a line feed at its end is
 // malformed, and so is a name in double quotes. Quotes around a name that
 // does not need them are valid, so `$.'a'` parses to the path that prints

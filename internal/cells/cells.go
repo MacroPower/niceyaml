@@ -3,8 +3,9 @@
 //
 // A rendered row shows each control character in one cell, as the rune
 // that [escape.Control] puts in its place. That rune is a picture for a C0
-// control or DEL, and U+FFFD for a C1 control. [Tabs] with a width show
-// each tab as the spaces up to the next tab stop instead.
+// control or DEL, and U+FFFD for a C1 control or a bidirectional
+// embedding, override, or isolate. [Tabs] with a width show each tab as
+// the spaces up to the next tab stop instead.
 //
 // A rendered row shows each grapheme cluster at its display width. A
 // cluster can hold several runes, as a combining mark, an emoji zero-width
@@ -219,11 +220,13 @@ func (r Row) total() int {
 }
 
 // TrimLastCluster returns s without its last grapheme cluster, the
-// character that a user sees. It splits s at the grapheme cluster boundaries of
-// the raw text. These match the boundaries that [NewRow] uses except
-// around control characters. NewRow segments each control character as
-// the rune that [escape.Control] puts in its place. A CR LF pair is thus
-// one cluster here but two in a [Row].
+// character that a user sees. It splits s at the grapheme cluster
+// boundaries of the raw text. These match the boundaries that [NewRow]
+// uses except around control characters and the bidirectional
+// embeddings, overrides, and isolates. NewRow segments each of those runes
+// as the rune that [escape.Control] puts in its place. A CR LF pair is
+// thus one cluster here but two in a [Row]. U+202E followed by a
+// combining mark is two clusters here but one in a Row.
 func TrimLastCluster(s string) string {
 	var cluster string
 

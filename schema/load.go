@@ -168,8 +168,9 @@ func (e *LoadError) Unwrap() error {
 // becomes spaces. The other C0 control characters and DEL become their
 // Unicode Control Pictures, such as "␛" for an escape. The C1 control
 // characters, U+0080 through U+009F, do not have pictures, so each
-// becomes U+FFFD, the replacement character. So does each byte that is
-// not valid UTF-8. URL and Err keep their text as written.
+// becomes U+FFFD, the replacement character. So does each bidirectional
+// embedding, override, or isolate, and each byte that is not valid
+// UTF-8. URL and Err keep their text as written.
 type FetchError struct {
 	// Err is why the read or fetch of the document failed. It matches
 	// [niceyaml.ErrLimit] for a document past the limit of

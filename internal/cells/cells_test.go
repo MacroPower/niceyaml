@@ -197,6 +197,7 @@ func TestTrimLastCluster(t *testing.T) {
 		"flag":                          {input: "x\U0001F1FA\U0001F1F8", want: "x"},
 		"zwj sequence":                  {input: "a\U0001F468\u200d\U0001F469", want: "a"},
 		"crlf":                          {input: "a\r\n", want: "a"},
+		"mark after a bidi override":    {input: "a\u202e\u0301", want: "a\u202e"},
 	}
 
 	for name, tc := range tcs {
