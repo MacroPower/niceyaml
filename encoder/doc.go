@@ -29,15 +29,16 @@
 //
 //	data, err := encoder.Marshal(ctx, nodes)
 //
-// [Marshal] and [New] take the same options. Each encoder setting that
-// this package supports has an option of its own, such as [WithIndent] or
-// [WithFlow]. The encoder rewrites parts of the go-yaml output so that the
-// YAML reads back as the value it encoded, and it takes only settings
-// whose effect on that output it knows. [Pretty] selects the layout that
-// prettier writes. That layout indents by two spaces, indents each sequence
-// below its parent key, and starts a sequence at the root of a document in
-// the first column. Options apply in order, so an option after [Pretty]
-// can change one of its settings, as in
+// [Marshal], [New], and [Encoder.Encode] take the same options. The options
+// of an Encode call apply to its document only, after those of [New]. Each
+// encoder setting that this package supports has an option of its own, such
+// as [WithIndent] or [WithFlow]. The encoder rewrites parts of the go-yaml
+// output so that the YAML reads back as the value it encoded, and it takes
+// only settings whose effect on that output it knows. [Pretty] selects the
+// layout that prettier writes. That layout indents by two spaces, indents
+// each sequence below its parent key, and starts a sequence at the root of
+// a document in the first column. Options apply in order, so an option
+// after [Pretty] can change one of its settings, as in
 // encoder.New(w, encoder.Pretty(), encoder.WithIndent(4)).
 //
 // [WithMarshalers] sets how the types of the program write YAML. A
@@ -49,7 +50,25 @@
 //
 // [WithYAMLComments] adds comments to each document by YAML path. It
 // skips a path of keys and indexes that does not select a node in a
-// document.
+// document. Documents that each have their own comments pass each map to
+// the Encode call of its document:
+//
+//	enc := encoder.New(os.Stdout, encoder.Pretty())
+//	for _, doc := range src.Documents() {
+//		var v map[string]any
+//		if err := doc.DecodeInto(ctx, &v); err != nil {
+//			return err
+//		}
+//
+//		comments, err := doc.YAMLComments(ctx)
+//		if err != nil {
+//			return err
+//		}
+//
+//		if err := enc.Encode(ctx, v, encoder.WithYAMLComments(comments)); err != nil {
+//			return err
+//		}
+//	}
 //
 // Each error names its cause with a sentinel, so a caller sorts failures
 // with [errors.Is] and does not name the error types of go-yaml. A value

@@ -2276,6 +2276,27 @@ func (c *encodableConverter) convertSlice(x []any) []any {
 //
 //	out, err := encoder.Marshal(ctx, cfg, encoder.WithYAMLComments(comments))
 //
+// Each document of a stream has its own map, keyed from its own root. An
+// [go.jacobcolvin.com/niceyaml/encoder.Encoder] that writes the stream
+// back takes each map in the Encode call of its document:
+//
+//	enc := encoder.New(w)
+//	for _, doc := range src.Documents() {
+//		var v map[string]any
+//		if err := doc.DecodeInto(ctx, &v); err != nil {
+//			return err
+//		}
+//
+//		comments, err := doc.YAMLComments(ctx)
+//		if err != nil {
+//			return err
+//		}
+//
+//		if err := enc.Encode(ctx, v, encoder.WithYAMLComments(comments)); err != nil {
+//			return err
+//		}
+//	}
+//
 // The encoder finds the value of each comment by its path in the changed
 // value. It drops the comments of a removed value, because their path
 // does not select a node. A go-yaml path does not step into a value that
