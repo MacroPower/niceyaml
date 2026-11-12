@@ -3004,7 +3004,7 @@ func TestNode_At(t *testing.T) {
 				doc := yamltest.FirstDocument(t, stringtest.LinesLF("spec: *b", "other: 1"),
 					niceyaml.WithName("test.yaml"), niceyaml.WithReferences(ref))
 
-				d, err := edit.New(doc, edit.WithApp("cafe"))
+				d, err := edit.New(doc, edit.WithAppName("cafe"))
 				require.NoError(t, err)
 
 				err = d.Apply(t.Context(), paths.Doc(), tc.fn, label)
@@ -3072,7 +3072,7 @@ func TestNode_At(t *testing.T) {
 				doc := yamltest.FirstDocument(t, tc.before,
 					niceyaml.WithName("test.yaml"), niceyaml.WithReferences(ref))
 
-				d, err := edit.New(doc, edit.WithApp("cafe"))
+				d, err := edit.New(doc, edit.WithAppName("cafe"))
 				require.NoError(t, err)
 
 				err = d.Apply(t.Context(), tc.path, func(ctx context.Context, n *edit.Node) error {
@@ -3303,7 +3303,7 @@ func TestNode_At(t *testing.T) {
 				doc := yamltest.FirstDocument(t, tc.before,
 					niceyaml.WithName("test.yaml"), niceyaml.WithReferences(refs))
 
-				d, err := edit.New(doc, edit.WithApp("cafe"))
+				d, err := edit.New(doc, edit.WithAppName("cafe"))
 				require.NoError(t, err)
 
 				err = applyAt(t, d, tc.path, func(ctx context.Context, n *edit.Node) error {

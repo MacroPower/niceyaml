@@ -705,9 +705,9 @@ func TestNew_Unsupported(t *testing.T) {
 			// Control.
 			before: stringtest.LinesLF("x:", "  ? |", "    a", "  : 1"),
 		},
-		"program that WithApp names": {
+		"program that WithAppName names": {
 			before:    "a: &x 1\nb: &x 2\n",
-			opts:      []edit.Option{edit.WithApp("cafe")},
+			opts:      []edit.Option{edit.WithAppName("cafe")},
 			construct: edit.ConstructReusedAnchor,
 			related:   []string{"$.a"},
 			err: stringtest.JoinLF(

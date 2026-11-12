@@ -221,7 +221,7 @@ type relatedSite struct {
 // refusal returns the problem of in, an instance of a construct of the
 // user's text, bound in the user's text at its site. A call that named
 // names, which reaches in, fails with the problem, which then names the
-// call. The problem names the program as [WithApp] names it, and each
+// call. The problem names the program as [WithAppName] names it, and each
 // related site comes as a detail before the fix. The details that name
 // calls come last, as [Doc.callDetails] gives them.
 func (d *Doc) refusal(in *instance, named string) error {

@@ -100,7 +100,9 @@ func newSourceDocWith(
 
 	doc := yamltest.FirstDocument(t, text, append([]niceyaml.SourceOption{niceyaml.WithName("test.yaml")}, opts...)...)
 
-	d, err := edit.New(doc, append([]edit.Option{edit.WithApp("cafe"), edit.WithProtected(typeFields...)}, eds...)...)
+	docOpts := append([]edit.Option{edit.WithAppName("cafe"), edit.WithProtected(typeFields...)}, eds...)
+
+	d, err := edit.New(doc, docOpts...)
 	require.NoError(t, err)
 
 	docSources.Store(d, doc.Source())
@@ -995,7 +997,7 @@ func TestDoc_Apply_Documents(t *testing.T) {
 
 			src := niceyaml.NewSourceFromString(tc.text, niceyaml.WithName("test.yaml"))
 
-			d, err := edit.New(src.AllDocuments()[tc.doc], edit.WithApp("cafe"))
+			d, err := edit.New(src.AllDocuments()[tc.doc], edit.WithAppName("cafe"))
 			require.NoError(t, err)
 
 			err = d.Apply(t.Context(), paths.Doc(), tc.fn)
@@ -5580,7 +5582,7 @@ func detachedSet(t *testing.T) (weak.Pointer[niceyaml.Source], error) {
 	doc := yamltest.FirstDocument(t, "a: x\n", niceyaml.WithName("test.yaml"))
 	src := doc.Source()
 
-	d, err := edit.New(doc, edit.WithApp("cafe"), edit.WithProtected(typeFields...))
+	d, err := edit.New(doc, edit.WithAppName("cafe"), edit.WithProtected(typeFields...))
 	require.NoError(t, err)
 
 	err = d.Apply(t.Context(), paths.Doc().Child("a"), func(ctx context.Context, n *edit.Node) error {

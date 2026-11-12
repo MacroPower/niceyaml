@@ -253,7 +253,7 @@ func TestNode_SetKey(t *testing.T) {
 				opts = append(opts, niceyaml.WithReferences(niceyaml.NewSourceFromString(tc.ref)))
 			}
 
-			d, err := edit.New(yamltest.FirstDocument(t, tc.before, opts...), edit.WithApp("cafe"))
+			d, err := edit.New(yamltest.FirstDocument(t, tc.before, opts...), edit.WithAppName("cafe"))
 			require.NoError(t, err)
 
 			err = applyAt(t, d, tc.path, func(_ context.Context, n *edit.Node) error {
@@ -296,7 +296,7 @@ func TestNode_SetKey_Kept(t *testing.T) {
 				opts = append(opts, niceyaml.WithReferences(niceyaml.NewSourceFromString(ref)))
 			}
 
-			d, err := edit.New(yamltest.FirstDocument(t, tc.before, opts...), edit.WithApp("cafe"))
+			d, err := edit.New(yamltest.FirstDocument(t, tc.before, opts...), edit.WithAppName("cafe"))
 			require.NoError(t, err)
 
 			path := paths.MustParse(tc.apply)
@@ -548,7 +548,7 @@ func TestNode_SetKey_Typed(t *testing.T) {
 
 			d, err := edit.New(
 				yamltest.FirstDocument(t, tc.before, niceyaml.WithName("test.yaml")),
-				append([]edit.Option{edit.WithApp("cafe")}, tc.opts...)...,
+				append([]edit.Option{edit.WithAppName("cafe")}, tc.opts...)...,
 			)
 			require.NoError(t, err)
 
