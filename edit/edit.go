@@ -368,12 +368,14 @@ func WithProtected(ps ...paths.Path) Option {
 
 // WithTypeRules is an [Option] that gives each decode of the document the
 // rules, ahead of those of its [niceyaml.Source], as though
-// [niceyaml.WithTypeRules] gave them first. [Node.Decode] applies them,
-// and so does each decode of the Node that [Doc.Node] returns. Each
-// WithTypeRules adds to the ones before it.
+// [niceyaml.WithTypeRules] gave them first. [Node.Decode] and
+// [Node.DecodeInto] apply them, and so does each decode of the Node that
+// [Doc.Node] returns. Each WithTypeRules adds to the ones before it.
 //
 // The defaults of a [niceyaml.TypeDefaults] among the rules reach each
-// such decode too. A [Func] that decodes a value, changes it, and sets it
+// such decode too. They reach the value that Decode returns and each
+// value that DecodeInto creates inside its v. The v of DecodeInto keeps
+// what it holds. A [Func] that decodes a value, changes it, and sets it
 // back then writes the defaults into the document. A program whose Funcs
 // set decoded values back keeps its defaults out of these rules.
 func WithTypeRules(rules ...niceyaml.TypeRule) Option {

@@ -220,9 +220,12 @@
 //		return n.At(paths.Doc().Child("server", "port")).Set(ctx, 8080)
 //	})
 //
-// At the root, [Node.Exists] reports false with a nil error, [Node.Kind]
-// returns [go.jacobcolvin.com/niceyaml.NodeNone], and [Node.Decode] returns the
-// zero value. The root encodes as null in the value of a Set elsewhere. A Set
+// At the root, [Node.Exists] reports false with a nil error, and [Node.Kind]
+// returns [go.jacobcolvin.com/niceyaml.NodeNone]. [Node.Decode] returns the
+// defaults of its type, and [Node.DecodeInto] leaves its value as it is. The
+// defaults of a type are its zero value when no
+// [go.jacobcolvin.com/niceyaml.TypeDefaults] rule gives it defaults. The root
+// encodes as null in the value of a Set elsewhere. A Set
 // of `$` writes the root. A Set of a path below it writes the mappings and the
 // sequences that its names and its indexes give, with the value inside them.
 // Each such sequence takes the index 0 alone, so a path with another index
@@ -720,13 +723,13 @@
 // can set each alias to the value that it reads, and the Remove then
 // passes in the same Apply.
 //
-// [Node.At], [Node.Nodes], [Node.Exists], [Node.Decode], [Node.Scalar],
-// [Node.Kind], and [Node.Len] are reads. Nodes, Exists, and Decode return
-// the problem of a read that cannot answer to the Func. Scalar, Kind, and Len
-// answer as they do for a place that does not hold a value. A Func that
-// must tell the two apart calls Exists first. The Decode of a place that
-// does not hold a value has a problem, which matches
-// [go.jacobcolvin.com/niceyaml/paths.ErrNotFound]. A read through a node of
+// [Node.At], [Node.Nodes], [Node.Exists], [Node.Decode], [Node.DecodeInto],
+// [Node.Scalar], [Node.Kind], and [Node.Len] are reads. Nodes, Exists,
+// Decode, and DecodeInto return the problem of a read that cannot answer to
+// the Func. Scalar, Kind, and Len answer as they do for a place that does
+// not hold a value. A Func that must tell the two apart calls Exists first.
+// The decode of a place that does not hold a value has a problem, which
+// matches [go.jacobcolvin.com/niceyaml/paths.ErrNotFound]. A read through a node of
 // At at a path that selects more than one value or a key has a problem, and
 // so does a Nodes of a path that selects a key. So does a read at a path
 // that a reference document decides, as the Edits section describes. A

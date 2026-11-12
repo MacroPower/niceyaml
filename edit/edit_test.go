@@ -12041,17 +12041,21 @@ func TestWithTypeRules(t *testing.T) {
 			d, err := edit.New(doc, edit.WithTypeRules(names))
 			require.NoError(t, err)
 
-			var got level
+			var got, into level
 
 			decode := func(ctx context.Context, n *edit.Node) error {
 				got, err = n.Decode[level](ctx)
+				if err != nil {
+					return err
+				}
 
-				return err
+				return n.DecodeInto(ctx, &into)
 			}
 
 			require.NoError(t, d.Apply(t.Context(), paths.Doc().Child("alarm"), decode))
 
 			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, into)
 
 			read, err := d.Node().Decode[map[string]level](t.Context())
 			require.NoError(t, err)
