@@ -3,6 +3,7 @@ package edit_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -27,6 +28,35 @@ func BenchmarkDoc_Apply_Queue(b *testing.B) {
 				b.StopTimer()
 
 				d, err := edit.New(yamltest.FirstDocument(b, text))
+				require.NoError(b, err)
+
+				b.StartTimer()
+
+				require.NoError(b, d.Apply(b.Context(), path, func(ctx context.Context, n *edit.Node) error {
+					return n.Set(ctx, 3)
+				}))
+			}
+		})
+	}
+}
+
+func BenchmarkDoc_Apply_Queue_Scalars(b *testing.B) {
+	// Each Apply sets each item of a sequence of small scalars. Each Set
+	// that waits costs about the same whatever the number of Sets before
+	// it. So the time of the Apply grows about linearly with the number of
+	// items.
+	path := paths.MustParse("$.s[*]")
+
+	for _, n := range []int{4000, 16000, 32000} {
+		text := "s:\n" + strings.Repeat("  - 1\n", n)
+
+		b.Run(fmt.Sprintf("items_%d", n), func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				b.StopTimer()
+
+				d, err := edit.New(yamltest.FirstDocument(b, text, yamltest.NoSizeLimits()...))
 				require.NoError(b, err)
 
 				b.StartTimer()

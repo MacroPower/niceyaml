@@ -949,7 +949,7 @@ func (d *Doc) writeString(ctx context.Context, h *Node, x heldString, origin int
 
 	at.value, at.end = x.lit, d.ownEnd(x)
 
-	step := d.docStep(nil)
+	step := d.docStep()
 	if path, ok := d.node.PathAt(positionIn(d.cur, d.curLines, x.header.start)); ok {
 		step = d.stepOf(nil, path)
 	}
@@ -1086,7 +1086,7 @@ func (d *Doc) stepOf(from *place, path paths.Path) int {
 		cur = parent
 	}
 
-	return d.docStep(nil)
+	return d.docStep()
 }
 
 // entryStep returns the distance from the key of the entry at path, as
@@ -1122,13 +1122,18 @@ func (d *Doc) entryStep(from *place, path paths.Path) (int, bool) {
 
 // docStep returns the step of the first block mapping in the document that
 // is the value of an entry, or two spaces when the document does not have
-// one. It leaves out skip and the nodes inside it, the entry or the value
-// that an edit takes out of the document, or nil.
-func (d *Doc) docStep(skip ast.Node) int {
+// one. It reads the step on its first call for the parse, so each later
+// call costs the same whatever the size of the text.
+func (d *Doc) docStep() int {
+	t := d.parseIndex()
+	if t.step > 0 {
+		return t.step
+	}
+
 	step := 0
 
 	d.inspect(func(n ast.Node) bool {
-		if step > 0 || skip != nil && n == skip {
+		if step > 0 {
 			return false
 		}
 
@@ -1154,11 +1159,9 @@ func (d *Doc) docStep(skip ast.Node) int {
 		return true
 	})
 
-	if step == 0 {
-		return defaultStep
-	}
+	t.step = cmp.Or(step, defaultStep)
 
-	return step
+	return t.step
 }
 
 // sequenceIndent reports whether a block sequence that an edit creates

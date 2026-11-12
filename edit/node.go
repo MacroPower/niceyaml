@@ -1923,7 +1923,7 @@ type reached struct {
 func (d *Doc) reached(s *spot) *reached {
 	r := &reached{nodes: make(map[*Node]int)}
 
-	for _, n := range d.nodes {
+	for _, n := range d.mightReach(s) {
 		if n.gone {
 			continue
 		}

@@ -381,9 +381,13 @@ type parseIndex struct {
 	// The mappings whose names a merge of a reference document decides, or
 	// nil before [Doc.referenceNames] reads them.
 	refNames map[ast.Node]*ast.MappingValueNode
+	// The entries of each mapping that [Doc.holdsEntry] read.
+	entrySets map[*ast.MappingNode]map[*ast.MappingValueNode]bool
 	// The comment origins that [Doc.commentOrigins] read, with the slice of
 	// origins that it read them for.
 	commented originMemo[int]
+	// The indent step of the document, or 0 before [Doc.docStep] reads it.
+	step int
 }
 
 // originMemo is what a check read from a parse for one slice of the

@@ -562,11 +562,41 @@ func (d *Doc) childOf(finder *paths.EntryFinder, content ast.Node, name string) 
 		return child{}, err
 	}
 
-	if slices.Contains(entries, entry) {
+	if d.holdsEntry(content, entries, entry) {
 		return child{entry: entry}, nil
 	}
 
 	return child{entry: entry, merged: d.tree().parent[entry]}, nil
+}
+
+// holdsEntry reports whether entry is one of entries, the entries of the
+// mapping content, as [readEntries] reads them. It reads the entries of a
+// mapping node into a set on its first call for the mapping and the parse,
+// so a path through each key of a large mapping costs time linear in the
+// number of keys.
+func (d *Doc) holdsEntry(content ast.Node, entries []*ast.MappingValueNode, entry *ast.MappingValueNode) bool {
+	mapping, ok := content.(*ast.MappingNode)
+	if !ok || d.node == nil {
+		return slices.Contains(entries, entry)
+	}
+
+	t := d.parseIndex()
+
+	set, ok := t.entrySets[mapping]
+	if !ok {
+		if t.entrySets == nil {
+			t.entrySets = make(map[*ast.MappingNode]map[*ast.MappingValueNode]bool)
+		}
+
+		set = make(map[*ast.MappingValueNode]bool, len(entries))
+		for _, e := range entries {
+			set[e] = true
+		}
+
+		t.entrySets[mapping] = set
+	}
+
+	return set[entry]
 }
 
 // referenceRead returns the problem of a path through the key of entry,

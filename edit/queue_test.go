@@ -482,6 +482,23 @@ func TestDoc_Apply_Queue(t *testing.T) {
 			},
 			err: "$.a",
 		},
+		"set and then a node below the scalar from before the set": {
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   "$.*",
+			fn: func(*edit.Doc) edit.Func {
+				return func(ctx context.Context, n *edit.Node) error {
+					below := n.At(paths.Current().Child("c"))
+
+					err := n.Set(ctx, "x")
+					if err != nil {
+						return err
+					}
+
+					return below.Set(ctx, 1)
+				}
+			},
+			err: "lost its place",
+		},
 		"set and then an error of the func": {
 			before: stringtest.LinesLF("a: 1", "b: 2"),
 			path:   "$.*",
@@ -569,6 +586,166 @@ func TestDoc_Apply_Queue_Deadline(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, strings.ReplaceAll(before, "replicas: 1", "replicas: 3"), d.Text())
+}
+
+func TestDoc_Apply_Queue_Scalars(t *testing.T) {
+	t.Parallel()
+
+	// Each row sets each of 20,000 small scalars in one Apply. Each Set
+	// that waits costs about the same whatever the number of Sets before
+	// it. So the Apply takes a few times as long as an Apply of the Set of
+	// one scalar, which parses and checks the text as well. A Set whose
+	// cost grows with the number of the Sets that wait makes the Apply
+	// take dozens of times as long. The slower of two single Sets sets
+	// the bound, so that a load on the machine in one of them does not
+	// shrink it.
+	tcs := map[string]struct {
+		before string
+		path   string
+		one    string
+		want   string
+		bound  int
+	}{
+		"items of a sequence": {
+			before: "s:\n" + strings.Repeat("  - 1\n", 20000),
+			path:   "$.s[*]",
+			one:    "$.s[0]",
+			want:   "s:\n" + strings.Repeat("  - 3\n", 20000),
+			bound:  20,
+		},
+		"keys of a mapping": {
+			// Go-yaml's parser takes time that grows faster than the size of
+			// a mapping of many keys. So a parse costs most of the time of
+			// the Set of one scalar, and the bound is lower.
+			before: strings.ReplaceAll(keys(20000), " # count", ""),
+			path:   "$.*",
+			one:    "$.k0",
+			want:   strings.ReplaceAll(strings.ReplaceAll(keys(20000), " # count", ""), ": 1\n", ": 3\n"),
+			bound:  8,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			one := paths.MustParse(tc.one)
+			unit := max(setTime(t, tc.before, one, false), setTime(t, tc.before, one, false))
+			d := newDoc(t, tc.before)
+
+			start := time.Now()
+			err := d.Apply(t.Context(), paths.MustParse(tc.path), func(ctx context.Context, n *edit.Node) error {
+				return n.Set(ctx, 3)
+			})
+			elapsed := time.Since(start)
+
+			require.NoError(t, err)
+			assert.Less(t, elapsed, time.Duration(tc.bound)*unit)
+			assert.Equal(t, tc.want, d.Text())
+		})
+	}
+}
+
+func TestDoc_Apply_Queue_Reads(t *testing.T) {
+	t.Parallel()
+
+	// The Func reads each item of a sequence of 20,000 small scalars
+	// before it sets the item. Each read checks the bytes of the Sets that
+	// wait, and a read of an item that no Set wrote keeps the queue. The
+	// check costs about the same whatever the number of Sets that wait. So
+	// the reads of the last 2,000 items take about as long as the reads of
+	// the first 2,000 items, before most of the Sets joined the queue. A
+	// check that compares the bytes of the read with those of each Set
+	// that waits makes the last reads take many times as long.
+	const (
+		items  = 20000
+		window = 2000
+		reads  = 4
+	)
+
+	before := "s:\n" + strings.Repeat("  - 1\n", items)
+	d := newDoc(t, before)
+
+	var first, last time.Duration
+
+	i := 0
+	err := d.Apply(t.Context(), paths.MustParse("$.s[*]"), func(ctx context.Context, n *edit.Node) error {
+		start := time.Now()
+
+		for range reads {
+			ok, err := n.Exists()
+			if err != nil {
+				return err
+			}
+
+			if !ok {
+				return fmt.Errorf("%s holds no value", n.Path())
+			}
+		}
+
+		elapsed := time.Since(start)
+
+		switch {
+		case i < window:
+			first += elapsed
+		case i >= items-window:
+			last += elapsed
+		}
+
+		i++
+
+		return n.Set(ctx, 3)
+	})
+
+	require.NoError(t, err)
+	assert.Less(t, last, 3*first)
+	assert.Equal(t, "s:\n"+strings.Repeat("  - 3\n", items), d.Text())
+}
+
+func TestDoc_Apply_Queue_FailedSets(t *testing.T) {
+	t.Parallel()
+
+	// For each of 2,000 small scalars, the Func sets the protected kind of
+	// the document and ignores the error. Each such Set fails before it
+	// joins the queue, so it leaves no queue behind it. A Set that fails
+	// costs the same whatever the size of the text. So the Apply takes
+	// about as long on a text with a long string after the scalars as on
+	// the text without it. A Set that fails but still takes memory that
+	// grows with the text makes the Apply on the longer text take about
+	// five times as long. The slower of two Applies on the shorter text
+	// sets the bound, so that a load on the machine in one of them does
+	// not shrink it.
+	const items = 2000
+
+	short := "kind: Cafe\ns:\n" + strings.Repeat("  - 1\n", items)
+	long := short + "pad: " + strings.Repeat("x", 200<<10) + "\n"
+	kind := paths.Doc().Child("kind")
+
+	failTime := func(text string) time.Duration {
+		d := newDoc(t, text)
+		fails := 0
+		start := time.Now()
+
+		err := d.Apply(t.Context(), paths.MustParse("$.s[*]"), func(ctx context.Context, n *edit.Node) error {
+			if n.At(kind).Set(ctx, "x") != nil {
+				fails++
+			}
+
+			return nil
+		})
+		elapsed := time.Since(start)
+
+		require.NoError(t, err)
+		assert.Equal(t, items, fails)
+		assert.Equal(t, text, d.Text())
+
+		return elapsed
+	}
+
+	unit := max(failTime(short), failTime(short))
+	elapsed := failTime(long)
+
+	assert.Less(t, elapsed, 3*unit)
 }
 
 func TestDoc_Apply_Queue_ContextEnded(t *testing.T) {

@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -3471,6 +3474,67 @@ func ExampleNode_Own() {
 	//   build: {<<: *defaults}
 	//   test: {<<: *defaults}
 	//   lint: {timeout: 5000}
+}
+
+func TestNode_At_LargeMapping(t *testing.T) {
+	t.Parallel()
+
+	// The lookup of a key costs about the same whatever the number of keys
+	// of its mapping. So 16,000 lookups of keys spread across a mapping of
+	// 16,000 keys take about as long as the same number of lookups in a
+	// mapping of 1,000 keys. A lookup that compares the key that it finds
+	// with each key of the mapping makes the larger mapping take many
+	// times as long. Each loop runs three times, and the fastest run
+	// counts, so that a load on the machine in one run does not set the
+	// result. The check that each lookup found its key runs after the
+	// timed loops.
+	lookups := func(t *testing.T, size int) time.Duration {
+		t.Helper()
+
+		const count = 16000
+
+		ps := make([]paths.Path, count)
+		for i := range ps {
+			ps[i] = paths.Doc().Child(fmt.Sprintf("k%d", size-1-i*size/count))
+		}
+
+		d := newDoc(t, strings.ReplaceAll(keys(size), " # count", ""))
+		fastest := time.Duration(math.MaxInt64)
+		found := make([]*edit.Node, count)
+
+		err := d.Apply(t.Context(), paths.MustParse("$.k0"), func(_ context.Context, n *edit.Node) error {
+			for range 3 {
+				start := time.Now()
+
+				for i, p := range ps {
+					found[i] = n.At(p)
+				}
+
+				fastest = min(fastest, time.Since(start))
+			}
+
+			for _, at := range found {
+				ok, err := at.Exists()
+				if err != nil {
+					return err
+				}
+
+				if !ok {
+					return fmt.Errorf("%s holds no value", at.Path())
+				}
+			}
+
+			return nil
+		})
+		require.NoError(t, err)
+
+		return fastest
+	}
+
+	small := lookups(t, 1000)
+	large := lookups(t, 16000)
+
+	assert.Less(t, large, 3*small)
 }
 
 func TestNode_Len(t *testing.T) {

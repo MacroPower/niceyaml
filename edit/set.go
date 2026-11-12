@@ -852,7 +852,7 @@ func (d *Doc) setFirst(ctx context.Context, h *Node, p *place, v any, cfg setCon
 		fd = flowDepth(len(sels))
 	}
 
-	step := d.docStep(nil)
+	step := d.docStep()
 	origin := d.addNote(d.createdNote(p, named))
 
 	pl, err := d.renderPayload(ctx, h, wrapped, fd, step, origin, nil, d.cfg.marshalers)

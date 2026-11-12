@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/goccy/go-yaml/ast"
@@ -33,10 +34,31 @@ type queue struct {
 	// which stays the current text until [Doc.flush] makes them.
 	edits []edit
 	sets  []queuedSet
+	// The bytes that the Sets of the queue read and write, as [spans]
+	// counts them.
+	touched spans
+	// The nodes of the Apply, as [queue.mightReach] reads them.
+	reach nodeIndex
 	// The text that the first Set of the queue found.
 	start state
 	// Whether the check of the queue changed the model.
 	modeled bool
+}
+
+// nodeIndex holds the nodes of the Apply by the paths that reach their
+// places. No call that changes the path of a node runs while the queue
+// holds a Set, because each such call flushes the queue first. So the
+// index holds the nodes by the paths that they hold.
+type nodeIndex struct {
+	// The nodes whose paths start with each path, by the text of that
+	// path, as [paths.Path.String] writes it. A node without a hidden
+	// entry is a node of each path from the root to its own.
+	below map[string][]*Node
+	// The nodes that held a hidden entry when the index took them, whose
+	// paths read through that entry, as [Doc.reach] reads them.
+	hidden []*Node
+	// The number of the nodes of the Apply that the index holds.
+	taken int
 }
 
 // queuedSet is one Set of a [queue].
@@ -65,13 +87,97 @@ var errQueueModel = errors.New("the text of the queued edits differs from the mo
 // touches reports whether s overlaps the bytes that a Set of q reads or
 // writes.
 func (q *queue) touches(s span) bool {
-	for _, set := range q.sets {
-		if s.start < set.touched.end && set.touched.start < s.end {
-			return true
+	return q.touched.overlaps(s)
+}
+
+// mightReach returns the nodes of the Apply that might reach the place of
+// s, a spot that only its own path reaches, as [Doc.reach] tells. Those are
+// the nodes whose paths start with the path of s, and each node that reads
+// through a hidden entry. It first takes the nodes of the Apply that the
+// index does not hold yet.
+func (q *queue) mightReach(d *Doc, s *spot) []*Node {
+	x := &q.reach
+	if x.below == nil {
+		x.below = make(map[string][]*Node)
+	}
+
+	for ; x.taken < len(d.nodes); x.taken++ {
+		n := d.nodes[x.taken]
+		if len(n.hidden) > 0 {
+			x.hidden = append(x.hidden, n)
+
+			continue
+		}
+
+		key := n.path.Prefix(0).String()
+		x.below[key] = append(x.below[key], n)
+
+		for sel := range n.path.Selectors() {
+			key += sel.String()
+			x.below[key] = append(x.below[key], n)
 		}
 	}
 
-	return false
+	return slices.Concat(x.below[s.path.String()], x.hidden)
+}
+
+// mightReach returns the nodes of the Apply that might reach the place of
+// s, as [Doc.reached] reads them. A Set of the queue reaches a place that
+// only its own path reaches, so the index of the queue gives the nodes, as
+// [queue.mightReach] does. Otherwise they are all the nodes of the Apply.
+func (d *Doc) mightReach(s *spot) []*Node {
+	if d.queueing && d.queue != nil && !s.shared {
+		return d.queue.mightReach(d, s)
+	}
+
+	return d.nodes
+}
+
+// spans counts the starts and the ends of a set of spans of a text, so
+// [spans.overlaps] reads in time logarithmic in the size of the text. Each
+// count is a Fenwick tree over the offsets of the text.
+type spans struct {
+	starts, ends []int32
+}
+
+// newSpans creates new [spans] for a text of size bytes.
+func newSpans(size int) spans {
+	return spans{starts: make([]int32, size+2), ends: make([]int32, size+2)}
+}
+
+// add adds s to the set.
+func (t *spans) add(s span) {
+	fenwickAdd(t.starts, s.start)
+	fenwickAdd(t.ends, s.end)
+}
+
+// overlaps reports whether s overlaps a span of the set. A span of the set
+// overlaps s when it starts before the end of s and ends after its start.
+// Each span that ends at or before the start of s also starts before its
+// end, so the spans that overlap s are those that start before its end
+// less those that end at or before its start.
+func (t *spans) overlaps(s span) bool {
+	return fenwickSum(t.starts, s.end-1) > fenwickSum(t.ends, s.start)
+}
+
+// fenwickAdd counts one more at the offset off of the Fenwick tree f. An
+// offset past the last of the tree counts at the last.
+func fenwickAdd(f []int32, off int) {
+	for i := min(max(off, 0), len(f)-2) + 1; i < len(f); i += i & -i {
+		f[i]++
+	}
+}
+
+// fenwickSum returns the count of the Fenwick tree f at the offsets from 0
+// to off, inclusive, or 0 for a negative offset.
+func fenwickSum(f []int32, off int) int32 {
+	var sum int32
+
+	for i := min(off, len(f)-2) + 1; i > 0; i -= i & -i {
+		sum += f[i]
+	}
+
+	return sum
 }
 
 // queues reports whether a Set of v through n, with opts, waits in the
@@ -218,7 +324,15 @@ func (d *Doc) queueSet(ctx context.Context, n *Node, v any, s span) error {
 		set.touched.start, set.touched.end = min(set.touched.start, e.start), max(set.touched.end, e.end)
 	}
 
+	// The counts of the bytes take memory that grows with the text. So the
+	// queue makes them for its first Set that succeeds, and a Set that
+	// fails costs nothing that grows with the text.
+	if len(q.sets) == 0 {
+		q.touched = newSpans(len(d.cur))
+	}
+
 	q.sets = append(q.sets, set)
+	q.touched.add(set.touched)
 
 	// A Set that writes the bytes that it replaces leaves the text, so
 	// its bytes keep their origins, as [Doc.keepOrigins] keeps them. When

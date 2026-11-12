@@ -1024,7 +1024,10 @@ func headerEnd(src *niceyaml.Source, line int) int {
 // marshaler of [WithMarshalers]. The edit of the Set waits until a later
 // call edits the text or a read reaches a value that a waiting Set writes.
 // An error of fn and the return of the last call end the wait too, and so
-// do [Doc.Text] and the other methods of the Doc.
+// do [Doc.Text] and the other methods of the Doc. The time of each Set
+// that waits does not grow with the number of Sets that wait before it.
+// So the time of an Apply that sets each of many such scalars grows about
+// linearly with the size of the text and the number of Sets.
 //
 // When the check of the waiting Sets fails, they run again one at a time
 // until one of them fails. So the problem names the Set that failed the
