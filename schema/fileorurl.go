@@ -155,10 +155,11 @@ func fileOrURL(baseDir, ref string, physical bool) (Ref, error) {
 // resolves each ".." element as text, as a URI reference does, so a
 // reference never makes the registry check the disk for symbolic links.
 // A document without a file path does not have such a directory, and a
-// relative path then reports [ErrNoBaseDir]. Each error of RefBeside
-// comes inside [niceyaml.Unchecked], because the check could not find a
-// schema to run. [niceyaml.IsInvalid] does not report it, even from a
-// check that returns it as it is.
+// relative path then reports [ErrNoBaseDir]. A nil doc reads as such a
+// document, so an absolute path or a URL still names its file on disk or
+// its URL. Each error of RefBeside comes inside [niceyaml.Unchecked],
+// because the check could not find a schema to run. [niceyaml.IsInvalid]
+// does not report it, even from a check that returns it as it is.
 //
 // A document with a relative file path and without a file system does
 // not have such a directory either. A relative reference beside it

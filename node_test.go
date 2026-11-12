@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -2054,6 +2055,93 @@ func TestNode_Text_Nil(t *testing.T) {
 	var node *niceyaml.Node
 
 	assert.Empty(t, node.Text())
+}
+
+func TestNode_Nil(t *testing.T) {
+	t.Parallel()
+
+	t.Run("readers return zero values", func(t *testing.T) {
+		t.Parallel()
+
+		var n *niceyaml.Node
+
+		assert.Nil(t, n.AST())
+		assert.Nil(t, n.DocumentAST())
+		assert.Nil(t, n.Source())
+		assert.Nil(t, n.FS())
+		assert.Empty(t, n.FilePath())
+		assert.Nil(t, n.Tokens())
+		assert.Nil(t, n.Preamble())
+		assert.Equal(t, position.Span{}, n.Span())
+		assert.True(t, n.Path().Equal(paths.Path{}))
+		assert.Zero(t, n.View().Count())
+		require.NoError(t, n.Bind(nil))
+		require.NoError(t, n.Bind((*niceyaml.Error)(nil)))
+	})
+
+	t.Run("the Node of an error without a location", func(t *testing.T) {
+		t.Parallel()
+
+		src := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("f.yaml"))
+
+		bindings := slices.Collect(niceyaml.Bindings(src.Bind(niceyaml.NewError("bad"))))
+		require.Len(t, bindings, 1)
+
+		for _, bound := range bindings {
+			n, ok := bound.Node()
+			require.False(t, ok)
+
+			assert.Equal(t, niceyaml.NodeNone, n.Kind())
+			assert.Empty(t, n.FilePath())
+			assert.True(t, n.Path().Equal(paths.Path{}))
+			assert.Empty(t, n.Source().Name())
+			assert.Zero(t, n.View().Count())
+		}
+	})
+
+	t.Run("methods that need the document panic", func(t *testing.T) {
+		t.Parallel()
+
+		var n *niceyaml.Node
+
+		tcs := map[string]struct {
+			call func(t *testing.T)
+		}{
+			"At": {call: func(t *testing.T) {
+				t.Helper()
+
+				_, err := n.At(paths.Doc())
+				assert.NoError(t, err)
+			}},
+			"Nodes": {call: func(t *testing.T) {
+				t.Helper()
+
+				_, err := n.Nodes(paths.Doc())
+				assert.NoError(t, err)
+			}},
+			"Ranges": {call: func(t *testing.T) {
+				t.Helper()
+
+				_, err := n.Ranges(paths.Doc())
+				assert.NoError(t, err)
+			}},
+			"DocumentIndex": {call: func(*testing.T) {
+				n.DocumentIndex()
+			}},
+			"DocumentResolver": {call: func(*testing.T) {
+				n.DocumentResolver()
+			}},
+			"Bind": {call: func(t *testing.T) {
+				t.Helper()
+
+				assert.NoError(t, n.Bind(niceyaml.NewError("bad")))
+			}},
+		}
+
+		for name, tc := range tcs {
+			assert.Panics(t, func() { tc.call(t) }, name)
+		}
+	})
 }
 
 func TestNode_Scalar(t *testing.T) {
