@@ -2536,11 +2536,13 @@ type ErrorExcerpt struct {
 
 // NewErrorReport creates a new [ErrorReport] from err. Each excerpt keeps
 // the context lines, the width, and the marks on one line that the options
-// set, as [ExcerptOption] describes. An excerpt of a detached binding keeps
-// those of the options [Detach] received instead. [WithProblemLimit] cuts
-// the tree to its first problems, and the report then ignores the bindings
-// of the rest, so it shows what the tree shows. The limit holds for the
-// detached bindings too. A nil err yields the zero ErrorReport.
+// set, as [ExcerptOption] describes. An excerpt of a detached binding
+// takes each one that the options do not set from the options [Detach]
+// received. It shows at most the context lines that Detach kept.
+// [WithProblemLimit] cuts the tree to its first problems, and the report
+// then ignores the bindings of the rest, so it shows what the tree shows.
+// The limit holds for the detached bindings too. A nil err yields the zero
+// ErrorReport.
 func NewErrorReport(err error, opts ...ExcerptOption) ErrorReport {
 	if err == nil {
 		return ErrorReport{}

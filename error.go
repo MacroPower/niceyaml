@@ -1983,20 +1983,23 @@ type boundChild struct {
 
 // DefaultContextLines is the number of context lines the %+v verb of an
 // [*Error] or a [*SourceError] shows on either side of each marked line.
-// A binding that [Detach] detached shows the context lines of the options
-// Detach received instead.
+// [Detach] keeps that many by default. A binding that Detach detached
+// shows the context lines of the options Detach received in place of the
+// default, and at most those.
 const DefaultContextLines = 2
 
 // DefaultExcerptWidth is the number of columns an error excerpt shows
 // around each location it marks on a line longer than that.
-// [WithExcerptWidth] sets another width for the excerpt, or for the call of
-// [Detach] that detached its binding.
+// [WithExcerptWidth] sets another width for the excerpt. Given to [Detach],
+// it sets the width that a detached binding renders at in place of the
+// default.
 const DefaultExcerptWidth = 160
 
 // DefaultExcerptMarks is the number of problems an error excerpt marks on
 // one line. A line that holds more gets a row that counts the rest.
-// [WithExcerptMarks] sets another number for the excerpt, or for the call
-// of [Detach] that detached its binding.
+// [WithExcerptMarks] sets another number for the excerpt. Given to
+// [Detach], it sets the number that a detached binding renders with in
+// place of the default.
 const DefaultExcerptMarks = ErrorListLimit
 
 // ExcerptOption configures the excerpts of an error, which [FormatError],
@@ -2006,8 +2009,10 @@ const DefaultExcerptMarks = ErrorListLimit
 // how much of a long line it shows. They also say how many problems it
 // marks on one line. The renderer of an error chooses all of them. One
 // program can thus render the same error with whole lines in a terminal
-// and with bounded rows in a log. Detach chooses them in place of the
-// renderer, as [Detach] describes.
+// and with bounded rows in a log. Given to Detach, the options set what a
+// detached error renders with when the renderer does not set them. The
+// context lines that Detach keeps also bound those that any renderer
+// shows, as [Detach] describes.
 //
 // [WithProblemLimit] cuts the whole report instead, the tree and the
 // excerpts together. [FormatError] and [NewErrorReport] apply it.
@@ -2039,6 +2044,10 @@ type excerptConfig struct {
 	// The problems a report keeps, where 0 and [NoLimit] keep every
 	// problem.
 	problems int
+	// Whether an option set context, width, or marks. A detached binding
+	// renders with the options of [Detach] in place of those that no
+	// option set.
+	contextSet, widthSet, marksSet bool
 }
 
 // defaultExcerptConfig returns the settings an excerpt has when no
@@ -2073,6 +2082,7 @@ func newExcerptConfig(opts []ExcerptOption) excerptConfig {
 func WithContextLines(n int) ExcerptOption {
 	return func(c *excerptConfig) {
 		c.context = max(0, n)
+		c.contextSet = true
 	}
 }
 
@@ -2100,6 +2110,7 @@ func WithContextLines(n int) ExcerptOption {
 func WithExcerptWidth(cols int) ExcerptOption {
 	return func(c *excerptConfig) {
 		c.width = max(0, cols)
+		c.widthSet = true
 	}
 }
 
@@ -2137,6 +2148,7 @@ func WithExcerptWidth(cols int) ExcerptOption {
 func WithExcerptMarks(n int) ExcerptOption {
 	return func(c *excerptConfig) {
 		c.marks = max(0, n)
+		c.marksSet = true
 	}
 }
 
@@ -4817,8 +4829,9 @@ func (e *SourceError) LogValue() slog.Value {
 // does not get an excerpt, as [ErrorReport.Tree] describes. The context
 // lines, the width of long lines, and the number of problems an excerpt
 // marks on one line come from opts, as [ExcerptOption] describes. An
-// excerpt of a binding that [Detach] detached keeps those of the options
-// Detach received instead.
+// excerpt of a binding that [Detach] detached takes each one that opts
+// does not set from the options Detach received. It shows at most the
+// context lines that Detach kept.
 //
 // A line starting "no excerpt:" follows the excerpts for each binding
 // [Bindings] yields whose tree does not resolve any location, with the
@@ -5199,8 +5212,9 @@ func Annotate(err error, view *line.View) bool {
 // location fails to resolve in the source.
 //
 // A binding that [Detach] detached builds its excerpt from the lines it
-// kept, with the context lines, the width, and the marks of the options
-// Detach received, whatever opts holds. The view holds those lines alone, so
+// kept. It takes the context lines, the width, and the marks that opts
+// does not set from the options Detach received. It shows at most the
+// context lines that Detach kept. The view holds those lines alone, so
 // its indices differ from those of [Source.Lines]. Each line keeps its
 // number in the file.
 func (e *SourceError) Excerpt(opts ...ExcerptOption) (*line.View, bool) {

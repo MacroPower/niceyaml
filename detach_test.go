@@ -71,23 +71,29 @@ func (*lookupValue) UnmarshalYAML(func(any) error) error {
 }
 
 // requireDetaches detaches err with opts and requires the result to read
-// and render as err does with opts. It renders the result with other
-// options too, which change nothing for it. It returns the result.
+// and render as err does with opts. It renders the result with options of
+// its own too. Those hold as they do for err, but the context lines stay
+// within those that opts set. It returns the result.
 func requireDetaches(t *testing.T, err error, opts ...niceyaml.ExcerptOption) error {
 	t.Helper()
 
 	detached := niceyaml.Detach(err, opts...)
 	require.Error(t, detached)
 
-	other := []niceyaml.ExcerptOption{
-		niceyaml.WithContextLines(7),
+	// More context lines than Detach kept show those it kept.
+	more := []niceyaml.ExcerptOption{niceyaml.WithContextLines(7)}
+	less := []niceyaml.ExcerptOption{
+		niceyaml.WithContextLines(0),
 		niceyaml.WithExcerptWidth(3),
 		niceyaml.WithExcerptMarks(1),
 	}
+	lessLive := append(slices.Clone(opts), less...)
 
 	require.EqualError(t, detached, err.Error())
+	assert.Equal(t, niceyaml.FormatError(err, opts...), niceyaml.FormatError(detached))
 	assert.Equal(t, niceyaml.FormatError(err, opts...), niceyaml.FormatError(detached, opts...))
-	assert.Equal(t, niceyaml.FormatError(err, opts...), niceyaml.FormatError(detached, other...))
+	assert.Equal(t, niceyaml.FormatError(err, opts...), niceyaml.FormatError(detached, more...))
+	assert.Equal(t, niceyaml.FormatError(err, lessLive...), niceyaml.FormatError(detached, less...))
 	assert.Equal(t, detachedRows(err), detachedRows(detached))
 	assert.Equal(t, niceyaml.IsInvalid(err), niceyaml.IsInvalid(detached))
 	assert.Equal(t, niceyaml.HasErrors(err), niceyaml.HasErrors(detached))
@@ -95,7 +101,8 @@ func requireDetaches(t *testing.T, err error, opts ...niceyaml.ExcerptOption) er
 	// The styles of the XML printer name the kind of each token, and the
 	// default printer draws the gutter and the colors.
 	for _, p := range []*printer.Printer{yamltest.NewXMLPrinter(), printer.New(printer.WithWrapWidth(60))} {
-		assert.Equal(t, p.PrintError(err, opts...), p.PrintError(detached, other...))
+		assert.Equal(t, p.PrintError(err, opts...), p.PrintError(detached, more...))
+		assert.Equal(t, p.PrintError(err, lessLive...), p.PrintError(detached, less...))
 	}
 
 	live := slices.Collect(niceyaml.Bindings(err))
@@ -107,7 +114,8 @@ func requireDetaches(t *testing.T, err error, opts ...niceyaml.ExcerptOption) er
 
 		// A binding renders alone as it did in err, whatever the other
 		// bindings of err mark on its lines.
-		assert.Equal(t, niceyaml.FormatError(live[i], opts...), niceyaml.FormatError(bound, other...))
+		assert.Equal(t, niceyaml.FormatError(live[i], opts...), niceyaml.FormatError(bound, more...))
+		assert.Equal(t, niceyaml.FormatError(live[i], lessLive...), niceyaml.FormatError(bound, less...))
 
 		// The %+v verb renders at the default options, so it matches err
 		// when opts set none.
@@ -1576,7 +1584,8 @@ func TestDetach_Excerpt(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, want, live.String())
 
-	// The options of Detach hold, whatever options the excerpt gets.
+	// The options of Detach hold when the excerpt does not set the context
+	// lines, and they bound the context lines it sets.
 	for _, opts := range [][]niceyaml.ExcerptOption{nil, {niceyaml.WithContextLines(3)}} {
 		view, ok := detached.Excerpt(opts...)
 		require.True(t, ok)
@@ -1584,8 +1593,20 @@ func TestDetach_Excerpt(t *testing.T) {
 		assert.Equal(t, []int{1, 2, 6, 7}, yamltest.LineNumbers(view))
 	}
 
+	// Fewer context lines than Detach kept hold as they do for err.
+	view, ok := detached.Excerpt(niceyaml.WithContextLines(0))
+	require.True(t, ok)
+	assert.Equal(t, stringtest.JoinLF(
+		"   1 | a: 1",
+		"     |    ^ see a",
+		"     | ...",
+		"   7 | g: 7",
+		"     |    ^",
+	), view.String())
+	assert.Equal(t, []int{1, 7}, yamltest.LineNumbers(view))
+
 	// The lines of the excerpt belong to no view of the source.
-	view := source.View()
+	view = source.View()
 	assert.False(t, niceyaml.Annotate(detached, view))
 	assert.False(t, detached.Annotate(view))
 
@@ -1593,6 +1614,104 @@ func TestDetach_Excerpt(t *testing.T) {
 	require.Len(t, rep.Excerpts, 1)
 	assert.Nil(t, rep.Excerpts[0].Source)
 	assert.Equal(t, "letters.yaml", rep.Excerpts[0].Name)
+}
+
+func TestDetach_RendererOptions(t *testing.T) {
+	t.Parallel()
+
+	doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+		"a: 1", "b: 2", "c: 3", "long: "+strings.Repeat("x", 314), "e: 5", "f: 6", "g: 7",
+	), niceyaml.WithName("cfg.yaml"))
+	long := doc.Bind(niceyaml.NewError("too long", niceyaml.AtPath(paths.Doc().Child("long"))))
+
+	// Every item of one line fails, so the marks of that line pass any
+	// small limit.
+	flowDoc := yamltest.FirstDocument(t, "tags: [a, b, c, d, e, f, g, h, i, j, k, l]\nnote: x\n")
+
+	tagErrs := make([]error, 0, 12)
+	for i := range 12 {
+		tagErrs = append(tagErrs, niceyaml.NewError("bad tag", niceyaml.AtPath(paths.Doc().Child("tags").Index(i))))
+	}
+
+	manyOnOneLine := flowDoc.Bind(niceyaml.NewSummary("12 violations", tagErrs...))
+
+	tcs := map[string]struct {
+		err    error
+		detach []niceyaml.ExcerptOption
+		render []niceyaml.ExcerptOption
+		// The options that render err as the detached error renders.
+		want []niceyaml.ExcerptOption
+	}{
+		"no options": {err: long},
+		"options of Detach": {
+			err:    long,
+			detach: []niceyaml.ExcerptOption{niceyaml.WithContextLines(1), niceyaml.WithExcerptWidth(0)},
+			want:   []niceyaml.ExcerptOption{niceyaml.WithContextLines(1), niceyaml.WithExcerptWidth(0)},
+		},
+		"options of the renderer": {
+			err:    long,
+			render: []niceyaml.ExcerptOption{niceyaml.WithContextLines(0), niceyaml.WithExcerptWidth(0)},
+			want:   []niceyaml.ExcerptOption{niceyaml.WithContextLines(0), niceyaml.WithExcerptWidth(0)},
+		},
+		"width of the renderer past a whole line": {
+			err:    long,
+			detach: []niceyaml.ExcerptOption{niceyaml.WithExcerptWidth(0)},
+			render: []niceyaml.ExcerptOption{niceyaml.WithExcerptWidth(40)},
+			want:   []niceyaml.ExcerptOption{niceyaml.WithExcerptWidth(40)},
+		},
+		"default width from the renderer": {
+			err:    long,
+			detach: []niceyaml.ExcerptOption{niceyaml.WithExcerptWidth(0)},
+			render: []niceyaml.ExcerptOption{niceyaml.WithExcerptWidth(niceyaml.DefaultExcerptWidth)},
+		},
+		"context lines of the renderer past those kept": {
+			err:    long,
+			detach: []niceyaml.ExcerptOption{niceyaml.WithContextLines(1)},
+			render: []niceyaml.ExcerptOption{niceyaml.WithContextLines(5)},
+			want:   []niceyaml.ExcerptOption{niceyaml.WithContextLines(1)},
+		},
+		"default context lines from the renderer": {
+			err:    long,
+			detach: []niceyaml.ExcerptOption{niceyaml.WithContextLines(0)},
+			render: []niceyaml.ExcerptOption{niceyaml.WithContextLines(niceyaml.DefaultContextLines)},
+			want:   []niceyaml.ExcerptOption{niceyaml.WithContextLines(0)},
+		},
+		"marks of Detach": {
+			err:    manyOnOneLine,
+			detach: []niceyaml.ExcerptOption{niceyaml.WithExcerptMarks(2)},
+			want:   []niceyaml.ExcerptOption{niceyaml.WithExcerptMarks(2)},
+		},
+		"every mark from the renderer past the marks of Detach": {
+			err:    manyOnOneLine,
+			detach: []niceyaml.ExcerptOption{niceyaml.WithExcerptMarks(2)},
+			render: []niceyaml.ExcerptOption{niceyaml.WithExcerptMarks(0)},
+			want:   []niceyaml.ExcerptOption{niceyaml.WithExcerptMarks(0)},
+		},
+		"default marks from the renderer": {
+			err:    manyOnOneLine,
+			detach: []niceyaml.ExcerptOption{niceyaml.WithExcerptMarks(1)},
+			render: []niceyaml.ExcerptOption{niceyaml.WithExcerptMarks(niceyaml.DefaultExcerptMarks)},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			detached := niceyaml.Detach(tc.err, tc.detach...)
+
+			assert.Equal(t, niceyaml.FormatError(tc.err, tc.want...), niceyaml.FormatError(detached, tc.render...))
+			assert.Equal(t,
+				printer.New().PrintError(tc.err, tc.want...),
+				printer.New().PrintError(detached, tc.render...),
+			)
+
+			// The %+v verb takes no option, so it renders as Detach set it,
+			// with the problem limit that the verb applies.
+			plusV := append([]niceyaml.ExcerptOption{niceyaml.WithProblemLimit(niceyaml.ErrorListLimit)}, tc.detach...)
+			assert.Equal(t, niceyaml.FormatError(tc.err, plusV...), fmt.Sprintf("%+v", detached))
+		})
+	}
 }
 
 func TestDetach_ExcerptsOff(t *testing.T) {
