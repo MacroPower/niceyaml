@@ -104,7 +104,9 @@ var (
 	// describes. The methods fail so with:
 	//
 	//   - a path of [Node.At] that selects more than one value or holds a
-	//     `~`, at each method that edits or decodes
+	//     `~`, at each method that edits or decodes and at a [Node.Nodes] of
+	//     an `@` path
+	//   - a path of [Node.Nodes] that holds a `~`
 	//   - a Set of the root of a document that holds a value
 	//   - a SetKey, a Move, or a Remove of the root
 	//   - a SetKey of an item of a sequence
@@ -166,25 +168,27 @@ var (
 	// ErrNested indicates an Apply that a [Func] of the same Doc calls. The
 	// nested Apply fails with the error and calls its Func zero times. The
 	// outer Apply fails with the error only when its Func returns it, and
-	// the error then binds at the node of that call.
+	// the error then binds at the node of that call. A Func selects the
+	// places of another path with [Node.Nodes] instead.
 	ErrNested = errors.New("Apply runs inside another Apply of the Doc")
 
 	// ErrEnded indicates an edit or a decode through a [Node] after the
-	// Apply that gave the node returned. [Node.Exists] returns the error
-	// then, and so does each method of the node that edits or decodes. The
-	// error binds nowhere, and [go.jacobcolvin.com/niceyaml.IsInvalid]
-	// reports false for it.
+	// Apply that gave the node returned. [Node.Exists] and [Node.Nodes]
+	// return the error then, and so does each method of the node that edits
+	// or decodes. The error binds nowhere, and
+	// [go.jacobcolvin.com/niceyaml.IsInvalid] reports false for it.
 	ErrEnded = errors.New("the Apply that gave the node has returned")
 
 	// ErrDisplaced indicates a call through a [Node] that lost its place to
 	// an earlier edit of the Apply, as [Node] describes. The edit removed
 	// the place, or it made the path of the node read another value.
-	// [Node.Exists] returns the error then, and so does each method of the
-	// node that edits or decodes. [Doc.Apply] does not call its Func for a
-	// place of its path that an earlier call took this way. A [Func] that
-	// loops over the nodes it kept can thus skip each node whose Exists
-	// returns the error. The error binds as [Node] describes, and
-	// [go.jacobcolvin.com/niceyaml.IsInvalid] reports true for it.
+	// [Node.Exists] returns the error then, and so does a [Node.Nodes] of an
+	// `@` path. So does each method of the node that edits or decodes.
+	// [Doc.Apply] does not call its Func for a place of its path that an
+	// earlier call took this way. A [Func] that loops over the nodes it kept
+	// can thus skip each node whose Exists returns the error. The error
+	// binds as [Node] describes, and [go.jacobcolvin.com/niceyaml.IsInvalid]
+	// reports true for it.
 	ErrDisplaced = errors.New("the node lost its place to an earlier edit")
 
 	// The problem of a call of New with a nil Node or a Node below the root.
@@ -881,9 +885,20 @@ func headerEnd(src *niceyaml.Source, line int) int {
 // Each entry and each item of the text is a place of its own, even when
 // its value is an alias, so each takes a call. A path that reaches one
 // entry or one item through an alias or a `<<` merge key reaches the same
-// text, so all such paths take one call. To create a value, apply at a
-// place that exists, such as `$`, and call [Node.Set] on the node that
-// [Node.At] returns.
+// text, so all such paths take one call.
+//
+// An Apply at a path that the document lacks thus calls fn zero times, and
+// a Set inside fn creates nothing. To set a value whether or not the
+// document holds it, apply at `$` and call [Node.Set] on the node that
+// [Node.At] returns. That Set creates the value and the mappings above it:
+//
+//	err := d.Apply(ctx, paths.Doc(), func(ctx context.Context, root *edit.Node) error {
+//		return root.At(paths.MustParse("$.image.tag")).Set(ctx, "v2")
+//	})
+//
+// A Func edits the places of other paths through [Node.Nodes], which
+// selects the places that Apply selects. All the edits of one Apply then
+// pass or fail together.
 //
 // The one call for each place covers the places that path selects. It does
 // not cover the nodes that [Node.At] returns. Those nodes can reach the

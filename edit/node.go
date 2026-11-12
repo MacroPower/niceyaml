@@ -23,11 +23,11 @@ import (
 // follows the value to the target.
 //
 // A node can lose its place to an earlier edit of the Apply. Each later
-// edit and each Decode and Exists through such a node then returns a
-// problem that matches [ErrDisplaced]. Kind, Len, and Text answer as they
-// do for a place that does not hold a value. They do so even when a later
-// edit writes that place again. A new node from [Node.At] reads and edits
-// the place.
+// edit, each Decode, each Exists, and each Nodes of an `@` path through
+// such a node then returns a problem that matches [ErrDisplaced]. Kind,
+// Len, and Text answer as they do for a place that does not hold a value.
+// They do so even when a later edit writes that place again. A new node
+// from [Node.At] reads and edits the place.
 //
 // A node loses its place when an edit removes the place, either directly or
 // by replacing a value above it. The edit can reach the place through another
@@ -51,10 +51,10 @@ import (
 // Through any other node, a read returns what the text holds. A call after
 // which the text differs from the model of the Apply fails with an error
 // that matches [ErrEngine], as the package documentation describes. Each
-// later edit, each Decode, and each Exists of the Apply then returns that
-// error. Kind, Len, and Text then answer as they do for a place that does
-// not hold a value. The Apply fails with that error whatever the Func
-// returns.
+// later edit, each Decode, each Exists, and each Nodes of the Apply then
+// returns that error. Kind, Len, and Text then answer as they do for a
+// place that does not hold a value. The Apply fails with that error
+// whatever the Func returns.
 //
 // The place of a node holds the value that the model of the Apply holds
 // there, as the package documentation describes. A node whose place did
@@ -65,15 +65,17 @@ import (
 // error too. [Doc.Apply] fails with such an error only when the [Func]
 // returns it or when the error matches [ErrEngine]. A node takes edits
 // until the Apply that gave it returns. After that, each method that edits
-// or decodes returns [ErrEnded], and so does [Node.Exists]. Kind, Len, and
-// Text then answer as they do for a place that does not hold a value.
+// or decodes returns [ErrEnded], and so do [Node.Exists] and [Node.Nodes].
+// Kind, Len, and Text then answer as they do for a place that does not
+// hold a value.
 //
 // The methods that run code of the caller take a context. Set and Insert
 // run marshalers, and Decode runs unmarshalers, so each takes one. SetKey,
 // Move, and Remove do not run code of the caller, so they do not take a
 // context. [Doc.Apply] checks its context between calls of the [Func].
 //
-// Receive instances as the argument of a [Func], or from [Node.At].
+// Receive instances as the argument of a [Func], or from [Node.At] or
+// [Node.Nodes].
 type Node struct {
 	d *Doc
 	// The problem of the path that At took, which each method that edits or
@@ -150,15 +152,15 @@ func (d *Doc) entryOfPlace(content ast.Node, at position.Position) *ast.MappingV
 	return nil
 }
 
-// selection collects the places that the path of an Apply selects, as
-// [Doc.matches] gives them.
+// selection collects the places that the path of an Apply or of
+// [Node.Nodes] selects, as [Doc.matches] gives them.
 type selection struct {
 	// The entries before each entry of a mapping that a later entry of
 	// their key hides, by the mapping, as [Doc.hiddenIn] gives them.
 	hidden map[ast.Node]map[*ast.MappingValueNode][]*ast.MappingValueNode
 	seen   map[any]bool
 	found  []selected
-	// The path of the Apply.
+	// The `$` path of the selection, which problems name.
 	path paths.Path
 }
 
@@ -192,13 +194,27 @@ func (d *Doc) matches(path paths.Path) ([]*Node, error) {
 		return nil, nil
 	}
 
+	return d.selectNodes(path, nil, paths.Doc(), nil, path)
+}
+
+// selectNodes returns a node on each place that rel selects from the value
+// from at base, a place that hidden reads, in document order, as
+// [Doc.selectFrom] selects them. Problems name path, the `$` path of the
+// selection.
+func (d *Doc) selectNodes(
+	path paths.Path,
+	from ast.Node,
+	base paths.Path,
+	hidden []hiddenEntry,
+	rel paths.Path,
+) ([]*Node, error) {
 	s := &selection{
 		path:   path,
 		seen:   make(map[any]bool),
 		hidden: make(map[ast.Node]map[*ast.MappingValueNode][]*ast.MappingValueNode),
 	}
 
-	err := d.selectFrom(s, nil, paths.Doc(), nil, path)
+	err := d.selectFrom(s, from, base, hidden, rel)
 	if err != nil {
 		return nil, err
 	}
@@ -1545,6 +1561,114 @@ func (n *Node) At(path paths.Path) *Node {
 	}
 
 	return at
+}
+
+// Nodes returns a node on each place that path selects in the current
+// text, in document order. A `$` path reads from the root, and an `@` path
+// reads from n, as [Node.At] reads them. The path can select more than one
+// value, as `.*`, `[*]`, and `..name` do. A [Func] can thus edit the places
+// of several such paths in one Apply. Nodes returns no node when path
+// selects no place, so a Func can report a path that matched nothing.
+//
+// Nodes selects the places that [Doc.Apply] selects for path. In one call,
+// each entry and each item takes one node, however many aliases or `<<`
+// merge keys reach it. Nodes leaves out each place that holds no value,
+// and each place that is a protected value of [WithProtected] or lies
+// inside one. The root of an empty document is the one place without a
+// value that a path selects, as Apply describes. An `@` path from a node
+// on an entry that a later entry of its key hides reads below that entry,
+// as Apply describes.
+//
+// The nodes of different calls of Nodes, and the nodes that Node.At
+// returns below them, can reach one entry or one item through an alias or
+// a `<<` merge key. A Func that sets a value from the value that it reads
+// then edits that place twice. [Node.Own] returns the same path for each
+// such node, so a Func can skip the nodes whose place it already edited.
+//
+// Each node follows the edits of the Apply, as [Node] describes. A Func can
+// thus remove the items of a sequence one by one through the nodes. Unlike
+// the calls of Apply, the nodes do not skip a place that an earlier edit
+// took away. Each edit, each Decode, and each Exists through such a node
+// returns a problem that matches [ErrDisplaced]. A removal of each place
+// that `$..name` selects can take a later place away with the value that
+// holds it. A Func that makes such edits skips each node whose Exists
+// returns an error that matches ErrDisplaced, and returns any other error:
+//
+//	for _, n := range nodes {
+//		_, err := n.Exists()
+//		if errors.Is(err, edit.ErrDisplaced) {
+//			continue
+//		}
+//		if err != nil {
+//			return err
+//		}
+//
+//		err = n.Remove()
+//		if err != nil {
+//			return err
+//		}
+//	}
+//
+// The guard that [Node.Exists] shows for the Func of one place returns the
+// error of the first such node instead, and so fails the Apply. An error
+// that the Func returns without a location binds at the node of the Func,
+// not at a node that Nodes gave.
+//
+// Nodes is a read, so the Apply fails with its error only when the Func
+// returns it, or when the error matches [ErrEngine]. Nodes returns an
+// error that matches [ErrUsage] for a path that holds a `~`. A path whose
+// matches read through an alias that the text does not resolve fails as
+// the path of Apply fails. After the Apply that gave n returns, Nodes
+// returns [ErrEnded].
+//
+// After a call of the Apply fails with an error that matches ErrEngine,
+// Nodes returns that error for each path, also for a path that holds a
+// `~`. Before that, an `@` path returns the problems that [Node.Exists]
+// returns for n, such as the problem of a node that lost its place. A `$`
+// path does not read the place of n, so it does not return them.
+func (n *Node) Nodes(path paths.Path) ([]*Node, error) {
+	if n.ended {
+		return nil, ErrEnded
+	}
+
+	full := path
+	if !path.IsAbsolute() {
+		full = n.path.Join(path)
+	}
+
+	outer := n.d.runningCall()
+	n.d.startCall("reads "+full.String(), nil)
+
+	defer n.d.resumeCall(outer)
+
+	if n.d.stuck != nil {
+		return nil, n.d.stuck
+	}
+
+	if holdsKey(path) {
+		return nil, n.d.failAs(ErrUsage, n, "%s reads %s, which %w", n.d.subject(), full, errKeyPath)
+	}
+
+	if path.IsAbsolute() {
+		return n.d.matches(path)
+	}
+
+	p, err := n.place(useRead, "reads")
+	if err != nil {
+		return nil, err
+	}
+
+	// A node below no hidden entry reads the place that its path selects,
+	// so the path from the root selects what path selects from n.
+	if n.hidden == nil {
+		return n.d.matches(full)
+	}
+
+	if !p.exists {
+		return nil, nil
+	}
+
+	return n.d.selectNodes(full, p.value, n.path, n.hidden, path)
 }
 
 // bind binds err, an error that a [Func] returned, in the user's text. An
