@@ -19,11 +19,14 @@ import (
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/escape"
+	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/aliaslimit"
 	"go.jacobcolvin.com/niceyaml/internal/datapath"
+	"go.jacobcolvin.com/niceyaml/internal/docparse"
 	"go.jacobcolvin.com/niceyaml/internal/excerpt"
 	"go.jacobcolvin.com/niceyaml/internal/fault"
 	"go.jacobcolvin.com/niceyaml/internal/multierr"
+	"go.jacobcolvin.com/niceyaml/internal/quantity"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -306,10 +309,12 @@ var (
 	// Limits section of the package documentation describes the bounds.
 	//
 	// Errors that match ErrLimit name a limit that the caller sets as a size,
-	// and a larger limit lets the same text pass. The alias limit of
-	// [WithAliasLimit] does not have a size, so an error of that limit alone
-	// matches [ErrExcessiveAliasing] and not ErrLimit. Programs that refuse
-	// both kinds, such as servers that answer 413, test for both sentinels.
+	// and a larger limit lets the same text pass. Each holds a [*LimitError],
+	// whose Kind names the setting and whose Max holds its value. The alias
+	// limit of [WithAliasLimit] does not have a size, so an error of that
+	// limit alone matches [ErrExcessiveAliasing] and not ErrLimit. Programs
+	// that refuse both kinds, such as servers that answer 413, test for both
+	// sentinels.
 	//
 	// The error of a schema past its load limit, as
 	// [go.jacobcolvin.com/niceyaml/schema.WithLoadLimit] describes, matches
@@ -5396,6 +5401,97 @@ func (e *PanicError) Unwrap() error {
 	}
 
 	return nil
+}
+
+// LimitKind names the setting that a [LimitError] reports.
+type LimitKind int
+
+const (
+	// LimitBytes names the byte limit of a Source, as [WithByteLimit] sets
+	// it.
+	LimitBytes LimitKind = iota + 1
+	// LimitDocumentBytes names the document byte limit of a Source, as
+	// [WithDocumentByteLimit] sets it. The text that the aliases of a
+	// document repeat passes the bound of this limit.
+	LimitDocumentBytes
+	// LimitDepth names the depth limit of a Source, as [WithDepthLimit]
+	// sets it. The levels that the aliases of a document nest pass the
+	// bound of this limit.
+	LimitDepth
+	// LimitLoad names the load limit of a schema or a schema catalog, as
+	// [go.jacobcolvin.com/niceyaml/schema.WithLoadLimit] and
+	// [go.jacobcolvin.com/niceyaml/schema/schemastore.WithLoadLimit] set
+	// it. It also names the fixed bound of
+	// [go.jacobcolvin.com/niceyaml/schema.DefaultLoadLimit] that
+	// [go.jacobcolvin.com/niceyaml/schema.Compile] puts on YAML text. No
+	// option raises that bound. A program that compiles larger YAML loads
+	// it through a registry with a larger load limit instead.
+	LimitLoad
+)
+
+// LimitError is the error of a text past a limit that the caller sets as a
+// size. It matches [ErrLimit], and every error that matches ErrLimit holds
+// one. Kind names the setting, so a program can tell which limit to raise:
+//
+//	if le, ok := errors.AsType[*niceyaml.LimitError](err); ok && le.Kind == niceyaml.LimitDepth {
+//		return fmt.Errorf("%w (raise --depth-limit above %d)", err, le.Max)
+//	}
+//
+// Each limit binds as ErrLimit describes. The error of a Source limit
+// comes inside a [SourceError]. The error of a load limit comes inside a
+// [go.jacobcolvin.com/niceyaml/schema.FetchError] or the error of a schema
+// read. The error of YAML text that a compile refuses for its size, from
+// [go.jacobcolvin.com/niceyaml/schema.Compile] or from a registry, comes
+// inside an error that matches
+// [go.jacobcolvin.com/niceyaml/schema.ErrCompile]. An error that joins
+// several problems, such as the error of [Source.ValidateDocuments], can
+// hold several LimitErrors, and [errors.As] finds the first of them.
+type LimitError struct {
+	// Kind names the setting that the text passes.
+	Kind LimitKind
+	// Max is the value of the setting, in bytes or in levels. For an error
+	// of the aliases of a document, the text of the document passes the
+	// setting only with each alias written out. Max is then the setting,
+	// not the size of that text, which the check weighs as the Limits
+	// section of the package documentation describes.
+	Max int
+	// Aliases reports that the aliases of the document, written out in
+	// full, take the text past the bound of the setting. The error then
+	// matches [ErrExcessiveAliasing] too. The text of the document itself
+	// stays within the setting.
+	Aliases bool
+}
+
+// Error returns the message of e, such as "file is larger than 256 KiB",
+// "document nests more than 100 levels", or "aliases repeat more than 256
+// KiB of text".
+func (e *LimitError) Error() string {
+	switch e.Kind {
+	case LimitBytes:
+		return "file is larger than " + quantity.Bytes(e.Max)
+	case LimitDocumentBytes:
+		if e.Aliases {
+			return (&aliasing.ExpansionError{Limit: e.Max}).Error()
+		}
+
+		return (&docparse.SizeError{Limit: e.Max}).Error()
+
+	case LimitDepth:
+		if e.Aliases {
+			return (&aliasing.ExpansionError{Limit: e.Max, Depth: true}).Error()
+		}
+
+		return (&docparse.DepthError{Limit: e.Max}).Error()
+
+	default:
+		return "text is larger than " + quantity.Bytes(e.Max)
+	}
+}
+
+// Is reports whether target is [ErrLimit], or [ErrExcessiveAliasing] for
+// an e whose Aliases field is true.
+func (e *LimitError) Is(target error) bool {
+	return target == ErrLimit || e.Aliases && target == ErrExcessiveAliasing
 }
 
 // panicked returns p sealed with marks on top. The message starts with in,

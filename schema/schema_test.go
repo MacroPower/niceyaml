@@ -519,6 +519,8 @@ func TestCompile_Document(t *testing.T) {
 	tcs := map[string]struct {
 		// Wrapped by the compile error, if any.
 		err error
+		// The limit error that the compile error holds, if any.
+		limit *niceyaml.LimitError
 		// The schema document, in JSON or YAML.
 		schema string
 		// Text the compile error holds, or empty for a schema that
@@ -629,6 +631,7 @@ func TestCompile_Document(t *testing.T) {
 			schema: "required: [name]\n" + strings.Repeat("#", schema.DefaultLoadLimit),
 			want:   "compile schema: YAML decode: text is larger than 10 MiB",
 			err:    niceyaml.ErrLimit,
+			limit:  &niceyaml.LimitError{Kind: niceyaml.LimitLoad, Max: schema.DefaultLoadLimit},
 		},
 		"JSON past the load limit": {
 			schema:  `{"required": ["name"]}` + strings.Repeat(" ", schema.DefaultLoadLimit),
@@ -735,6 +738,14 @@ func TestCompile_Document(t *testing.T) {
 
 				if tc.err != nil {
 					require.ErrorIs(t, err, tc.err)
+				}
+
+				le, ok := errors.AsType[*niceyaml.LimitError](err)
+				if tc.limit != nil {
+					require.True(t, ok)
+					assert.Equal(t, *tc.limit, *le)
+				} else {
+					assert.False(t, ok, "LimitError in %v", err)
 				}
 
 				// The text of the schema is at fault, and no document is.

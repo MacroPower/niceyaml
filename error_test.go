@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"math"
 	"net"
+	"net/netip"
 	"runtime"
 	"slices"
 	"strconv"
@@ -15226,6 +15227,177 @@ func TestPanicError_Validators(t *testing.T) {
 			require.PanicsWithValue(t, errRegistry, func() {
 				_ = tc.decode(t.Context(), doc) //nolint:errcheck // The call panics before it returns.
 			})
+		})
+	}
+}
+
+func TestLimitError(t *testing.T) {
+	t.Parallel()
+
+	// The anchor holds about 500 bytes, and its aliases repeat it ten
+	// times. The [netip.Addr] field reads text, so a decode checks the
+	// text that the aliases repeat.
+	repeated := "a: &a [" + strings.Repeat(strings.Repeat("x", 48)+", ", 10) + "]\n" +
+		"b: [" + strings.Repeat("*a, ", 10) + "]\n"
+
+	type textTarget struct {
+		Addr netip.Addr `yaml:"addr"`
+		A    []string   `yaml:"a"`
+		B    [][]string `yaml:"b"`
+	}
+
+	type nestTarget struct {
+		Addr netip.Addr `yaml:"addr"`
+		A    [][]int    `yaml:"a"`
+		B    [][][]int  `yaml:"b"`
+	}
+
+	tcs := map[string]struct {
+		run  func(t *testing.T) error
+		want niceyaml.LimitError
+	}{
+		"reader past the byte limit": {
+			run: func(t *testing.T) error {
+				t.Helper()
+
+				_, err := niceyaml.NewSourceFromReader(strings.NewReader("a: 12345\n"), niceyaml.WithByteLimit(4))
+
+				return err
+			},
+			want: niceyaml.LimitError{Kind: niceyaml.LimitBytes, Max: 4},
+		},
+		"text past the byte limit": {
+			run: func(t *testing.T) error {
+				t.Helper()
+
+				_, err := niceyaml.NewSourceFromString("a: 12345\n", niceyaml.WithByteLimit(4)).Document()
+
+				return err
+			},
+			want: niceyaml.LimitError{Kind: niceyaml.LimitBytes, Max: 4},
+		},
+		"document past the document byte limit": {
+			run: func(t *testing.T) error {
+				t.Helper()
+
+				_, err := niceyaml.NewSourceFromString("a: 12345\n", niceyaml.WithDocumentByteLimit(4)).Document()
+
+				return err
+			},
+			want: niceyaml.LimitError{Kind: niceyaml.LimitDocumentBytes, Max: 4},
+		},
+		"document past the depth limit": {
+			run: func(t *testing.T) error {
+				t.Helper()
+
+				_, err := niceyaml.NewSourceFromString("a: [[1]]\n", niceyaml.WithDepthLimit(2)).Document()
+
+				return err
+			},
+			want: niceyaml.LimitError{Kind: niceyaml.LimitDepth, Max: 2},
+		},
+		"aliases past the document byte limit": {
+			run: func(t *testing.T) error {
+				t.Helper()
+
+				doc := yamltest.FirstDocument(t, repeated, niceyaml.WithDocumentByteLimit(1024))
+
+				return doc.DecodeInto(t.Context(), new(textTarget))
+			},
+			want: niceyaml.LimitError{Kind: niceyaml.LimitDocumentBytes, Max: 1024, Aliases: true},
+		},
+		"aliases past the depth limit": {
+			run: func(t *testing.T) error {
+				t.Helper()
+
+				doc := yamltest.FirstDocument(t, "a: &a [[1]]\nb: [*a]\n", niceyaml.WithDepthLimit(3))
+
+				return doc.DecodeInto(t.Context(), new(nestTarget))
+			},
+			want: niceyaml.LimitError{Kind: niceyaml.LimitDepth, Max: 3, Aliases: true},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tc.run(t)
+			require.ErrorIs(t, err, niceyaml.ErrLimit)
+
+			limit, ok := errors.AsType[*niceyaml.LimitError](err)
+			require.True(t, ok)
+			assert.Equal(t, tc.want, *limit)
+			assert.Equal(t, tc.want.Aliases, errors.Is(err, niceyaml.ErrExcessiveAliasing))
+		})
+	}
+}
+
+func TestLimitError_Error(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		err  niceyaml.LimitError
+		want string
+	}{
+		"bytes": {
+			err:  niceyaml.LimitError{Kind: niceyaml.LimitBytes, Max: 256 << 10},
+			want: "file is larger than 256 KiB",
+		},
+		"document bytes": {
+			err:  niceyaml.LimitError{Kind: niceyaml.LimitDocumentBytes, Max: 256 << 10},
+			want: "document is larger than 256 KiB",
+		},
+		"document bytes of aliases": {
+			err:  niceyaml.LimitError{Kind: niceyaml.LimitDocumentBytes, Max: 256 << 10, Aliases: true},
+			want: "aliases repeat more than 256 KiB of text",
+		},
+		"depth": {
+			err:  niceyaml.LimitError{Kind: niceyaml.LimitDepth, Max: 100},
+			want: "document nests more than 100 levels",
+		},
+		"depth of aliases": {
+			err:  niceyaml.LimitError{Kind: niceyaml.LimitDepth, Max: 100, Aliases: true},
+			want: "aliases nest the document more than 100 levels",
+		},
+		"load": {
+			err:  niceyaml.LimitError{Kind: niceyaml.LimitLoad, Max: 10 << 20},
+			want: "text is larger than 10 MiB",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.err.Error())
+		})
+	}
+}
+
+func TestLimitError_Is(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		err       niceyaml.LimitError
+		excessive bool
+	}{
+		"text": {
+			err: niceyaml.LimitError{Kind: niceyaml.LimitDepth, Max: 100},
+		},
+		"aliases": {
+			err:       niceyaml.LimitError{Kind: niceyaml.LimitDepth, Max: 100, Aliases: true},
+			excessive: true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			require.ErrorIs(t, &tc.err, niceyaml.ErrLimit)
+			assert.Equal(t, tc.excessive, errors.Is(&tc.err, niceyaml.ErrExcessiveAliasing))
+			require.NotErrorIs(t, &tc.err, niceyaml.ErrSyntax)
 		})
 	}
 }

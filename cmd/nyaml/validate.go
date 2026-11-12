@@ -308,9 +308,10 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry, ex
 
 	source, err := niceyaml.NewSourceFromFile(yamlPath, opts...)
 
-	// The read checks the byte limit alone, so a limit error here names
-	// the flag that raises it. The other limits fail a document later.
-	if errors.Is(err, niceyaml.ErrLimit) {
+	// The read checks the byte limit alone. The other limits fail a
+	// document later.
+	limit, ok := errors.AsType[*niceyaml.LimitError](err)
+	if ok && limit.Kind == niceyaml.LimitBytes {
 		return fmt.Errorf("%w (raise it with --byte-limit)", err)
 	}
 

@@ -1386,7 +1386,10 @@ func (n *Node) warnUnknownFields(ctx context.Context, t reflect.Type, cfg decode
 func (n *Node) aliasingError(err error) error {
 	expansion, ok := errors.AsType[*aliasing.ExpansionError](err)
 	if ok {
-		limit := &markedError{err: errors.New(expansion.Error()), marks: []error{ErrLimit, ErrExcessiveAliasing}}
+		limit := &LimitError{Kind: LimitDocumentBytes, Max: expansion.Limit, Aliases: true}
+		if expansion.Depth {
+			limit.Kind = LimitDepth
+		}
 
 		return n.Bind(Invalid(limit, atToken(expansion.Alias.GetToken())))
 	}

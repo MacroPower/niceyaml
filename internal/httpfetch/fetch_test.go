@@ -127,6 +127,10 @@ func TestTooLarge(t *testing.T) {
 			require.EqualError(t, err, tc.want)
 			require.ErrorIs(t, err, niceyaml.ErrLimit)
 			assert.False(t, niceyaml.IsInvalid(err))
+
+			limit, ok := errors.AsType[*niceyaml.LimitError](err)
+			require.True(t, ok)
+			assert.Equal(t, niceyaml.LimitError{Kind: niceyaml.LimitLoad, Max: tc.limit}, *limit)
 		})
 	}
 }

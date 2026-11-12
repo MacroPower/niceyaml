@@ -17,7 +17,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/fault"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/internal/mapkey"
-	"go.jacobcolvin.com/niceyaml/internal/quantity"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 )
@@ -1373,7 +1372,7 @@ func FileText(src *niceyaml.Source, docs ...*Doc) (string, error) {
 	// cover. A path binds in one document, not in the file. So the error
 	// names src alone, as the error of a load of the file does.
 	if limit := src.ByteLimit(); len(docs) > 0 && b.Len() > limit {
-		return "", src.Bind(niceyaml.Unchecked(&limitError{msg: "file is larger than " + quantity.Bytes(limit)}))
+		return "", src.Bind(niceyaml.Unchecked(&niceyaml.LimitError{Kind: niceyaml.LimitBytes, Max: limit}))
 	}
 
 	return b.String(), nil

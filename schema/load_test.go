@@ -190,6 +190,10 @@ func TestWithLoadLimit(t *testing.T) {
 			require.ErrorIs(t, err, niceyaml.ErrLimit)
 			assert.False(t, niceyaml.IsInvalid(err))
 
+			le, ok := errors.AsType[*niceyaml.LimitError](err)
+			require.True(t, ok)
+			assert.Equal(t, niceyaml.LimitError{Kind: niceyaml.LimitLoad, Max: limit}, *le)
+
 			fetched := fetchErrors(err)
 			if tc.status < 0 {
 				assert.Empty(t, fetched)
