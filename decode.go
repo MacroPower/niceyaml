@@ -2970,7 +2970,7 @@ type decodeProblem struct {
 // one position come in the order the collector found them.
 func sortProblems(problems []decodeProblem) {
 	slices.SortFunc(problems, func(a, b decodeProblem) int {
-		return cmp.Or(cmp.Compare(a.at.Line, b.at.Line), cmp.Compare(a.at.Col, b.at.Col), cmp.Compare(a.order, b.order))
+		return cmp.Or(a.at.Compare(b.at), cmp.Compare(a.order, b.order))
 	})
 }
 

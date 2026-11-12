@@ -1538,11 +1538,7 @@ func sortRows(rows []warningRow) []warningRow {
 			return ga - gb
 		}
 
-		if a.pos.Line != b.pos.Line {
-			return a.pos.Line - b.pos.Line
-		}
-
-		return a.pos.Col - b.pos.Col
+		return a.pos.Compare(b.pos)
 	})
 
 	return rows

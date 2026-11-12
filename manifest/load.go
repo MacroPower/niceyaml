@@ -586,8 +586,7 @@ func compareRows(a, b *row) int {
 		cmp.Compare(a.file, b.file),
 		cmp.Compare(a.index, b.index),
 		compareBool(b.unplaced, a.unplaced),
-		cmp.Compare(a.pos.Line, b.pos.Line),
-		cmp.Compare(a.pos.Col, b.pos.Col),
+		a.pos.Compare(b.pos),
 	)
 }
 

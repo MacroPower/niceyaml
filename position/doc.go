@@ -33,6 +33,15 @@
 //	end := position.New(0, 10)      // Line 0, column 10.
 //	r := position.NewRange(start, end)
 //
+// Positions order by line, then by column. [Position.Compare] follows the
+// contract of [cmp.Compare], so the method expression sorts positions into
+// document order:
+//
+//	slices.SortFunc(ps, position.Position.Compare)
+//
+// [Range.LineSpan] gives the lines a range covers as a [Span], which slices
+// a [go.jacobcolvin.com/niceyaml/line.View] down to the lines of a match.
+//
 // A range is a pair of coordinates and does not refer to the text it lies
 // on. To split a multi-line range into one range per line, call
 // [go.jacobcolvin.com/niceyaml/line.Lines.SliceLines] on the lines that hold

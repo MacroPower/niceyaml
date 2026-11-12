@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"testing"
 
@@ -86,6 +87,89 @@ func TestPositionOneBased(t *testing.T) {
 			assert.Equal(t, tc.want, tc.pos.OneBased())
 		})
 	}
+}
+
+func TestPosition_Compare(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		p    position.Position
+		q    position.Position
+		want int
+	}{
+		"equal": {
+			p:    position.New(2, 3),
+			q:    position.New(2, 3),
+			want: 0,
+		},
+		"earlier line": {
+			p:    position.New(1, 9),
+			q:    position.New(2, 0),
+			want: -1,
+		},
+		"later line": {
+			p:    position.New(3, 0),
+			q:    position.New(2, 9),
+			want: 1,
+		},
+		"earlier column on one line": {
+			p:    position.New(2, 1),
+			q:    position.New(2, 3),
+			want: -1,
+		},
+		"later column on one line": {
+			p:    position.New(2, 4),
+			q:    position.New(2, 3),
+			want: 1,
+		},
+		"int limits do not wrap": {
+			p:    position.New(math.MinInt, 0),
+			q:    position.New(math.MaxInt, 0),
+			want: -1,
+		},
+		"column int limits do not wrap": {
+			p:    position.New(0, math.MaxInt),
+			q:    position.New(0, math.MinInt),
+			want: 1,
+		},
+		"line decides before a huge column": {
+			p:    position.New(0, math.MaxInt),
+			q:    position.New(1, 0),
+			want: -1,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.p.Compare(tc.q))
+			assert.Equal(t, -tc.want, tc.q.Compare(tc.p))
+		})
+	}
+}
+
+func TestPosition_CompareSort(t *testing.T) {
+	t.Parallel()
+
+	ps := []position.Position{
+		position.New(2, 0),
+		position.New(0, 5),
+		position.New(1, 3),
+		position.New(0, 1),
+		position.New(1, 0),
+	}
+
+	slices.SortFunc(ps, position.Position.Compare)
+
+	want := []position.Position{
+		position.New(0, 1),
+		position.New(0, 5),
+		position.New(1, 0),
+		position.New(1, 3),
+		position.New(2, 0),
+	}
+	assert.Equal(t, want, ps)
 }
 
 func TestString(t *testing.T) {
@@ -265,6 +349,58 @@ func TestRange_LastLine(t *testing.T) {
 			t.Parallel()
 
 			assert.Equal(t, tc.want, tc.r.LastLine())
+		})
+	}
+}
+
+func TestRange_LineSpan(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		r    position.Range
+		want position.Span
+	}{
+		"single line": {
+			r:    position.NewRange(position.New(3, 1), position.New(3, 5)),
+			want: position.NewSpan(3, 4),
+		},
+		"multiple lines": {
+			r:    position.NewRange(position.New(1, 2), position.New(4, 1)),
+			want: position.NewSpan(1, 5),
+		},
+		"end at column 0 excludes the end line": {
+			r:    position.NewRange(position.New(1, 0), position.New(3, 0)),
+			want: position.NewSpan(1, 3),
+		},
+		"empty range covers its line": {
+			r:    position.NewRange(position.New(2, 3), position.New(2, 3)),
+			want: position.NewSpan(2, 3),
+		},
+		"inverted columns give the empty span at the start line": {
+			r:    position.NewRange(position.New(3, 5), position.New(3, 2)),
+			want: position.NewSpan(3, 3),
+		},
+		"inverted lines give the empty span at the start line": {
+			r:    position.NewRange(position.New(5, 0), position.New(2, 0)),
+			want: position.NewSpan(5, 5),
+		},
+		"inverted range on the MinInt line is empty": {
+			r:    position.NewRange(position.New(math.MinInt, 5), position.New(math.MinInt, 2)),
+			want: position.NewSpan(math.MinInt, math.MinInt),
+		},
+		"end saturates at the MaxInt line": {
+			r:    position.NewRange(position.New(math.MaxInt-1, 0), position.New(math.MaxInt, 4)),
+			want: position.NewSpan(math.MaxInt-1, math.MaxInt),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := tc.r.LineSpan()
+			assert.Equal(t, tc.want, got)
+			assert.GreaterOrEqual(t, got.Len(), 0)
 		})
 	}
 }

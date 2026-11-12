@@ -143,7 +143,7 @@ func firstInText(found []instance) *instance {
 
 // siteOrder orders a and b, two sites, by their places in the user's text.
 func siteOrder(a, b site) int {
-	return cmp.Or(cmp.Compare(a.at.Start.Line, b.at.Start.Line), cmp.Compare(a.at.Start.Col, b.at.Start.Col))
+	return a.at.Start.Compare(b.at.Start)
 }
 
 // find returns each instance of a construct that [New] refuses in the
@@ -276,7 +276,7 @@ func (d *Doc) valueInstances(typ string) []instance {
 	}
 
 	slices.SortStableFunc(out, func(a, b found) int {
-		return cmp.Or(cmp.Compare(a.at.Line, b.at.Line), cmp.Compare(a.at.Col, b.at.Col), cmp.Compare(a.rank, b.rank))
+		return cmp.Or(a.at.Compare(b.at), cmp.Compare(a.rank, b.rank))
 	})
 
 	refused := make([]instance, 0, len(out))

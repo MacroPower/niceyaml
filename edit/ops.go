@@ -913,11 +913,11 @@ func (d *Doc) recordRemoval(h *Node, p *place, reason string) {
 
 		if dash, ok := d.userDash(path); ok {
 			rng.Start = dash
-		} else if spanned && comparePositions(span.Start, rng.Start) < 0 {
+		} else if spanned && span.Start.Compare(rng.Start) < 0 {
 			rng.Start = span.Start
 		}
 
-		if spanned && comparePositions(span.End, rng.End) > 0 {
+		if spanned && span.End.Compare(rng.End) > 0 {
 			rng.End = span.End
 		}
 
@@ -1055,11 +1055,11 @@ func (d *Doc) userSpan(path paths.Path) (position.Range, bool) {
 	}
 
 	rng := first
-	if comparePositions(last.Start, rng.Start) < 0 {
+	if last.Start.Compare(rng.Start) < 0 {
 		rng.Start = last.Start
 	}
 
-	if comparePositions(last.End, rng.End) > 0 {
+	if last.End.Compare(rng.End) > 0 {
 		rng.End = last.End
 	}
 
