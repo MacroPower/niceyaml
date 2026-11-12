@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"iter"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -664,6 +665,13 @@ func NewWarnings() *Warnings {
 // does each Context derived from the context it returns. A validator that
 // reads the warnings of a check it runs collects them with a Warnings of
 // its own. The caller of the enclosing call still gets them.
+//
+// A hook can also return the warnings of its own Warnings, as through
+// [Warnings.Err], to place them itself. The call then takes each such
+// warning from the result of the hook alone, wherever the result wraps it.
+// A hook that moves the result under the path of a field with [Rebase]
+// thus reports each warning once, at that path. A hook that returns the
+// warnings through [AsErrors] reports each of them once, as an error.
 func (w *Warnings) Context(ctx context.Context) context.Context {
 	if w == nil {
 		return ctx
@@ -904,12 +912,20 @@ func isolate(ctx context.Context, w *Warnings) context.Context {
 // hands to its context. That context is a copy of ctx whose collector
 // holds those warnings, and the collectors of ctx do not get them. The
 // call thus binds every warning of the hook as it binds the result.
+//
+// The hook might hand a warning to its context and return it as well. The
+// call then keeps the copy that the hook returns, because the hook placed
+// that copy itself. A hook can collect the warnings of a nested call with a
+// collector from its context and return them under the path of a field.
+// Each of them then shows at that path alone. [returnedRows] finds such
+// warnings.
 func runHook(ctx context.Context, run func(ctx context.Context) error) (error, error) {
 	held := NewWarnings()
 
-	failure, warnings := splitWarnings(run(isolate(ctx, held)))
+	result := run(isolate(ctx, held))
+	failure, warnings := splitWarnings(result)
 
-	handed := held.Err()
+	handed := tallyRows(returnedRows(held.sorted(), result))
 	if handed == nil {
 		return failure, warnings
 	}
@@ -919,6 +935,133 @@ func runHook(ctx context.Context, run func(ctx context.Context) error) (error, e
 	}
 
 	return failure, errors.Join(warnings, handed)
+}
+
+// returnedRows returns the rows that result does not hold, in their order.
+// The test compares the identity of each error, not its text, as
+// [heldErrors.holds] describes. It thus finds the warnings of a collector
+// that a hook returns through [Rebase], a heading, [AsErrors], or a wrapper
+// of its own. A warning that only reads like one that result holds keeps
+// its row.
+func returnedRows(rows []warningRow, result error) []warningRow {
+	if len(rows) == 0 || isNothing(result) {
+		return rows
+	}
+
+	held := heldErrors{
+		errs:  map[error]struct{}{},
+		bound: map[boundIdentity]struct{}{},
+	}
+	held.collect(result, nil)
+
+	return slices.DeleteFunc(rows, held.holds)
+}
+
+// heldErrors holds the identity of each error that the result of a hook
+// wraps, the result included. It holds only the errors that [hasIdentity]
+// accepts.
+type heldErrors struct {
+	// Each error of the result.
+	errs map[error]struct{}
+	// Each error of the result, with the place of the nearest binding
+	// above it.
+	bound map[boundIdentity]struct{}
+}
+
+// boundIdentity is the identity of an error and the place of the nearest
+// binding above it. A copy of a binding, such as [SourceError.remarked]
+// builds, keeps that place. The place is empty for an error that does not
+// stand below a binding.
+//
+//nolint:unused // The fields tell the keys of the map apart.
+type boundIdentity struct {
+	err  error
+	src  *Source
+	node *Node
+	rng  position.Range
+}
+
+// collect adds err and every error that it wraps to h. It follows every
+// Unwrap method, and the error that a [BindValue] binding bound. The
+// binding above names the place of err, or is nil for an err that does not
+// stand below a binding.
+func (h heldErrors) collect(err error, above *SourceError) {
+	if err == nil {
+		return
+	}
+
+	if hasIdentity(err) {
+		key := boundIdentity{err: err}
+		if above != nil {
+			key.src, key.node, key.rng = above.source, above.node, above.rng
+		}
+
+		if _, ok := h.bound[key]; ok {
+			return
+		}
+
+		h.bound[key] = struct{}{}
+		h.errs[err] = struct{}{}
+	}
+
+	switch x := err.(type) { //nolint:errorlint // Walks the tree one node at a time.
+	case *SourceError:
+		if x == nil {
+			return
+		}
+
+		h.collect(x.err, x)
+		h.collect(x.free, x)
+
+	case interface{ Unwrap() error }:
+		h.collect(x.Unwrap(), above)
+
+	case interface{ Unwrap() []error }:
+		for _, branch := range x.Unwrap() {
+			h.collect(branch, above)
+		}
+	}
+}
+
+// holds reports whether the result holds the warning of r. It holds the
+// warning when it holds the error of r itself. For a row whose error is a
+// binding, it also holds the warning when it holds the error that a
+// [BindValue] binding bound, because [Rebase] and every Bind place that
+// error anew. It holds the warning as well when it holds the error that the
+// binding binds below a binding at the same place, as a copy that
+// [AsErrors] builds holds it.
+func (h heldErrors) holds(r warningRow) bool {
+	if hasIdentity(r.err) {
+		if _, ok := h.errs[r.err]; ok {
+			return true
+		}
+	}
+
+	b, ok := r.err.(*SourceError) //nolint:errorlint // The node itself, not a chain search.
+	if !ok || b == nil {
+		return false
+	}
+
+	if hasIdentity(b.free) {
+		if _, ok := h.errs[b.free]; ok {
+			return true
+		}
+	}
+
+	if !hasIdentity(b.err) {
+		return false
+	}
+
+	_, ok = h.bound[boundIdentity{err: b.err, src: b.source, node: b.node, rng: b.rng}]
+
+	return ok
+}
+
+// hasIdentity reports whether err is a pointer, which identifies one
+// error. Two errors of another kind can be equal without being one, and a
+// map cannot hash some of them.
+func hasIdentity(err error) bool {
+	return err != nil && reflect.TypeOf(err).Kind() == reflect.Pointer
 }
 
 // deliver hands each problem of err to every collector that ctx carries.
