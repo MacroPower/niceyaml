@@ -11,7 +11,7 @@ require (
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/creack/pty v1.1.24
 	github.com/stretchr/testify v1.12.1
-	go.jacobcolvin.com/niceyaml v0.0.0-20261031072356-ce2a6c4c720b
+	go.jacobcolvin.com/niceyaml v0.0.0-20261112054121-fbd80ba88048
 	go.jacobcolvin.com/x/stringtest v0.2.0
 )
 
