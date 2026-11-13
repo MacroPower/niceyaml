@@ -741,6 +741,12 @@ func WithReason(reason string) RemoveOption {
 // [niceyaml.WithReferences] decides which names the mapping reads, through
 // a merge key that reads it.
 //
+// Go-yaml's parser refuses a comment line right after the blank lines of a
+// block scalar without text, as in "a: |", "", "# c", and "b: 1". So a
+// Remove fails where it leaves such a comment line, as a Remove of $.z in
+// "a: |", "", "z: 1", "# c", and "b: 1" does. The document is at fault for
+// the problem, and the text stays as it was.
+//
 // An entry or an item that starts on the line of the "-" of an item leaves
 // the "-" in place. The next entry or item then takes that line, with its
 // comments. When another comment line lies between the two, the "-" ends
@@ -838,7 +844,10 @@ func (n *Node) remove(opts ...RemoveOption) error {
 		err = d.removeBlock(p)
 	}
 
-	if err != nil {
+	switch {
+	case errors.Is(err, errStrandedComment):
+		return d.strandedProblem(n, "removes "+n.path.String()+", after which a comment line goes")
+	case err != nil:
 		return d.bug(n, err)
 	}
 
@@ -1125,6 +1134,10 @@ func (d *Doc) removeBlock(p *place) error {
 		start, end := d.lineCut(r)
 		end, text := d.emptiedAfter(start, end)
 
+		if d.strandsComment(start, end) {
+			return errStrandedComment
+		}
+
 		cut := edit{start: start, end: end, text: text.text, origins: text.origins}
 
 		return d.apply(cut)
@@ -1235,6 +1248,42 @@ func (d *Doc) emptiedAfter(start, end int) (int, run) {
 	}
 
 	return d.lineEnd(spaced), text
+}
+
+// strandsComment reports whether a cut of the bytes [start, end) leaves a
+// comment line right after the blank lines of a block scalar without text,
+// as [Doc.emptyScalarAbove] describes them. Start starts a line. Go-yaml's
+// parser refuses the text after such a cut. The blank lines that
+// [Doc.emptiedAfter] writes in place of the bytes count as blank lines
+// below the cut.
+func (d *Doc) strandsComment(start, end int) bool {
+	if end >= len(d.cur) {
+		return false
+	}
+
+	first := d.lineOf(end)
+	below := first
+
+	for below < len(d.curLines) && d.lineStart(below) < len(d.cur) && d.isBlankLine(below) {
+		below++
+	}
+
+	if d.lineStart(below) >= len(d.cur) {
+		return false
+	}
+
+	if _, ok := d.commentColumn(below); !ok {
+		return false
+	}
+
+	line := d.lineOf(start)
+	above := line - 1
+
+	for above >= 0 && d.isBlankLine(above) {
+		above--
+	}
+
+	return (below > first || above < line-1) && d.emptyScalarAt(above)
 }
 
 // blankCut returns the lines of r with their line breaks, and the blank
@@ -1724,6 +1773,26 @@ func (d *Doc) cutBefore(start, end int) edit {
 	cut.text, cut.origins = " ", []int{d.origin[end-1]}
 
 	return cut
+}
+
+// strandedProblem returns the problem of the call through h whose edit
+// leaves a comment line right after the blank lines of a block scalar
+// without text, as [Doc.emptyScalarAbove] describes them. Step names the
+// call and the edit up to the place of that comment line, as in "removes
+// $.a, after which a comment line goes". The layout of the document
+// decides the problem, so the document is at fault for it. The problem
+// binds at the place of h in the text that the call found, because a Move
+// can take the value from its place before it fails.
+func (d *Doc) strandedProblem(h *Node, step string) error {
+	if d.calling {
+		now := d.save()
+		d.show(d.callStart)
+
+		defer d.show(now)
+	}
+
+	return d.fail(h, "%s %s right after the blank lines of a block scalar without text, and go-yaml's parser "+
+		"refuses a comment line there", d.subject(), step)
 }
 
 // bug returns the problem of an edit whose text the engine cannot

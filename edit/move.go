@@ -2,6 +2,7 @@ package edit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -121,6 +122,15 @@ import (
 // "-" ends the line there, or comes before the comment of the value. A
 // value that leaves a flow collection takes the comment that [Node.Remove]
 // deletes with it.
+//
+// Go-yaml's parser refuses a comment line right after the blank lines of a
+// block scalar without text. A Move fails where the value leaves such a
+// comment line at its place, as [Node.Remove] does. The value leaves its
+// place before it goes to its new place, so the Move fails even when the
+// value goes back between the blank lines and the comment line. It fails
+// the same way where the comment lines of the value go right after such
+// blank lines, as for a [Before] of the key after them. The document is at
+// fault for the problem.
 //
 // In a flow collection, the value takes flow style and drops the comments
 // of the entry and of the value. Each string there, as a key or a value,
@@ -481,7 +491,7 @@ func (d *Doc) moveValue(
 	}
 
 	// The value leaves its place first.
-	err := d.removeMoved(n, p)
+	err := d.removeMoved(n, p, named)
 	if err != nil {
 		return target, 0, err
 	}
@@ -522,7 +532,7 @@ func (d *Doc) moveValue(
 		return target, 0, d.bug(n, fmt.Errorf("%s does not resolve after the insert", n.path))
 	}
 
-	err = d.removeMoved(n, p)
+	err = d.removeMoved(n, p, named)
 	if err != nil {
 		return target, 0, err
 	}
@@ -594,9 +604,17 @@ func (d *Doc) targetHolderID(target paths.Path, occupied bool) (holderID, bool) 
 }
 
 // removeMoved removes p, the place of the value that a move of n takes.
-func (d *Doc) removeMoved(n *Node, p *place) error {
+// Named says what the Move does, as in "moves $.a to $.b".
+func (d *Doc) removeMoved(n *Node, p *place, named string) error {
 	err := d.removePlace(p)
-	if err != nil {
+
+	switch {
+	case errors.Is(err, errStrandedComment):
+		step := fmt.Sprintf("%s, and taking %s from its place leaves a comment line", named, n.path)
+
+		return d.strandedProblem(n, step)
+
+	case err != nil:
 		return d.bug(n, err)
 	}
 

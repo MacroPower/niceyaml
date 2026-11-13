@@ -360,6 +360,15 @@ func TestNode_Update(t *testing.T) {
 			value:  1,
 			err:    "updates $.a.b, but a holds a scalar",
 		},
+		"entry that it removes between a blank line of a block scalar without text and a comment line": {
+			// Go-yaml's parser refuses a comment line right after the blank
+			// line, so the document is at fault.
+			before: stringtest.LinesLF("a: |", "", "z: 1", "# c", "b: 1"),
+			path:   paths.Doc(),
+			value:  ms("a", "", "b", 1),
+			err: "test.yaml:3:4: $.z: cafe.jacobcolvin.com/v1 removes $.z, after which a comment line goes right " +
+				"after the blank lines of a block scalar without text",
+		},
 		"value that does not encode at a new place": {
 			before:  "a: 1\n",
 			path:    paths.Doc().Child("b"),

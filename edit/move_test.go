@@ -1360,6 +1360,50 @@ func TestNode_Move_Placement(t *testing.T) {
 			opts:   []edit.SetOption{edit.Before("y")},
 			want:   stringtest.LinesLF("m:", "  x: 1", "  a: 1", "  y: 2"),
 		},
+		"from between a blank line of a block scalar without text and a comment line": {
+			// Go-yaml's parser refuses a comment line right after the blank
+			// line, so the document is at fault.
+			before: stringtest.LinesLF("a: |", "", "z: 1", "# c", "b: 1"),
+			path:   paths.Doc().Child("z"),
+			target: paths.Doc().Child("y"),
+			err: "test.yaml:3:4: $.z: cafe.jacobcolvin.com/v1 moves $.z to $.y, and taking $.z from its place " +
+				"leaves a comment line right after the blank lines of a block scalar without text, and go-yaml's " +
+				"parser refuses a comment line there",
+		},
+		"from between a block scalar without text and a blank line before a comment line": {
+			before: stringtest.LinesLF("a: |", "z: 1", "", "# c", "b: 1"),
+			path:   paths.Doc().Child("z"),
+			target: paths.Doc().Child("y"),
+			opts:   []edit.SetOption{edit.After("a")},
+			err: "test.yaml:2:4: $.z: cafe.jacobcolvin.com/v1 moves $.z to $.y, and taking $.z from its place " +
+				"leaves a comment line",
+		},
+		"in place between a blank line of a block scalar without text and a comment line": {
+			// The value leaves its place before it goes back, so the Move
+			// fails though the text would end as it started.
+			before: stringtest.LinesLF("a: |", "", "z: 1", "# c", "b: 1", "q: 1"),
+			path:   paths.Doc().Child("z"),
+			target: paths.Doc().Child("z"),
+			opts:   []edit.SetOption{edit.Before("b")},
+			err: "test.yaml:3:4: $.z: cafe.jacobcolvin.com/v1 moves $.z to $.z, and taking $.z from its place " +
+				"leaves a comment line right after the blank lines of a block scalar without text",
+		},
+		"before a key after a blank line of a block scalar without text with a comment line": {
+			// The comment line of the entry goes right after the blank line.
+			before: stringtest.LinesLF("a: |", "", "b: 1", "# c", "c: 1"),
+			path:   paths.Doc().Child("c"),
+			target: paths.Doc().Child("x"),
+			opts:   []edit.SetOption{edit.Before("b")},
+			err: "test.yaml:5:4: $.c: cafe.jacobcolvin.com/v1 moves $.c to $.x, after which a comment line goes " +
+				"right after the blank lines of a block scalar without text",
+		},
+		"before a key after a blank line of a block scalar without text": {
+			before: stringtest.LinesLF("a: |", "", "b: 1", "c: 1"),
+			path:   paths.Doc().Child("c"),
+			target: paths.Doc().Child("x"),
+			opts:   []edit.SetOption{edit.Before("b")},
+			want:   stringtest.LinesLF("a: |", "", "x: 1", "b: 1"),
+		},
 		"after a key": {
 			before: stringtest.LinesLF("m:", "  x: 1", "  y: 2", "a: 1"),
 			path:   paths.Doc().Child("a"),

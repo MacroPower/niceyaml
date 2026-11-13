@@ -458,12 +458,18 @@ func (d *Doc) emptyScalarAbove(line int) bool {
 		above--
 	}
 
-	if above == line-1 {
+	return above < line-1 && d.emptyScalarAt(above)
+}
+
+// emptyScalarAt reports whether line holds the header of a block scalar
+// that holds no text, as [Doc.emptyScalarAbove] reads it.
+func (d *Doc) emptyScalarAt(line int) bool {
+	if line < 0 {
 		return false
 	}
 
 	for _, lit := range d.literals() {
-		if hs, ok := d.tokenSpan(lit.Start); ok && d.lineOf(hs.start) == above {
+		if hs, ok := d.tokenSpan(lit.Start); ok && d.lineOf(hs.start) == line {
 			return lit.Value == nil || lit.Value.Value == ""
 		}
 	}

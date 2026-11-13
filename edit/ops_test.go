@@ -1394,6 +1394,61 @@ func TestNode_Remove(t *testing.T) {
 			want:   "{}",
 			value:  map[string]any{},
 		},
+		"entry between a blank line of a block scalar without text and a comment line": {
+			// Go-yaml's parser refuses a comment line right after the blank
+			// line, so the document is at fault.
+			before: stringtest.LinesLF("a: |", "", "z: 1", "# c", "b: 1"),
+			path:   paths.MustParse("$.z"),
+			err: "test.yaml:3:4: $.z: cafe.jacobcolvin.com/v1 removes $.z, after which a comment line goes right " +
+				"after the blank lines of a block scalar without text, and go-yaml's parser refuses a comment line there",
+		},
+		"entry between a block scalar without text and a blank line before a comment line": {
+			before: stringtest.LinesLF("a: |", "z: 1", "", "# c", "b: 1"),
+			path:   paths.MustParse("$.z"),
+			err:    "test.yaml:2:4: $.z: cafe.jacobcolvin.com/v1 removes $.z, after which a comment line goes right",
+		},
+		"entry between a block scalar without text and a spaced blank line before a comment line": {
+			// The cut writes the spaced blank line empty.
+			before: stringtest.LinesLF("a: |", "z: 1", "    ", "# c", "b: 1"),
+			path:   paths.MustParse("$.z"),
+			err:    "test.yaml:2:4: $.z: cafe.jacobcolvin.com/v1 removes $.z, after which a comment line goes right",
+		},
+		"entry between blank lines of a block scalar without text and a comment line": {
+			before: stringtest.LinesLF("a: |", "", "z: 1", "", "# c", "b: 1"),
+			path:   paths.MustParse("$.z"),
+			err:    "removes $.z, after which a comment line goes right after the blank lines of a block scalar without text",
+		},
+		"entry with a collection between a blank line of a block scalar without text and a comment line": {
+			before: stringtest.LinesLF("a: |", "", "z:", "  - 1", "# c", "b: 1"),
+			path:   paths.MustParse("$.z"),
+			err:    "removes $.z, after which a comment line goes right after the blank lines of a block scalar without text",
+		},
+		"entry of an item between a blank line of a nested block scalar without text and a comment line": {
+			before: stringtest.LinesLF("s:", "- a: |", "", "  z: 1", "  # c", "  b: 1"),
+			path:   paths.MustParse("$.s[0].z"),
+			err:    "removes $.s[0].z, after which a comment line goes right after the blank lines of a block scalar without text",
+		},
+		"entry between a blank line of a block scalar without text and the last comment line": {
+			before: stringtest.LinesLF("a: |", "", "z: 1", "# c"),
+			path:   paths.MustParse("$.z"),
+			err:    "removes $.z, after which a comment line goes right after the blank lines of a block scalar without text",
+		},
+		"entry between a blank line of a block scalar without text and a comment line that it holds": {
+			// The comment line goes with the entry.
+			before: stringtest.LinesLF("a: |", "", "z: 1", "  # c", "b: 1"),
+			path:   paths.MustParse("$.z"),
+			want:   stringtest.LinesLF("a: |", "", "b: 1"),
+		},
+		"entry between a blank line of a block scalar with text and a comment line": {
+			before: stringtest.LinesLF("a: |", "  x", "", "z: 1", "# c", "b: 1"),
+			path:   paths.MustParse("$.z"),
+			want:   stringtest.LinesLF("a: |", "  x", "", "# c", "b: 1"),
+		},
+		"entry between a block scalar without text and a comment line": {
+			before: stringtest.LinesLF("a: |", "z: 1", "# c", "b: 1"),
+			path:   paths.MustParse("$.z"),
+			want:   stringtest.LinesLF("a: |", "# c", "b: 1"),
+		},
 		"only entry of the root between blank lines": {
 			before: stringtest.LinesLF("# c", "", "m: 1", "", ""),
 			path:   paths.Doc().Child("m"),

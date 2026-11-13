@@ -210,6 +210,10 @@ var (
 	errFileTextTwice   = usage("FileText takes each document once")
 	// The problem of a parse of the text that finds no document in it.
 	errNoDocument = errors.New("the text holds no document")
+	// The problem of a removal whose cut leaves a comment line right after
+	// the blank lines of a block scalar without text, as
+	// [Doc.strandsComment] tells.
+	errStrandedComment = errors.New("a comment line follows the blank lines of a block scalar without text")
 )
 
 // sentinelError is a problem that matches sentinel, an error of the
