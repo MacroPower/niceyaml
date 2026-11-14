@@ -1178,19 +1178,22 @@
 // hooks slice of the api service. A program that changes a decoded value in
 // place must not assume that no other place holds the value.
 //
-// TypeDefaults can make more places share. Places that read one anchor
-// through aliases or `<<` merge keys can share a value that the decode
-// builds from the defaults. The api and worker services merge one anchor:
+// Where the decoder gives two places one value, a decode with TypeDefaults
+// can give both places one value that it builds from the defaults. When
+// TypeDefaults gives the type of the retry target a function, the api and
+// worker services of that document share one retry target that the decode
+// builds. A place that starts from another value builds a value of its own.
+//
+// The api and worker services of a second document merge one anchor:
 //
 //	x-common: &common {env: {LOG: info}, retry: {codes: [500]}, hooks: [{codes: [1]}]}
 //	services:
 //	  api: {<<: *common, image: api}
 //	  worker: {<<: *common, image: worker}
 //
-// When TypeDefaults gives the type of the retry target a function, the two
-// services share one retry target, which they do not share without
-// TypeDefaults. A place that starts from another value builds a value of its
-// own.
+// The two services get an env map, a retry target, and a hooks slice of
+// their own, with TypeDefaults and without it. So do two services that are
+// aliases of that anchor, as in `services: {api: *common, worker: *common}`.
 //
 // A value that the decode builds at an alias starts from the defaults of its
 // own place. The decode can keep a value as the decoder gave it, such as an
