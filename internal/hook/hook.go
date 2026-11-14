@@ -1,12 +1,14 @@
 // Package hook holds the calls that the niceyaml package hands to its
-// manifest, schema, and edit packages without adding them to its API. It
-// also holds the call that the encoder package hands to the edit package.
+// manifest, schema, edit, and encoder packages without adding them to its
+// API. It also holds the calls that the encoder package hands to the edit
+// package.
 //
 // The niceyaml and encoder packages set each of their variables when they
-// load, so a package that imports them finds every variable set. A
-// parameter or a result that names a type of either, such as a
-// *niceyaml.Source, has the type any here, because this package cannot
-// import them.
+// load, so a package that imports them finds every variable set. The
+// encoder package calls Guard and imports the niceyaml package for it, so
+// Guard is set before the encoder package loads. A parameter or a result
+// that names a type of either, such as a *niceyaml.Source, has the type
+// any here, because this package cannot import them.
 package hook
 
 import (
@@ -116,7 +118,8 @@ var (
 	// []encoder.Option, with the node that go-yaml's encoder made for v
 	// and that the encoder printed. Each scalar of the node holds the value
 	// that go-yaml's encoder gave it, which a parse of the text might read
-	// otherwise.
+	// otherwise. Marshal lets a panic in the encode reach the caller, and
+	// encoder.Marshal returns such a panic as an error.
 	Marshal func(ctx context.Context, v, opts any) ([]byte, ast.Node, error)
 
 	// EncodeNode returns the node that go-yaml's encoder makes for v under

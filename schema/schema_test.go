@@ -1867,6 +1867,9 @@ func TestSchema_ValidateValue_Typed(t *testing.T) {
 			data any
 			err  error
 			want string
+			// Holds the value of the panic whose PanicError the error
+			// holds, or nil for an error without one.
+			panicked any
 		}{
 			"channel inside an ordered mapping": {
 				data: yaml.MapSlice{{Key: "mode", Value: make(chan int)}},
@@ -1880,13 +1883,14 @@ func TestSchema_ValidateValue_Typed(t *testing.T) {
 				data: map[string]any{"listen": failingMarshaler{}},
 				err:  errMarshal,
 			},
-			// The encoder panics on this field, and the check returns the
-			// panic as an error.
+			// Go-yaml's encoder panics on this field, and the check returns
+			// the panic as an error that holds it.
 			"unexported embedded named slice": {
 				data: typedEmbeddedTags{embeddedTags{"a"}},
 				err:  schema.ErrValidate,
-				want: "validate schema: encode schema_test.typedEmbeddedTags: encoder panic: " +
+				want: "validate schema: encode schema_test.typedEmbeddedTags: encoder panicked: " +
 					"reflect.Value.Interface: cannot return value obtained from unexported field or method",
+				panicked: "reflect.Value.Interface: cannot return value obtained from unexported field or method",
 			},
 			// The encoder writes text that the decode of the check does
 			// not read. The text of the error names the problem without
@@ -1914,6 +1918,14 @@ func TestSchema_ValidateValue_Typed(t *testing.T) {
 
 				if tc.want != "" {
 					require.EqualError(t, err, tc.want)
+				}
+
+				p, ok := errors.AsType[*niceyaml.PanicError](err)
+				require.Equal(t, tc.panicked != nil, ok)
+
+				if ok {
+					assert.Equal(t, tc.panicked, p.Value)
+					assert.NotEmpty(t, p.Stack)
 				}
 			})
 		}

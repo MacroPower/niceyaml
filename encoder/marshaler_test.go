@@ -242,6 +242,15 @@ func TestCustomMarshaler(t *testing.T) {
 			))},
 			err: errSecret,
 		},
+		"an error of the function for a map key": {
+			// Go-yaml's encoder drops the error of a key and writes the key
+			// as fmt.Sprint formats it.
+			input: map[funcInt]int{7: 1},
+			opts: []encoder.Option{encoder.WithMarshalers(encoder.CustomMarshaler(
+				func(context.Context, funcInt) (any, error) { return nil, errSecret },
+			))},
+			want: "\"7\": 1\n",
+		},
 		"a function that returns its own type": {
 			input: tenNet,
 			opts: []encoder.Option{encoder.WithMarshalers(encoder.CustomMarshaler(

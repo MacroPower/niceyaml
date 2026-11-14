@@ -88,10 +88,6 @@ var (
 	// matches it through the [*Deprecation] that it wraps. [errors.As]
 	// finds the Deprecation itself, which names each schema.
 	ErrDeprecated = errors.New("deprecated")
-
-	// The error for a value that made the encoder panic wraps
-	// errEncoderPanic.
-	errEncoderPanic = errors.New("encoder panic")
 )
 
 // AcceptAll returns a [*Schema] that passes every document and value
@@ -1105,10 +1101,10 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 // slice, or pointer that contains itself, it returns an error wrapping
 // [ErrValidate]. For a typed value that the encoder does not write, such
 // as a channel, ValidateValue returns an error wrapping ErrValidate with
-// the error of the encoder in its chain. The encoder panics on some
+// the error of the encoder in its chain. Go-yaml's encoder panics on some
 // values, such as a struct that embeds an unexported named slice. For
-// such a value, ValidateValue returns an error wrapping ErrValidate with
-// the panic value in its text. It also returns an error
+// such a value, ValidateValue returns an error wrapping ErrValidate that
+// holds the [*niceyaml.PanicError] of the panic. It also returns an error
 // wrapping ErrValidate when the text that the encoder writes does not
 // decode, such as the text of a string that is not UTF-8. The text of
 // that error names the problem.
@@ -1574,12 +1570,12 @@ func typed(data any) bool {
 //
 // It returns an error wrapping [ErrValidate] inside [niceyaml.Unchecked]
 // when v does not encode or its text does not decode for any other
-// reason. The error of the encode is in the chain. A panic of the encode
-// returns the same error, with the panic value in its text. The error of
-// the decode declares the encoded text at fault, so it stays out of the
-// chain, and [niceyaml.IsInvalid] does not report the result. Its
-// message is in the text of the result. When the decode fails after ctx
-// ended, the error of ctx is in the chain in place of that message.
+// reason. The error of the encode is in the chain, and so is the
+// [*niceyaml.PanicError] of a panic in the encode. The error of the decode
+// declares the encoded text at fault, so it stays out of the chain, and
+// [niceyaml.IsInvalid] does not report the result. Its message is in the
+// text of the result. When the decode fails after ctx ended, the error of
+// ctx is in the chain in place of that message.
 func encodeTree(ctx context.Context, v any) (any, error) {
 	text, err := marshalValue(ctx, v)
 	if err != nil {
@@ -1620,25 +1616,11 @@ func encodeTree(ctx context.Context, v any) (any, error) {
 // marshalValue returns the text that [encoder.Marshal] writes for v. When
 // v does not encode, it returns an error wrapping [ErrValidate] inside
 // [niceyaml.Unchecked], with the error of the encode in the chain. The
-// encoder panics on some values, such as a struct that embeds an
-// unexported named slice. For such a value, the error holds the panic
-// value in its text.
+// encoder returns a panic in the encode as an error that holds a
+// [*niceyaml.PanicError], such as the panic of go-yaml's encoder on a
+// struct that embeds an unexported named slice.
 func marshalValue(ctx context.Context, v any) ([]byte, error) {
-	var (
-		text []byte
-		err  error
-	)
-
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				err = fmt.Errorf("%w: %v", errEncoderPanic, r)
-			}
-		}()
-
-		text, err = encoder.Marshal(ctx, v)
-	}()
-
+	text, err := encoder.Marshal(ctx, v)
 	if err != nil {
 		return nil, niceyaml.Unchecked(fmt.Errorf("%w: encode %T: %w", ErrValidate, v, err))
 	}

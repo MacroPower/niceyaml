@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"runtime/debug"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 
+	// The niceyaml package sets hook.Guard, which Encode calls, when it
+	// loads.
+	_ "go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/internal/marshaler"
 )
@@ -29,9 +31,11 @@ var (
 	//
 	// The error of the context of the call does not match after that
 	// context ended, even when a marshaler returns it. A context error
-	// that a marshaler returns while that context lives matches. A
-	// [*PanicError], an [ErrComment] error, and an [ErrWrite] error do
-	// not match.
+	// that a marshaler returns while that context lives matches. An
+	// [ErrComment] error and an [ErrWrite] error do not match. The error
+	// of a panic matches ErrEncode when the value of the panic does, as
+	// [Encoder.Encode] describes, so a caller tests for the
+	// [*go.jacobcolvin.com/niceyaml.PanicError] first.
 	ErrEncode = errors.New("value does not encode")
 
 	// ErrNoNode is a label on an [ErrEncode] error for a value that go-yaml
@@ -60,40 +64,6 @@ var (
 	// it for the refused write and for every call after it.
 	ErrWrite = errors.New("writer refused the document")
 )
-
-// PanicError is the error of a panic that the go-yaml printer raised while
-// it laid out a node. Value holds the value the code passed to panic, and
-// Stack holds the stack of the goroutine at the panic, as [debug.Stack]
-// formats it. The message leaves the stack out.
-//
-// A panic is a bug in code, not a problem with the value, so the error
-// matches no sentinel of this package:
-//
-//	if p, ok := errors.AsType[*encoder.PanicError](err); ok {
-//		slog.Error("printer panicked", "value", p.Value, "stack", string(p.Stack))
-//	}
-type PanicError struct {
-	// Value is the value the code passed to panic.
-	Value any
-	// Stack is the stack of the goroutine at the panic.
-	Stack []byte
-}
-
-// Error returns the value of the panic behind "printer panicked: ",
-// formatted as the %v verb of [fmt.Sprintf] formats it.
-func (e *PanicError) Error() string {
-	return fmt.Sprintf("printer panicked: %v", e.Value)
-}
-
-// Unwrap returns Value when it is an error, and nil for any other value.
-// [errors.Is] and [errors.As] thus reach an error the code panicked with.
-func (e *PanicError) Unwrap() error {
-	if err, ok := e.Value.(error); ok {
-		return err
-	}
-
-	return nil
-}
 
 // labeled is an error that matches [ErrEncode] beside the label it holds,
 // such as [ErrNoNode]. Its message is the message of the label.
@@ -522,25 +492,60 @@ func newDocEncoder(c config) *docEncoder {
 // itself, an entry of a sequence in v, or the value of a map key in v.
 // After ctx ended, Encode returns its error as it is. A marshaler can
 // return a context error of its own while ctx lives, and that error
-// matches ErrEncode. Encode returns a [*PanicError] when go-yaml cannot
-// print the node. A comment from [WithYAMLComments] that the encoder
-// cannot place returns an error that matches [ErrComment]. In every case
-// but a refused write, Encode does not write to the writer.
+// matches ErrEncode. A comment from [WithYAMLComments] that the encoder
+// cannot place returns an error that matches [ErrComment].
+//
+// A panic in a marshaler of v, in go-yaml's encoder, or in go-yaml's
+// printer fails the encode. Such a marshaler can be a MarshalYAML,
+// MarshalText, or MarshalJSON method or a function of [CustomMarshaler],
+// for a value or for a map key. The error holds a
+// [*go.jacobcolvin.com/niceyaml.PanicError] with the value and the stack
+// of the panic. Its message reads "encoder panicked: " and the value, as
+// in "encoder panicked: boom", whichever code panicked.
+//
+// A panic is a bug in code, not a fault of v, so
+// [go.jacobcolvin.com/niceyaml.IsInvalid] does not report its error.
+// Encode returns that error after ctx ended too. The error matches what
+// the value of the panic matches, such as ErrEncode for a value that wraps
+// it. It matches none of [go.jacobcolvin.com/niceyaml.ErrDecode],
+// [go.jacobcolvin.com/niceyaml.ErrSyntax], and the decode labels of the
+// niceyaml package, even when the value matches one. A caller thus tests
+// for the PanicError first.
+//
+// When Encode returns an error, it writes nothing to the writer, except
+// for a refused write. A panic in the writer reaches the caller.
 func (e *Encoder) Encode(ctx context.Context, v any, opts ...Option) error {
-	_, err := e.encode(ctx, v, opts)
+	var text []byte
 
-	return err
+	// The guard recovers a panic in every step of the build. Go-yaml calls
+	// the marshalers of v, so a panic in one of them unwinds through
+	// go-yaml's encoder to the guard.
+	err := hook.Guard("encoder", func() error {
+		var err error
+
+		text, _, err = e.build(ctx, v, opts)
+
+		return err
+	})
+	if err != nil {
+		return err //nolint:wrapcheck // The build and the guard name the cause.
+	}
+
+	return e.write(text)
 }
 
-// encode is [Encoder.Encode], and it also returns the node that it printed
-// for v. The scalars of the node hold the values that go-yaml's encoder
-// gave them.
-func (e *Encoder) encode(ctx context.Context, v any, opts []Option) (ast.Node, error) {
+// build returns the text of the document that [Encoder.Encode] writes for
+// v, without a separator, and the node that it printed for v. The scalars
+// of the node hold the values that go-yaml's encoder gave them. It returns
+// the errors of Encode, except the error of its own write. After a refused
+// write it returns the error of that write, and v does not reach go-yaml.
+// It does not recover a panic.
+func (e *Encoder) build(ctx context.Context, v any, opts []Option) ([]byte, ast.Node, error) {
 	// After a refused write, v never reaches go-yaml, so its marshalers do
 	// not run and an encoding error cannot hide the write error.
 	err := e.writeErr()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	c := e.cfg
@@ -557,49 +562,50 @@ func (e *Encoder) encode(ctx context.Context, v any, opts []Option) (ast.Node, e
 	// the same map gets the same answer.
 	comments, err := parseComments(d.comments)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	node, err := d.node(ctx, v)
 	if err != nil {
 		// The value is not at fault when its context ended, so that error
-		// comes back as it is. So does a panic of the printer in the encode
-		// of the value of a marshaler function, and an error that already
-		// names its cause, such as one of that encode.
-		var panicked *PanicError
-
-		if contextEnded(ctx, err) || errors.As(err, &panicked) || errors.Is(err, ErrEncode) {
-			return nil, err
+		// comes back as it is. So does an error that already names its
+		// cause, such as one of the encode of the value of a marshaler
+		// function.
+		if contextEnded(ctx, err) || errors.Is(err, ErrEncode) {
+			return nil, nil, err
 		}
 
-		return nil, fmt.Errorf("%w: %w", ErrEncode, err)
+		return nil, nil, fmt.Errorf("%w: %w", ErrEncode, err)
 	}
 
 	// The comments go on after the quoting, which can replace a node.
 	err = setComments(node, comments)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	b, err := render(node)
-	if err != nil {
-		return nil, err
-	}
+	return render(node), node, nil
+}
 
+// write writes text, the text of a document that [Encoder.build]
+// returned, to the writer of e. Every document after the first starts with
+// a "---" separator. It keeps the error of a refused write, so it returns
+// an error that matches [ErrWrite].
+func (e *Encoder) write(text []byte) error {
 	if e.written {
-		b = append([]byte("---\n"), b...)
+		text = append([]byte("---\n"), text...)
 	}
 
-	_, err = e.w.Write(b)
+	_, err := e.w.Write(text)
 	if err != nil {
 		e.err = err
 
-		return nil, e.writeErr()
+		return e.writeErr()
 	}
 
 	e.written = true
 
-	return node, nil
+	return nil
 }
 
 // node returns the node of v that the encoder prints, quoted and laid out
@@ -648,14 +654,17 @@ func (d *docEncoder) node(ctx context.Context, v any) (ast.Node, error) {
 
 // marshalText returns the YAML text of v, the value that the function of
 // a [CustomMarshaler] returns, as the encoder prints it without comments.
-// Go-yaml's encoder reads that text as the YAML of a marshaler.
+// Go-yaml's encoder calls marshalText and reads that text as the YAML of a
+// marshaler. A panic in the encode of v unwinds through go-yaml's encoder
+// to the caller of the encode, such as the guard of [Encoder.Encode],
+// because marshalText does not recover it.
 func (d *docEncoder) marshalText(ctx context.Context, v any) ([]byte, error) {
 	node, err := d.node(ctx, v)
 	if err != nil {
 		return nil, err
 	}
 
-	return render(node)
+	return render(node), nil
 }
 
 // Marshal returns v as one YAML document that ends in a line break. The
@@ -683,7 +692,16 @@ func init() {
 
 		var buf bytes.Buffer
 
-		node, err := New(&buf, o...).encode(ctx, v, nil)
+		enc := New(&buf, o...)
+
+		// The build runs without the guard of Encode, so a panic in it
+		// reaches the edit package, which names its cause.
+		text, node, err := enc.build(ctx, v, nil)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		err = enc.write(text)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -705,18 +723,12 @@ func init() {
 	}
 }
 
-// render returns the YAML text of node, or a [*PanicError] when the
-// go-yaml printer panics on a node it cannot lay out. The PrintNode
-// method of that printer formats the node with fmt, which writes the panic
-// into the text instead.
-func render(node ast.Node) (_ []byte, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			err = &PanicError{Value: r, Stack: debug.Stack()}
-		}
-	}()
-
-	return []byte(node.String() + "\n"), nil
+// render returns the YAML text of node. A panic of the go-yaml printer on
+// a node that it cannot lay out reaches the caller. The PrintNode method of
+// that printer formats the node with fmt. Fmt writes the panic into the
+// text instead, so render calls the String method of node.
+func render(node ast.Node) []byte {
+	return []byte(node.String() + "\n")
 }
 
 // outdentRoot moves a block sequence at the root of a document to the

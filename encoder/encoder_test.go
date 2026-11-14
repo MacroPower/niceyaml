@@ -813,7 +813,8 @@ var (
 	errWrite = errors.New("disk full")
 	// The error that failingMarshaler returns.
 	errMarshal = errors.New("the marshaler fails")
-	// The error that TestPanicError gives a PanicError.
+	// The error that the marshalers and the writer of
+	// TestEncoder_Encode_panics panic with.
 	errPanic = errors.New("the marshaler panics")
 	// Every sentinel of the encoder package, so a test can check that an
 	// error matches no other sentinel than its own.
@@ -1413,27 +1414,268 @@ func TestEncoder_Encode_marshalerContextError(t *testing.T) {
 	assert.Nil(t, got)
 }
 
-func TestPanicError(t *testing.T) {
+// panicBytesYAML panics with "boom" in the MarshalYAML method of a
+// [yaml.BytesMarshaler].
+type panicBytesYAML struct{}
+
+func (panicBytesYAML) MarshalYAML() ([]byte, error) {
+	panic("boom")
+}
+
+// panicBytesYAMLContext panics with "boom" in the MarshalYAML method of
+// a [yaml.BytesMarshalerContext].
+type panicBytesYAMLContext struct{}
+
+func (panicBytesYAMLContext) MarshalYAML(context.Context) ([]byte, error) {
+	panic("boom")
+}
+
+// panicYAML panics with errPanic in the MarshalYAML method of a
+// [yaml.InterfaceMarshaler].
+type panicYAML struct{}
+
+func (panicYAML) MarshalYAML() (any, error) {
+	panic(errPanic)
+}
+
+// panicYAMLContext panics with errPanic in the MarshalYAML method of a
+// [yaml.InterfaceMarshalerContext].
+type panicYAMLContext struct{}
+
+func (panicYAMLContext) MarshalYAML(context.Context) (any, error) {
+	panic(errPanic)
+}
+
+// panicText panics with "boom" in its MarshalText method.
+type panicText struct{}
+
+func (panicText) MarshalText() ([]byte, error) {
+	panic("boom")
+}
+
+// panicJSON panics with errPanic in its MarshalJSON method.
+type panicJSON struct{}
+
+func (panicJSON) MarshalJSON() ([]byte, error) {
+	panic(errPanic)
+}
+
+// encodePanicYAML panics in its MarshalYAML method with the error of a
+// nested encode of a channel, which matches [encoder.ErrEncode].
+type encodePanicYAML struct{}
+
+func (encodePanicYAML) MarshalYAML(ctx context.Context) (any, error) {
+	_, err := encoder.Marshal(ctx, make(chan int))
+	panic(err)
+}
+
+// decodePanicYAML panics in its MarshalYAML method with an error that
+// matches [niceyaml.ErrDecode], as a marshaler does that panics with the
+// error of a decode.
+type decodePanicYAML struct{}
+
+func (decodePanicYAML) MarshalYAML() (any, error) {
+	panic(fmt.Errorf("read: %w", niceyaml.ErrDecode))
+}
+
+// syntaxPanicYAML panics in its MarshalYAML method with an error that
+// matches [niceyaml.ErrSyntax], as a marshaler does that panics with the
+// error of a parse.
+type syntaxPanicYAML struct{}
+
+func (syntaxPanicYAML) MarshalYAML() (any, error) {
+	panic(fmt.Errorf("parse: %w", niceyaml.ErrSyntax))
+}
+
+// heldPanicYAML returns an error that holds a [niceyaml.PanicError] from
+// its MarshalYAML method, as a marshaler does that runs a call that
+// recovered a panic.
+type heldPanicYAML struct{}
+
+func (heldPanicYAML) MarshalYAML() (any, error) {
+	return nil, fmt.Errorf("nested: %w", &niceyaml.PanicError{Value: "held", Stack: []byte("held stack")})
+}
+
+// funcInt is an int that tests write through a function of
+// [encoder.CustomMarshaler].
+type funcInt int
+
+// unexportedTags is an unexported named slice that [embedsUnexported]
+// embeds.
+type unexportedTags []string
+
+// embedsUnexported embeds an unexported named slice, on which go-yaml's
+// encoder panics.
+type embedsUnexported struct {
+	unexportedTags `yaml:"tags"` //nolint:unused // Only reflect reads the field.
+}
+
+const (
+	// The value that go-yaml's encoder panics with on an embedsUnexported.
+	unexportedPanic = "reflect.Value.Interface: cannot return value obtained from unexported field or method"
+	// The message of the error that encodePanicYAML panics with.
+	chanError = "value does not encode: unknown value type chan int"
+)
+
+// panicWriter panics with errPanic on every write.
+type panicWriter struct{}
+
+func (panicWriter) Write([]byte) (int, error) {
+	panic(errPanic)
+}
+
+// TestEncoder_Encode_panics checks that a panic fails the encode with an
+// error that holds a [niceyaml.PanicError]. The panic comes from a
+// marshaler of the value, from the encode of the value of a function of
+// [encoder.CustomMarshaler], or from go-yaml's encoder. The encoder writes
+// nothing, and its next document is its first.
+func TestEncoder_Encode_panics(t *testing.T) {
 	t.Parallel()
 
+	// Under the options that withFunc returns, an encode writes each
+	// funcInt through fn.
+	withFunc := func(fn func(context.Context, funcInt) (any, error)) []encoder.Option {
+		return []encoder.Option{encoder.WithMarshalers(encoder.CustomMarshaler(fn))}
+	}
+
 	tcs := map[string]struct {
-		value any
-		msg   string
-		// Holds the error that Unwrap returns.
-		unwrap error
+		input any
+		opts  []encoder.Option
+		want  string
+		// Holds the value of the PanicError that the error holds, as
+		// fmt.Sprint formats it.
+		panicked string
+		// Holds the errors that the error matches. The error matches no
+		// other sentinel of the encoder package.
+		errs []error
+		// Holds the errors that the value of the panic matches and the
+		// error does not.
+		refused []error
+		// Reports whether the context of the call ended before the call.
+		canceled bool
+		// Reports whether the writer panics, which the call does not
+		// recover.
+		writerPanics bool
 	}{
-		"string": {
-			value: "boom",
-			msg:   "printer panicked: boom",
+		"MarshalYAML method of a BytesMarshaler": {
+			input:    panicBytesYAML{},
+			want:     "encoder panicked: boom",
+			panicked: "boom",
 		},
-		"error": {
-			value:  errPanic,
-			msg:    "printer panicked: the marshaler panics",
-			unwrap: errPanic,
+		"MarshalYAML method of a BytesMarshalerContext": {
+			input:    []any{panicBytesYAMLContext{}},
+			want:     "encoder panicked: boom",
+			panicked: "boom",
 		},
-		"nil": {
-			value: nil,
-			msg:   "printer panicked: <nil>",
+		"MarshalYAML method of an InterfaceMarshaler": {
+			input:    map[string]any{"k": panicYAML{}},
+			want:     "encoder panicked: the marshaler panics",
+			panicked: "the marshaler panics",
+			errs:     []error{errPanic},
+		},
+		"MarshalYAML method of an InterfaceMarshalerContext of a map key": {
+			input:    map[panicYAMLContext]int{{}: 1},
+			want:     "encoder panicked: the marshaler panics",
+			panicked: "the marshaler panics",
+			errs:     []error{errPanic},
+		},
+		"MarshalText method": {
+			input:    panicText{},
+			want:     "encoder panicked: boom",
+			panicked: "boom",
+		},
+		"MarshalText method of a map key": {
+			input:    map[panicText]int{{}: 1},
+			want:     "encoder panicked: boom",
+			panicked: "boom",
+		},
+		"MarshalJSON method": {
+			input:    map[string]any{"k": panicJSON{}},
+			opts:     []encoder.Option{encoder.WithMarshalers(encoder.JSONMarshalers(true))},
+			want:     "encoder panicked: the marshaler panics",
+			panicked: "the marshaler panics",
+			errs:     []error{errPanic},
+		},
+		"MarshalJSON method of a map key": {
+			input:    map[panicJSON]int{{}: 1},
+			opts:     []encoder.Option{encoder.WithMarshalers(encoder.JSONMarshalers(true))},
+			want:     "encoder panicked: the marshaler panics",
+			panicked: "the marshaler panics",
+			errs:     []error{errPanic},
+		},
+		"function of CustomMarshaler": {
+			input:    funcInt(1),
+			opts:     withFunc(func(context.Context, funcInt) (any, error) { panic("boom") }),
+			want:     "encoder panicked: boom",
+			panicked: "boom",
+		},
+		"function of CustomMarshaler of a map key": {
+			input:    map[funcInt]int{1: 1},
+			opts:     withFunc(func(context.Context, funcInt) (any, error) { panic(errPanic) }),
+			want:     "encoder panicked: the marshaler panics",
+			panicked: "the marshaler panics",
+			errs:     []error{errPanic},
+		},
+		"value of a function of CustomMarshaler": {
+			input:    []funcInt{1},
+			opts:     withFunc(func(context.Context, funcInt) (any, error) { return panicYAML{}, nil }),
+			want:     "encoder panicked: the marshaler panics",
+			panicked: "the marshaler panics",
+			errs:     []error{errPanic},
+		},
+		"value of a function of CustomMarshaler of a map key": {
+			input:    map[funcInt]int{1: 1},
+			opts:     withFunc(func(context.Context, funcInt) (any, error) { return panicText{}, nil }),
+			want:     "encoder panicked: boom",
+			panicked: "boom",
+		},
+		"unexported embedded named slice": {
+			input:    embedsUnexported{unexportedTags{"a"}},
+			want:     "encoder panicked: " + unexportedPanic,
+			panicked: unexportedPanic,
+		},
+		// The error matches what the value of the panic matches.
+		"MarshalYAML method that panics with an encode error": {
+			input:    map[string]any{"k": encodePanicYAML{}},
+			want:     "encoder panicked: " + chanError,
+			panicked: chanError,
+			errs:     []error{encoder.ErrEncode},
+		},
+		// The error matches none of the decode and syntax sentinels of
+		// niceyaml.
+		"MarshalYAML method that panics with a decode error": {
+			input:    decodePanicYAML{},
+			want:     "encoder panicked: read: value does not decode",
+			panicked: "read: value does not decode",
+			refused:  []error{niceyaml.ErrDecode},
+		},
+		"MarshalYAML method that panics with a syntax error": {
+			input:    syntaxPanicYAML{},
+			want:     "encoder panicked: parse: invalid YAML syntax",
+			panicked: "parse: invalid YAML syntax",
+			refused:  []error{niceyaml.ErrSyntax},
+		},
+		// The guard returns the panic as it is, without the error of the
+		// context.
+		"MarshalYAML method after the context ended": {
+			input:    map[string]any{"k": panicYAML{}},
+			want:     "encoder panicked: the marshaler panics",
+			panicked: "the marshaler panics",
+			errs:     []error{errPanic},
+			canceled: true,
+		},
+		// A returned error fails the encode with ErrEncode, whatever it
+		// holds.
+		"MarshalYAML method that returns an error that holds a PanicError": {
+			input:    heldPanicYAML{},
+			want:     "value does not encode: nested: panic: held",
+			panicked: "held",
+			errs:     []error{encoder.ErrEncode},
+		},
+		// The panic of the writer reaches the caller.
+		"writer that panics": {
+			input:        map[string]int{"a": 1},
+			writerPanics: true,
 		},
 	}
 
@@ -1441,18 +1683,66 @@ func TestPanicError(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := &encoder.PanicError{Value: tc.value}
-			require.EqualError(t, err, tc.msg)
-			require.Equal(
-				t,
-				tc.unwrap,
-				err.Unwrap(),
-			) //nolint:testifylint // Unwrap returns a value to compare, not a result to check.
-			requireOnly(t, err)
+			if tc.writerPanics {
+				require.PanicsWithValue(t, errPanic, func() {
+					//nolint:errcheck // The call panics before it returns.
+					_ = encoder.New(panicWriter{}).Encode(t.Context(), tc.input, tc.opts...)
+				})
 
-			if tc.unwrap != nil {
-				require.ErrorIs(t, err, tc.unwrap)
+				return
 			}
+
+			ctx := t.Context()
+
+			if tc.canceled {
+				var cancel context.CancelFunc
+
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			}
+
+			check := func(err error) {
+				t.Helper()
+
+				require.EqualError(t, err, tc.want)
+				requireOnly(t, err, tc.errs...)
+
+				for _, target := range tc.errs {
+					require.ErrorIs(t, err, target)
+				}
+
+				assert.False(t, niceyaml.IsInvalid(err))
+
+				p, ok := errors.AsType[*niceyaml.PanicError](err)
+				require.True(t, ok)
+				assert.Equal(t, tc.panicked, fmt.Sprint(p.Value))
+				assert.NotEmpty(t, p.Stack)
+
+				for _, target := range tc.refused {
+					require.ErrorIs(t, p, target)
+					require.NotErrorIs(t, err, target)
+				}
+			}
+
+			var (
+				buf bytes.Buffer
+				err error
+			)
+
+			enc := encoder.New(&buf)
+
+			require.NotPanics(t, func() { err = enc.Encode(ctx, tc.input, tc.opts...) })
+			check(err)
+			assert.Empty(t, buf.String())
+
+			require.NoError(t, enc.Encode(t.Context(), map[string]int{"a": 1}))
+			assert.Equal(t, "a: 1\n", buf.String(), "the next document is the first")
+
+			var got []byte
+
+			require.NotPanics(t, func() { got, err = encoder.Marshal(ctx, tc.input, tc.opts...) })
+			check(err)
+			assert.Nil(t, got)
 		})
 	}
 }

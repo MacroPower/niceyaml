@@ -76,10 +76,19 @@
 // a value that encodes to no node. A comment that the encoder cannot
 // place matches [ErrComment], and a write that the writer refused matches
 // [ErrWrite]. The error of go-yaml or of the writer stays in the chain
-// under the sentinel. A [*PanicError] matches no sentinel, and neither
-// does the error of the context of the call after that context ended:
+// under the sentinel. The error of the context of the call matches no
+// sentinel after that context ended.
+//
+// A panic in a marshaler, in go-yaml's encoder, or in go-yaml's printer
+// fails the encode with an error that holds a
+// [*go.jacobcolvin.com/niceyaml.PanicError]. That error matches what the
+// value of the panic matches, except the decode and syntax sentinels of
+// the niceyaml package. A caller thus tests for the PanicError before the
+// sentinels:
 //
 //	switch {
+//	case errors.As(err, new(*niceyaml.PanicError)):
+//		// Code panicked, and the value is not at fault.
 //	case errors.Is(err, encoder.ErrWrite):
 //		// The writer refused the document.
 //	case errors.Is(err, encoder.ErrComment):

@@ -71,11 +71,14 @@ func (m Marshaler) applyTo(o *marshaler.Options) {
 // writes a duration. Those rules are the rules of go-yaml's encoder.
 //
 // The function gets the context of the encode. An error that fn returns
-// fails the encode, and the error matches [ErrEncode]. The encoder writes
-// the value that fn returns as text and places that text as it places the
-// YAML that a marshaler returns, as [Encoder.Encode] describes. A value of
-// type T or *T from fn fails the encode, because the encoder writes such a
-// value through fn again, without end.
+// fails the encode, and the error matches [ErrEncode]. For a map key,
+// go-yaml's encoder drops such an error and writes the key as [fmt.Sprint]
+// formats it. A panic in fn fails the encode, also for a map key, as
+// [Encoder.Encode] describes. The encoder writes the value that fn returns
+// as text and places that text as it places the YAML that a marshaler
+// returns, as [Encoder.Encode] describes. A value of type T or *T from fn
+// fails the encode, because the encoder writes such a value through fn
+// again, without end.
 //
 // The encoder writes each value of fn as text and parses that text again.
 // A value of fn that holds further values of functions thus goes through
