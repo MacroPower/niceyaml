@@ -1715,6 +1715,31 @@ func TestNode_Move_Placement(t *testing.T) {
 			err:    "could not find multi-line content",
 			engine: true,
 		},
+		"block scalar with keep chomping without text after a key": {
+			// Go-yaml's parser refuses any line after such a scalar.
+			before: stringtest.LinesLF("a: 1", "b: 1", "x: |+"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("y"),
+			opts:   []edit.SetOption{edit.After("a")},
+			err:    "could not find multi-line content",
+			engine: true,
+		},
+		"block scalar with keep chomping without text to a new key at the end": {
+			// A control: no line follows the scalar.
+			before: stringtest.LinesLF("x: |+"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("y"),
+			want:   stringtest.LinesLF(`"y": |+`),
+		},
+		"block scalar with keep chomping with text after a key before a blank line and a comment line": {
+			// A control: go-yaml's parser reads a line after a scalar with
+			// keep chomping that holds text.
+			before: stringtest.LinesLF("a: 1", "", "# c", "b: 1", "x: |+", "  t"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("y"),
+			opts:   []edit.SetOption{edit.After("a")},
+			want:   stringtest.LinesLF("a: 1", `"y": |+`, "  t", "# c", "b: 1"),
+		},
 		"block scalar without text after a key before a blank line with spaces": {
 			before: stringtest.LinesLF("a: 1", "   ", "b: 1", "x: |"),
 			path:   paths.Doc().Child("x"),

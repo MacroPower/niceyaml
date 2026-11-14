@@ -247,6 +247,31 @@ func TestNode_Set(t *testing.T) {
 			value:  1,
 			err:    "test.yaml:1:4: $.a: cafe.jacobcolvin.com/v1 adds lines after this block scalar, which ends the text without a line break, so it changes the string of the scalar, when it sets $.b",
 		},
+		"new key after a block scalar with keep chomping without text": {
+			// Go-yaml's parser refuses any line after such a scalar.
+			before: stringtest.LinesLF("a: 1", "x: |+"),
+			path:   paths.Doc().Child("z"),
+			value:  1,
+			err:    "could not find multi-line content",
+			engine: true,
+		},
+		"new key after a block scalar with keep chomping that holds an empty line alone": {
+			// In a text with "\n" line breaks, go-yaml's parser refuses a key
+			// after such a scalar.
+			before: stringtest.LinesLF("a: 1", "x: |+", ""),
+			path:   paths.Doc().Child("z"),
+			value:  1,
+			err:    "could not find multi-line content",
+			engine: true,
+		},
+		"new key after a block scalar with keep chomping that holds an empty line alone, with CRLF": {
+			// A control: go-yaml's parser reads a key after such a scalar in
+			// a text with "\r\n" line breaks.
+			before: stringtest.LinesCRLF("a: 1", "x: |+", ""),
+			path:   paths.Doc().Child("z"),
+			value:  1,
+			want:   stringtest.LinesCRLF("a: 1", "x: |+", "", "z: 1"),
+		},
 		"literal scalar with \"\\r\\n\" lines that a marshaler writes": {
 			// The encoder of go-yaml writes the header with a "\n" and keeps
 			// the "\r\n" lines, so the Set fails loudly.
@@ -4440,6 +4465,14 @@ func TestNode_Insert(t *testing.T) {
 			path:   paths.Doc().Child("s").Index(0),
 			value:  "\x01",
 			err:    "go-yaml's encoder writes U+0001",
+			engine: true,
+		},
+		"item past a block scalar with keep chomping without text": {
+			// Go-yaml's parser refuses any line after such a scalar.
+			before: stringtest.LinesLF("s:", "- |+"),
+			path:   paths.Doc().Child("s").Index(1),
+			value:  1,
+			err:    "could not find multi-line content",
 			engine: true,
 		},
 		"block scalar without text from a marshaler past the last item before a blank line and a comment line": {

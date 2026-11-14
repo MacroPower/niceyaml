@@ -888,8 +888,13 @@
 // not read it writes the line empty. The parser refuses a file that ends
 // with an empty line after a block scalar with an indentation indicator,
 // as in "|+2". It also refuses such a file whose last line holds spaces
-// alone without a line break. A call that leaves such a file fails with
-// [ErrEngine], and the error names go-yaml's parser.
+// alone without a line break. It refuses a key, item, or comment line
+// after a block scalar with keep chomping that holds no line, as in
+// "x: |+\nb: 1\n". In a text with "\n" line breaks, it also refuses such a
+// line after one that holds empty lines alone, as in "x: |+\n\nb: 1\n".
+// So [New] refuses a document with such a line. A call that leaves such a
+// file or writes such a line fails with [ErrEngine], and the error names
+// go-yaml's parser.
 //
 // At the end of a file without a final newline, a block scalar that a call
 // writes keeps the line break that ends its string, so the file gains a
