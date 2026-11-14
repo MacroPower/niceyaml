@@ -198,11 +198,6 @@ func (n *Node) setHeadComment(lines []string, named string) error {
 		first = d.blockRegion(owner).first
 	}
 
-	if d.emptyScalarAbove(first) {
-		return d.fail(n, "%s %s, whose comment lines go after the blank lines of a block scalar without text, "+
-			"and go-yaml's parser refuses a comment line there", d.subject(), named)
-	}
-
 	brk := d.breakBefore(first)
 	pad := strings.Repeat(" ", d.column(start))
 
@@ -212,7 +207,18 @@ func (n *Node) setHeadComment(lines []string, named string) error {
 		text.WriteString(pad + commentLine(l) + brk)
 	}
 
-	return n.writeComment(owner, named, d.lineStart(first), d.lineStart(keyLine), text.String())
+	err = n.writeComment(owner, named, d.lineStart(first), d.lineStart(keyLine), text.String())
+
+	switch {
+	case strandedWrite(err):
+		return d.fail(n, "%s %s, whose comment lines go after the blank lines of a block scalar without text, "+
+			"and go-yaml's parser refuses a comment line there", d.subject(), named)
+
+	case err != nil:
+		return d.bug(n, err)
+	}
+
+	return nil
 }
 
 // setLineComment writes text as the line comment of the place of n, as
@@ -274,14 +280,20 @@ func (n *Node) setLineComment(text, named string) error {
 	case text == "" && spot.bare:
 		// Go-yaml's lexer reads the tag before a line break, as it reads it
 		// before the comment, so the line break keeps the value.
-		return n.writeComment(owner, named, spot.at, spot.end, d.breakBefore(d.lineOf(spot.at)))
+		err = n.writeComment(owner, named, spot.at, spot.end, d.breakBefore(d.lineOf(spot.at)))
 	case text == "":
-		return n.writeComment(owner, named, spot.at, spot.end, "")
+		err = n.writeComment(owner, named, spot.at, spot.end, "")
 	case spot.comment >= 0:
-		return n.writeComment(owner, named, spot.comment, spot.end, commentLine(text))
+		err = n.writeComment(owner, named, spot.comment, spot.end, commentLine(text))
 	default:
-		return n.writeComment(owner, named, spot.at, spot.end, " "+commentLine(text))
+		err = n.writeComment(owner, named, spot.at, spot.end, " "+commentLine(text))
 	}
+
+	if err != nil {
+		return d.bug(n, err)
+	}
+
+	return nil
 }
 
 // commentPlace returns the place of n for a call that writes a comment of
@@ -386,6 +398,8 @@ func (n *Node) commentReach(p, owner *place, named string) error {
 
 // writeComment replaces the bytes [start, end) of the current text with
 // text, a comment of p that the call through n, which named names, writes.
+// It returns the error of the parse of the new text, as [Doc.apply] gives
+// it, and the caller binds that error.
 func (n *Node) writeComment(p *place, named string, start, end int, text string) error {
 	d := n.d
 
@@ -394,12 +408,7 @@ func (n *Node) writeComment(p *place, named string, start, end int, text string)
 	s := d.placeOfSite(p)
 	origin := d.addNote(note{detail: d.subject(), call: named, path: s.path, at: s.at, hasPath: true, located: true})
 
-	err := d.apply(edit{start: start, end: end, text: text, origins: written(text, origin)})
-	if err != nil {
-		return d.bug(n, err)
-	}
-
-	return nil
+	return d.apply(edit{start: start, end: end, text: text, origins: written(text, origin)})
 }
 
 // headOwner returns the place that owns the comment lines above p, an
@@ -443,38 +452,6 @@ func (d *Doc) itemPlace(p, item *place) *place {
 	item.path = d.textPath(item.value)
 
 	return item
-}
-
-// emptyScalarAbove reports whether one or more blank lines lie right above
-// line, below the header of a block scalar that holds no text. Go-yaml's
-// parser refuses a comment line in any column right after the blank lines
-// of such a scalar. It refuses "a: |", "", "# c", and "b: 1". A line of
-// spaces holds text when it has more spaces than the explicit indent of its
-// scalar. The scalar of "a: |1" and "  " holds text, so go-yaml accepts a
-// comment line after it.
-func (d *Doc) emptyScalarAbove(line int) bool {
-	above := line - 1
-	for above >= 0 && d.isBlankLine(above) {
-		above--
-	}
-
-	return above < line-1 && d.emptyScalarAt(above)
-}
-
-// emptyScalarAt reports whether line holds the header of a block scalar
-// that holds no text, as [Doc.emptyScalarAbove] reads it.
-func (d *Doc) emptyScalarAt(line int) bool {
-	if line < 0 {
-		return false
-	}
-
-	for _, lit := range d.literals() {
-		if hs, ok := d.tokenSpan(lit.Start); ok && d.lineOf(hs.start) == line {
-			return lit.Value == nil || lit.Value.Value == ""
-		}
-	}
-
-	return false
 }
 
 // headLines returns the text of each comment line above p that belongs to

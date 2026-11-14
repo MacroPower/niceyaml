@@ -481,6 +481,16 @@ func (e *placedError) Unwrap() error {
 	return e.err
 }
 
+// strandedWrite reports whether err, the error of a write, holds the mark
+// that [placedError] keeps. A parse of the text of the write sets that mark
+// when go-yaml's parser refuses a comment line right after the blank lines
+// of a block scalar without text.
+func strandedWrite(err error) bool {
+	placed, ok := errors.AsType[*placedError](err)
+
+	return ok && placed.stranded
+}
+
 var (
 	// The range of a site of a problem without a place in the user's text,
 	// which lies at no value.

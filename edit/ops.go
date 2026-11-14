@@ -845,7 +845,7 @@ func (n *Node) remove(opts ...RemoveOption) error {
 	}
 
 	switch {
-	case errors.Is(err, errStrandedComment):
+	case strandedWrite(err):
 		return d.strandedProblem(n, "removes "+n.path.String()+", after which a comment line goes")
 	case err != nil:
 		return d.bug(n, err)
@@ -1133,11 +1133,6 @@ func (d *Doc) removeBlock(p *place) error {
 	if d.count(p) > 1 || p.container == nil {
 		start, end := d.lineCut(r)
 		end, text := d.emptiedAfter(start, end)
-
-		if d.strandsComment(start, end) {
-			return errStrandedComment
-		}
-
 		cut := edit{start: start, end: end, text: text.text, origins: text.origins}
 
 		return d.apply(cut)
@@ -1248,42 +1243,6 @@ func (d *Doc) emptiedAfter(start, end int) (int, run) {
 	}
 
 	return d.lineEnd(spaced), text
-}
-
-// strandsComment reports whether a cut of the bytes [start, end) leaves a
-// comment line right after the blank lines of a block scalar without text,
-// as [Doc.emptyScalarAbove] describes them. Start starts a line. Go-yaml's
-// parser refuses the text after such a cut. The blank lines that
-// [Doc.emptiedAfter] writes in place of the bytes count as blank lines
-// below the cut.
-func (d *Doc) strandsComment(start, end int) bool {
-	if end >= len(d.cur) {
-		return false
-	}
-
-	first := d.lineOf(end)
-	below := first
-
-	for below < len(d.curLines) && d.lineStart(below) < len(d.cur) && d.isBlankLine(below) {
-		below++
-	}
-
-	if d.lineStart(below) >= len(d.cur) {
-		return false
-	}
-
-	if _, ok := d.commentColumn(below); !ok {
-		return false
-	}
-
-	line := d.lineOf(start)
-	above := line - 1
-
-	for above >= 0 && d.isBlankLine(above) {
-		above--
-	}
-
-	return (below > first || above < line-1) && d.emptyScalarAt(above)
 }
 
 // blankCut returns the lines of r with their line breaks, and the blank
@@ -1777,9 +1736,8 @@ func (d *Doc) cutBefore(start, end int) edit {
 
 // strandedProblem returns the problem of the call through h whose edit
 // leaves a comment line right after the blank lines of a block scalar
-// without text. Go-yaml's parser refuses such a comment line.
-// [Doc.emptyScalarAbove] tells such blank lines before an edit, and
-// [Doc.bug] tells them from the refusal of the parser after one. Step
+// without text. Go-yaml's parser refuses such a comment line, so the
+// write of the edit fails, and [strandedWrite] tells that failure. Step
 // names the call and the edit up to the place of that comment line, as in
 // "removes $.a, after which a comment line goes". The layout of the
 // document decides the problem, so the document is at fault for it. The
@@ -1805,8 +1763,7 @@ func (d *Doc) strandedProblem(h *Node, step string) error {
 // document then decides the problem, so bug returns the problem that
 // [Doc.strandedProblem] gives in place of a bug.
 func (d *Doc) bug(h *Node, err error) error {
-	placed, ok := errors.AsType[*placedError](err)
-	if ok && placed.stranded && d.callNamed != "" {
+	if strandedWrite(err) && d.callNamed != "" {
 		return d.strandedProblem(h, d.callNamed+", after which a comment line goes")
 	}
 

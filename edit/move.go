@@ -2,7 +2,6 @@ package edit
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -612,7 +611,7 @@ func (d *Doc) removeMoved(n *Node, p *place, named string) error {
 	err := d.removePlace(p)
 
 	switch {
-	case errors.Is(err, errStrandedComment):
+	case strandedWrite(err):
 		step := fmt.Sprintf("%s, and taking %s from its place leaves a comment line", named, n.path)
 
 		return d.strandedProblem(n, step)

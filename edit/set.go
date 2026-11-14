@@ -2683,20 +2683,15 @@ func (d *Doc) insertPayload(
 // collection, above the comment lines that belong to p. When p starts on
 // the line of the "-" of the item that holds it, the first line of lines
 // takes that place. Then p goes on the line after them at its column.
-// Lines that start with a comment line, as the comment lines that a Move
-// carries, cannot go right after the blank lines of a block scalar without
-// text, as [Doc.emptyScalarAbove] tells. The insert then fails, as
-// [Doc.strandedProblem] describes.
+// Go-yaml's parser refuses lines that start with a comment line, as the
+// comment lines that a Move carries, right after the blank lines of a
+// block scalar without text. The insert then fails with the problem that
+// [Doc.bug] gives for such a refusal.
 func (d *Doc) insertBefore(h *Node, p *place, lines run, brk string, origin int) error {
 	text := appendRun(lines, newRun(brk, origin))
 
 	if !d.sharesLine(p) {
-		first := d.blockRegion(p).first
-		if strings.HasPrefix(strings.TrimLeft(text.text, " \t"), "#") && d.emptyScalarAbove(first) {
-			return d.strandedProblem(h, d.callNamed+", after which a comment line goes")
-		}
-
-		at := d.lineStart(first)
+		at := d.lineStart(d.blockRegion(p).first)
 
 		return d.applyEdit(h, edit{start: at, end: at, text: text.text, origins: text.origins})
 	}
