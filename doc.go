@@ -1220,9 +1220,9 @@
 // struct from zero, the decode decodes the struct again from its defaults
 // first, so the unmarshalers inside it run a second time. The decode takes
 // such fields from the second decode. The fields whose entries the document
-// writes, other than those held inline or inside an inline struct, build from
-// what the decoder first gave them, as they do without the merge key. An
-// unmarshaler inside such a field can run one more time.
+// writes build from what the decoder first gave them, as they do without the
+// merge key. An unmarshaler inside such a field can run one more time. The
+// fields of an inline struct that does not decode itself follow the same rule.
 //
 // Each key of a map keeps the value that the decoder gives it. A panic in a
 // function of TypeDefaults makes the decode return an error that holds a

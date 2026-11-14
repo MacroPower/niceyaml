@@ -74,10 +74,14 @@ type Starts struct {
 //     decoder did not start the struct from its start, the struct decodes
 //     again from its start first, so each such field starts from the value
 //     the start holds. Fill takes such fields from the second decode. The
-//     fields whose entries the document writes, other than those held
-//     inline or inside an inline struct, build from what the decoder first
-//     gave them, as they do without the merge key. An unmarshaler inside
-//     such a field can run one more time.
+//     fields whose entries the document writes build from what the decoder
+//     first gave them, as they do without the merge key. An unmarshaler
+//     inside such a field can run one more time. The fields of an inline
+//     struct whose type does not decode itself follow the same rule, alone
+//     or behind a pointer. An inline map whose type does not decode itself
+//     builds from the map that the decoder first gave it, as
+//     [filler.inlineFirst] describes. Fill takes each other field held
+//     inline from the second decode.
 //   - A value that [unmarshaler.Options.Whole] reports as decoding itself
 //     decodes again from its start when the decoder did not start it
 //     there. Its method then sees the start.
@@ -119,9 +123,10 @@ type filler struct {
 	// Whether a value of each type reaches a type that starts from a
 	// value other than zero.
 	reach map[reflect.Type]bool
-	// Whether the fill is inside a field held inline that [filler.fields]
-	// takes from a second decode of its struct. The memo then keys each
-	// place by its type and its node alone, as [filler.keyOf] describes.
+	// Whether the fill is inside a field held inline that
+	// [filler.inlineAgain] takes from a second decode of its struct. The
+	// memo then keys each place by its type and its node alone, as
+	// [filler.keyOf] describes.
 	second bool
 }
 
@@ -743,8 +748,10 @@ func (f *filler) readsReferenceField(t reflect.Type, mapping *ast.MappingNode) b
 // for a `<<` merge key of a reference document. It is not valid when the
 // struct did not decode again. A named field whose entry the document
 // writes builds from decoded, as it does in a struct without such a merge
-// key. Each other field that the decode writes builds from again when
-// again is valid, as from a value that the decoder started from start.
+// key. A field held inline goes to [filler.inline] with its values in both
+// decodes, and [filler.inline] picks the value that it builds from. Each
+// other field that the decode writes builds from again when again is
+// valid, as from a value that the decoder started from start.
 //
 // A struct held inline skips each field that hidden names, because the
 // struct that holds it names that field too.
@@ -756,9 +763,9 @@ func (f *filler) fields(
 	exact bool,
 	hidden map[string]bool,
 ) error {
-	whole, wholeExact := decoded, exact
+	whole := decoded
 	if again.IsValid() {
-		whole, wholeExact = again, true
+		whole = again
 	}
 
 	for i := range t.NumField() {
@@ -782,12 +789,13 @@ func (f *filler) fields(
 
 		switch {
 		case inline:
-			// Each value of a second decode is new, so the places inside
-			// such a field take the key of the mark.
-			second := f.second
-			f.second = second || again.IsValid()
-			v, err = f.inline(field.Type, t, mapping, merges, result.Field(i), whole.Field(i), wholeExact)
-			f.second = second
+			var held reflect.Value
+
+			if again.IsValid() {
+				held = again.Field(i)
+			}
+
+			v, err = f.inline(field.Type, t, mapping, merges, result.Field(i), decoded.Field(i), held, exact)
 
 		case hidden[name]:
 			continue
@@ -821,16 +829,29 @@ func (f *filler) fields(
 
 // inline returns the value, from start, of a field of type t that a
 // struct of type owner holds inline. The field reads mapping, the mapping
-// of owner.
+// of owner. The argument decoded is the value that the decoder gave the
+// field, and exact reports whether the decoder started it from start.
+//
+// The argument again is the field of a decode of owner from its start for
+// a `<<` merge key of a reference document, as [filler.fields] describes.
+// It is not valid when owner did not decode again. When it is valid and
+// [filler.inlineFirst] reports the field, the field builds from decoded.
+// A struct held inline then sets its fields from both values, as
+// [filler.fields] does for owner, and a pointer passes both targets to it.
+// Each other field takes again, as [filler.inlineAgain] describes.
 func (f *filler) inline(
 	t, owner reflect.Type,
 	mapping *ast.MappingNode,
 	merges bool,
-	start, decoded reflect.Value,
+	start, decoded, again reflect.Value,
 	exact bool,
 ) (reflect.Value, error) {
+	if again.IsValid() && !f.inlineFirst(t, decoded, again) {
+		return f.inlineAgain(t, owner, mapping, merges, start, again)
+	}
+
 	if t.Kind() == reflect.Pointer {
-		return f.inlinePointer(t, owner, mapping, merges, start, decoded, exact)
+		return f.inlinePointer(t, owner, mapping, merges, start, decoded, again, exact)
 	}
 
 	if _, whole := f.rules.Unmarshalers.Whole(t); whole {
@@ -842,7 +863,7 @@ func (f *filler) inline(
 		result := reflect.New(t).Elem()
 		result.Set(start)
 
-		err := f.fields(t, mapping, merges, result, decoded, reflect.Value{}, exact, renderNames(owner))
+		err := f.fields(t, mapping, merges, result, decoded, again, exact, renderNames(owner))
 		if err != nil {
 			return reflect.Value{}, err
 		}
@@ -861,12 +882,14 @@ func (f *filler) inline(
 // a struct of type owner holds inline, as [filler.inline] does. The
 // target is new, and it starts from the target of start, or from the
 // start of its type when start is nil. With exact set, the decoder started
-// a target from the target of start too.
+// a target from the target of start too. When again is valid, it is the
+// pointer of the second decode, and its target goes with the target of
+// decoded.
 func (f *filler) inlinePointer(
 	t, owner reflect.Type,
 	mapping *ast.MappingNode,
 	merges bool,
-	start, decoded reflect.Value,
+	start, decoded, again reflect.Value,
 	exact bool,
 ) (reflect.Value, error) {
 	if decoded.IsNil() {
@@ -886,7 +909,13 @@ func (f *filler) inlinePointer(
 		from.Elem().Set(v)
 	}
 
-	target, err := f.inline(base, owner, mapping, merges, from.Elem(), decoded.Elem(), exact && !start.IsNil())
+	var held reflect.Value
+
+	if again.IsValid() {
+		held = again.Elem()
+	}
+
+	target, err := f.inline(base, owner, mapping, merges, from.Elem(), decoded.Elem(), held, exact && !start.IsNil())
 	if err != nil {
 		return reflect.Value{}, err
 	}
@@ -895,6 +924,55 @@ func (f *filler) inlinePointer(
 	p.Elem().Set(target)
 
 	return p, nil
+}
+
+// inlineFirst reports whether a field of type t held inline builds from
+// decoded, the value that the decoder first gave it. The struct that holds
+// the field decodes again for a `<<` merge key of a reference document, and
+// again is the field of that second decode. Such a field is a struct or a
+// map whose type does not decode itself, or a pointer to such a struct
+// that both decodes set.
+//
+// The decoder starts each value of a map held inline from zero in both
+// decodes, and it drops the entries that the map started with. The map of
+// the first decode thus holds the entries that the merge key brings in.
+func (f *filler) inlineFirst(t reflect.Type, decoded, again reflect.Value) bool {
+	if t.Kind() == reflect.Pointer {
+		if decoded.IsNil() || again.IsNil() {
+			return false
+		}
+
+		t = unmarshaler.Base(t)
+		if t.Kind() != reflect.Struct {
+			return false
+		}
+	}
+
+	if _, whole := f.rules.Unmarshalers.Whole(t); whole {
+		return false
+	}
+
+	return t.Kind() == reflect.Struct || t.Kind() == reflect.Map
+}
+
+// inlineAgain returns the value, from start, of a field of type t that a
+// struct of type owner holds inline. The argument again is the field of a
+// decode of owner from its start. The field builds from again as from a
+// value that the decoder started from start. Each value of a second decode
+// is new, so the places inside the field take the key of the mark of
+// [filler.second].
+func (f *filler) inlineAgain(
+	t, owner reflect.Type,
+	mapping *ast.MappingNode,
+	merges bool,
+	start, again reflect.Value,
+) (reflect.Value, error) {
+	second := f.second
+	f.second = true
+	v, err := f.inline(t, owner, mapping, merges, start, again, reflect.Value{}, true)
+	f.second = second
+
+	return v, err
 }
 
 // mapOf returns the value of the map type t that a decode of mapping

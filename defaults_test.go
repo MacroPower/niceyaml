@@ -1317,8 +1317,8 @@ func TestNode_Decode_DefaultsOfFieldsBesideReferenceMerges(t *testing.T) {
 	// defaults decodes it again. Each named field that the document writes
 	// there takes the value that the same document without the merge key
 	// gives it. Each field that the merge key brings in takes the value of
-	// the second decode. So do each field that reads the anchor of the
-	// merge key and each field of an inline struct.
+	// the second decode, in the struct or in an inline struct. So does each
+	// field that reads the anchor of the merge key.
 	tcs := map[string]struct {
 		test  func(t *testing.T, doc *niceyaml.Node)
 		input string
@@ -1453,19 +1453,18 @@ func TestNode_Decode_DefaultsOfFieldsBesideReferenceMerges(t *testing.T) {
 				assert.Equal(t, "h", got.A[0].Host)
 			},
 		},
-		// The decode reads the aliases after the struct that merges the
-		// reference document, outside its field held inline.
+		// The fill takes the map held inline behind a pointer from the
+		// second decode. The decode reads the aliases after the struct that
+		// merges the reference document, outside that field.
 		"aliases after a field held inline beside a reference merge": {
 			input: "ws: [{<<: *bar, name: x}]\nx-c: &c {image: i}\nsvcs: [*c, *c]\n",
 			test: func(t *testing.T, doc *niceyaml.Node) {
 				t.Helper()
 
 				type with struct {
-					Extra struct {
-						Tag string `yaml:"tag"`
-					} `yaml:",inline"`
-					Host string `yaml:"host"`
-					Name string `yaml:"name"`
+					Extra *map[string]string `yaml:",inline"`
+					Host  string             `yaml:"host"`
+					Name  string             `yaml:"name"`
 				}
 
 				type svc struct {
@@ -1496,11 +1495,12 @@ func TestNode_Decode_DefaultsOfFieldsBesideReferenceMerges(t *testing.T) {
 					reflect.ValueOf(got.Svcs[1].Env).Pointer())
 			},
 		},
-		// The fill takes the field held inline from the second decode. There
-		// it records the value that it builds for the anchor without the walk
-		// that sorts the memory of the value. The aliases take that value, so
-		// the function runs for the two elements of the anchor alone.
-		"start inside an array inside a field held inline beside a reference merge": {
+		// The fields of the struct held inline build from the values that
+		// the decoder first gave them. The anchor holds a start inside an
+		// array, so the fill records no value for it, and each alias builds
+		// a value of its own. The function thus runs for the two elements of
+		// each item, as it does without the merge key.
+		"start inside an array inside a struct held inline beside a reference merge": {
 			input: "ws: [{<<: *bar, name: w, items: [&a {arr: [{max: 1}, {}], name: x}, *a, *a]}]\n",
 			test: func(t *testing.T, doc *niceyaml.Node) {
 				t.Helper()
@@ -1540,18 +1540,549 @@ func TestNode_Decode_DefaultsOfFieldsBesideReferenceMerges(t *testing.T) {
 
 				assert.Equal(t, "h", got.Ws[0].Host)
 				assert.Equal(t, "x", got.Ws[0].Extra.Items[1].Name)
+				assert.Equal(t, 6, calls)
+			},
+		},
+		// The merge key brings in the field more, so the fill decodes the
+		// struct again. It takes the map held inline behind a pointer from
+		// that decode. There it records the value that it builds for the
+		// anchor without the walk that sorts the memory of the value. The
+		// aliases take that value, so the function runs for the two elements
+		// of the anchor alone.
+		"start inside an array inside a map held inline beside a reference merge": {
+			input: "ws: [{<<: *lst, items: [&a {arr: [{max: 1}, {}], name: x}, *a, *a]}]\n",
+			test: func(t *testing.T, doc *niceyaml.Node) {
+				t.Helper()
+
+				type tagged struct {
+					Labels map[string]string `yaml:"labels"`
+					Max    int               `yaml:"max"`
+				}
+
+				type flat struct {
+					Arr  [2]tagged `yaml:"arr"`
+					Name string    `yaml:"name"`
+				}
+
+				type with struct {
+					Extra *map[string][]flat `yaml:",inline"`
+					More  []flat             `yaml:"more"`
+				}
+
+				calls := 0
+
+				got, err := doc.Decode[struct {
+					Ws []with `yaml:"ws"`
+				}](t.Context(), niceyaml.OverrideTypeRules(
+					niceyaml.TypeDefaults(func(g *tagged) {
+						calls++
+						g.Labels = map[string]string{}
+					}),
+				))
+				require.NoError(t, err)
+				require.Len(t, got.Ws, 1)
+				require.NotNil(t, got.Ws[0].Extra)
+				require.Len(t, (*got.Ws[0].Extra)["items"], 3)
+				require.Len(t, got.Ws[0].More, 1)
+
+				assert.Equal(t, "m", got.Ws[0].More[0].Name)
+				assert.Equal(t, "x", (*got.Ws[0].Extra)["items"][1].Name)
 				assert.Equal(t, 2, calls)
 			},
 		},
 	}
 
-	refs := yamltest.References("bar: &bar {host: h}\nfix: &fix {fixed: {codes: [4]}}\n")
+	refs := yamltest.References(stringtest.LinesLF(
+		"bar: &bar {host: h}",
+		"fix: &fix {fixed: {codes: [4]}}",
+		"lst: &lst {more: [{name: m}]}",
+	))
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
 			tc.test(t, yamltest.FirstDocument(t, tc.input, refs))
+		})
+	}
+}
+
+func TestNode_Decode_DefaultsOfInlineFieldsBesideReferenceMerges(t *testing.T) {
+	t.Parallel()
+
+	type hook struct {
+		Codes []int `yaml:"codes"`
+		Max   int   `yaml:"max"`
+	}
+
+	type inl struct {
+		Any  any      `yaml:"any"`
+		Lead *hook    `yaml:"lead"`
+		Tags []string `yaml:"tags"`
+	}
+
+	hookDefaults := niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(h *hook) { h.Max = 3 }))
+
+	refs := yamltest.References(stringtest.LinesLF(
+		"n: &n {name: ref}",
+		"extra: &extra {more: {codes: [9]}}",
+		"lead: &lead {lead: {codes: [9]}}",
+		"num: &num {num: 4}",
+	))
+
+	read := func(t *testing.T, input string) *niceyaml.Node {
+		t.Helper()
+
+		return yamltest.FirstDocument(t, input, refs)
+	}
+
+	// Each struct in the list merges the reference document, so the fill of
+	// the defaults decodes it again. Each struct that decodes itself takes
+	// the second decode there, alone or behind a pointer. Each other struct
+	// or map held inline builds each value that the document writes from the
+	// value that the decoder first gave it. So does each pointer to such a
+	// struct.
+	tcs := map[string]struct {
+		test func(t *testing.T)
+	}{
+		"struct held inline": {
+			test: func(t *testing.T) {
+				t.Helper()
+
+				// The decoder reads the list before the place of the anchor
+				// that the alias reads, so it gives the alias a value of its
+				// own.
+				type box struct {
+					Inl  inl    `yaml:",inline"`
+					Name string `yaml:"name"`
+				}
+
+				doc := read(t, "late: &l {codes: [1]}\nboxes: [{<<: *n, any: *l}]\n")
+
+				for _, opts := range [][]niceyaml.DecodeOption{nil, {hookDefaults}} {
+					got, err := doc.Decode[struct {
+						Boxes []box `yaml:"boxes"`
+						Late  hook  `yaml:"late"`
+					}](t.Context(), opts...)
+					require.NoError(t, err)
+					require.Len(t, got.Boxes, 1)
+
+					assert.IsType(t, map[string]any{}, got.Boxes[0].Inl.Any)
+					assert.Equal(t, "ref", got.Boxes[0].Name)
+				}
+			},
+		},
+		"struct held inline inside a struct held inline": {
+			test: func(t *testing.T) {
+				t.Helper()
+
+				type mid struct {
+					Inner inl `yaml:",inline"`
+				}
+
+				type box struct {
+					Mid  mid    `yaml:",inline"`
+					Name string `yaml:"name"`
+				}
+
+				type boxes struct {
+					Boxes []box `yaml:"boxes"`
+					Late  hook  `yaml:"late"`
+				}
+
+				// The decoder reads the list before the place of the anchor
+				// that the alias reads, so it gives the alias a value of its
+				// own.
+				doc := read(t, "late: &l {codes: [1]}\nboxes: [{<<: *n, any: *l}]\n")
+
+				for _, opts := range [][]niceyaml.DecodeOption{nil, {hookDefaults}} {
+					got, err := doc.Decode[boxes](t.Context(), opts...)
+					require.NoError(t, err)
+					require.Len(t, got.Boxes, 1)
+
+					assert.IsType(t, map[string]any{}, got.Boxes[0].Mid.Inner.Any)
+					assert.Equal(t, "ref", got.Boxes[0].Name)
+				}
+
+				// The merge key brings in the lead, so the lead takes the
+				// second decode, which starts from the target that the
+				// function sets.
+				doc = read(t, "boxes: [{<<: *lead, any: 1}]\n")
+
+				got, err := doc.Decode[boxes](t.Context(), niceyaml.OverrideTypeRules(
+					niceyaml.TypeDefaults(func(b *box) { b.Mid.Inner.Lead = &hook{Max: 7} }),
+				))
+				require.NoError(t, err)
+				require.Len(t, got.Boxes, 1)
+
+				assert.Equal(t, uint64(1), got.Boxes[0].Mid.Inner.Any)
+				assert.Equal(t, &hook{Codes: []int{9}, Max: 7}, got.Boxes[0].Mid.Inner.Lead)
+			},
+		},
+		"field of a struct held inline that the box names too": {
+			test: func(t *testing.T) {
+				t.Helper()
+
+				// The decoder sets the field to zero because the box names it
+				// too, and the fill keeps its start.
+				type named struct {
+					Name string `yaml:"name"`
+					Host string `yaml:"host"`
+				}
+
+				type box struct {
+					Inl  named  `yaml:",inline"`
+					Name string `yaml:"name"`
+				}
+
+				type pbox struct {
+					Inl  *named `yaml:",inline"`
+					Name string `yaml:"name"`
+				}
+
+				doc := read(t, "boxes: [{<<: *n}]\n")
+
+				got, err := doc.Decode[struct {
+					Boxes []box `yaml:"boxes"`
+				}](t.Context(), niceyaml.OverrideTypeRules(
+					niceyaml.TypeDefaults(func(b *box) { b.Inl.Name = "keep" }),
+				))
+				require.NoError(t, err)
+				require.Len(t, got.Boxes, 1)
+
+				assert.Equal(t, "keep", got.Boxes[0].Inl.Name)
+				assert.Equal(t, "ref", got.Boxes[0].Name)
+
+				pgot, err := doc.Decode[struct {
+					Boxes []pbox `yaml:"boxes"`
+				}](t.Context(), niceyaml.OverrideTypeRules(
+					niceyaml.TypeDefaults(func(b *pbox) { b.Inl = &named{Name: "keep"} }),
+				))
+				require.NoError(t, err)
+				require.Len(t, pgot.Boxes, 1)
+				require.NotNil(t, pgot.Boxes[0].Inl)
+
+				assert.Equal(t, "keep", pgot.Boxes[0].Inl.Name)
+				assert.Equal(t, "ref", pgot.Boxes[0].Name)
+			},
+		},
+		"field that decodes itself inside a struct held inline": {
+			test: func(t *testing.T) {
+				t.Helper()
+
+				// The document writes the field, so the field builds from the
+				// value that the decoder first gave it. The decoder started
+				// that value from zero, so the field decodes again from its
+				// defaults, as it does without the merge key.
+				type selfInl struct {
+					Self defaultsCounted `yaml:"self"`
+				}
+
+				type box struct {
+					Inl  selfInl `yaml:",inline"`
+					Name string  `yaml:"name"`
+				}
+
+				doc := read(t, "boxes: [{<<: *n, self: x}]\n")
+
+				got, err := doc.Decode[struct {
+					Boxes []box `yaml:"boxes"`
+				}](t.Context(), niceyaml.OverrideTypeRules(
+					niceyaml.TypeDefaults(func(c *defaultsCounted) { c.Port = 5 }),
+				))
+				require.NoError(t, err)
+				require.Len(t, got.Boxes, 1)
+
+				assert.Equal(t, "x", got.Boxes[0].Inl.Self.Name)
+				assert.Equal(t, 5, got.Boxes[0].Inl.Self.Port)
+				assert.Equal(t, "ref", got.Boxes[0].Name)
+			},
+		},
+		"field that decodes itself inside a pointer to a struct held inline": {
+			test: func(t *testing.T) {
+				t.Helper()
+
+				// The document writes the field, so the field builds from the
+				// value that the decoder first gave it. The decoder started
+				// that value from zero, so the field decodes again from the
+				// target that the function sets.
+				type selfInl struct {
+					Self defaultsCounted `yaml:"self"`
+				}
+
+				type box struct {
+					Inl  *selfInl `yaml:",inline"`
+					Name string   `yaml:"name"`
+				}
+
+				doc := read(t, "boxes: [{<<: *n, self: x}]\n")
+
+				boxDefaults := niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(b *box) {
+					b.Inl = &selfInl{Self: defaultsCounted{Port: 5}}
+				}))
+
+				for _, decode := range []struct {
+					opts []niceyaml.DecodeOption
+					port int
+				}{
+					{},
+					{opts: []niceyaml.DecodeOption{boxDefaults}, port: 5},
+				} {
+					got, err := doc.Decode[struct {
+						Boxes []box `yaml:"boxes"`
+					}](t.Context(), decode.opts...)
+					require.NoError(t, err)
+					require.Len(t, got.Boxes, 1)
+					require.NotNil(t, got.Boxes[0].Inl)
+
+					assert.Equal(t, "x", got.Boxes[0].Inl.Self.Name)
+					assert.Equal(t, decode.port, got.Boxes[0].Inl.Self.Port)
+					assert.Equal(t, "ref", got.Boxes[0].Name)
+				}
+			},
+		},
+		"pointer to a struct held inline": {
+			test: func(t *testing.T) {
+				t.Helper()
+
+				// The decoder reads the list before the place of the anchor
+				// that each alias reads, so it gives each alias a value of
+				// its own.
+				type box struct {
+					Inl  *inl   `yaml:",inline"`
+					Name string `yaml:"name"`
+				}
+
+				type boxes struct {
+					Boxes []box `yaml:"boxes"`
+					Late  hook  `yaml:"late"`
+				}
+
+				doc := read(t, "late: &l {codes: [1]}\nboxes: [{<<: *n, any: *l}]\n")
+
+				for _, opts := range [][]niceyaml.DecodeOption{nil, {hookDefaults}} {
+					got, err := doc.Decode[boxes](t.Context(), opts...)
+					require.NoError(t, err)
+					require.Len(t, got.Boxes, 1)
+					require.NotNil(t, got.Boxes[0].Inl)
+
+					assert.IsType(t, map[string]any{}, got.Boxes[0].Inl.Any)
+					assert.Equal(t, "ref", got.Boxes[0].Name)
+				}
+
+				// The fill keeps the values of the two aliases apart.
+				doc = read(t, "late: &l {codes: [1]}\nboxes: [{<<: *n, lead: *l}, {<<: *n, lead: *l}]\n")
+
+				for _, opts := range [][]niceyaml.DecodeOption{nil, {hookDefaults}} {
+					got, err := doc.Decode[boxes](t.Context(), opts...)
+					require.NoError(t, err)
+					require.Len(t, got.Boxes, 2)
+					require.NotNil(t, got.Boxes[0].Inl)
+					require.NotNil(t, got.Boxes[1].Inl)
+					require.NotNil(t, got.Boxes[0].Inl.Lead)
+					require.NotNil(t, got.Boxes[1].Inl.Lead)
+
+					assert.Equal(t, []int{1}, got.Boxes[0].Inl.Lead.Codes)
+					assert.Equal(t, []int{1}, got.Boxes[1].Inl.Lead.Codes)
+					assert.NotEqual(t,
+						reflect.ValueOf(got.Boxes[0].Inl.Lead.Codes).Pointer(),
+						reflect.ValueOf(got.Boxes[1].Inl.Lead.Codes).Pointer())
+				}
+
+				// The target of the lead starts from the defaults of its type.
+				doc = read(t, "late: &l {codes: [1]}\nboxes: [{<<: *n, any: *l, lead: {codes: [2]}}]\n")
+
+				got, err := doc.Decode[boxes](t.Context(), hookDefaults)
+				require.NoError(t, err)
+				require.Len(t, got.Boxes, 1)
+				require.NotNil(t, got.Boxes[0].Inl)
+
+				assert.IsType(t, map[string]any{}, got.Boxes[0].Inl.Any)
+				assert.Equal(t, &hook{Codes: []int{2}, Max: 3}, got.Boxes[0].Inl.Lead)
+
+				// The merge key brings in the lead, so the lead takes the
+				// second decode, which starts from the target that the
+				// function sets.
+				doc = read(t, "boxes: [{<<: *lead, any: 1}]\n")
+
+				got, err = doc.Decode[boxes](t.Context(), niceyaml.OverrideTypeRules(
+					niceyaml.TypeDefaults(func(b *box) { b.Inl = &inl{Lead: &hook{Max: 7}} }),
+				))
+				require.NoError(t, err)
+				require.Len(t, got.Boxes, 1)
+				require.NotNil(t, got.Boxes[0].Inl)
+
+				assert.Equal(t, uint64(1), got.Boxes[0].Inl.Any)
+				assert.Equal(t, &hook{Codes: []int{9}, Max: 7}, got.Boxes[0].Inl.Lead)
+			},
+		},
+		"struct that decodes itself held inline": {
+			test: func(t *testing.T) {
+				t.Helper()
+
+				// The method of the struct reads the whole mapping. The fill
+				// thus takes the struct from the second decode and does not
+				// decode it a third time. The first decode starts the struct
+				// from zero, so the method counts its call in the second
+				// decode alone.
+				type box struct {
+					Self defaultsSelf `yaml:",inline"`
+					Num  int          `yaml:"num"`
+				}
+
+				doc := read(t, "boxes: [{<<: *num, k: 1}]\n")
+
+				calls := 0
+				selfDefaults := niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(s *defaultsSelf) {
+					s.Calls = &calls
+					s.Port = 5
+				}))
+
+				for _, decode := range []struct {
+					opts  []niceyaml.DecodeOption
+					port  int
+					calls int
+				}{
+					{},
+					{opts: []niceyaml.DecodeOption{selfDefaults}, port: 5, calls: 1},
+				} {
+					got, err := doc.Decode[struct {
+						Boxes []box `yaml:"boxes"`
+					}](t.Context(), decode.opts...)
+					require.NoError(t, err)
+					require.Len(t, got.Boxes, 1)
+
+					assert.Equal(t, map[string]int{"k": 1, "num": 4}, got.Boxes[0].Self.M)
+					assert.Equal(t, decode.port, got.Boxes[0].Self.Port)
+					assert.Equal(t, 4, got.Boxes[0].Num)
+					assert.Equal(t, decode.calls, calls)
+				}
+			},
+		},
+		"pointer to a struct that decodes itself held inline": {
+			test: func(t *testing.T) {
+				t.Helper()
+
+				// A function of TypeDefaults of the box sets the target that
+				// the second decode starts from. The fill takes the target
+				// from that decode and does not decode it a third time.
+				type box struct {
+					Self *defaultsSelf `yaml:",inline"`
+					Num  int           `yaml:"num"`
+				}
+
+				doc := read(t, "boxes: [{<<: *num, k: 1}]\n")
+
+				calls := 0
+				boxDefaults := niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(b *box) {
+					b.Self = &defaultsSelf{Calls: &calls, Port: 5}
+				}))
+
+				for _, decode := range []struct {
+					opts  []niceyaml.DecodeOption
+					port  int
+					calls int
+				}{
+					{},
+					{opts: []niceyaml.DecodeOption{boxDefaults}, port: 5, calls: 1},
+				} {
+					got, err := doc.Decode[struct {
+						Boxes []box `yaml:"boxes"`
+					}](t.Context(), decode.opts...)
+					require.NoError(t, err)
+					require.Len(t, got.Boxes, 1)
+					require.NotNil(t, got.Boxes[0].Self)
+
+					assert.Equal(t, map[string]int{"k": 1, "num": 4}, got.Boxes[0].Self.M)
+					assert.Equal(t, decode.port, got.Boxes[0].Self.Port)
+					assert.Equal(t, 4, got.Boxes[0].Num)
+					assert.Equal(t, decode.calls, calls)
+				}
+			},
+		},
+		"map held inline": {
+			test: func(t *testing.T) {
+				t.Helper()
+
+				// The merge key brings in the field more, so the fill decodes
+				// the bag again. The decoder starts each value of the map from
+				// zero, so the value that the merge key brings in keeps that
+				// start. The value that the document writes starts from the
+				// defaults of its type.
+				type bag struct {
+					Rest map[string]hook `yaml:",inline"`
+					More hook            `yaml:"more"`
+				}
+
+				doc := read(t, "bags: [{<<: *extra, own: {codes: [2]}}]\n")
+
+				for _, decode := range []struct {
+					opts []niceyaml.DecodeOption
+					own  hook
+				}{
+					{own: hook{Codes: []int{2}}},
+					{opts: []niceyaml.DecodeOption{hookDefaults}, own: hook{Codes: []int{2}, Max: 3}},
+				} {
+					got, err := doc.Decode[struct {
+						Bags []bag `yaml:"bags"`
+					}](t.Context(), decode.opts...)
+					require.NoError(t, err)
+					require.Len(t, got.Bags, 1)
+
+					assert.Equal(t, map[string]hook{"more": {Codes: []int{9}}, "own": decode.own}, got.Bags[0].Rest)
+				}
+
+				// The decoder reads the list before the place of the anchor
+				// that each alias reads, so it gives each alias a value of
+				// its own. The fill keeps those values apart.
+				doc = read(t, "late: &l {codes: [1]}\nbags: [{<<: *extra, own: *l, two: *l}]\n")
+
+				for _, opts := range [][]niceyaml.DecodeOption{nil, {hookDefaults}} {
+					got, err := doc.Decode[struct {
+						Bags []bag `yaml:"bags"`
+						Late hook  `yaml:"late"`
+					}](t.Context(), opts...)
+					require.NoError(t, err)
+					require.Len(t, got.Bags, 1)
+
+					own, two := got.Bags[0].Rest["own"], got.Bags[0].Rest["two"]
+					assert.Equal(t, []int{1}, own.Codes)
+					assert.Equal(t, []int{1}, two.Codes)
+					assert.NotEqual(t, reflect.ValueOf(own.Codes).Pointer(), reflect.ValueOf(two.Codes).Pointer())
+				}
+
+				// The decoder reads the list before the place of the anchor
+				// that the alias reads, so it gives the alias a value of its
+				// own.
+				type anyBag struct {
+					Rest map[string]any `yaml:",inline"`
+					Name string         `yaml:"name"`
+				}
+
+				doc = read(t, "late: &l {codes: [1]}\nbags: [{<<: *n, own: *l}]\n")
+
+				bagDefaults := niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(b *anyBag) { b.Name = "d" }))
+
+				for _, opts := range [][]niceyaml.DecodeOption{nil, {bagDefaults}} {
+					got, err := doc.Decode[struct {
+						Bags []anyBag `yaml:"bags"`
+						Late hook     `yaml:"late"`
+					}](t.Context(), opts...)
+					require.NoError(t, err)
+					require.Len(t, got.Bags, 1)
+
+					assert.IsType(t, map[string]any{}, got.Bags[0].Rest["own"])
+					assert.Equal(t, "ref", got.Bags[0].Name)
+				}
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tc.test(t)
 		})
 	}
 }
@@ -1722,7 +2253,8 @@ func TestNode_Decode_DefaultsCalls(t *testing.T) {
 			},
 		},
 		// The struct decodes again for the merge key, and the kids sit in
-		// a field held inline that the fill takes from that decode.
+		// a struct held inline. They build from the values that the decoder
+		// first gave them, as the kids of a named field do.
 		"inline kids with the merge": {
 			want: 37,
 			calls: func(t *testing.T) int {
@@ -1753,8 +2285,9 @@ func TestNode_Decode_DefaultsCalls(t *testing.T) {
 				return calls
 			},
 		},
-		// The kids sit in a field held inline inside another field held
-		// inline, which the fill takes from the second decode too.
+		// The kids sit in a struct held inline inside another struct held
+		// inline. They build from the values that the decoder first gave them
+		// too.
 		"nested inline kids with the merge": {
 			want: 37,
 			calls: func(t *testing.T) int {
