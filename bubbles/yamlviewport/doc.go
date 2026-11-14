@@ -147,7 +147,8 @@
 // of an error. A Reveal before the content area has room for a row waits,
 // as a search does, and scrolls when the area has room. A parent can
 // therefore reveal the first error before the first [tea.WindowSizeMsg]
-// arrives.
+// arrives. A call to [Model.SetViewMode] before then keeps the Reveal
+// waiting, as the doc of Reveal describes.
 //
 // # Customization
 //

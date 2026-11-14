@@ -2385,6 +2385,215 @@ func TestViewport_ScrollBeforeSizeWaits(t *testing.T) {
 	}
 }
 
+func TestViewport_PresentationChangeKeepsWaitingScroll(t *testing.T) {
+	t.Parallel()
+
+	// Revision 1 changes lines 10 and 150 of revision 0, so the hunks of
+	// the diff leave out line 120. A presentation change keeps a Reveal
+	// that waits for room. The Reveal is the last scroll the caller asked
+	// for, so it wins over the selected search match. When the area has
+	// room, it scrolls to its Hit in the views on display then, or leaves
+	// the view in place when they do not show the Hit. A search scroll
+	// that waits goes to the match that the change selects. Every line
+	// takes one row, so the offset that centers row n is n-4.
+	reveal := func(hit yamlviewport.Hit) func(t *testing.T, m *yamlviewport.Model) {
+		return func(t *testing.T, m *yamlviewport.Model) {
+			t.Helper()
+
+			require.True(t, m.Reveal(hit))
+		}
+	}
+
+	// Each pane of a side-by-side diff at a width of 4 takes no column, so
+	// a Reveal waits there at a height of 10. The full view has room.
+	narrow := func(t *testing.T, m *yamlviewport.Model) {
+		t.Helper()
+
+		m.SetWordWrap(false)
+		m.SetWidth(4)
+		m.SetHeight(10)
+		m.SetViewMode(yamlviewport.ViewModeSideBySide)
+		reveal(lineHit(1, 120))(t, m)
+		require.Equal(t, 0, m.YOffset())
+	}
+
+	tcs := map[string]struct {
+		// Runs at a width of 80 and a height of 0, before the modes.
+		setup func(t *testing.T, m *yamlviewport.Model)
+		// The line of the selected match, as selectedLine reports it.
+		selected *yamlviewport.Hit
+		// The view modes that the viewport takes in turn. A height of 10
+		// follows them.
+		modes []yamlviewport.ViewMode
+		// The Hits that the view shows, and the Hits that it does not show.
+		shows, hides []yamlviewport.Hit
+		// The width that the viewport takes after the modes, when it is
+		// more than 0.
+		width int
+		// The vertical offset.
+		y int
+		// Reports that the view does not show the selected match.
+		hidden bool
+	}{
+		"reveal in side-by-side": {
+			setup: reveal(lineHit(1, 150)),
+			modes: []yamlviewport.ViewMode{yamlviewport.ViewModeSideBySide},
+			y:     146,
+			shows: []yamlviewport.Hit{lineHit(1, 150)},
+		},
+		"reveal outside every hunk": {
+			setup: reveal(lineHit(1, 120)),
+			modes: []yamlviewport.ViewMode{yamlviewport.ViewModeHunks},
+			y:     0,
+			hides: []yamlviewport.Hit{lineHit(1, 120)},
+		},
+		"reveal outside every hunk, then full": {
+			// The Reveal waits through the hunks, and the full view shows
+			// the line on row 121.
+			setup: reveal(lineHit(1, 120)),
+			modes: []yamlviewport.ViewMode{yamlviewport.ViewModeHunks, yamlviewport.ViewModeFull},
+			y:     117,
+			shows: []yamlviewport.Hit{lineHit(1, 120)},
+		},
+		"reveal outside every hunk, from row 100": {
+			// The change keeps the line on row 100 at the top. The hunks
+			// show neither that line nor the Hit, so they aim at line 147,
+			// the first line of the hunks after it. The hunks end before
+			// they can put that line at the top, so they scroll to their
+			// bottom.
+			setup: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+
+				m.SetYOffset(100)
+				reveal(lineHit(1, 120))(t, m)
+			},
+			modes: []yamlviewport.ViewMode{yamlviewport.ViewModeHunks},
+			y:     8,
+			hides: []yamlviewport.Hit{lineHit(1, 120)},
+		},
+		"reveal after a reveal with room": {
+			// The Reveal of line 50 has room, so the viewport records it.
+			// The Reveal of line 120 waits and takes the place of the
+			// recorded one, so the change does not reveal line 50 again.
+			setup: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+
+				m.SetHeight(10)
+				reveal(lineHit(1, 50))(t, m)
+				m.SetHeight(0)
+				reveal(lineHit(1, 120))(t, m)
+			},
+			modes: []yamlviewport.ViewMode{yamlviewport.ViewModeSideBySide},
+			y:     116,
+			shows: []yamlviewport.Hit{lineHit(1, 120)},
+			hides: []yamlviewport.Hit{lineHit(1, 50)},
+		},
+		"reveal after a search": {
+			// The search selects its first match, on line 0, and the change
+			// keeps that match without a scroll to it.
+			setup: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+
+				m.SetSearchTerm("needle")
+				reveal(lineHit(1, 120))(t, m)
+			},
+			modes:    []yamlviewport.ViewMode{yamlviewport.ViewModeSideBySide},
+			y:        116,
+			shows:    []yamlviewport.Hit{lineHit(1, 120)},
+			selected: new(lineHit(0, 0)),
+			hidden:   true,
+		},
+		"search": {
+			// The hunks do not show line 140, so they select the first match
+			// after it, the deleted line 150.
+			setup: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+
+				m.SetSearchTerm("needle")
+				searchNext(m, 15)
+				require.Equal(t, lineHit(1, 140), selectedLine(t, m))
+			},
+			modes:    []yamlviewport.ViewMode{yamlviewport.ViewModeHunks},
+			y:        8,
+			selected: new(lineHit(0, 150)),
+		},
+		"search without a match in the new rows": {
+			// The hunks hold no match, so the change drops the search
+			// scroll. It puts line 120 at the top, the first line of the
+			// hunk after line 100. No scroll waits, so the new width keeps
+			// line 120 at the top.
+			setup: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+
+				m.SetHunkContext(30)
+				m.SetYOffset(100)
+				m.SetSearchTerm("k100:")
+			},
+			modes: []yamlviewport.ViewMode{yamlviewport.ViewModeHunks},
+			width: 12,
+			y:     45,
+			shows: []yamlviewport.Hit{lineHit(1, 120)},
+		},
+		"change that gives the area room": {
+			// The Reveal runs with the change to the full view.
+			setup: narrow,
+			modes: []yamlviewport.ViewMode{yamlviewport.ViewModeFull},
+			y:     117,
+			shows: []yamlviewport.Hit{lineHit(1, 120)},
+		},
+		"change that gives the area room, then hunks": {
+			// The Reveal runs with the change to the full view and leaves line
+			// 116 at the top. The hunks do not show the Hit or line 116, so
+			// they aim at line 147, the first line of the hunks after it. The
+			// hunks end before they can put that line at the top, so they
+			// scroll to their bottom.
+			setup: narrow,
+			modes: []yamlviewport.ViewMode{yamlviewport.ViewModeFull, yamlviewport.ViewModeHunks},
+			y:     8,
+			hides: []yamlviewport.Hit{lineHit(1, 120)},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := testModel(testPrinter(), 80, 0)
+			addRevisions(&m, placeDoc(), placeDoc(10, 150))
+
+			tc.setup(t, &m)
+
+			for _, mode := range tc.modes {
+				m.SetViewMode(mode)
+			}
+
+			if tc.width > 0 {
+				m.SetWidth(tc.width)
+			}
+
+			m.SetHeight(10)
+
+			assert.Equal(t, tc.y, m.YOffset(), screenMessage(&m))
+
+			for _, hit := range tc.shows {
+				assert.True(t, m.Shows(hit), "%v: %s", hit, screenMessage(&m))
+			}
+
+			for _, hit := range tc.hides {
+				assert.False(t, m.Shows(hit), "%v: %s", hit, screenMessage(&m))
+			}
+
+			if tc.selected != nil {
+				assert.Equal(t, *tc.selected, selectedLine(t, &m))
+
+				match, ok := m.SearchMatch(m.SearchIndex())
+				require.True(t, ok)
+				assert.Equal(t, !tc.hidden, m.Shows(match.Hit), screenMessage(&m))
+			}
+		})
+	}
+}
+
 func TestViewport_ScrollBeforeSizeThenLayout(t *testing.T) {
 	t.Parallel()
 
@@ -9127,7 +9336,8 @@ func TestViewport_PresentationChangeKeepsTopLine(t *testing.T) {
 			},
 		},
 		"reveal that waits": {
-			// The change drops the scroll that waits for room.
+			// The change keeps the Reveal that waits for room, and the Reveal
+			// runs in the new views when the area has room.
 			docs:  twoRevs,
 			width: 80, height: 0,
 			setup: func(t *testing.T, m *yamlviewport.Model) {
@@ -9140,8 +9350,7 @@ func TestViewport_PresentationChangeKeepsTopLine(t *testing.T) {
 				t.Helper()
 
 				m.SetHeight(10)
-				assert.Equal(t, 0, m.YOffset())
-				assert.False(t, m.Shows(lineHit(1, 150)))
+				assert.True(t, m.Shows(lineHit(1, 150)), screenMessage(m))
 			},
 		},
 	}
@@ -10387,8 +10596,10 @@ func TestViewport_PresentationChangeRepeatsScroll(t *testing.T) {
 			},
 		},
 		"reveal that waits": {
-			// The change drops the Reveal that waits for room and scrolls to
-			// the selected match, which waits again.
+			// The change keeps the Reveal that waits for room and the selected
+			// match. The Reveal is the last scroll, so it runs in the new
+			// views when the area has room, and the view does not show the
+			// match.
 			term: "k170:", docs: twoRevs,
 			width: 80, height: 0,
 			steps: []step{
@@ -10400,8 +10611,8 @@ func TestViewport_PresentationChangeRepeatsScroll(t *testing.T) {
 						m.SetViewMode(yamlviewport.ViewModeSideBySide)
 						m.SetHeight(10)
 					},
-					selected: new(lineHit(0, 170)),
-					hides:    []yamlviewport.Hit{lineHit(1, 20)},
+					selected: new(lineHit(0, 170)), hidden: true,
+					shows: []yamlviewport.Hit{lineHit(1, 20)},
 				},
 			},
 		},

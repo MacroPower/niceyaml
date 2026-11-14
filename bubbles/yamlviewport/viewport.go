@@ -618,14 +618,23 @@ func New(opts ...Option) Model {
 // search without a current match at that point leaves the view in place.
 // The scroll sets the offsets, so a layout change before that point does not
 // keep the top line. Reveal reports its result at the call, before the
-// scroll runs. [Model.SetYOffset], [Model.SetXOffset], and the scroll
-// methods drop a scroll that waits, and so do a change of content and a
-// presentation change. A change that drops the scroll waits again to scroll
-// to the match that it selects in the new rows, when the term has one.
-// [Model.ReplaceRevision] keeps a scroll that waits. A Reveal that waits
-// scrolls to the place its [Hit] has in the views the viewport shows when
-// the scroll runs. A Reveal whose Hit those views do not show leaves the
-// view in place.
+// scroll runs.
+//
+// [Model.SetYOffset], [Model.SetXOffset], and the scroll methods drop a
+// scroll that waits, and so does a change of content. A change of content
+// waits again to scroll to its first match, when the term has one.
+// [Model.ReplaceRevision] and presentation changes keep a scroll that waits.
+// A presentation change replaces a search scroll that waits with a scroll to
+// the match that it selects in the new rows. It drops the search scroll when
+// the new rows do not hold a match.
+//
+// A Reveal that waits scrolls to the place its [Hit] has in the views the
+// viewport shows when the scroll runs. A Reveal whose Hit those views do not
+// show leaves the view in place. A Reveal that waits takes the place of the
+// recorded line and the recorded scroll. A presentation change thus starts
+// from the line at the top row, and it keeps the selected match without a
+// scroll to it. The Reveal sets the offsets when it runs, so the view might
+// not show the selected match.
 type Model struct {
 	config
 
@@ -765,9 +774,10 @@ type scrollTarget struct {
 	// The range, in the content of the left pane, or of the right one when
 	// right is true.
 	rng position.Range
-	// The Hit of a Reveal. ReplaceRevision can swap a revision while the
-	// scroll waits. A deferred scroll without match set therefore finds hit
-	// again in the views on display when ensureRows runs the scroll.
+	// The Hit of a Reveal. ReplaceRevision and a presentation change can
+	// change the views while the scroll waits. A deferred scroll without
+	// match set therefore finds hit again in the views on display when
+	// ensureRows runs the scroll.
 	hit   Hit
 	right bool
 	// Reports that the range is the current search match. A deferred
@@ -1647,11 +1657,23 @@ func (m *Model) resetViews() {
 // after ensureRows clamps the offsets to the new views. A change without a
 // start line holds the place that applied without a line. Without either,
 // it leaves the next call to ensureRows to clamp the offsets.
+//
+// A Reveal that waits for room leaves no held place that applies. The
+// change thus restores the start line and does not scroll. It then keeps
+// the Reveal waiting, and the Reveal finds its Hit in the views on display
+// when it runs. The new views can give the content area room, such as the
+// full width after a side-by-side diff. The change then calls ensureRows,
+// which runs the Reveal.
 func (m *Model) rebuildPresentation(set func()) {
 	held := m.appliedPlace()
 	start, ok := m.startLine(held)
 	place := m.selectedPlace(start, ok)
 	x := m.xOffset
+
+	reveal := m.pending
+	if reveal != nil && reveal.match {
+		reveal = nil
+	}
 
 	set()
 	m.resetViews()
@@ -1679,15 +1701,21 @@ func (m *Model) rebuildPresentation(set func()) {
 			held.kind = heldTop
 		}
 
-	case held.kind == heldNone:
-		return
-
-	default:
+	case held.kind != heldNone:
 		held.line, held.hasLine = 0, false
 	}
 
-	held.top = m.TopLine()
-	m.held = held
+	if held.kind != heldNone {
+		held.top = m.TopLine()
+		m.held = held
+	}
+
+	// The Reveal writes the held place when it runs, so it starts waiting
+	// again after the change holds the start line.
+	if reveal != nil {
+		m.pending = reveal
+		m.ensureRows()
+	}
 }
 
 // appliedPlace returns the held place that applies to the views on
@@ -1695,9 +1723,10 @@ func (m *Model) rebuildPresentation(set func()) {
 // [Model.TopLine] returns the index that it holds. A place of the kind
 // heldTop also needs the views to map its line, as revisionRow does.
 //
-// A scroll that waits for room counts as a held search match that applies,
-// so the change scrolls to the match that it selects, and that scroll waits
-// again. A Reveal that waits thus ends with the change.
+// A search scroll that waits for room counts as a held search match that
+// applies. The change thus scrolls to the match that it selects, and that
+// scroll waits again. A Reveal that waits is the last scroll the caller
+// asked for, so no held place applies. The caller keeps the Reveal waiting.
 func (m *Model) appliedPlace() heldPlace {
 	h := m.held
 
@@ -1713,8 +1742,12 @@ func (m *Model) appliedPlace() heldPlace {
 		h = heldPlace{}
 	}
 
-	if m.pending != nil {
+	switch {
+	case m.pending == nil:
+	case m.pending.match:
 		h.kind = heldMatch
+	default:
+		h = heldPlace{}
 	}
 
 	return h
@@ -3356,10 +3389,16 @@ func (m *Model) revisionHit(right bool, pos position.Position) (Hit, bool) {
 // Reveal scrolls as a search does for its current match. It centers the
 // row that shows the position. With wrapping off it scrolls sideways only
 // when the position lies past the right edge of the first screen. It then
-// centers the position. Before the content area has room for a row, Reveal
-// reports its result at the call and scrolls when the area has room, as the
-// [Model] doc describes. A [Model.ReplaceRevision] before that point can
-// take the position out of the view, and the viewport then stays in place.
+// centers the position.
+//
+// Before the content area has room for a row, Reveal reports its result at
+// the call and scrolls when the area has room, as the [Model] doc
+// describes. A [Model.ReplaceRevision] or a presentation change before that
+// point keeps the Reveal waiting. The Reveal then scrolls to hit in the
+// views on display when the area has room. Either change can take the
+// position out of the view, and the viewport then stays in place. A
+// presentation change before that point keeps the selected search match
+// without a scroll to it, so the Reveal wins over the match.
 //
 // A presentation change, such as a new [ViewMode], reveals hit again in its
 // new views while the line the scroll left at the top stays at the top. New
