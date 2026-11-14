@@ -541,17 +541,26 @@ func New(opts ...Option) Model {
 //
 // A presentation change shows the current revision in other rows. A diff
 // mode that changes [Model.DiffBaseIndex] is one. So are a view mode while a
-// diff shows and a hunk context while hunks of a diff show. When the search
-// term has a match in the new rows, the change selects a match and scrolls
-// to it.
+// diff shows and a hunk context while hunks of a diff show.
 //
-// Without a match in the new rows, a presentation change keeps the line of
-// the current revision at the top of the view. The horizontal offset stays
-// too. The view shows the line from the first row of its block. That block
-// holds the rows above the content of the line, such as a hunk header. Hunks
-// that do not cover the line put the first line of the hunks after it at the
-// top, or the last line of the last hunk when no hunk follows. A view that
-// ends before it can put the line at the top scrolls to its bottom.
+// A presentation change repeats the last search scroll or [Model.Reveal] in
+// the new rows while the line the scroll left at the top stays at the top.
+// A search step, a new search term, and a change of content each scroll to
+// the selected match. After such a scroll, the change scrolls to the
+// selected match of the new rows. After a Reveal, it reveals the same [Hit]
+// in the new rows. A later scroll that brings another line to the top, such
+// as one from [Model.GotoTop], ends the repeat. A layout change keeps the
+// same line at the top, so the repeat stays.
+//
+// Without a scroll to repeat, a presentation change keeps the line of the
+// current revision at the top of the view. It keeps that line too when the
+// new rows do not hold a match to scroll to, or do not show the Hit to
+// reveal. The horizontal offset stays. The view shows the line from the
+// first row of its block. That block holds the rows above the content of
+// the line, such as a hunk header. Hunks that do not cover the line put the
+// first line of the hunks after it at the top, or the last line of the last
+// hunk when no hunk follows. A view that ends before it can put the line at
+// the top scrolls to its bottom.
 //
 // The line at the top is the line that owns the top row. Some rows show only
 // a line of the revision the diff compares with, such as a deleted line.
@@ -570,18 +579,27 @@ func New(opts ...Option) Model {
 // show any line. The next view mode then starts from the line that the hunks
 // did not show at the top.
 //
-// A change of content drops the recorded line. [Model.GotoTop] at the first
-// row leaves the same line at the top, so the recorded line stays. A parent
-// that wants the new view at its first row calls GotoTop after the
-// presentation change.
+// A change that keeps the line at the top in place of a scroll records that
+// scroll with the line. The next change repeats the scroll in new rows that
+// hold a match, or that show the Hit of the Reveal. Hunks that do not cover
+// the revealed line keep the line at the top, for example, and the next
+// view mode reveals the line again.
+//
+// A change of content drops the recorded line, and its scroll to the first
+// match starts a new repeat. [Model.GotoTop] at the first row leaves the
+// same line at the top, so the recorded line or scroll stays. A parent that
+// wants the new view at its first row calls GotoTop after the presentation
+// change.
 //
 // With a match in the new rows, a presentation change keeps the selected
-// match when the new rows show it at the [Hit] that [Model.SearchMatch]
+// match when the new rows show it at the Hit that [Model.SearchMatch]
 // reports. Otherwise it selects the first match at or after the place of the
 // old match in the current revision. The change selects the first match when
 // no match follows that place, or when the change does not have a place.
 // [Model.SearchNext] wraps from the last match to the first in the same way.
-// The change then scrolls to the selected match, as a search does.
+// A change that repeats a search scroll then scrolls to the selected match.
+// Any other change does not scroll to it, so the view might not show the
+// selected match.
 //
 // The place of a match on a line that the current revision holds is the line
 // and the column of the match. An unchanged line of a diff is such a line,
@@ -690,10 +708,12 @@ type Model struct {
 	// row counts from the first row of the frame.
 	anchorLine int
 	anchorRow  int
-	// The line that the last presentation change put at the top of the
-	// view, or meant to put there. A presentation change reads it and then
+	// What the next presentation change repeats in the new views. That is
+	// the last scroll to a search match or to the Hit of a Reveal, or the
+	// line that the last presentation change put at the top. Each scroll
+	// that scrollTo runs writes it. A presentation change reads it and then
 	// writes it, and every rebuild of the views clears it.
-	held heldLine
+	held heldPlace
 	// Reports that the base views or the searcher changed since the
 	// searcher last loaded them.
 	searcherStale bool
@@ -707,19 +727,37 @@ type Model struct {
 	anchored bool
 }
 
-// heldLine is the line that a presentation change put at the top of the
-// view, or meant to put there. The next presentation change starts from it
-// while the view keeps the same line at the top and the current revision
-// holds it.
-type heldLine struct {
-	// The line of the current revision.
+// heldPlace is what the next presentation change repeats in the new views.
+// It applies while [Model.TopLine] returns the index that the scroll or the
+// change that wrote it saw. A record of the kind heldTop also needs the
+// current revision to hold its line.
+type heldPlace struct {
+	// The Hit of a Reveal, for the kind heldReveal.
+	hit Hit
+	// The line of the current revision that a presentation change put at
+	// the top of the view, or meant to put there, when hasLine is set. A
+	// scroll does not set it.
 	line int
-	// The index of the line at the top of the view after the change, as
-	// [Model.TopLine] returns it.
-	top int
-	// Reports that a presentation change set line and top.
-	ok bool
+	// The index of the line at the top of the view after the scroll or the
+	// change, as [Model.TopLine] returns it.
+	top     int
+	kind    heldKind
+	hasLine bool
 }
+
+// heldKind names what a [heldPlace] repeats.
+type heldKind int
+
+const (
+	// The kind of the zero heldPlace, which does not repeat anything.
+	heldNone heldKind = iota
+	// The record repeats the line at the top of the view.
+	heldTop
+	// The record repeats the scroll to the selected search match.
+	heldMatch
+	// The record repeats the Reveal of its Hit.
+	heldReveal
+)
 
 // scrollTarget is a range for scrollTo to center: a search match or a
 // revealed position.
@@ -1557,7 +1595,7 @@ func (m *Model) PreviousRevision() { m.GotoRevision(m.revIndex - 1) }
 // content. The view therefore scrolls to the top, or to the first match in
 // the new content. A presentation change goes through rebuildPresentation
 // instead. It selects a match from the place of the match that the old views
-// selected. When the new views do not have a match, it keeps the top line.
+// selected, and it repeats the held place in the new views.
 // ReplaceRevision goes through reloadViews.
 func (m *Model) rebuildViews() {
 	m.resetViews()
@@ -1567,12 +1605,12 @@ func (m *Model) rebuildViews() {
 // resetViews rebuilds the displayed views from the revision, diff mode, and
 // view mode, then refreshes the search state at its first match. It drops
 // both offsets, the cached row counts, and a deferred scroll, because they
-// name rows of the old views. A line that a presentation change held names
-// a line of the old views too, so resetViews drops it. The caller selects a
-// match and scrolls.
+// name rows of the old views. The held place describes the old views too,
+// so resetViews drops it. The caller selects a match and scrolls, and that
+// scroll writes the held place for the new views.
 func (m *Model) resetViews() {
 	m.searchIndex = -1
-	m.held = heldLine{}
+	m.held = heldPlace{}
 	m.loadViews()
 
 	// The old row counts describe other lines, so the cache starts empty
@@ -1594,18 +1632,24 @@ func (m *Model) resetViews() {
 // current revision. It then rebuilds the views, as the [Model] doc
 // describes a presentation change. Only the old diff and modes map the rows
 // of the views on display to lines of the revision. It therefore reads the
-// start line and the place of the selected search match from those views
-// before set runs.
+// held place that applies, the start line, and the place of the selected
+// search match from those views before set runs.
 //
-// When the new views hold a search match, selectPlace selects one, and the
-// change scrolls to it. Otherwise the start line goes to the top of the new
-// views, and the horizontal offset stays. The change then holds the line
-// that anchorRevisionLine returns. It also holds the index that
-// [Model.TopLine] returns after ensureRows clamps the offsets to the new
-// views. A change that does not have a start line leaves the next call to
-// ensureRows to clamp the offsets.
+// When the new views hold a search match, selectPlace selects one. A held
+// search match then scrolls to the selected match, and a held Reveal
+// reveals its Hit again. Either scroll writes the held place, as scrollTo
+// does. In every other case the start line goes to the top of the new
+// views, and the horizontal offset stays.
+//
+// A change that restores the start line holds the kind of the place that
+// applied, or heldTop when none applied. It holds the line that
+// anchorRevisionLine returns, and the index that [Model.TopLine] returns
+// after ensureRows clamps the offsets to the new views. A change without a
+// start line holds the place that applied without a line. Without either,
+// it leaves the next call to ensureRows to clamp the offsets.
 func (m *Model) rebuildPresentation(set func()) {
-	start, ok := m.startLine()
+	held := m.appliedPlace()
+	start, ok := m.startLine(held)
 	place := m.selectedPlace(start, ok)
 	x := m.xOffset
 
@@ -1614,19 +1658,66 @@ func (m *Model) rebuildPresentation(set func()) {
 
 	if len(m.searchMatches) > 0 {
 		m.selectPlace(place)
+	}
+
+	switch {
+	case held.kind == heldMatch && len(m.searchMatches) > 0:
 		m.scrollToCurrentMatch()
 
+		return
+
+	case held.kind == heldReveal && m.Reveal(held.hit):
 		return
 	}
 
 	m.xOffset = x
 
-	if !ok {
+	switch {
+	case ok:
+		held.line, held.hasLine = m.anchorRevisionLine(start), true
+		if held.kind == heldNone {
+			held.kind = heldTop
+		}
+
+	case held.kind == heldNone:
 		return
+
+	default:
+		held.line, held.hasLine = 0, false
 	}
 
-	held := m.anchorRevisionLine(start)
-	m.held = heldLine{line: held, top: m.TopLine(), ok: true}
+	held.top = m.TopLine()
+	m.held = held
+}
+
+// appliedPlace returns the held place that applies to the views on
+// display, or the zero heldPlace when none applies. A place applies while
+// [Model.TopLine] returns the index that it holds. A place of the kind
+// heldTop also needs the views to map its line, as revisionRow does.
+//
+// A scroll that waits for room counts as a held search match that applies,
+// so the change scrolls to the match that it selects, and that scroll waits
+// again. A Reveal that waits thus ends with the change.
+func (m *Model) appliedPlace() heldPlace {
+	h := m.held
+
+	// The scroll or the change that held the place measured the rows
+	// already, so the check of the place can measure them. A view without a
+	// held place leaves the measure to topRevisionLine.
+	applies := h.kind != heldNone && m.TopLine() == h.top
+	if applies && h.kind == heldTop {
+		_, applies = m.revisionRow(h.line)
+	}
+
+	if !applies {
+		h = heldPlace{}
+	}
+
+	if m.pending != nil {
+		h.kind = heldMatch
+	}
+
+	return h
 }
 
 // matchPlace is the selected search match of the views on display, as a
@@ -1743,16 +1834,13 @@ func (m *Model) selectPlace(p matchPlace) {
 }
 
 // startLine returns the line of the current revision that a presentation
-// change puts at the top of the new views, and true. It returns the line
-// that the last presentation change held while [Model.TopLine] still
-// returns the index that change saw. The views on display must also map
-// that line, as revisionRow does. In every other case startLine reads the
-// line at the top row, as topRevisionLine does.
-func (m *Model) startLine() (int, bool) {
-	// The change that held the line measured the rows already, so the
-	// check of the held line can measure them. A view without a held line
-	// leaves the measure to topRevisionLine.
-	if h := m.held; h.ok && m.TopLine() == h.top {
+// change puts at the top of the new views, and true. It returns the line of
+// h, the held place that applies, when h has a line and the views on
+// display map it, as revisionRow does. A presentation change writes that
+// line. In every other case startLine reads the line at the top row, as
+// topRevisionLine does.
+func (m *Model) startLine(h heldPlace) (int, bool) {
+	if h.hasLine {
 		if _, ok := m.revisionRow(h.line); ok {
 			return h.line, true
 		}
@@ -3273,6 +3361,13 @@ func (m *Model) revisionHit(right bool, pos position.Position) (Hit, bool) {
 // [Model] doc describes. A [Model.ReplaceRevision] before that point can
 // take the position out of the view, and the viewport then stays in place.
 //
+// A presentation change, such as a new [ViewMode], reveals hit again in its
+// new views while the line the scroll left at the top stays at the top. New
+// views that do not show hit keep the line at the top instead. A later
+// presentation change to views that show hit then reveals it again. The
+// next search scroll or Reveal takes the place of this one, as the [Model]
+// doc describes.
+//
 // Reveal does not change the revision on display, the [ViewMode], or the
 // [DiffMode]. It reports false and leaves the viewport as it is when the
 // view on display does not show the position. The viewport shows the
@@ -3405,8 +3500,15 @@ func holds(view *line.View, pos position.Position) bool {
 // the [Model] doc defines them. A change of content restarts the search at
 // the first match in the new content and scrolls to it. A presentation
 // change keeps the current match, or selects the first match at or after
-// its place, and scrolls to that match. It selects the first match when no
-// match follows.
+// its place. It selects the first match when no match follows.
+//
+// A presentation change scrolls to the selected match when the last scroll
+// of the view went to the selected match. A search step, a new term, and a
+// change of content each make such a scroll. The change repeats it while the
+// line the scroll left at the top stays at the top. After a scroll to
+// another line, the change keeps that line at the top. After a
+// [Model.Reveal], it reveals the same [Hit]. The view then might not show
+// the selected match.
 //
 // A new term starts at its first match, but setting the same term again
 // keeps the current match. To restart the search at its first match, call
@@ -3665,6 +3767,11 @@ func (m *Model) paneRow(right bool, pos position.Position) (int, printer.Layout,
 // with room runs the scroll, and a search target scrolls to the match that
 // is current then. The row counts fill at any size, so scrollTo reports its
 // result at the call.
+//
+// After it sets the offsets, scrollTo holds the scroll for the next
+// presentation change to repeat, as the [Model] doc describes. A search
+// target holds the selected match, and any other target holds its Hit. A
+// scroll that waits does not hold anything until ensureRows runs it.
 func (m *Model) scrollTo(target scrollTarget) bool {
 	rng, right := target.rng, target.right
 
@@ -3684,6 +3791,22 @@ func (m *Model) scrollTo(target scrollTarget) bool {
 		return true
 	}
 
+	m.center(rng, view, row, layout)
+
+	h := heldPlace{kind: heldReveal, hit: target.hit, top: m.TopLine()}
+	if target.match {
+		h = heldPlace{kind: heldMatch, top: h.top}
+	}
+
+	m.held = h
+
+	return true
+}
+
+// center sets both offsets for scrollTo. It centers row, the row that holds
+// the start of rng. The range lies in the content of view, and layout is
+// the layout of its first line alone in the pane of view.
+func (m *Model) center(rng position.Range, view *line.View, row int, layout printer.Layout) {
 	i := rng.Start.Line
 
 	// (maxHeight-1)/2 puts the range on the visual center row. A height of
@@ -3697,7 +3820,7 @@ func (m *Model) scrollTo(target scrollTarget) bool {
 	if m.wrapEnabled {
 		m.SetXOffset(0)
 
-		return true
+		return
 	}
 
 	// With wrap off every line is one row that starts at the gutter, so
@@ -3721,14 +3844,12 @@ func (m *Model) scrollTo(target scrollTarget) bool {
 	if xEnd <= m.scrollWidth() {
 		m.SetXOffset(0)
 
-		return true
+		return
 	}
 
 	// Any other range takes the offset that centers its first cell, the
 	// way the Y offset centers its row.
 	m.SetXOffset(x - (m.scrollWidth()-1)/2)
-
-	return true
 }
 
 // Update processes Bubble Tea messages and returns the updated model.

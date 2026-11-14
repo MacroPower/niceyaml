@@ -4463,18 +4463,20 @@ func TestViewport_SameDiffBaseKeepsPosition(t *testing.T) {
 
 	// At revision index 2, origin compares against another revision than
 	// adjacent does, so the change is a presentation change. It keeps the
-	// selected match and scrolls back to it.
+	// selected match. The view left the match after the search step, so the
+	// change keeps the line at the top rather than scrolling to the match.
 	addRevisions(&m, replaceLine(v1, 40, "k40: w"))
 	m.SearchNext()
 	m.SetYOffset(30)
 
 	require.Equal(t, 1, m.SearchIndex())
 	require.Equal(t, 30, m.YOffset())
+	require.Equal(t, lineHit(2, 29), topHit(t, &m))
 
 	m.SetDiffMode(yamlviewport.DiffModeOrigin)
 	assert.Equal(t, 1, m.SearchIndex(), "adjacent to origin at index 2")
 	assert.Equal(t, lineHit(2, 1), selectedLine(t, &m), "adjacent to origin at index 2")
-	assert.Equal(t, 0, m.YOffset(), "adjacent to origin at index 2")
+	assert.Equal(t, lineHit(2, 29), topHit(t, &m), "adjacent to origin at index 2")
 }
 
 // notedRevision returns a revision named name over doc. Each line in notes
@@ -9626,10 +9628,15 @@ func TestViewport_PresentationChangeKeepsMatch(t *testing.T) {
 		change func(m *yamlviewport.Model)
 		// The vertical offset after the change, when set.
 		y *int
+		// The line at the top of the view after the change, as TopHit
+		// reports it, when set.
+		top *yamlviewport.Hit
 		// The line of the selected match, as selectedLine reports it. When
 		// count is 0, the line at the top of the view, as TopHit reports it.
 		want         yamlviewport.Hit
 		index, count int
+		// Reports that the view does not show the selected match.
+		hidden bool
 	}
 
 	tcs := map[string]struct {
@@ -9804,6 +9811,8 @@ func TestViewport_PresentationChangeKeepsMatch(t *testing.T) {
 		"without a selected match": {
 			// The hunks do not have a match, so the full view selects the
 			// first match after line 150, the line at the top of the hunks.
+			// The view did not scroll to a match before the change, so it
+			// keeps line 150 at the top rather than scrolling to the match.
 			docs:  twoRevs,
 			width: 80, height: 4,
 			setup: func(t *testing.T, m *yamlviewport.Model) {
@@ -9816,10 +9825,16 @@ func TestViewport_PresentationChangeKeepsMatch(t *testing.T) {
 				require.Equal(t, 150, topHit(t, m).Position.Line)
 			},
 			steps: []step{
-				{change: setMode(yamlviewport.ViewModeFull), want: lineHit(1, 160), index: 1, count: 11},
+				{
+					change: setMode(yamlviewport.ViewModeFull),
+					want:   lineHit(1, 160), index: 1, count: 11,
+					top: new(lineHit(1, 150)), hidden: true,
+				},
 			},
 		},
 		"without a selected match at the first row": {
+			// The change starts the full view at its first row and does not
+			// scroll to the first match.
 			docs:  twoRevs,
 			width: 80, height: 4,
 			setup: func(t *testing.T, m *yamlviewport.Model) {
@@ -9830,15 +9845,23 @@ func TestViewport_PresentationChangeKeepsMatch(t *testing.T) {
 				require.Equal(t, 0, m.SearchCount())
 			},
 			steps: []step{
-				{change: setMode(yamlviewport.ViewModeFull), want: lineHit(1, 16), index: 0, count: 11},
+				{
+					change: setMode(yamlviewport.ViewModeFull),
+					want:   lineHit(1, 16),
+					index:  0,
+					count:  11,
+					y:      new(0),
+					hidden: true,
+				},
 			},
 		},
 		"without a selected match after hunks that fit the screen": {
-			// The hunks do not hold a match, and they fit the screen, so they
-			// stay at their first row. They record line 151, the line at the
-			// top of the full view before them. The full view therefore starts
-			// from line 151, not from its first row, and selects the first
-			// match after it.
+			// The hunks repeat the scroll to the match on line 160. They do
+			// not hold a match, and they fit the screen, so they stay at their
+			// first row. They hold line 151, the line at the top of the full
+			// view before them. The full view therefore starts from line 151,
+			// not from its first row. It selects the first match after that
+			// line and scrolls to it.
 			docs:  twoRevs,
 			width: 80, height: 20,
 			setup: func(t *testing.T, m *yamlviewport.Model) {
@@ -9893,9 +9916,10 @@ func TestViewport_PresentationChangeKeepsMatch(t *testing.T) {
 			},
 		},
 		"view away from the match": {
-			// Each change scrolls back to the selected match, though the view
-			// shows other lines before it. A rule that leaves such a view in
-			// place reverses this row.
+			// The reader left the match after the search step, so each change
+			// keeps the line at the top and the selected match. Line 119 lies
+			// outside every hunk, so the hunks aim at line 147. They fit the
+			// screen and stay at their first row, which shows the match.
 			docs:  twoRevs,
 			width: 80, height: 20,
 			setup: func(t *testing.T, m *yamlviewport.Model) {
@@ -9905,11 +9929,12 @@ func TestViewport_PresentationChangeKeepsMatch(t *testing.T) {
 				m.SearchNext()
 				require.Equal(t, lineHit(0, 10), selectedLine(t, m))
 				m.SetYOffset(120)
+				require.Equal(t, lineHit(1, 119), topHit(t, m))
 			},
 			steps: []step{
-				{change: pressV, want: lineHit(0, 10), index: 0, count: 4},
-				{change: pressV, want: lineHit(0, 10), index: 1, count: 22},
-				{change: pressV, want: lineHit(0, 10), index: 1, count: 22},
+				{change: pressV, want: lineHit(0, 10), index: 0, count: 4, y: new(0)},
+				{change: pressV, want: lineHit(0, 10), index: 1, count: 22, top: new(lineHit(0, 147)), hidden: true},
+				{change: pressV, want: lineHit(0, 10), index: 1, count: 22, top: new(lineHit(1, 147)), hidden: true},
 			},
 		},
 	}
@@ -9942,10 +9967,14 @@ func TestViewport_PresentationChangeKeepsMatch(t *testing.T) {
 
 				match, ok := m.SearchMatch(m.SearchIndex())
 				require.True(t, ok)
-				assert.True(t, m.Shows(match.Hit), "step %d: %s", i, screenMessage(&m))
+				assert.Equal(t, !s.hidden, m.Shows(match.Hit), "step %d: %s", i, screenMessage(&m))
 
 				if s.y != nil {
 					assert.Equal(t, *s.y, m.YOffset(), "step %d", i)
+				}
+
+				if s.top != nil {
+					assert.Equal(t, *s.top, topHit(t, &m), "step %d", i)
 				}
 			}
 		})
@@ -10058,6 +10087,460 @@ func TestViewport_PresentationChangeKeepsMatchInLine(t *testing.T) {
 			require.True(t, ok)
 			assert.Equal(t, tc.want, match.Hit)
 			assert.True(t, m.Shows(match.Hit), screenMessage(&m))
+		})
+	}
+}
+
+func TestViewport_PresentationChangeRepeatsScroll(t *testing.T) {
+	t.Parallel()
+
+	// Revision 1 changes lines 10 and 150 of revision 0. The hunks of the
+	// diff cover lines 7 through 13 and 147 through 153, inclusive, and fit
+	// a screen of 20 rows.
+	twoRevs := []string{placeDoc(), placeDoc(10, 150)}
+
+	// The third revision also changes line 100.
+	threeRevs := []string{placeDoc(), placeDoc(10, 150), placeDoc(10, 100, 150)}
+
+	// Each line takes one row at a width of 140 and two rows at a width of
+	// 80. Every tenth line holds "needle" before its run of "y".
+	wide := func(changed ...int) string {
+		y := strings.Repeat("y", 100)
+
+		return changedDoc(func(i int) string {
+			if i%10 == 0 {
+				return "needle " + y
+			}
+
+			return y
+		}, changed...)
+	}
+
+	pressV := func(_ *testing.T, m *yamlviewport.Model) {
+		*m, _ = m.Update(tea.KeyPressMsg{Code: 'v', Text: "v"})
+	}
+
+	setMode := func(mode yamlviewport.ViewMode) func(*testing.T, *yamlviewport.Model) {
+		return func(_ *testing.T, m *yamlviewport.Model) { m.SetViewMode(mode) }
+	}
+
+	reveal := func(hit yamlviewport.Hit) func(*testing.T, *yamlviewport.Model) {
+		return func(t *testing.T, m *yamlviewport.Model) {
+			t.Helper()
+
+			require.True(t, m.Reveal(hit))
+		}
+	}
+
+	// A step changes the viewport. The fields after change hold what the
+	// viewport shows after it, and each pointer that is nil checks nothing.
+	type step struct {
+		change func(t *testing.T, m *yamlviewport.Model)
+		// The vertical offset.
+		y *int
+		// The line at the top of the view, as TopHit reports it.
+		top *yamlviewport.Hit
+		// The line of the selected match, as selectedLine reports it, and the
+		// index of the match.
+		selected *yamlviewport.Hit
+		index    *int
+		// The Hits that the view shows, and the Hits that it does not show.
+		shows, hides []yamlviewport.Hit
+		// Reports that the view does not show the selected match.
+		hidden bool
+	}
+
+	tcs := map[string]struct {
+		// The search term, which the viewport takes before the first step.
+		term          string
+		docs          []string
+		steps         []step
+		width, height int
+	}{
+		"search step in hunks that fit the screen": {
+			// The hunks stay at their first row for each search step. Each
+			// step still holds the match for the next change.
+			term: "needle", docs: twoRevs,
+			width: 80, height: 20,
+			steps: []step{
+				{
+					change: func(_ *testing.T, m *yamlviewport.Model) {
+						m.SetYOffset(5)
+						m.SetViewMode(yamlviewport.ViewModeHunks)
+						searchNext(m, 3)
+					},
+					y: new(0), selected: new(lineHit(1, 150)),
+				},
+				{change: setMode(yamlviewport.ViewModeSideBySide), selected: new(lineHit(1, 150))},
+				{change: setMode(yamlviewport.ViewModeFull), selected: new(lineHit(1, 150))},
+			},
+		},
+		"reveal in hunks that fit the screen": {
+			// The hunks show line 150 without a scroll. The Reveal still holds
+			// its Hit for each later change.
+			docs:  twoRevs,
+			width: 80, height: 20,
+			steps: []step{
+				{
+					change: func(t *testing.T, m *yamlviewport.Model) {
+						t.Helper()
+
+						m.SetYOffset(5)
+						m.SetViewMode(yamlviewport.ViewModeHunks)
+						reveal(lineHit(1, 150))(t, m)
+					},
+					y: new(0), shows: []yamlviewport.Hit{lineHit(1, 150)},
+				},
+				{change: setMode(yamlviewport.ViewModeSideBySide), shows: []yamlviewport.Hit{lineHit(1, 150)}},
+				{change: setMode(yamlviewport.ViewModeHunks), shows: []yamlviewport.Hit{lineHit(1, 150)}},
+				{change: setMode(yamlviewport.ViewModeFull), shows: []yamlviewport.Hit{lineHit(1, 150)}},
+			},
+		},
+		"reveal outside the hunks": {
+			// The hunks do not show line 100, so they keep the line at the
+			// top. They still hold the Hit, so the side-by-side view reveals
+			// it again.
+			docs:  twoRevs,
+			width: 80, height: 20,
+			steps: []step{
+				{change: reveal(lineHit(1, 100)), shows: []yamlviewport.Hit{lineHit(1, 100)}},
+				{change: setMode(yamlviewport.ViewModeHunks), hides: []yamlviewport.Hit{lineHit(1, 100)}},
+				{change: setMode(yamlviewport.ViewModeSideBySide), shows: []yamlviewport.Hit{lineHit(1, 100)}},
+			},
+		},
+		"reveal across a view at its first row without the hit": {
+			// The view without a diff starts at its first row and cannot show
+			// the Hit. It still holds the Reveal, so the diff reveals the Hit
+			// again.
+			docs:  twoRevs,
+			width: 80, height: 20,
+			steps: []step{
+				{
+					change: func(t *testing.T, m *yamlviewport.Model) {
+						t.Helper()
+
+						m.SetYOffset(5)
+						m.SetViewMode(yamlviewport.ViewModeHunks)
+						reveal(lineHit(0, 150))(t, m)
+					},
+					y: new(0), shows: []yamlviewport.Hit{lineHit(0, 150)},
+				},
+				{
+					change: func(_ *testing.T, m *yamlviewport.Model) { m.SetDiffMode(yamlviewport.DiffModeNone) },
+					y:      new(0), hides: []yamlviewport.Hit{lineHit(0, 150)},
+				},
+				{
+					change: func(_ *testing.T, m *yamlviewport.Model) {
+						m.SetViewMode(yamlviewport.ViewModeFull)
+						m.SetDiffMode(yamlviewport.DiffModeAdjacent)
+					},
+					shows: []yamlviewport.Hit{lineHit(0, 150)},
+				},
+			},
+		},
+		"search steps across every view mode": {
+			// The hunks do not show line 50, so they select the match on line
+			// 150. Each later change keeps that match and scrolls to it.
+			term: "needle", docs: twoRevs,
+			width: 80, height: 20,
+			steps: []step{
+				{change: func(_ *testing.T, m *yamlviewport.Model) { searchNext(m, 6) }, selected: new(lineHit(1, 50))},
+				{change: pressV, selected: new(lineHit(0, 150))},
+				{change: pressV, selected: new(lineHit(0, 150))},
+				{change: pressV, selected: new(lineHit(0, 150))},
+				{change: pressV, selected: new(lineHit(0, 150))},
+				{change: pressV, selected: new(lineHit(0, 150))},
+				{change: pressV, selected: new(lineHit(0, 150))},
+			},
+		},
+		"go to top after a search step": {
+			// GotoTop brings another line to the top, so the change starts at
+			// the first row and does not scroll to the match.
+			term: "needle", docs: twoRevs,
+			width: 80, height: 20,
+			steps: []step{
+				{
+					change: func(_ *testing.T, m *yamlviewport.Model) {
+						searchNext(m, 6)
+						m.GotoTop()
+					},
+					y: new(0), selected: new(lineHit(1, 50)), hidden: true,
+				},
+				{
+					change: setMode(yamlviewport.ViewModeSideBySide),
+					y:      new(0), selected: new(lineHit(0, 50)), index: new(6), hidden: true,
+				},
+			},
+		},
+		"reveal after a search step": {
+			// The Reveal replaces the scroll to the match, so the change
+			// reveals line 125 again and keeps the match on line 10 selected.
+			term: "needle", docs: twoRevs,
+			width: 80, height: 20,
+			steps: []step{
+				{
+					change: func(t *testing.T, m *yamlviewport.Model) {
+						t.Helper()
+
+						m.SearchNext()
+						reveal(lineHit(1, 125))(t, m)
+					},
+					selected: new(lineHit(0, 10)), hidden: true,
+				},
+				{
+					change:   setMode(yamlviewport.ViewModeSideBySide),
+					selected: new(lineHit(0, 10)), hidden: true,
+					shows: []yamlviewport.Hit{lineHit(1, 125)},
+				},
+			},
+		},
+		"clear search after a search step": {
+			// The new views do not have a match, so the change keeps the line
+			// at the top that the search step left there.
+			term: "needle", docs: twoRevs,
+			width: 80, height: 20,
+			steps: []step{
+				{
+					change: func(_ *testing.T, m *yamlviewport.Model) {
+						searchNext(m, 6)
+						m.ClearSearch()
+					},
+					top: new(lineHit(1, 41)),
+				},
+				{change: setMode(yamlviewport.ViewModeSideBySide), top: new(lineHit(0, 41))},
+			},
+		},
+		"search scroll across views without a match": {
+			// The hunks do not hold the match on line 95, so they aim at line
+			// 147 and hold it with the scroll to the match. They fit the screen
+			// and stay at their first row. The hunks with more context also
+			// lack a match, so they start from line 147 rather than from the
+			// first row.
+			term: "k95", docs: twoRevs,
+			width: 80, height: 20,
+			steps: []step{
+				{change: setMode(yamlviewport.ViewModeHunks), y: new(0)},
+				{
+					change: func(_ *testing.T, m *yamlviewport.Model) { m.SetHunkContext(20) },
+					top:    new(lineHit(1, 147)),
+				},
+				{change: setMode(yamlviewport.ViewModeSideBySide), selected: new(lineHit(0, 95))},
+			},
+		},
+		"clear search after a search step in hunks that fit the screen": {
+			// The search step replaces the line that the hunks held, line 147.
+			// The new views do not have a match, so the change keeps the first
+			// row of the hunks at the top.
+			term: "needle", docs: twoRevs,
+			width: 80, height: 20,
+			steps: []step{
+				{
+					change: func(_ *testing.T, m *yamlviewport.Model) {
+						m.SetYOffset(141)
+						m.SetViewMode(yamlviewport.ViewModeHunks)
+						m.SearchNext()
+						m.ClearSearch()
+					},
+					y: new(0),
+				},
+				{change: setMode(yamlviewport.ViewModeFull), y: new(0)},
+			},
+		},
+		"replace revision after a search step": {
+			// ReplaceRevision keeps the line at the top and the selected match,
+			// so the change still scrolls to the match.
+			term: "needle", docs: twoRevs,
+			width: 80, height: 20,
+			steps: []step{
+				{
+					change: func(t *testing.T, m *yamlviewport.Model) {
+						t.Helper()
+
+						searchNext(m, 6)
+						require.True(
+							t,
+							m.ReplaceRevision(
+								1,
+								niceyaml.NewSourceFromString(placeDoc(10, 150), niceyaml.WithName("v2")),
+							),
+						)
+					},
+					selected: new(lineHit(1, 50)),
+				},
+				{change: setMode(yamlviewport.ViewModeSideBySide), selected: new(lineHit(0, 50))},
+			},
+		},
+		"another revision": {
+			// The move to another revision scrolls to its first match, and the
+			// change repeats that scroll.
+			term: "needle", docs: threeRevs,
+			width: 80, height: 20,
+			steps: []step{
+				{
+					change: func(_ *testing.T, m *yamlviewport.Model) {
+						m.SearchNext()
+						m.GotoRevision(1)
+					},
+					selected: new(lineHit(1, 0)), index: new(0),
+				},
+				{change: setMode(yamlviewport.ViewModeSideBySide), selected: new(lineHit(0, 0)), index: new(0)},
+			},
+		},
+		"reveal that waits": {
+			// The change drops the Reveal that waits for room and scrolls to
+			// the selected match, which waits again.
+			term: "k170:", docs: twoRevs,
+			width: 80, height: 0,
+			steps: []step{
+				{
+					change: func(t *testing.T, m *yamlviewport.Model) {
+						t.Helper()
+
+						reveal(lineHit(1, 20))(t, m)
+						m.SetViewMode(yamlviewport.ViewModeSideBySide)
+						m.SetHeight(10)
+					},
+					selected: new(lineHit(0, 170)),
+					hides:    []yamlviewport.Hit{lineHit(1, 20)},
+				},
+			},
+		},
+		"new width that reflows the rows": {
+			// The new width moves the row offset but keeps line 116 at the
+			// top, so the change still repeats the search step.
+			term: "needle", docs: []string{wide(), wide(10, 150, 170)},
+			width: 140, height: 10,
+			steps: []step{
+				{
+					change: func(_ *testing.T, m *yamlviewport.Model) { searchNext(m, 13) },
+					y:      new(117), selected: new(lineHit(1, 120)),
+				},
+				{
+					change: func(_ *testing.T, m *yamlviewport.Model) { m.SetWidth(80) },
+					y:      new(351), top: new(lineHit(1, 116)), selected: new(lineHit(1, 120)), hidden: true,
+				},
+				{change: setMode(yamlviewport.ViewModeHunks), selected: new(lineHit(0, 150))},
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New()
+			m.SetWidth(tc.width)
+			m.SetHeight(tc.height)
+			addRevisions(&m, tc.docs...)
+			m.SetSearchTerm(tc.term)
+
+			for i, s := range tc.steps {
+				s.change(t, &m)
+
+				if s.y != nil {
+					assert.Equal(t, *s.y, m.YOffset(), "step %d", i)
+				}
+
+				if s.top != nil {
+					assert.Equal(t, *s.top, topHit(t, &m), "step %d", i)
+				}
+
+				if s.selected != nil {
+					assert.Equal(t, *s.selected, selectedLine(t, &m), "step %d", i)
+
+					match, ok := m.SearchMatch(m.SearchIndex())
+					require.True(t, ok)
+					assert.Equal(t, !s.hidden, m.Shows(match.Hit), "step %d: %s", i, screenMessage(&m))
+				}
+
+				if s.index != nil {
+					assert.Equal(t, *s.index, m.SearchIndex(), "step %d", i)
+				}
+
+				for _, hit := range s.shows {
+					assert.True(t, m.Shows(hit), "step %d: %v: %s", i, hit, screenMessage(&m))
+				}
+
+				for _, hit := range s.hides {
+					assert.False(t, m.Shows(hit), "step %d: %v: %s", i, hit, screenMessage(&m))
+				}
+			}
+		})
+	}
+}
+
+func TestViewport_ScrollToTargetEndsKeptPlace(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		// Moves to a target that the hunks show, and returns its Hit.
+		target func(t *testing.T, m *yamlviewport.Model) yamlviewport.Hit
+		mode   yamlviewport.ViewMode
+	}{
+		"search match": {
+			mode: yamlviewport.ViewModeSideBySide,
+			target: func(t *testing.T, m *yamlviewport.Model) yamlviewport.Hit {
+				t.Helper()
+
+				m.SearchNext()
+				m.SearchPrevious()
+
+				match, ok := m.SearchMatch(m.SearchIndex())
+				require.True(t, ok)
+
+				return match.Hit
+			},
+		},
+		"search term": {
+			mode: yamlviewport.ViewModeFull,
+			target: func(t *testing.T, m *yamlviewport.Model) yamlviewport.Hit {
+				t.Helper()
+
+				m.SetSearchTerm("k8:")
+
+				match, ok := m.SearchMatch(m.SearchIndex())
+				require.True(t, ok)
+
+				return match.Hit
+			},
+		},
+		"reveal": {
+			mode: yamlviewport.ViewModeFull,
+			target: func(t *testing.T, m *yamlviewport.Model) yamlviewport.Hit {
+				t.Helper()
+
+				require.True(t, m.Reveal(lineHit(1, 9)))
+
+				return lineHit(1, 9)
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New()
+			m.SetWidth(80)
+			m.SetHeight(20)
+			addRevisions(&m, placeDoc(), placeDoc(10, 150))
+			m.SetSearchTerm("needle")
+
+			// The hunks fit the screen, so they stay at their top and hold
+			// line 147 for the next change of presentation.
+			m.SetYOffset(77)
+			m.SetViewMode(yamlviewport.ViewModeHunks)
+			require.Equal(t, 0, m.YOffset())
+
+			// The hunks already show the target, so the view does not move.
+			hit := tc.target(t, &m)
+			require.Equal(t, 0, m.YOffset())
+			require.True(t, m.Shows(hit))
+
+			// The scroll to the target replaces the held line, so the new view
+			// still shows the target.
+			m.SetViewMode(tc.mode)
+			assert.True(t, m.Shows(hit), screenMessage(&m))
 		})
 	}
 }

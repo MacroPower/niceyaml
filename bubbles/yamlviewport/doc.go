@@ -76,15 +76,22 @@
 // shows.
 //
 // A change of view mode, diff mode, or hunk context keeps the selected
-// search match and scrolls to it. A new view that does not show that match
-// selects the first match at or after its place in the current revision.
-// Hunks that leave out the line of the match thus select the next match
-// after it. The change selects the first match when no match follows.
+// search match. A new view that does not show that match selects the first
+// match at or after its place in the current revision. Hunks that leave out
+// the line of the match thus select the next match after it. The change
+// selects the first match when no match follows.
 //
-// Without a match in the new view, the change keeps the line at the top of
-// the view. Hunks that fit the screen stay at their first row. The next
-// change starts from the line they meant to put at the top while the same
-// line of the view stays at the top.
+// The change repeats the last search scroll or [Model.Reveal] while the line
+// the scroll left at the top stays at the top. It scrolls to the selected
+// match, or it reveals the same [Hit]. Otherwise it keeps the line at the
+// top of the view, and the view might not show the selected match. A reader
+// who steps to a match and then scrolls on thus keeps the place they read.
+// A new view without a match, or one that does not show the Hit, keeps the
+// line at the top too.
+//
+// Hunks that fit the screen stay at their first row. The next change starts
+// from the line they meant to put at the top while the same line of the
+// view stays at the top.
 //
 // A [ViewMode] and a [DiffMode] each read and write their name as text,
 // such as "hunks" or "origin". A program thus takes either mode from a
