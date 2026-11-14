@@ -541,6 +541,147 @@ func TestNode_Decode_DefaultsAtAliases(t *testing.T) {
 
 	// An interface value holds the value of its anchor.
 	assert.Equal(t, map[string]any{"k": "v"}, got.Y)
+
+	t.Run("value that keeps the start of its anchor", func(t *testing.T) {
+		t.Parallel()
+
+		type plain struct {
+			Labels map[string]string `yaml:"labels"`
+			Codes  []int             `yaml:"codes"`
+			Name   string            `yaml:"name"`
+		}
+
+		type holder struct {
+			Q plain `yaml:"q"`
+		}
+
+		// The field s comes before the field r, as in the example of the
+		// Defaults section of the package documentation.
+		type root struct {
+			S holder `yaml:"s"`
+			R holder `yaml:"r"`
+		}
+
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"s: &s {q: {codes: [1]}}",
+			"r: *s",
+		))
+
+		got, err := doc.Decode[root](t.Context(), niceyaml.OverrideTypeRules(
+			niceyaml.TypeDefaults(func(r *root) {
+				r.S.Q.Name = "q"
+				r.S.Q.Labels = map[string]string{"a": "b"}
+			}),
+		))
+		require.NoError(t, err)
+
+		// The value at r starts from zero, and no type inside it has a
+		// function of TypeDefaults, so it keeps the copy of the decoder. The
+		// copy holds what the place of the anchor started from, the map of
+		// labels included.
+		assert.Equal(t, plain{Labels: map[string]string{"a": "b"}, Codes: []int{1}, Name: "q"}, got.R.Q)
+		assert.Equal(t, reflect.ValueOf(got.S.Q.Labels).Pointer(), reflect.ValueOf(got.R.Q.Labels).Pointer())
+	})
+}
+
+func TestNode_Decode_DefaultsShareValuesOfAnchors(t *testing.T) {
+	t.Parallel()
+
+	type retry struct {
+		Codes []int `yaml:"codes"`
+		Max   int   `yaml:"max"`
+	}
+
+	type service struct {
+		Env   map[string]string `yaml:"env"`
+		Retry *retry            `yaml:"retry"`
+		Hooks []retry           `yaml:"hooks"`
+		Image string            `yaml:"image"`
+	}
+
+	type compose struct {
+		Services map[string]service `yaml:"services"`
+	}
+
+	// The fields of shared name the values of the api service that the
+	// worker service shares.
+	type shared struct {
+		Retry, Hooks, Env bool
+	}
+
+	const common = "{env: {LOG: info}, retry: {codes: [500]}, hooks: [{codes: [1]}]}"
+
+	aliasOfPlace := stringtest.LinesLF(
+		"services: {api: &common " + common + ", worker: *common}",
+	)
+	mergeKeys := stringtest.LinesLF(
+		"x-common: &common "+common,
+		"services: {api: {<<: *common, image: api}, worker: {<<: *common, image: worker}}",
+	)
+	aliases := stringtest.LinesLF(
+		"x-common: &common "+common,
+		"services: {api: *common, worker: *common}",
+	)
+
+	rules := niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(r *retry) { r.Max = 3 }))
+
+	tcs := map[string]struct {
+		input   string
+		opts    []niceyaml.DecodeOption
+		wantMax int
+		want    shared
+	}{
+		"alias to an anchor of the same type": {
+			input: aliasOfPlace,
+			want:  shared{Retry: true, Hooks: true, Env: true},
+		},
+		"alias to an anchor of the same type with defaults": {
+			input:   aliasOfPlace,
+			opts:    []niceyaml.DecodeOption{rules},
+			wantMax: 3,
+			want:    shared{Retry: true, Hooks: true, Env: true},
+		},
+		"merge keys": {
+			input: mergeKeys,
+		},
+		"merge keys with defaults": {
+			input:   mergeKeys,
+			opts:    []niceyaml.DecodeOption{rules},
+			wantMax: 3,
+			want:    shared{Retry: true, Hooks: true},
+		},
+		"aliases to an anchor outside the services": {
+			input: aliases,
+		},
+		"aliases to an anchor outside the services with defaults": {
+			input:   aliases,
+			opts:    []niceyaml.DecodeOption{rules},
+			wantMax: 3,
+			want:    shared{Retry: true, Hooks: true, Env: true},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := yamltest.FirstDocument(t, tc.input).Decode[compose](t.Context(), tc.opts...)
+			require.NoError(t, err)
+
+			api, worker := got.Services["api"], got.Services["worker"]
+			for _, s := range []service{api, worker} {
+				require.Equal(t, map[string]string{"LOG": "info"}, s.Env)
+				require.Equal(t, &retry{Codes: []int{500}, Max: tc.wantMax}, s.Retry)
+				require.Equal(t, []retry{{Codes: []int{1}, Max: tc.wantMax}}, s.Hooks)
+			}
+
+			assert.Equal(t, tc.want, shared{
+				Retry: api.Retry == worker.Retry,
+				Hooks: &api.Hooks[0] == &worker.Hooks[0],
+				Env:   reflect.ValueOf(api.Env).Pointer() == reflect.ValueOf(worker.Env).Pointer(),
+			})
+		})
+	}
 }
 
 func TestNode_Decode_DefaultsAtReferenceAliases(t *testing.T) {

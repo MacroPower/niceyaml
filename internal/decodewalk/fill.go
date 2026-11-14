@@ -45,10 +45,10 @@ type Starts struct {
 //   - A pointer that the document fills gets a target of its own. The
 //     target starts from the value the pointer held, or from the start of
 //     its type for a nil pointer. A null sets the pointer to nil.
-//   - The places that aliases of one anchor fill share one value when
-//     they start from equal values. Two pointers there share one target,
-//     though the decoder gives each place a value of its own. A place that
-//     starts from another value builds a value of its own.
+//   - The places that read one anchor through aliases or `<<` merge keys
+//     share one value when they start from equal values. Two pointers
+//     there share one target. A place that starts from another value
+//     builds a value of its own.
 //   - Each element and each map value starts from the start of its type,
 //     and so does one the document writes as a null.
 //   - A null leaves any other value at its start.
@@ -203,8 +203,9 @@ func (f *filler) reaches(t reflect.Type) bool {
 
 // built returns the value that the fill built for the node and the type
 // of key from a start equal to start, and reports whether it built one.
-// The places that aliases of one anchor fill thus share a value when they
-// start from equal values. A chain of aliases also fills in linear time.
+// The places that read one anchor through aliases or `<<` merge keys thus
+// share a value when they start from equal values. A chain of aliases also
+// fills in linear time.
 func (f *filler) built(key seenKey, start reflect.Value) (reflect.Value, bool) {
 	if !start.CanInterface() {
 		return reflect.Value{}, false

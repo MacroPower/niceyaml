@@ -1165,14 +1165,44 @@
 // reached. The search for unknown fields then calls again the unmarshalers
 // of the structs that decode themselves, as [WithUnknownFields] describes.
 //
-// The value at an alias starts from the defaults of its own place. The places
-// that aliases of one anchor fill share one value when they start from equal
-// values. Two pointer fields with equal defaults thus share one target, and
-// two maps or slices share their contents. A program that changes one of
-// them in place changes the others too. A decode without TypeDefaults gives
-// each place a value of its own. A place that starts from another value
-// builds a value of its own. An interface value at an alias holds the value
-// of its anchor.
+// The go-yaml decoder can give the place of an alias the value that its
+// anchor decoded to. The two places then share each map, slice, and pointer
+// target inside that value. For example, the anchor of this document decodes
+// into the api service of a map of service structs:
+//
+//	services:
+//	  api: &common {env: {LOG: info}, retry: {codes: [500]}, hooks: [{codes: [1]}]}
+//	  worker: *common
+//
+// The worker service then shares the env map, the retry target, and the
+// hooks slice of the api service. A program that changes a decoded value in
+// place must not assume that no other place holds the value.
+//
+// TypeDefaults can make more places share. Places that read one anchor
+// through aliases or `<<` merge keys can share a value that the decode
+// builds from the defaults. The api and worker services merge one anchor:
+//
+//	x-common: &common {env: {LOG: info}, retry: {codes: [500]}, hooks: [{codes: [1]}]}
+//	services:
+//	  api: {<<: *common, image: api}
+//	  worker: {<<: *common, image: worker}
+//
+// When TypeDefaults gives the type of the retry target a function, the two
+// services share one retry target, which they do not share without
+// TypeDefaults. A place that starts from another value builds a value of its
+// own.
+//
+// A value that the decode builds at an alias starts from the defaults of its
+// own place. The decode can keep a value as the decoder gave it, such as an
+// interface value. It can also keep a value that starts from zero whose type
+// holds no type with a function of TypeDefaults. A value that the decode
+// keeps at an alias can hold what the place of the anchor started from.
+//
+// For example, a document holds `s: &s {q: {codes: [1]}}` and `r: *s`, and
+// it decodes into a struct whose field s comes before its field r. The
+// function of that struct type sets the name and the labels map of s.q. No
+// type inside r has a function. The value at r then starts from zero, and
+// r.q holds that name and that map.
 //
 // The fill of the defaults does not map the values inside an anchor of a
 // reference document to the document. The value at an alias to one still

@@ -54,8 +54,11 @@ import (
 // a Validate method, which see the defaults wherever they come from.
 //
 // A decode calls fn once for each value it creates, so a map or a
-// pointer that fn sets belongs to that value alone. A panic in fn makes
-// the decode return an error that holds a [PanicError].
+// pointer that fn sets belongs to that value alone. A place at an alias
+// can hold the value of its anchor, and the place then holds that map or
+// pointer too, as the Defaults section of the package documentation
+// describes. A panic in fn makes the decode return an error that holds a
+// [PanicError].
 func TypeDefaults[T any](fn func(*T)) TypeRule {
 	t := reflect.TypeFor[T]()
 
