@@ -103,7 +103,7 @@ func (d *docState) check(ctx context.Context) {
 	for _, m := range reg.cfg.ignores {
 		warnings := niceyaml.NewWarnings()
 
-		ok, err := m.Match(isolate(ctx, warnings), doc)
+		ok, err := match(isolate(ctx, warnings), m, doc)
 
 		d.warn(warnings.Err())
 
@@ -510,7 +510,7 @@ func (d *docState) claims(ctx context.Context, e *kindEntry) (bool, error) {
 	for _, m := range e.kind.cfg.claims {
 		warnings := niceyaml.NewWarnings()
 
-		ok, err := m.Match(isolate(ctx, warnings), d.doc)
+		ok, err := match(isolate(ctx, warnings), m, d.doc)
 
 		d.warn(warnings.Err())
 

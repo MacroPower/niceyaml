@@ -3452,6 +3452,72 @@ func TestRegistry_Load_Checks(t *testing.T) {
 	})
 }
 
+func TestRegistry_Load_Panics(t *testing.T) {
+	t.Parallel()
+
+	errBoom := errors.New("boom")
+
+	boom := matcher.Func(func(context.Context, *niceyaml.Node) (bool, error) { panic(errBoom) })
+
+	tcs := map[string]struct {
+		opts []manifest.RegistryOption
+		file string
+		err  string
+	}{
+		"matcher of WithIgnore": {
+			// The panic fails the one document, so the load misses its
+			// Cafe as well.
+			opts: cafeOptions(manifest.WithIgnore(boom)),
+			file: cafeDoc,
+			err: stringtest.JoinLF(
+				"config: 2 errors",
+				"|-- config/cafe.yaml: matcher panicked: boom",
+				"`-- missing Cafe",
+				"    `-- add a document with apiVersion: cafe.jacobcolvin.com/v1 and kind: Cafe",
+			),
+		},
+		"matcher of Claim": {
+			// The document has no kind field, so the load asks the claims
+			// of each kind.
+			opts: withKinds(manifest.NewKind[CafeSpec]("Cafe",
+				manifest.Claim(boom),
+				manifest.Unversioned(),
+				manifest.Version("cafe.jacobcolvin.com/v1"),
+			)),
+			file: "seats: 40\n",
+			err:  "config/cafe.yaml: matcher panicked: boom",
+		},
+		"validator of a decode": {
+			opts: cafeOptions(manifest.WithDecodeOptions(niceyaml.WithValidator(niceyaml.ValidatorFunc(
+				func(context.Context, *niceyaml.Node) error { panic(errBoom) },
+			)))),
+			file: cafeDoc,
+			err:  "config/cafe.yaml: validator panicked: boom",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			reg, err := manifest.NewRegistry(tc.opts...)
+			require.NoError(t, err)
+
+			require.NotPanics(t, func() {
+				_, err = reg.Load(t.Context(), configFS(map[string]string{"cafe.yaml": tc.file}))
+			})
+			require.Error(t, err)
+			assert.Equal(t, tc.err, niceyaml.FormatError(err))
+			require.ErrorIs(t, err, errBoom)
+			assert.False(t, niceyaml.IsInvalid(err))
+
+			p, ok := errors.AsType[*niceyaml.PanicError](err)
+			require.True(t, ok)
+			assert.Equal(t, errBoom, p.Value)
+		})
+	}
+}
+
 // deprecationOptions returns the options of a registry whose schema of
 // each version of MenuItem deprecates a field: cost at v1beta1, and
 // legacyPricing at v1.

@@ -50,8 +50,9 @@ import (
 //     [niceyaml.IsInvalid] does not report them.
 //   - An error that a step, a validator, a matcher of [WithIgnore] or
 //     [Claim], or a function of [WithCheck] returns keeps what it matched.
-//     A panic in a step, a validator, or a function of WithCheck wraps a
-//     [*niceyaml.PanicError].
+//     The error of a panic in any of them, or in a hook of a decode such
+//     as an unmarshaler or a value check, wraps a [*niceyaml.PanicError].
+//     [niceyaml.IsInvalid] does not report it.
 //   - A file that Apply has not reached when its context ends matches
 //     ctx.Err().
 //

@@ -12,6 +12,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/input"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/internal/inputhook"
+	"go.jacobcolvin.com/niceyaml/matcher"
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
@@ -696,6 +697,26 @@ func runCheck(ctx context.Context, check func(context.Context, *Set) error, set 
 	}()
 
 	return check(ctx, set)
+}
+
+// match reports whether m accepts doc and returns the error of m, or the
+// [niceyaml.PanicError] of a panic in m.
+func match(ctx context.Context, m matcher.Matcher, doc *niceyaml.Node) (bool, error) {
+	var ok bool
+
+	err := func() (err error) {
+		defer func() {
+			if v := recover(); v != nil {
+				ok, err = false, &panicError{in: "matcher", p: &niceyaml.PanicError{Value: v, Stack: debug.Stack()}}
+			}
+		}()
+
+		ok, err = m.Match(ctx, doc)
+
+		return err //nolint:wrapcheck // The error of the matcher fails the document.
+	}()
+
+	return ok, err
 }
 
 // errHint returns the migrate hint of the registry as an error, or nil
