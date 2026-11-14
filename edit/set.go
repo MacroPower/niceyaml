@@ -241,16 +241,15 @@ type payload struct {
 // an array or a struct. Such a key fails the Set the same way, before the
 // encode. The encoder writes that string for a key whose encode fails too,
 // as for a key whose MarshalYAML method returns an error. The Set then
-// fails before the encode with that error, which matches ErrValue, as
-// the error of the marshaler of a value does. A text of the encode
-// that go-yaml's parser or decoder refuses fails the Set with ErrEngine.
-// The encoder quotes a string key that YAML reads as a << merge key or as
-// an explicit key, so the parse reads such a key as the string. A panic
-// during go-yaml's encode fails the Set with ErrEngine at its place too, as
-// on a map key that is nil, or in a MarshalText method that the encoder
-// calls. The
-// message of each names go-yaml. Set calls each MarshalYAML method of v
-// before the encode, and a panic of that call reaches the caller as it is.
+// fails before the encode with that error, which matches ErrValue, as the
+// error of the marshaler of a value does. A text of the encode that
+// go-yaml's parser or decoder refuses fails the Set with ErrEngine. The
+// message of each of these ErrEngine problems names go-yaml. The encoder
+// quotes a string key that YAML reads as a << merge key or as an explicit
+// key, so the parse reads such a key as the string. Set does not recover a
+// panic, such as a panic of a marshaler of v or of go-yaml's encoder on a
+// map key that is nil. The panic unwinds through the [Func], and
+// [Doc.Apply] fails with it at the place of the call.
 //
 // Before the encode, Set reads v as go-yaml's encoder reads it. It calls
 // each MarshalYAML method of v that the encoder calls, and reads what the

@@ -2,6 +2,7 @@ package edit_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"runtime"
 	"strings"
@@ -93,6 +94,10 @@ func TestNode_Update(t *testing.T) {
 		likeSet bool
 		// Whether the error is an engine error, which fails the Apply.
 		engine bool
+		// Whether the Update panics, so that the Apply fails with an error
+		// that holds a niceyaml.PanicError in place of the error of the
+		// Update.
+		panicked bool
 	}{
 		"field of a section": {
 			before: config,
@@ -391,6 +396,15 @@ func TestNode_Update(t *testing.T) {
 			err:     "writes a mapping that repeats the key x, which YAML does not allow",
 			likeSet: true,
 		},
+		"value whose marshaler panics": {
+			// The panic leaves the call of the Func, so the error binds at the
+			// place of that call.
+			before:   stringtest.LinesLF("m:", "  a: 1"),
+			path:     paths.Doc().Child("m"),
+			value:    ms("a", panicYAMLMarshaler{}),
+			err:      "test.yaml:1:1: $: cafe.jacobcolvin.com/v1 panicked: edit_test.panicYAMLMarshaler",
+			panicked: true,
+		},
 		"value whose YAML holds an anchor": {
 			before:  stringtest.LinesLF("m:", "  a: 1"),
 			path:    paths.Doc().Child("m"),
@@ -615,6 +629,31 @@ func TestNode_Update(t *testing.T) {
 			opts := []niceyaml.SourceOption{}
 			if tc.ref != "" {
 				opts = append(opts, yamltest.References(tc.ref))
+			}
+
+			if tc.panicked {
+				d := newDoc(t, tc.before, opts...)
+
+				var err error
+
+				require.NotPanics(t, func() {
+					err = applyAt(t, d, tc.path, func(ctx context.Context, n *edit.Node) error {
+						return n.Update(ctx, tc.value, tc.opts...)
+					})
+				})
+				require.Error(t, err)
+				assert.Equal(t, tc.err, err.Error())
+
+				p, ok := errors.AsType[*niceyaml.PanicError](err)
+				require.True(t, ok)
+				assert.NotEmpty(t, p.Stack)
+				require.NotErrorIs(t, err, edit.ErrEngine)
+				require.NotErrorIs(t, err, edit.ErrValue)
+				assert.False(t, niceyaml.IsInvalid(err))
+				require.Equal(t, tc.before, d.Text())
+				require.Empty(t, d.Removals())
+
+				return
 			}
 
 			d, err := applyCall(t, tc.before, tc.path, opts, tc.engine, func(ctx context.Context, n *edit.Node) error {

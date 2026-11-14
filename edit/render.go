@@ -88,17 +88,18 @@ type renderedHeader struct {
 // it, and the text holds what go-yaml's parse of the encoded text reads.
 // When the two differ, as for a float that the encoder writes as 1e+06 and
 // the decoder reads as a string, render returns an error that matches
-// errEncoder. So does a panic of go-yaml's encoder, a byte of the encoded
-// text that UTF-8 does not allow, and a refusal of go-yaml's parser of the
-// encoded text. So does a byte order mark there, as
-// [Doc.valueMisread] finds it. So do line breaks of both kinds in the
-// encoded text where the YAML of no marshaler of v holds both. The encoder
-// wrote them then, as it writes the header of a block scalar of "\r\n"
-// lines with a "\n". After those checks, the finder reads the text, and the
-// rendered value holds the instances that it finds. A failed check leaves
-// the instances that the finder found in the YAML of the marshalers of v,
-// because a construct there can make go-yaml fail on the text, as an alias
-// whose anchor the YAML lacks does.
+// errEncoder. So does a byte of the encoded text that UTF-8 does not allow,
+// and a refusal of go-yaml's parser of the encoded text. So does a byte
+// order mark there, as [Doc.valueMisread] finds it. So do line breaks of
+// both kinds in the encoded text where the YAML of no marshaler of v holds
+// both. The encoder wrote them then, as it writes the header of a block
+// scalar of "\r\n" lines with a "\n". After those checks, the finder reads
+// the text, and the rendered value holds the instances that it finds. A
+// failed check leaves the instances that the finder found in the YAML of
+// the marshalers of v, because a construct there can make go-yaml fail on
+// the text, as an alias whose anchor the YAML lacks does. A panic of a
+// marshaler of v or of go-yaml's encoder goes on as it is, as [encode] lets
+// it.
 //
 // The value goes in flow style from the depth fd on, as [flowDepth]
 // describes. The block lines then end with the flow text of the value at
@@ -331,34 +332,20 @@ const maxMarshalersText = "1,000"
 // the node that go-yaml's encoder made for v. Before the encoder runs, the
 // check of [checkValue] reads v under the marshalers of opts. Its problem
 // comes back as it is, and the instances that it finds come back with the
-// result of the encode. A panic
-// of a marshaler of v that the check calls goes on as it is. A panic of
-// go-yaml's encoder, as on a map key that is nil, returns an error that
-// matches errEncoder. Any other error of the encode comes back as the
-// encoder package returns it. That error matches the sentinel of the
-// encoder package that names its cause, except the error of a context
-// that ended, which comes back bare.
+// result of the encode. A panic of a marshaler of v goes on as it is, in
+// the check or in the encode. So does a panic of go-yaml's encoder, as on a
+// map key that is nil. [Doc.Apply] recovers such a panic after it leaves
+// the [Func]. Any other error of the encode comes back as the encoder
+// package returns it. That error matches the sentinel of the encoder
+// package that names its cause, except the error of a context that ended,
+// which comes back bare.
 func encode(ctx context.Context, v any, opts ...encoder.Option) ([]byte, ast.Node, []instance, error) {
 	refused, err := checkValue(ctx, v, opts)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	var (
-		data     []byte
-		node     ast.Node
-		panicked any
-	)
-
-	func() {
-		defer func() { panicked = recover() }()
-
-		data, node, err = hook.Marshal(ctx, v, opts)
-	}()
-
-	if panicked != nil {
-		return nil, nil, refused, fmt.Errorf("%w panicked on the value: %v", errEncoder, panicked)
-	}
+	data, node, err := hook.Marshal(ctx, v, opts)
 
 	return data, node, refused, err //nolint:wrapcheck // The encoder names the cause of its error with a sentinel.
 }

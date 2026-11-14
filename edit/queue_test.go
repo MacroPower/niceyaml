@@ -833,6 +833,57 @@ func TestDoc_Apply_Queue_ContextEndedLater(t *testing.T) {
 	assert.Equal(t, before, oracle.Text())
 }
 
+func TestDoc_Apply_Queue_PanicLater(t *testing.T) {
+	t.Parallel()
+
+	// A Set of a key after $.k0 fails the check, and the call of $.x
+	// panics. The Sets of $.k0 to $.k9 wait, and the panic wins over them,
+	// so they never run and the Apply fails with the panic. A Doc whose
+	// Sets do not wait fails at the Set, before the call of $.x.
+	before := keys(10) + "x: !!bool y\n"
+
+	run := func(d *edit.Doc, calls *[]string) error {
+		var err error
+
+		require.NotPanics(t, func() {
+			err = d.Apply(t.Context(), paths.MustParse("$.*"), func(ctx context.Context, n *edit.Node) error {
+				*calls = append(*calls, n.Key())
+
+				if n.Key() == "x" {
+					panic("boom")
+				}
+
+				return setKeys(ctx, n)
+			})
+		})
+
+		return err //nolint:wrapcheck // The test reads the error of the Apply.
+	}
+
+	var calls []string
+
+	d := newDoc(t, before)
+	err := run(d, &calls)
+	require.Error(t, err)
+	assert.Equal(t, "test.yaml:11:11: $.x: the edit panicked: boom", err.Error())
+
+	var p *niceyaml.PanicError
+
+	require.ErrorAs(t, err, &p)
+	assert.Equal(t, "boom", p.Value)
+	assert.Equal(t, []string{"k0", "k1", "k2", "k3", "k4", "k5", "k6", "k7", "k8", "k9", "x"}, calls)
+	assert.Equal(t, before, d.Text())
+
+	_, oracle := newSourceDocWith(t, before, []edit.Option{eachCall})
+	calls = nil
+	err = run(oracle, &calls)
+	require.Error(t, err)
+	require.NotErrorAs(t, err, &p)
+	assert.Contains(t, niceyaml.FormatError(err), `$.x: cannot convert "y" to boolean`)
+	assert.NotContains(t, calls, "x")
+	assert.Equal(t, before, oracle.Text())
+}
+
 // keys returns a mapping of n keys, each with the value 1 and a comment.
 func keys(n int) string {
 	var b strings.Builder

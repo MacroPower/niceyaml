@@ -692,7 +692,9 @@
 // edits of the calls before them. Apply fails with the error that the Func
 // returns. A problem of a call that matches [ErrEngine] fails the Apply
 // too, whatever the Func returns, and so does a problem that the check of
-// the text after a write finds.
+// the text after a write finds. A panic that leaves a call of the Func
+// fails the Apply with an error that holds a
+// [*go.jacobcolvin.com/niceyaml.PanicError], as [Doc.Apply] describes.
 //
 // A Func of the Doc cannot call Apply, so one transaction runs one Apply.
 // To edit the places of several paths at once, apply at `$` and select
@@ -736,7 +738,8 @@
 // Func cannot see such a problem, so it cannot recover from it. Some Sets
 // wait, so that Apply parses and checks the text once for many of them, as
 // [Doc.Apply] describes. The text and the error of the Apply are the same
-// either way, unless the context of the Apply ends during the Apply.
+// either way, unless the context of the Apply ends during the Apply or a
+// call of the Func panics.
 //
 // For example, a Remove of an anchored value that an alias reads fails with
 // an [*UnsupportedError] whose Related field names each alias. The Func

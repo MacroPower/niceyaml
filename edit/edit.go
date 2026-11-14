@@ -27,21 +27,20 @@ var (
 	// also marks go-yaml behavior that the engine cannot write around.
 	// Go-yaml's parser can refuse or misread the edited text, with or
 	// without its comments, or panic on it. Go-yaml's decoder can refuse
-	// it. Go-yaml's encoder can panic on the value of a Set, or write text
-	// that go-yaml's decoder reads as another value. It can also write a
-	// character that YAML does not allow in a text, or both "\n" and
-	// "\r\n" line breaks for YAML of one kind. A call can also write a text
-	// that go-yaml's decoder reads otherwise than YAML does, in one of the
-	// ways that the Supported YAML section of the package documentation
-	// lists. The engine wrote that text, so the call fails with ErrEngine.
-	// The message names go-yaml in each of those cases. ErrEngine also
-	// indicates new text that differs from the model of the calls of an
-	// Apply, as the Transactions section of the package documentation
-	// describes. It also indicates a call that the model cannot take. The
-	// error binds where the user's text holds the value that differs, or at
-	// the place of the call, as the Errors section of the package
-	// documentation describes. An error that matches ErrEngine never
-	// matches [ErrUnsupported] or [ErrMisread].
+	// it. Go-yaml's encoder can write text that go-yaml's decoder reads as
+	// another value. It can also write a character that YAML does not allow
+	// in a text, or both "\n" and "\r\n" line breaks for YAML of one kind.
+	// A call can also write a text that go-yaml's decoder reads otherwise
+	// than YAML does, in one of the ways that the Supported YAML section of
+	// the package documentation lists. The engine wrote that text, so the
+	// call fails with ErrEngine. The message names go-yaml in each of those
+	// cases. ErrEngine also indicates new text that differs from the model
+	// of the calls of an Apply, as the Transactions section of the package
+	// documentation describes. It also indicates a call that the model
+	// cannot take. The error binds where the user's text holds the value
+	// that differs, or at the place of the call, as the Errors section of
+	// the package documentation describes. An error that matches ErrEngine
+	// never matches [ErrUnsupported] or [ErrMisread].
 	ErrEngine = errors.New("the engine cannot write this edit")
 
 	// ErrMisread indicates a document of valid YAML that go-yaml's decoder
@@ -309,6 +308,11 @@ func (e *sentinelError) DetachErrors(detach func(error) error) error {
 // Func edits a document through n, a node on one place that the path of
 // [Doc.Apply] selects. An error fails the Apply, and an error without a
 // location binds at the value of n.
+//
+// A panic that leaves a call of the Func fails the Apply with an error
+// that holds a [*niceyaml.PanicError], as Doc.Apply describes. That error
+// binds at the value of n too, also for a panic in a write through another
+// node. Its message reads as in "the edit panicked: boom".
 //
 // An edit through a [Node] parses and checks the whole text, unless the
 // edit waits for the edits after it, as [Doc.Apply] describes. Apply checks
@@ -1037,12 +1041,14 @@ func headerEnd(src *niceyaml.Source, line int) int {
 // until one of them fails. So the problem names the Set that failed the
 // check, as it does for a Set that does not wait. Apply can thus call fn
 // again after the call of that Set, before it fails. The text and the
-// error of the Apply do not depend on whether a Set waits, unless ctx ends
-// during the Apply. Apply checks ctx before each Set that runs again after
-// the first. When ctx has ended, Apply fails with its error. Suppose that
-// ctx ends after the call of a failing Set, and that the Set is not the
-// first that waits. Then the Apply fails with the error of ctx. On a Doc
-// whose Sets do not wait, it fails with the problem of the Set.
+// error of the Apply are the same whether a Set waits or not, unless ctx
+// ends during the Apply or a later call of fn panics. A panic wins over
+// the Sets that wait, so their check never runs. Apply checks ctx before
+// each Set that runs again after the first. When ctx has ended, Apply
+// fails with its error. Suppose that ctx ends after the call of a failing
+// Set, and that the Set is not the first that waits. Then the Apply fails
+// with the error of ctx. On a Doc whose Sets do not wait, it fails with
+// the problem of the Set.
 //
 // After the last call, Apply checks the text. The text must decode, and it
 // must hold the values of the model, as the package documentation
@@ -1079,6 +1085,21 @@ func headerEnd(src *niceyaml.Source, line int) int {
 // before the Apply. To let an Apply finish after its context ends, pass
 // it the context that [context.WithoutCancel] returns.
 //
+// A panic that leaves a call of fn fails the Apply with an error that
+// holds a [*niceyaml.PanicError] with the value and the stack of the
+// panic. A write of a [Node] lets a panic of a marshaler or of go-yaml's
+// encoder through to fn, so such a panic fails the Apply too. The panic
+// wins over a problem that the call recorded before it, and the Sets that
+// wait do not run. The error binds at the place of the call. Its message
+// names the label of [WithLabel], or "the edit", as in "the edit panicked:
+// boom".
+//
+// The error of a panic matches what the value of the panic matches, except
+// the decode and syntax sentinels of the niceyaml package, such as
+// [niceyaml.ErrDecode]. A caller thus tests for the PanicError before a
+// sentinel such as [ErrEngine]. [niceyaml.IsInvalid] does not report the
+// error.
+//
 // Apply returns the first problem, bound in the user's text, and stops
 // there. A failed Apply leaves the Doc as it found it, so the Doc drops
 // every edit of the calls before the problem. Apply returns an error that
@@ -1110,7 +1131,7 @@ func (d *Doc) Apply(ctx context.Context, path paths.Path, fn Func, opts ...Apply
 	saved := d.save()
 	passed := false
 
-	// A panic in fn leaves the Doc as it found it too.
+	// A panic outside a call of fn leaves the Doc as it found it too.
 	defer func() {
 		if !passed {
 			d.restore(saved)
@@ -1173,7 +1194,7 @@ func (d *Doc) run(ctx context.Context, path paths.Path, fn Func, cfg applyConfig
 			return d.user.Bind(err) //nolint:wrapcheck // The error binds in the user's text.
 		}
 
-		err = d.endCall(n, fn(ctx, n))
+		err = d.call(ctx, n, fn)
 		if err != nil {
 			return err
 		}
@@ -1186,6 +1207,48 @@ func (d *Doc) run(ctx context.Context, path paths.Path, fn Func, cfg applyConfig
 	}
 
 	return d.check(ctx, start)
+}
+
+// call runs fn on n, one call of the Func of the Apply running, and
+// returns the problem that fails the Apply, as [Doc.endCall] gives it. For
+// a panic that leaves fn, call returns an error that holds a
+// [*niceyaml.PanicError], bound at n, in place of a problem that the call
+// recorded before the panic. It does not run the Sets that wait. A write
+// that a panic cut short goes back to the text that it found, also when fn
+// recovers the panic and returns. The error of the call binds in that
+// text. No state of that write, such as the detail that names it, reaches
+// the binding, a later call, or a later Apply.
+func (d *Doc) call(ctx context.Context, n *Node, fn Func) error {
+	returned := false
+
+	err := hook.Guard(d.subject(), func() error {
+		err := fn(ctx, n)
+		returned = true
+
+		return err
+	})
+
+	if returned {
+		// A write still runs here only when fn recovered the panic that cut
+		// the write short.
+		if d.calling {
+			d.undoCall(true)
+
+			d.calling, d.found, d.callNamed = false, nil, ""
+			d.endRunning()
+		}
+
+		return d.endCall(n, err)
+	}
+
+	if d.calling {
+		d.undoCall(true)
+	}
+
+	d.calling, d.found, d.callNamed, d.callErr = false, nil, "", nil
+	d.endRunning()
+
+	return n.bind(err)
 }
 
 // holdsKey reports whether path holds a `~` selector.

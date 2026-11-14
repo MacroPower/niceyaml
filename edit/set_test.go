@@ -38,9 +38,9 @@ func TestNode_Set(t *testing.T) {
 		dup bool
 		// Whether err matches edit.ErrEngine.
 		engine bool
-		// The value of the panic of the Set, which the Apply passes on, or
-		// nil.
-		panics any
+		// Whether err holds a niceyaml.PanicError, because the Set panics
+		// and the Apply recovers the panic.
+		panicked bool
 	}{
 		"string of several lines at the end of a document before a comment line deeper than its text": {
 			// The comment line above the next "---" belongs to the next
@@ -885,39 +885,51 @@ func TestNode_Set(t *testing.T) {
 			err:    "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 sets $.b to a value whose YAML holds the anchor &z, and cafe does not write anchors or aliases",
 		},
 		"YAML marshaler that panics": {
-			// The check of the value calls the marshaler, so the panic is the
-			// caller's.
-			before: stringtest.LinesLF("a: 1", "b: 2"),
-			path:   paths.Doc().Child("b"),
-			value:  panicYAMLMarshaler{},
-			panics: "edit_test.panicYAMLMarshaler",
+			// The check of the value calls the marshaler. The panic leaves the
+			// call of the Func, so the error binds at the place of that call.
+			before:   stringtest.LinesLF("a: 1", "b: 2"),
+			path:     paths.Doc().Child("b"),
+			value:    panicYAMLMarshaler{},
+			err:      "test.yaml:1:1: $: cafe.jacobcolvin.com/v1 panicked: edit_test.panicYAMLMarshaler",
+			panicked: true,
 		},
 		"context YAML marshaler that panics": {
-			before: stringtest.LinesLF("a: 1", "b: 2"),
-			path:   paths.Doc().Child("b"),
-			value:  panicContextYAMLMarshaler{},
-			panics: "edit_test.panicContextYAMLMarshaler",
+			before:   stringtest.LinesLF("a: 1", "b: 2"),
+			path:     paths.Doc().Child("b"),
+			value:    panicContextYAMLMarshaler{},
+			err:      "test.yaml:1:1: $: cafe.jacobcolvin.com/v1 panicked: edit_test.panicContextYAMLMarshaler",
+			panicked: true,
 		},
 		"marshaler that panics": {
-			before: stringtest.LinesLF("a: 1", "b: 2"),
-			path:   paths.Doc().Child("b"),
-			value:  panicMarshaler{},
-			panics: "edit_test.panicMarshaler",
+			before:   stringtest.LinesLF("a: 1", "b: 2"),
+			path:     paths.Doc().Child("b"),
+			value:    panicMarshaler{},
+			err:      "test.yaml:1:1: $: cafe.jacobcolvin.com/v1 panicked: edit_test.panicMarshaler",
+			panicked: true,
 		},
 		"context marshaler that panics": {
-			before: stringtest.LinesLF("a: 1", "b: 2"),
-			path:   paths.Doc().Child("b"),
-			value:  panicContextMarshaler{},
-			panics: "edit_test.panicContextMarshaler",
+			before:   stringtest.LinesLF("a: 1", "b: 2"),
+			path:     paths.Doc().Child("b"),
+			value:    panicContextMarshaler{},
+			err:      "test.yaml:1:1: $: cafe.jacobcolvin.com/v1 panicked: edit_test.panicContextMarshaler",
+			panicked: true,
 		},
 		"text marshaler that panics": {
-			// A control: go-yaml's encoder alone calls the method, so the panic
-			// is a panic of the encoder.
-			before: stringtest.LinesLF("a: 1", "b: 2"),
-			path:   paths.Doc().Child("b"),
-			value:  panicTextMarshaler{},
-			err:    "2:4: $.b: go-yaml's encoder panicked on the value: edit_test.panicTextMarshaler",
-			engine: true,
+			// Go-yaml's encoder alone calls the method, and its panic fails the
+			// Apply as the panic of any other marshaler does.
+			before:   stringtest.LinesLF("a: 1", "b: 2"),
+			path:     paths.Doc().Child("b"),
+			value:    panicTextMarshaler{},
+			err:      "test.yaml:1:1: $: cafe.jacobcolvin.com/v1 panicked: edit_test.panicTextMarshaler",
+			panicked: true,
+		},
+		"struct with a zero omitempty field whose text marshaler panics on the zero value": {
+			// Go-yaml's encoder leaves out the field, so it does not call the
+			// method, and neither does the check of the value.
+			before: "a: 1\n",
+			path:   paths.Doc().Child("a"),
+			value:  omitsZeroText{Name: "cafe"},
+			want:   stringtest.LinesLF("a:", "  name: cafe"),
 		},
 		"YAML marshaler that writes two documents": {
 			// Go-yaml's encoder would write the first document alone.
@@ -997,29 +1009,26 @@ func TestNode_Set(t *testing.T) {
 			want:   stringtest.LinesLF("a:", "  name: c"),
 		},
 		"map with a nil key, on which go-yaml's encoder panics": {
-			before: "a: 1\n",
-			path:   paths.Doc().Child("a"),
-			value:  map[any]any{nil: 1},
-			// The engine wrote no text, so the error does not describe one.
-			err:    "test.yaml:1:4: $.a: go-yaml's encoder panicked on the value: runtime error: ",
-			engine: true,
+			before:   "a: 1\n",
+			path:     paths.Doc().Child("a"),
+			value:    map[any]any{nil: 1},
+			err:      "test.yaml:1:1: $: cafe.jacobcolvin.com/v1 panicked: runtime error: ",
+			panicked: true,
 		},
 		"new mapping with a nil key, on which go-yaml's encoder panics": {
-			// The call creates the place, so the problem binds at the nearest value above it that the user
-			// wrote, under its path (fix19 G1-1).
-			before: "a: 1\n",
-			path:   paths.MustParse("$.b.c"),
-			value:  map[any]any{nil: 1},
-			err:    "1:1: $: go-yaml's encoder panicked on the value: runtime error: ",
-			engine: true,
+			before:   "a: 1\n",
+			path:     paths.MustParse("$.b.c"),
+			value:    map[any]any{nil: 1},
+			err:      "test.yaml:1:1: $: cafe.jacobcolvin.com/v1 panicked: runtime error: ",
+			panicked: true,
 		},
 		"map slice with a key that is not a string, on which go-yaml's encoder panics": {
 			before: "a: 1\n",
 			path:   paths.Doc().Child("a"),
 			value:  yaml.MapSlice{{Key: 1, Value: 2}},
-			err: "1:4: $.a: go-yaml's encoder panicked on the value: " +
+			err: "test.yaml:1:1: $: cafe.jacobcolvin.com/v1 panicked: " +
 				"interface conversion: interface {} is int, not string",
-			engine: true,
+			panicked: true,
 		},
 		"multi-line string in place of a value with spaces after it": {
 			// The spaces would end the last line of the block scalar.
@@ -2272,21 +2281,20 @@ func TestNode_Set(t *testing.T) {
 
 			var err error
 
-			if tc.panics != nil {
-				require.PanicsWithValue(t, tc.panics, func() { err = applyAt(t, d, tc.path, set) })
-				require.NoError(t, err)
-				require.Equal(t, tc.before, d.Text())
-
-				return
-			}
-
-			err = applyAt(t, d, tc.path, set)
+			require.NotPanics(t, func() { err = applyAt(t, d, tc.path, set) })
 
 			requireEachCall(t, d, err, tc.before, opts, func(d *edit.Doc) error {
 				return applyAt(t, d, tc.path, set)
 			})
 
 			switch {
+			case tc.panicked:
+				require.ErrorAs(t, err, new(*niceyaml.PanicError))
+				require.NotErrorIs(t, err, edit.ErrEngine)
+				require.NotErrorIs(t, err, edit.ErrValue)
+				require.False(t, niceyaml.IsInvalid(err))
+				require.Equal(t, tc.before, d.Text())
+
 			case tc.engine:
 				require.ErrorIs(t, err, edit.ErrEngine)
 			case tc.err != "":
@@ -3379,6 +3387,34 @@ type panicTextMarshaler struct{}
 // MarshalText panics.
 func (panicTextMarshaler) MarshalText() ([]byte, error) {
 	panic("edit_test.panicTextMarshaler")
+}
+
+// panicJSONMarshaler panics with the name of its type when it marshals.
+type panicJSONMarshaler struct{}
+
+// MarshalJSON panics.
+func (panicJSONMarshaler) MarshalJSON() ([]byte, error) {
+	panic("edit_test.panicJSONMarshaler")
+}
+
+// zeroPanicText writes its string as its text, and panics with the name of
+// its type when it marshals the empty string.
+type zeroPanicText string
+
+// MarshalText returns z, and panics for the empty string.
+func (z zeroPanicText) MarshalText() ([]byte, error) {
+	if z == "" {
+		panic("edit_test.zeroPanicText")
+	}
+
+	return []byte(z), nil
+}
+
+// omitsZeroText holds a zeroPanicText that go-yaml's encoder leaves out when
+// it is the empty string.
+type omitsZeroText struct {
+	Name string        `yaml:"name"`
+	Text zeroPanicText `yaml:"text,omitempty"`
 }
 
 func TestNode_Set_Placement(t *testing.T) {

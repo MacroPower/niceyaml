@@ -5898,7 +5898,7 @@ func TestDoc_Apply_Failed(t *testing.T) {
 
 				panic("too late")
 			},
-			err: "panic: too late",
+			err: "test.yaml:1:1: $: the edit panicked: too late",
 		},
 	}
 
@@ -5908,15 +5908,9 @@ func TestDoc_Apply_Failed(t *testing.T) {
 
 			src, d := newSourceDoc(t, before)
 
-			err := func() (err error) {
-				defer func() {
-					if v := recover(); v != nil {
-						err = fmt.Errorf("panic: %v", v)
-					}
-				}()
+			var err error
 
-				return d.Apply(t.Context(), paths.Doc(), tc.fn)
-			}()
+			require.NotPanics(t, func() { err = d.Apply(t.Context(), paths.Doc(), tc.fn) })
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.err)
 
@@ -5938,6 +5932,355 @@ func TestDoc_Apply_Failed(t *testing.T) {
 				d.Text(),
 			)
 			assert.Len(t, d.Removals(), 1)
+		})
+	}
+}
+
+func TestDoc_Apply_Panic(t *testing.T) {
+	t.Parallel()
+
+	const before = "name: x\ncount: 1\nitems:\n  - a\n  - b\n"
+
+	// A value that the marshaler panicking marshals.
+	type secret struct{}
+
+	var (
+		name   = paths.Doc().Child("name")
+		count  = paths.Doc().Child("count")
+		first  = paths.Doc().Child("items").Index(0)
+		second = paths.Doc().Child("items").Index(1)
+	)
+
+	panicking := encoder.CustomMarshaler(func(context.Context, secret) (any, error) {
+		panic("secret panics")
+	})
+
+	// The Func of set sets the place of its node to v.
+	set := func(v any) edit.Func {
+		return func(ctx context.Context, n *edit.Node) error {
+			return n.Set(ctx, v)
+		}
+	}
+
+	pass := func(context.Context, *edit.Node) error { return nil }
+	stop := func(context.Context, *edit.Node) error { return errors.New("stop") }
+
+	// The Func of recovering recovers the panic of a Set of v at $.name, and
+	// then it returns what the Func rest returns. It fails when the Set does
+	// not panic.
+	recovering := func(v any, rest edit.Func) edit.Func {
+		return func(ctx context.Context, n *edit.Node) error {
+			var (
+				recovered any
+				setErr    error
+			)
+
+			func() {
+				defer func() { recovered = recover() }()
+
+				setErr = n.At(name).Set(ctx, v)
+			}()
+
+			if recovered == nil {
+				return fmt.Errorf("the set does not panic: %w", setErr)
+			}
+
+			return rest(ctx, n)
+		}
+	}
+
+	tcs := map[string]struct {
+		fn         edit.Func
+		path       paths.Path
+		opts       []edit.ApplyOption
+		marshalers []encoder.Marshaler
+		// The message of the error of the Apply, or "" for an Apply that
+		// passes and leaves the text want.
+		err  string
+		want string
+		// The value of the panic, as fmt prints it, or "" for an error that
+		// holds no panic.
+		value string
+		// The sentinel that the value of the panic matches, and so the error
+		// of the Apply too, or nil.
+		is error
+		// A sentinel of the niceyaml package that the value of the panic
+		// matches and the error of the Apply does not, or nil.
+		refused error
+	}{
+		"func that panics": {
+			path:  name,
+			fn:    func(context.Context, *edit.Node) error { panic("boom") },
+			err:   "test.yaml:1:7: $.name: the edit panicked: boom",
+			value: "boom",
+		},
+		"func that panics after an edit": {
+			path: paths.Doc(),
+			fn: func(_ context.Context, n *edit.Node) error {
+				err := n.At(count).Remove()
+				if err != nil {
+					return err
+				}
+
+				panic("late")
+			},
+			err:   "test.yaml:1:1: $: the edit panicked: late",
+			value: "late",
+		},
+		"func that panics after a set that waits": {
+			// The Set of a string waits for the end of the Apply, and the panic
+			// comes first, so the Set never runs.
+			path: name,
+			fn: func(ctx context.Context, n *edit.Node) error {
+				err := n.Set(ctx, "y")
+				if err != nil {
+					return err
+				}
+
+				panic("late")
+			},
+			err:   "test.yaml:1:7: $.name: the edit panicked: late",
+			value: "late",
+		},
+		"func that panics after it ignores a set that fails with ErrEngine": {
+			// The problem of the Set fails the Apply whatever the Func returns,
+			// and the panic wins over it.
+			path: name,
+			fn: func(ctx context.Context, n *edit.Node) error {
+				err := n.Set(ctx, yamlMarshaler("&a"))
+				if !errors.Is(err, edit.ErrEngine) {
+					return fmt.Errorf("the set does not fail with ErrEngine: %w", err)
+				}
+
+				panic("late")
+			},
+			err:   "test.yaml:1:7: $.name: the edit panicked: late",
+			value: "late",
+		},
+		"func that panics with the error of a failed set": {
+			path: name,
+			fn: func(ctx context.Context, n *edit.Node) error {
+				panic(n.Set(ctx, make(chan int)))
+			},
+			err: "test.yaml:1:7: $.name: the edit panicked: test.yaml:1:7: $.name: the edit cannot write the value " +
+				"of $.name: value does not encode: unknown value type chan int",
+			value: "test.yaml:1:7: $.name: the edit cannot write the value of $.name: value does not encode: " +
+				"unknown value type chan int",
+			is: edit.ErrValue,
+		},
+		"func that panics with the error of a failed decode": {
+			// The error of the Apply does not match the decode sentinels that
+			// the value matches.
+			path: name,
+			fn: func(ctx context.Context, n *edit.Node) error {
+				_, err := n.Decode[int](ctx)
+				panic(err)
+			},
+			err:     "test.yaml:1:7: $.name: the edit panicked: test.yaml:1:7: $.name: expected integer, got string",
+			value:   "test.yaml:1:7: $.name: expected integer, got string",
+			refused: niceyaml.ErrDecode,
+		},
+		"second call that panics": {
+			// The Set of the first call writes the item on two lines, and the
+			// Apply drops it.
+			path: paths.MustParse("$.items[*]"),
+			fn: func(ctx context.Context, n *edit.Node) error {
+				if n.Path().Equal(second) {
+					panic("second")
+				}
+
+				return n.Set(ctx, []string{"c", "d"})
+			},
+			err:   "test.yaml:5:5: $.items[1]: the edit panicked: second",
+			value: "second",
+		},
+		"YAML method": {
+			path:  name,
+			fn:    set(panicYAMLMarshaler{}),
+			err:   "test.yaml:1:7: $.name: the edit panicked: edit_test.panicYAMLMarshaler",
+			value: "edit_test.panicYAMLMarshaler",
+		},
+		"text method": {
+			path:  name,
+			fn:    set(panicTextMarshaler{}),
+			err:   "test.yaml:1:7: $.name: the edit panicked: edit_test.panicTextMarshaler",
+			value: "edit_test.panicTextMarshaler",
+		},
+		"text method with a label": {
+			path:  name,
+			opts:  []edit.ApplyOption{label},
+			fn:    set(panicTextMarshaler{}),
+			err:   "test.yaml:1:7: $.name: cafe.jacobcolvin.com/v1 panicked: edit_test.panicTextMarshaler",
+			value: "edit_test.panicTextMarshaler",
+		},
+		"text method of a map key": {
+			path:  name,
+			fn:    set(map[panicTextMarshaler]int{{}: 1}),
+			err:   "test.yaml:1:7: $.name: the edit panicked: edit_test.panicTextMarshaler",
+			value: "edit_test.panicTextMarshaler",
+		},
+		"text method in a set below the place of the call": {
+			// The error binds at the place of the call, not at the place of
+			// the Set.
+			path: paths.Doc(),
+			fn: func(ctx context.Context, n *edit.Node) error {
+				return n.At(name).Set(ctx, panicTextMarshaler{})
+			},
+			err:   "test.yaml:1:1: $: the edit panicked: edit_test.panicTextMarshaler",
+			value: "edit_test.panicTextMarshaler",
+		},
+		"JSON method under JSON marshalers": {
+			path:       name,
+			marshalers: []encoder.Marshaler{encoder.JSONMarshalers(true)},
+			fn:         set(panicJSONMarshaler{}),
+			err:        "test.yaml:1:7: $.name: the edit panicked: edit_test.panicJSONMarshaler",
+			value:      "edit_test.panicJSONMarshaler",
+		},
+		"function of the marshalers": {
+			path:       name,
+			marshalers: []encoder.Marshaler{panicking},
+			fn:         set(secret{}),
+			err:        "test.yaml:1:7: $.name: the edit panicked: secret panics",
+			value:      "secret panics",
+		},
+		"function of the marshalers on a map key": {
+			path:       name,
+			marshalers: []encoder.Marshaler{panicking},
+			fn:         set(map[secret]int{{}: 1}),
+			err:        "test.yaml:1:7: $.name: the edit panicked: secret panics",
+			value:      "secret panics",
+		},
+		"map with a nil key": {
+			// Go-yaml's encoder panics on the key.
+			path:  name,
+			fn:    set(map[any]any{nil: 1}),
+			err:   "test.yaml:1:7: $.name: the edit panicked: runtime error: invalid memory address or nil pointer dereference",
+			value: "runtime error: invalid memory address or nil pointer dereference",
+		},
+		"func that recovers the panic of a set": {
+			// The Func owns the panic. The Set did not change the Doc, so the
+			// text holds the second Set alone.
+			path: paths.Doc(),
+			fn: recovering(panicTextMarshaler{}, func(ctx context.Context, n *edit.Node) error {
+				return n.At(count).Set(ctx, 2)
+			}),
+			want: "name: x\ncount: 2\nitems:\n  - a\n  - b\n",
+		},
+		"func that recovers the panic of a set and returns": {
+			path: paths.Doc(),
+			fn:   recovering(panicTextMarshaler{}, pass),
+			want: before,
+		},
+		"func that recovers the panic of a YAML method and returns": {
+			path: paths.Doc(),
+			fn:   recovering(panicYAMLMarshaler{}, pass),
+			want: before,
+		},
+		"func that recovers the panic of a set and fails": {
+			// No detail names the Set that the panic cut short.
+			path: paths.Doc(),
+			fn:   recovering(panicTextMarshaler{}, stop),
+			err:  "test.yaml:1:1: $: stop",
+		},
+		"second call that fails after the first recovers the panic of a set": {
+			// No detail of the problem of the second call names the Set that
+			// the panic cut short in the first.
+			path: paths.MustParse("$.items[*]"),
+			fn: func(ctx context.Context, n *edit.Node) error {
+				if n.Path().Equal(second) {
+					return stop(ctx, n)
+				}
+
+				return recovering(panicTextMarshaler{}, pass)(ctx, n)
+			},
+			err: "test.yaml:5:5: $.items[1]: stop",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var eds []edit.Option
+
+			if len(tc.marshalers) > 0 {
+				eds = append(eds, edit.WithMarshalers(tc.marshalers...))
+			}
+
+			_, d := newSourceDocWith(t, before, eds)
+
+			var err error
+
+			require.NotPanics(t, func() { err = d.Apply(t.Context(), tc.path, tc.fn, tc.opts...) })
+
+			if tc.err == "" {
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, d.Text())
+			} else {
+				require.Error(t, err)
+				assert.Equal(t, tc.err, err.Error())
+
+				// No detail names the write that the panic cut short.
+				formatted := niceyaml.FormatError(err)
+				assert.True(t, strings.HasPrefix(formatted, tc.err+"\n\n"), formatted)
+
+				p, ok := errors.AsType[*niceyaml.PanicError](err)
+				require.Equal(t, tc.value != "", ok)
+
+				if ok {
+					assert.Equal(t, tc.value, fmt.Sprint(p.Value))
+					assert.NotEmpty(t, p.Stack)
+				}
+
+				assert.False(t, niceyaml.IsInvalid(err))
+
+				if tc.is != nil {
+					require.ErrorIs(t, err, tc.is)
+				} else {
+					require.NotErrorIs(t, err, edit.ErrEngine)
+					require.NotErrorIs(t, err, edit.ErrValue)
+				}
+
+				assert.Equal(t, before, d.Text())
+				assert.Empty(t, d.Removals())
+			}
+
+			if tc.refused != nil {
+				var p *niceyaml.PanicError
+
+				require.ErrorAs(t, err, &p)
+
+				valueErr, isErr := p.Value.(error)
+				require.True(t, isErr)
+				require.ErrorIs(t, valueErr, tc.refused)
+				require.NotErrorIs(t, err, tc.refused)
+			}
+
+			// The problem of a later Apply reads as on a new Doc, so no state
+			// of a call that a panic cut short reaches it. The problem binds
+			// in the user's text, at a place that no row sets.
+			_, fresh := newSourceDocWith(t, before, eds)
+
+			assert.Equal(t,
+				niceyaml.FormatError(fresh.Apply(t.Context(), first, stop)),
+				niceyaml.FormatError(d.Apply(t.Context(), first, stop)),
+			)
+
+			// A later Apply whose Func panics fails with the panic too.
+			var later error
+
+			require.NotPanics(t, func() {
+				later = d.Apply(t.Context(), count, func(context.Context, *edit.Node) error { panic("boom") })
+			})
+			require.EqualError(t, later, "test.yaml:2:8: $.count: the edit panicked: boom")
+
+			var laterPanic *niceyaml.PanicError
+
+			require.ErrorAs(t, later, &laterPanic)
+			assert.Equal(t, "boom", fmt.Sprint(laterPanic.Value))
+
+			require.NoError(t, d.Apply(t.Context(), count, set(2)))
+			assert.Equal(t, "name: x\ncount: 2\nitems:\n  - a\n  - b\n", d.Text())
 		})
 	}
 }
@@ -12203,6 +12546,9 @@ func TestWithMarshalers(t *testing.T) {
 	failing := encoder.CustomMarshaler(func(context.Context, hop) (any, error) {
 		return nil, errors.New("hop is secret")
 	})
+	panicking := encoder.CustomMarshaler(func(context.Context, hop) (any, error) {
+		panic("hop panics")
+	})
 	hops := encoder.CustomMarshaler(func(_ context.Context, h hop) (any, error) {
 		return map[string]any{"name": h.name, "next": []string{"a", "b"}}, nil
 	})
@@ -12366,6 +12712,30 @@ func TestWithMarshalers(t *testing.T) {
 			},
 			want: stringtest.LinesLF("hops:", "  x: 1"),
 		},
+		"a function that panics": {
+			before:     "hop: x\n",
+			marshalers: []encoder.Marshaler{panicking},
+			fn: func(ctx context.Context, n *edit.Node) error {
+				return n.At(paths.Doc().Child("hop")).Set(ctx, hop{name: "y"})
+			},
+			err: "test.yaml:1:1: $: the edit panicked: hop panics",
+		},
+		"a function that panics on a key of a map": {
+			before:     "hops: {}\n",
+			marshalers: []encoder.Marshaler{panicking},
+			fn: func(ctx context.Context, n *edit.Node) error {
+				return n.At(paths.Doc().Child("hops")).Set(ctx, map[hop]int{{name: "x"}: 1})
+			},
+			err: "test.yaml:1:1: $: the edit panicked: hop panics",
+		},
+		"a function that panics on a key of a map in a map": {
+			before:     "hops: {}\n",
+			marshalers: []encoder.Marshaler{panicking},
+			fn: func(ctx context.Context, n *edit.Node) error {
+				return n.At(paths.Doc().Child("hops")).Set(ctx, map[string]map[hop]int{"a": {{name: "x"}: 1}})
+			},
+			err: "test.yaml:1:1: $: the edit panicked: hop panics",
+		},
 		"a nil function removes the function before it": {
 			before:     "net: x\n",
 			marshalers: []encoder.Marshaler{cidrText, encoder.CustomMarshaler[net.IPNet](nil)},
@@ -12466,7 +12836,8 @@ func TestWithMarshalers(t *testing.T) {
 			d, err := edit.New(doc, edit.WithMarshalers(tc.marshalers...))
 			require.NoError(t, err)
 
-			err = d.Apply(t.Context(), paths.Doc(), tc.fn)
+			require.NotPanics(t, func() { err = d.Apply(t.Context(), paths.Doc(), tc.fn) })
+
 			if tc.err != "" {
 				require.Error(t, err)
 				assert.Equal(t, tc.err, err.Error())

@@ -695,7 +695,8 @@ func init() {
 		enc := New(&buf, o...)
 
 		// The build runs without the guard of Encode, so a panic in it
-		// reaches the edit package, which names its cause.
+		// reaches the edit package. Doc.Apply there recovers the panic when
+		// the panic leaves a call of its Func.
 		text, node, err := enc.build(ctx, v, nil)
 		if err != nil {
 			return nil, nil, err
