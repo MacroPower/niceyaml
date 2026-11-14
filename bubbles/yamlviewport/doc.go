@@ -75,7 +75,9 @@
 // revision as [ViewModeFull] does, and the mode takes effect when a diff
 // shows. A change of view mode, diff mode, or hunk context keeps the line at
 // the top of the view, or scrolls to the first search match when the new
-// view holds one.
+// view holds one. Hunks that fit the screen stay at their first row. The
+// next change starts from the line they meant to put at the top while the
+// same line of the view stays at the top.
 //
 // A [ViewMode] and a [DiffMode] each read and write their name as text,
 // such as "hunks" or "origin". A program thus takes either mode from a

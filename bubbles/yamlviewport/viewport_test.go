@@ -9060,6 +9060,23 @@ func TestViewport_PresentationChangeKeepsTopLine(t *testing.T) {
 				assert.Equal(t, 0, m.YOffset())
 			},
 		},
+		"setup from the first row": {
+			// Each change starts at the first row, so none of them holds a
+			// line for the next.
+			docs:  twoRevs,
+			width: 80, height: 4,
+			setup: func(*testing.T, *yamlviewport.Model) {},
+			change: func(m *yamlviewport.Model) {
+				m.SetViewMode(yamlviewport.ViewModeHunks)
+				m.SetHunkContext(8)
+				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+
+				assert.Equal(t, 0, m.YOffset())
+			},
+		},
 		"hunks without changes": {
 			// The hunks of two equal revisions do not hold any lines.
 			docs:  []string{placeDoc(), placeDoc()},
@@ -9130,6 +9147,427 @@ func TestViewport_PresentationChangeKeepsTopLine(t *testing.T) {
 			tc.test(t, &m)
 		})
 	}
+}
+
+func TestViewport_ViewModeCycleKeepsPlace(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		// A step that runs while the hunks show and leaves them at their
+		// first row.
+		onHunks func(m *yamlviewport.Model)
+	}{
+		"key binding": {
+			onHunks: func(*yamlviewport.Model) {},
+		},
+		"scroll that keeps the top line": {
+			onHunks: func(m *yamlviewport.Model) {
+				*m, _ = m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+			},
+		},
+		"resize": {
+			onHunks: func(m *yamlviewport.Model) {
+				m.SetWidth(60)
+				m.SetHeight(30)
+			},
+		},
+		"go to top at the first row": {
+			// GotoTop leaves the same line at the top, so the hunks still hold
+			// line 147.
+			onHunks: func(m *yamlviewport.Model) { m.GotoTop() },
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New()
+			m.SetWidth(80)
+			m.SetHeight(20)
+			addRevisions(&m, placeDoc(), placeDoc(10, 150))
+
+			m.SetYOffset(77)
+			require.Equal(t, lineHit(1, 76), topHit(t, &m))
+
+			pressV := func() {
+				m, _ = m.Update(tea.KeyPressMsg{Code: 'v', Text: "v"})
+			}
+
+			// Line 76 lies outside every hunk, so the hunks aim at line 147.
+			// They fit the screen and stay at their first row.
+			pressV()
+			require.Equal(t, yamlviewport.ViewModeHunks, m.ViewMode())
+			assert.Equal(t, 0, m.YOffset())
+
+			tc.onHunks(&m)
+			require.Equal(t, 0, m.YOffset())
+
+			// The next modes start from line 147 rather than from the top.
+			pressV()
+			require.Equal(t, yamlviewport.ViewModeSideBySide, m.ViewMode())
+			assert.Equal(t, lineHit(0, 147), topHit(t, &m))
+
+			pressV()
+			require.Equal(t, yamlviewport.ViewModeFull, m.ViewMode())
+			assert.Equal(t, lineHit(1, 147), topHit(t, &m))
+		})
+	}
+}
+
+func TestViewport_ViewModeCycleWithoutChangesKeepsPlace(t *testing.T) {
+	t.Parallel()
+
+	m := yamlviewport.New()
+	m.SetWidth(80)
+	m.SetHeight(20)
+	addRevisions(&m, placeDoc(), placeDoc())
+
+	m.SetYOffset(76)
+	require.Equal(t, lineHit(1, 76), topHit(t, &m))
+
+	pressV := func() {
+		m, _ = m.Update(tea.KeyPressMsg{Code: 'v', Text: "v"})
+	}
+
+	// The revisions match, so the hunks show no line.
+	pressV()
+	require.Equal(t, yamlviewport.ViewModeHunks, m.ViewMode())
+	assert.Equal(t, 0, m.YOffset())
+
+	// The next modes start from the line the hunks could not show.
+	pressV()
+	require.Equal(t, yamlviewport.ViewModeSideBySide, m.ViewMode())
+	assert.Equal(t, lineHit(0, 76), topHit(t, &m))
+
+	pressV()
+	require.Equal(t, yamlviewport.ViewModeFull, m.ViewMode())
+	assert.Equal(t, lineHit(1, 76), topHit(t, &m))
+}
+
+func TestViewport_ScrollEndsKeptPlace(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		// A step that runs while the hunks show and brings another line to
+		// their top.
+		step   func(t *testing.T, m *yamlviewport.Model)
+		want   yamlviewport.Hit
+		mode   yamlviewport.ViewMode
+		height int
+		y      int
+	}{
+		"scroll to another line": {
+			// The full view starts from the line at the new top of the hunks
+			// rather than from line 147.
+			height: 4, y: 77,
+			step: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+
+				require.Equal(t, lineHit(1, 147), topHit(t, m))
+				m.ScrollUp(5)
+				require.Equal(t, lineHit(0, 10), topHit(t, m))
+			},
+			mode: yamlviewport.ViewModeFull,
+			want: lineHit(1, 10),
+		},
+		"go to top": {
+			// A caller that wants the next view at its top calls GotoTop
+			// after the change that put line 147 at the top.
+			height: 4, y: 77,
+			step: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+
+				require.Equal(t, lineHit(1, 147), topHit(t, m))
+				m.GotoTop()
+			},
+			mode: yamlviewport.ViewModeSideBySide,
+			want: lineHit(0, 0),
+		},
+		"taller window at the bottom": {
+			// The hunks end before they can put line 153 at the top. The
+			// taller window shows more rows, so another line comes to the
+			// top.
+			height: 10, y: 190,
+			step: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+
+				require.Equal(t, 8, m.YOffset())
+				require.True(t, m.AtBottom())
+				m.SetHeight(14)
+				require.Equal(t, 4, m.YOffset())
+			},
+			mode: yamlviewport.ViewModeSideBySide,
+			want: lineHit(0, 10),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := testModel(testPrinter(), 80, tc.height)
+			addRevisions(&m, placeDoc(), placeDoc(10, 150))
+
+			m.SetYOffset(tc.y)
+			m.SetViewMode(yamlviewport.ViewModeHunks)
+
+			tc.step(t, &m)
+
+			m.SetViewMode(tc.mode)
+			assert.Equal(t, tc.want, topHit(t, &m))
+		})
+	}
+}
+
+func TestViewport_ContentChangeEndsKeptPlace(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		change func(m *yamlviewport.Model)
+	}{
+		"another revision": {
+			change: func(m *yamlviewport.Model) {
+				m.GotoRevision(0)
+				m.GotoRevision(1)
+			},
+		},
+		"new revisions": {
+			change: func(m *yamlviewport.Model) {
+				m.SetRevisions(
+					niceyaml.NewSourceFromString(placeDoc(), niceyaml.WithName("v1")),
+					niceyaml.NewSourceFromString(placeDoc(10, 150), niceyaml.WithName("v2")),
+				)
+			},
+		},
+		"another differ": {
+			change: func(m *yamlviewport.Model) { m.SetDiffer(paddingDiffer()) },
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New()
+			m.SetWidth(80)
+			m.SetHeight(20)
+			addRevisions(&m, placeDoc(), placeDoc(10, 150))
+
+			// The hunks fit the screen, so they aim at line 147 from their
+			// first row.
+			m.SetYOffset(77)
+			m.SetViewMode(yamlviewport.ViewModeHunks)
+			require.Equal(t, 0, m.YOffset())
+
+			// The new content starts at its first row, and so does the next
+			// view.
+			tc.change(&m)
+			require.Equal(t, yamlviewport.ViewModeHunks, m.ViewMode())
+
+			m.SetViewMode(yamlviewport.ViewModeSideBySide)
+			assert.Equal(t, 0, m.YOffset())
+		})
+	}
+}
+
+func TestViewport_ReplaceRevisionKeepsPlace(t *testing.T) {
+	t.Parallel()
+
+	// The short revision holds the first 100 lines of revision 1, so the
+	// diff does not hold line 147 of the current revision.
+	short := strings.Join(strings.SplitAfter(placeDoc(10, 150), "\n")[:100], "")
+
+	tcs := map[string]struct {
+		replacement string
+		wantHunks   yamlviewport.Hit
+		want        yamlviewport.Hit
+	}{
+		"same content keeps the line": {
+			replacement: placeDoc(10, 150),
+			wantHunks:   lineHit(1, 7),
+			want:        lineHit(0, 147),
+		},
+		"line outside the content starts from the top row": {
+			replacement: short,
+			wantHunks:   lineHit(1, 99),
+			want:        lineHit(0, 99),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New()
+			m.SetWidth(80)
+			m.SetHeight(20)
+			addRevisions(&m, placeDoc(), placeDoc(10, 150))
+
+			m.SetYOffset(141)
+
+			// The hunks fit the screen, so the full view returns to the line
+			// they aimed at.
+			m.SetViewMode(yamlviewport.ViewModeHunks)
+			require.Equal(t, 0, m.YOffset())
+			m.SetViewMode(yamlviewport.ViewModeFull)
+			require.Equal(t, lineHit(1, 147), topHit(t, &m))
+
+			require.True(t, m.ReplaceRevision(1, niceyaml.NewSourceFromString(tc.replacement, niceyaml.WithName("v2"))))
+
+			m.SetViewMode(yamlviewport.ViewModeHunks)
+			assert.Equal(t, tc.wantHunks, topHit(t, &m))
+
+			m.SetViewMode(yamlviewport.ViewModeSideBySide)
+			assert.Equal(t, tc.want, topHit(t, &m))
+		})
+	}
+}
+
+func TestViewport_ReplaceRevisionKeepsPlaceWithoutDiff(t *testing.T) {
+	t.Parallel()
+
+	// The short revision holds the first 100 lines of revision 1, so it
+	// does not hold line 140.
+	short := strings.Join(strings.SplitAfter(placeDoc(10, 150), "\n")[:100], "")
+
+	tcs := map[string]struct {
+		replacement string
+		want        yamlviewport.Hit
+	}{
+		"same content keeps the line": {
+			replacement: placeDoc(10, 150),
+			want:        lineHit(1, 140),
+		},
+		"line outside the content starts from the top row": {
+			replacement: short,
+			want:        lineHit(1, 80),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New()
+			m.SetWidth(80)
+			m.SetHeight(20)
+			addRevisions(&m, placeDoc(), placeDoc(10, 150))
+
+			m.SetYOffset(141)
+			require.Equal(t, lineHit(1, 140), topHit(t, &m))
+
+			m.SetDiffMode(yamlviewport.DiffModeNone)
+			require.Equal(t, 140, topHit(t, &m).Position.Line)
+
+			require.True(t, m.ReplaceRevision(1, niceyaml.NewSourceFromString(tc.replacement, niceyaml.WithName("v2"))))
+
+			m.SetDiffMode(yamlviewport.DiffModeAdjacent)
+			assert.Equal(t, tc.want, topHit(t, &m))
+		})
+	}
+}
+
+func TestViewport_ReplaceRevisionKeepsPlaceOnFittingHunks(t *testing.T) {
+	t.Parallel()
+
+	m := yamlviewport.New()
+	m.SetWidth(80)
+	m.SetHeight(20)
+	addRevisions(&m, placeDoc(), placeDoc(10, 150))
+
+	// Line 76 lies outside every hunk, so the hunks aim at line 147. They
+	// fit the screen and stay at their first row.
+	m.SetYOffset(77)
+	m.SetViewMode(yamlviewport.ViewModeHunks)
+	require.Equal(t, 0, m.YOffset())
+
+	// The swap leaves the same line at the top of the hunks, and the
+	// revision still holds line 147.
+	require.True(t, m.ReplaceRevision(1, niceyaml.NewSourceFromString(placeDoc(10, 150), niceyaml.WithName("v2"))))
+	require.Equal(t, 0, m.YOffset())
+
+	m.SetViewMode(yamlviewport.ViewModeSideBySide)
+	assert.Equal(t, lineHit(0, 147), topHit(t, &m))
+}
+
+func TestViewport_ReplaceRevisionKeepsPlaceAtBottomWithoutDiff(t *testing.T) {
+	t.Parallel()
+
+	// The second revision holds lines 0 through 180 of the first,
+	// inclusive, so the diff ends in deleted lines.
+	head := strings.Join(strings.SplitAfter(placeDoc(), "\n")[:181], "")
+
+	// The wrapped revision holds lines 0 through 179 of the first revision,
+	// and its line 179 wraps to several rows. Line 175 thus stays at the
+	// top of the view, which does not hold line 180.
+	lines := strings.SplitAfter(placeDoc(), "\n")[:180]
+	lines[179] = "k179: " + strings.Repeat("y", 400) + "\n"
+	wrapped := strings.Join(lines, "")
+
+	tcs := map[string]struct {
+		replacement string
+		want        yamlviewport.Hit
+	}{
+		"same content keeps the line": {
+			replacement: head,
+			want:        lineHit(1, 180),
+		},
+		"line outside the content starts from the top row": {
+			replacement: wrapped,
+			want:        lineHit(1, 175),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := testModel(testPrinter(), 80, 6)
+			addRevisions(&m, placeDoc(), head)
+
+			// Only deleted lines follow the top row, so the view without a
+			// diff aims at line 180. It ends before it can put that line at
+			// the top.
+			m.GotoBottom()
+			m.SetDiffMode(yamlviewport.DiffModeNone)
+			require.True(t, m.AtBottom())
+			require.Equal(t, lineHit(1, 175), topHit(t, &m))
+
+			require.True(t, m.ReplaceRevision(1, niceyaml.NewSourceFromString(tc.replacement, niceyaml.WithName("v2"))))
+			require.Equal(t, lineHit(1, 175), topHit(t, &m))
+
+			m.SetDiffMode(yamlviewport.DiffModeAdjacent)
+			assert.Equal(t, tc.want, topHit(t, &m))
+		})
+	}
+}
+
+func TestViewport_ReflowKeepsPlace(t *testing.T) {
+	t.Parallel()
+
+	// The second revision holds lines 0 through 180 of the first,
+	// inclusive, so only deleted lines follow line 180 in the diff.
+	head := strings.Join(strings.SplitAfter(placeDoc(), "\n")[:181], "")
+
+	m := testModel(testPrinter(), 80, 6)
+	addRevisions(&m, placeDoc(), head)
+
+	// The view without a diff aims at line 180. It ends before it can put
+	// that line at the top.
+	m.GotoBottom()
+	m.SetDiffMode(yamlviewport.DiffModeNone)
+	require.Equal(t, lineHit(1, 175), topHit(t, &m))
+
+	// A narrow width wraps the lines above the top line. The row offset
+	// moves, and line 175 stays at the top.
+	y := m.YOffset()
+	m.SetWidth(10)
+	require.NotEqual(t, y, m.YOffset())
+	require.Equal(t, lineHit(1, 175), topHit(t, &m))
+
+	m.SetDiffMode(yamlviewport.DiffModeAdjacent)
+	assert.Equal(t, lineHit(1, 180), topHit(t, &m))
 }
 
 func TestViewport_SearchAcrossRevisions(t *testing.T) {

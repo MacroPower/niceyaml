@@ -563,6 +563,19 @@ func New(opts ...Option) Model {
 // starts the new view at its first row, and so does a diff without lines of
 // the current revision.
 //
+// A presentation change records the line that it means to put at the top.
+// The next presentation change starts from the recorded line instead of the
+// top row. It does so while the same line of the view stays at the top and
+// the current revision holds the line. Hunks that fit the screen stay at
+// their first row, for example, and hunks of a diff without changes do not
+// show any line. The next view mode then starts from the line that the hunks
+// did not show at the top.
+//
+// A change of content drops the recorded line. [Model.GotoTop] at the first
+// row leaves the same line at the top, so the recorded line stays. A parent
+// that wants the new view at its first row calls GotoTop after the
+// presentation change.
+//
 // A search or [Model.Reveal] waits to scroll while the content area does not
 // have room for a row, such as before the parent sizes the viewport from the
 // first [tea.WindowSizeMsg]. When the area has room, the viewport centers
@@ -660,6 +673,10 @@ type Model struct {
 	// row counts from the first row of the frame.
 	anchorLine int
 	anchorRow  int
+	// The line that the last presentation change put at the top of the
+	// view, or meant to put there. A presentation change reads it and then
+	// writes it, and every rebuild of the views clears it.
+	held heldLine
 	// Reports that the base views or the searcher changed since the
 	// searcher last loaded them.
 	searcherStale bool
@@ -671,6 +688,20 @@ type Model struct {
 	// Reports that anchorLine and anchorRow wait for ensureRows to restore
 	// them.
 	anchored bool
+}
+
+// heldLine is the line that a presentation change put at the top of the
+// view, or meant to put there. The next presentation change starts from it
+// while the view keeps the same line at the top and the current revision
+// holds it.
+type heldLine struct {
+	// The line of the current revision.
+	line int
+	// The index of the line at the top of the view after the change, as
+	// [Model.TopLine] returns it.
+	top int
+	// Reports that a presentation change set line and top.
+	ok bool
 }
 
 // scrollTarget is a range for scrollTo to center: a search match or a
@@ -1506,12 +1537,14 @@ func (m *Model) PreviousRevision() { m.GotoRevision(m.revIndex - 1) }
 // Every change of content goes through rebuildViews. A match index or row
 // offset from the old content points at an arbitrary line of the new
 // content. The view therefore scrolls to the top, or to the first match in
-// the new content when the search term has one. A presentation change goes
-// through rebuildPresentation, which calls rebuildViews and then keeps the
-// top line when the new content does not hold a match. ReplaceRevision goes
-// through reloadViews instead.
+// the new content when the search term has one. A line that a presentation
+// change held names a line of the old content, so rebuildViews drops it. A
+// presentation change goes through rebuildPresentation, which calls
+// rebuildViews and then keeps the top line when the new content does not
+// hold a match. ReplaceRevision goes through reloadViews instead.
 func (m *Model) rebuildViews() {
 	m.searchIndex = -1
+	m.held = heldLine{}
 	m.loadViews()
 
 	// The old row counts describe other lines, so the cache starts empty
@@ -1534,15 +1567,18 @@ func (m *Model) rebuildViews() {
 // rebuildPresentation runs set, which changes how the views present the
 // current revision. It then rebuilds the views, as the [Model] doc
 // describes a presentation change. Only the old diff and modes map the rows
-// of the views on display to lines of the revision, so it reads the top
-// line of those views before set runs.
+// of the views on display to lines of the revision. It therefore reads the
+// start line from those views before set runs.
 //
 // When the new views hold a search match, rebuildViews scrolls to it.
-// Otherwise the top line goes to the top of the new views, and the
-// horizontal offset stays. The next call to ensureRows clamps both offsets
-// to the new views.
+// Otherwise the start line goes to the top of the new views, and the
+// horizontal offset stays. The change then holds the line that
+// anchorRevisionLine returns. It also holds the index that [Model.TopLine]
+// returns after ensureRows clamps the offsets to the new views. A change
+// that does not have a start line leaves the next call to ensureRows to
+// clamp the offsets.
 func (m *Model) rebuildPresentation(set func()) {
-	top, ok := m.topRevisionLine()
+	start, ok := m.startLine()
 	x := m.xOffset
 
 	set()
@@ -1554,9 +1590,31 @@ func (m *Model) rebuildPresentation(set func()) {
 
 	m.xOffset = x
 
-	if ok {
-		m.anchorRevisionLine(top)
+	if !ok {
+		return
 	}
+
+	held := m.anchorRevisionLine(start)
+	m.held = heldLine{line: held, top: m.TopLine(), ok: true}
+}
+
+// startLine returns the line of the current revision that a presentation
+// change puts at the top of the new views, and true. It returns the line
+// that the last presentation change held while [Model.TopLine] still
+// returns the index that change saw. The views on display must also map
+// that line, as revisionRow does. In every other case startLine reads the
+// line at the top row, as topRevisionLine does.
+func (m *Model) startLine() (int, bool) {
+	// The change that held the line measured the rows already, so the
+	// check of the held line can measure them. A view without a held line
+	// leaves the measure to topRevisionLine.
+	if h := m.held; h.ok && m.TopLine() == h.top {
+		if _, ok := m.revisionRow(h.line); ok {
+			return h.line, true
+		}
+	}
+
+	return m.topRevisionLine()
 }
 
 // topRevisionLine returns the line of the current revision that a
@@ -1643,10 +1701,11 @@ func (m *Model) revisionLine(i int) (int, bool) {
 // revisionRow returns the row of the content on display that shows line l
 // of the current revision, and true. Without a diff, line l sits on row l.
 // The hunks of a diff hold the row only when a hunk covers it. It reports
-// false when the diff does not hold the line.
+// false when the diff does not hold the line, or without a diff when the
+// view does not hold it.
 func (m *Model) revisionRow(l int) (int, bool) {
 	if !m.ShowingDiff() {
-		return l, true
+		return l, m.baseLeft.Contains(l)
 	}
 
 	o := diff.Origin{Side: diff.After, Index: l}
@@ -1659,38 +1718,49 @@ func (m *Model) revisionRow(l int) (int, bool) {
 }
 
 // anchorRevisionLine anchors the top of the views on display to line l of
-// the current revision. The next call to ensureRows measures the rows of
-// the views and restores the anchor. The top row becomes the first row of
-// the block of the line. That block holds the rows the layout puts above
-// the content of the line, such as a hunk header. Hunks that do not cover
-// the line put the first line of the hunks after it at the top, or the
-// last line of the last hunk when no hunk follows. A view without lines
-// stays at its first row.
-func (m *Model) anchorRevisionLine(l int) {
+// the current revision. It returns the line of the current revision that
+// the anchor names. The next call to ensureRows measures the rows
+// of the views and restores the anchor. The top row becomes the first row
+// of the block of the line. That block holds the rows the layout puts above
+// the content of the line, such as a hunk header.
+//
+// Hunks that do not cover the line put the first line of the hunks after it
+// at the top, or the last line of the last hunk when no hunk follows. The
+// line it returns is then the line of the current revision that
+// revisionLine maps that line of the hunks to. A view without lines stays
+// at its first row, and the line it returns is l.
+func (m *Model) anchorRevisionLine(l int) int {
 	row, ok := m.revisionRow(l)
 	if !ok {
-		return
+		return l
 	}
 
 	// The anchor names a line by its rank among the lines the view holds.
-	k := 0
+	// It names the first line at or after row, or the last line when every
+	// line comes before row.
+	k, at := -1, 0
 
 	for i := range m.baseLeft.All() {
+		k, at = k+1, i
+
 		if i >= row {
 			break
 		}
-
-		k++
 	}
 
-	k = min(k, m.lineCount()-1)
 	if k < 0 {
-		return
+		return l
 	}
 
 	m.anchorLine = k
 	m.anchorRow = 0
 	m.anchored = true
+
+	if shown, ok := m.revisionLine(at); ok {
+		return shown
+	}
+
+	return l
 }
 
 // reloadViews reads the views on display again after ReplaceRevision swapped
