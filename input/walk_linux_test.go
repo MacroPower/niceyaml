@@ -88,9 +88,10 @@ func TestPath_ExchangedDirectory(t *testing.T) {
 // pins what each check prevents, a read of another file or a read of a
 // directory. It also pins that the walk skips a directory that became a
 // link to a directory inside the walk, because a retry reports that link.
-// It cannot tell a retry apart from the skip of a link that leads out of
-// the walk, so it does not pin that skip, or how many times the walk
-// tries an entry.
+// A directory that the link replaced in each try reads as changed, even
+// when the open of a try met the link for a moment. The test cannot tell
+// a retry apart from the skip of a link that leads out of the walk. So it
+// does not pin that skip, or how many times the walk tries an entry.
 func TestPath_ExchangedEntry(t *testing.T) {
 	t.Parallel()
 

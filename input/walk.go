@@ -687,8 +687,10 @@ func (w *diskWalk) selects(rel string) bool {
 // Another directory can also replace the directory between two steps of
 // the system. A path that changes so can fail with a reason that names
 // no link, so readDir tries again after any other problem. It returns
-// the problem of the last try. A directory that changed in every try
-// gets [errChangedInWalk].
+// the problem of the last try. A directory that another directory
+// replaced in every try gets [errChangedInWalk]. So does a directory that
+// a link to another directory inside parent replaced in every try, but on
+// DragonFly it might get EINVAL instead. See [diskWalk.enter].
 func (w *diskWalk) readDir(parent *os.Root, name string) (*os.Root, []fs.DirEntry, error) {
 	var err error
 
@@ -751,8 +753,10 @@ func readRoot(root *os.Root) ([]fs.DirEntry, error) {
 // one element or ".". The caller closes the Root. It returns
 // [errLinkInWalk] when name is a link. It returns [errChangedInWalk] when
 // the directory that it opens is not the one that name named a step
-// before. The Root thus holds a directory that name named through no
-// link.
+// before. It also returns [errChangedInWalk] when the open fails at a
+// link that the step before did not find. On DragonFly, that open might
+// fail with EINVAL, and enter returns that reason. The Root thus holds a
+// directory that name named through no link.
 func (w *diskWalk) enter(parent *os.Root, name string) (*os.Root, error) {
 	info, err := parent.Lstat(name)
 
@@ -764,6 +768,16 @@ func (w *diskWalk) enter(parent *os.Root, name string) (*os.Root, error) {
 	}
 
 	dir, err := parent.OpenRoot(name)
+	if metLink(err) {
+		// The Root fails with a reason that metLink finds only after it met
+		// a link at name. It reads each link that it meets and follows it.
+		// So the reason means that a link that the Root met stopped being a
+		// link before the Root read it, or that the links form a chain
+		// longer than the Root follows. The Lstat found no link at name, so
+		// name changed between the two steps in either case.
+		err = errChangedInWalk
+	}
+
 	if err != nil {
 		return nil, err //nolint:wrapcheck // The caller names the problem.
 	}
