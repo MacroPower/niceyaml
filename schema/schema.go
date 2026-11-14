@@ -1101,13 +1101,16 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 // slice, or pointer that contains itself, it returns an error wrapping
 // [ErrValidate]. For a typed value that the encoder does not write, such
 // as a channel, ValidateValue returns an error wrapping ErrValidate with
-// the error of the encoder in its chain. Go-yaml's encoder panics on some
-// values, such as a struct that embeds an unexported named slice. For
-// such a value, ValidateValue returns an error wrapping ErrValidate that
-// holds the [*niceyaml.PanicError] of the panic. It also returns an error
-// wrapping ErrValidate when the text that the encoder writes does not
-// decode, such as the text of a string that is not UTF-8. The text of
-// that error names the problem.
+// the error of the encoder in its chain. It also returns an error wrapping
+// ErrValidate when the text that the encoder writes does not decode, such
+// as the text of a string that is not UTF-8. The text of that error names
+// the problem.
+//
+// Go-yaml's encoder panics on some values, such as a struct that embeds
+// an unexported named slice. For such a value, ValidateValue returns an
+// error wrapping ErrValidate that holds the [*niceyaml.PanicError] of the
+// panic. ValidateValue returns such an error too when a MarshalYAML or
+// MarshalText method of the value or of a part of it panics.
 //
 // YAML aliases make a decode share maps, slices, and byte slices. A typed
 // value can share pointers, maps, slices, and byte slices too, and the
@@ -1696,10 +1699,11 @@ func stringText(node ast.Node) (string, bool) {
 // checkExpansion returns an error wrapping [ErrValidate] inside
 // [niceyaml.Unchecked] when a pointer, map, or slice in data contains
 // itself, and when MarshalYAML calls nest more than [maxMarshalerDepth]
-// deep. It returns one matching [ErrExcessiveAliasing] when aliases make
-// up too much of the data the validator reads. The data is at fault for that
-// error, so it comes from [niceyaml.Invalid] and does not wrap
-// ErrValidate.
+// deep. It returns such an error too when a MarshalYAML method panics, as
+// [expansionWalker.marshaled] describes. It returns one matching
+// [ErrExcessiveAliasing] when aliases make up too much of the data the
+// validator reads. The data is at fault for that error, so it comes from
+// [niceyaml.Invalid] and does not wrap ErrValidate.
 func checkExpansion(ctx context.Context, data any) error {
 	w := expansionWalker{ctx: ctx, sizes: map[sharedKey]int{}, onPath: map[sharedKey]bool{}}
 
@@ -2031,11 +2035,15 @@ func (w *expansionWalker) elemsSize(v reflect.Value) (int, error) {
 // each write one scalar, which has the size that
 // [expansionWalker.scalarSize] gives it. For a MarshalYAML method that
 // returns a value, marshaled calls the method and returns the size of
-// that value. A method that fails counts as one node, because the encode
-// calls it again and returns its error.
+// that value. A method that returns an error counts as one node, because
+// the encode calls it again and returns its error.
 //
 // For a MarshalYAML call nested inside [maxMarshalerDepth] others,
-// marshaled returns an error wrapping [ErrValidate].
+// marshaled returns an error wrapping [ErrValidate]. For a MarshalYAML
+// method that panics, it returns an error wrapping ErrValidate that holds
+// the [*niceyaml.PanicError] of the panic. The message of that error
+// names the method and the type of v, as in "the MarshalYAML method of
+// config.Listen panicked: boom".
 func (w *expansionWalker) marshaled(v reflect.Value) (int, bool, error) {
 	if !v.CanInterface() {
 		return 0, false, nil
@@ -2060,7 +2068,23 @@ func (w *expansionWalker) marshaled(v reflect.Value) (int, bool, error) {
 		return 0, true, fmt.Errorf("%w: MarshalYAML calls nest more than %d deep", ErrValidate, maxMarshalerDepth)
 	}
 
-	out, err := call()
+	var (
+		out      any
+		returned bool
+	)
+
+	err := hook.Guard("the MarshalYAML method of "+v.Type().String(), func() error {
+		var err error
+
+		out, err = call()
+		returned = true
+
+		return err
+	})
+	if !returned {
+		return 0, true, fmt.Errorf("%w: %w", ErrValidate, err)
+	}
+
 	if err != nil {
 		// The encode calls the method again and returns its error.
 		return 1, true, nil

@@ -1373,6 +1373,10 @@ var (
 
 	// The error of [failingMarshaler].
 	errMarshal = errors.New("marshal")
+
+	// The error of [heldPanicMarshaler], which holds a panic that the
+	// method recovered itself.
+	errHeldPanic = fmt.Errorf("marshal: %w", &niceyaml.PanicError{Value: "held bug", Stack: []byte("stack")})
 )
 
 func TestSchema_ValidateValue(t *testing.T) {
@@ -1672,6 +1676,40 @@ func (failingMarshaler) MarshalYAML() (any, error) {
 	return nil, errMarshal
 }
 
+// heldPanicMarshaler returns errHeldPanic, an error that holds a
+// [*niceyaml.PanicError], from its MarshalYAML method.
+type heldPanicMarshaler struct{}
+
+func (heldPanicMarshaler) MarshalYAML() (any, error) {
+	return nil, errHeldPanic
+}
+
+// panickingMarshaler panics in its MarshalYAML method.
+type panickingMarshaler struct{}
+
+func (panickingMarshaler) MarshalYAML() (any, error) {
+	panic("marshal bug")
+}
+
+// panickingContextMarshaler panics in its MarshalYAML method, which takes
+// a context.
+type panickingContextMarshaler struct{}
+
+func (panickingContextMarshaler) MarshalYAML(context.Context) (any, error) {
+	panic("marshal bug")
+}
+
+// panickingListen holds a field whose MarshalYAML method panics.
+type panickingListen struct {
+	Listen panickingMarshaler `yaml:"listen"`
+}
+
+// panickingContextListen holds a field whose MarshalYAML method, which
+// takes a context, panics.
+type panickingContextListen struct {
+	Listen panickingContextMarshaler `yaml:"listen"`
+}
+
 // jsonHidden can point to itself through a field that only its json tag
 // hides from the encoder.
 type jsonHidden struct {
@@ -1883,6 +1921,47 @@ func TestSchema_ValidateValue_Typed(t *testing.T) {
 				data: map[string]any{"listen": failingMarshaler{}},
 				err:  errMarshal,
 			},
+			// The check counts a method that returns an error as one node,
+			// also when the error holds a panic, and the encode returns
+			// the error.
+			"marshaler that fails with a held panic": {
+				data: map[string]any{"listen": heldPanicMarshaler{}},
+				err:  errHeldPanic,
+				want: "validate schema: encode schema_test.heldPanicMarshaler: " +
+					"value does not encode: marshal: panic: held bug",
+				panicked: "held bug",
+			},
+			// The check calls each MarshalYAML method that returns a
+			// value before the encode, and it returns a panic there as an
+			// error that holds it.
+			"marshaler that panics": {
+				data: panickingMarshaler{},
+				err:  schema.ErrValidate,
+				want: "validate schema: the MarshalYAML method of " +
+					"schema_test.panickingMarshaler panicked: marshal bug",
+				panicked: "marshal bug",
+			},
+			"marshaler with a context that panics": {
+				data: panickingContextMarshaler{},
+				err:  schema.ErrValidate,
+				want: "validate schema: the MarshalYAML method of " +
+					"schema_test.panickingContextMarshaler panicked: marshal bug",
+				panicked: "marshal bug",
+			},
+			"struct field whose marshaler panics": {
+				data: panickingListen{},
+				err:  schema.ErrValidate,
+				want: "validate schema: the MarshalYAML method of " +
+					"schema_test.panickingMarshaler panicked: marshal bug",
+				panicked: "marshal bug",
+			},
+			"struct field whose marshaler with a context panics": {
+				data: panickingContextListen{},
+				err:  schema.ErrValidate,
+				want: "validate schema: the MarshalYAML method of " +
+					"schema_test.panickingContextMarshaler panicked: marshal bug",
+				panicked: "marshal bug",
+			},
 			// Go-yaml's encoder panics on this field, and the check returns
 			// the panic as an error that holds it.
 			"unexported embedded named slice": {
@@ -1911,7 +1990,9 @@ func TestSchema_ValidateValue_Typed(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				err := v.ValidateValue(t.Context(), tc.data)
+				var err error
+
+				require.NotPanics(t, func() { err = v.ValidateValue(t.Context(), tc.data) })
 				requireNoFault(t, err, schema.ErrValidate)
 				require.ErrorIs(t, err, tc.err)
 				assert.False(t, niceyaml.IsInvalid(err))
