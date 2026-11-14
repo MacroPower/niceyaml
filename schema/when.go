@@ -22,7 +22,9 @@ type guarded struct {
 // When creates a [Resolver] that delegates to r for documents that m
 // accepts and reports [ErrNoMatch] for the rest. For a document that m
 // cannot decide on, the Resolver returns the error from m, and that error
-// ends the lookup of a registry.
+// ends the lookup of a registry. A registry does not turn a panic in m or
+// r into an error, so the panic reaches the caller of the lookup, as
+// [Registry.Lookup] describes.
 //
 // When pairs a [Ref], which applies to every document, with a matcher
 // that decides which documents the Ref applies to:

@@ -364,7 +364,9 @@ func (r Ref) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // [ErrLoad], or [ErrCompile] stops the lookup too, and the registry
 // returns it without a second ErrResolve. An error that holds a
 // [*niceyaml.PanicError] stops the lookup as well, even when the value of
-// the panic wraps ErrNoMatch.
+// the panic wraps ErrNoMatch. A registry does not turn a panic in Resolve
+// into an error, so the panic reaches the caller of the lookup, as
+// [Registry.Lookup] describes.
 //
 // A resolver can read the document's content, file path, or tokens, or
 // it can ignore the document and always name the same schema. The

@@ -131,6 +131,9 @@ var (
 		"refs required":     {require: true, err: schema.ErrLoad},
 		"refs not required": {require: false, err: schema.ErrValidate},
 	}
+
+	// The value that the Validate method of [panicKind] panics with.
+	errKindBug = errors.New("kind bug")
 )
 
 // requireRefModes checks input under a registry of each of refModes,
@@ -181,6 +184,13 @@ type lookupKind string
 
 func (*lookupKind) UnmarshalText([]byte) error {
 	panic(fmt.Errorf("lookup: %w", schema.ErrNoMatch))
+}
+
+// panicKind is a kind whose Validate method panics with [errKindBug].
+type panicKind string
+
+func (panicKind) Validate() error {
+	panic(errKindBug)
 }
 
 // A gatedContext is a context whose Done method waits for gate to close.
@@ -539,6 +549,206 @@ func TestRegistry_Lookup(t *testing.T) {
 				}
 			})
 		}
+	})
+
+	t.Run("a panic in a resolver, a matcher, or a loader reaches the caller", func(t *testing.T) {
+		t.Parallel()
+
+		// The registry does not turn a panic into an error, so a direct
+		// call panics with the value. A Validate that runs the registry
+		// recovers the panic, as it recovers a panic in any validator. A
+		// matcher that recovers a panic itself returns an error, and the
+		// lookup returns that error inside schema.ErrResolve.
+		boom := errors.New("boom")
+		decline := fmt.Errorf("must: %w", schema.ErrNoMatch)
+
+		tcs := map[string]struct {
+			resolver schema.Resolver
+			// The value of the panic.
+			value any
+			// The error of a Validate that runs the registry.
+			want string
+			// Whether the resolver returns the panic as an error. A direct
+			// Lookup or Check then returns want, which matches
+			// schema.ErrResolve, instead of a panic.
+			recovered bool
+			// Whether the value of the panic wraps schema.ErrNoMatch. The
+			// error of a Validate then matches schema.ErrNoMatch, so a
+			// caller that lets an unmatched document pass must test for
+			// the PanicError first.
+			noMatch bool
+		}{
+			"resolver": {
+				resolver: schema.ResolverFunc(func(context.Context, *niceyaml.Node) (schema.Ref, error) {
+					panic(boom)
+				}),
+				value: boom,
+				want:  "app.yaml: validator panicked: boom",
+			},
+			"matcher of When": {
+				resolver: schema.When(
+					matcher.Func(func(context.Context, *niceyaml.Node) (bool, error) { panic(boom) }),
+					schema.Embedded(schemaData),
+				),
+				value: boom,
+				want:  "app.yaml: validator panicked: boom",
+			},
+			"loader": {
+				resolver: schema.Loadable("app-schema", func(context.Context) ([]byte, error) { panic(boom) }),
+				value:    boom,
+				want:     "app.yaml: validator panicked: boom",
+			},
+			"resolver whose value wraps ErrNoMatch": {
+				resolver: schema.ResolverFunc(func(context.Context, *niceyaml.Node) (schema.Ref, error) {
+					panic(decline)
+				}),
+				value:   decline,
+				want:    "app.yaml: validator panicked: must: no matching schema",
+				noMatch: true,
+			},
+			"content guard that returns the panic": {
+				resolver: schema.When(
+					matcher.Content(paths.Doc().Child("kind"), panicKind("Deployment")),
+					schema.Embedded(schemaData),
+				),
+				value:     errKindBug,
+				want:      "resolve schema: app.yaml:1:7: $.kind: the Validate method of schema_test.panicKind panicked: kind bug",
+				recovered: true,
+			},
+		}
+
+		settings := map[string]bool{
+			"schema required":     true,
+			"schema not required": false,
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				for setting, required := range settings {
+					t.Run(setting, func(t *testing.T) {
+						t.Parallel()
+
+						reg := schema.NewRegistry(
+							schema.WithRequireSchema(required),
+							schema.WithResolvers(tc.resolver),
+						)
+						doc := yamltest.FirstDocumentWithPath(t, "kind: Deployment\n", "app.yaml")
+
+						requirePanic := func(t *testing.T, err error) {
+							t.Helper()
+
+							require.EqualError(t, err, tc.want)
+							assert.False(t, niceyaml.IsInvalid(err))
+
+							p, ok := errors.AsType[*niceyaml.PanicError](err)
+							require.True(t, ok)
+							assert.Equal(t, tc.value, p.Value)
+						}
+
+						direct := map[string]func(context.Context, *niceyaml.Node) error{
+							"lookup": func(ctx context.Context, doc *niceyaml.Node) error {
+								_, err := reg.Lookup(ctx, doc)
+
+								return err //nolint:wrapcheck // Tests inspect the registry's own error.
+							},
+							"check": reg.Check,
+						}
+
+						for call, fn := range direct {
+							t.Run(call, func(t *testing.T) {
+								t.Parallel()
+
+								if !tc.recovered {
+									assert.PanicsWithValue(t, tc.value, func() {
+										//nolint:errcheck // The call panics.
+										_ = fn(t.Context(), doc)
+									})
+
+									return
+								}
+
+								var err error
+
+								require.NotPanics(t, func() { err = fn(t.Context(), doc) })
+								require.ErrorIs(t, err, schema.ErrResolve)
+								requirePanic(t, err)
+							})
+						}
+
+						t.Run("validate", func(t *testing.T) {
+							t.Parallel()
+
+							var err error
+
+							require.NotPanics(t, func() { err = doc.Validate(t.Context(), reg) })
+							requirePanic(t, err)
+							require.NotErrorIs(t, err, schema.ErrLoad)
+
+							if tc.recovered {
+								require.ErrorIs(t, err, schema.ErrResolve)
+							} else {
+								require.NotErrorIs(t, err, schema.ErrResolve)
+							}
+
+							if tc.noMatch {
+								require.ErrorIs(t, err, schema.ErrNoMatch)
+							} else {
+								require.NotErrorIs(t, err, schema.ErrNoMatch)
+							}
+						})
+					})
+				}
+			})
+		}
+	})
+
+	t.Run("a panic during the validation of Check returns as an error", func(t *testing.T) {
+		t.Parallel()
+
+		// The compile does not find defs.json, so the schema compiles
+		// without it. The registry drops that failure after a nanosecond,
+		// so the validation of Check loads defs.json again, and that load
+		// panics. Check validates through Node.Validate, which recovers the
+		// panic.
+		boom := errors.New("boom")
+
+		var loads atomic.Int32
+
+		load := func(_ context.Context, uri string) ([]byte, error) {
+			if strings.HasSuffix(uri, "/root.json") {
+				return []byte(`{"properties": {"kind": {"$ref": "defs.json"}}}`), nil
+			}
+
+			if loads.Add(1) == 1 {
+				return nil, fs.ErrNotExist
+			}
+
+			panic(boom)
+		}
+
+		reg := schema.NewRegistry(
+			schema.WithLoader("https://schemas.test/", load),
+			requireRefs(false),
+			schema.WithRetryAfter(time.Nanosecond),
+			schema.WithResolvers(schema.URL("https://schemas.test/root.json")),
+		)
+		doc := yamltest.FirstDocumentWithPath(t, "kind: Deployment\n", "app.yaml")
+
+		// The lookup compiles the schema but does not validate the
+		// document, so it does not load defs.json a second time.
+		_, err := reg.Lookup(t.Context(), doc)
+		require.NoError(t, err)
+
+		require.NotPanics(t, func() { err = reg.Check(t.Context(), doc) })
+		require.EqualError(t, err, "app.yaml: validator panicked: boom")
+		assert.False(t, niceyaml.IsInvalid(err))
+		assert.Equal(t, int32(2), loads.Load())
+
+		p, ok := errors.AsType[*niceyaml.PanicError](err)
+		require.True(t, ok)
+		assert.Equal(t, boom, p.Value)
 	})
 
 	t.Run("a load error is no fault wherever it goes", func(t *testing.T) {

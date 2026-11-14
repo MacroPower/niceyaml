@@ -598,6 +598,21 @@ type Match struct {
 // that repeats the most. So does a matcher.Content guard whose want type
 // fails its Validate or ValidateContext method, bound at the value.
 //
+// A lookup does not turn a panic into an error. A panic in a resolver, in
+// a matcher of [When], or in the load of the schema that the lookup names
+// reaches the caller of Lookup, [Registry.Check], or [Registry.Resolve]
+// as a panic. A panic in a load reaches the caller of [Registry.Schema]
+// or [Registry.Load] the same way. A call of [niceyaml] that runs the
+// registry as a [niceyaml.Validator], such as [niceyaml.Node.Validate],
+// returns the panic as an error that holds a [*niceyaml.PanicError]. For
+// a panic with the value "boom", the error reads
+// "app.yaml: validator panicked: boom".
+//
+// A resolver or a matcher can recover a panic itself and return an error
+// that holds a PanicError, as [matcher.Content] does for the decode that
+// it runs. That error ends the lookup, even when the value of the panic
+// wraps ErrNoMatch.
+//
 // For most uses, prefer [Registry.Check], which combines lookup and
 // validation. Use Lookup when you need the schema for custom processing,
 // or the Ref to report which schema a document chose.
@@ -683,7 +698,9 @@ func (r *Registry) Lookup(ctx context.Context, n *niceyaml.Node) (Match, error) 
 // registry returns it without adding an ErrResolve of its own. An error
 // that matches [ErrResolve], [ErrLoad], or [ErrCompile] ends the lookup
 // even when it wraps ErrNoMatch. So a directive that names a schema that
-// does not load fails the lookup with that load error.
+// does not load fails the lookup with that load error. A panic in a
+// resolver of this registry, in a matcher of [When], or in the load of a
+// schema reaches the caller of Resolve as a panic, as Lookup describes.
 //
 // Lookup binds its error to the document, but Resolve returns the error
 // unbound, because the registry that asked binds it. An error at a
@@ -970,14 +987,21 @@ func (e reasonError) Unwrap() error {
 // A document that a resolver applies to never passes that way, even when
 // the load error of its schema wraps ErrNoMatch. A caller that holds a
 // registry that someone else built to require a schema checks for the
-// error at its own call site instead. Such a load error matches both
-// [ErrLoad] and ErrNoMatch. When a resolver error holds a
+// error at its own call site instead.
+//
+// When the load error of such a document wraps ErrNoMatch, it matches
+// both [ErrLoad] and ErrNoMatch. When a resolver error holds a
 // [*niceyaml.PanicError] whose value wraps ErrNoMatch, the lookup error
-// matches both [ErrResolve] and ErrNoMatch. So the check tests for
-// ErrLoad and ErrResolve first:
+// matches both [ErrResolve] and ErrNoMatch. [niceyaml.Node.Validate]
+// returns a panic in a resolver, in a matcher of [When], or in a load as
+// an error that holds a PanicError. That error matches ErrLoad,
+// ErrResolve, or ErrNoMatch only when the value of the panic wraps that
+// sentinel. So the check tests for the PanicError, ErrLoad, and
+// ErrResolve first:
 //
 //	err := doc.Validate(ctx, reg)
-//	if err != nil && (errors.Is(err, ErrLoad) || errors.Is(err, ErrResolve) || !errors.Is(err, ErrNoMatch)) {
+//	_, panicked := errors.AsType[*niceyaml.PanicError](err)
+//	if err != nil && (panicked || errors.Is(err, ErrLoad) || errors.Is(err, ErrResolve) || !errors.Is(err, ErrNoMatch)) {
 //	    return err
 //	}
 //
@@ -1006,6 +1030,14 @@ func (e reasonError) Unwrap() error {
 // [WithRequireSchema] set false. So a loop that validates every document
 // of a file reports the error of each document that did not parse beside
 // the violations of the documents that parsed.
+//
+// A panic in a resolver, in a matcher of [When], or in the load of the
+// schema that the lookup names reaches the caller of Check as a panic, as
+// [Registry.Lookup] describes. Check validates through
+// [niceyaml.Node.Validate], so it returns a panic during the validation
+// as an error that holds a [*niceyaml.PanicError]. Check returns a panic
+// in the load of a $ref document that the validation reaches the same
+// way.
 //
 // Check binds every error that it returns. It binds the error of the
 // lookup through the root of the document, as [Registry.Lookup] does. An
@@ -1152,10 +1184,14 @@ func (r *Registry) Check(ctx context.Context, n *niceyaml.Node) error {
 // did, a caller with a live context loads again, and a caller whose
 // context has ended returns [ErrLoad] wrapping its own context's error.
 // Any other failure reaches every caller that shared the load, including
-// a timeout inside the load whose error wraps a context error. A panic
-// or a call to [runtime.Goexit] in the load happens again in every
-// caller that shared it. The registry does not remember a panic or a
-// Goexit, so the next request runs the load again.
+// a timeout inside the load whose error wraps a context error.
+//
+// A panic or a call to [runtime.Goexit] in the load happens again in
+// every caller that shared it. The registry does not remember a panic or
+// a Goexit, so the next request runs the load again. A call of
+// [niceyaml] that runs the registry as a [niceyaml.Validator], such as
+// [niceyaml.Node.Validate], returns the panic of a load as an error, as
+// [Registry.Lookup] describes.
 //
 // A refresh of a schema that has fallen due, as [WithRefreshAfter]
 // describes, runs apart from the context of each caller. Only the caller
