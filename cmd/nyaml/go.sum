@@ -71,8 +71,8 @@ go.jacobcolvin.com/niceyaml v0.0.0-20261112054121-ffcd17088c47 h1:KZ8QHGDbXfmjQz
 go.jacobcolvin.com/niceyaml v0.0.0-20261112054121-ffcd17088c47/go.mod h1:bY0Mxg+823h2QJX090f5mKALAI2CAAYLb53b2Cg+8UE=
 go.jacobcolvin.com/niceyaml/bubbles v0.0.0-20261112054121-ffcd17088c47 h1:/dYeXYriZUcHI0QJY9GtVR3MXfD0C6clDi5BK1Bbecc=
 go.jacobcolvin.com/niceyaml/bubbles v0.0.0-20261112054121-ffcd17088c47/go.mod h1:du/uEi7c1yIwlg5EaOhvXC4KS9HC8C1xriQA8feJe8s=
-go.jacobcolvin.com/niceyaml/fangs v0.0.0-20261112054121-ffcd17088c47 h1:kBWEau6FNi8ahucT8WL+N85ZAvxq0lGLC6oaawclR84=
-go.jacobcolvin.com/niceyaml/fangs v0.0.0-20261112054121-ffcd17088c47/go.mod h1:u9wBLNxCo1VmFo1KwcMMXiZ6duPS7zF1sEf1P5QRRY8=
+go.jacobcolvin.com/niceyaml/fangs v0.0.0-20261113001324-552ff15815ee h1:ssO9tBTUyNDLHNkuv+he/U0TQ+WKJ0ePA0lmPfBnIDU=
+go.jacobcolvin.com/niceyaml/fangs v0.0.0-20261113001324-552ff15815ee/go.mod h1:aBMMOXxvulxBZme2a6siKDUu+Kg8u4vp4wxgGjsqvoQ=
 go.jacobcolvin.com/x/cobras v0.1.0 h1:oSyOR1Hpx7gGaCPCma7Y2bqngfhvbuYAbEocGVwkuqU=
 go.jacobcolvin.com/x/cobras v0.1.0/go.mod h1:6y8CxzhC4ces5/tLVRRy02sb//SXfevkrc7Ijxl0Xcg=
 go.jacobcolvin.com/x/jsonschema v0.4.0 h1:zT5rTiinyVT5cam14q6am8byHbyr2HaUJoUSPmhHepk=
