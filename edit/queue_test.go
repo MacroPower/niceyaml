@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -653,10 +654,15 @@ func TestDoc_Apply_Queue_Reads(t *testing.T) {
 	// before it sets the item. Each read checks the bytes of the Sets that
 	// wait, and a read of an item that no Set wrote keeps the queue. The
 	// check costs about the same whatever the number of Sets that wait. So
-	// the reads of the last 2,000 items take about as long as the reads of
-	// the first 2,000 items, before most of the Sets joined the queue. A
+	// the reads of one of the last 2,000 items take about as long as the
+	// reads of one of the first 2,000, when fewer than 2,000 Sets waited. A
 	// check that compares the bytes of the read with those of each Set
 	// that waits makes the last reads take many times as long.
+	//
+	// The test compares the median time of the reads of an item in the two
+	// windows. A burst of load on the machine slows only the reads that
+	// run during it. So the burst moves a median only when it lasts for
+	// more than half of a window.
 	const (
 		items  = 20000
 		window = 2000
@@ -666,9 +672,9 @@ func TestDoc_Apply_Queue_Reads(t *testing.T) {
 	before := "s:\n" + strings.Repeat("  - 1\n", items)
 	d := newDoc(t, before)
 
-	var first, last time.Duration
+	// The time of the reads of each item, in the order of the items.
+	times := make([]time.Duration, 0, items)
 
-	i := 0
 	err := d.Apply(t.Context(), paths.MustParse("$.s[*]"), func(ctx context.Context, n *edit.Node) error {
 		start := time.Now()
 
@@ -683,23 +689,23 @@ func TestDoc_Apply_Queue_Reads(t *testing.T) {
 			}
 		}
 
-		elapsed := time.Since(start)
-
-		switch {
-		case i < window:
-			first += elapsed
-		case i >= items-window:
-			last += elapsed
-		}
-
-		i++
+		times = append(times, time.Since(start))
 
 		return n.Set(ctx, 3)
 	})
 
 	require.NoError(t, err)
-	assert.Less(t, last, 3*first)
+	require.Len(t, times, items)
+	assert.Less(t, median(times[items-window:]), 3*median(times[:window]))
 	assert.Equal(t, "s:\n"+strings.Repeat("  - 3\n", items), d.Text())
+}
+
+// median returns the middle duration of ds in sorted order, or the slower
+// of the two in the middle when ds holds an even number of durations.
+func median(ds []time.Duration) time.Duration {
+	sorted := slices.Sorted(slices.Values(ds))
+
+	return sorted[len(sorted)/2]
 }
 
 func TestDoc_Apply_Queue_FailedSets(t *testing.T) {
