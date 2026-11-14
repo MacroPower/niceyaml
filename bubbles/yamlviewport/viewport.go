@@ -542,9 +542,8 @@ func New(opts ...Option) Model {
 // A presentation change shows the current revision in other rows. A diff
 // mode that changes [Model.DiffBaseIndex] is one. So are a view mode while a
 // diff shows and a hunk context while hunks of a diff show. When the search
-// term has a match in the new rows, the change resets both offsets and
-// restarts the search at its first match. It then scrolls to that match, as
-// a change of content does.
+// term has a match in the new rows, the change selects a match and scrolls
+// to it.
 //
 // Without a match in the new rows, a presentation change keeps the line of
 // the current revision at the top of the view. The horizontal offset stays
@@ -576,6 +575,24 @@ func New(opts ...Option) Model {
 // that wants the new view at its first row calls GotoTop after the
 // presentation change.
 //
+// With a match in the new rows, a presentation change keeps the selected
+// match when the new rows show it at the [Hit] that [Model.SearchMatch]
+// reports. Otherwise it selects the first match at or after the place of the
+// old match in the current revision. The change selects the first match when
+// no match follows that place, or when the change does not have a place.
+// [Model.SearchNext] wraps from the last match to the first in the same way.
+// The change then scrolls to the selected match, as a search does.
+//
+// The place of a match on a line that the current revision holds is the line
+// and the column of the match. An unchanged line of a diff is such a line,
+// whichever revision the Hit of the match names. A match on any other line,
+// such as a deleted line, stands for the first line of the current revision
+// on its row or on a later row of the diff. Its place is the start of that
+// line, and a match without such a line does not have a place. Without a
+// selected match, the place is the start of the line that the change starts
+// from, the recorded line or the line at the top. A change that starts the
+// new view at its first row does not have a place.
+//
 // A search or [Model.Reveal] waits to scroll while the content area does not
 // have room for a row, such as before the parent sizes the viewport from the
 // first [tea.WindowSizeMsg]. When the area has room, the viewport centers
@@ -586,7 +603,7 @@ func New(opts ...Option) Model {
 // scroll runs. [Model.SetYOffset], [Model.SetXOffset], and the scroll
 // methods drop a scroll that waits, and so do a change of content and a
 // presentation change. A change that drops the scroll waits again to scroll
-// to the first match in the new rows, when the term has one.
+// to the match that it selects in the new rows, when the term has one.
 // [Model.ReplaceRevision] keeps a scroll that waits. A Reveal that waits
 // scrolls to the place its [Hit] has in the views the viewport shows when
 // the scroll runs. A Reveal whose Hit those views do not show leaves the
@@ -1531,60 +1548,74 @@ func (m *Model) NextRevision() { m.GotoRevision(m.revIndex + 1) }
 func (m *Model) PreviousRevision() { m.GotoRevision(m.revIndex - 1) }
 
 // rebuildViews rebuilds the displayed views from the revision, diff mode, and
-// view mode, then refreshes the search state and drops the cached row counts.
-// Rendering itself waits for View, which renders only the visible window.
+// view mode, as resetViews does. It then scrolls to the first search match
+// in the new content when the search term has one. Rendering itself waits
+// for View, which renders only the visible window.
 //
 // Every change of content goes through rebuildViews. A match index or row
 // offset from the old content points at an arbitrary line of the new
 // content. The view therefore scrolls to the top, or to the first match in
-// the new content when the search term has one. A line that a presentation
-// change held names a line of the old content, so rebuildViews drops it. A
-// presentation change goes through rebuildPresentation, which calls
-// rebuildViews and then keeps the top line when the new content does not
-// hold a match. ReplaceRevision goes through reloadViews instead.
+// the new content. A presentation change goes through rebuildPresentation
+// instead. It selects a match from the place of the match that the old views
+// selected. When the new views do not have a match, it keeps the top line.
+// ReplaceRevision goes through reloadViews.
 func (m *Model) rebuildViews() {
+	m.resetViews()
+	m.scrollToCurrentMatch()
+}
+
+// resetViews rebuilds the displayed views from the revision, diff mode, and
+// view mode, then refreshes the search state at its first match. It drops
+// both offsets, the cached row counts, and a deferred scroll, because they
+// name rows of the old views. A line that a presentation change held names
+// a line of the old views too, so resetViews drops it. The caller selects a
+// match and scrolls.
+func (m *Model) resetViews() {
 	m.searchIndex = -1
 	m.held = heldLine{}
 	m.loadViews()
 
 	// The old row counts describe other lines, so the cache starts empty
 	// without anchoring to a line of the old content, as relayout would.
-	// The horizontal offset describes them too, and a search match in the
-	// new content sets it again below.
+	// The horizontal offset describes them too, and a scroll to a search
+	// match in the new content sets it again.
 	m.anchored = false
 	m.yOffset = 0
 	m.xOffset = 0
 	m.rows = &rowCache{}
 
-	// A deferred scroll targets a range of the old content, so rebuildViews
-	// drops it with the offsets. Then scrollToCurrentMatch scrolls to a
-	// match in the new content, or defers that scroll.
+	// A deferred scroll targets a range of the old content, so resetViews
+	// drops it with the offsets. A scroll to a match in the new content
+	// defers again when the content area does not have room.
 	m.pending = nil
-
-	m.scrollToCurrentMatch()
 }
 
 // rebuildPresentation runs set, which changes how the views present the
 // current revision. It then rebuilds the views, as the [Model] doc
 // describes a presentation change. Only the old diff and modes map the rows
 // of the views on display to lines of the revision. It therefore reads the
-// start line from those views before set runs.
+// start line and the place of the selected search match from those views
+// before set runs.
 //
-// When the new views hold a search match, rebuildViews scrolls to it.
-// Otherwise the start line goes to the top of the new views, and the
-// horizontal offset stays. The change then holds the line that
-// anchorRevisionLine returns. It also holds the index that [Model.TopLine]
-// returns after ensureRows clamps the offsets to the new views. A change
-// that does not have a start line leaves the next call to ensureRows to
-// clamp the offsets.
+// When the new views hold a search match, selectPlace selects one, and the
+// change scrolls to it. Otherwise the start line goes to the top of the new
+// views, and the horizontal offset stays. The change then holds the line
+// that anchorRevisionLine returns. It also holds the index that
+// [Model.TopLine] returns after ensureRows clamps the offsets to the new
+// views. A change that does not have a start line leaves the next call to
+// ensureRows to clamp the offsets.
 func (m *Model) rebuildPresentation(set func()) {
 	start, ok := m.startLine()
+	place := m.selectedPlace(start, ok)
 	x := m.xOffset
 
 	set()
-	m.rebuildViews()
+	m.resetViews()
 
 	if len(m.searchMatches) > 0 {
+		m.selectPlace(place)
+		m.scrollToCurrentMatch()
+
 		return
 	}
 
@@ -1596,6 +1627,119 @@ func (m *Model) rebuildPresentation(set func()) {
 
 	held := m.anchorRevisionLine(start)
 	m.held = heldLine{line: held, top: m.TopLine(), ok: true}
+}
+
+// matchPlace is the selected search match of the views on display, as a
+// presentation change reads it for selectPlace.
+type matchPlace struct {
+	// The Hit of the match, as [Model.SearchMatch] reports it, when hasHit
+	// is set.
+	hit Hit
+	// The place in the current revision that the new views select the first
+	// match at or after, when ok is set.
+	pos    position.Position
+	hasHit bool
+	ok     bool
+}
+
+// selectedPlace returns the selected search match of the views on display.
+// The place of the match is its place in the current revision, as
+// currentPlace returns it. When the views do not have a selected match, the
+// place is column 0 of line start, the line that the change starts from. It
+// has a place only when startOK is set.
+func (m *Model) selectedPlace(start int, startOK bool) matchPlace {
+	i := m.searchIndex
+	if i < 0 || i >= len(m.searchMatches) {
+		return matchPlace{pos: position.New(start, 0), ok: startOK}
+	}
+
+	var p matchPlace
+
+	if match, ok := m.SearchMatch(i); ok {
+		p.hit, p.hasHit = match.Hit, true
+	}
+
+	match := m.searchMatches[i]
+	p.pos, p.ok = m.currentPlace(m.baseRight != nil && !match.inLeft, match.rng.Start)
+
+	return p
+}
+
+// currentPlace returns the place in the current revision of pos, and true.
+// The position pos lies in the content of the left pane, or of the right
+// one when right is true. A row that shows a line of the current revision
+// in that pane gives the line and the column of pos. Rows of the unified
+// diff and of the right pane show a line of the current revision unless
+// they show a deleted line or a placeholder. Rows of the left pane show one
+// when the line is unchanged, as equalLine reports. Any other row gives the
+// start of the line that nextRevisionLine returns for it. When no such line
+// follows, currentPlace reports false.
+func (m *Model) currentPlace(right bool, pos position.Position) (position.Position, bool) {
+	if !m.ShowingDiff() {
+		return pos, true
+	}
+
+	var (
+		origin diff.Origin
+		ok     bool
+	)
+
+	result := m.getDiffResult()
+
+	switch {
+	case !m.sideBySide():
+		origin, ok = result.UnifiedOrigin(pos.Line)
+		ok = ok && origin.Side == diff.After
+
+	case right || m.equalLine(pos.Line):
+		origin, ok = result.PaneOrigin(diff.After, pos.Line)
+	}
+
+	if ok {
+		return position.New(origin.Index, pos.Col), true
+	}
+
+	l, ok := m.nextRevisionLine(pos.Line)
+
+	return position.New(l, 0), ok
+}
+
+// selectPlace selects the search match of the views on display that p
+// names. That is the match with the Hit of p, or else the first match that
+// starts at or after the place of p. The place maps to a row of the views as
+// revisionRow maps a line. Without either match, the first match stays
+// selected.
+func (m *Model) selectPlace(p matchPlace) {
+	if p.hasHit {
+		for i := range m.searchMatches {
+			if match, ok := m.SearchMatch(i); ok && match.Hit == p.hit {
+				m.searchIndex = i
+
+				return
+			}
+		}
+	}
+
+	if !p.ok {
+		return
+	}
+
+	row, ok := m.revisionRow(p.pos.Line)
+	if !ok {
+		return
+	}
+
+	// The matches come in document order, and a side-by-side diff aligns
+	// the rows of its panes.
+	target := position.New(row, p.pos.Col)
+
+	for i, match := range m.searchMatches {
+		if match.rng.Start.Compare(target) >= 0 {
+			m.searchIndex = i
+
+			return
+		}
+	}
 }
 
 // startLine returns the line of the current revision that a presentation
@@ -1654,48 +1798,60 @@ func (m *Model) revisionLine(i int) (int, bool) {
 		return i, true
 	}
 
-	result := m.getDiffResult()
-	sideBySide := m.sideBySide()
-
-	// For a row of the diff, shows returns the line of the current revision
-	// that the row shows, whether the row shows one, and whether the diff has
-	// the row.
-	shows := func(row int) (int, bool, bool) {
-		if !sideBySide {
-			o, ok := result.UnifiedOrigin(row)
-
-			return o.Index, ok && o.Side == diff.After, ok
-		}
-
-		if o, ok := result.PaneOrigin(diff.After, row); ok {
-			return o.Index, true, true
-		}
-
-		// The right pane shows a placeholder beside a line that only the
-		// left one shows.
-		_, ok := result.PaneOrigin(diff.Before, row)
-
-		return 0, false, ok
+	if l, ok := m.nextRevisionLine(i); ok {
+		return l, true
 	}
 
+	for row := i - 1; row >= 0; row-- {
+		if l, ok, _ := m.rowRevisionLine(row); ok {
+			return l, true
+		}
+	}
+
+	return 0, false
+}
+
+// nextRevisionLine returns the first line of the current revision on row i
+// of the diff on display or on a later row, and true. It reports false when
+// no such row shows one. The rows of the diff are the rows of
+// [diff.Result.Unified], or of the panes in side-by-side mode, whether or
+// not a hunk holds them. The caller checks [Model.ShowingDiff] first.
+func (m *Model) nextRevisionLine(i int) (int, bool) {
 	for row := i; ; row++ {
-		l, ok, held := shows(row)
+		l, ok, held := m.rowRevisionLine(row)
 		if !held {
-			break
+			return 0, false
 		}
 
 		if ok {
 			return l, true
 		}
 	}
+}
 
-	for row := i - 1; row >= 0; row-- {
-		if l, ok, _ := shows(row); ok {
-			return l, true
-		}
+// rowRevisionLine returns three results for a row of the diff on display.
+// They are the line of the current revision that the row shows, whether the
+// row shows one, and whether the diff has the row. In side-by-side mode the
+// row shows the line of the right pane. The caller checks
+// [Model.ShowingDiff] first.
+func (m *Model) rowRevisionLine(row int) (int, bool, bool) {
+	result := m.getDiffResult()
+
+	if !m.sideBySide() {
+		o, ok := result.UnifiedOrigin(row)
+
+		return o.Index, ok && o.Side == diff.After, ok
 	}
 
-	return 0, false
+	if o, ok := result.PaneOrigin(diff.After, row); ok {
+		return o.Index, true, true
+	}
+
+	// The right pane shows a placeholder beside a line that only the left
+	// one shows.
+	_, ok := result.PaneOrigin(diff.Before, row)
+
+	return 0, false, ok
 }
 
 // revisionRow returns the row of the content on display that shows line l
@@ -3245,11 +3401,15 @@ func holds(view *line.View, pos position.Position) bool {
 // SetSearchTerm sets the search term and updates highlights. An empty term
 // clears all search highlights, as [Model.ClearSearch] does.
 //
-// The term stays set across changes of content and presentation changes.
-// Either change, as the [Model] doc defines them, restarts the search at
-// the first match in the new content and scrolls to it. A new term likewise
-// starts at its first match, but setting the same term again keeps the
-// current match. To restart the search at its first match, call
+// The term stays set across changes of content and presentation changes, as
+// the [Model] doc defines them. A change of content restarts the search at
+// the first match in the new content and scrolls to it. A presentation
+// change keeps the current match, or selects the first match at or after
+// its place, and scrolls to that match. It selects the first match when no
+// match follows.
+//
+// A new term starts at its first match, but setting the same term again
+// keeps the current match. To restart the search at its first match, call
 // [Model.SetSearchIndex] with 0 after SetSearchTerm. Before the content area
 // has room for a row, the scroll to the match waits until the area has
 // room, as the [Model] doc describes.
