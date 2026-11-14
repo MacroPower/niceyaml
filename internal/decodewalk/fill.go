@@ -65,7 +65,11 @@ type Starts struct {
 //     whose entry Fill cannot tell, as [Walk] describes. When the
 //     decoder did not start the struct from its start, the struct decodes
 //     again from its start first, so each such field starts from the value
-//     the start holds.
+//     the start holds. Fill takes such fields from the second decode. The
+//     fields whose entries the document writes, other than those held
+//     inline or inside an inline struct, build from what the decoder first
+//     gave them, as they do without the merge key. An unmarshaler inside
+//     such a field can run one more time.
 //   - A value that [unmarshaler.Options.Whole] reports as decoding itself
 //     decodes again from its start when the decoder did not start it
 //     there. Its method then sees the start.
@@ -431,25 +435,27 @@ func (f *filler) structOf(
 		return start, nil
 	}
 
-	// The decoder starts each field from the value it holds, so a decode
-	// from start gives a field that a merge key of a reference document
+	// The decoder starts each field from the value it holds. A decode from
+	// start thus gives a field that a merge key of a reference document
 	// brings in the value it starts from there.
-	if merges && !exact && f.readsReferenceField(t, mapping) {
-		again := reflect.New(t)
-		again.Elem().Set(start)
+	var again reflect.Value
 
-		err := f.rules.Decode(f.rules.View(mapping), again.Interface())
+	if merges && !exact && f.readsReferenceField(t, mapping) {
+		v := reflect.New(t)
+		v.Elem().Set(start)
+
+		err := f.rules.Decode(f.rules.View(mapping), v.Interface())
 		if err != nil {
 			return reflect.Value{}, err
 		}
 
-		decoded, exact = again.Elem(), true
+		again = v.Elem()
 	}
 
 	result := reflect.New(t).Elem()
 	result.Set(start)
 
-	err := f.fields(t, mapping, merges, result, decoded, exact, nil)
+	err := f.fields(t, mapping, merges, result, decoded, again, exact, nil)
 	if err != nil {
 		return reflect.Value{}, err
 	}
@@ -471,18 +477,33 @@ func (f *filler) readsReferenceField(t reflect.Type, mapping *ast.MappingNode) b
 	return false
 }
 
-// fields sets each field of result that a decode of mapping writes, from
-// decoded. The argument result is a struct of type t that holds its
-// start. A struct held inline skips each field that hidden names, because
-// the struct that holds it names that field too.
+// fields sets each field of result that a decode of mapping writes. The
+// argument result is a struct of type t that holds its start. The
+// argument decoded is the value that the decoder gave the struct, and
+// exact reports whether the decoder started it from start.
+//
+// The argument again holds the value of a decode of the struct from start
+// for a `<<` merge key of a reference document. It is not valid when the
+// struct did not decode again. A named field whose entry the document
+// writes builds from decoded, as it does in a struct without such a merge
+// key. Each other field that the decode writes builds from again when
+// again is valid, as from a value that the decoder started from start.
+//
+// A struct held inline skips each field that hidden names, because the
+// struct that holds it names that field too.
 func (f *filler) fields(
 	t reflect.Type,
 	mapping *ast.MappingNode,
 	merges bool,
-	result, decoded reflect.Value,
+	result, decoded, again reflect.Value,
 	exact bool,
 	hidden map[string]bool,
 ) error {
+	whole, wholeExact := decoded, exact
+	if again.IsValid() {
+		whole, wholeExact = again, true
+	}
+
 	for i := range t.NumField() {
 		field := t.Field(i)
 
@@ -492,7 +513,7 @@ func (f *filler) fields(
 		}
 
 		if yamlfield.ReadsAnchor(field) {
-			result.Field(i).Set(decoded.Field(i))
+			result.Field(i).Set(whole.Field(i))
 
 			continue
 		}
@@ -504,7 +525,7 @@ func (f *filler) fields(
 
 		switch {
 		case inline:
-			v, err = f.inline(field.Type, t, mapping, merges, result.Field(i), decoded.Field(i), exact)
+			v, err = f.inline(field.Type, t, mapping, merges, result.Field(i), whole.Field(i), wholeExact)
 
 		case hidden[name]:
 			continue
@@ -516,7 +537,7 @@ func (f *filler) fields(
 			// The fill cannot read below the entry of a reference document
 			// that the decoder read, nor tell which entry it read.
 			case read.alias != nil || !read.known:
-				v = decoded.Field(i)
+				v = whole.Field(i)
 
 			case read.entry == nil:
 				continue
@@ -559,7 +580,7 @@ func (f *filler) inline(
 		result := reflect.New(t).Elem()
 		result.Set(start)
 
-		err := f.fields(t, mapping, merges, result, decoded, exact, renderNames(owner))
+		err := f.fields(t, mapping, merges, result, decoded, reflect.Value{}, exact, renderNames(owner))
 		if err != nil {
 			return reflect.Value{}, err
 		}
