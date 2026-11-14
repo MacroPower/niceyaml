@@ -540,7 +540,10 @@ type Match struct {
 // describes.
 //
 // Returns [ErrResolve] if a resolver applied but could not name the
-// schema. Returns an error that holds a [*LoadError] matching [ErrLoad]
+// schema. A resolver error that holds a [*niceyaml.PanicError] does not
+// decline the document, even when the value of the panic wraps
+// ErrNoMatch. So Lookup returns ErrResolve wrapping that error. Returns
+// an error that holds a [*LoadError] matching [ErrLoad]
 // or [ErrCompile] if loading or compiling the schema fails. Each error
 // but ErrNoMatch comes inside [niceyaml.Unchecked], because the lookup
 // could not name a schema to check the document with. So
@@ -788,8 +791,15 @@ func (r *Registry) lookupSchema(ctx context.Context, doc *niceyaml.Node) (Match,
 // [ErrResolve], [ErrLoad], or [ErrCompile]. The error of a [Registry]
 // that is a resolver can match ErrNoMatch beside one of those, as a load
 // error does. Such an error is not a decline.
+//
+// An error that holds a [*niceyaml.PanicError] is not a decline either.
+// A PanicError unwraps to the value of its panic, so it matches
+// ErrNoMatch when that value wraps ErrNoMatch. A panic is a bug in code
+// rather than an answer about the document.
 func isDecline(err error) bool {
-	return errors.Is(err, ErrNoMatch) && !isLookupError(err)
+	var p *niceyaml.PanicError
+
+	return !errors.As(err, &p) && errors.Is(err, ErrNoMatch) && !isLookupError(err)
 }
 
 // resolveError wraps err, the error of a resolver that did not name a
@@ -961,10 +971,13 @@ func (e reasonError) Unwrap() error {
 // the load error of its schema wraps ErrNoMatch. A caller that holds a
 // registry that someone else built to require a schema checks for the
 // error at its own call site instead. Such a load error matches both
-// [ErrLoad] and ErrNoMatch, so the check tests for ErrLoad first:
+// [ErrLoad] and ErrNoMatch. When a resolver error holds a
+// [*niceyaml.PanicError] whose value wraps ErrNoMatch, the lookup error
+// matches both [ErrResolve] and ErrNoMatch. So the check tests for
+// ErrLoad and ErrResolve first:
 //
 //	err := doc.Validate(ctx, reg)
-//	if err != nil && (errors.Is(err, ErrLoad) || !errors.Is(err, ErrNoMatch)) {
+//	if err != nil && (errors.Is(err, ErrLoad) || errors.Is(err, ErrResolve) || !errors.Is(err, ErrNoMatch)) {
 //	    return err
 //	}
 //

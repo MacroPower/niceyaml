@@ -175,6 +175,14 @@ func countingLoader(key string, data []byte) (schema.Ref, *atomic.Int32) {
 	return r, &loads
 }
 
+// lookupKind decodes itself from text by panicking with an error that
+// wraps [schema.ErrNoMatch].
+type lookupKind string
+
+func (*lookupKind) UnmarshalText([]byte) error {
+	panic(fmt.Errorf("lookup: %w", schema.ErrNoMatch))
+}
+
 // A gatedContext is a context whose Done method waits for gate to close.
 // A test uses it to hold a caller of [schema.Registry.Schema] after the
 // caller joins a load and before it waits on the result.
@@ -455,6 +463,82 @@ func TestRegistry_Lookup(t *testing.T) {
 		assert.Equal(t, `load schema: "gone.json": no matching schema: schema is gone`, err.Error())
 		assert.False(t, niceyaml.IsInvalid(err))
 		assert.Zero(t, fallbackLoads.Load())
+	})
+
+	t.Run("a resolver error that holds a panic ends the lookup", func(t *testing.T) {
+		t.Parallel()
+
+		// The value of each panic wraps ErrNoMatch, and a PanicError
+		// unwraps to its value. A panic is a bug in code, so the lookup
+		// fails even in a registry that passes a document that every
+		// resolver declines.
+		tcs := map[string]struct {
+			resolver schema.Resolver
+			want     string
+		}{
+			"resolver": {
+				resolver: schema.ResolverFunc(func(context.Context, *niceyaml.Node) (schema.Ref, error) {
+					return schema.Ref{}, fmt.Errorf("nested: %w",
+						&niceyaml.PanicError{Value: fmt.Errorf("lookup: %w", schema.ErrNoMatch)})
+				}),
+				want: "app.yaml: resolve schema: nested: panic: lookup: no matching schema",
+			},
+			"content guard": {
+				resolver: schema.When(
+					matcher.Content(paths.Doc().Child("kind"), lookupKind("Deployment")),
+					schema.Embedded(schemaData),
+				),
+				want: "resolve schema: app.yaml:1:7: decoder panicked: lookup: no matching schema",
+			},
+		}
+
+		settings := map[string]bool{
+			"schema required":     true,
+			"schema not required": false,
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				for setting, required := range settings {
+					t.Run(setting, func(t *testing.T) {
+						t.Parallel()
+
+						reg := schema.NewRegistry(
+							schema.WithRequireSchema(required),
+							schema.WithResolvers(tc.resolver),
+						)
+
+						calls := map[string]func(context.Context, *niceyaml.Node) error{
+							"lookup": func(ctx context.Context, doc *niceyaml.Node) error {
+								_, err := reg.Lookup(ctx, doc)
+
+								return err //nolint:wrapcheck // Tests inspect the registry's own error.
+							},
+							"check": reg.Check,
+						}
+
+						for call, fn := range calls {
+							t.Run(call, func(t *testing.T) {
+								t.Parallel()
+
+								doc := yamltest.FirstDocumentWithPath(t, "kind: Deployment\n", "app.yaml")
+
+								err := fn(t.Context(), doc)
+								require.ErrorIs(t, err, schema.ErrResolve)
+								require.EqualError(t, err, tc.want)
+
+								var p *niceyaml.PanicError
+
+								require.ErrorAs(t, err, &p)
+								assert.False(t, niceyaml.IsInvalid(err))
+							})
+						}
+					})
+				}
+			})
+		}
 	})
 
 	t.Run("a load error is no fault wherever it goes", func(t *testing.T) {

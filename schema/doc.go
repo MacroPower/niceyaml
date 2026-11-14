@@ -574,7 +574,9 @@
 // the document.
 //
 // A resolver error that does not wrap [ErrNoMatch] ends the lookup, and the
-// resolvers after it do not run. An error that matches [ErrResolve],
+// resolvers after it do not run. A resolver error that holds a
+// [*niceyaml.PanicError] ends the lookup as well, even when the value of
+// the panic wraps ErrNoMatch. An error that matches [ErrResolve],
 // [ErrLoad], or [ErrCompile] ends it too, even when it wraps ErrNoMatch.
 // The error of a [Registry] that is a resolver is one example. Until a
 // catalog loads, a [go.jacobcolvin.com/niceyaml/schema/schemastore.Store]
