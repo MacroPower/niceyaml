@@ -953,12 +953,15 @@ func TestContent_SelfValidator(t *testing.T) {
 	// A want with a Validate method validates the value the matcher
 	// reads, as a decode of its type does. A value that fails is the
 	// fault of the document, so the matcher returns the error rather
-	// than a no, whatever the want holds.
+	// than a no, whatever the want holds. A panic in the method is a bug
+	// in code, so the matcher returns it as an error that is no fault.
 	tcs := map[string]struct {
 		matcher matcher.Matcher
 		err     error
 		input   string
-		want    bool
+		// The message of an error that holds a niceyaml.PanicError.
+		panicked string
+		want     bool
 	}{
 		"valid value matches": {
 			matcher: versionIs(evenInt(2)),
@@ -1017,6 +1020,19 @@ func TestContent_SelfValidator(t *testing.T) {
 			input:   `version: 20`,
 			err:     errLarge,
 		},
+		"panic in a Validate method is an error": {
+			matcher:  versionIs(panicValidate(2)),
+			input:    `version: 2`,
+			err:      errValidatePanic,
+			panicked: "1:10: $.version: the Validate method of matcher_test.panicValidate panicked: validate bug",
+		},
+		"panic in a ValidateContext method is an error": {
+			matcher: versionIs(panicValidateContext(2)),
+			input:   `version: 2`,
+			err:     errValidatePanic,
+			panicked: "1:10: $.version: the ValidateContext method of matcher_test.panicValidateContext " +
+				"panicked: validate bug",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -1036,7 +1052,20 @@ func TestContent_SelfValidator(t *testing.T) {
 
 			require.ErrorIs(t, err, tc.err)
 			require.NotErrorIs(t, err, niceyaml.ErrDecode)
-			assert.True(t, niceyaml.IsInvalid(err))
+
+			if tc.panicked == "" {
+				assert.True(t, niceyaml.IsInvalid(err))
+
+				return
+			}
+
+			require.EqualError(t, err, tc.panicked)
+			assert.False(t, niceyaml.IsInvalid(err))
+
+			p, ok := errors.AsType[*niceyaml.PanicError](err)
+			require.True(t, ok)
+			assert.Equal(t, errValidatePanic, p.Value)
+			assert.NotEmpty(t, p.Stack)
 		})
 	}
 }
@@ -1167,7 +1196,25 @@ var (
 
 	// The error smallInt reports from ValidateContext.
 	errLarge = errors.New("large")
+
+	// The value panicValidate and panicValidateContext panic with.
+	errValidatePanic = errors.New("validate bug")
 )
+
+// panicValidate is a plain integer whose Validate method panics.
+type panicValidate int
+
+func (panicValidate) Validate() error {
+	panic(errValidatePanic)
+}
+
+// panicValidateContext is a plain integer whose ValidateContext method
+// panics.
+type panicValidateContext int
+
+func (panicValidateContext) ValidateContext(context.Context) error {
+	panic(errValidatePanic)
+}
 
 // rejecting decodes itself and reports errRejecting, so the decoder
 // returns the value's own error rather than a rejection of its own.

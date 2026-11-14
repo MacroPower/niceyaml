@@ -8,6 +8,7 @@ import (
 	"iter"
 	"log/slog"
 	"math"
+	"runtime/debug"
 	"slices"
 	"sort"
 	"strconv"
@@ -5816,16 +5817,20 @@ func checkInRange(loc location, lines line.Lines) error {
 	return nil
 }
 
-// PanicError is the error of a panic that the parse or a decode recovered.
+// PanicError is the error of a panic that a call recovered and returned.
 // Value holds the value the code passed to panic, and Stack holds the stack
 // of the goroutine at the panic, as [debug.Stack] formats it. The message
 // leaves the stack out.
 //
-// The go-yaml parser and decoder run under a recover, and so do the
-// UnmarshalYAML and UnmarshalText methods and the [CustomUnmarshaler]
-// functions the decoder calls. A panic in any of them reaches the caller as
-// a [SourceError] that holds a PanicError, with a message such as "decoder
-// panicked: registry not initialized":
+// A call of this package recovers a panic in the go-yaml parser and decoder,
+// in an unmarshaler, and in a function of [CustomUnmarshaler] or
+// [TypeDefaults] that a decode runs. It also recovers a panic in a
+// [Validator], in a Validate method of a [SelfValidator] or a ValidateContext
+// method of a [SelfValidatorContext], and in a function of [WithValueCheck]
+// or [WithNodeCheck]. The call returns the panic as an error that holds a
+// PanicError. The message names the step that panicked, as in "decoder
+// panicked: registry not initialized" or "validator panicked: registry not
+// initialized":
 //
 //	if p, ok := errors.AsType[*niceyaml.PanicError](err); ok {
 //		slog.Error("decode panicked", "value", p.Value, "stack", string(p.Stack))
@@ -5833,9 +5838,29 @@ func checkInRange(loc location, lines line.Lines) error {
 //
 // A panic is a bug in code, not a fault of the document. The error does not
 // match [ErrDecode], [ErrSyntax], or a decode label such as [ErrWrongKind],
-// and [IsInvalid] does not report it. The library does not recover a panic
-// in a [Validator], a [SelfValidator], or a [SelfValidatorContext], so such
-// a panic reaches the caller as a panic.
+// and [IsInvalid] does not report it.
+//
+// Each step whose panic a call recovers owns the code that it runs, so the
+// call recovers a panic in that code too. For example, a
+// [go.jacobcolvin.com/niceyaml/schema.Registry] raises a panic of its schema
+// loader again in the caller of Check. A decode that runs that Registry as a
+// Validator thus returns such a panic as "validator panicked: ...".
+//
+// A panic anywhere else reaches the caller, such as a panic in one of these:
+//
+//   - An [io.Reader] or an [io/fs.FS] that the program supplies.
+//   - A function of TypeDefaults that [Defaults], [DefaultsInto],
+//     [Source.Defaults], or [Source.DefaultsInto] runs.
+//   - A call that reports a misuse with a panic, such as [WithValueCheck] for
+//     a pointer type.
+//
+// The self-validation walk, [MultiValidator], and [Each] return the error of
+// a context that ended in place of the errors that they found, as the
+// Cancellation section of the package documentation describes. The error of
+// a panic is one of those errors, so the error of the context replaces it
+// too.
+//
+// A program that wants the crash calls panic(p) with the PanicError p.
 type PanicError struct {
 	// Value is the value the code passed to panic.
 	Value any
@@ -5962,6 +5987,20 @@ func panicked(in string, p *PanicError, marks ...error) *markedError {
 		refused: panicRefused,
 		sealed:  true,
 	}
+}
+
+// guard runs fn, a hook of a call, and returns what fn returns. A panic in
+// fn comes back as the error that [panicked] gives it under in, the name of
+// the hook, as in "validator panicked: boom". That error comes inside
+// [Unchecked], as the error of a check that could not run.
+func guard(in string, fn func() error) (err error) {
+	defer func() {
+		if v := recover(); v != nil {
+			err = Unchecked(panicked(in, &PanicError{Value: v, Stack: debug.Stack()}))
+		}
+	}()
+
+	return fn()
 }
 
 // holdsPanic reports whether err is, or wraps, a [*PanicError]. The

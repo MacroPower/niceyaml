@@ -75,8 +75,8 @@ type contentMatcher[T Scalar] struct {
 // elsewhere. Such a path holds a wildcard selector, or an alias that does
 // not name an earlier anchor in the document. Match also returns the error
 // of a context that ended. It returns the error of a panic in an
-// UnmarshalYAML or UnmarshalText method of the type of want too, and that
-// error holds a [*niceyaml.PanicError].
+// UnmarshalYAML, UnmarshalText, Validate, or ValidateContext method of the
+// type of want too, and that error holds a [*niceyaml.PanicError].
 //
 // An alias at the end of the path that reads a reference document of
 // [niceyaml.WithReferences] resolves. The path selects that alias, and

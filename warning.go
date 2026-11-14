@@ -957,16 +957,22 @@ func handOn(ctx context.Context, w *Warnings) {
 // holds those warnings, and the collectors of ctx do not get them. The
 // call thus binds every warning of the hook as it binds the result.
 //
+// The hook runs under [guard], so a panic in it comes back as the error
+// that guard gives it under in, the name of the hook. The warnings that the
+// hook handed to its context before the panic come back beside that error,
+// as they do beside an error that the hook returns.
+//
 // The hook might hand a warning to its context and return it as well. The
 // call then keeps the copy that the hook returns, because the hook placed
 // that copy itself. A hook can collect the warnings of a nested call with a
 // collector from its context and return them under the path of a field.
 // Each of them then shows at that path alone. [returnedRows] finds such
 // warnings.
-func runHook(ctx context.Context, run func(ctx context.Context) error) (error, error) {
+func runHook(ctx context.Context, in string, run func(ctx context.Context) error) (error, error) {
 	held := NewWarnings()
+	hookCtx := isolate(ctx, held)
 
-	result := run(isolate(ctx, held))
+	result := guard(in, func() error { return run(hookCtx) })
 	failure, warnings := splitWarnings(result)
 
 	handed := tallyRows(returnedRows(held.sorted(), result))

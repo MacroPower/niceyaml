@@ -315,8 +315,10 @@ func WithSelfValidationOf[T any](enabled bool) DecodeOption {
 // functions it gets. A call that gets one [DecodeOptions] value twice
 // runs each of its functions twice.
 //
-// WithValueCheck panics for a pointer or interface T, because the walk
-// never checks a value of such a type. It also panics if fn is nil.
+// The walk returns a panic in fn as an error that holds a [PanicError],
+// bound at the value. WithValueCheck panics for a pointer or interface T,
+// because the walk never checks a value of such a type. It also panics if
+// fn is nil.
 func WithValueCheck[T any](fn func(ctx context.Context, v *T) error) DecodeOption {
 	if fn == nil {
 		return addCheck[T]("WithValueCheck", false, nil)
@@ -406,8 +408,10 @@ func WithValueCheck[T any](fn func(ctx context.Context, v *T) error) DecodeOptio
 //     alias to a reference document in a Source that is not merged, or
 //     the document did not parse.
 //
-// WithNodeCheck panics for a pointer or interface T, because the walk
-// never checks a value of such a type. It also panics if fn is nil.
+// The walk returns a panic in fn as an error that holds a [PanicError],
+// bound at the value. WithNodeCheck panics for a pointer or interface T,
+// because the walk never checks a value of such a type. It also panics if
+// fn is nil.
 func WithNodeCheck[T any](fn func(ctx context.Context, n *Node, v *T) error) DecodeOption {
 	return addCheck("WithNodeCheck", true, fn)
 }

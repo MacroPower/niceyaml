@@ -24,6 +24,7 @@ func init() {
 		return isolate(ctx, held)
 	}
 	hook.Rewrap = rewrap
+	hook.Guard = guard
 	hook.ReferenceName = func(n any, name string) (string, bool) {
 		node, _ := n.(*Node) //nolint:errcheck // The hook takes a *Node.
 

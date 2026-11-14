@@ -15150,13 +15150,31 @@ func (*nestedDecode) UnmarshalYAML(ctx context.Context, text []byte) error {
 	return err
 }
 
-// panickingValidator panics with errRegistry when it validates itself.
-type panickingValidator struct {
-	Name string `yaml:"name"`
+// panicConfig is the decode target of [TestPanicError_Validators].
+type panicConfig struct {
+	Name  string      `yaml:"name"`
+	Items []panicItem `yaml:"items"`
 }
 
-func (panickingValidator) Validate() error {
-	panic(errRegistry)
+// panicItem is an element of the items of a [panicConfig].
+type panicItem struct {
+	N string `yaml:"n"`
+}
+
+// validatePanics is a [panicConfig] whose Validate method panics with
+// "validate boom".
+type validatePanics panicConfig
+
+func (validatePanics) Validate() error {
+	panic("validate boom")
+}
+
+// validateContextPanics is a [panicConfig] whose ValidateContext method
+// panics with "validate boom".
+type validateContextPanics panicConfig
+
+func (validateContextPanics) ValidateContext(context.Context) error {
+	panic("validate boom")
 }
 
 // requirePanic checks that err holds a PanicError with a stack, and
@@ -15434,18 +15452,213 @@ func TestPanicError_Recovered_Value(t *testing.T) {
 func TestPanicError_Validators(t *testing.T) {
 	t.Parallel()
 
-	// Nothing recovers a panic outside the decoder, so it reaches the
-	// caller as the panic it is.
+	_, decodeErr := niceyaml.NewSourceFromString("port: abc\n", niceyaml.WithName("other.yaml")).
+		Decode[struct {
+		Port int `yaml:"port"`
+	}](t.Context())
+	require.ErrorIs(t, decodeErr, niceyaml.ErrDecode)
+	require.True(t, niceyaml.IsInvalid(decodeErr))
+
+	boom := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error { panic("boom") })
+	items := paths.Doc().Child("items").IndexAll()
+
+	// Each hook that panics fails its own check with an error that holds
+	// the panic. The error travels from there as an error that the hook
+	// returns travels, so it binds where an error of the hook binds.
 	tcs := map[string]struct {
-		decode func(context.Context, *niceyaml.Node) error
+		run func(ctx context.Context, doc *niceyaml.Node) error
+		// The value of the panic that the error holds, or nil when the
+		// error holds none.
+		value any
+		// The text that the collector of the call holds.
+		warnings string
+		// The lines of niceyaml.FormatError above the excerpt.
+		want string
 	}{
-		"panic in a Validator": {
-			decode: decodeAs[any](niceyaml.WithValidator(niceyaml.ValidatorFunc(
-				func(context.Context, *niceyaml.Node) error { panic(errRegistry) },
-			))),
+		"Validator of a decode": {
+			run:   decodeAs[panicConfig](niceyaml.WithValidator(boom)),
+			value: "boom",
+			want:  "p.yaml: validator panicked: boom",
 		},
-		"panic in a Validate method": {
-			decode: decodeAs[panickingValidator](),
+		"Validator of Node.Validate": {
+			run: func(ctx context.Context, doc *niceyaml.Node) error {
+				return doc.Validate(ctx, boom)
+			},
+			value: "boom",
+			want:  "p.yaml: validator panicked: boom",
+		},
+		"direct call to ValidatorFunc.Check": {
+			run:   boom.Check,
+			value: "boom",
+			want:  "p.yaml: validator panicked: boom",
+		},
+		"Validator inside MultiValidator": {
+			run: func(ctx context.Context, doc *niceyaml.Node) error {
+				return doc.Validate(ctx, niceyaml.MultiValidator(niceyaml.NoValidator(), boom))
+			},
+			value: "boom",
+			want:  "p.yaml: validator panicked: boom",
+		},
+		"Validator inside ChainValidator": {
+			run: func(ctx context.Context, doc *niceyaml.Node) error {
+				return doc.Validate(ctx, niceyaml.ChainValidator(niceyaml.NoValidator(), boom))
+			},
+			value: "boom",
+			want:  "p.yaml: validator panicked: boom",
+		},
+		"Validator inside SkipEmpty": {
+			run: func(ctx context.Context, doc *niceyaml.Node) error {
+				return doc.Validate(ctx, niceyaml.SkipEmpty(boom))
+			},
+			value: "boom",
+			want:  "p.yaml: validator panicked: boom",
+		},
+		"Validator of Each": {
+			run: func(ctx context.Context, doc *niceyaml.Node) error {
+				return doc.Validate(ctx, niceyaml.Each(items, boom))
+			},
+			value: "boom",
+			want: stringtest.JoinLF(
+				"|-- p.yaml:3:3: $.items[0]: validator panicked: boom",
+				"`-- p.yaml:4:3: $.items[1]: validator panicked: boom",
+			),
+		},
+		"Validator of Source.ValidateDocuments": {
+			run: func(ctx context.Context, doc *niceyaml.Node) error {
+				return doc.Source().ValidateDocuments(ctx, boom)
+			},
+			value: "boom",
+			want:  "p.yaml: validator panicked: boom",
+		},
+		"Validate method": {
+			run:   decodeAs[validatePanics](),
+			value: "validate boom",
+			want:  "p.yaml:1:1: $: the Validate method of niceyaml_test.validatePanics panicked: validate boom",
+		},
+		"ValidateContext method": {
+			run:   decodeAs[validateContextPanics](),
+			value: "validate boom",
+			want: "p.yaml:1:1: $: the ValidateContext method of niceyaml_test.validateContextPanics " +
+				"panicked: validate boom",
+		},
+		"function of WithValueCheck": {
+			run: decodeAs[panicConfig](niceyaml.WithValueCheck(func(context.Context, *panicConfig) error {
+				panic("check boom")
+			})),
+			value: "check boom",
+			want:  "p.yaml:1:1: $: value check panicked: check boom",
+		},
+		"function of WithNodeCheck": {
+			run: decodeAs[panicConfig](niceyaml.WithNodeCheck(func(context.Context, *niceyaml.Node, *panicItem) error {
+				panic("check boom")
+			})),
+			value: "check boom",
+			want: stringtest.JoinLF(
+				"|-- p.yaml:3:3: $.items[0]: node check panicked: check boom",
+				"`-- p.yaml:4:3: $.items[1]: node check panicked: check boom",
+			),
+		},
+		"SelfValidateValue": {
+			run: func(ctx context.Context, _ *niceyaml.Node) error {
+				return niceyaml.SelfValidateValue(ctx, validatePanics{})
+			},
+			value: "validate boom",
+			want:  "$: the Validate method of niceyaml_test.validatePanics panicked: validate boom",
+		},
+		"Node.SelfValidate": {
+			run: func(ctx context.Context, doc *niceyaml.Node) error {
+				return doc.SelfValidate(ctx, &validateContextPanics{})
+			},
+			value: "validate boom",
+			want: "p.yaml:1:1: $: the ValidateContext method of niceyaml_test.validateContextPanics " +
+				"panicked: validate boom",
+		},
+		"panic beside a failure of another item": {
+			run: decodeAs[panicConfig](niceyaml.WithValueCheck(func(_ context.Context, item *panicItem) error {
+				if item.N == "a" {
+					panic("check boom")
+				}
+
+				return niceyaml.NewError("unknown item")
+			})),
+			value: "check boom",
+			want: stringtest.JoinLF(
+				"|-- p.yaml:3:3: $.items[0]: value check panicked: check boom",
+				"`-- p.yaml:4:3: $.items[1]: unknown item",
+			),
+		},
+		"warning before a panic": {
+			run: func(ctx context.Context, doc *niceyaml.Node) error {
+				return doc.Validate(ctx, niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+					n.Warn(
+						ctx,
+						niceyaml.NewWarning("name is deprecated", niceyaml.AtPath(paths.Current().Child("name"))),
+					)
+
+					panic("boom")
+				}))
+			},
+			value:    "boom",
+			warnings: "p.yaml:1:7: warning: $.name: name is deprecated",
+			want:     "p.yaml: validator panicked: boom",
+		},
+		"decode error of another document as the value": {
+			run: func(ctx context.Context, doc *niceyaml.Node) error {
+				return doc.Validate(ctx, niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+					panic(decodeErr)
+				}))
+			},
+			value: decodeErr,
+			want:  "p.yaml: validator panicked: other.yaml:1:7: $.port: expected integer, got string",
+		},
+		// The error of a context that ended replaces the errors of the
+		// walk, the error of a panic among them.
+		"check that cancels and then panics": {
+			run: func(ctx context.Context, doc *niceyaml.Node) error {
+				ctx, cancel := context.WithCancel(ctx)
+				defer cancel()
+
+				return decodeAs[panicConfig](niceyaml.WithValueCheck(func(context.Context, *panicConfig) error {
+					cancel()
+					panic("check boom")
+				}))(ctx, doc)
+			},
+			want: "p.yaml: context canceled",
+		},
+		// MultiValidator returns the error of the context in place of the
+		// failures before it.
+		"panic before a validator that cancels": {
+			run: func(ctx context.Context, doc *niceyaml.Node) error {
+				ctx, cancel := context.WithCancel(ctx)
+				defer cancel()
+
+				return doc.Validate(ctx, niceyaml.MultiValidator(
+					boom,
+					niceyaml.ValidatorFunc(func(ctx context.Context, _ *niceyaml.Node) error {
+						cancel()
+
+						return ctx.Err()
+					}),
+				))
+			},
+			want: "p.yaml: context canceled",
+		},
+		// MultiValidator returns the error of the validator that saw the
+		// context end.
+		"validator that cancels and then panics": {
+			run: func(ctx context.Context, doc *niceyaml.Node) error {
+				ctx, cancel := context.WithCancel(ctx)
+				defer cancel()
+
+				return doc.Validate(ctx, niceyaml.MultiValidator(
+					niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+						cancel()
+						panic("boom")
+					}),
+				))
+			},
+			value: "boom",
+			want:  "p.yaml: validator panicked: boom",
 		},
 	}
 
@@ -15453,11 +15666,36 @@ func TestPanicError_Validators(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocument(t, "name: x\n")
+			doc := yamltest.FirstDocument(t, "name: x\nitems:\n  - n: a\n  - n: b\n", niceyaml.WithName("p.yaml"))
+			warnings := niceyaml.NewWarnings()
 
-			require.PanicsWithValue(t, errRegistry, func() {
-				_ = tc.decode(t.Context(), doc) //nolint:errcheck // The call panics before it returns.
-			})
+			var err error
+
+			require.NotPanics(t, func() { err = tc.run(warnings.Context(t.Context()), doc) })
+			require.Error(t, err)
+
+			head, _, _ := strings.Cut(niceyaml.FormatError(err), "\n\n")
+			assert.Equal(t, tc.want, head)
+			assert.False(t, niceyaml.IsInvalid(err))
+			require.NotErrorIs(t, err, niceyaml.ErrDecode)
+
+			if tc.warnings == "" {
+				require.NoError(t, warnings.Err())
+			} else {
+				require.EqualError(t, warnings.Err(), tc.warnings)
+			}
+
+			p, ok := errors.AsType[*niceyaml.PanicError](err)
+			if tc.value == nil {
+				assert.False(t, ok, "the error holds a panic")
+				require.ErrorIs(t, err, context.Canceled)
+
+				return
+			}
+
+			require.True(t, ok, "the error does not hold a panic")
+			assert.Equal(t, tc.value, p.Value)
+			assert.NotEmpty(t, p.Stack)
 		})
 	}
 }

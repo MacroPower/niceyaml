@@ -1086,9 +1086,11 @@
 // The decode recovers a panic in the go-yaml decoder and in the unmarshalers
 // it calls. It returns the panic as an error that holds a [PanicError] and
 // binds that error at the first token of the node. That error does not match
-// ErrDecode, and [IsInvalid] does not report it. The package does not
-// recover a panic in a Validator, in a Validate or ValidateContext method, or
-// in a function from [WithValueCheck].
+// ErrDecode, and [IsInvalid] does not report it. The decode also recovers a
+// panic in a Validator, in a Validate or ValidateContext method, and in a
+// function from [WithValueCheck] or [WithNodeCheck]. It returns such a panic
+// as the error of the check that panicked, so the error binds where an
+// error of that check binds.
 //
 // A Source from [NewSourceFromLayers] runs these steps once on the merged
 // document, as the Layers section describes.

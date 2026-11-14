@@ -1078,11 +1078,12 @@ func selfCheckOf(t reflect.Type) selfCheck {
 // type off. It runs ValidateContext as it runs a function of
 // [WithValueCheck]. It then runs each function of the walk from WithValueCheck
 // and [WithNodeCheck] for the type of v, in order. Every check runs and reports
-// its own failure, whatever the checks before it return. Rebasing the error of
-// the method or of a function under at presumes every problem invalid, unless
-// an Error from [Unchecked] sits on its cause chain. Each such problem matches
-// [errInvalid] whether it has a location or not. [selfWalker.report] describes
-// the errors that the presumption skips.
+// its own failure, whatever the checks before it return. A panic in a check is
+// its failure, as [guard] returns it. Rebasing the error of the method or of a
+// function under at presumes every problem invalid, unless an Error from
+// [Unchecked] sits on its cause chain. Each such problem matches [errInvalid]
+// whether it has a location or not. [selfWalker.report] describes the errors
+// that the presumption skips.
 func (w *selfWalker) validate(v reflect.Value, at place) {
 	if !w.checked.validates(v.Type()) || w.stopped() {
 		return
@@ -1099,14 +1100,16 @@ func (w *selfWalker) validate(v reflect.Value, at place) {
 	case contextSelfCheck:
 		validator, ok := reflect.TypeAssert[SelfValidatorContext](v.Addr())
 		if ok {
-			failure, warnings := runHook(w.ctx, validator.ValidateContext)
+			in := "the ValidateContext method of " + v.Type().String()
+			failure, warnings := runHook(w.ctx, in, validator.ValidateContext)
 			w.report(failure, warnings, v, at, presumed)
 		}
 
 	case plainSelfCheck:
 		validator, ok := reflect.TypeAssert[SelfValidator](v.Addr())
 		if ok {
-			failure, warnings := splitWarnings(validator.Validate())
+			in := "the Validate method of " + v.Type().String()
+			failure, warnings := splitWarnings(guard(in, validator.Validate))
 			w.report(failure, warnings, v, at, presumed)
 		}
 
@@ -1131,7 +1134,12 @@ func (w *selfWalker) validate(v reflect.Value, at place) {
 			node, built = w.nodeAt(at), true
 		}
 
-		failure, warnings := runHook(w.ctx, func(ctx context.Context) error {
+		in := "value check"
+		if check.node {
+			in = "node check"
+		}
+
+		failure, warnings := runHook(w.ctx, in, func(ctx context.Context) error {
 			return check.run(ctx, node, v.Addr())
 		})
 		w.report(failure, warnings, v, at, presumed)
@@ -1484,7 +1492,9 @@ func (w *selfWalker) valueNode(node ast.Node, parsed bool) ast.Node {
 // their checks return, so Validate guards each precondition that it reads.
 // For example, it returns nil when a field that it depends on is empty,
 // and the check of that field reports the problem. Validate must not
-// dereference or index state that only a check below it guarantees.
+// dereference or index state that only a check below it guarantees. The
+// walk returns a panic in Validate as an error that holds a [PanicError],
+// bound at the value.
 //
 // The Validation section describes the order the values validate in, the
 // path of each value, and where each error binds.
@@ -1540,8 +1550,9 @@ type SelfValidator interface {
 // The walk reads a result of ValidateContext as it reads a result of
 // Validate. The decode presumes a fault for each error that does not
 // declare one. It reports a timeout of the method at the value. The walk
-// stops when the context of the call ends, as the Cancellation section of
-// the package documentation describes.
+// returns a panic in ValidateContext as an error that holds a [PanicError],
+// bound at the value. The walk stops when the context of the call ends, as
+// the Cancellation section of the package documentation describes.
 type SelfValidatorContext interface {
 	ValidateContext(ctx context.Context) error
 }
@@ -1561,7 +1572,8 @@ type SelfValidatorContext interface {
 // that Node. An error about a key the document lacks carries the path of
 // the key. Node.Validate and a decode bind what Check returns as
 // [Node.Bind] binds an error. They bind each warning that Check hands to
-// its context the same way.
+// its context the same way. They return a panic in Check as an error that
+// holds a [PanicError], bound at the Node.
 //
 // Node.Validate and a decode presume the document at fault for each error
 // and each warning of Check that does not declare anything, as they do for
@@ -2000,7 +2012,7 @@ func (n *Node) firstFailure(ctx context.Context, validators []Validator, presume
 // warnings take the fault that [presume] puts on them first, as the
 // warnings of a hook do.
 func (n *Node) checkWith(ctx context.Context, check func(context.Context, *Node) error, presumes bool) error {
-	failure, warnings := runHook(ctx, func(ctx context.Context) error {
+	failure, warnings := runHook(ctx, "validator", func(ctx context.Context) error {
 		return check(ctx, n)
 	})
 

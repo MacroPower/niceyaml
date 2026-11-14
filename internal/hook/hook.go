@@ -35,6 +35,13 @@ var (
 	// hook does. A collector that code derives from it with
 	// niceyaml.Warnings.Context thus hands its warnings to w as well.
 	Isolate func(ctx context.Context, w any) context.Context
+	// Guard runs fn, a hook of a call, and returns what fn returns. A panic
+	// in fn comes back as an error that holds a *niceyaml.PanicError with
+	// the value and the stack of the panic. Its message names the hook with
+	// in, as in "validator panicked: boom". The document is not at fault
+	// for that error, as niceyaml.IsInvalid reads it.
+	Guard func(in string, fn func() error) error
+
 	// Rewrap returns err with wrap applied to the error that it binds, when
 	// err is a *niceyaml.SourceError, and wrap(err) otherwise. The result
 	// keeps the location, the source, and the children of the binding. So
