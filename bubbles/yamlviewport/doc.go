@@ -73,7 +73,9 @@
 // panes. [Model.ToggleViewMode] cycles through the view modes. A view
 // mode is a presentation of a diff. Without a diff every mode renders the
 // revision as [ViewModeFull] does, and the mode takes effect when a diff
-// shows.
+// shows. A change of view mode, diff mode, or hunk context keeps the line at
+// the top of the view, or scrolls to the first search match when the new
+// view holds one.
 //
 // A [ViewMode] and a [DiffMode] each read and write their name as text,
 // such as "hunks" or "origin". A program thus takes either mode from a
