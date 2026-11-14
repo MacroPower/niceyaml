@@ -374,6 +374,20 @@ func TestNode_Update(t *testing.T) {
 			err: "test.yaml:3:4: $.z: cafe.jacobcolvin.com/v1 removes $.z, after which a comment line goes right " +
 				"after the blank lines of a block scalar without text",
 		},
+		"block scalar without text from a marshaler after the last key before a blank line and a comment line": {
+			before: stringtest.LinesLF("a: 1", "", "# c"),
+			path:   paths.Doc(),
+			value:  ms("a", 1, "z", yamlMarshaler("k: |\n")),
+			err: "test.yaml:1:1: $: cafe.jacobcolvin.com/v1 updates $, after which a comment line goes right after " +
+				"the blank lines of a block scalar without text",
+		},
+		"block scalar without text from a marshaler as the value of the last key before a blank line and a comment line": {
+			// The value writes as "", as it does in any place.
+			before: stringtest.LinesLF("a: 1", "", "# c"),
+			path:   paths.Doc(),
+			value:  ms("a", 1, "z", yamlMarshaler("|\n")),
+			want:   stringtest.LinesLF("a: 1", `z: ""`, "", "# c"),
+		},
 		"value that does not encode at a new place": {
 			before:  "a: 1\n",
 			path:    paths.Doc().Child("b"),

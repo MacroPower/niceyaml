@@ -34,13 +34,16 @@ var (
 	// than YAML does, in one of the ways that the Supported YAML section of
 	// the package documentation lists. The engine wrote that text, so the
 	// call fails with ErrEngine. The message names go-yaml in each of those
-	// cases. ErrEngine also indicates new text that differs from the model
-	// of the calls of an Apply, as the Transactions section of the package
-	// documentation describes. It also indicates a call that the model
-	// cannot take. The error binds where the user's text holds the value
-	// that differs, or at the place of the call, as the Errors section of
-	// the package documentation describes. An error that matches ErrEngine
-	// never matches [ErrUnsupported] or [ErrMisread].
+	// cases. A call whose text go-yaml's parser refuses at a comment line
+	// right after the blank lines of a block scalar without text fails with
+	// a problem of the document instead. ErrEngine also indicates new text
+	// that differs from the model of the calls of an Apply, as the
+	// Transactions section of the package documentation describes. It also
+	// indicates a call that the model cannot take. The error binds where
+	// the user's text holds the value that differs, or at the place of the
+	// call, as the Errors section of the package documentation describes.
+	// An error that matches ErrEngine never matches [ErrUnsupported] or
+	// [ErrMisread].
 	ErrEngine = errors.New("the engine cannot write this edit")
 
 	// ErrMisread indicates a document of valid YAML that go-yaml's decoder

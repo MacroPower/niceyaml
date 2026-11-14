@@ -702,6 +702,15 @@ func TestNode_Set(t *testing.T) {
 			value:  yamlMarshaler("a: |+\n  x\n\n"),
 			want:   stringtest.LinesLF("a: 1", "b:", `  a: "x\n\n"`),
 		},
+		"YAML marshaler that writes a block scalar without text before a blank line and an indented comment line": {
+			// The comment line indents past the key, so go-yaml's parser
+			// reads it as text of the block scalar. The value then keeps its
+			// string in double quotes.
+			before: stringtest.LinesLF("a: 1", "", "  # c", "b: 1"),
+			path:   paths.Doc().Child("a"),
+			value:  yamlMarshaler("|\n"),
+			want:   stringtest.LinesLF(`a: ""`, "", "", "  # c", "b: 1"),
+		},
 		"YAML marshaler that writes a tagged flow sequence": {
 			before: stringtest.LinesLF("a: 1", "b: 2"),
 			path:   paths.Doc().Child("b"),
@@ -3680,6 +3689,24 @@ func TestNode_Set_Placement(t *testing.T) {
 			value:  0,
 			want:   stringtest.LinesLF("a: 1", "b: 2", "z: 0"),
 		},
+		"block scalar without text from a marshaler after a key before a blank line and a comment line": {
+			before: stringtest.LinesLF("a: 1", "", "# c", "b: 1"),
+			path:   paths.Doc().Child("z"),
+			value:  yamlMarshaler("|\n"),
+			opts:   []edit.SetOption{edit.After("a")},
+			err: "sets $.z, after which a comment line goes right after the blank lines of a block scalar " +
+				"without text",
+		},
+		"block scalar without text from a marshaler after a key before a comment line": {
+			// Go-yaml's encoder writes a blank line after the header, and the
+			// comment line goes right after it.
+			before: stringtest.LinesLF("a: 1", "# c", "b: 1"),
+			path:   paths.Doc().Child("z"),
+			value:  yamlMarshaler("|\n"),
+			opts:   []edit.SetOption{edit.After("a")},
+			err: "sets $.z, after which a comment line goes right after the blank lines of a block scalar " +
+				"without text",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -4191,6 +4218,8 @@ func TestNode_Insert(t *testing.T) {
 		err    string
 		// Whether the error matches edit.ErrProtected.
 		protected bool
+		// Whether the error matches edit.ErrEngine.
+		engine bool
 	}{
 		"first item of a block sequence": {
 			before: stringtest.LinesLF("s:", "  - a", "  - b"),
@@ -4411,6 +4440,14 @@ func TestNode_Insert(t *testing.T) {
 			path:   paths.Doc().Child("s").Index(0),
 			value:  "\x01",
 			err:    "go-yaml's encoder writes U+0001",
+			engine: true,
+		},
+		"block scalar without text from a marshaler past the last item before a blank line and a comment line": {
+			before: stringtest.LinesLF("s:", "- 1", "", "# c"),
+			path:   paths.Doc().Child("s").Index(1),
+			value:  yamlMarshaler("|\n"),
+			err: "inserts $.s[1], after which a comment line goes right after the blank lines of a block scalar " +
+				"without text",
 		},
 	}
 
@@ -4423,6 +4460,9 @@ func TestNode_Insert(t *testing.T) {
 			err := applyAt(t, d, tc.path, func(ctx context.Context, n *edit.Node) error {
 				return n.Insert(ctx, tc.value)
 			})
+			if tc.err != "" {
+				require.Equal(t, tc.engine, errors.Is(err, edit.ErrEngine))
+			}
 
 			requireEdit(t, d, err, tc.err, tc.want)
 

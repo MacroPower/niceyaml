@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 
@@ -121,8 +122,13 @@ func isBreak(text string, off int) bool {
 // place. The engine wrote that text, so the problem does not keep the
 // fault of the document that the parse declares. A refusal at a byte that
 // an edit created keeps the path of the site where it binds, as
-// [Doc.locate] gives it. The caller binds the problem as a problem of the
-// engine, which adds [ErrEngine].
+// [Doc.locate] gives it. The problem also holds whether the parser refuses
+// a comment line right after the blank lines of a block scalar without
+// text, as [strandedRefusal] reads the token of the refusal. The problem
+// does not keep the error of go-yaml that holds that token, so the parse
+// reads the token first. The caller binds the problem as a problem of the
+// engine, which adds [ErrEngine], unless the parser refuses such a comment
+// line, as [Doc.bug] describes.
 func (d *Doc) parse() error {
 	// A refusal of the parser is a problem of the edit, so it shows the
 	// path of its site. The caller binds it again, and the site of the
@@ -147,6 +153,8 @@ func (d *Doc) parse() error {
 				return &placedError{err: fmt.Errorf("%w: %w", errParserPanicked, err), at: *d.capture}
 			}
 
+			stranded := strandedRefusal(err)
+
 			return &placedError{err: fmt.Errorf("%w: %w", errParserRefuses, hook.Rewrap(err, func(refusal error) error {
 				plain := errors.New(refusal.Error())
 
@@ -157,7 +165,7 @@ func (d *Doc) parse() error {
 				}
 
 				return plain
-			})), at: *d.capture}
+			})), at: *d.capture, stranded: stranded}
 		}
 
 		if !n.IsEmpty() || d.node == nil {
@@ -174,6 +182,50 @@ func (d *Doc) parse() error {
 	}
 
 	return nil
+}
+
+// strandedRefusal reports whether err, a refusal of go-yaml's parser,
+// refuses a comment line right after the blank lines of a block scalar
+// without text. Go-yaml's lexer marks that layout in the tokens around the
+// token of the refusal, and strandedRefusal reads each part of it.
+//
+//   - The token of the refusal stands for the blank lines. It is a string
+//     that holds only line breaks.
+//   - A comment token after it stands for the comment line.
+//   - An empty string before it stands for the block scalar without text.
+//     The header of a block scalar comes before the empty string, alone or
+//     with the token of a comment on its line.
+//
+// Go-yaml's positions of tokens drift in a text with CRLF line breaks, so
+// strandedRefusal reads only the types, the values, and the order of the
+// tokens.
+func strandedRefusal(err error) bool {
+	refusal, ok := errors.AsType[yaml.Error](err)
+	if !ok {
+		return false
+	}
+
+	blank := refusal.GetToken()
+	if blank == nil || blank.Type != token.StringType || blank.Value == "" ||
+		strings.Trim(blank.Value, "\r\n") != "" {
+		return false
+	}
+
+	if blank.Next == nil || blank.Next.Type != token.CommentType {
+		return false
+	}
+
+	text := blank.Prev
+	if text == nil || text.Type != token.StringType || text.Value != "" {
+		return false
+	}
+
+	header := text.Prev
+	if header != nil && header.Type == token.CommentType {
+		header = header.Prev
+	}
+
+	return header != nil && (header.Type == token.LiteralType || header.Type == token.FoldedType)
 }
 
 // lexed returns text with U+FFFD in place of each byte that is not UTF-8,
@@ -414,6 +466,9 @@ func (c capture) writerAt(rng position.Range) *note {
 type placedError struct {
 	err error
 	at  capture
+	// Whether go-yaml's parser refuses a comment line right after the blank
+	// lines of a block scalar without text, as [strandedRefusal] tells.
+	stranded bool
 }
 
 // Error returns the message of the error.

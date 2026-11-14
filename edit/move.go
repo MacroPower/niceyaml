@@ -129,7 +129,10 @@ import (
 // place before it goes to its new place, so the Move fails even when the
 // value goes back between the blank lines and the comment line. It fails
 // the same way where the comment lines of the value go right after such
-// blank lines, as for a [Before] of the key after them. The document is at
+// blank lines, as for a [Before] of the key after them. It also fails so
+// when the parser refuses such a comment line in the text after the value
+// takes its new place. A block scalar without text that goes before blank
+// lines and a comment line can cause that refusal. The document is at
 // fault for the problem.
 //
 // In a flow collection, the value takes flow style and drops the comments

@@ -1777,12 +1777,14 @@ func (d *Doc) cutBefore(start, end int) edit {
 
 // strandedProblem returns the problem of the call through h whose edit
 // leaves a comment line right after the blank lines of a block scalar
-// without text, as [Doc.emptyScalarAbove] describes them. Step names the
-// call and the edit up to the place of that comment line, as in "removes
-// $.a, after which a comment line goes". The layout of the document
-// decides the problem, so the document is at fault for it. The problem
-// binds at the place of h in the text that the call found, because a Move
-// can take the value from its place before it fails.
+// without text. Go-yaml's parser refuses such a comment line.
+// [Doc.emptyScalarAbove] tells such blank lines before an edit, and
+// [Doc.bug] tells them from the refusal of the parser after one. Step
+// names the call and the edit up to the place of that comment line, as in
+// "removes $.a, after which a comment line goes". The layout of the
+// document decides the problem, so the document is at fault for it. The
+// problem binds at the place of h in the text that the call found, because
+// a Move can take the value from its place before it fails.
 func (d *Doc) strandedProblem(h *Node, step string) error {
 	if d.calling {
 		now := d.save()
@@ -1796,8 +1798,18 @@ func (d *Doc) strandedProblem(h *Node, step string) error {
 }
 
 // bug returns the problem of an edit whose text the engine cannot
-// parse, which shows a bug in the engine.
+// parse, which shows a bug in the engine. Go-yaml's parser refuses a
+// comment line right after the blank lines of a block scalar without
+// text, though the text is valid YAML. The parse of the text that the call
+// running wrote can fail so, as [Doc.parse] tells. The layout of the
+// document then decides the problem, so bug returns the problem that
+// [Doc.strandedProblem] gives in place of a bug.
 func (d *Doc) bug(h *Node, err error) error {
+	placed, ok := errors.AsType[*placedError](err)
+	if ok && placed.stranded && d.callNamed != "" {
+		return d.strandedProblem(h, d.callNamed+", after which a comment line goes")
+	}
+
 	at, err := d.refusedCall(err)
 	if at != nil {
 		bound := d.user.Bind(d.engineProblem(err, at...))

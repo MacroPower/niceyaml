@@ -1404,6 +1404,331 @@ func TestNode_Move_Placement(t *testing.T) {
 			opts:   []edit.SetOption{edit.Before("b")},
 			want:   stringtest.LinesLF("a: |", "", "x: 1", "b: 1"),
 		},
+		"block scalar without text after a key before a blank line and a comment line": {
+			// The comment line goes right after the blank line of the value.
+			before: stringtest.LinesLF("a: 1", "", "# c", "b: 1", "x: |"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("y"),
+			opts:   []edit.SetOption{edit.After("a")},
+			err: "test.yaml:5:4: $.x: cafe.jacobcolvin.com/v1 moves $.x to $.y, after which a comment line goes " +
+				"right after the blank lines of a block scalar without text, and go-yaml's parser refuses a comment " +
+				"line there",
+		},
+		"block scalar without text after the last key before a blank line and a comment line": {
+			before: stringtest.LinesLF("x: |", "a: 1", "", "# c"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("y"),
+			err: "test.yaml:1:4: $.x: cafe.jacobcolvin.com/v1 moves $.x to $.y, after which a comment line goes " +
+				"right after the blank lines of a block scalar without text",
+		},
+		"block scalar without text after the last key before a blank line and an indented comment line": {
+			before: stringtest.LinesLF("x: |", "m:", "  a: 1", "", "  # c", "b: 1"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("m").Child("y"),
+			err: "moves $.x to $.m.y, after which a comment line goes right after the blank lines of a block " +
+				"scalar without text",
+		},
+		"block scalar without text after the last key of a mapping before a blank line and a comment line": {
+			before: stringtest.LinesLF("m:", "  a: 1", "", "# c", "b: 1", "x: |"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("m").Child("y"),
+			err: "moves $.x to $.m.y, after which a comment line goes right after the blank lines of a block " +
+				"scalar without text",
+		},
+		"mapping that ends with a block scalar without text after a key before a blank line and a comment line": {
+			before: stringtest.LinesLF("a: 1", "", "# c", "b: 1", "x:", "  k: |"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("y"),
+			opts:   []edit.SetOption{edit.After("a")},
+			err: "moves $.x to $.y, after which a comment line goes right after the blank lines of a block " +
+				"scalar without text",
+		},
+		"mapping that ends with a block scalar without text after its other key before a blank line and a comment line": {
+			before: stringtest.LinesLF("a: 1", "", "# c", "b: 1", "x:", "  k: 1", "  l: |"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("y"),
+			opts:   []edit.SetOption{edit.After("a")},
+			err: "moves $.x to $.y, after which a comment line goes right after the blank lines of a block " +
+				"scalar without text",
+		},
+		"sequence that ends with a block scalar without text after a key before a blank line and a comment line": {
+			before: stringtest.LinesLF("a: 1", "", "# c", "b: 1", "x:", "- 1", "- |"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("y"),
+			opts:   []edit.SetOption{edit.After("a")},
+			err: "moves $.x to $.y, after which a comment line goes right after the blank lines of a block " +
+				"scalar without text",
+		},
+		"block scalar with strip chomping without text after a key before a blank line and a comment line": {
+			before: stringtest.LinesLF("a: 1", "", "# c", "b: 1", "x: |-"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("y"),
+			opts:   []edit.SetOption{edit.After("a")},
+			err: "moves $.x to $.y, after which a comment line goes right after the blank lines of a block " +
+				"scalar without text",
+		},
+		"block scalar without text after the last item before a blank line and a comment line": {
+			before: stringtest.LinesLF("s:", "- 1", "", "# c", "t:", "- |"),
+			path:   paths.Doc().Child("t").Index(0),
+			target: paths.Doc().Child("s").Index(1),
+			err: "test.yaml:6:3: $.t[0]: cafe.jacobcolvin.com/v1 moves $.t[0] to $.s[1], after which a comment " +
+				"line goes right after the blank lines of a block scalar without text",
+		},
+		"block scalar without text after a key of a new mapping before a blank line and a comment line": {
+			// The Move creates the mapping of the new key.
+			before: stringtest.LinesLF("a: 1", "", "# c", "b: 1", "x: |"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("n").Child("y"),
+			opts:   []edit.SetOption{edit.After("a")},
+			err: "test.yaml:5:4: $.x: cafe.jacobcolvin.com/v1 moves $.x to $.n.y, after which a comment line goes " +
+				"right after the blank lines of a block scalar without text",
+		},
+		"block scalar without text after the last key into a new mapping before a blank line and a comment line": {
+			before: stringtest.LinesLF("x: |", "a: 1", "", "# c"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("n").Child("y"),
+			err: "moves $.x to $.n.y, after which a comment line goes right after the blank lines of a block " +
+				"scalar without text",
+		},
+		"block scalar without text into a new mapping of a mapping before a blank line and a comment line": {
+			before: stringtest.LinesLF("x: |", "m:", "  a: 1", "", "# c"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("m").Child("n").Child("y"),
+			err: "moves $.x to $.m.n.y, after which a comment line goes right after the blank lines of a block " +
+				"scalar without text",
+		},
+		"block scalar without text after a key before a comment line": {
+			before: stringtest.LinesLF("a: 1", "# c", "b: 1", "x: |"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("y"),
+			opts:   []edit.SetOption{edit.After("a")},
+			want:   stringtest.LinesLF("a: 1", `"y": |`, "# c", "b: 1"),
+		},
+		"block scalar without text after a key before a blank line": {
+			before: stringtest.LinesLF("a: 1", "", "b: 1", "x: |"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("y"),
+			opts:   []edit.SetOption{edit.After("a")},
+			want:   stringtest.LinesLF("a: 1", `"y": |`, "", "b: 1"),
+		},
+		"block scalar without text before a key after a blank line and a comment line": {
+			// The comment line goes after the value and not after a blank line.
+			before: stringtest.LinesLF("a: 1", "", "# c", "b: 1", "x: |"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("y"),
+			opts:   []edit.SetOption{edit.Before("b")},
+			want:   stringtest.LinesLF("a: 1", "", `"y": |`, "# c", "b: 1"),
+		},
+		"block scalar without text into a null mapping before a blank line and a comment line": {
+			before: stringtest.LinesLF("x: |", "m:", "", "# c", "b: 1"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("m").Child("y"),
+			err: "test.yaml:1:4: $.x: cafe.jacobcolvin.com/v1 moves $.x to $.m.y, after which a comment line goes " +
+				"right after the blank lines of a block scalar without text",
+		},
+		"block scalar without text into a null mapping before a blank line and an indented comment line": {
+			// The comment line indents past the new key, so it would be text
+			// of the scalar.
+			before: stringtest.LinesLF("x: |", "m:", "", "    # c", "b: 1"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("m").Child("y"),
+			err: "test.yaml:1:4: $.x: cafe.jacobcolvin.com/v1 moves $.x to $.m.y, after which this block scalar " +
+				`reads "\n# c\n", not "", and cafe does not change the string of a block scalar of the user's text`,
+		},
+		"block scalar without text into a null sequence before a blank line and a comment line": {
+			before: stringtest.LinesLF("t:", "- |", "s:", "", "# c", "b: 1"),
+			path:   paths.Doc().Child("t").Index(0),
+			target: paths.Doc().Child("s").Index(0),
+			err: "test.yaml:2:3: $.t[0]: cafe.jacobcolvin.com/v1 moves $.t[0] to $.s[0], after which a comment " +
+				"line goes right after the blank lines of a block scalar without text",
+		},
+		"block scalar without text into a null mapping before a comment line": {
+			before: stringtest.LinesLF("x: |", "m:", "# c", "b: 1"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("m").Child("y"),
+			want:   stringtest.LinesLF("m:", `  "y": |`, "# c", "b: 1"),
+		},
+		"block scalar without text into a null mapping before a blank line": {
+			before: stringtest.LinesLF("x: |", "m:", "", "b: 1"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("m").Child("y"),
+			want:   stringtest.LinesLF("m:", `  "y": |`, "", "b: 1"),
+		},
+		"block scalar without text at the end of a document before a blank line and a comment line": {
+			// The comment line above the next "---" belongs to the next
+			// document, but the parser reads it after the new entry.
+			before: stringtest.LinesLF("x: |", "a: 1", "", "# c", "---", "b: 1"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("y"),
+			err:    "moves $.x to $.y, after which a comment line goes right after the blank lines of a block scalar without text",
+		},
+		"block scalar without text at the end of a document before a blank line and a comment line above a document end marker": {
+			before: stringtest.LinesLF("x: |", "a: 1", "", "# c", "...", "---", "b: 1"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("y"),
+			err:    "moves $.x to $.y, after which a comment line goes right after the blank lines of a block scalar without text",
+		},
+		"block scalar without text after a key before a blank line with spaces and a comment line": {
+			// The edit writes the blank line empty after the value, so the
+			// comment line goes right after the edit.
+			before: stringtest.LinesLF("a: 1", "   ", "# c", "b: 1", "x: |"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("y"),
+			opts:   []edit.SetOption{edit.After("a")},
+			err: "moves $.x to $.y, after which a comment line goes right after the blank lines of a block " +
+				"scalar without text",
+		},
+		"block scalar without text after a key before an empty line, a blank line with spaces, and a comment line": {
+			before: stringtest.LinesLF("a: 1", "", "  ", "# c", "b: 1", "x: |"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("y"),
+			opts:   []edit.SetOption{edit.After("a")},
+			err: "moves $.x to $.y, after which a comment line goes right after the blank lines of a block " +
+				"scalar without text",
+		},
+		"block scalar without text after the last key before a blank line with spaces and a comment line": {
+			before: stringtest.LinesLF("x: |", "a: 1", "  ", "# c"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("y"),
+			err: "moves $.x to $.y, after which a comment line goes right after the blank lines of a block " +
+				"scalar without text",
+		},
+		"block scalar without text after the last key of a mapping before a blank line with spaces and a comment line at its key": {
+			before: stringtest.LinesLF("x: |", "m:", "  a: 1", "   ", "  # c", "b: 1"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("m").Child("y"),
+			err: "moves $.x to $.m.y, after which a comment line goes right after the blank lines of a block " +
+				"scalar without text",
+		},
+		"block scalar without text into a null mapping before a blank line with spaces and an indented comment line": {
+			// The comment line indents past the new key, so it reads as text
+			// of the scalar.
+			before: stringtest.LinesLF("x: |", "m:", "   ", "    # c", "b: 1"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("m").Child("y"),
+			err: `moves $.x to $.m.y, after which this block scalar reads "\n# c\n", not "", and cafe does not ` +
+				"change the string of a block scalar of the user's text",
+		},
+		"block scalar without text below its key after a key before a blank line and a comment line": {
+			// The header sits alone on the line below its key.
+			before: stringtest.LinesLF("a: 1", "", "# c", "b: 1", "x:", "  |"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("y"),
+			opts:   []edit.SetOption{edit.After("a")},
+			err: "moves $.x to $.y, after which a comment line goes right after the blank lines of a block " +
+				"scalar without text",
+		},
+		"anchored block scalar without text below its key after a key before a blank line and a comment line": {
+			before: stringtest.LinesLF("a: 1", "", "# c", "b: 1", "x: &q", "  |"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("y"),
+			opts:   []edit.SetOption{edit.After("a")},
+			err: "moves $.x to $.y, after which a comment line goes right after the blank lines of a block " +
+				"scalar without text",
+		},
+		"block scalar without text below its key and a comment line after a key before a blank line and a comment line": {
+			before: stringtest.LinesLF("a: 1", "", "# c", "b: 1", "x:", "  # n", "  |"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("y"),
+			opts:   []edit.SetOption{edit.After("a")},
+			err: "moves $.x to $.y, after which a comment line goes right after the blank lines of a block " +
+				"scalar without text",
+		},
+		"block scalar without text below its key after the last key before a blank line and a comment line": {
+			before: stringtest.LinesLF("x:", "  |", "a: 1", "", "# c"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("y"),
+			err: "moves $.x to $.y, after which a comment line goes right after the blank lines of a block " +
+				"scalar without text",
+		},
+		"anchored block scalar without text below its key after the last key before a blank line and a comment line": {
+			before: stringtest.LinesLF("x: &q", "  |", "a: 1", "", "# c"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("y"),
+			err: "moves $.x to $.y, after which a comment line goes right after the blank lines of a block " +
+				"scalar without text",
+		},
+		"block scalar without text below its key into a null mapping before a blank line and a comment line at the new key": {
+			// The new key goes on its own line below the key of the mapping,
+			// and the comment line ends the scalar of the new key.
+			before: stringtest.LinesLF("x:", "  |", "m:", "", "  # c", "b: 1"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("m").Child("y"),
+			err: "moves $.x to $.m.y, after which a comment line goes right after the blank lines of a block " +
+				"scalar without text",
+		},
+		"block scalar without text below its key into a null mapping before a blank line and an indented comment line": {
+			// The comment line indents past the new key, so it would be text
+			// of the scalar.
+			before: stringtest.LinesLF("x:", "  |", "m:", "", "    # c", "b: 1"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("m").Child("y"),
+			err: `moves $.x to $.m.y, after which this block scalar reads "\n# c\n", not "", and cafe does not ` +
+				"change the string of a block scalar of the user's text",
+		},
+		"block scalar without text with a comment on its header line after a key before a blank line and a comment line": {
+			before: stringtest.LinesLF("a: 1", "", "# c", "b: 1", "x: | # h"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("y"),
+			opts:   []edit.SetOption{edit.After("a")},
+			err: "moves $.x to $.y, after which a comment line goes right after the blank lines of a block " +
+				"scalar without text",
+		},
+		"tagged block scalar without text after a key before a blank line and a comment line": {
+			before: stringtest.LinesLF("a: 1", "", "# c", "b: 1", "x: !!str |"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("y"),
+			opts:   []edit.SetOption{edit.After("a")},
+			err: "moves $.x to $.y, after which a comment line goes right after the blank lines of a block " +
+				"scalar without text",
+		},
+		"folded block scalar without text after a key before a blank line and a comment line": {
+			before: stringtest.LinesLF("a: 1", "", "# c", "b: 1", "x: >-"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("y"),
+			opts:   []edit.SetOption{edit.After("a")},
+			err: "moves $.x to $.y, after which a comment line goes right after the blank lines of a block " +
+				"scalar without text",
+		},
+		"block scalar with an indent indicator without text after a key before a blank line and a comment line": {
+			before: stringtest.LinesLF("a: 1", "", "# c", "b: 1", "x: |2"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("y"),
+			opts:   []edit.SetOption{edit.After("a")},
+			err: "moves $.x to $.y, after which a comment line goes right after the blank lines of a block " +
+				"scalar without text",
+		},
+		"block scalar without text after a key before a blank line and a comment line, with CRLF": {
+			before: stringtest.LinesCRLF("a: 1", "", "# c", "b: 1", "x: |"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("y"),
+			opts:   []edit.SetOption{edit.After("a")},
+			err: "moves $.x to $.y, after which a comment line goes right after the blank lines of a block " +
+				"scalar without text",
+		},
+		"block scalar with keep chomping without text after a key before a blank line and a comment line": {
+			// Go-yaml's parser refuses any line after such a scalar.
+			before: stringtest.LinesLF("a: 1", "", "# c", "b: 1", "x: |+"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("y"),
+			opts:   []edit.SetOption{edit.After("a")},
+			err:    "could not find multi-line content",
+			engine: true,
+		},
+		"block scalar without text after a key before a blank line with spaces": {
+			before: stringtest.LinesLF("a: 1", "   ", "b: 1", "x: |"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("y"),
+			opts:   []edit.SetOption{edit.After("a")},
+			want:   stringtest.LinesLF("a: 1", `"y": |`, "", "b: 1"),
+		},
+		"block scalar with text after a key before a blank line and a comment line": {
+			before: stringtest.LinesLF("a: 1", "", "# c", "b: 1", "x: |", "  t"),
+			path:   paths.Doc().Child("x"),
+			target: paths.Doc().Child("w"),
+			opts:   []edit.SetOption{edit.After("a")},
+			want:   stringtest.LinesLF("a: 1", "w: |", "  t", "", "# c", "b: 1"),
+		},
 		"after a key": {
 			before: stringtest.LinesLF("m:", "  x: 1", "  y: 2", "a: 1"),
 			path:   paths.Doc().Child("a"),
@@ -1929,4 +2254,28 @@ func TestNode_Move_AfterFirstWrite(t *testing.T) {
 			assert.Equal(t, tc.want, d.Text())
 		})
 	}
+}
+
+func TestNode_Move_AfterStrandedComment(t *testing.T) {
+	t.Parallel()
+
+	// The problem of a comment line right after the blank lines of a block
+	// scalar without text is a problem of the document, so the Func can
+	// put the value elsewhere.
+	d := newDoc(t, stringtest.LinesLF("a: 1", "", "# c", "b: 1", "x: |"))
+
+	err := d.Apply(t.Context(), paths.Doc(), func(_ context.Context, n *edit.Node) error {
+		x := n.At(paths.Doc().Child("x"))
+
+		err := x.Move(paths.Doc().Child("y"), edit.After("a"))
+		require.Error(t, err)
+		require.NotErrorIs(t, err, edit.ErrEngine)
+		assert.Contains(t, niceyaml.FormatError(err), "moves $.x to $.y, after which a comment line goes right "+
+			"after the blank lines of a block scalar without text")
+
+		return x.Move(paths.Doc().Child("y"), edit.After("b"))
+	}, label)
+	require.NoError(t, err)
+
+	assert.Equal(t, stringtest.LinesLF("a: 1", "", "# c", "b: 1", `"y": |`), d.Text())
 }

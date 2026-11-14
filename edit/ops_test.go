@@ -1433,6 +1433,19 @@ func TestNode_Remove(t *testing.T) {
 			path:   paths.MustParse("$.z"),
 			err:    "removes $.z, after which a comment line goes right after the blank lines of a block scalar without text",
 		},
+		"entry between a block scalar without text and a blank line before a comment line of the next document": {
+			// The comment line above the next "---" belongs to the next
+			// document, but the parser reads it after the cut.
+			before: stringtest.LinesLF("a: |", "b: 1", "", "# c", "---", "z: 1"),
+			path:   paths.MustParse("$.b"),
+			err:    "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 removes $.b, after which a comment line goes right after the blank lines of a block scalar without text",
+		},
+		"last entry between blank lines after a block scalar without text and a comment line of the next document": {
+			// The cut runs to the end of the text of the document.
+			before: stringtest.LinesLF("a: |", "", "b: 1", "", "# c", "---", "z: 1"),
+			path:   paths.MustParse("$.b"),
+			err:    "test.yaml:3:4: $.b: cafe.jacobcolvin.com/v1 removes $.b, after which a comment line goes right after the blank lines of a block scalar without text",
+		},
 		"entry between a blank line of a block scalar without text and a comment line that it holds": {
 			// The comment line goes with the entry.
 			before: stringtest.LinesLF("a: |", "", "z: 1", "  # c", "b: 1"),
