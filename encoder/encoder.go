@@ -381,6 +381,8 @@ func WithAutoInt(enabled bool) Option {
 //     output. The encoder writes such a collection on the lines after
 //     its anchor or tag, and no comment can follow the anchor or the
 //     tag.
+//   - [yaml.WithComment] drops the line comment of an alias. The encoder
+//     writes the comment after the alias, as in `b: *x # c`.
 //
 // The error of go-yaml stays in the chain. Of the paths that select no
 // node, [yaml.WithComment] skips only a path to a key that its mapping

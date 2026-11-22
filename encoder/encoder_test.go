@@ -2569,6 +2569,21 @@ func TestWithYAMLComments(t *testing.T) {
 			comments: yaml.CommentMap{"$": {yaml.LineComment(" x")}},
 			want:     stringtest.LinesLF("!custom", "name: x"),
 		},
+		"line comment on an alias": {
+			input:    aliasedDoc{A: s, B: s},
+			comments: yaml.CommentMap{"$.b": {yaml.LineComment(" c")}},
+			want:     stringtest.LinesLF("a: &x", "  name: x", "b: *x # c"),
+		},
+		"line comment on an alias in a sequence": {
+			input:    rawYAML("a: &x 1\nl:\n- *x\n- 2\n"),
+			comments: yaml.CommentMap{"$.l[0]": {yaml.LineComment(" c")}},
+			want:     stringtest.LinesLF("a: &x 1", "l:", "- *x # c", "- 2"),
+		},
+		"head and foot comments on an alias": {
+			input:    aliasedDoc{A: s, B: s},
+			comments: yaml.CommentMap{"$.b": {yaml.HeadComment(" h"), yaml.FootComment(" f")}},
+			want:     stringtest.LinesLF("a: &x", "  name: x", "# h", "b: *x", "# f"),
+		},
 		"head and foot comments on a scalar with a tag": {
 			input:    map[string]taggedString{"k": "x"},
 			comments: yaml.CommentMap{"$.k": {yaml.HeadComment(" h"), yaml.FootComment(" f")}},

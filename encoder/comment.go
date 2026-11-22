@@ -246,7 +246,7 @@ func commentError(key string, err error) error {
 // in the tree under root. It skips an entry whose path does not select a
 // node, as [commentTree.selectNode] reports it. It places each comment
 // where the go-yaml encoder places it for a [yaml.WithComment] map,
-// except for three kinds of line comment. Go-yaml puts the line comment
+// except for some line comments. Go-yaml puts the line comment
 // of a flow or empty sequence under a mapping key on the key, before the
 // sequence. Here the sequence holds it, and the printer writes it after
 // the sequence. Go-yaml writes a line comment inside a flow collection,
@@ -254,7 +254,9 @@ func commentError(key string, err error) error {
 // puts the line comment of a node with a tag or an anchor on the tag or
 // the anchor, and the printer does not write it there. Here the scalar
 // or flow collection under the tag or the anchor holds it, as
-// [setLineComment] describes. Each of these returns an error that
+// [setLineComment] describes. Go-yaml puts the line comment of an alias
+// on the alias, and the printer does not write it there. Here the name
+// of the alias holds it. Each of these returns an error that
 // matches [ErrComment] and wraps the error of go-yaml:
 //
 //   - A comment that its node cannot hold, such as a line comment
@@ -333,7 +335,8 @@ func setHeadComment(tree *commentTree, target ast.Node, comment *ast.CommentGrou
 // hold a line comment, so setLineComment returns
 // [yaml.ErrUnsupportedLinePositionType] for that flow collection. The
 // node under the tags and anchors of a target holds the comment of the
-// target, as [setPropertyLineComment] describes.
+// target, as [setPropertyLineComment] describes. The name of an alias
+// holds the comment of the alias.
 func setLineComment(tree *commentTree, target ast.Node, comment *ast.CommentGroupNode) error {
 	// The printer writes a flow collection on one line and writes the
 	// line comment of a node inside it before the closing bracket or
@@ -347,8 +350,13 @@ func setLineComment(tree *commentTree, target ast.Node, comment *ast.CommentGrou
 		return setPropertyLineComment(value, comment)
 	}
 
-	switch target.(type) {
+	switch t := target.(type) {
 	case *ast.MappingValueNode, *ast.SequenceNode:
+	// The printer writes an alias as `*` and the name of its anchor, and
+	// it does not write the comment of the alias. It writes the comment
+	// of the name after the name, as in `k: *x # c`.
+	case *ast.AliasNode:
+		return t.Value.SetComment(comment) //nolint:wrapcheck // Return the original error.
 	default:
 		return target.SetComment(comment) //nolint:wrapcheck // Return the original error.
 	}
