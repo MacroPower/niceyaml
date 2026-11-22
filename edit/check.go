@@ -1119,8 +1119,10 @@ func (d *Doc) lexedAt(tks token.Tokens, tk *token.Token) (*token.Token, bool) {
 // limit counts the bytes of the whole file, with the current text in place
 // of the document and the other documents as the user wrote them. The
 // document byte limit counts the bytes of the run of
-// documents that holds the document, as [Doc.runSize] counts them. The
-// problem of either byte limit binds where a problem at the path $ binds.
+// documents that holds the document, as [Doc.runSize] counts them. A run
+// is a part of the file. The check counts the run only when the whole
+// file holds more bytes than the document byte limit. The problem of
+// either byte limit binds where a problem at the path $ binds.
 // The depth limit counts the levels of the document. Its problem binds at
 // the token that opens the first level past the limit, at the site that
 // [Doc.bindAt] gives the token. Each problem is the [*niceyaml.LimitError]
@@ -1140,7 +1142,7 @@ func (d *Doc) limitProblem(start string) error {
 	if size := len(src.Text()) - (d.end - d.start) + len(d.cur); size > bytes {
 		problem = d.bindOwn(niceyaml.Unchecked(&niceyaml.LimitError{Kind: niceyaml.LimitBytes, Max: bytes},
 			niceyaml.AtPath(paths.Doc())))
-	} else if docBytes < niceyaml.NoLimit && d.runSize() > docBytes {
+	} else if size > docBytes && d.runSize() > docBytes {
 		limit := &niceyaml.LimitError{Kind: niceyaml.LimitDocumentBytes, Max: docBytes}
 		problem = d.bindOwn(niceyaml.Unchecked(limit, niceyaml.AtPath(paths.Doc())))
 	} else if tk, deep := docparse.TooDeep(d.src.Tokens(), depth); deep && tk.Position != nil {

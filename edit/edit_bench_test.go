@@ -227,3 +227,31 @@ func BenchmarkDoc_Apply_NestedAliases(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkDoc_Apply_Limits(b *testing.B) {
+	replicas := paths.MustParse("$.services.svc0.replicas")
+
+	// Each Apply sets one scalar of a file that holds one document. The
+	// Source keeps its default limits, so the check of the Apply counts
+	// the text against them.
+	for _, n := range []int{200, 800} {
+		text := services(n)
+
+		b.Run(fmt.Sprintf("set_one_bytes_%d", len(text)), func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				b.StopTimer()
+
+				d, err := edit.New(yamltest.FirstDocument(b, text))
+				require.NoError(b, err)
+
+				b.StartTimer()
+
+				require.NoError(b, d.Apply(b.Context(), replicas, func(ctx context.Context, n *edit.Node) error {
+					return n.Set(ctx, 3)
+				}))
+			}
+		})
+	}
+}

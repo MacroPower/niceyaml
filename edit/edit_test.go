@@ -6807,6 +6807,20 @@ func TestDoc_Apply_Limits(t *testing.T) {
 			doc   int
 			limit int
 		}{
+			"one document, file at the limit": {
+				text:  "a: xxxxx\n",
+				limit: len("a: xxxxx\n"),
+				key:   "a",
+				value: "yyyyy",
+				want:  "a: yyyyy\n",
+			},
+			"one document, file past the limit": {
+				text:  "a: xxxxx\n",
+				limit: len("a: xxxxx\n"),
+				key:   "a",
+				value: "yyyyyy",
+				err:   "test.yaml:1:1: $: document is larger than 9 bytes\n\n",
+			},
 			"next header, value at the limit": {
 				text:  "a: xxxxx\n---\nb: 2\n",
 				limit: len("a: xxxxx\n"),
