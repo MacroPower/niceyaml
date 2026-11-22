@@ -109,6 +109,26 @@
 // gives with [go.jacobcolvin.com/niceyaml/edit.WithReason] appears as a
 // detail of the warning.
 //
+// A step removes a value of the file with
+// [go.jacobcolvin.com/niceyaml/edit.Node.Remove], with
+// [go.jacobcolvin.com/niceyaml/edit.Node.Update], or with a
+// [go.jacobcolvin.com/niceyaml/edit.Node.Set] that drops an entry of a
+// mapping. Each such value warns, and it has a row in [PlanFile.Header]
+// and in [PlanFile.Removals]. A Set deletes these values without a warning
+// and without a row:
+//
+//   - An item of a sequence, and each value inside an item.
+//   - An entry that a `<<` merge key brings into a mapping.
+//   - An entry of a value that an earlier step wrote with a Set that
+//     changed the text. Such a Set writes each entry anew, so the entry
+//     is not a value of the file.
+//
+// So a step that writes a decoded value back and keeps its entries uses
+// Update, and a later step that removes one of those entries then warns.
+// A step that renames or relocates a field calls SetKey or Move before a
+// Set of the mapping. A step that drops a field on purpose calls Remove
+// with WithReason before the Set.
+//
 // An error at a value that a step set carries a detail that names the
 // step, as in "cafe.jacobcolvin.com/v1 sets $.spec.dietary from this
 // value". The detail gives the version of the step and the path that the
@@ -166,8 +186,9 @@
 // blank lines, the key order, the quoting, and the line endings. A
 // document that fails a check blocks its file, so a rewrite never writes a
 // document that a load then rejects. A value that a step removes appears
-// in [PlanFile.Header] and [PlanFile.Removals], so each value that a
-// rewrite deletes has a row that says so.
+// in [PlanFile.Header] and [PlanFile.Removals]. The Versions section names
+// the calls of a step that remove a value, and the values that a Set
+// deletes without a row.
 //
 // Header, [Plan.Summary], and [Result.Summary] write lines for a terminal.
 // A program that renders a plan another way, such as a JSON report or a
@@ -634,7 +655,8 @@
 // later version can remove a value. The warning about that value stays a
 // warning in strict mode, because a rewrite does not delete the value
 // before [Written] moves. Every other value that a step removes fails a
-// strict load, because a rewrite deletes it.
+// strict load, because a rewrite deletes it. The Versions section names
+// the calls of a step that remove a value.
 //
 // The schema of the current version marks a field or a value deprecated
 // with the deprecated keyword, as the Deprecations section of

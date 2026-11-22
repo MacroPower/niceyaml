@@ -116,8 +116,9 @@ type PlanDocument struct {
 	// To is the name of the version that the rewrite writes, the written
 	// version of the kind.
 	To string
-	// Removals holds each value that the rewrite deletes from the
-	// document, or nil when it deletes none. The path and the range of
+	// Removals holds each value that the steps of the rewrite remove from
+	// the document, or nil when they remove none. The Versions section of
+	// the package docs names those values. The path and the range of
 	// each value are in the text of [PlanFile.Source]. [PlanFile.Removals]
 	// returns the same values as warnings bound in that text.
 	Removals []edit.Removal
@@ -278,12 +279,12 @@ func (f *PlanFile) After() string {
 	return f.after
 }
 
-// Removals returns the values that the rewrite deletes from the file, or
-// nil when the rewrite does not delete a value. It returns them as a
-// [*LoadError] of the warnings that a load reports for them, bound in the
-// text that the plan read. Removals does not apply [WithWarningFilter] or
-// [WithWarningsAsErrors], so each value that a rewrite deletes has a row
-// that says so.
+// Removals returns the values that the steps of the rewrite remove from
+// the file, or nil when they remove none. The Versions section of the
+// package docs names those values. Removals returns them as a [*LoadError]
+// of the warnings that a load reports for them, bound in the text that the
+// plan read. It does not apply [WithWarningFilter] or
+// [WithWarningsAsErrors], so a filter hides none of them.
 func (f *PlanFile) Removals() error {
 	return newLoadError(namedSource(f.f.name), f.removals)
 }
@@ -307,10 +308,10 @@ func (f *PlanFile) Documents() []PlanDocument {
 // Header returns a line for each document of the file that migrates, as
 // in `config/hours.yaml: Hours "weekday" from cafe.jacobcolvin.com/v1alpha1
 // to cafe.jacobcolvin.com/v1`. An indented row below the line of a
-// document names each value that the rewrite deletes, with the reason of
-// its step. When the file holds documents that fail to route, which the
-// rewrite leaves as they are, a last line counts them as not migrated. A
-// document that is up to date does not get a line.
+// document names each value that a step of the rewrite removes, with the
+// reason of its step. When the file holds documents that fail to route,
+// which the rewrite leaves as they are, a last line counts them as not
+// migrated. A document that is up to date does not get a line.
 //
 // Each line takes one row of a terminal. Header passes the name of the
 // file and the reason of each removal through [escape.Line], as an error

@@ -33,7 +33,28 @@ var (
 
 	// The size of v1 for each size of v1beta1.
 	sizes = map[string]string{"S": "small", "M": "medium", "L": "large"}
+
+	// A Cafe at v1 whose spec holds a motto and then the seats, as
+	// [greeted] encodes them.
+	seatedDoc = stringtest.LinesLF(
+		"apiVersion: v1",
+		"kind: Cafe",
+		"spec:",
+		"  motto: stay a while",
+		"  seats: 4",
+	)
 )
+
+// seated is the spec of a Cafe that declares the seats alone.
+type seated struct {
+	Seats int `yaml:"seats"`
+}
+
+// greeted is the spec of a Cafe that declares the motto and the seats.
+type greeted struct {
+	Motto string `yaml:"motto"`
+	Seats int    `yaml:"seats"`
+}
 
 // drinkOptions returns the options of a registry with one kind, Drink,
 // whose v1 holds the steps of the size example, the color removal, and a
@@ -114,6 +135,52 @@ func shiftOptions() []manifest.RegistryOption {
 			),
 			manifest.Version("cafe.jacobcolvin.com/v3"),
 		)),
+	}
+}
+
+// seatOptions returns the options of a registry with one kind, Cafe. Each
+// step migrates the spec to the next version after v1, so the first step
+// gives v2.
+func seatOptions(steps ...edit.Func) []manifest.RegistryOption {
+	versions := []manifest.KindOption{manifest.Version("v1")}
+	for i, step := range steps {
+		versions = append(versions, manifest.Version(fmt.Sprintf("v%d", i+2), manifest.Migrate(spec, step)))
+	}
+
+	return []manifest.RegistryOption{
+		manifest.WithAppName("cafe"),
+		manifest.WithKinds(manifest.NewKind[map[string]any]("Cafe", versions...)),
+	}
+}
+
+// dropMotto is a step that decodes the spec into [seated] and sets it
+// back, so the Set drops the motto.
+func dropMotto(ctx context.Context, n *edit.Node) error {
+	old, err := n.Decode[seated](ctx)
+	if err != nil {
+		return err
+	}
+
+	return n.Set(ctx, old)
+}
+
+// keepMotto returns a step that decodes the spec into [greeted], adds
+// seats to its seats, and writes it back. The step writes with Update when
+// update is set, and with Set otherwise.
+func keepMotto(seats int, update bool) edit.Func {
+	return func(ctx context.Context, n *edit.Node) error {
+		old, err := n.Decode[greeted](ctx)
+		if err != nil {
+			return err
+		}
+
+		old.Seats += seats
+
+		if update {
+			return n.Update(ctx, old)
+		}
+
+		return n.Set(ctx, old)
 	}
 }
 
@@ -370,6 +437,118 @@ func TestRegistry_Load_Steps(t *testing.T) {
 				"   5 | spec:",
 				"   6 |   color: red",
 				"     |   ^^^^^",
+			),
+			matches: []error{manifest.ErrRemoved},
+		},
+		"field that a Set of its mapping drops": {
+			opts:  seatOptions(dropMotto),
+			files: map[string]string{"cafe.yaml": seatedDoc},
+			want:  []string{`Cafe "" v1 up-to-date=false`},
+			warns: stringtest.JoinLF(
+				`config/cafe.yaml:4:3: warning: $.spec.motto~: v2 ignores field "motto"`,
+				"",
+				"   2 | kind: Cafe",
+				"   3 | spec:",
+				"   4 |   motto: stay a while",
+				"     |   ^^^^^",
+				"   5 |   seats: 4",
+			),
+			matches: []error{manifest.ErrRemoved},
+		},
+		"field that a Set of its mapping drops in strict mode": {
+			opts:  seatOptions(dropMotto),
+			files: map[string]string{"cafe.yaml": seatedDoc},
+			load:  []manifest.LoadOption{manifest.WithWarningsAsErrors(true)},
+			err: stringtest.JoinLF(
+				`config/cafe.yaml:4:3: $.spec.motto~: v2 ignores field "motto"`,
+				"",
+				"   2 | kind: Cafe",
+				"   3 | spec:",
+				"   4 |   motto: stay a while",
+				"     |   ^^^^^",
+				"   5 |   seats: 4",
+			),
+			matches: []error{manifest.ErrRemoved},
+		},
+		"field that a Set drops after an Update that kept it": {
+			opts:  seatOptions(keepMotto(1, true), dropMotto),
+			files: map[string]string{"cafe.yaml": seatedDoc},
+			want:  []string{`Cafe "" v1 up-to-date=false`},
+			warns: stringtest.JoinLF(
+				`config/cafe.yaml:4:3: warning: $.spec.motto~: v3 ignores field "motto"`,
+				"",
+				"   2 | kind: Cafe",
+				"   3 | spec:",
+				"   4 |   motto: stay a while",
+				"     |   ^^^^^",
+				"   5 |   seats: 4",
+			),
+			matches: []error{manifest.ErrRemoved},
+		},
+		"field that a Set drops after a Set that kept it and changed the text": {
+			// The Set of v2 writes each entry of the spec anew, so the motto
+			// that v3 drops is not text of the file.
+			opts:  seatOptions(keepMotto(1, false), dropMotto),
+			files: map[string]string{"cafe.yaml": seatedDoc},
+			load:  []manifest.LoadOption{manifest.WithWarningsAsErrors(true)},
+			want:  []string{`Cafe "" v1 up-to-date=false`},
+		},
+		"field that a Set drops after a Set that left the text as it found it": {
+			// The Set of v2 is no edit, so the motto stays text of the file.
+			opts:  seatOptions(keepMotto(0, false), dropMotto),
+			files: map[string]string{"cafe.yaml": seatedDoc},
+			want:  []string{`Cafe "" v1 up-to-date=false`},
+			warns: stringtest.JoinLF(
+				`config/cafe.yaml:4:3: warning: $.spec.motto~: v3 ignores field "motto"`,
+				"",
+				"   2 | kind: Cafe",
+				"   3 | spec:",
+				"   4 |   motto: stay a while",
+				"     |   ^^^^^",
+				"   5 |   seats: 4",
+			),
+			matches: []error{manifest.ErrRemoved},
+		},
+		"item that a Set of its sequence drops": {
+			opts: seatOptions(func(ctx context.Context, n *edit.Node) error {
+				return n.At(paths.Current().Child("tables")).Set(ctx, []string{"window"})
+			}),
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF(
+				"apiVersion: v1",
+				"kind: Cafe",
+				"spec:",
+				"  tables:",
+				"    - window",
+				"    - bar",
+			)},
+			load: []manifest.LoadOption{manifest.WithWarningsAsErrors(true)},
+			want: []string{`Cafe "" v1 up-to-date=false`},
+		},
+		"mapping that a Set folds into a scalar": {
+			opts: seatOptions(func(ctx context.Context, n *edit.Node) error {
+				return n.At(paths.Current().Child("price")).Set(ctx, 5)
+			}),
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF(
+				"apiVersion: v1",
+				"kind: Cafe",
+				"spec:",
+				"  price:",
+				"    amount: 5",
+				"    currency: SEK",
+			)},
+			want: []string{`Cafe "" v1 up-to-date=false`},
+			warns: stringtest.JoinLF(
+				"config: 2 warnings",
+				`|-- config/cafe.yaml:5:5: warning: $.spec.price.amount~: v2 ignores field "amount"`,
+				"`-- config/cafe.yaml:6:5: warning: $.spec.price.currency~: v2 ignores field \"currency\"",
+				"",
+				"config/cafe.yaml",
+				"   3 | spec:",
+				"   4 |   price:",
+				"   5 |     amount: 5",
+				`     |     ^^^^^^ warning: v2 ignores field "amount"`,
+				"   6 |     currency: SEK",
+				`     |     ^^^^^^^^ warning: v2 ignores field "currency"`,
 			),
 			matches: []error{manifest.ErrRemoved},
 		},

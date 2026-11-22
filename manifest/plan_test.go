@@ -217,6 +217,23 @@ func TestRegistry_PlanMigration(t *testing.T) {
 			// The error of the mark, and the warning of the old version.
 			err: "config: 1 error, 1 warning",
 		},
+		"field that a Set of its mapping drops": {
+			opts:  seatOptions(dropMotto),
+			files: map[string]string{"cafe.yaml": seatedDoc},
+			headers: []string{
+				stringtest.JoinLF(
+					"config/cafe.yaml: Cafe from v1 to v2",
+					"  removes $.spec.motto",
+				),
+			},
+			afters: []string{stringtest.LinesLF(
+				"apiVersion: v2",
+				"kind: Cafe",
+				"spec:",
+				"  seats: 4",
+			)},
+			summary: "1 file to migrate, nothing written",
+		},
 		"removal": {
 			opts: drinkOptions(false),
 			files: map[string]string{
@@ -1312,6 +1329,11 @@ func TestPlanFile_Removals(t *testing.T) {
 
 	require.ErrorAs(t, removals, &w)
 	assert.Equal(t, "Drink", w.Kind)
+
+	// A Set that drops an entry of a mapping removes it, as a Remove does.
+	dropped := planOf(t, seatOptions(dropMotto), map[string]string{"cafe.yaml": seatedDoc})
+	require.Len(t, dropped.Files(), 1)
+	require.ErrorIs(t, dropped.Files()[0].Removals(), manifest.ErrRemoved)
 
 	assert.NoError(t, planOf(t, cafeOptions(), map[string]string{"hours.yaml": hoursDoc}).Files()[0].Removals())
 }
