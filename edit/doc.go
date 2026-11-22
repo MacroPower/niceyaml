@@ -1014,15 +1014,15 @@
 // some texts without their comments that it takes with them, such as one
 // that holds an anchor without a value before a comment at its end. It
 // refuses others with their comments, such as a flow collection at the root
-// before a comment line. When the parser refuses or panics on the edited
-// text in either parse, the Apply fails with ErrEngine. A removal that
-// empties a block collection at the root and leaves its "{}" or "[]" above
-// a comment line fails the Apply with a problem of the document instead,
-// as [Node.Remove] describes.
-// Otherwise the error names go-yaml's parser and gives its message. It
-// binds where the text holds the token that the parser names, even where
-// go-yaml's lexer misplaces that token, as in a text with CRLF line
-// breaks. The error of a panic binds at the root.
+// before a comment line. A removal that empties a block collection at the
+// root and leaves its "{}" or "[]" above a comment line fails the Apply
+// with a problem of the document, as [Node.Remove] describes. Any other
+// refusal with the comments does not count when the parser also refuses
+// the text that the Apply found with its comments. So an Apply edits a
+// document that holds a comment line below a flow collection at the root.
+// Otherwise, when the parser refuses or panics on the edited text in
+// either parse, the Apply fails with ErrEngine. The error names go-yaml's
+// parser and gives its message.
 //
 // The edited text must hold only the characters that YAML allows in a text,
 // the printable characters of YAML 1.2, which include U+0085. A Go string

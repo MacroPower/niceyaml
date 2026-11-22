@@ -130,7 +130,7 @@ func (d *Doc) check(ctx context.Context, start state) error {
 		return err
 	}
 
-	err = d.parseProblem(final)
+	err = d.parseProblem(final, start)
 	if err != nil {
 		return err
 	}
@@ -594,13 +594,16 @@ func (d *Doc) engineAtToken(tk *token.Token, err error) error {
 // parser refuse or misread valid YAML. The parser refuses some texts
 // without their comments, such as one with an anchor without a value
 // before a comment at its end. It refuses some texts with their comments,
-// such as a flow collection at the root before a comment line. The problem
-// matches [ErrEngine], and it names go-yaml's parser. It binds at the
-// token where the parser refused the text, as [Doc.lexedAt] places it, or
-// at the root for a panic. A refusal of a comment line below the "{}" or
-// "[]" that a removal wrote for the root gives the problem of the
-// document that [Doc.emptiedRootProblem] gives instead.
-func (d *Doc) parseProblem(final finalParse) error {
+// such as a flow collection at the root before a comment line. A refusal
+// of a comment line below the "{}" or "[]" that a removal wrote for the
+// root gives the problem of the document that [Doc.emptiedRootProblem]
+// gives. Any other refusal with the comments does not count when the
+// parser also refuses start, the text that the Apply found, with its
+// comments, as [refusedWithComments] tells. The problem of each refusal
+// that counts matches [ErrEngine], and it names go-yaml's parser. It binds
+// at the token where the parser refused the text, as [Doc.lexedAt] places
+// it, or at the root for a panic.
+func (d *Doc) parseProblem(final finalParse, start state) error {
 	refusals := []struct{ err, why error }{
 		{final.plain, errRefusedWithoutComments},
 		{final.comments, errRefusedWithComments},
@@ -624,6 +627,10 @@ func (d *Doc) parseProblem(final finalParse) error {
 			if problem != nil {
 				return problem
 			}
+
+			if refusedWithComments(start.cur + d.tail) {
+				continue
+			}
 		}
 
 		if at, ok := d.lexedAt(final.tokens, tk); ok {
@@ -634,6 +641,25 @@ func (d *Doc) parseProblem(final finalParse) error {
 	}
 
 	return nil
+}
+
+// refusedWithComments reports whether go-yaml's parser refuses text with
+// its comments, as [parser.ParseComments] parses it, or whether go-yaml's
+// lexer or parser panics on it.
+func refusedWithComments(text string) bool {
+	var refused bool
+
+	func() {
+		defer func() {
+			if p := recover(); p != nil {
+				refused = true
+			}
+		}()
+
+		refused = parseTokens(lexer.Tokenize(text), parser.ParseComments) != nil
+	}()
+
+	return refused
 }
 
 // emptiedRootProblem returns the problem of the current text when tk, the
