@@ -813,7 +813,7 @@ func (n *Node) remove(opts ...RemoveOption) error {
 
 	s := d.spotOf(n.path, p)
 
-	d.recordRemoval(n, p, cfg.reason)
+	d.recordRemoval(n.path, p, cfg.reason)
 
 	// The paths that reach the value go, and those below the later items of
 	// its sequence take the index before them.
@@ -860,10 +860,13 @@ func (n *Node) remove(opts ...RemoveOption) error {
 	return nil
 }
 
-// recordRemoval records the removal of the value of p through h when the
-// value holds text of the user's file. The removal names the value as the
-// user's text holds it, whatever renames and moves came before.
-func (d *Doc) recordRemoval(h *Node, p *place, reason string) {
+// recordRemoval records the removal of the value of p when the value holds
+// text of the user's file. The removal names the value as the user's text
+// holds it, whatever renames and moves came before. The caller gives
+// fallback, the path of the value in the current text. The removal takes
+// that path where the user's text gives the value no path, as
+// [Doc.removalAt] describes.
+func (d *Doc) recordRemoval(fallback paths.Path, p *place, reason string) {
 	start, ok := d.startOf(p)
 	if !ok {
 		return
@@ -894,11 +897,21 @@ func (d *Doc) recordRemoval(h *Node, p *place, reason string) {
 		return
 	}
 
+	d.removals = append(d.removals, d.removalAt(fallback, p, at, start, reason))
+}
+
+// removalAt returns the removal of the value of p, with reason, that binds
+// at the byte at off, as [Doc.removedAt] reads that byte. The key or the
+// "-" of p starts at start. The removal names the value as the user's text
+// holds it. Where that text gives the byte no path, the removal takes the
+// path fallback that the caller gives. For an entry, it takes the path of
+// the key of fallback, as [paths.Path.Key] gives it.
+func (d *Doc) removalAt(fallback paths.Path, p *place, off, start int, reason string) Removal {
 	r := Removal{Reason: reason, Label: d.label}
 
-	rng, path, ok := d.removedAt(p, at, start)
+	rng, path, ok := d.removedAt(p, off, start)
 	if !ok {
-		path = h.path
+		path = fallback
 		if p.entry != nil {
 			path = path.Key()
 		}
@@ -950,7 +963,8 @@ func (d *Doc) recordRemoval(h *Node, p *place, reason string) {
 	}
 
 	r.Path, r.Range = path, rng
-	d.removals = append(d.removals, r)
+
+	return r
 }
 
 // removedAt returns the range and the path in the user's text of the byte

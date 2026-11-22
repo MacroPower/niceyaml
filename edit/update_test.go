@@ -216,10 +216,19 @@ func TestNode_Update(t *testing.T) {
 		"anchor of a value that the update replaces": {
 			// The alias reads the anchor inside the value of a, so it takes
 			// its value before the Set of a takes the anchor away.
-			before: stringtest.LinesLF("a: {k: &x 1}", "b: *x"),
+			before:   stringtest.LinesLF("a: {k: &x 1}", "b: *x"),
+			path:     paths.Doc(),
+			value:    ms("a", 5, "b", 1),
+			want:     stringtest.LinesLF("a: 5", "b: 1"),
+			removals: []string{"$.a.k~"},
+		},
+		"sequence that the update replaces with a scalar": {
+			// A sequence is one value, so the Set of l records no removal
+			// for its items.
+			before: stringtest.LinesLF("l:", "  - a", "  - b: 1"),
 			path:   paths.Doc(),
-			value:  ms("a", 5, "b", 1),
-			want:   stringtest.LinesLF("a: 5", "b: 1"),
+			value:  ms("l", 5),
+			want:   "l: 5\n",
 		},
 		"anchored value that the update removes": {
 			before:   stringtest.LinesLF("a: &x 1", "b: *x"),
@@ -519,10 +528,11 @@ func TestNode_Update(t *testing.T) {
 			removals: []string{"$.m.l[0]", "$.m.base~"},
 		},
 		"merge key that the update replaces with its anchor": {
-			before: "m: {base: &a {x: 1}, r: {<<: *a, y: 1}}\n",
-			path:   paths.Doc().Child("m"),
-			value:  ms("base", 3, "r", []int{1}),
-			want:   "m: {base: &a 3, r: [1]}\n",
+			before:   "m: {base: &a {x: 1}, r: {<<: *a, y: 1}}\n",
+			path:     paths.Doc().Child("m"),
+			value:    ms("base", 3, "r", []int{1}),
+			want:     "m: {base: &a 3, r: [1]}\n",
+			removals: []string{"$.m.r.y~", "$.m.base.x~"},
 		},
 		"merge key that the update removes with its anchor": {
 			before:   "m: {base: &a {x: 1}, r: {<<: *a, y: 1}}\n",

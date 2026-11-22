@@ -69,9 +69,9 @@ type Change struct {
 // at another. The pair holds the moved text, or the text that the Move
 // passed when that text gives fewer replaced bytes. A Move that keeps its
 // order relative to the kept text can keep its bytes in place and change
-// only the text around them. [Doc.Removals] names the values that the
-// edits removed. A program that needs the Changes of each Apply reads them
-// after each one and compares them.
+// only the text around them. [Doc.Removals] names the values of the
+// user's text that the calls record as removed. A program that needs the
+// Changes of each Apply reads them after each one and compares them.
 //
 // A Change can take bytes that the edits kept, so that each Range starts
 // and ends where a position of the user's text points. The bytes of a

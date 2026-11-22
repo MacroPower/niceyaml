@@ -7768,6 +7768,9 @@ func TestDoc_Locate_Moved(t *testing.T) {
 		// The removal that a last Apply makes at at, as Doc.Removals lists
 		// it, when set.
 		removal string
+		// The removals that the Sets of the steps make before that Apply,
+		// for the entries of the user's text that each Set drops.
+		sets []string
 		// The error of the first Apply that fails, the last one included,
 		// when one fails. The row checks nothing after that Apply.
 		err string
@@ -7963,6 +7966,12 @@ func TestDoc_Locate_Moved(t *testing.T) {
 			},
 			at:      paths.MustParse("$.l[0]"),
 			removal: `$.l[0] "cafe.jacobcolvin.com/v1" "" key="" item=true 1:2-1:8`,
+			// The Set deletes the entry of the user and the entry that the
+			// move put in the item.
+			sets: []string{
+				`$.l[0].a~ "cafe.jacobcolvin.com/v1" "" key="a" item=false 1:4-1:5`,
+				`$.z~ "cafe.jacobcolvin.com/v1" "" key="z" item=false 2:0-2:1`,
+			},
 		},
 		"item of a block sequence that a mapping item of a flow sequence without braces moved into": {
 			before:  stringtest.LinesLF("f: [a: 1, 2]", "l:", "  - k: 0"),
@@ -8433,6 +8442,7 @@ func TestDoc_Locate_Moved(t *testing.T) {
 			want:    "test.yaml:1:8: $.f[1]: bad",
 			detail:  "cafe.jacobcolvin.com/v1 sets $.f[1] from this value",
 			removal: `$.f[1] "cafe.jacobcolvin.com/v1" "" key="" item=true 0:7-0:11`,
+			sets:    []string{`$.f[1].a~ "cafe.jacobcolvin.com/v1" "" key="a" item=false 0:7-0:8`},
 		},
 		"mapping item of a flow sequence without braces with a renamed key": {
 			before:  stringtest.LinesLF("f: [0, a: 1]"),
@@ -8675,6 +8685,7 @@ func TestDoc_Locate_Moved(t *testing.T) {
 			want:    "test.yaml:1:8: $.f[1]: bad",
 			detail:  "cafe.jacobcolvin.com/v1 sets $.f[1] from this value",
 			removal: `$.f[1] "cafe.jacobcolvin.com/v1" "" key="" item=true 0:7-0:13`,
+			sets:    []string{`$.f[1].a~ "cafe.jacobcolvin.com/v1" "" key="a" item=false 0:8-0:9`},
 		},
 		"set item of a flow sequence moved to a new key": {
 			before:  stringtest.LinesLF("f: [0, 5]", "g: {k: 0}"),
@@ -8693,6 +8704,7 @@ func TestDoc_Locate_Moved(t *testing.T) {
 			detail:  "cafe.jacobcolvin.com/v1 sets $.f[1] from this value",
 			wantKey: "test.yaml:1:8: $.g.q~: bad",
 			removal: `$.f[1] "cafe.jacobcolvin.com/v1" "" key="" item=true 0:7-0:13`,
+			sets:    []string{`$.f[1].a~ "cafe.jacobcolvin.com/v1" "" key="a" item=false 0:8-0:9`},
 		},
 		"set tagged mapping item of a flow sequence moved to a new key": {
 			before:  stringtest.LinesLF("f: [0, !!map {a: 1}]"),
@@ -8702,6 +8714,7 @@ func TestDoc_Locate_Moved(t *testing.T) {
 			detail:  "cafe.jacobcolvin.com/v1 sets $.f[1] from this value",
 			wantKey: "test.yaml:1:8: $.q~: bad",
 			removal: `$.f[1] "cafe.jacobcolvin.com/v1" "" key="" item=true 0:7-0:19`,
+			sets:    []string{`$.f[1].a~ "cafe.jacobcolvin.com/v1" "" key="a" item=false 0:14-0:15`},
 		},
 		"set mapping item of a flow sequence that loses an entry": {
 			before: stringtest.LinesLF("f: [0, {a: 1}]"),
@@ -8715,6 +8728,7 @@ func TestDoc_Locate_Moved(t *testing.T) {
 			want:    "test.yaml:1:8: $.f[1]: bad",
 			detail:  "cafe.jacobcolvin.com/v1 sets $.f[1] from this value",
 			removal: `$.f[1] "cafe.jacobcolvin.com/v1" "" key="" item=true 0:7-0:13`,
+			sets:    []string{`$.f[1].a~ "cafe.jacobcolvin.com/v1" "" key="a" item=false 0:8-0:9`},
 		},
 		"set sequence item of a flow sequence that loses its first and last items": {
 			before: stringtest.LinesLF("f: [0, 9]"),
@@ -9226,6 +9240,10 @@ func TestDoc_Locate_Moved(t *testing.T) {
 			want:    "test.yaml:2:3: $.l[0]: bad",
 			detail:  "cafe.jacobcolvin.com/v1 sets $.l[0] from this value",
 			removal: `$.l[0] "cafe.jacobcolvin.com/v1" "" key="" item=true 1:2-2:8`,
+			sets: []string{
+				`$.l[0].a~ "cafe.jacobcolvin.com/v1" "" key="a" item=false 1:4-1:5`,
+				`$.l[0].b~ "cafe.jacobcolvin.com/v1" "" key="b" item=false 2:4-2:5`,
+			},
 		},
 		"set scalar item that ends in multi-byte characters": {
 			before:  stringtest.LinesLF("l:", "  - 日本", "  - 2"),
@@ -9360,8 +9378,18 @@ func TestDoc_Locate_Moved(t *testing.T) {
 			require.Empty(t, tc.err, "every Apply passes")
 
 			removals := d.Removals()
-			require.Len(t, removals, 1)
-			assert.Equal(t, tc.removal, removalString(removals[0]))
+			require.NotEmpty(t, removals)
+
+			last := len(removals) - 1
+
+			var sets []string
+
+			for _, rm := range removals[:last] {
+				sets = append(sets, removalString(rm))
+			}
+
+			assert.Equal(t, tc.sets, sets)
+			assert.Equal(t, tc.removal, removalString(removals[last]))
 		})
 	}
 }

@@ -105,6 +105,13 @@
 // Update also writes the root of a document that holds a value of the same
 // kind, where a Set fails.
 //
+// A Set over a mapping pairs the entries of the old mapping with the
+// entries of its value by key, at any depth of mappings. [Doc.Removals]
+// lists each entry of the user's text that the value drops. [Node.Set]
+// names the values that a Set records nothing for, such as the items of a
+// sequence. A Func that renames, moves, or drops a field on purpose calls
+// SetKey, Move, or Remove with [WithReason] before the Set.
+//
 // A Set writes a value of a type by the MarshalYAML or MarshalText method
 // of the type, and otherwise field by field. [WithMarshalers] gives the
 // types of the program a function or their MarshalJSON methods instead.
@@ -1229,8 +1236,8 @@
 // name no call. So when go-yaml's parser refuses the edited text in one of
 // those parses, the problem names no call. A difference from the model
 // that these checks find names the call after which the text first
-// differed, in its message. [Doc.Removals] names each removed value as the
-// user's text holds it.
+// differed, in its message. [Doc.Removals] names each value that it lists
+// as the user's text holds it.
 //
 // [WithLabel] gives the edits of one Apply a name for its messages, such
 // as the version of a migration step. Without a label, a message names

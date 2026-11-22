@@ -92,9 +92,11 @@ import (
 // or items grows with their number times the size of the text. The time of
 // the same calls of Remove, Insert, and Set grows that way too.
 //
-// [Doc.Removals] lists each value of the user's text that Update removes.
-// A key that v holds and that the text lacks reads back as its name, as
-// for each key that an edit writes.
+// [Doc.Removals] lists each entry and each item of the user's text that
+// Update removes as [Node.Remove] removes it. Where a value takes its part
+// of v as a Set of that place writes it, Removals lists what that Set
+// records, as [Node.Set] describes. A key that v holds and that the text
+// lacks reads back as its name, as for each key that an edit writes.
 func (n *Node) Update(ctx context.Context, v any, opts ...SetOption) error {
 	var cfg setConfig
 

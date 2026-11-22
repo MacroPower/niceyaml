@@ -4232,6 +4232,771 @@ func TestNode_Set_Style(t *testing.T) {
 	}
 }
 
+func TestNode_Set_Removals(t *testing.T) {
+	t.Parallel()
+
+	// The Func that setAt returns sets the value at path to v.
+	setAt := func(path string, v any, opts ...edit.SetOption) edit.Func {
+		return func(ctx context.Context, n *edit.Node) error {
+			return n.At(paths.MustParse(path)).Set(ctx, v, opts...)
+		}
+	}
+
+	// The Func that updateAt returns updates the value at path to v.
+	updateAt := func(path string, v any) edit.Func {
+		return func(ctx context.Context, n *edit.Node) error {
+			return n.At(paths.MustParse(path)).Update(ctx, v)
+		}
+	}
+
+	// The Func that removeAt returns removes the value at path.
+	removeAt := func(path string, opts ...edit.RemoveOption) edit.Func {
+		return func(_ context.Context, n *edit.Node) error {
+			return n.At(paths.MustParse(path)).Remove(opts...)
+		}
+	}
+
+	// The Func that moveTo returns moves the value at from to the path to.
+	moveTo := func(from, to string) edit.Func {
+		return func(_ context.Context, n *edit.Node) error {
+			return n.At(paths.MustParse(from)).Move(paths.MustParse(to))
+		}
+	}
+
+	// The Func that renameTo returns renames the key of the entry at path to
+	// key.
+	renameTo := func(path, key string) edit.Func {
+		return func(_ context.Context, n *edit.Node) error {
+			return n.At(paths.MustParse(path)).SetKey(key)
+		}
+	}
+
+	// The Func that failing returns runs fn, which must fail. It returns nil
+	// when fn fails, so the Apply goes on, and an error when fn passes.
+	failing := func(fn edit.Func) edit.Func {
+		return func(ctx context.Context, n *edit.Node) error {
+			if fn(ctx, n) == nil {
+				return errors.New("the call passed")
+			}
+
+			return nil
+		}
+	}
+
+	// A spec, a value that drops its motto, and a value that keeps it.
+	cafe := stringtest.LinesLF("spec:", "  seats: 4", "  motto: hi")
+	seats := map[string]int{"seats": 4}
+	both := ms("seats", 4, "motto", "hi")
+	// A mapping with two entries that the moves of a row put in a mapping
+	// that the moves create.
+	abc := stringtest.LinesLF("s:", "  a: 1", "  b: 2", "  c: 3")
+	// An anchored item of a flow sequence that a move takes to $.spec.v.
+	item := stringtest.LinesLF("spec:", "  a: 1", "f: {l: [1, &x 2]}")
+	// An entry that a move takes into the spec.
+	a1 := stringtest.LinesLF("a: 1", "spec:", "  seats: 4")
+	// A mapping that repeats a key, which the Source allows with dup.
+	repeats := stringtest.LinesLF("spec:", "  a: 1", "  a: 2", "  b: 3")
+	dup := []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)}
+
+	// A spec with another number of seats, which keeps the motto.
+	grown := ms("seats", 5, "motto", "hi")
+	// A mapping whose entry a holds an entry that a move takes into b.
+	moved := stringtest.LinesLF("s:", "  a:", "    q: 1", "    r: 2", "  b:", "    z: 2")
+	hosts := stringtest.LinesLF("l:", "  - host: a", "    motto: m")
+	// A mapping whose entry a holds an anchor that an alias outside it
+	// reads.
+	anchoredSpec := stringtest.LinesLF("spec:", "  a: &x 1", "  b: 2", "u: *x")
+
+	mottoRemoval := `$.spec.motto~ "cafe.jacobcolvin.com/v1" "" key="motto" item=false 2:2-2:7`
+	seatsRemoval := `$.spec.seats~ "cafe.jacobcolvin.com/v1" "" key="seats" item=false 1:2-1:7`
+	abcA := `$.s.a~ "cafe.jacobcolvin.com/v1" "" key="a" item=false 1:2-1:3`
+	abcB := `$.s.b~ "cafe.jacobcolvin.com/v1" "" key="b" item=false 2:2-2:3`
+
+	tcs := map[string]struct {
+		before string
+		// The options of the Source of the text.
+		opts []niceyaml.SourceOption
+		// The calls of one Apply at the root, in order, and of a second
+		// Apply after it when later holds any. The first Apply takes the
+		// label of the tests, and the second the label of v2.
+		calls []edit.Func
+		later []edit.Func
+		want  string
+		// The removals of the Doc, as removalString writes them.
+		removals []string
+	}{
+		"block mapping": {
+			before:   cafe,
+			calls:    []edit.Func{setAt("$.spec", seats)},
+			want:     stringtest.LinesLF("spec:", "  seats: 4"),
+			removals: []string{mottoRemoval},
+		},
+		"block mapping with comment lines": {
+			before: stringtest.LinesLF(
+				"spec:",
+				"  # how many",
+				"  seats: 4",
+				"  # what we say",
+				"  motto: hi # a greeting",
+				"open: true",
+			),
+			calls:    []edit.Func{setAt("$.spec", seats)},
+			want:     stringtest.LinesLF("spec:", "  seats: 4", "open: true"),
+			removals: []string{`$.spec.motto~ "cafe.jacobcolvin.com/v1" "" key="motto" item=false 4:2-4:7`},
+		},
+		"block mapping with CRLF line breaks": {
+			before:   stringtest.LinesCRLF("spec:", "  seats: 4", "  motto: hi"),
+			calls:    []edit.Func{setAt("$.spec", seats)},
+			want:     stringtest.LinesCRLF("spec:", "  seats: 4"),
+			removals: []string{mottoRemoval},
+		},
+		"flow mapping": {
+			before:   "spec: {seats: 4, motto: hi}\n",
+			calls:    []edit.Func{setAt("$.spec", seats)},
+			want:     "spec: {seats: 4}\n",
+			removals: []string{`$.spec.motto~ "cafe.jacobcolvin.com/v1" "" key="motto" item=false 0:17-0:22`},
+		},
+		"set in flow style": {
+			before:   cafe,
+			calls:    []edit.Func{setAt("$.spec", seats, edit.Flow())},
+			want:     "spec: {seats: 4}\n",
+			removals: []string{mottoRemoval},
+		},
+		"mappings inside the place": {
+			before: stringtest.LinesLF("spec:", "  a:", "    x: 1", "    y: 2", "  b: 3"),
+			calls:  []edit.Func{setAt("$.spec", map[string]any{"a": map[string]int{"x": 1}})},
+			want:   stringtest.LinesLF("spec:", "  a:", "    x: 1"),
+			removals: []string{
+				`$.spec.a.y~ "cafe.jacobcolvin.com/v1" "" key="y" item=false 3:4-3:5`,
+				`$.spec.b~ "cafe.jacobcolvin.com/v1" "" key="b" item=false 4:2-4:3`,
+			},
+		},
+		"mapping to a scalar at the place": {
+			before: stringtest.LinesLF("price:", "  amount: 5", "  currency: SEK"),
+			calls:  []edit.Func{setAt("$.price", 5)},
+			want:   "price: 5\n",
+			removals: []string{
+				`$.price.amount~ "cafe.jacobcolvin.com/v1" "" key="amount" item=false 1:2-1:8`,
+				`$.price.currency~ "cafe.jacobcolvin.com/v1" "" key="currency" item=false 2:2-2:10`,
+			},
+		},
+		"mapping to a scalar at a paired key": {
+			before: stringtest.LinesLF("p:", "  price:", "    amount: 5", "    currency: SEK"),
+			calls:  []edit.Func{setAt("$.p", map[string]int{"price": 5})},
+			want:   stringtest.LinesLF("p:", "  price: 5"),
+			removals: []string{
+				`$.p.price.amount~ "cafe.jacobcolvin.com/v1" "" key="amount" item=false 2:4-2:10`,
+				`$.p.price.currency~ "cafe.jacobcolvin.com/v1" "" key="currency" item=false 3:4-3:12`,
+			},
+		},
+		"mapping to null": {
+			before:   cafe,
+			calls:    []edit.Func{setAt("$.spec", nil)},
+			want:     "spec: null\n",
+			removals: []string{seatsRemoval, mottoRemoval},
+		},
+		"mapping to an empty mapping": {
+			before:   cafe,
+			calls:    []edit.Func{setAt("$.spec", map[string]int{})},
+			want:     "spec: {}\n",
+			removals: []string{seatsRemoval, mottoRemoval},
+		},
+		"mapping to a sequence": {
+			before: stringtest.LinesLF("a:", "  '': 1", "  b: 2"),
+			calls:  []edit.Func{setAt("$.a", []int{1})},
+			want:   stringtest.LinesLF("a:", "  - 1"),
+			removals: []string{
+				`$.a.''~ "cafe.jacobcolvin.com/v1" "" key="" item=false 1:2-1:4`,
+				`$.a.b~ "cafe.jacobcolvin.com/v1" "" key="b" item=false 2:2-2:3`,
+			},
+		},
+		"scalar that changes and keys in another order": {
+			before: cafe,
+			calls:  []edit.Func{setAt("$.spec", ms("motto", "bye", "seats", 5))},
+			want:   stringtest.LinesLF("spec:", "  motto: bye", "  seats: 5"),
+		},
+		"quoted key": {
+			before:   stringtest.LinesLF("spec:", "  seats: 4", `  "motto": hi`),
+			calls:    []edit.Func{setAt("$.spec", seats)},
+			want:     stringtest.LinesLF("spec:", "  seats: 4"),
+			removals: []string{`$.spec.motto~ "cafe.jacobcolvin.com/v1" "" key="motto" item=false 2:2-2:9`},
+		},
+		"explicit key": {
+			before:   stringtest.LinesLF("spec:", "  seats: 4", "  ? motto", "  : hi"),
+			calls:    []edit.Func{setAt("$.spec", seats)},
+			want:     stringtest.LinesLF("spec:", "  seats: 4"),
+			removals: []string{`$.spec.motto~ "cafe.jacobcolvin.com/v1" "" key="motto" item=false 2:4-2:9`},
+		},
+		"null key": {
+			before:   stringtest.LinesLF("spec:", "  seats: 4", "  ~: hi"),
+			calls:    []edit.Func{setAt("$.spec", seats)},
+			want:     stringtest.LinesLF("spec:", "  seats: 4"),
+			removals: []string{`$.spec.'~'~ "cafe.jacobcolvin.com/v1" "" key="~" item=false 2:2-2:3`},
+		},
+		"integer key": {
+			before:   stringtest.LinesLF("spec:", "  seats: 4", "  1: hi"),
+			calls:    []edit.Func{setAt("$.spec", seats)},
+			want:     stringtest.LinesLF("spec:", "  seats: 4"),
+			removals: []string{`$.spec.1~ "cafe.jacobcolvin.com/v1" "" key="1" item=false 2:2-2:3`},
+		},
+		"hex key that the new mapping decodes to": {
+			before: stringtest.LinesLF("spec:", "  0x10: a"),
+			calls:  []edit.Func{setAt("$.spec", map[int]string{16: "a"})},
+			want:   stringtest.LinesLF("spec:", "  16: a"),
+		},
+		"hex key that the new mapping holds as a string": {
+			before:   stringtest.LinesLF("spec:", "  0x10: a"),
+			calls:    []edit.Func{setAt("$.spec", map[string]string{"0x10": "a"})},
+			want:     stringtest.LinesLF("spec:", `  "0x10": a`),
+			removals: []string{`$.spec.0x10~ "cafe.jacobcolvin.com/v1" "" key="0x10" item=false 1:2-1:6`},
+		},
+		"flow key without a value": {
+			before:   "spec: {seats, motto: hi}\n",
+			calls:    []edit.Func{setAt("$.spec", map[string]string{"motto": "hi"})},
+			want:     "spec: {motto: hi}\n",
+			removals: []string{`$.spec.seats~ "cafe.jacobcolvin.com/v1" "" key="seats" item=false 0:7-0:12`},
+		},
+		"dropped entry whose value is an alias": {
+			before:   stringtest.LinesLF("b: &b hi", "spec:", "  seats: 4", "  motto: *b"),
+			calls:    []edit.Func{setAt("$.spec", seats)},
+			want:     stringtest.LinesLF("b: &b hi", "spec:", "  seats: 4"),
+			removals: []string{`$.spec.motto~ "cafe.jacobcolvin.com/v1" "" key="motto" item=false 3:2-3:7`},
+		},
+		"place is an item of a block sequence": {
+			before:   stringtest.LinesLF("l:", "  - host: a", "    motto: m"),
+			calls:    []edit.Func{setAt("$.l[0]", map[string]string{"host": "a"})},
+			want:     stringtest.LinesLF("l:", "  - host: a"),
+			removals: []string{`$.l[0].motto~ "cafe.jacobcolvin.com/v1" "" key="motto" item=false 2:4-2:9`},
+		},
+		"place is an item of a flow sequence": {
+			before:   "l: [{host: a, motto: m}]\n",
+			calls:    []edit.Func{setAt("$.l[0]", map[string]string{"host": "a"})},
+			want:     "l: [{host: a}]\n",
+			removals: []string{`$.l[0].motto~ "cafe.jacobcolvin.com/v1" "" key="motto" item=false 0:14-0:19`},
+		},
+		"mapping at an anchor that an alias reads": {
+			before:   stringtest.LinesLF("spec: &s", "  seats: 4", "  motto: hi", "u: *s"),
+			calls:    []edit.Func{setAt("$.spec", seats)},
+			want:     stringtest.LinesLF("spec: &s", "  seats: 4", "u: *s"),
+			removals: []string{mottoRemoval},
+		},
+		"mapping at a tag": {
+			before:   stringtest.LinesLF("spec: !t", "  seats: 4", "  motto: hi"),
+			calls:    []edit.Func{setAt("$.spec", seats)},
+			want:     stringtest.LinesLF("spec:", "  seats: 4"),
+			removals: []string{mottoRemoval},
+		},
+		"place reached through an alias": {
+			before: stringtest.LinesLF("base: &m", "  v:", "    k: 1", "    j: 2", "md: *m"),
+			calls:  []edit.Func{setAt("$.md.v", map[string]int{"k": 1})},
+			want:   stringtest.LinesLF("base: &m", "  v:", "    k: 1", "md: *m"),
+			removals: []string{
+				`$.base.v.j~ "cafe.jacobcolvin.com/v1" "" key="j" item=false 3:4-3:5`,
+			},
+		},
+		"place reached through an alias in a flow mapping": {
+			before: stringtest.LinesLF("base: &m {v: {k: 1, j: 2}}", "md: *m"),
+			calls:  []edit.Func{setAt("$.md.v", map[string]int{"k": 1})},
+			want:   stringtest.LinesLF("base: &m {v: {k: 1}}", "md: *m"),
+			removals: []string{
+				`$.base.v.j~ "cafe.jacobcolvin.com/v1" "" key="j" item=false 0:20-0:21`,
+			},
+		},
+		"place reached through a merge key": {
+			before: stringtest.LinesLF("b: &b", "  m:", "    x: 1", "    y: 2", "spec:", "  <<: *b", "  seats: 4"),
+			calls:  []edit.Func{setAt("$.spec.m", map[string]int{"x": 1})},
+			want:   stringtest.LinesLF("b: &b", "  m:", "    x: 1", "spec:", "  <<: *b", "  seats: 4"),
+			removals: []string{
+				`$.b.m.y~ "cafe.jacobcolvin.com/v1" "" key="y" item=false 3:4-3:5`,
+			},
+		},
+		"value is a node": {
+			before: stringtest.LinesLF("a:", "  x: 1", "  y: 2", "b:", "  x: 1", "  z: 3"),
+			calls: []edit.Func{func(ctx context.Context, n *edit.Node) error {
+				return n.At(paths.MustParse("$.b")).Set(ctx, n.At(paths.MustParse("$.a")))
+			}},
+			want:     stringtest.LinesLF("a:", "  x: 1", "  y: 2", "b:", "  x: 1", `  "y": 2`),
+			removals: []string{`$.b.z~ "cafe.jacobcolvin.com/v1" "" key="z" item=false 5:2-5:3`},
+		},
+		"renamed key that the set keeps": {
+			before: cafe,
+			calls: []edit.Func{
+				renameTo("$.spec.motto", "slogan"),
+				setAt("$.spec", ms("seats", 4, "slogan", "hi")),
+			},
+			want: stringtest.LinesLF("spec:", "  seats: 4", "  slogan: hi"),
+		},
+		"renamed key that the set drops": {
+			before:   cafe,
+			calls:    []edit.Func{renameTo("$.spec.motto", "slogan"), setAt("$.spec", seats)},
+			want:     stringtest.LinesLF("spec:", "  seats: 4"),
+			removals: []string{mottoRemoval},
+		},
+		"key renamed twice that the set drops": {
+			before: cafe,
+			calls: []edit.Func{
+				renameTo("$.spec.motto", "slogan"),
+				renameTo("$.spec.slogan", "tagline"),
+				setAt("$.spec", seats),
+			},
+			want:     stringtest.LinesLF("spec:", "  seats: 4"),
+			removals: []string{mottoRemoval},
+		},
+		"moved entry that the set drops": {
+			before:   a1,
+			calls:    []edit.Func{moveTo("$.a", "$.spec.a"), setAt("$.spec", seats)},
+			want:     stringtest.LinesLF("spec:", "  seats: 4"),
+			removals: []string{`$.a~ "cafe.jacobcolvin.com/v1" "" key="a" item=false 0:0-0:1`},
+		},
+		"entry moved in an earlier apply that the set drops": {
+			before:   a1,
+			calls:    []edit.Func{moveTo("$.a", "$.spec.a")},
+			later:    []edit.Func{setAt("$.spec", seats)},
+			want:     stringtest.LinesLF("spec:", "  seats: 4"),
+			removals: []string{`$.a~ "cafe.jacobcolvin.com/v2" "" key="a" item=false 0:0-0:1`},
+		},
+		"entry moved into a flow mapping and out of it": {
+			before: a1 + "f: {k: 1}\n",
+			calls: []edit.Func{
+				moveTo("$.a", "$.f.a"),
+				moveTo("$.f.a", "$.spec.a"),
+				setAt("$.spec", seats),
+			},
+			want:     stringtest.LinesLF("spec:", "  seats: 4", "f: {k: 1}"),
+			removals: []string{`$.a~ "cafe.jacobcolvin.com/v1" "" key="a" item=false 0:0-0:1`},
+		},
+		"item moved to a key": {
+			before:   stringtest.LinesLF("l:", "  - p: 1", "  - q: 2", "spec:", "  seats: 4"),
+			calls:    []edit.Func{moveTo("$.l[1]", "$.spec.it"), setAt("$.spec", seats)},
+			want:     stringtest.LinesLF("l:", "  - p: 1", "spec:", "  seats: 4"),
+			removals: []string{`$.l[1] "cafe.jacobcolvin.com/v1" "" key="" item=true 2:2-2:8`},
+		},
+		"mapping that a move took to another place": {
+			before:   cafe + stringtest.LinesLF("g:", "  k: 0"),
+			calls:    []edit.Func{moveTo("$.spec", "$.g.spec"), setAt("$.g.spec", seats)},
+			want:     stringtest.LinesLF("g:", "  k: 0", "  spec:", "    seats: 4"),
+			removals: []string{mottoRemoval},
+		},
+		"remove with a reason before the set": {
+			before: cafe,
+			calls: []edit.Func{
+				removeAt("$.spec.motto", edit.WithReason("v2 has no motto")),
+				setAt("$.spec", seats),
+			},
+			want: stringtest.LinesLF("spec:", "  seats: 4"),
+			removals: []string{
+				`$.spec.motto~ "cafe.jacobcolvin.com/v1" "v2 has no motto" key="motto" item=false 2:2-2:7`,
+			},
+		},
+		"key of the user whose value an earlier set replaced": {
+			before:   cafe,
+			calls:    []edit.Func{setAt("$.spec.motto", map[string]int{"x": 1}), setAt("$.spec", seats)},
+			want:     stringtest.LinesLF("spec:", "  seats: 4"),
+			removals: []string{mottoRemoval},
+		},
+		"created entry": {
+			before: cafe,
+			calls: []edit.Func{
+				setAt("$.spec.extra", map[string]int{"x": 1}),
+				setAt("$.spec", ms("motto", "hi", "seats", 4)),
+			},
+			want: stringtest.LinesLF("spec:", "  motto: hi", "  seats: 4"),
+		},
+		"created entry after a move": {
+			before: cafe,
+			calls: []edit.Func{
+				setAt("$.spec.extra", map[string]int{"x": 1}),
+				moveTo("$.spec.extra", "$.spec.more"),
+				setAt("$.spec", ms("motto", "hi", "seats", 4)),
+			},
+			want: stringtest.LinesLF("spec:", "  motto: hi", "  seats: 4"),
+		},
+		"created entry after a rename": {
+			before: cafe,
+			calls: []edit.Func{
+				setAt("$.spec.extra", map[string]int{"x": 1}),
+				renameTo("$.spec.extra", "more"),
+				setAt("$.spec", ms("motto", "hi", "seats", 4)),
+			},
+			want: stringtest.LinesLF("spec:", "  motto: hi", "  seats: 4"),
+		},
+		"created mapping that holds two moved entries": {
+			before: abc,
+			calls: []edit.Func{
+				moveTo("$.s.a", "$.s.n.a"),
+				moveTo("$.s.b", "$.s.n.b"),
+				setAt("$.s", map[string]int{"c": 3}),
+			},
+			want:     stringtest.LinesLF("s:", "  c: 3"),
+			removals: []string{abcA, abcB},
+		},
+		"created mapping that holds two moved entries replaced by a scalar": {
+			before: abc,
+			calls: []edit.Func{
+				moveTo("$.s.a", "$.s.n.a"),
+				moveTo("$.s.b", "$.s.n.b"),
+				setAt("$.s", ms("c", 3, "n", 1)),
+			},
+			want:     stringtest.LinesLF("s:", "  c: 3", `  "n": 1`),
+			removals: []string{abcA, abcB},
+		},
+		"entry of the user that holds a moved entry": {
+			before:   stringtest.LinesLF("s:", "  h:", "    k: 1", "  a: 2", "  c: 3"),
+			calls:    []edit.Func{moveTo("$.s.a", "$.s.h.a"), setAt("$.s", map[string]int{"c": 3})},
+			want:     stringtest.LinesLF("s:", "  c: 3"),
+			removals: []string{`$.s.h~ "cafe.jacobcolvin.com/v1" "" key="h" item=false 1:2-1:3`},
+		},
+		"entry moved out of an entry that the set drops": {
+			before: moved,
+			calls: []edit.Func{
+				moveTo("$.s.a.q", "$.s.b.q"),
+				setAt("$.s", map[string]any{"b": map[string]int{"z": 2}}),
+			},
+			want: stringtest.LinesLF("s:", "  b:", "    z: 2"),
+			removals: []string{
+				`$.s.a~ "cafe.jacobcolvin.com/v1" "" key="a" item=false 1:2-1:3`,
+				`$.s.a.q~ "cafe.jacobcolvin.com/v1" "" key="q" item=false 2:4-2:5`,
+			},
+		},
+		"entry moved out of an entry that the set drops with both dropped": {
+			before: moved,
+			calls:  []edit.Func{moveTo("$.s.a.q", "$.s.b.q"), setAt("$.s", map[string]int{})},
+			want:   "s: {}\n",
+			removals: []string{
+				`$.s.a~ "cafe.jacobcolvin.com/v1" "" key="a" item=false 1:2-1:3`,
+				`$.s.b~ "cafe.jacobcolvin.com/v1" "" key="b" item=false 4:2-4:3`,
+			},
+		},
+		"created first key of a mapping set where a moved flow item was": {
+			before: item,
+			calls: []edit.Func{
+				moveTo("$.f.l[1]", "$.spec.v"),
+				setAt("$.spec.v", ms("p", nil, "q", 1)),
+				setAt("$.spec.v", map[string]int{"q": 1}),
+			},
+			want: stringtest.LinesLF("spec:", "  a: 1", "  v: &x", "    q: 1", "f: {l: [1]}"),
+		},
+		"moved flow item that a set dropped": {
+			before: item,
+			calls: []edit.Func{
+				moveTo("$.f.l[1]", "$.spec.v"),
+				setAt("$.spec.v", ms("p", nil, "q", 1)),
+				setAt("$.spec", map[string]int{"a": 1}),
+			},
+			want:     stringtest.LinesLF("spec:", "  a: 1", "f: {l: [1]}"),
+			removals: []string{`$.f.l[1] "cafe.jacobcolvin.com/v1" "" key="" item=true 2:11-2:15`},
+		},
+		"renamed created key in a mapping set where a moved flow item was": {
+			before: item,
+			calls: []edit.Func{
+				moveTo("$.f.l[1]", "$.spec.v"),
+				setAt("$.spec.v", map[string]any{"q": map[string]int{"x": 1}}),
+				renameTo("$.spec.v.q", "r2"),
+				setAt("$.spec.v", map[string]int{}),
+			},
+			want: stringtest.LinesLF("spec:", "  a: 1", "  v: &x {}", "f: {l: [1]}"),
+		},
+		"remove inside before the set": {
+			before: stringtest.LinesLF("spec:", "  m:", "    x: 1", "  seats: 4"),
+			calls:  []edit.Func{removeAt("$.spec.m.x"), setAt("$.spec", seats)},
+			want:   stringtest.LinesLF("spec:", "  seats: 4"),
+			removals: []string{
+				`$.spec.m.x~ "cafe.jacobcolvin.com/v1" "" key="x" item=false 2:4-2:5`,
+				`$.spec.m~ "cafe.jacobcolvin.com/v1" "" key="m" item=false 1:2-1:3`,
+			},
+		},
+		"same set in a later apply": {
+			before:   cafe,
+			calls:    []edit.Func{setAt("$.spec", seats)},
+			later:    []edit.Func{setAt("$.spec", seats)},
+			want:     stringtest.LinesLF("spec:", "  seats: 4"),
+			removals: []string{mottoRemoval},
+		},
+		"set that writes the dropped entry back": {
+			before:   cafe,
+			calls:    []edit.Func{setAt("$.spec", seats), setAt("$.spec", both)},
+			want:     cafe,
+			removals: []string{mottoRemoval},
+		},
+		"set after a set that changed the text": {
+			before: cafe,
+			calls:  []edit.Func{setAt("$.spec", grown), setAt("$.spec", map[string]int{"seats": 5})},
+			want:   stringtest.LinesLF("spec:", "  seats: 5"),
+		},
+		"set in a later apply after a set that changed the text": {
+			before: cafe,
+			calls:  []edit.Func{setAt("$.spec", grown)},
+			later:  []edit.Func{setAt("$.spec", map[string]int{"seats": 5})},
+			want:   stringtest.LinesLF("spec:", "  seats: 5"),
+		},
+		"remove after a set that changed the text": {
+			before: cafe,
+			calls:  []edit.Func{setAt("$.spec", grown), removeAt("$.spec.motto")},
+			want:   stringtest.LinesLF("spec:", "  seats: 5"),
+		},
+		"remove in a later apply after a set that changed the text": {
+			before: cafe,
+			calls:  []edit.Func{setAt("$.spec", grown)},
+			later:  []edit.Func{removeAt("$.spec.motto")},
+			want:   stringtest.LinesLF("spec:", "  seats: 5"),
+		},
+		"update after a set that changed the text": {
+			before: cafe,
+			calls:  []edit.Func{setAt("$.spec", grown), updateAt("$.spec", map[string]int{"seats": 5})},
+			want:   stringtest.LinesLF("spec:", "  seats: 5"),
+		},
+		"update in a later apply after a set that changed the text": {
+			before: cafe,
+			calls:  []edit.Func{setAt("$.spec", grown)},
+			later:  []edit.Func{updateAt("$.spec", map[string]int{"seats": 5})},
+			want:   stringtest.LinesLF("spec:", "  seats: 5"),
+		},
+		"set after a set that left the text as it found it": {
+			before:   cafe,
+			calls:    []edit.Func{setAt("$.spec", both), setAt("$.spec", seats)},
+			want:     stringtest.LinesLF("spec:", "  seats: 4"),
+			removals: []string{mottoRemoval},
+		},
+		"set in a later apply after a set that left the text as it found it": {
+			before:   cafe,
+			calls:    []edit.Func{setAt("$.spec", both)},
+			later:    []edit.Func{setAt("$.spec", seats)},
+			want:     stringtest.LinesLF("spec:", "  seats: 4"),
+			removals: []string{`$.spec.motto~ "cafe.jacobcolvin.com/v2" "" key="motto" item=false 2:2-2:7`},
+		},
+		"merge key of an alias": {
+			before: stringtest.LinesLF("b: &b", "  motto: hi", "spec:", "  <<: *b", "  seats: 4"),
+			calls:  []edit.Func{setAt("$.spec", seats)},
+			want:   stringtest.LinesLF("b: &b", "  motto: hi", "spec:", "  seats: 4"),
+		},
+		"merge key of a mapping written in place": {
+			before: stringtest.LinesLF("spec:", "  <<: {motto: hi}", "  seats: 4"),
+			calls:  []edit.Func{setAt("$.spec", seats)},
+			want:   stringtest.LinesLF("spec:", "  seats: 4"),
+		},
+		"place holds an alias": {
+			before: stringtest.LinesLF("b: &b", "  motto: hi", "  seats: 4", "spec: *b"),
+			calls:  []edit.Func{setAt("$.spec", seats)},
+			want:   stringtest.LinesLF("b: &b", "  motto: hi", "  seats: 4", "spec:", "  seats: 4"),
+		},
+		"paired key whose old value is an alias": {
+			before: stringtest.LinesLF("b: &b", "  x: 1", "  y: 2", "spec:", "  m: *b"),
+			calls:  []edit.Func{setAt("$.spec", map[string]any{"m": map[string]int{"x": 1}})},
+			want:   stringtest.LinesLF("b: &b", "  x: 1", "  y: 2", "spec:", "  m:", "    x: 1"),
+		},
+		"sequence of mappings": {
+			before: hosts,
+			calls:  []edit.Func{setAt("$.l", []map[string]string{{"host": "a"}})},
+			want:   stringtest.LinesLF("l:", "  - host: a"),
+		},
+		"sequence of mappings to an empty sequence": {
+			before: hosts,
+			calls:  []edit.Func{setAt("$.l", []int{})},
+			want:   "l: []\n",
+		},
+		"created entry whose value is a sequence that holds a moved value": {
+			before: a1,
+			calls:  []edit.Func{moveTo("$.a", "$.spec.l[0]"), setAt("$.spec", seats)},
+			want:   stringtest.LinesLF("spec:", "  seats: 4"),
+		},
+		"place holds no value": {
+			before: "a: 1\n",
+			calls:  []edit.Func{setAt("$.spec", seats)},
+			want:   stringtest.LinesLF("a: 1", "spec:", "  seats: 4"),
+		},
+		"place holds an empty value": {
+			before: "spec:\n",
+			calls:  []edit.Func{setAt("$.spec", seats)},
+			want:   stringtest.LinesLF("spec:", "  seats: 4"),
+		},
+		"place holds a null": {
+			before: "spec: null\n",
+			calls:  []edit.Func{setAt("$.spec", seats)},
+			want:   stringtest.LinesLF("spec:", "  seats: 4"),
+		},
+		"repeated key": {
+			before: repeats,
+			opts:   dup,
+			calls:  []edit.Func{setAt("$.spec", map[string]int{"a": 2})},
+			want:   stringtest.LinesLF("spec:", "  a: 2"),
+			removals: []string{
+				`$.spec.a~ "cafe.jacobcolvin.com/v1" "" key="a" item=false 1:2-1:3`,
+				`$.spec.b~ "cafe.jacobcolvin.com/v1" "" key="b" item=false 3:2-3:3`,
+			},
+		},
+		"repeated key whose earlier entry holds a mapping": {
+			before:   stringtest.LinesLF("spec:", "  a:", "    x: 1", "  a: 2"),
+			opts:     dup,
+			calls:    []edit.Func{setAt("$.spec", map[string]int{"a": 2})},
+			want:     stringtest.LinesLF("spec:", "  a: 2"),
+			removals: []string{`$.spec.a~ "cafe.jacobcolvin.com/v1" "" key="a" item=false 1:2-1:3`},
+		},
+		"repeated key that the new mapping lacks": {
+			before: repeats,
+			opts:   dup,
+			calls:  []edit.Func{setAt("$.spec", map[string]int{"b": 3})},
+			want:   stringtest.LinesLF("spec:", "  b: 3"),
+			removals: []string{
+				`$.spec.a~ "cafe.jacobcolvin.com/v1" "" key="a" item=false 1:2-1:3`,
+				`$.spec.a~ "cafe.jacobcolvin.com/v1" "" key="a" item=false 2:2-2:3`,
+			},
+		},
+		"dropped entry that holds a repeated key": {
+			before:   stringtest.LinesLF("t:", "  spec:", "    a: 1", "    a: 2", "  z: 1"),
+			opts:     dup,
+			calls:    []edit.Func{setAt("$.t", map[string]int{"z": 1})},
+			want:     stringtest.LinesLF("t:", "  z: 1"),
+			removals: []string{`$.t.spec~ "cafe.jacobcolvin.com/v1" "" key="spec" item=false 1:2-1:6`},
+		},
+		"repeated key below a renamed key": {
+			before: repeats,
+			opts:   dup,
+			calls:  []edit.Func{renameTo("$.spec", "s2"), setAt("$.s2", map[string]int{"a": 2})},
+			want:   stringtest.LinesLF("s2:", "  a: 2"),
+			removals: []string{
+				`$.spec.a~ "cafe.jacobcolvin.com/v1" "" key="a" item=false 1:2-1:3`,
+				`$.spec.b~ "cafe.jacobcolvin.com/v1" "" key="b" item=false 3:2-3:3`,
+			},
+		},
+		"set that fails": {
+			// The Set drops the anchor that the alias reads, so it fails when
+			// it checks its value, before it compares the mappings. It thus
+			// records nothing. TestNode_Set_Removals_Failed covers a call
+			// that fails after its Set records a removal.
+			before: anchoredSpec,
+			calls:  []edit.Func{failing(setAt("$.spec", map[string]int{"b": 2}))},
+			want:   anchoredSpec,
+		},
+		"update that replaces a mapping with a scalar": {
+			before: stringtest.LinesLF("price:", "  amount: 5", "  currency: SEK"),
+			calls:  []edit.Func{updateAt("$", map[string]int{"price": 5})},
+			want:   "price: 5\n",
+			removals: []string{
+				`$.price.amount~ "cafe.jacobcolvin.com/v1" "" key="amount" item=false 1:2-1:8`,
+				`$.price.currency~ "cafe.jacobcolvin.com/v1" "" key="currency" item=false 2:2-2:10`,
+			},
+		},
+		"update that removes an entry": {
+			before:   cafe,
+			calls:    []edit.Func{updateAt("$.spec", seats)},
+			want:     stringtest.LinesLF("spec:", "  seats: 4"),
+			removals: []string{mottoRemoval},
+		},
+		"update that removes an entry and replaces a mapping": {
+			before: stringtest.LinesLF("spec:", "  price:", "    amount: 5", "  motto: hi"),
+			calls:  []edit.Func{updateAt("$.spec", map[string]int{"price": 5})},
+			want:   stringtest.LinesLF("spec:", "  price: 5"),
+			removals: []string{
+				`$.spec.motto~ "cafe.jacobcolvin.com/v1" "" key="motto" item=false 3:2-3:7`,
+				`$.spec.price.amount~ "cafe.jacobcolvin.com/v1" "" key="amount" item=false 2:4-2:10`,
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d := newDoc(t, tc.before, tc.opts...)
+
+			labels := []edit.ApplyOption{label, edit.WithLabel("cafe.jacobcolvin.com/v2")}
+
+			var err error
+
+			for i, calls := range [][]edit.Func{tc.calls, tc.later} {
+				if len(calls) == 0 || err != nil {
+					continue
+				}
+
+				err = d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, root *edit.Node) error {
+					for _, call := range calls {
+						err := call(ctx, root)
+						if err != nil {
+							return err
+						}
+					}
+
+					return nil
+				}, labels[i])
+			}
+
+			requireEdit(t, d, err, "", tc.want)
+
+			var got []string
+
+			for _, rm := range d.Removals() {
+				got = append(got, removalString(rm))
+			}
+
+			assert.Equal(t, tc.removals, got)
+		})
+	}
+}
+
+func TestNode_Set_Removals_Failed(t *testing.T) {
+	t.Parallel()
+
+	// A merge key whose later source holds the key that a Set of $.b
+	// writes, which go-yaml's decoder reads otherwise than the merge spec.
+	merged := stringtest.LinesLF("a: &a {k: 1}", "b: &b {j: 2}", "m:", "  <<: [*a, *b]")
+
+	tcs := map[string]struct {
+		v      any
+		ret    error
+		before string
+		path   paths.Path
+		// The text and the number of removals of the Doc right after the
+		// Set, inside the Func.
+		text     string
+		removals int
+		// The error of the Apply.
+		err string
+	}{
+		"func that fails after the set": {
+			// The Apply fails after the Set, so it drops the removal of the
+			// Set with its text.
+			before:   stringtest.LinesLF("spec:", "  seats: 4", "  motto: hi"),
+			path:     spec,
+			v:        map[string]int{"seats": 4},
+			ret:      errors.New("too late"),
+			text:     stringtest.LinesLF("spec:", "  seats: 4"),
+			removals: 1,
+			err:      "too late",
+		},
+		"set whose call the check after the write undoes": {
+			// The Set drops $.b.j and records it. The check after the write
+			// then finds the misread of the merge key and undoes the call.
+			// The undo drops the removal with the text of the call. The Set
+			// returns nil, and the Apply fails.
+			before: merged,
+			path:   paths.Doc().Child("b"),
+			v:      map[string]int{"k": 3},
+			text:   merged,
+			err:    "go-yaml's decoder reads $.m.k from a later source of a merge key",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d := newDoc(t, tc.before)
+
+			err := applyAt(t, d, tc.path, func(ctx context.Context, n *edit.Node) error {
+				err := n.Set(ctx, tc.v)
+				require.NoError(t, err)
+				assert.Equal(t, tc.text, d.Text())
+				assert.Len(t, d.Removals(), tc.removals)
+
+				return tc.ret
+			})
+			require.ErrorContains(t, err, tc.err)
+			assert.Equal(t, tc.before, d.Text())
+			assert.Empty(t, d.Removals())
+		})
+	}
+}
+
 func TestNode_Insert(t *testing.T) {
 	t.Parallel()
 

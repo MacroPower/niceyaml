@@ -688,7 +688,8 @@ func (d *Doc) undoCall(changed bool) {
 // other text into it. Key, Path, Range, and Item still describe the value
 // as the user's text holds it.
 type Removal struct {
-	// Reason is the reason that [WithReason] gave, or "".
+	// Reason is the reason that [WithReason] gave, or "". The Removal of a
+	// [Node.Set] has no reason.
 	Reason string
 	// Label is the label that [WithLabel] gave the Apply that removed the
 	// value, or "".
@@ -698,7 +699,9 @@ type Removal struct {
 	Key string
 	// Path is the path of the value as the user's text spells it. It ends
 	// in `~` when the user wrote the value under a key. [paths.Path.Value]
-	// gives the path of the removed value.
+	// gives the path of the removed value. A mapping can repeat a key, and
+	// the user's text gives an earlier entry of that key no path of its
+	// own. The Path of such an entry is the path of its key.
 	Path paths.Path
 	// Range is the range in the user's text of the key that the user wrote
 	// for the value. For an item of a block sequence, it runs from the "-"
@@ -1477,9 +1480,10 @@ func (d *Doc) Edited() bool {
 	return d.cur != d.orig
 }
 
-// Removals returns the values of the user's text that the edits removed,
-// in the order of the calls. It omits each value that an earlier edit
-// created.
+// Removals returns the values of the user's text that [Node.Remove],
+// [Node.Update], and [Node.Set] record as removed, in the order of the
+// calls. Each of those calls says which values it records. Removals omits
+// each value that an earlier edit created.
 func (d *Doc) Removals() []Removal {
 	d.settle()
 

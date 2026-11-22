@@ -121,6 +121,35 @@ type payload struct {
 // The blank lines after an old block scalar with a keep indicator, as in
 // "|+", belong to its text, so they go with it.
 //
+// A Set over a mapping pairs its entries with the entries of v by the key
+// that a decode reads, at any depth of mappings. [Doc.Removals] lists each
+// entry of the user's text that v drops. A mapping that v replaces with a
+// value of another kind drops each of its entries. The [Removal] of an
+// entry stands for everything inside the entry. The Removal of a Set has
+// no reason.
+//
+// A dropped entry that an edit created records nothing. But the Set
+// records each entry of the user's text that a move put in a mapping that
+// an edit created.
+//
+// A sequence is one value. So a Set records nothing for the items of a
+// sequence that it replaces, at its place or inside a mapping, or for
+// anything inside those items. A `<<` merge entry of a mapping that the
+// Set replaces records nothing. An alias that the Set replaces at its
+// place or at a paired key records nothing for the value that the alias
+// reads. A Set whose place is an item compares the mapping there as at
+// any other place. So does a Set whose path goes through an alias or a
+// merge key.
+//
+// A Set that changes the text writes each entry of v anew. So a later
+// Remove, Set, or Update records nothing for an entry inside the value. A
+// Set that leaves the text as it found it is no edit. A [Func] that writes
+// a decoded value back and keeps its entries uses [Node.Update]. For a
+// field that the program renames or relocates, the Func calls
+// [Node.SetKey] or [Node.Move] before the Set. For a field that the
+// program drops on purpose, it calls [Node.Remove] with [WithReason]
+// before the Set.
+//
 // Set creates each value that its path lacks below the nearest value that
 // holds content. A name there creates a mapping, and an index creates a
 // sequence. A sequence that Set creates holds no items before the call, so
@@ -1391,6 +1420,13 @@ func (d *Doc) replaceValue(ctx context.Context, h *Node, p *place, v any, flow b
 		return nil, err
 	}
 
+	// The Set deletes each entry of the old value that the new value drops.
+	// A call or an Apply that fails after this drops the removals with its
+	// text, as [Doc.undoCall] and [Doc.restore] do.
+	if pl.value != nil {
+		d.recordDropped(h.path, p.value, pl.value)
+	}
+
 	// An item of a flow sequence has no key or "-". The note of the first
 	// byte of the new value thus holds the one that the old value stood
 	// for. A move out of the sequence then writes a key or a "-" that
@@ -1440,6 +1476,116 @@ func (d *Doc) replaceValue(ctx context.Context, h *Node, p *place, v any, flow b
 	}
 
 	return &edge{val: pl.value, tag: pl.tag}, d.writeValue(h, p, pl, origin, step)
+}
+
+// recordDropped records a [Removal] for each entry of the user's text that
+// a Set drops from old, a value of the current text at path, when it
+// writes nv in its place. A nil nv drops each entry of old.
+//
+// Old can hold a mapping under its anchors and tags, as
+// [astnode.Converted] reads it. Its own entries then pair with the entries
+// of a mapping nv by the key that a decode reads, as [keyOf] gives it. The
+// last entry of a key that old repeats pairs, because a decode reads it.
+// The value of each pair compares the same way. The Set drops every other
+// entry of old, and [Doc.dropEntry] records each drop as its doc
+// describes. A `<<` merge entry is not an own entry. Any other old value,
+// such as a scalar, an alias, or a sequence, is one value, so
+// recordDropped records nothing for it.
+func (d *Doc) recordDropped(path paths.Path, old ast.Node, nv *value) {
+	content := astnode.Converted(old)
+
+	entries, ok := readEntries(content)
+	if !ok {
+		return
+	}
+
+	keys, res := d.keyReader(), d.node.DocumentResolver()
+
+	last := make(map[string]*ast.MappingValueNode, len(entries))
+
+	for _, e := range entries {
+		if !astnode.IsMergeKey(e.Key) {
+			last[keyOf(e.Key, keys)] = e
+		}
+	}
+
+	var partners map[string]*value
+
+	if nv != nil && nv.kind == vMapping {
+		partners = make(map[string]*value, len(nv.edges))
+
+		for _, e := range nv.edges {
+			partners[e.key] = e.val
+		}
+	}
+
+	for _, e := range entries {
+		if astnode.IsMergeKey(e.Key) {
+			continue
+		}
+
+		key := keyOf(e.Key, keys)
+
+		// A path names the entry by the text of its key. The key that a
+		// decode reads names an entry whose key has no such text. No public
+		// call reaches such a key, because go-yaml's parser and [New]
+		// refuse each key without text, so no test covers it.
+		name, ok := res.KeyName(e.Key)
+		if !ok {
+			name = key
+		}
+
+		at := path.Child(name)
+
+		if partner, ok := partners[key]; ok && last[key] == e {
+			d.recordDropped(at, e.Value, partner)
+
+			continue
+		}
+
+		d.dropEntry(at, content, e, last[key])
+	}
+}
+
+// dropEntry records the drop of e, the entry at path at of the mapping
+// content, when its key is text of the user's file. The first byte of such
+// a key is a byte of the user's text that the edits kept. It can also be a
+// byte that stands for one, as a renamed key or the key of a move is. The
+// [Removal] then stands for the whole entry and has no reason, as
+// [Doc.removalAt] gives it.
+//
+// Last is the last entry of the key of e in content. The user's text gives
+// an earlier entry of the key no path. So dropEntry gives [Doc.removalAt]
+// the path that the user's text gives last as the fallback. The Removal of
+// such an entry takes that path and the range of its own key. Otherwise
+// the fallback is at, the path of the entry in the current text. No public
+// call reaches that fallback, so no test covers it.
+//
+// An edit created every other entry. For such an entry, dropEntry records
+// the drop of each entry of its value instead, as [Doc.recordDropped] does
+// with a nil value.
+func (d *Doc) dropEntry(at paths.Path, content ast.Node, e, last *ast.MappingValueNode) {
+	p := entryPlace(content, e)
+
+	start, ok := d.startOf(p)
+	if !ok || !d.ownByte(start) && !d.standsFor(start) {
+		d.recordDropped(at, e.Value, nil)
+
+		return
+	}
+
+	fallback := at
+
+	if last != e {
+		lp := entryPlace(content, last)
+		if ls, ok := d.startOf(lp); ok {
+			if _, path, ok := d.removedAt(lp, ls, ls); ok {
+				fallback = path
+			}
+		}
+	}
+
+	d.removals = append(d.removals, d.removalAt(fallback, p, start, start, ""))
 }
 
 // keptAnchorSpan returns the bytes of the anchor of the value of p, which
