@@ -1242,6 +1242,8 @@ func requireOnly(t *testing.T, err error, errs ...error) {
 func TestEncoder_Encode_errors(t *testing.T) {
 	t.Parallel()
 
+	emptyBool := yamltest.FirstDocument(t, "x: !!bool\n").AST()
+
 	tcs := map[string]struct {
 		input    any
 		comments yaml.CommentMap
@@ -1276,6 +1278,43 @@ func TestEncoder_Encode_errors(t *testing.T) {
 			errs:  []error{encoder.ErrEncode},
 			wraps: errMarshal,
 			msg:   "value does not encode: the marshaler fails",
+		},
+		"marshaled empty node under bool tag": {
+			input: rawYAML("x: !!bool\n"),
+			errs:  []error{encoder.ErrEncode},
+			msg:   "value does not encode: empty node under the !!bool tag",
+		},
+		"marshaled empty node under bool tag at root": {
+			input: rawYAML("!!bool\n"),
+			errs:  []error{encoder.ErrEncode},
+			msg:   "value does not encode: empty node under the !!bool tag",
+		},
+		"marshaled empty node under bool tag in flow mapping": {
+			input: map[string]rawYAML{"k": "x: !!bool\n"},
+			opts:  []encoder.Option{encoder.WithFlow(true)},
+			errs:  []error{encoder.ErrEncode},
+			msg:   "value does not encode: empty node under the !!bool tag",
+		},
+		"marshaled empty node under bool tag and anchor in flow sequence": {
+			input: map[string]rawYAML{"k": "- &a !!bool\n"},
+			opts:  []encoder.Option{encoder.WithFlow(true)},
+			errs:  []error{encoder.ErrEncode},
+			msg:   "value does not encode: empty node under the !!bool tag",
+		},
+		"marshaled empty key under bool tag": {
+			input: map[string]rawYAML{"k": "? !!bool\n: c\n"},
+			errs:  []error{encoder.ErrEncode},
+			msg:   "value does not encode: empty node under the !!bool tag",
+		},
+		"AST with empty node under bool tag": {
+			input: emptyBool,
+			errs:  []error{encoder.ErrEncode},
+			msg:   "value does not encode: empty node under the !!bool tag",
+		},
+		"AST with empty node under bool tag as a map value": {
+			input: map[string]any{"k": emptyBool},
+			errs:  []error{encoder.ErrEncode},
+			msg:   "value does not encode: empty node under the !!bool tag",
 		},
 		"comment key that is not a path": {
 			input:    map[string]int{"a": 1},

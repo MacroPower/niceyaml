@@ -406,6 +406,9 @@ var (
 	// node, except under "!!float", "!!bool", and "!!binary". Under
 	// "!!float", go-yaml reads the empty node as the int 0 and the string as
 	// the float 0. Go-yaml rejects an empty node under the other two tags.
+	// Under "!!binary", it reads the string as empty bytes. Under "!!bool",
+	// it rejects the string too, so [Encoder.Encode] refuses an empty node
+	// under that tag before the quoter runs.
 	scalarTags = map[token.ReservedTagKeyword]bool{
 		token.StringTag:    true,
 		token.IntegerTag:   true,

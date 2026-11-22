@@ -10,6 +10,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/token"
 
 	// The niceyaml package sets hook.Guard, which Encode calls, when it
 	// loads.
@@ -28,6 +29,8 @@ var (
 	//     MarshalJSON method returns, or a function of [CustomMarshaler].
 	//     That error stays in the chain.
 	//   - A value that encodes to no YAML node, which [ErrNoNode] labels.
+	//   - A marshaler's YAML or an AST node with an empty node under the
+	//     "!!bool" tag.
 	//
 	// The error of the context of the call does not match after that
 	// context ended, even when a marshaler returns it. A context error
@@ -526,9 +529,12 @@ func newDocEncoder(c config) *docEncoder {
 //
 // Encode returns an error that matches [ErrEncode] when v does not encode
 // to YAML. A value of a type go-yaml does not encode and a marshaler that
-// returns an error are such values. The error matches [ErrNoNode] too
-// when a value in v does not encode to a YAML node. That value is v
-// itself, an entry of a sequence in v, or the value of a map key in v.
+// returns an error are such values. So is a marshaler's YAML or an AST
+// node with an empty node under the !!bool tag, because go-yaml does not
+// decode that node in any form that Encode can write. The error matches
+// [ErrNoNode] too when a value in v does not encode to a YAML node. That
+// value is v itself, an entry of a sequence in v, or the value of a map
+// key in v.
 // After ctx ended, Encode returns its error as it is. A marshaler can
 // return a context error of its own while ctx lives, and that error
 // matches ErrEncode. A comment from [WithYAMLComments] that the encoder
@@ -672,6 +678,16 @@ func (d *docEncoder) node(ctx context.Context, v any) (ast.Node, []block, error)
 
 	if holes.found {
 		return nil, nil, &labeled{label: ErrNoNode}
+	}
+
+	// Go-yaml's decoder rejects an empty node under the !!bool tag, and
+	// the quoting cannot make that node read back as a bool.
+	var bools emptyBoolFinder
+
+	ast.Walk(&bools, node)
+
+	if bools.found {
+		return nil, nil, fmt.Errorf("%w: empty node under the %s tag", ErrEncode, token.BooleanTag)
 	}
 
 	// The go-yaml encoder can leave a collection of a marshaler's YAML at
@@ -949,6 +965,30 @@ func (h *holeFinder) Visit(node ast.Node) ast.Visitor {
 	}
 
 	return h
+}
+
+// emptyBoolFinder is an [ast.Visitor] that reports whether a tree holds an
+// empty node under the "!!bool" tag. A marshaler's YAML or an AST node in
+// the value can put such a node in the tree.
+type emptyBoolFinder struct {
+	found bool
+}
+
+// Visit implements [ast.Visitor].
+func (f *emptyBoolFinder) Visit(node ast.Node) ast.Visitor {
+	tag, ok := node.(*ast.TagNode)
+	if !ok || token.ReservedTagKeyword(tag.Start.Value) != token.BooleanTag {
+		return f
+	}
+
+	null, ok := tag.Value.(*ast.NullNode)
+	if ok && null.Token.Type == token.ImplicitNullType {
+		f.found = true
+
+		return nil
+	}
+
+	return f
 }
 
 // writeErr returns the first error the writer returned, wrapped with
