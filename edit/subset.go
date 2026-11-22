@@ -61,8 +61,8 @@ type instance struct {
 	// Whether the instance lies in a value or a key that the program passed
 	// to the call, rather than in the text of the document.
 	inValue bool
-	// Whether the instance is an anchor on an empty value under which
-	// go-yaml's parse nests the lines after it, as
+	// Whether the instance is an anchor or a tag on an empty value under
+	// which go-yaml's parse nests the lines after it, as
 	// [Doc.misnestedEmpties] finds it.
 	nests bool
 }
@@ -87,12 +87,12 @@ type refused struct {
 // site, a byte order mark comes first, then the misreads in the order of
 // [Doc.misreads], then the constructs in the order of their constants. The
 // sort is stable, so it keeps the order of the gathering for the places of
-// one site and one construct. The list stops at the first anchor on an
-// empty value under which go-yaml's parse nests the lines after it, as
+// one site and one construct. The list stops at the first anchor or tag on
+// an empty value under which go-yaml's parse nests the lines after it, as
 // [Doc.misnestedEmpties] finds it, inclusive. The paths of the places
-// after such an anchor name values of another tree. An anchor on an empty
-// value that go-yaml's parse shows as empty does not stop the list. One
-// problem comes alone, and several come under a summary from
+// after such an anchor or tag name values of another tree. An anchor on an
+// empty value that go-yaml's parse shows as empty does not stop the list.
+// One problem comes alone, and several come under a summary from
 // [niceyaml.NewSummary] that counts them.
 func (d *Doc) newRefusal() error {
 	found := d.markRefusals()
@@ -995,34 +995,82 @@ func (d *Doc) anchoredEmpty(anchor *ast.AnchorNode) instance {
 	}
 }
 
-// misnestedEmpties returns the instances of [ConstructAnchoredEmpty] that
-// go-yaml's parse of the user's text does not show as empty. Go-yaml nests
-// the lines after an anchored empty value or item in that value, as
-// [misnested] finds them. Each anchor on the collection of such a line is
-// the anchor of an empty value of the text.
+// misnestedEmpties returns the instances of [ConstructAnchoredEmpty] and
+// [ConstructTaggedEmpty] that go-yaml's parse of the user's text does not
+// show as empty. Go-yaml nests the lines after an empty value or item with
+// properties in that value, as [misnested] finds them. Each anchor on the
+// collection of such a line is the anchor of an empty value of the text.
+// Each tag there is the tag of an empty value, and it gives an instance
+// when no anchor stands beside it.
 func (d *Doc) misnestedEmpties() []instance {
-	seen := make(map[*ast.AnchorNode]bool)
+	seen := make(map[ast.Node]bool)
 
 	var found []instance
 
 	for _, m := range d.misnests() {
-		d.anchorsAbove(m.props, func(anchor *ast.AnchorNode) {
-			if !seen[anchor] {
-				seen[anchor] = true
-				in := d.anchoredEmpty(anchor)
-				in.nests = true
-				found = append(found, in)
+		var (
+			anchored bool
+			tags     []*ast.TagNode
+		)
+
+		d.propsAbove(m.props, func(prop ast.Node) {
+			switch x := prop.(type) {
+			case *ast.AnchorNode:
+				anchored = true
+
+				if !seen[x] {
+					seen[x] = true
+					in := d.anchoredEmpty(x)
+					in.nests = true
+					found = append(found, in)
+				}
+
+			case *ast.TagNode:
+				tags = append(tags, x)
 			}
 		})
+
+		for _, tag := range tags {
+			if !anchored && !seen[tag] {
+				seen[tag] = true
+				found = append(found, d.taggedEmpty(tag))
+			}
+		}
 	}
 
 	return found
 }
 
-// anchorsAbove calls f with each anchor of props, the anchors and the tags
-// on a collection of the current text, from props up, as
+// taggedEmpty returns the instance of [ConstructTaggedEmpty] of tag, a tag
+// on an empty value or an empty item of the user's text under which
+// go-yaml's parse nests the lines after it. Go-yaml's lexer reads a tab
+// after a tag as a part of the tag, so it reads "!!int\t5" as a tag on an
+// empty value. The words of such an instance name the tag before the tab.
+// Its fix replaces the tab when a value follows it. It asks for a value
+// after the tag otherwise, as after "!t\t" at the end of a line. The lexer
+// also reads a comment after the tab into the tag. But YAML reads "#" after
+// a tab as the start of a comment, so the fix asks for a value there too.
+func (d *Doc) taggedEmpty(tag *ast.TagNode) instance {
+	text, rest, _ := strings.Cut(tagText(tag), "\t")
+	fix := fmt.Sprintf("write a value after %s, such as null", text)
+
+	if r := strings.TrimLeft(rest, " \t"); r != "" && !strings.HasPrefix(r, "#") {
+		fix = fmt.Sprintf("write a space in place of the tab after %s", text)
+	}
+
+	return instance{
+		construct: ConstructTaggedEmpty,
+		at:        d.nodeSite(tag, false),
+		what:      "a document with a tag on an empty value before a line that go-yaml nests in it, such as " + text,
+		fix:       fix,
+		nests:     true,
+	}
+}
+
+// propsAbove calls f with each anchor and each tag of props, the anchors
+// and the tags on a collection of the current text, from props up, as
 // [Doc.misnestedEmpties] reads them.
-func (d *Doc) anchorsAbove(props ast.Node, f func(*ast.AnchorNode)) {
+func (d *Doc) propsAbove(props ast.Node, f func(ast.Node)) {
 	if props == nil {
 		return
 	}
@@ -1030,10 +1078,9 @@ func (d *Doc) anchorsAbove(props ast.Node, f func(*ast.AnchorNode)) {
 	t := d.tree()
 
 	for p := props; p != nil; p = t.parent[p] {
-		switch x := p.(type) {
-		case *ast.AnchorNode:
-			f(x)
-		case *ast.TagNode:
+		switch p.(type) {
+		case *ast.AnchorNode, *ast.TagNode:
+			f(p)
 		default:
 			return
 		}

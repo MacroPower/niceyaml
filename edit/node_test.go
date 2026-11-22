@@ -1476,10 +1476,10 @@ func TestNode_Own_Edited(t *testing.T) {
 func TestNode_Own_FailedCall(t *testing.T) {
 	t.Parallel()
 
-	// Go-yaml reads a new line after the tag of a as the value of the tag,
-	// so a Set of a new key differs from the model after it wrote. The Set
-	// leaves the Doc as it found it and returns nil, so each node reads its
-	// place again. The Apply fails with ErrEngine.
+	// Go-yaml nests a new line after the tag of a in the value of the tag,
+	// so the check after the write of a Set of a new key refuses it. The
+	// Set leaves the Doc as it found it and returns nil, so each node reads
+	// its place again. The Apply fails with ErrUnsupported.
 	before := stringtest.LinesLF("x: &d {k: 1}", "c: *d", "a: !t")
 
 	d := newDoc(t, before)
@@ -1498,7 +1498,7 @@ func TestNode_Own_FailedCall(t *testing.T) {
 
 		return nil
 	})
-	require.ErrorIs(t, err, edit.ErrEngine)
+	require.ErrorIs(t, err, edit.ErrUnsupported)
 
 	assert.Equal(t, before, d.Text())
 }
@@ -4216,9 +4216,9 @@ func TestNode_Nodes(t *testing.T) {
 	t.Run("after a call that leaves the text apart from the model", func(t *testing.T) {
 		t.Parallel()
 
-		// As in TestNode_Own_FailedCall, the Set of a new key differs from
-		// the model after it wrote. Nodes then reads the text as the Set
-		// found it, and the Apply fails with ErrEngine.
+		// As in TestNode_Own_FailedCall, the check after the write of a Set
+		// of a new key refuses it. Nodes then reads the text as the Set
+		// found it, and the Apply fails with ErrUnsupported.
 		before := stringtest.LinesLF("x: &d {k: 1}", "c: *d", "a: !t")
 
 		d := newDoc(t, before)
@@ -4235,7 +4235,7 @@ func TestNode_Nodes(t *testing.T) {
 
 			return nil
 		})
-		require.ErrorIs(t, err, edit.ErrEngine)
+		require.ErrorIs(t, err, edit.ErrUnsupported)
 
 		assert.Equal(t, before, d.Text())
 	})

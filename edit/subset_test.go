@@ -463,6 +463,115 @@ func TestNew_Unsupported(t *testing.T) {
 				"`-- write a value after &x, such as null",
 			),
 		},
+		"tag on an empty value before a line at its column": {
+			// Go-yaml nests b in the value of a, but YAML reads b beside a.
+			before:    stringtest.LinesLF("a: !t", "b: 1"),
+			construct: edit.ConstructTaggedEmpty,
+			err: stringtest.JoinLF(
+				"test.yaml:1:4: $.a: this program does not edit a document with a tag on an empty value before a line that go-yaml nests in it, such as !t",
+				"`-- write a value after !t, such as null",
+			),
+		},
+		"tag on an empty value before a line at a smaller column": {
+			before: stringtest.LinesLF(
+				"Resources:",
+				"  Group:",
+				"    Properties:",
+				"      AvailabilityZones: !GetAZs",
+				"      LaunchTemplate:",
+				"        Id: x",
+				"  Other: 1",
+			),
+			construct: edit.ConstructTaggedEmpty,
+			err: stringtest.JoinLF(
+				"test.yaml:4:26: $.Resources.Group.Properties.AvailabilityZones: this program does not edit a document with a tag on an empty value before a line that go-yaml nests in it, such as !GetAZs",
+				"`-- write a value after !GetAZs, such as null",
+			),
+		},
+		"tag on an empty value before a comment line and a line at its column": {
+			before:    stringtest.LinesLF("a: !t", "# c", "b: 1"),
+			construct: edit.ConstructTaggedEmpty,
+			err: stringtest.JoinLF(
+				"test.yaml:1:4: $.a: this program does not edit a document with a tag on an empty value before a line that go-yaml nests in it, such as !t",
+				"`-- write a value after !t, such as null",
+			),
+		},
+		"tag on an empty item before an entry": {
+			before:    stringtest.LinesLF("r0:", "- !t", "r1: 1"),
+			construct: edit.ConstructTaggedEmpty,
+			err: stringtest.JoinLF(
+				"test.yaml:2:3: $.r0[0]: this program does not edit a document with a tag on an empty value before a line that go-yaml nests in it, such as !t",
+				"`-- write a value after !t, such as null",
+			),
+		},
+		"tag on an empty item before an item": {
+			before:    stringtest.LinesLF("- !t", "- 1"),
+			construct: edit.ConstructTaggedEmpty,
+			err: stringtest.JoinLF(
+				"test.yaml:1:3: $[0]: this program does not edit a document with a tag on an empty value before a line that go-yaml nests in it, such as !t",
+				"`-- write a value after !t, such as null",
+			),
+		},
+		"tab after a tag before a line at its column": {
+			// Go-yaml's lexer reads the tab and 5 into the tag, so the tag
+			// stands on an empty value.
+			before:    stringtest.LinesLF("a: !!int\t5", "z: 1"),
+			construct: edit.ConstructTaggedEmpty,
+			err: stringtest.JoinLF(
+				"test.yaml:1:4: $.a: this program does not edit a document with a tag on an empty value before a line that go-yaml nests in it, such as !!int",
+				"`-- write a space in place of the tab after !!int",
+			),
+		},
+		"tab after a tag at the end of its line before a line at its column": {
+			// No value follows the tab, so a space in place of it leaves the
+			// tag on an empty value.
+			before:    stringtest.LinesLF("a: !t\t", "b: 1"),
+			construct: edit.ConstructTaggedEmpty,
+			err: stringtest.JoinLF(
+				"test.yaml:1:4: $.a: this program does not edit a document with a tag on an empty value before a line that go-yaml nests in it, such as !t",
+				"`-- write a value after !t, such as null",
+			),
+		},
+		"tab after a tag before a comment before a line at its column": {
+			// The lexer reads the tab and the comment into the tag. A space
+			// in place of the tab leaves the tag on an empty value, because
+			// YAML reads the comment as a comment.
+			before:    stringtest.LinesLF("a: !t\t#c", "b: 1"),
+			construct: edit.ConstructTaggedEmpty,
+			err: stringtest.JoinLF(
+				"test.yaml:1:4: $.a: this program does not edit a document with a tag on an empty value before a line that go-yaml nests in it, such as !t",
+				"`-- write a value after !t, such as null",
+			),
+		},
+		"tag after an anchor on an empty value before a line at its column": {
+			// The anchor gives the one problem of the value.
+			before:    stringtest.LinesLF("a: &x !t", "b: 1"),
+			construct: edit.ConstructAnchoredEmpty,
+			err: stringtest.JoinLF(
+				"test.yaml:1:4: $.a: this program does not edit a document with an anchor on an empty value, such as &x",
+				"`-- write a value after &x, such as null",
+			),
+		},
+		"tag before an anchor on an empty value before a line at its column": {
+			before:    stringtest.LinesLF("a: !t &x", "b: 1"),
+			construct: edit.ConstructAnchoredEmpty,
+			err: stringtest.JoinLF(
+				"test.yaml:1:7: $.a: this program does not edit a document with an anchor on an empty value, such as &x",
+				"`-- write a value after &x, such as null",
+			),
+		},
+		"tag on an empty value at the end of a mapping": {
+			// Control: go-yaml reads the value as empty, as YAML does.
+			before: stringtest.LinesLF("b: 1", "a: !t"),
+		},
+		"tag on a mapping on the lines after it": {
+			// Control.
+			before: stringtest.LinesLF("a: !t", "  b: 1", "c: 2"),
+		},
+		"tag on the root mapping on the lines after it": {
+			// Control.
+			before: stringtest.LinesLF("!t", "b: 1"),
+		},
 		"anchor on a null": {
 			// Control.
 			before: stringtest.LinesLF("a: &x null", "b: *x"),

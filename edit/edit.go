@@ -733,8 +733,8 @@ type Removal struct {
 // outside the subset that the engine edits, as that section lists it, with
 // a problem that matches [ErrUnsupported]. The error of New holds a
 // problem for each instance that it refuses. The problems stop at the
-// first anchor on an empty value under which go-yaml's parser nests the
-// lines after it, as that section describes.
+// first anchor or tag on an empty value under which go-yaml's parser nests
+// the lines after it, as that section describes.
 //
 // New takes an empty document, which [niceyaml.Node.IsEmpty] reports, such
 // as an empty text or a text of comments alone. Its root holds no value, so

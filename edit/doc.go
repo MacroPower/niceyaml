@@ -296,8 +296,16 @@
 //   - an anchor on an empty value or an empty item, as in "a: &x", also
 //     where go-yaml's parser nests the lines after it in the value, as it
 //     nests "b: 1" after "a: &x !t"
+//   - a tag on an empty value or an empty item where go-yaml's parser
+//     nests the lines after it in the value, as it nests "b: 1" after
+//     "a: !t", but YAML reads b beside a
 //   - both "\n" and "\r\n" line breaks in the file of the document, or a
 //     "\r" alone
+//
+// Go-yaml's lexer reads a tab after a tag, and some values after the tab,
+// as a part of the tag. So it reads "a: !!int\t5" as a tag on an empty
+// value, and New refuses that line before "z: 1" as such a tag. A space in
+// place of the tab fixes it.
 //
 // The error of New holds a problem for each instance of these and for each
 // byte order mark that New refuses. It also holds a problem for each
@@ -312,10 +320,11 @@
 // [go.jacobcolvin.com/niceyaml.Problems] yields them in the order of the
 // text. At one site, a byte order mark comes first, then the misreads,
 // then the constructs in the order of their [Construct] constants. The
-// problems stop at the first anchor on an empty value under which go-yaml's
-// parser nests the lines after it, inclusive. For example,
-// the parser nests "b: 1" after "a: &x !t" inside the value of a. The
-// paths of the places after such an anchor name values of another tree.
+// problems stop at the first anchor or tag on an empty value under which
+// go-yaml's parser nests the lines after it, inclusive. For example,
+// the parser nests "b: 1" after "a: &x !t" or "a: !t" inside the value of
+// a. The paths of the places after such an anchor or tag name values of
+// another tree.
 // An anchor on an empty value that go-yaml's parser reads as empty, as in
 // "a: &x" before "b: 1", does not stop the problems. [errors.As] finds the
 // first [*UnsupportedError] of the error, which can come after a misread.
@@ -841,18 +850,13 @@
 // found it.
 //
 // The error of a difference binds where the user's text holds the value
-// that differs, as an error at that value does. A value that the call left
-// in its place binds where the text that the call found holds it. It binds
-// there even where go-yaml reads it as a value of another kind after the
-// call. So in "a: !t", a Set of $.b fails at the tag, though go-yaml reads
-// $.a as a mapping after the Set.
-//
-// An entry that the text holds but the model lacks binds at its key when
-// the user wrote that key. When a call wrote the key, the entry binds at
-// the mapping or the item that holds it in the edited text. An entry that
-// the model holds but the text lacks binds at its key in the text that the
-// Apply found, or at its mapping when a call created it. An error at the
-// root binds at the site of the root, as the Errors section gives it.
+// that differs, as an error at that value does. An entry that the text
+// holds but the model lacks binds at its key when the user wrote that key.
+// When a call wrote the key, the entry binds at the mapping or the item
+// that holds it in the edited text. An entry that the model holds but the
+// text lacks binds at its key in the text that the Apply found, or at its
+// mapping when a call created it. An error at the root binds at the site
+// of the root, as the Errors section gives it.
 //
 // The message of a difference says what go-yaml reads at the value. The
 // message names the path of the value in the edited text and the call that

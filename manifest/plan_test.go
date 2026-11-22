@@ -887,8 +887,10 @@ func TestRegistry_PlanMigration_Misread(t *testing.T) {
 		text string
 		// The text of the file after the plan, or "".
 		want string
-		// The error of the plan, which matches edit.ErrMisread, or "".
+		// The error of the plan, or "".
 		err string
+		// The sentinel that the error of the plan matches.
+		errIs error
 	}{
 		"own key before a merge key that brings in the key": {
 			// Control: go-yaml's decoder reads the merged entry, so the
@@ -896,12 +898,16 @@ func TestRegistry_PlanMigration_Misread(t *testing.T) {
 			text: stringtest.LinesLF("a:", "  b: 1", "s: &s {x: 1}", "m:", "  x: 2", "  <<: *s"),
 			err: "config/config.yaml:5:3: $.m.x: go-yaml's decoder reads $.m.x from the merge key at 6:3, but the " +
 				"merge spec keeps the own entry written before it",
+			errIs: edit.ErrMisread,
 		},
 		"tag alone on an empty value before a line at the column of its key": {
-			// Go-yaml reads "x: 1" as part of the empty value of !t, and the
-			// plan migrates the document as go-yaml reads it.
+			// Go-yaml reads "x: 1" as part of the empty value of !t, but YAML
+			// reads x beside meta, so the migration of the document fails at
+			// New.
 			text: stringtest.LinesLF("a:", "  b: 1", "meta: !t", "x: 1"),
-			want: stringtest.LinesLF("a:", "  version: v1", "  b: 1", "meta: !t", "x: 1"),
+			err: "config/config.yaml:3:7: $.meta: this program does not edit a document with a tag on an empty " +
+				"value before a line that go-yaml nests in it, such as !t",
+			errIs: edit.ErrUnsupported,
 		},
 		"value after the tag": {
 			// Control.
@@ -925,7 +931,7 @@ func TestRegistry_PlanMigration_Misread(t *testing.T) {
 			require.Equal(t, plan.Err(), err)
 
 			if tc.err != "" {
-				require.ErrorIs(t, plan.Err(), edit.ErrMisread)
+				require.ErrorIs(t, plan.Err(), tc.errIs)
 				require.NotErrorIs(t, plan.Err(), edit.ErrEngine)
 				assert.Contains(t, plan.Err().Error(), tc.err)
 				assert.True(t, niceyaml.IsInvalid(plan.Err()))

@@ -401,6 +401,26 @@ func TestNew_Refusals(t *testing.T) {
 			},
 			construct: edit.ConstructAnchoredEmpty,
 		},
+		"construct after a tagged empty value": {
+			// Go-yaml nests b and c inside the value of a, so the list stops
+			// at its tag.
+			text: stringtest.LinesLF("a: !t", "b: &y 1", "c: &y 2"),
+			want: []string{
+				"1:4 this program does not edit a document with a tag on an empty value before a line that go-yaml " +
+					"nests in it, such as !t",
+			},
+			construct: edit.ConstructTaggedEmpty,
+		},
+		"construct before a tagged empty item": {
+			text:    stringtest.LinesLF("a: &y 1", "b: &y 2", "r0:", "- !t", "r1: 1"),
+			summary: "this program does not edit this document, for 2 reasons",
+			want: []string{
+				"2:4 this program does not edit a document that defines the anchor &y twice",
+				"4:3 this program does not edit a document with a tag on an empty value before a line that go-yaml " +
+					"nests in it, such as !t",
+			},
+			construct: edit.ConstructReusedAnchor,
+		},
 		"construct before an anchored empty item": {
 			text:    stringtest.LinesLF("a: &y 1", "b: &y 2", "r0:", "- &x0", "r1: !t *x0"),
 			summary: "this program does not edit this document, for 2 reasons",
@@ -6437,7 +6457,8 @@ func TestDoc_Apply_FailedCheck(t *testing.T) {
 		"new key that go-yaml reads as the value of a tag": {
 			text:  stringtest.LinesLF("x: &d {k: 1}", "c: *d", "a: !t"),
 			path:  paths.Doc().Child("b"),
-			errIs: edit.ErrEngine,
+			err:   "test.yaml:3:4: $.a: the edit sets $.b, which makes a document with a tag on an empty value",
+			errIs: edit.ErrUnsupported,
 		},
 	}
 

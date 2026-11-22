@@ -570,19 +570,8 @@ func TestNew_GoYAMLReading(t *testing.T) {
 		// The texts of the reference documents of the Source.
 		refs []string
 	}{
-		"tab after a tag": {
-			text: stringtest.LinesLF("a: !!int\t5", "z: 1"),
-		},
-		"tag alone on an empty value before a line at the column of its key": {
-			text: stringtest.LinesLF(
-				"Resources:",
-				"  Group:",
-				"    Properties:",
-				"      AvailabilityZones: !GetAZs",
-				"      LaunchTemplate:",
-				"        Id: x",
-				"  Other: 1",
-			),
+		"tab after a tag at the end of a mapping": {
+			text: stringtest.LinesLF("z: 1", "a: !!int\t5"),
 		},
 		"tag before an anchor on a number": {
 			text: stringtest.LinesLF("a: !t &k 1", "b: *k"),

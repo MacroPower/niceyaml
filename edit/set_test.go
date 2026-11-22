@@ -221,23 +221,22 @@ func TestNode_Set(t *testing.T) {
 			want:   stringtest.LinesLF("k:\t5\t# c", "z: 1"),
 		},
 		"new key after a tag alone at the end of a mapping": {
-			// Go-yaml reads the new line as the value of the tag, and the
-			// message names that value, not a tag. The Set left the value in
-			// its place, so the problem binds at the tag, where an error at
-			// the value binds in the text that the Set found (fix24 G24-4).
+			// Go-yaml nests the new line in the value of the tag, but YAML
+			// reads it beside a. The tag is the user's, so the problem binds
+			// there.
 			before: stringtest.LinesLF("a: !t"),
 			path:   paths.Doc().Child("b"),
 			value:  9,
-			err:    `1:4: $.a: go-yaml reads $.a as {"b": 9}, not null, after cafe.jacobcolvin.com/v1 sets $.b`,
-			engine: true,
+			err: "test.yaml:1:4: $.a: cafe.jacobcolvin.com/v1 sets $.b, which makes a document with a tag on an " +
+				"empty value before a line that go-yaml nests in it, such as !t, and cafe does not edit such a document",
 		},
 		"new key after a tag alone at the end of a mapping in a mapping": {
 			before: stringtest.LinesLF("m:", "  x:", "    a: !GetAZs"),
 			path:   paths.MustParse("$.m.nk"),
 			value:  9,
-			err: `3:8: $.m.x.a: go-yaml reads $.m.x.a as {"nk": 9}, not null, after cafe.jacobcolvin.com/v1 ` +
-				"sets $.m.nk",
-			engine: true,
+			err: "test.yaml:3:8: $.m.x.a: cafe.jacobcolvin.com/v1 sets $.m.nk, which makes a document with a tag " +
+				"on an empty value before a line that go-yaml nests in it, such as !GetAZs, and cafe does not edit " +
+				"such a document",
 		},
 		"new key after a block scalar that ends with a line of spaces, in a text without a final newline": {
 			// The new key gives the line of spaces a line break, which changes
@@ -2374,13 +2373,6 @@ func TestNode_Set(t *testing.T) {
 				yaml: "|-\n  x \n",
 				want: "a: |-\n  x \n",
 			},
-			"mapping after a tag alone on the line of its key": {
-				// A control: go-yaml's encoder writes the mapping in flow style,
-				// where YAML reads it as go-yaml does.
-				yaml: "x: !t\ny: 1\n",
-				opts: []edit.SetOption{edit.Flow()},
-				want: "a: {x: !t {y: 1}}\n",
-			},
 			"int tag on an integer past the range of an int64": {
 				// A control: yaml.Unmarshal reads the integer otherwise than
 				// niceyaml's decode does. The Set either writes a text that reads
@@ -2691,6 +2683,13 @@ func TestNode_Set_Unsupported(t *testing.T) {
 			value:     yamlMarshaler("? a\n: 1\n"),
 			err:       "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 sets $.b to a value whose YAML holds an explicit key, and cafe does not write explicit keys",
 			construct: edit.ConstructExplicitKey,
+		},
+		"tag on an empty value before a line at its column in the YAML of a marshaler": {
+			// Go-yaml nests y in the value of x, but YAML reads y beside x.
+			value: yamlMarshaler("x: !t\ny: 1\n"),
+			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 sets $.b to a value whose YAML holds a tag on an " +
+				"empty value before a line that go-yaml nests in it, such as !t, and cafe does not write such YAML",
+			construct: edit.ConstructTaggedEmpty,
 		},
 		"merge key in the YAML of a marshaler": {
 			value:     yamlMarshaler("<<: {a: 1}\nb: 2\n"),

@@ -1839,57 +1839,12 @@ func (d *Doc) diffProblem(x *model, df *diff) error {
 		)))
 
 	default:
-		bound = d.diffAt(at, problem)
+		bound = d.engineAt(at, problem)
 	}
 
 	d.record(bound)
 
 	return bound //nolint:wrapcheck // The binding is the problem of the edit.
-}
-
-// diffAt returns problem, the problem of a difference at path, bound in
-// the text that the call running found, where an error at the value of
-// path binds there. It does so when that text holds the value at path with
-// the same first byte, a value that the call left in its place. Go-yaml can
-// read such a value as a value of another kind after the call, as it reads
-// a tag alone before a key that the call writes. The site of a value
-// follows its kind, so the problem binds where the user's text holds the
-// value. Any other problem, and a problem of the checks after the last
-// call, binds as [Doc.engineAt] binds it.
-func (d *Doc) diffAt(path paths.Path, problem error) error {
-	if d.calling && !path.IsRoot() {
-		now := d.save()
-		first, ok := d.valueOrigin(path)
-
-		d.show(d.callStart)
-
-		if found, held := d.valueOrigin(path); ok && held && found == first {
-			if bound, ok := d.engineIn(path, problem); ok {
-				d.show(now)
-
-				return bound
-			}
-		}
-
-		d.show(now)
-	}
-
-	return d.engineAt(path, problem)
-}
-
-// valueOrigin returns the origin of the first byte of the value at path in
-// the current text, with its anchors and tags, as [Doc.firstOrigin] gives
-// it. It reports false when the text does not hold path or the value has no
-// bytes.
-func (d *Doc) valueOrigin(path paths.Path) (int, bool) {
-	p, err := d.resolve(path)
-	if err != nil || !p.exists {
-		return 0, false
-	}
-
-	o := d.firstOrigin(p.value)
-
-	return o, o != math.MinInt
 }
 
 // startKey returns the site of the key of the entry that df finds missing,
