@@ -884,7 +884,7 @@ func readingOf(node ast.Node) string {
 
 	var v any
 
-	err := astnode.NodeToValue(node, &v)
+	err := astnode.StockNodeToValue(node, &v)
 	if err != nil {
 		return fmt.Sprintf("the lines %q", strings.TrimSpace(node.String()))
 	}

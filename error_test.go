@@ -15278,7 +15278,7 @@ func TestPanicError_Recovered(t *testing.T) {
 		"sequence longer than its array": {
 			input:  "# pair\n[a, b, c]\n",
 			decode: decodeAs[[2]string](),
-			stack:  "go-yaml",
+			stack:  "internal/yamldecode.(*Decoder).decodeArray(",
 			want:   "2:1: decoder panicked: reflect: array index out of range",
 		},
 		// The decode of the outer value would mark the error of an

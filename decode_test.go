@@ -54,12 +54,6 @@ var (
 	// The error decodeLevel reports for a name that is no level.
 	errUnknownLevel = errors.New("unknown level")
 
-	// RegisterStrict has go-yaml decode a [strictRegistered] with a
-	// function that accepts every key, in every decode of the program.
-	registerStrict = sync.OnceFunc(func() {
-		yaml.RegisterCustomUnmarshaler(func(*strictRegistered, []byte) error { return nil })
-	})
-
 	// OpenOnlyDoc is a document whose hours hold an open and no close.
 	openOnlyDoc = stringtest.LinesLF("spec:", "  hours:", "    open: 9")
 
@@ -73,21 +67,6 @@ var (
 	errPortRequired = errors.New("port is required")
 	errNegativeA    = errors.New("a must not be negative")
 
-	// Has go-yaml decode a problemRegistered as decodePulled decodes a
-	// problemPulled, in every decode of the program.
-	registerPulled = sync.OnceFunc(func() {
-		yaml.RegisterCustomUnmarshalerContext(func(ctx context.Context, p *problemRegistered, data []byte) error {
-			return decodePulled(ctx, (*problemPulled)(p), func(v any) error {
-				err := yaml.Unmarshal(data, v)
-				if err != nil {
-					return fmt.Errorf("decode image: %w", err)
-				}
-
-				return nil
-			})
-		})
-	})
-
 	// The calls of the UnmarshalText method of [problemLevel], by text.
 	levelCalls callCounter
 
@@ -96,6 +75,14 @@ var (
 
 	// The calls of the UnmarshalText method of [problemOnce], by text.
 	onceCalls callCounter
+
+	// The calls of the UnmarshalText method of [problemEndingText], by
+	// text.
+	endingCalls callCounter
+
+	// The function that the UnmarshalText method of [problemEndingText]
+	// calls to end a context, by text.
+	textEndings sync.Map
 
 	// The error tier reports for text it does not know.
 	errUnknownTier = errors.New("unknown tier")
@@ -3409,6 +3396,34 @@ func TestCustomUnmarshaler(t *testing.T) {
 			ByName:  map[string]plainLevel{"a": levelHigh},
 			ByLevel: map[plainLevel]string{levelLow: "a"},
 		}, got)
+	})
+
+	// The decode reads a type that only yaml.RegisterCustomUnmarshaler
+	// gives a function by its fields, and the option decodes it.
+	t.Run("leaves out the functions that go-yaml registers", func(t *testing.T) {
+		t.Parallel()
+
+		type registered struct {
+			Name string `yaml:"name"`
+		}
+
+		yaml.RegisterCustomUnmarshaler(func(*registered, []byte) error { return errUnmarshal })
+
+		doc := yamltest.FirstDocument(t, "name: api\n")
+
+		got, err := doc.Decode[registered](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, registered{Name: "api"}, got)
+
+		got, err = doc.Decode[registered](t.Context(), niceyaml.OverrideTypeRules(niceyaml.CustomUnmarshaler(
+			func(_ context.Context, r *registered, _ func(any) error) error {
+				r.Name = "option"
+
+				return nil
+			},
+		)))
+		require.NoError(t, err)
+		assert.Equal(t, registered{Name: "option"}, got)
 	})
 
 	t.Run("hands the function the context and a decode of the value", func(t *testing.T) {
@@ -11515,8 +11530,8 @@ type strictOption struct {
 }
 
 // strictRegistered has the fields of [strictOption]. A function from
-// yaml.RegisterCustomUnmarshaler decodes it in every decode of the
-// program, as [registerStrict] registers one, and accepts every key.
+// yaml.RegisterCustomUnmarshaler accepts every key of it, and a decode of
+// niceyaml does not call that function.
 type strictRegistered strictOption
 
 // strictJSON has the fields of [strictOption] and an UnmarshalJSON
@@ -11843,7 +11858,7 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 
 	strict := niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject)
 
-	registerStrict()
+	yaml.RegisterCustomUnmarshaler(func(*strictRegistered, []byte) error { return nil })
 
 	// The mapping of s holds a key no field reads, and so do the mapping
 	// below it and the root.
@@ -12098,15 +12113,15 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 			input: nestedUnknown,
 			want:  `7:1: $.qqq~: unknown field "qqq"`,
 		},
-		// Nothing shows which type a registered function decodes. The
-		// function still decides the keys of its own struct, and the
-		// search reports a key below it that the function accepts.
-		"type a registered function decodes": {
+		// The decode does not call the function that go-yaml registers for
+		// the type, so the decoder checks the fields of the type.
+		"type a function of go-yaml's registry decodes": {
 			decode: decodeAs[struct {
 				S strictRegistered `yaml:"s"`
 			}](strict),
 			input: nestedUnknown,
 			want: stringtest.JoinLF(
+				`3:3: $.s.zzz~: unknown field "zzz"`,
 				`6:5: $.s.n.www~: unknown field "www"`,
 				`7:1: $.qqq~: unknown field "qqq"`,
 			),
@@ -13981,11 +13996,6 @@ type problemPulled struct {
 	Pull bool   `yaml:"pull"`
 }
 
-// problemRegistered has the fields of [problemPulled]. A function from
-// yaml.RegisterCustomUnmarshaler decodes it in every decode of the
-// program, as registerPulled registers one.
-type problemRegistered problemPulled
-
 // problemJSON has the fields of [problemPulled] and an UnmarshalJSON
 // method that accepts every value, which the decoder calls only under
 // niceyaml.JSONUnmarshalers.
@@ -14398,6 +14408,25 @@ func (*problemEnding) UnmarshalYAML(ctx context.Context, _ func(any) error) erro
 	if calls, ok := ctx.Value(callsKey{}).(*problemCalls); ok {
 		calls.cancel()
 	}
+
+	return nil
+}
+
+// problemEndingText decodes itself from text. It counts its calls by text
+// in endingCalls. Each call after the first for a text ends the context
+// that textEndings holds for that text.
+type problemEndingText string
+
+func (e *problemEndingText) UnmarshalText(text []byte) error {
+	if endingCalls.add(string(text)) > 1 {
+		if v, ok := textEndings.Load(string(text)); ok {
+			if cancel, ok := v.(context.CancelFunc); ok {
+				cancel()
+			}
+		}
+	}
+
+	*e = problemEndingText(text)
 
 	return nil
 }
@@ -15403,8 +15432,6 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 
 	custom := niceyaml.OverrideTypeRules(niceyaml.CustomUnmarshaler(decodePulled))
 
-	registerPulled()
-
 	// The documents several cases share. Each holds replicas no integer
 	// field takes. The image of the first lacks the repo its unmarshalers
 	// require, the image of the second passes them, and the image of the
@@ -15479,21 +15506,6 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 		// as text, so the boolean field of the type is no problem.
 		"value beside a custom unmarshaler function that passes": {
 			decode: decodeAs[problemImaged[problemPulled]](custom),
-			input:  withRepo,
-			want:   "1:11: $.replicas: expected integer, got string",
-		},
-		// Nothing shows which type a registered function decodes, so the
-		// error of the function has no location and comes back alone.
-		"registered unmarshaler function": {
-			decode: decodeAs[problemImaged[problemRegistered]](),
-			input:  noRepo,
-			is:     errRepoRequired,
-			want:   "repo is required",
-		},
-		// The struct the function decodes confirms each of its fields,
-		// so the function, which takes pull as text, has the last word.
-		"value beside a registered unmarshaler function that passes": {
-			decode: decodeAs[problemImaged[problemRegistered]](),
 			input:  withRepo,
 			want:   "1:11: $.replicas: expected integer, got string",
 		},
@@ -16876,38 +16888,24 @@ func TestDocument_Decode_Problems_Context(t *testing.T) {
 		require.EqualError(t, err, "2:11: $.replicas: expected integer, got string")
 	})
 
-	// The registered function decodes the image in the decode, and ends
-	// the context when the search asks it about a field of the image. The
-	// search has found the timeout by then, and reports none of what it
-	// found.
+	// The decode calls the method of the mode once. The search calls it
+	// again, and that call ends the context. The search has found the
+	// timeout by then, and reports none of what it found.
 	t.Run("context that ends in the search", func(t *testing.T) {
 		t.Parallel()
-
-		type ended struct {
-			Pull bool `yaml:"pull"`
-		}
 
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 
-		calls := 0
+		textEndings.Store("ends-in-search", cancel)
 
-		yaml.RegisterCustomUnmarshaler(func(*ended, []byte) error {
-			calls++
-			if calls > 1 {
-				cancel()
-			}
-
-			return nil
-		})
-
-		_, err := yamltest.FirstDocument(t, imageInput).Decode[struct {
-			Replicas int   `yaml:"replicas"`
-			Timeout  int   `yaml:"timeout"`
-			Image    ended `yaml:"image"`
+		_, err := yamltest.FirstDocument(t, "replicas: x\ntimeout: soon\nmode: ends-in-search\n").Decode[struct {
+			Replicas int               `yaml:"replicas"`
+			Timeout  int               `yaml:"timeout"`
+			Mode     problemEndingText `yaml:"mode"`
 		}](ctx)
 		require.EqualError(t, err, "1:11: $.replicas: expected integer, got string")
-		assert.Equal(t, 2, calls)
+		assert.Equal(t, map[string]int{"ends-in-search": 2}, endingCalls.take())
 	})
 
 	// The option names the type its function decodes, so the search asks
@@ -17453,11 +17451,6 @@ func (r *rebasing) UnmarshalYAML(unmarshal func(any) error) error {
 // optionDecoded has no method of its own. A function from
 // niceyaml.CustomUnmarshaler decodes it.
 type optionDecoded struct{}
-
-// registeredDecoded has no method of its own. A function from
-// yaml.RegisterCustomUnmarshaler decodes it in every decode of the
-// program.
-type registeredDecoded struct{}
 
 // cancelKey is the context key of the function canceling calls.
 type cancelKey struct{}
@@ -19449,22 +19442,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 						A int         `yaml:"a"`
 						V rejectsOnce `yaml:"v"`
 					}](context.WithValue(ctx, panicCallsKey{}, new(atomic.Int32)))
-
-					return err
-				},
-				want: "unmarshaler rejected the value",
-			},
-			// The decoder shows no type a function registered for the
-			// whole program decodes.
-			"type a registered function decodes": {
-				input: "name: api\nvalue: bad\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					yaml.RegisterCustomUnmarshaler(func(*registeredDecoded, []byte) error { return errUnmarshal })
-
-					_, err := dd.Decode[struct {
-						Name  string            `yaml:"name"`
-						Value registeredDecoded `yaml:"value"`
-					}](ctx)
 
 					return err
 				},

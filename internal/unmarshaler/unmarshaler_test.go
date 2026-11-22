@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/stretchr/testify/assert"
 
 	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
+	"go.jacobcolvin.com/niceyaml/internal/yamldecode"
 )
 
 // textValue decodes itself from text.
@@ -97,7 +97,7 @@ type inlineCustom struct {
 }
 
 // noOption is the go-yaml option of a function no test calls.
-func noOption(unmarshaler.ValueDecoder) yaml.DecodeOption { return nil }
+func noOption(unmarshaler.ValueDecoder) yamldecode.DecodeOption { return nil }
 
 func TestBase(t *testing.T) {
 	t.Parallel()

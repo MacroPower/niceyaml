@@ -17,13 +17,14 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/decodewalk"
+	"go.jacobcolvin.com/niceyaml/internal/yamldecode"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
 
 // rules returns the rules of a walk of doc, for a decoder with opts that
 // has read the anchors of doc, as the decode of doc did. A panic of the
 // decoder comes back as an error.
-func rules(tb testing.TB, doc *niceyaml.Node, opts ...yaml.DecodeOption) decodewalk.Rules {
+func rules(tb testing.TB, doc *niceyaml.Node, opts ...yamldecode.DecodeOption) decodewalk.Rules {
 	tb.Helper()
 
 	return referenceRules(tb, doc, nil, opts...)
@@ -33,10 +34,10 @@ func rules(tb testing.TB, doc *niceyaml.Node, opts ...yaml.DecodeOption) decodew
 // aliases of doc read the anchors of ref, a reference document, or of no
 // document for a nil ref. The decoder reads ref before doc, as a decode
 // reads the anchors of its reference documents first.
-func referenceRules(tb testing.TB, doc, ref *niceyaml.Node, opts ...yaml.DecodeOption) decodewalk.Rules {
+func referenceRules(tb testing.TB, doc, ref *niceyaml.Node, opts ...yamldecode.DecodeOption) decodewalk.Rules {
 	tb.Helper()
 
-	dec := yaml.NewDecoder(bytes.NewReader(nil), opts...)
+	dec := yamldecode.NewDecoder(bytes.NewReader(nil), opts...)
 
 	var sink any
 

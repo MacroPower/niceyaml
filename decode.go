@@ -28,6 +28,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/rejection"
 	"go.jacobcolvin.com/niceyaml/internal/taggedscalar"
 	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
+	"go.jacobcolvin.com/niceyaml/internal/yamldecode"
 	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -669,9 +670,12 @@ func (m *UnknownFieldsMode) UnmarshalText(text []byte) error {
 //
 // Below a struct that decodes itself into fields that do not mirror the
 // document, the report holds an unknown field only when the decoder names
-// it. The report can also hold a key that a function from
-// [yaml.RegisterCustomUnmarshaler] accepts. A function from
-// [CustomUnmarshaler] does not have that limit.
+// it.
+//
+// A decode does not call a function from [yaml.RegisterCustomUnmarshaler],
+// so it checks the fields of a type that such a function decodes, as it
+// checks those of any other type. Give the function to [CustomUnmarshaler]
+// instead.
 func WithUnknownFields(mode UnknownFieldsMode) DecodeOption {
 	if mode < UnknownFieldsIgnore || mode > UnknownFieldsReject {
 		panic(fmt.Sprintf("niceyaml.WithUnknownFields: %v is not one of the UnknownFieldsMode constants", mode))
@@ -876,9 +880,11 @@ func typeRulesConfig(rules []TypeRule) decodeConfig {
 // [Validator] included. A nil fn removes the function that an earlier
 // TypeRule or the Source gave the type. A library that gets a Source
 // from its caller can thus read T by the methods of the type alone, when
-// it passes CustomUnmarshaler[T](nil) to [OverrideTypeRules]. Give the
-// function to CustomUnmarshaler rather than to
-// [yaml.RegisterCustomUnmarshaler], whose types a decode cannot see.
+// it passes CustomUnmarshaler[T](nil) to [OverrideTypeRules].
+//
+// A decode does not call a function from [yaml.RegisterCustomUnmarshaler],
+// so it reads the type of such a function as it reads a type without one.
+// Give the function to CustomUnmarshaler instead.
 //
 // CustomUnmarshaler panics for a pointer type T. The decoder reads a *T
 // through T, so the function for T already decodes a pointer to T.
@@ -895,8 +901,8 @@ func CustomUnmarshaler[T any](fn func(ctx context.Context, v *T, decode func(any
 		}}
 	}
 
-	opt := func(decode unmarshaler.ValueDecoder) yaml.DecodeOption {
-		return yaml.CustomUnmarshalerContext(func(ctx context.Context, v *T, text []byte) error {
+	opt := func(decode unmarshaler.ValueDecoder) yamldecode.DecodeOption {
+		return yamldecode.CustomUnmarshalerContext(func(ctx context.Context, v *T, text []byte) error {
 			err := fn(ctx, v, func(dst any) error {
 				// A decode into T calls fn again for the same value, so the
 				// recursion never ends.
@@ -1543,7 +1549,7 @@ func allocate(v any) any {
 
 // newDecoder returns a go-yaml decoder for a decode of n with cfg. It
 // applies the options of the source, then those of cfg, then extra.
-func (n *Node) newDecoder(cfg decodeConfig, extra ...yaml.DecodeOption) *yaml.Decoder {
+func (n *Node) newDecoder(cfg decodeConfig, extra ...yamldecode.DecodeOption) *yamldecode.Decoder {
 	decode := func(ctx context.Context, text []byte, dst any) error {
 		return n.decodeValue(ctx, text, dst, cfg)
 	}
@@ -1551,18 +1557,18 @@ func (n *Node) newDecoder(cfg decodeConfig, extra ...yaml.DecodeOption) *yaml.De
 	opts := slices.Concat(n.source.decodeOptions(), cfg.unmarshalers.YAMLOptions(decode))
 
 	if cfg.unknownFields == UnknownFieldsReject && !cfg.searchesUnknown {
-		opts = append(opts, yaml.DisallowUnknownField())
+		opts = append(opts, yamldecode.DisallowUnknownField())
 	}
 
 	if len(cfg.allowedFieldPrefixes) > 0 {
-		opts = append(opts, yaml.AllowFieldPrefixes(cfg.allowedFieldPrefixes...))
+		opts = append(opts, yamldecode.AllowFieldPrefixes(cfg.allowedFieldPrefixes...))
 	}
 
 	if cfg.orderedMaps {
-		opts = append(opts, yaml.UseOrderedMap())
+		opts = append(opts, yamldecode.UseOrderedMap())
 	}
 
-	return yaml.NewDecoder(bytes.NewReader(nil), append(opts, extra...)...)
+	return yamldecode.NewDecoder(bytes.NewReader(nil), append(opts, extra...)...)
 }
 
 // ownDecode decodes the first document of text into an any with go-yaml's
@@ -1915,7 +1921,7 @@ func saveTarget(v any) func() {
 func panicsOnInlineMap(err error) bool {
 	p, ok := errors.AsType[*PanicError](err)
 
-	return ok && bytes.Contains(p.Stack, []byte("go-yaml.(*Decoder).deleteStructKeys("))
+	return ok && bytes.Contains(p.Stack, []byte("internal/yamldecode.(*Decoder).deleteStructKeys("))
 }
 
 // decodeOnce is [Node.decodeUnbound] with one decoder, which rejects
@@ -1948,10 +1954,10 @@ func (n *Node) decodeOnce(
 		return nil
 	}
 
-	var extra []yaml.DecodeOption
+	var extra []yamldecode.DecodeOption
 
 	if comments != nil {
-		extra = append(extra, yaml.CommentToMap(comments))
+		extra = append(extra, yamldecode.CommentToMap(comments))
 	}
 
 	dec := n.newDecoder(cfg, extra...)
@@ -2366,13 +2372,13 @@ func asDecodeError(err error) error {
 // [*Error] at node that holds a [*PanicError]. The document is not at
 // fault for a panic, so the error matches [errPlaced] but not
 // [ErrDecode].
-func decodeWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, v any) error {
+func decodeWithRecover(ctx context.Context, dec *yamldecode.Decoder, node ast.Node, v any) error {
 	return decodeAtWithRecover(ctx, dec, node, v, node)
 }
 
 // decodeAtWithRecover is [decodeWithRecover] with the error of a panic at
 // the first token of at, a node of the document, rather than of node.
-func decodeAtWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, v any, at ast.Node) (err error) {
+func decodeAtWithRecover(ctx context.Context, dec *yamldecode.Decoder, node ast.Node, v any, at ast.Node) (err error) {
 	defer func() {
 		p := recover()
 		if p == nil {
@@ -2732,7 +2738,7 @@ func (n *Node) YAMLComments(ctx context.Context) (yaml.CommentMap, error) {
 // reference documents that the aliases reach and, for a node below the
 // body, the anchors of the document before node. It stops at the first
 // anchor that fails.
-func (n *Node) prime(ctx context.Context, dec *yaml.Decoder, node ast.Node) (ast.Node, error) {
+func (n *Node) prime(ctx context.Context, dec *yamldecode.Decoder, node ast.Node) (ast.Node, error) {
 	tree := n.doc.tree()
 	view := tree.View(node)
 
@@ -3240,11 +3246,11 @@ type problemKey struct {
 type problemCollector struct {
 	ctx     context.Context
 	node    *Node
-	decoder *yaml.Decoder
+	decoder *yamldecode.Decoder
 	// The decoder for the settings of the decode with searchesUnknown
 	// flipped, as [problemCollector.flipped] creates it, or nil before
 	// the first call.
-	flip *yaml.Decoder
+	flip *yamldecode.Decoder
 	// The node that [problemCollector.register] read, which the flipped
 	// decoder reads too.
 	registered ast.Node
@@ -3303,7 +3309,7 @@ func (c *problemCollector) decode(node ast.Node, v any) error {
 // fields when the decoder of the collector rejects them, and the other way
 // around. It reads the node that [problemCollector.register] read, so it
 // holds the same anchors.
-func (c *problemCollector) flipped() *yaml.Decoder {
+func (c *problemCollector) flipped() *yamldecode.Decoder {
 	if c.flip != nil {
 		return c.flip
 	}
@@ -3321,7 +3327,7 @@ func (c *problemCollector) flipped() *yaml.Decoder {
 
 // walkRules returns the [decodewalk.Rules] of a decode of n with the
 // unmarshalers u, for a walk that asks dec about the values it reaches.
-func (n *Node) walkRules(ctx context.Context, dec *yaml.Decoder, u unmarshaler.Options) decodewalk.Rules {
+func (n *Node) walkRules(ctx context.Context, dec *yamldecode.Decoder, u unmarshaler.Options) decodewalk.Rules {
 	return decodewalk.Rules{
 		Resolver: n.doc.pathResolver(),
 		View:     n.doc.tree().View,
@@ -3427,7 +3433,7 @@ func (c *problemCollector) register(node ast.Node) {
 
 // registerWith has dec read node into an interface once, after
 // [Node.prime], as [problemCollector.register] describes for n.
-func registerWith(ctx context.Context, n *Node, dec *yaml.Decoder, node ast.Node) {
+func registerWith(ctx context.Context, n *Node, dec *yamldecode.Decoder, node ast.Node) {
 	view, err := n.prime(ctx, dec, node)
 	if err != nil {
 		return
@@ -3917,7 +3923,7 @@ func builtRejection(err error) (yaml.Error, bool) {
 
 // confirmed reports whether the value that holds v, a leaf, also rejects
 // it as err when it holds v alone. That decode applies what the walk cannot
-// see, such as a registered unmarshaler or the value held for an anchor.
+// see, such as the value held for an anchor.
 // The uses of one node that the same value holds share the answer, since
 // err is the error of [problemCollector.decodeLeaf] for v.
 func (c *problemCollector) confirmed(err error, v *decodewalk.Value) bool {
@@ -4225,7 +4231,7 @@ func valueProblem(problem error) error {
 type errorLocator struct {
 	ctx     context.Context
 	node    *Node
-	decoder *yaml.Decoder
+	decoder *yamldecode.Decoder
 	// The value the walk found, or nil.
 	found *decodewalk.Value
 	// The locator that found the value inside the anchor of a reference

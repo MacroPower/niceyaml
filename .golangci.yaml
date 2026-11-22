@@ -35,6 +35,12 @@ formatters:
     golines:
       reformat-tags: false
       max-len: 120
+  exclusions:
+    paths:
+      # The copy of go-yaml's decoder, its shims, and its ported tests keep the
+      # style of go-yaml, which these rules refuse.
+      - internal/yamldecode/(context|decode|decode_test|option|struct|upstream|yaml|yaml_fuzz_test)\.go$
+      - internal/yamldecode/(errors|format)/
 
 linters:
   default: none
@@ -242,6 +248,11 @@ linters:
               desc: build on the public API of niceyaml
 
   exclusions:
+    paths:
+      # The copy of go-yaml's decoder, its shims, and its ported tests keep the
+      # style of go-yaml, which these rules refuse.
+      - internal/yamldecode/(context|decode|decode_test|option|struct|upstream|yaml|yaml_fuzz_test)\.go$
+      - internal/yamldecode/(errors|format)/
     rules:
       - path: _test\.go
         linters:

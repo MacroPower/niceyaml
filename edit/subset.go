@@ -922,7 +922,7 @@ func (d *Doc) readKey(key ast.Node, text string) keyReading {
 		r keyReading
 	)
 
-	err := astnode.NodeToValue(ast.MappingValue(token.New(":", ":", &token.Position{}), mk,
+	err := astnode.StockNodeToValue(ast.MappingValue(token.New(":", ":", &token.Position{}), mk,
 		ast.Null(token.New("null", "null", &token.Position{}))), &m)
 	if err == nil && len(m) == 1 {
 		for read := range m {

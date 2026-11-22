@@ -37,11 +37,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/yamldecode"
 )
 
 // Viewer returns node, a node that a decode of a document reads, as
@@ -90,7 +90,7 @@ type Keys struct {
 // Create instances with [NewPlain].
 type Plain struct {
 	// The decoder of the keys, which reads no anchor.
-	dec   *yaml.Decoder
+	dec   *yamldecode.Decoder
 	texts map[scalarKey]result
 	// The value that a decode into any reads from each scalar value that
 	// decodes, by its text.
@@ -137,7 +137,7 @@ func (p *Plain) key(key ast.Node, text scalarKey) result {
 	}
 
 	if p.dec == nil {
-		p.dec = yaml.NewDecoder(&bytes.Buffer{})
+		p.dec = yamldecode.NewDecoder(&bytes.Buffer{})
 	}
 
 	got := decoded(decodeKey(p.dec, key))
@@ -280,8 +280,8 @@ func (r *Keys) ValueOf(node ast.Node) (any, error) {
 // outside returns a decoder for node, a node outside the document, that
 // holds the anchors of the reference documents that the aliases of node
 // read. An alias of an anchor inside node reads that anchor.
-func (r *Keys) outside(node ast.Node) (*yaml.Decoder, error) {
-	dec := yaml.NewDecoder(&bytes.Buffer{})
+func (r *Keys) outside(node ast.Node) (*yamldecode.Decoder, error) {
+	dec := yamldecode.NewDecoder(&bytes.Buffer{})
 	if r.refs == nil {
 		return dec, nil
 	}
@@ -312,7 +312,7 @@ func (r *Keys) plainKey(key ast.Node) result {
 	}
 
 	if r.plain.dec == nil {
-		r.plain.dec = yaml.NewDecoder(&bytes.Buffer{})
+		r.plain.dec = yamldecode.NewDecoder(&bytes.Buffer{})
 	}
 
 	got := decoded(decodeKey(r.plain.dec, key))
@@ -334,7 +334,7 @@ func (r *Keys) viewedKey(key ast.Node) result {
 		return r.keyOf(view)
 	}
 
-	dec := yaml.NewDecoder(&bytes.Buffer{})
+	dec := yamldecode.NewDecoder(&bytes.Buffer{})
 
 	err := primed(dec, anchors)
 	if err != nil {
@@ -346,7 +346,7 @@ func (r *Keys) viewedKey(key ast.Node) result {
 
 // primed decodes each of nodes with dec, in order, so that dec holds their
 // anchors. It returns the error of the first node that does not decode.
-func primed(dec *yaml.Decoder, nodes []ast.Node) error {
+func primed(dec *yamldecode.Decoder, nodes []ast.Node) error {
 	for _, n := range nodes {
 		var sink any
 
@@ -384,7 +384,7 @@ func StringOf(node ast.Node) (string, bool, error) {
 
 // decodeKey decodes a mapping of key to null with dec, and returns the key
 // of the entry of the decode.
-func decodeKey(dec *yaml.Decoder, key ast.Node) (string, error) {
+func decodeKey(dec *yamldecode.Decoder, key ast.Node) (string, error) {
 	mk, ok := key.(ast.MapKeyNode)
 	if !ok {
 		explicit := ast.MappingKey(token.New("?", "?", &token.Position{}))

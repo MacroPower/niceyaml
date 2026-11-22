@@ -36,11 +36,11 @@
 package astnode
 
 import (
-	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/internal/nilness"
+	"go.jacobcolvin.com/niceyaml/internal/yamldecode"
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
@@ -726,7 +726,7 @@ func IsTaggedNull(node ast.Node) bool {
 
 	var v any
 
-	err := yaml.NodeToValue(tag, &v)
+	err := yamldecode.NodeToValue(tag, &v)
 
 	return err == nil && v == nil
 }

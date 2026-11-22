@@ -30,6 +30,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/pathindex"
 	"go.jacobcolvin.com/niceyaml/internal/reftable"
 	"go.jacobcolvin.com/niceyaml/internal/reposition"
+	"go.jacobcolvin.com/niceyaml/internal/yamldecode"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -1102,11 +1103,11 @@ func (s *Source) parserOptions() []parser.Option {
 
 // decodeOptions returns the options of every decode of a document of the
 // Source.
-func (s *Source) decodeOptions() []yaml.DecodeOption {
+func (s *Source) decodeOptions() []yamldecode.DecodeOption {
 	// The decoder counts a key that a `<<` merge brings in beside the
 	// keys of the mapping, so its check rejects a mapping that overrides
 	// a merged key. The parser rejects a key a mapping holds twice.
-	return []yaml.DecodeOption{yaml.AllowDuplicateMapKey()}
+	return []yamldecode.DecodeOption{yamldecode.AllowDuplicateMapKey()}
 }
 
 // referenceAnchors returns the anchors of the reference documents of the

@@ -6,11 +6,11 @@ import (
 	"reflect"
 	"runtime/debug"
 
-	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/decodewalk"
+	"go.jacobcolvin.com/niceyaml/internal/yamldecode"
 )
 
 // TypeDefaults creates a new [TypeRule] that gives the type T a function
@@ -310,7 +310,7 @@ func startTarget(v any, cfg decodeConfig, node ast.Node) (any, reflect.Value, er
 // what the decoder read, with the cut of the known keys of the decode.
 func (n *Node) fillDefaults(
 	ctx context.Context,
-	dec *yaml.Decoder,
+	dec *yamldecode.Decoder,
 	cfg decodeConfig,
 	node ast.Node,
 	target any,

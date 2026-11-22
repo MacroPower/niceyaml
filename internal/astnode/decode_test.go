@@ -2,6 +2,7 @@ package astnode_test
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 
 	"github.com/goccy/go-yaml"
@@ -10,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/yamldecode"
 )
 
 func TestNodeToValue(t *testing.T) {
@@ -47,6 +49,32 @@ func TestNodeToValue(t *testing.T) {
 	}
 }
 
+func TestStockNodeToValue(t *testing.T) {
+	t.Parallel()
+
+	errRegistered := errors.New("registered function")
+
+	// Go-yaml decodes a registered type through its function, and the
+	// decoder of niceyaml reads its fields.
+	type registered struct {
+		Name string `yaml:"name"`
+	}
+
+	yaml.RegisterCustomUnmarshaler(func(*registered, []byte) error { return errRegistered })
+
+	file, err := parser.ParseBytes([]byte("name: api"), 0)
+	require.NoError(t, err)
+
+	var stock registered
+
+	require.ErrorIs(t, astnode.StockNodeToValue(file.Docs[0].Body, &stock), errRegistered)
+
+	var got registered
+
+	require.NoError(t, astnode.NodeToValue(file.Docs[0].Body, &got))
+	assert.Equal(t, registered{Name: "api"}, got)
+}
+
 func TestDecodeNode(t *testing.T) {
 	t.Parallel()
 
@@ -66,7 +94,7 @@ func TestDecodeNode(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			dec := yaml.NewDecoder(&bytes.Buffer{})
+			dec := yamldecode.NewDecoder(&bytes.Buffer{})
 
 			var (
 				got any

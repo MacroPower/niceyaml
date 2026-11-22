@@ -24,6 +24,7 @@ import (
 	"github.com/goccy/go-yaml/ast"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/yamldecode"
 	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
 )
 
@@ -161,12 +162,12 @@ type Options struct {
 // decode that decoder serves.
 type custom struct {
 	typ reflect.Type
-	opt func(decode ValueDecoder) yaml.DecodeOption
+	opt func(decode ValueDecoder) yamldecode.DecodeOption
 }
 
 // With returns o with the function that opt registers for the type t,
 // in place of the one an earlier call gave t.
-func (o Options) With(t reflect.Type, opt func(ValueDecoder) yaml.DecodeOption) Options {
+func (o Options) With(t reflect.Type, opt func(ValueDecoder) yamldecode.DecodeOption) Options {
 	o = o.Without(t)
 	o.custom = append(o.custom, custom{typ: t, opt: opt})
 
@@ -189,15 +190,15 @@ func (o Options) Empty() bool {
 // YAMLOptions returns the go-yaml options that register the
 // unmarshalers with a decoder. The functions of those options read their
 // values through decode.
-func (o Options) YAMLOptions(decode ValueDecoder) []yaml.DecodeOption {
-	opts := make([]yaml.DecodeOption, 0, len(o.custom)+1)
+func (o Options) YAMLOptions(decode ValueDecoder) []yamldecode.DecodeOption {
+	opts := make([]yamldecode.DecodeOption, 0, len(o.custom)+1)
 
 	for _, c := range o.custom {
 		opts = append(opts, c.opt(decode))
 	}
 
 	if o.JSON {
-		opts = append(opts, yaml.UseJSONUnmarshaler())
+		opts = append(opts, yamldecode.UseJSONUnmarshaler())
 	}
 
 	return opts
@@ -246,9 +247,9 @@ func (o Options) Whole(t reflect.Type) (int, bool) {
 // ReportsOwnError reports whether the decoder can return an error for a
 // value of type t without a token of the source. It can for a
 // [time.Duration], for a type that decodes itself, as [DecodesItself]
-// reads it, and for a type o gives an unmarshaler. A function from
-// [yaml.RegisterCustomUnmarshaler] names a type the decoder never shows,
-// so ReportsOwnError is false for a type only such a function decodes.
+// reads it, and for a type o gives an unmarshaler. The decoder does not
+// call a function from [yaml.RegisterCustomUnmarshaler], so such a function
+// does not change what ReportsOwnError reports.
 func (o Options) ReportsOwnError(t reflect.Type) bool {
 	return t == DurationType || DecodesItself(t) || o.Custom(t) || o.decodesJSON(t)
 }

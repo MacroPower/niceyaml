@@ -440,7 +440,7 @@ func placedKey(e *ast.MappingValueNode) (any, bool) {
 
 	var m map[any]any
 
-	err := astnode.NodeToValue(ast.MappingValue(token.New(":", ":", &token.Position{}), e.Key,
+	err := astnode.StockNodeToValue(ast.MappingValue(token.New(":", ":", &token.Position{}), e.Key,
 		ast.Null(token.New("null", "null", &token.Position{}))), &m)
 	if err != nil || len(m) != 1 {
 		return nil, false

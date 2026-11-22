@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/stretchr/testify/assert"
 
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
+	"go.jacobcolvin.com/niceyaml/internal/yamldecode"
 )
 
 // textValue reads the text of its node.
@@ -110,7 +110,7 @@ func TestDecodesText(t *testing.T) {
 	t.Parallel()
 
 	custom := func(typ reflect.Type) unmarshaler.Options {
-		return unmarshaler.Options{}.With(typ, func(unmarshaler.ValueDecoder) yaml.DecodeOption { return nil })
+		return unmarshaler.Options{}.With(typ, func(unmarshaler.ValueDecoder) yamldecode.DecodeOption { return nil })
 	}
 
 	tcs := map[string]struct {

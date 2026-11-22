@@ -2511,28 +2511,6 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		require.EqualError(t, err, "1:7: $.shop.inner.close: closes before it opens")
 	})
 
-	t.Run("a value a registered function decodes walks as its fields", func(t *testing.T) {
-		t.Parallel()
-
-		// Nothing shows which types yaml.RegisterCustomUnmarshaler gave a
-		// function, so the walk reads the type as one that decodes field
-		// by field. It reads the hours below the value as it does below
-		// any type, at a path the document does not hold, so the error
-		// binds at the nearest value the document holds.
-		yaml.RegisterCustomUnmarshaler(func(r *registeredHours, _ []byte) error {
-			r.Inner = hours{Open: "17:00", Close: "09:00"}
-
-			return nil
-		})
-
-		dd := yamltest.FirstDocument(t, "registered: anything\n")
-
-		_, err := dd.Decode[struct {
-			Registered registeredHours `yaml:"registered"`
-		}](t.Context())
-		require.EqualError(t, err, "1:13: $.registered.inner.close: closes before it opens")
-	})
-
 	t.Run("an ast.Node value validates itself alone", func(t *testing.T) {
 		t.Parallel()
 
@@ -4675,13 +4653,6 @@ func (j *jsonDecodedHours) UnmarshalJSON([]byte) error {
 	j.Inner = hours{Open: "17:00", Close: "09:00"}
 
 	return nil
-}
-
-// registeredHours has no unmarshaler method. A function from
-// yaml.RegisterCustomUnmarshaler decodes it in every decode of the
-// program.
-type registeredHours struct {
-	Inner hours `yaml:"inner"`
 }
 
 // failingSelfDecoding decodes itself and rejects itself, so its own

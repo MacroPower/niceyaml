@@ -10,7 +10,6 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
@@ -18,6 +17,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/multierr"
 	"go.jacobcolvin.com/niceyaml/internal/nilness"
 	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
+	"go.jacobcolvin.com/niceyaml/internal/yamldecode"
 	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -245,7 +245,7 @@ type selfWalker struct {
 	keyCtx  context.Context
 	ctx     context.Context
 	node    *Node
-	decoder *yaml.Decoder
+	decoder *yamldecode.Decoder
 	// The types that the functions of cfg check. The walk skips each value
 	// that does not hold a validator, and it counts these types as
 	// validators for that test.
@@ -1349,7 +1349,7 @@ func (w *selfWalker) pathResolver() *paths.Resolver {
 // keyDecoder returns the go-yaml decoder for the keys of the walk. It
 // creates the decoder with the options of the decode when the walk first
 // decodes a key.
-func (w *selfWalker) keyDecoder() *yaml.Decoder {
+func (w *selfWalker) keyDecoder() *yamldecode.Decoder {
 	if w.decoder == nil {
 		w.decoder = w.node.newDecoder(w.cfg)
 	}

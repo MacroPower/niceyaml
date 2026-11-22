@@ -683,7 +683,7 @@ func readsAs(node ast.Node, text string) bool {
 func readsBack(meant, body ast.Node) error {
 	var got any
 
-	err := astnode.NodeToValue(body, &got)
+	err := astnode.StockNodeToValue(body, &got)
 	if err != nil {
 		return fmt.Errorf("%w writes text that go-yaml's decoder refuses: %s", errEncoder, refusal(err, "that text"))
 	}
@@ -693,7 +693,7 @@ func readsBack(meant, body ast.Node) error {
 		return nil
 	}
 
-	err = astnode.NodeToValue(b, &got)
+	err = astnode.StockNodeToValue(b, &got)
 	if err != nil {
 		return fmt.Errorf("%w writes text that go-yaml's decoder refuses: %s", errEncoder, refusal(err, "that text"))
 	}
@@ -883,14 +883,14 @@ func misread(meant, body ast.Node) (ast.Node, ast.Node) {
 		// chomping holds.
 		var want, got any
 
-		if astnode.NodeToValue(meant, &want) != nil || astnode.NodeToValue(body, &got) != nil || want != got {
+		if astnode.StockNodeToValue(meant, &want) != nil || astnode.StockNodeToValue(body, &got) != nil || want != got {
 			return meant, body
 		}
 
 	default:
 		var want, got any
 
-		if astnode.NodeToValue(meant, &want) != nil || astnode.NodeToValue(body, &got) != nil ||
+		if astnode.StockNodeToValue(meant, &want) != nil || astnode.StockNodeToValue(body, &got) != nil ||
 			reflect.TypeOf(want) != reflect.TypeOf(got) {
 			return meant, body
 		}
@@ -1127,7 +1127,7 @@ func plainText(ctx context.Context, text string) bool {
 
 	var read any
 
-	_ = astnode.NodeToValue(body, &read) //nolint:errcheck // A text that does not decode fails readsAs.
+	_ = astnode.StockNodeToValue(body, &read) //nolint:errcheck // A text that does not decode fails readsAs.
 	if s, ok := read.(string); ok && encodedString(ctx, s, false, false) != text {
 		return false
 	}

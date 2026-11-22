@@ -4,13 +4,13 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/stretchr/testify/assert"
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/decodewalk"
+	"go.jacobcolvin.com/niceyaml/internal/yamldecode"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
 
@@ -19,7 +19,7 @@ import (
 func unknownKeys(tb testing.TB, doc *niceyaml.Node, t reflect.Type) []string {
 	tb.Helper()
 
-	r := rules(tb, doc, yaml.DisallowUnknownField())
+	r := rules(tb, doc, yamldecode.DisallowUnknownField())
 
 	var keys []string
 
@@ -219,7 +219,7 @@ func TestUnknownFields_Aliases(t *testing.T) {
 			t.Parallel()
 
 			doc := yamltest.FirstDocument(t, tc.input)
-			r := rules(t, doc, yaml.DisallowUnknownField())
+			r := rules(t, doc, yamldecode.DisallowUnknownField())
 			decode := r.Decode
 			decodes := 0
 			r.Decode = func(node ast.Node, v any) error {
@@ -276,7 +276,7 @@ func TestUnknownFields_TypesOfOneName(t *testing.T) {
 	})
 
 	doc := yamltest.FirstDocument(t, stringtest.LinesLF("d: &d {x: 1}", "a: *d", "b: *d"))
-	r := rules(t, doc, yaml.DisallowUnknownField())
+	r := rules(t, doc, yamldecode.DisallowUnknownField())
 
 	var keys []string
 
@@ -330,7 +330,7 @@ func TestUnknownFields_Merges(t *testing.T) {
 			t.Parallel()
 
 			doc := yamltest.FirstDocument(t, tc.input, yamltest.References(reference))
-			r := referenceRules(t, doc, yamltest.FirstDocument(t, reference), yaml.DisallowUnknownField())
+			r := referenceRules(t, doc, yamltest.FirstDocument(t, reference), yamldecode.DisallowUnknownField())
 
 			type holder struct {
 				V pair `yaml:"v"`
