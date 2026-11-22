@@ -176,7 +176,7 @@ func (d *Doc) valueMisread() (misreadFound, bool) {
 		return misreadFound{}, false
 	}
 
-	at := positionIn(d.cur, d.curLines, marks[0])
+	at := d.curPos(marks[0])
 
 	return misreadFound{
 		kind: misreadMark, start: marks[0],

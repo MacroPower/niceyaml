@@ -180,8 +180,8 @@ func (d *Doc) entryProblem(e *ast.MappingValueNode, path paths.Path, msg string,
 
 	if s, ok := d.nodeSpan(e.Key); ok {
 		opts = append(opts, niceyaml.AtRange(position.NewRange(
-			positionIn(d.cur, d.curLines, s.start),
-			positionIn(d.cur, d.curLines, s.end),
+			d.curPos(s.start),
+			d.curPos(s.end),
 		)))
 	}
 

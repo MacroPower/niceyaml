@@ -154,6 +154,117 @@ func TestNode_Update(t *testing.T) {
 			want:     stringtest.LinesLF("a: 1  # one", "c: 3"),
 			removals: []string{"$.b~"},
 		},
+		"keys that the update removes with a blank line between them": {
+			before:   stringtest.LinesLF("x:", "  a: 1", "", "  b: 2", "y: 3"),
+			path:     paths.Doc().Child("x"),
+			value:    ms(),
+			want:     stringtest.LinesLF("x: {}", "y: 3"),
+			removals: []string{"$.x.b~", "$.x.a~"},
+		},
+		"keys that the update removes after a block scalar": {
+			before:   stringtest.LinesLF("x:", "  a: |", "    t", "", "  b: 2", "  c: 3"),
+			path:     paths.Doc().Child("x"),
+			value:    ms("c", 3),
+			want:     stringtest.LinesLF("x:", "  c: 3"),
+			removals: []string{"$.x.b~", "$.x.a~"},
+		},
+		"keys that the update removes in flow style": {
+			before:   "m: {a: 1, b: 2, c: 3, d: 4}  # m\n",
+			path:     paths.Doc().Child("m"),
+			value:    ms("a", 1, "d", 4),
+			want:     "m: {a: 1, d: 4}  # m\n",
+			removals: []string{"$.m.c~", "$.m.b~"},
+		},
+		"items that the update removes with a blank line between them": {
+			before:   stringtest.LinesLF("l:", "  - 1", "  - 2", "", "  - 3", "z: 0"),
+			path:     paths.Doc().Child("l"),
+			value:    []int{1},
+			want:     stringtest.LinesLF("l:", "  - 1", "z: 0"),
+			removals: []string{"$.l[2]", "$.l[1]"},
+		},
+		"comment line between keys that the update removes": {
+			before:   stringtest.LinesLF("x:", "  a: 1", "# kept note", "  b: 2", "  c: 3"),
+			path:     paths.Doc().Child("x"),
+			value:    ms("c", 3),
+			want:     stringtest.LinesLF("x:", "# kept note", "  c: 3"),
+			removals: []string{"$.x.b~", "$.x.a~"},
+		},
+		"comment line between all the keys of a mapping": {
+			before:   stringtest.LinesLF("x:", "  a: 1", "#  old: 9", "  b: 2"),
+			path:     paths.Doc().Child("x"),
+			value:    ms(),
+			want:     stringtest.LinesLF("x: {}", "#  old: 9"),
+			removals: []string{"$.x.b~", "$.x.a~"},
+		},
+		"comment line between items that the update removes": {
+			before:   stringtest.LinesLF("l:", "  - 1", "# note", "  - 2", "  - 3"),
+			path:     paths.Doc().Child("l"),
+			value:    []int{3},
+			want:     stringtest.LinesLF("l:", "# note", "  - 3"),
+			removals: []string{"$.l[1]", "$.l[0]"},
+		},
+		"comment line between removed keys of a mapping on a dash": {
+			before:   stringtest.LinesLF("- a: 1", "# note", "  b: 2", "  c: 3"),
+			path:     paths.Doc().Index(0),
+			value:    ms("c", 3),
+			want:     stringtest.LinesLF("-", "# note", "  c: 3"),
+			removals: []string{"$[0].b~", "$[0].a~"},
+		},
+		"keys that the update removes on a dash": {
+			before:   stringtest.LinesLF("- a: 1", "  b: 2", "  c: 3"),
+			path:     paths.Doc().Index(0),
+			value:    ms("c", 3),
+			want:     stringtest.LinesLF("- c: 3"),
+			removals: []string{"$[0].b~", "$[0].a~"},
+		},
+		"all the keys of a mapping on a dash": {
+			before:   stringtest.LinesLF("- a: 1", "  b: 2", "- 5"),
+			path:     paths.Doc().Index(0),
+			value:    ms(),
+			want:     stringtest.LinesLF("- {}", "- 5"),
+			removals: []string{"$[0].b~", "$[0].a~"},
+		},
+		"keys that the update removes in two mappings": {
+			before:   stringtest.LinesLF("x:", "  a:", "    p: 1", "    q: 2", "  b: 3", "  c: 4"),
+			path:     paths.Doc().Child("x"),
+			value:    ms("a", ms("q", 2)),
+			want:     stringtest.LinesLF("x:", "  a:", "    q: 2"),
+			removals: []string{"$.x.c~", "$.x.b~", "$.x.a.p~"},
+		},
+		"keys that the update removes between keys that it keeps": {
+			before:   stringtest.LinesLF("x:", "  a: 1", "  b: 2  # two", "  c: 3", "  d: 4", "", "  e: 5", "y: 0"),
+			path:     paths.Doc().Child("x"),
+			value:    ms("b", 2, "d", 4),
+			want:     stringtest.LinesLF("x:", "  b: 2  # two", "  d: 4", "", "y: 0"),
+			removals: []string{"$.x.e~", "$.x.c~", "$.x.a~"},
+		},
+		"keys that the update removes between keys that it keeps in flow style": {
+			before:   "m: {a: 1, b: 2, c: 3, d: 4, e: 5}  # m\n",
+			path:     paths.Doc().Child("m"),
+			value:    ms("b", 2, "d", 4),
+			want:     "m: {b: 2, d: 4}  # m\n",
+			removals: []string{"$.m.e~", "$.m.c~", "$.m.a~"},
+		},
+		"items that the update removes between items that it keeps": {
+			before:   stringtest.LinesLF("l:", "  - 1", "  - 2", "  - 3", "  - 4", "  - 5", "z: 0"),
+			path:     paths.Doc().Child("l"),
+			value:    []int{2, 4},
+			want:     stringtest.LinesLF("l:", "  - 2", "  - 4", "z: 0"),
+			removals: []string{"$.l[4]", "$.l[2]", "$.l[0]"},
+		},
+		"alias in a removed key after a key that the update keeps": {
+			before:   stringtest.LinesLF("x:", "  a: &A 1", "  k: 0", "  b: *A"),
+			path:     paths.Doc().Child("x"),
+			value:    ms("k", 0),
+			want:     stringtest.LinesLF("x:", "  k: 0"),
+			removals: []string{"$.x.b~", "$.x.a~"},
+		},
+		"alias after the mapping that reads a removed key": {
+			before: stringtest.LinesLF("x:", "  a: &A 1", "  k: 0", "  b: *A", "y: *A"),
+			path:   paths.Doc().Child("x"),
+			value:  ms("k", 0),
+			err:    "test.yaml:5:4: $.y: cafe.jacobcolvin.com/v1 removes $.x.a, which this alias reads",
+		},
 		"new keys in the order of the value": {
 			before: stringtest.LinesLF("# top", "b: 2  # two", "d: 4"),
 			path:   paths.Doc(),
@@ -381,6 +492,23 @@ func TestNode_Update(t *testing.T) {
 			path:   paths.Doc(),
 			value:  ms("a", "", "b", 1),
 			err: "test.yaml:3:4: $.z: cafe.jacobcolvin.com/v1 removes $.z, after which a comment line goes right " +
+				"after the blank lines of a block scalar without text",
+		},
+		"later entry that it removes between a blank line of a block scalar without text and a comment line": {
+			// The problem names the entry whose removal leaves the comment
+			// line after the blank line, not the first entry that the
+			// Update removes.
+			before: stringtest.LinesLF("x:", "  a: 1", "  s: |", "", "  b: 2", "# note", "  c: 3", "  d: 4"),
+			path:   paths.Doc().Child("x"),
+			value:  ms("s", "", "d", 4),
+			err: "test.yaml:5:6: $.x.b: cafe.jacobcolvin.com/v1 removes $.x.b, after which a comment line goes right " +
+				"after the blank lines of a block scalar without text",
+		},
+		"later entry that it removes before a comment line with a kept entry between": {
+			before: stringtest.LinesLF("x:", "  a: 1", "  k: 0", "  s: |", "", "  b: 2", "# note", "  d: 4"),
+			path:   paths.Doc().Child("x"),
+			value:  ms("k", 0, "s", "", "d", 4),
+			err: "test.yaml:6:6: $.x.b: cafe.jacobcolvin.com/v1 removes $.x.b, after which a comment line goes right " +
 				"after the blank lines of a block scalar without text",
 		},
 		"block scalar without text from a marshaler after the last key before a blank line and a comment line": {
@@ -749,52 +877,117 @@ func TestNode_Update(t *testing.T) {
 	}
 }
 
-// TestNode_Update_Scaling checks that the bytes that an Update of many
-// scalars allocates grow linearly with the number of scalars. The Update
-// writes all the scalars into the text in one pass. A pass for each
-// scalar copies the whole text for each one, which makes the bytes grow
+// TestNode_Update_Scaling checks that the bytes that an Update allocates
+// grow linearly with the number of entries that it changes or removes. The
+// Update writes all the scalars into the text in one pass, and it removes
+// the entries that follow each other in one removal. A pass or a parse for
+// each entry copies the whole text for each one, which makes the bytes grow
 // with the square of the number. The test reads the allocations of the
 // whole process, so it does not run in parallel.
 //
 //nolint:paralleltest // See above.
 func TestNode_Update_Scaling(t *testing.T) {
-	allocated := func(count int) uint64 {
+	// The block mapping at $.m of count entries, each with comments.
+	block := func(count int) string {
 		var text strings.Builder
 
 		text.WriteString("m:\n")
 
-		v := make(yaml.MapSlice, 0, count)
-
 		for i := range count {
 			fmt.Fprintf(&text, "  # about k%d\n  k%d: %d  # was %d\n", i, i, i, i)
-
-			v = append(v, yaml.MapItem{Key: fmt.Sprintf("k%d", i), Value: i + 1})
 		}
 
-		doc := yamltest.FirstDocument(t, text.String(), yamltest.NoSizeLimits()...)
-
-		d, err := edit.New(doc)
-		require.NoError(t, err)
-
-		var before, after runtime.MemStats
-
-		runtime.ReadMemStats(&before)
-
-		err = d.Apply(t.Context(), paths.Doc().Child("m"), func(ctx context.Context, n *edit.Node) error {
-			return n.Update(ctx, v)
-		})
-
-		runtime.ReadMemStats(&after)
-		require.NoError(t, err)
-
-		return after.TotalAlloc - before.TotalAlloc
+		return text.String()
 	}
 
-	small, large := allocated(200), allocated(800)
+	// The flow mapping at $.m of count entries, on one line.
+	flow := func(count int) string {
+		entries := make([]string, 0, count)
+		for i := range count {
+			entries = append(entries, fmt.Sprintf("k%d: %d", i, i))
+		}
 
-	// Four times the scalars take about four times the bytes. A copy of
-	// the text for each scalar takes more than ten times the bytes.
-	assert.Less(t, large, 6*small, "bytes for 200 scalars: %d, for 800: %d", small, large)
+		return "m: {" + strings.Join(entries, ", ") + "}\n"
+	}
+
+	// The entries of the mapping at an even index, so that the Update
+	// removes each other entry.
+	everyOther := func(count int) any {
+		v := make(yaml.MapSlice, 0, count/2)
+		for i := 0; i < count; i += 2 {
+			v = append(v, yaml.MapItem{Key: fmt.Sprintf("k%d", i), Value: i})
+		}
+
+		return v
+	}
+
+	tcs := map[string]struct {
+		// Text returns the text of the document, and value returns the new
+		// value at $.m, for a count of entries.
+		text  func(count int) string
+		value func(count int) any
+	}{
+		"scalars": {
+			text: block,
+			value: func(count int) any {
+				v := make(yaml.MapSlice, 0, count)
+				for i := range count {
+					v = append(v, yaml.MapItem{Key: fmt.Sprintf("k%d", i), Value: i + 1})
+				}
+
+				return v
+			},
+		},
+		"removed entries": {
+			text:  block,
+			value: func(int) any { return ms("k0", 0) },
+		},
+		"removed entries in flow style": {
+			text:  flow,
+			value: func(int) any { return ms("k0", 0) },
+		},
+		"removed entries between kept entries": {
+			text:  block,
+			value: everyOther,
+		},
+		"removed entries between kept entries in flow style": {
+			text:  flow,
+			value: everyOther,
+		},
+	}
+
+	for name, tc := range tcs {
+		//nolint:paralleltest // See above.
+		t.Run(name, func(t *testing.T) {
+			allocated := func(count int) uint64 {
+				doc := yamltest.FirstDocument(t, tc.text(count), yamltest.NoSizeLimits()...)
+
+				d, err := edit.New(doc)
+				require.NoError(t, err)
+
+				v := tc.value(count)
+
+				var before, after runtime.MemStats
+
+				runtime.ReadMemStats(&before)
+
+				err = d.Apply(t.Context(), paths.Doc().Child("m"), func(ctx context.Context, n *edit.Node) error {
+					return n.Update(ctx, v)
+				})
+
+				runtime.ReadMemStats(&after)
+				require.NoError(t, err)
+
+				return after.TotalAlloc - before.TotalAlloc
+			}
+
+			small, large := allocated(200), allocated(800)
+
+			// Four times the entries take about four times the bytes. A copy
+			// of the text for each entry takes more than ten times the bytes.
+			assert.Less(t, large, 6*small, "bytes for 200 entries: %d, for 800: %d", small, large)
+		})
+	}
 }
 
 // applyCall applies call at path to a Doc of before, a text that a Source

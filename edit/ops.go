@@ -762,102 +762,223 @@ func (n *Node) Remove(opts ...RemoveOption) error {
 
 // remove removes the entry or the item, as [Node.Remove] describes.
 func (n *Node) remove(opts ...RemoveOption) error {
-	d := n.d
-
 	var cfg removeConfig
 
 	for _, opt := range opts {
 		opt(&cfg)
 	}
 
-	p, err := n.place(useEdit, "removes")
-	if err != nil {
-		return err
-	}
+	return n.d.removeRun([]*Node{n}, cfg.reason)
+}
 
-	// The text lacks the place, so the removal does nothing, unless a step
-	// of the path reaches a zone of the Apply. The root of an empty document
-	// holds no value either, but the removal of a root fails.
-	if !p.exists && !p.root {
-		return n.stepProblem()
-	}
+// taking is what the removal of one value of a run, as [Doc.removeRun]
+// removes it, does to the nodes of the Apply after its cut.
+type taking struct {
+	// The nodes that reach the value, and the nodes that reach the items
+	// of its sequence, or nil.
+	at, items *reached
+	// The record of the edit that takes the value away.
+	by *editRecord
+	// The index of an item.
+	index int
+}
 
-	why := d.protection(p, true)
+// removeRun removes the entries or the items that the nodes of run reach,
+// as [Node.Remove] removes each. Run holds nodes of entries or items of
+// one collection, in the order of the text. Other entries or items can lie
+// between them. The removal checks and records each value from the last to
+// the first, as a Remove of each in that order does. An alias inside a
+// later value of run goes with it, so it does not read an anchor of an
+// earlier one. The removal then deletes the text of all of them with one
+// parse, as [Doc.removePlaces] deletes it.
+func (d *Doc) removeRun(run []*Node, reason string) error {
+	places := make([]*place, len(run))
+	takes := make([]taking, len(run))
 
-	switch {
-	case p.root:
-		return d.failAs(ErrUsage, n, "%s removes the root of the document", d.subject())
-	case why != "":
-		return d.failAs(ErrProtected, n, "%s removes %s, which %s", d.subject(), n.path, why)
-	}
+	// The bytes of the values after the one that the loop checks, which
+	// the removal takes too, from the last to the first.
+	var later []span
 
-	err = d.reachProblem(reachCall{
-		kind: callRemove, path: n.path, hidden: n.hidden, named: "removes " + n.path.String(),
-	})
-	if err != nil {
-		return err
-	}
-
-	if p.entry != nil {
-		err = d.ownKeysProblem(p.entry, p.container, "", false, "removes "+n.path.String())
+	for i, n := range slices.Backward(run) {
+		p, err := n.place(useEdit, "removes")
 		if err != nil {
 			return err
 		}
+
+		// The text lacks the place, so the removal does nothing, unless a
+		// step of the path reaches a zone of the Apply. The root of an empty
+		// document holds no value either, but the removal of a root fails.
+		if !p.exists && !p.root {
+			return n.stepProblem()
+		}
+
+		why := d.protection(p, true)
+
+		switch {
+		case p.root:
+			return d.failAs(ErrUsage, n, "%s removes the root of the document", d.subject())
+		case why != "":
+			return d.failAs(ErrProtected, n, "%s removes %s, which %s", d.subject(), n.path, why)
+		}
+
+		err = d.reachProblem(reachCall{
+			kind: callRemove, path: n.path, hidden: n.hidden, named: "removes " + n.path.String(),
+		})
+		if err != nil {
+			return err
+		}
+
+		if p.entry != nil {
+			err = d.ownKeysProblem(p.entry, p.container, "", false, "removes "+n.path.String())
+			if err != nil {
+				return err
+			}
+		}
+
+		if p.entry != nil {
+			d.recordEdit(p, fmt.Sprintf("removes %q", n.Key()), "removes "+n.path.String())
+		} else {
+			d.recordEdit(p, "removes this item", "removes "+n.path.String())
+		}
+
+		s := d.spotOf(n.path, p)
+
+		d.recordRemoval(n.path, p, reason)
+
+		// The paths that reach the value go, and those below the later
+		// items of its sequence take the index before them.
+		t := taking{at: d.reached(s), by: d.takenBy(), index: p.index}
+
+		if p.seq != nil {
+			t.items = d.reached(d.itemsOf(n.path, p))
+		}
+
+		// The anchors of the entry go with it, the anchor of its key too.
+		taken := p.value
+		if p.entry != nil {
+			taken = p.entry
+		}
+
+		anchors := d.anchorsIn(taken)
+		anchors.drop(later)
+
+		err = d.aliasCopyProblem(anchors, p.value, "removes "+n.path.String(), n.path)
+		if err != nil {
+			return err
+		}
+
+		if s, ok := d.nodeSpan(taken); ok {
+			later = append(later, s)
+		}
+
+		places[i], takes[i] = p, t
 	}
 
-	if p.entry != nil {
-		d.recordEdit(p, fmt.Sprintf("removes %q", n.Key()), "removes "+n.path.String())
-	} else {
-		d.recordEdit(p, "removes this item", "removes "+n.path.String())
-	}
-
-	s := d.spotOf(n.path, p)
-
-	d.recordRemoval(n.path, p, cfg.reason)
-
-	// The paths that reach the value go, and those below the later items of
-	// its sequence take the index before them.
-	at := d.reached(s)
-
-	var items *reached
-
-	if p.seq != nil {
-		items = d.reached(d.itemsOf(n.path, p))
-	}
-
-	// The anchors of the entry go with it, the anchor of its key too.
-	taken := p.value
-	if p.entry != nil {
-		taken = p.entry
-	}
-
-	anchors := d.anchorsIn(taken)
-
-	err = d.aliasCopyProblem(anchors, p.value, "removes "+n.path.String(), n.path)
-	if err != nil {
-		return err
-	}
-
-	if p.flow {
-		err = d.removeFlow(p)
-	} else {
-		err = d.removeBlock(p)
-	}
+	err := d.removePlaces(places)
 
 	switch {
 	case strandedWrite(err):
-		return d.strandedProblem(n, "removes "+n.path.String()+", after which a comment line goes")
+		h := d.strandingRemove(run)
+
+		return d.strandedProblem(h, "removes "+h.path.String()+", after which a comment line goes")
+
 	case err != nil:
-		return d.bug(n, err)
+		return d.bug(run[0], err)
 	}
 
-	at.take(true, d.takenBy())
+	for _, t := range slices.Backward(takes) {
+		t.at.take(true, t.by)
 
-	if items != nil {
-		items.shift(p.index+1, -1)
+		if t.items != nil {
+			t.items.shift(t.index+1, -1)
+		}
 	}
 
 	return nil
+}
+
+// strandingRemove returns the node of run whose removal leaves a comment
+// line right after the blank lines of a block scalar without text. The
+// removal of run in one cut failed so. StrandingRemove removes the values
+// of run one at a time, from the last to the first, as a Remove of each
+// does. It returns the first value whose removal fails so, which is the
+// value that a Remove of each names. It returns the first node of run when
+// no such removal fails so. It leaves the text as it found it.
+func (d *Doc) strandingRemove(run []*Node) *Node {
+	if len(run) == 1 {
+		return run[0]
+	}
+
+	saved := d.save()
+
+	defer d.restore(saved)
+
+	for _, n := range slices.Backward(run) {
+		p, err := n.place(useEdit, "removes")
+		if err != nil || !p.exists {
+			break
+		}
+
+		err = d.removePlaces([]*place{p})
+		if strandedWrite(err) {
+			return n
+		}
+
+		if err != nil {
+			break
+		}
+	}
+
+	return run[0]
+}
+
+// indexes returns the index of each of places in its collection. Places
+// holds entries or items of the current text. It reports false unless they
+// lie in one collection, in the order of the text.
+func (d *Doc) indexes(places []*place) ([]int, bool) {
+	first := places[0]
+	out := make([]int, len(places))
+
+	if len(places) == 1 {
+		out[0] = first.index
+
+		return out, true
+	}
+
+	if first.seq != nil {
+		for i, p := range places {
+			if p.seq != first.seq || i > 0 && p.index <= out[i-1] {
+				return nil, false
+			}
+
+			out[i] = p.index
+		}
+
+		return out, true
+	}
+
+	entries, _ := astnode.Entries(first.container)
+
+	at := 0
+
+	for i, p := range places {
+		if p.container != first.container {
+			return nil, false
+		}
+
+		for at < len(entries) && entries[at] != p.entry {
+			at++
+		}
+
+		if at == len(entries) {
+			return nil, false
+		}
+
+		out[i] = at
+		at++
+	}
+
+	return out, true
 }
 
 // recordRemoval records the removal of the value of p when the value holds
@@ -1136,20 +1257,103 @@ func (d *Doc) userValue(path paths.Path) (ast.Node, bool) {
 	return nil, false
 }
 
-// removeBlock removes p, an entry or an item of a block collection.
-func (d *Doc) removeBlock(p *place) error {
-	if d.sharesLine(p) {
-		return d.removeFirst(p)
+// removePlaces removes the entries or the items of places, which one
+// collection holds in the order of the text, with one parse. It returns
+// the problem of the parse of the text without them, which leaves the
+// text as it was.
+func (d *Doc) removePlaces(places []*place) error {
+	index, ok := d.indexes(places)
+	if !ok {
+		return errors.New("the values of the removal do not lie in one collection in the order of the text")
 	}
 
-	r := d.blockRegion(p)
+	if places[0].flow {
+		return d.removeFlow(places, index)
+	}
 
-	if d.count(p) > 1 || p.container == nil {
-		start, end := d.lineCut(r)
-		end, text := d.emptiedAfter(start, end)
-		cut := edit{start: start, end: end, text: text.text, origins: text.origins}
+	return d.removeBlock(places, index)
+}
 
-		return d.apply(cut)
+// cutRun is entries or items of a removal that follow each other in a
+// collection, from first through last.
+type cutRun struct {
+	first, last *place
+	// The lines of the entries or the items in a block collection, from
+	// the first line of first through the last line of last.
+	lines region
+}
+
+// blockRuns returns the runs of places, entries or items of a block
+// collection in the order of the text, at the indexes index. Two of them
+// share a run when they follow each other and only blank lines lie
+// between their lines, as [Doc.blockRegion] finds them. Other lines, such
+// as a comment that belongs to neither, split the run, so they stay.
+func (d *Doc) blockRuns(places []*place, index []int) []cutRun {
+	var runs []cutRun
+
+	for i, p := range places {
+		r := d.blockRegion(p)
+
+		if i > 0 && index[i] == index[i-1]+1 {
+			prev := &runs[len(runs)-1]
+			if d.blankBetween(prev.lines.last, r.first) {
+				prev.last, prev.lines.end, prev.lines.last = p, r.end, r.last
+
+				continue
+			}
+		}
+
+		runs = append(runs, cutRun{first: p, last: p, lines: r})
+	}
+
+	return runs
+}
+
+// blankBetween reports whether each line after the line above and before
+// the line below is blank.
+func (d *Doc) blankBetween(above, below int) bool {
+	for l := above + 1; l < below; l++ {
+		if !d.isBlankLine(l) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// removeBlock removes places, entries or items of a block collection in
+// the order of the text, at the indexes index, with one parse. Each run of
+// them that [Doc.blockRuns] finds loses its lines as one entry or item
+// does. Those lines hold the comments that belong to the first and the
+// last value of the run, as [Doc.blockRegion] finds them. When the removal
+// takes each entry or item of the collection, "{}" or "[]" takes the place
+// of the first run. The lines between the runs stay.
+func (d *Doc) removeBlock(places []*place, index []int) error {
+	p := places[0]
+	runs := d.blockRuns(places, index)
+	all := d.count(p) == len(places)
+
+	// The runs after the first go as the lines of one entry or item go
+	// from a collection that keeps others.
+	var edits []edit
+
+	for _, r := range runs[1:] {
+		edits = append(edits, d.blockCut(r.lines))
+	}
+
+	head := runs[0]
+
+	switch {
+	case d.sharesLine(p):
+		cut, err := d.firstCut(head, all)
+		if err != nil {
+			return err
+		}
+
+		return d.apply(append(edits, cut)...)
+
+	case !all || p.container == nil:
+		return d.apply(append(edits, d.blockCut(head.lines))...)
 	}
 
 	empty := "{}"
@@ -1157,14 +1361,17 @@ func (d *Doc) removeBlock(p *place) error {
 		empty = "[]"
 	}
 
+	r := head.lines
+
 	// The "{}" or "[]" of the root takes the place of the lines, on a line
 	// of its own, and ends with the line break of the last of them. The
 	// line before them keeps its line break, and the blank lines next to
 	// them stay.
 	if p.container == astnode.Content(d.node.AST()) {
 		text := empty + d.lineBreak(r.last)
+		cut := edit{start: r.start, end: r.end, text: text, origins: written(text, d.addNote(d.emptiedNote(nil)))}
 
-		return d.splice(r.start, r.end, text, written(text, d.addNote(d.emptiedNote(nil))))
+		return d.apply(append(edits, cut)...)
 	}
 
 	start, end := d.lineCut(r)
@@ -1187,10 +1394,23 @@ func (d *Doc) removeBlock(p *place) error {
 		text += " "
 	}
 
-	return d.apply(
+	edits = append(edits,
 		edit{start: at, end: at, text: text, origins: written(text, d.addNote(d.emptiedNote(holder)))},
 		edit{start: start, end: end},
 	)
+
+	return d.apply(edits...)
+}
+
+// blockCut returns the edit that removes the lines of r, which hold
+// entries or items of a block collection that keeps others. The edit
+// deletes the lines that [Doc.lineCut] finds, and it writes the text that
+// [Doc.emptiedAfter] gives in their place.
+func (d *Doc) blockCut(r region) edit {
+	start, end := d.lineCut(r)
+	end, text := d.emptiedAfter(start, end)
+
+	return edit{start: start, end: end, text: text.text, origins: text.origins}
 }
 
 // lineCut returns the bytes that a removal of the lines of r deletes: the
@@ -1381,17 +1601,21 @@ func (d *Doc) holderOf(node ast.Node) (*place, bool) {
 	return nil, false
 }
 
-// removeFirst removes p, the first entry or item of a block collection
-// that starts on the line of the "-" of an item. The "-" stays. The next
-// entry or item takes its place on that line, or "{}" or "[]" does when p
-// is the only one. When a line other than a blank one lies between p and
-// the next entry or item, the "-" ends its line instead.
-func (d *Doc) removeFirst(p *place) error {
+// firstCut returns the edit that removes the entries or the items of r,
+// which follow each other in a block collection. The first of them is the
+// first of the collection, and it starts on the line of the "-" of an
+// item. The "-" stays. The entry or the item after r takes the place of
+// the first on that line. All tells that the removal takes each entry or
+// item of the collection, and "{}" or "[]" takes that place then. When a
+// line other than a blank one lies between r and the entry or the item
+// after it, the "-" ends its line instead.
+func (d *Doc) firstCut(r cutRun, all bool) (edit, error) {
+	p := r.first
 	start, _ := d.startOf(p)
-	r := d.blockRegion(p)
+	last := r.lines.last
 
-	next, ok := d.nextPlace(p)
-	if !ok {
+	next, ok := d.nextPlace(r.last)
+	if all || !ok {
 		empty := "{}"
 		if p.seq != nil {
 			empty = "[]"
@@ -1404,27 +1628,30 @@ func (d *Doc) removeFirst(p *place) error {
 		if p.container != astnode.Content(d.node.AST()) {
 			holder, ok = d.holderOf(p.container)
 			if !ok {
-				return errors.New("no item holds the collection")
+				return edit{}, errors.New("no item holds the collection")
 			}
 		}
 
-		return d.splice(start, d.lineEnd(r.last), empty, written(empty, d.addNote(d.emptiedNote(holder))))
+		cut := edit{start: start, end: d.lineEnd(last), text: empty}
+		cut.origins = written(empty, d.addNote(d.emptiedNote(holder)))
+
+		return cut, nil
 	}
 
 	nr := d.blockRegion(next)
 
-	for l := r.last + 1; l < nr.first; l++ {
+	for l := last + 1; l < nr.first; l++ {
 		if !d.isBlankLine(l) {
 			cut := start
 			for cut > 0 && d.cur[cut-1] == ' ' {
 				cut--
 			}
 
-			return d.splice(cut, d.lineEnd(r.last), "", nil)
+			return edit{start: cut, end: d.lineEnd(last)}, nil
 		}
 	}
 
-	return d.splice(start, d.lineStart(nr.first)+d.indentOf(nr.first), "", nil)
+	return edit{start: start, end: d.lineStart(nr.first) + d.indentOf(nr.first)}, nil
 }
 
 // nextPlace returns the entry or the item after p in its block collection.
@@ -1568,31 +1795,51 @@ func (d *Doc) propsSpan(node ast.Node) (span, bool) {
 	return span{}, false
 }
 
-// removeFlow removes p, an entry or an item of a flow collection, with the
-// comma after it, or the comma before it for the last one. A mapping that
-// the user wrote without braces in a flow sequence, as in "[a: 1]", holds
-// one entry. Without that entry, the item becomes "{}", as a mapping with
-// braces keeps its braces.
-func (d *Doc) removeFlow(p *place) error {
-	start, ok := d.startOf(p)
-	if !ok {
-		return nil
-	}
-
-	end := d.valueEnd(p)
+// removeFlow removes places, entries or items of a flow collection in the
+// order of the text, at the indexes index, with one parse. Each run of
+// them that follow each other goes with one comma: the comma after its
+// last, or the comma before its first when it ends the collection. A
+// mapping that the user wrote without braces in a flow sequence, as in
+// "[a: 1]", holds one entry. Without that entry, the item becomes "{}", as
+// a mapping with braces keeps its braces.
+func (d *Doc) removeFlow(places []*place, index []int) error {
+	p := places[0]
 
 	if p.entry != nil && isBareMapping(p.container) {
+		start, ok := d.startOf(p)
+		if !ok {
+			return nil
+		}
+
 		holder, ok := d.holderOf(p.container)
 		if !ok {
 			return errors.New("no item holds the mapping")
 		}
 
-		return d.splice(start, end, "{}", written("{}", d.addNote(d.emptiedNote(holder))))
+		return d.splice(start, d.valueEnd(places[len(places)-1]), "{}", written("{}", d.addNote(d.emptiedNote(holder))))
 	}
 
-	cuts, _ := d.flowCuts(p, start, end)
+	var edits []edit
 
-	return d.apply(cuts...)
+	for i := 0; i < len(places); {
+		j := i + 1
+		for j < len(places) && index[j] == index[j-1]+1 {
+			j++
+		}
+
+		if start, ok := d.startOf(places[i]); ok {
+			cuts, _ := d.flowCuts(places[i], start, d.valueEnd(places[j-1]))
+			edits = append(edits, cuts...)
+		}
+
+		i = j
+	}
+
+	if len(edits) == 0 {
+		return nil
+	}
+
+	return d.apply(edits...)
 }
 
 // flowCuts returns the edits that remove p, an entry or an item of a flow

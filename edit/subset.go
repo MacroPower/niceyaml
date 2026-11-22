@@ -1491,7 +1491,7 @@ func (d *Doc) madeSite(off int) (site, bool) {
 		return site{}, false
 	}
 
-	path, ok := d.node.PathAt(positionIn(d.cur, d.curLines, off))
+	path, ok := d.node.PathAt(d.curPos(off))
 	if !ok {
 		path = paths.Doc()
 	}

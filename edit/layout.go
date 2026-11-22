@@ -950,7 +950,7 @@ func (d *Doc) writeString(ctx context.Context, h *Node, x heldString, origin int
 	at.value, at.end = x.lit, d.ownEnd(x)
 
 	step := d.docStep()
-	if path, ok := d.node.PathAt(positionIn(d.cur, d.curLines, x.header.start)); ok {
+	if path, ok := d.node.PathAt(d.curPos(x.header.start)); ok {
 		step = d.stepOf(nil, path)
 	}
 

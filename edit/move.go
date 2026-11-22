@@ -627,11 +627,7 @@ func (d *Doc) removeMoved(n *Node, p *place, named string) error {
 // returns the problem of the parse of the text without it, which leaves
 // the text as it was.
 func (d *Doc) removePlace(p *place) error {
-	if p.flow {
-		return d.removeFlow(p)
-	}
-
-	return d.removeBlock(p)
+	return d.removePlaces([]*place{p})
 }
 
 // moveUsage returns the problem of a move of n to target with the placement

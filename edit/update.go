@@ -40,18 +40,22 @@ import (
 //     comments, its style, its tags, and its aliases.
 //   - Two mappings pair their entries by key. Update removes each entry
 //     whose key v lacks, with its comments, as [Node.Remove] does. It
-//     compares the values of each pair. It creates each entry of v that the
-//     mapping lacks after the entry of the key before it in v, or first
-//     when no key comes before it.
+//     removes such entries of one mapping in one removal. A change of an
+//     entry between them splits that removal. A blank line between two
+//     removed entries that follow each other goes with them. A comment line
+//     between them that belongs to neither stays. Update compares the
+//     values of each pair. It creates each entry of v that the mapping
+//     lacks after the entry of the key before it in v, or first when no key
+//     comes before it.
 //   - Two sequences pair the items that decode equal, in order, as many of
 //     them as they can. Update compares the other items between two such
 //     pairs at the same index. It removes the items that the text holds
-//     past them, and it inserts the items that v holds past them, as
-//     [Node.Insert] does. The items that the two sequences share at their
-//     start and at their end pair first. The count of the other items of
-//     the text times the count of the other items of v can be more than
-//     1,048,576. None of those other items pair then, so Update compares
-//     them at the same index.
+//     past them, as it removes the entries of a mapping, and it inserts
+//     the items that v holds past them, as [Node.Insert] does. The items
+//     that the two sequences share at their start and at their end pair
+//     first. The count of the other items of the text times the count of
+//     the other items of v can be more than 1,048,576. None of those other
+//     items pair then, so Update compares them at the same index.
 //   - Any other value takes its part of v as a Set of that place writes
 //     it, and so keeps the comments of its entry or its item. Such values
 //     include a scalar that decodes to another value, a value of another
@@ -85,12 +89,14 @@ import (
 // Update is one call, so the details of its problems name it, as in "the
 // edit updates $.server". Its checks of the model and of the whole text
 // run once for all its edits. Update parses the text once for each run of
-// scalars that it replaces with scalars. So the time of such changes grows
+// scalars that it replaces with scalars, and once for each removal of
+// entries or items of one collection. So the time of such changes grows
 // with the size of the text plus their number. Each other edit parses the
-// whole text, such as a remove, an insert, a new entry, or a value of
-// another kind. So the time of an Update that removes or adds many entries
-// or items grows with their number times the size of the text. The time of
-// the same calls of Remove, Insert, and Set grows that way too.
+// whole text, such as an insert, a new entry, or a value of another kind.
+// So the time of an Update that adds many entries or items grows with
+// their number times the size of the text. So does the time of an Update
+// that removes entries or items between many values that it changes. The
+// time of the same calls of Remove, Insert, and Set grows that way too.
 //
 // [Doc.Removals] lists each entry and each item of the user's text that
 // Update removes as [Node.Remove] removes it. Where a value takes its part
@@ -979,6 +985,11 @@ func (pl *updatePlan) scan(path paths.Path, te *edge, ov *value, ne *edge, nv *v
 // removes or replaces an alias, or a `<<` merge key, comes before an edit
 // that changes the anchor that it reads.
 //
+// The Removes of entries or items of one collection that follow each
+// other in the order of the edits make one removal, as [Doc.removeRun]
+// makes it, which parses the text once. Values that the Update keeps as
+// they are can lie between their values in the text.
+//
 // Some Sets replace a scalar of the text without an anchor with a scalar.
 // Each such Set writes inside the bytes of its scalar. So the places and
 // the bytes of the text stay where the Sets after it find them. The Sets
@@ -997,7 +1008,8 @@ func (pl *updatePlan) run(ctx context.Context) error {
 		}
 	}()
 
-	for _, op := range ops {
+	for i := 0; i < len(ops); i++ {
+		op := ops[i]
 		d.deferring = op.scalar()
 
 		if !d.deferring && len(d.deferred) > 0 {
@@ -1007,6 +1019,25 @@ func (pl *updatePlan) run(ctx context.Context) error {
 			}
 		}
 
+		if op.kind == opRemove {
+			run := ownerRemoves(ops[i:])
+
+			// The removal takes the nodes in the order of the text.
+			nodes := make([]*Node, len(run))
+			for j, r := range run {
+				nodes[len(run)-1-j] = &Node{d: d, path: r.path, hidden: slices.Clone(pl.n.hidden)}
+			}
+
+			err := d.removeRun(nodes, "")
+			if err != nil {
+				return err
+			}
+
+			i += len(run) - 1
+
+			continue
+		}
+
 		h := &Node{d: d, path: op.path, hidden: slices.Clone(pl.n.hidden)}
 
 		var (
@@ -1014,11 +1045,9 @@ func (pl *updatePlan) run(ctx context.Context) error {
 			err error
 		)
 
-		if op.kind != opRemove {
-			v, err = pl.leafValue(op.ne, op.nv)
-			if err != nil {
-				return err
-			}
+		v, err = pl.leafValue(op.ne, op.nv)
+		if err != nil {
+			return err
 		}
 
 		switch op.kind {
@@ -1037,7 +1066,7 @@ func (pl *updatePlan) run(ctx context.Context) error {
 			op.mv, err = h.insert(ctx, v)
 
 		case opRemove:
-			err = h.remove()
+			// The removal of the run before the switch made the edit.
 		}
 
 		if err != nil {
@@ -1055,6 +1084,19 @@ func (pl *updatePlan) run(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// ownerRemoves returns the Removes at the start of ops, edits in the order
+// of [updatePlan.run], that one removal makes, as [Doc.removeRun] makes
+// it. They remove entries or items of one collection of the text, from
+// the last to the first.
+func ownerRemoves(ops []*updateOp) []*updateOp {
+	n := 1
+	for n < len(ops) && ops[n].kind == opRemove && ops[n].owner == ops[0].owner {
+		n++
+	}
+
+	return ops[:n]
 }
 
 // scalar reports whether op is a Set of a scalar of the text, which no

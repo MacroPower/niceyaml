@@ -268,13 +268,11 @@ func (d *Doc) offset(pos position.Position) int {
 	}
 
 	m := &d.runes
-	if len(m.starts) != len(d.curLines) || &m.starts[0] != &d.curLines[0] {
-		*m = runeOffsets{starts: d.curLines, wide: wideLines(d.cur, d.curLines)}
-	}
+	m.hold(d.cur, d.curLines)
 
 	start := d.curLines[pos.Line]
 
-	if _, wide := slices.BinarySearch(m.wide, pos.Line); !wide {
+	if !m.isWide(pos.Line) {
 		// The line ends at the byte that ends it, its line break.
 		end := len(d.cur)
 		if pos.Line+1 < len(d.curLines) {
@@ -284,27 +282,98 @@ func (d *Doc) offset(pos position.Position) int {
 		return min(start+pos.Col, end)
 	}
 
-	if m.lines == nil {
-		m.lines = make(map[int][]int)
-	}
-
-	offs, ok := m.lines[pos.Line]
-	if !ok {
-		offs = runeStarts(d.cur, start)
-		m.lines[pos.Line] = offs
-	}
+	offs := m.runesOf(d.cur, pos.Line)
 
 	return offs[min(pos.Col, len(offs)-1)]
 }
 
-// runeOffsets holds, for one slice of the starts of the lines of the
-// current text, the lines that hold a byte outside ASCII, in order, and
-// the offsets of the runes of each such line that [Doc.offset] read. A
-// parse makes a new slice of starts, so the slice names the text.
+// curPos returns the position of the byte at off in the current text, as
+// [positionIn] gives it, with the runes that [Doc.runes] keeps.
+func (d *Doc) curPos(off int) position.Position {
+	return d.runes.position(d.cur, d.curLines, off)
+}
+
+// origPos returns the position of the byte at off in the text of the user,
+// as [positionIn] gives it, with the runes that [Doc.origRunes] keeps.
+func (d *Doc) origPos(off int) position.Position {
+	return d.origRunes.position(d.orig, d.origLines, off)
+}
+
+// runeOffsets holds the lines of a text that hold a byte outside ASCII, in
+// order, and the offsets of the runes of each such line that a lookup
+// read. It holds them for one slice of the starts of the lines of the
+// text. Each parse makes a new slice of starts, so the slice names the
+// text.
 type runeOffsets struct {
 	lines  map[int][]int
 	starts []int
 	wide   []int
+}
+
+// hold makes m hold the lines of text, whose lines start at starts, unless
+// it holds them already.
+func (m *runeOffsets) hold(text string, starts []int) {
+	if len(m.starts) != len(starts) || &m.starts[0] != &starts[0] {
+		*m = runeOffsets{starts: starts, wide: wideLines(text, starts)}
+	}
+}
+
+// isWide reports whether line holds a byte outside ASCII.
+func (m *runeOffsets) isWide(line int) bool {
+	_, wide := slices.BinarySearch(m.wide, line)
+
+	return wide
+}
+
+// runesOf returns the offsets of the runes of line, a line of text that
+// holds a byte outside ASCII, and the offset of its end, as [runeStarts]
+// gives them.
+func (m *runeOffsets) runesOf(text string, line int) []int {
+	if m.lines == nil {
+		m.lines = make(map[int][]int)
+	}
+
+	offs, ok := m.lines[line]
+	if !ok {
+		offs = runeStarts(text, m.starts[line])
+		m.lines[line] = offs
+	}
+
+	return offs
+}
+
+// position returns the position of the byte at off in text, whose lines
+// start at starts, as [positionIn] gives it. The column of a byte of a
+// line in ASCII is its distance from the start of the line. On another
+// line, it is the index of its rune in the offsets that m keeps. So the
+// positions of the tokens of a long line cost one walk of the line.
+func (m *runeOffsets) position(text string, starts []int, off int) position.Position {
+	m.hold(text, starts)
+
+	line, _ := slices.BinarySearch(starts, off+1)
+	line--
+
+	start := starts[line]
+
+	if !m.isWide(line) {
+		return position.New(line, off-start)
+	}
+
+	offs := m.runesOf(text, line)
+	at := runeStart(text, start, off)
+
+	col, ok := slices.BinarySearch(offs, at)
+
+	switch end := offs[len(offs)-1]; {
+	case ok:
+	case at > end:
+		// The byte lies in the line break.
+		col = len(offs) - 1 + utf8.RuneCountInString(text[end:at])
+	default:
+		col = utf8.RuneCountInString(text[start:at])
+	}
+
+	return position.New(line, col)
 }
 
 // wideLines returns each line of text that holds a byte outside ASCII, in
@@ -1031,7 +1100,7 @@ func (d *Doc) emptyAt(path paths.Path, before int) (position.Range, paths.Path) 
 		u++
 	}
 
-	pos := positionIn(d.orig, d.origLines, u)
+	pos := d.origPos(u)
 	pos.Line += d.base
 
 	return position.NewRange(pos, pos), user
@@ -1312,7 +1381,7 @@ func (d *Doc) tailRange(rng position.Range) (position.Range, bool) {
 func (d *Doc) userPos(off int) position.Position {
 	for i := min(off, len(d.origin)-1); i >= 0; i-- {
 		if o := d.origin[i]; o >= 0 {
-			pos := positionIn(d.orig, d.origLines, o)
+			pos := d.origPos(o)
 			pos.Line += d.base
 
 			return pos

@@ -1292,7 +1292,7 @@ func (d *Doc) bindAt(off, size int, problem func(opts ...niceyaml.ErrorOption) e
 	s := span{start: off, end: off + max(size, 1)}
 	at := d.site(s, false)
 
-	if path, ok := d.node.PathAt(positionIn(d.cur, d.curLines, off)); ok {
+	if path, ok := d.node.PathAt(d.curPos(off)); ok {
 		if path.IsKey() {
 			at = d.keyPlace(s)
 		}
@@ -1835,7 +1835,7 @@ func (d *Doc) diffProblem(x *model, df *diff) error {
 		// hides the entry, so the problem binds at the node. So does an
 		// extra entry, at its key.
 		bound = d.bindOwn(d.engineProblem(problem, niceyaml.AtPath(at), niceyaml.AtRange(
-			position.NewRange(positionIn(d.cur, d.curLines, s.start), positionIn(d.cur, d.curLines, s.end)),
+			position.NewRange(d.curPos(s.start), d.curPos(s.end)),
 		)))
 
 	default:

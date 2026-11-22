@@ -520,8 +520,9 @@ type Doc struct {
 	// The line starts of orig and of cur.
 	origLines []int
 	curLines  []int
-	// The offsets of the runes of the lines of cur that [Doc.offset] read.
-	runes runeOffsets
+	// The offsets of the runes of the lines of cur and of orig that a
+	// lookup of an offset or a position read.
+	runes, origRunes runeOffsets
 	// The nodes of the Apply running, whose paths each edit keeps up to
 	// date, and the guards of the paths of [WithProtected], as
 	// [Doc.guardValues] gives them.

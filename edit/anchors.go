@@ -2,6 +2,7 @@ package edit
 
 import (
 	"slices"
+	"sort"
 
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
@@ -81,6 +82,29 @@ func (d *Doc) anchorsIn(nodes ...ast.Node) *keeper {
 	}
 
 	return k
+}
+
+// drop leaves out each alias that starts in one of spans, bytes of text
+// that the edit takes too, and each anchor that no other alias reads. The
+// spans do not overlap, and they go from the last in the text to the
+// first.
+func (k *keeper) drop(spans []span) {
+	if len(spans) == 0 {
+		return
+	}
+
+	taken := func(r reader) bool {
+		// The first span that starts at or before the alias.
+		i := sort.Search(len(spans), func(i int) bool { return spans[i].start <= r.ref.start })
+
+		return i < len(spans) && inside(spans[i], r.ref.start)
+	}
+
+	for i := range k.kept {
+		k.kept[i].readers = slices.DeleteFunc(k.kept[i].readers, taken)
+	}
+
+	k.kept = slices.DeleteFunc(k.kept, func(a keptAnchor) bool { return len(a.readers) == 0 })
 }
 
 // inside reports whether the byte at off lies in s.

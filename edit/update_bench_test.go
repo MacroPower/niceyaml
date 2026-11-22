@@ -27,11 +27,15 @@ type updateBench struct {
 
 func BenchmarkNode_Update(b *testing.B) {
 	// The Update of the change case replaces scalars with scalars and parses
-	// the text once for all of them. So its time grows about linearly with
-	// the number of entries, as the time of the Set does. The time of the
-	// leaf calls grows with the square of that number. Each remove and each
-	// insert of an Update parses the text. So the time of the remove and
-	// append cases grows with the square of the number of entries or items.
+	// the text once for all of them. The Update of each remove case removes
+	// the entries of its mapping in one removal, which parses the text
+	// once. So the time of these cases grows about linearly with the number
+	// of entries, as the time of the Set does. The flow case writes its
+	// mapping on one line, so its time shows the cost of the positions of
+	// the entries of a long line. The time of the leaf calls grows with the
+	// square of the number of entries. Each insert of an Update parses the
+	// text. So the time of the append case grows with the square of the
+	// number of items.
 	comments := func(count int) string {
 		var text strings.Builder
 
@@ -73,6 +77,30 @@ func BenchmarkNode_Update(b *testing.B) {
 		"remove": {
 			path:  paths.Doc().Child("m"),
 			text:  comments,
+			value: func(int) any { return yaml.MapSlice{{Key: "k0", Value: 0}} },
+		},
+		"remove_every_other": {
+			path: paths.Doc().Child("m"),
+			text: comments,
+			value: func(count int) any {
+				v := make(yaml.MapSlice, 0, count/2)
+				for i := 0; i < count; i += 2 {
+					v = append(v, yaml.MapItem{Key: fmt.Sprintf("k%d", i), Value: i})
+				}
+
+				return v
+			},
+		},
+		"remove_flow": {
+			path: paths.Doc().Child("m"),
+			text: func(count int) string {
+				entries := make([]string, 0, count)
+				for i := range count {
+					entries = append(entries, fmt.Sprintf("k%d: %d", i, i))
+				}
+
+				return "m: {" + strings.Join(entries, ", ") + "}\n"
+			},
 			value: func(int) any { return yaml.MapSlice{{Key: "k0", Value: 0}} },
 		},
 		"append": {

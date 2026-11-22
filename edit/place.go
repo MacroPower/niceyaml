@@ -1125,7 +1125,7 @@ func eachToken(node ast.Node, fn func(*token.Token)) {
 
 // lineOf returns the line of the current text that holds the byte at off.
 func (d *Doc) lineOf(off int) int {
-	return positionIn(d.cur, d.curLines, off).Line
+	return d.curPos(off).Line
 }
 
 // lineStart returns the offset of line, or the length of the text past the
@@ -1185,7 +1185,7 @@ func (d *Doc) commentColumn(line int) (int, bool) {
 
 	col := len(text) - len(trimmed)
 
-	tk := d.src.Lines().TokenAt(positionIn(d.cur, d.curLines, d.lineStart(line)+col))
+	tk := d.src.Lines().TokenAt(d.curPos(d.lineStart(line) + col))
 	if tk != nil && tk.Type != token.CommentType {
 		return 0, false
 	}
@@ -1202,7 +1202,7 @@ func (d *Doc) indentOf(line int) int {
 
 // column returns the column of the byte at off in its line.
 func (d *Doc) column(off int) int {
-	return positionIn(d.cur, d.curLines, off).Col
+	return d.curPos(off).Col
 }
 
 // trailingComment returns the start of the comment that ends the line of
@@ -1284,7 +1284,7 @@ func (d *Doc) pastDropped(end int) int {
 	lines := d.src.Lines()
 
 	for i := end; i < last; i++ {
-		if strings.IndexByte(" \t\r\n", d.cur[i]) < 0 && lines.TokenAt(positionIn(d.cur, d.curLines, i)) != nil {
+		if strings.IndexByte(" \t\r\n", d.cur[i]) < 0 && lines.TokenAt(d.curPos(i)) != nil {
 			return end
 		}
 	}
