@@ -219,13 +219,16 @@ func WithIndentSequence(indent bool) Option {
 // mappings and sequences it builds from Go values in flow style, as in
 // {a: [1, 2]}. The default is false, and the encoder then writes those
 // collections in block style. Under the default, the encoder writes an
-// empty collection and a struct field with the flow option in its yaml
-// tag in flow style. A collection in the YAML that a marshaler returns
-// keeps the style it has in that text under either setting. Under
-// [JSONMarshalers], go-yaml converts the JSON of a MarshalJSON method to
-// YAML in block style. A collection in that JSON thus comes out in block
-// style under either setting. Under true, such a block collection sits in
-// block style inside the flow collection, as [Encoder.Encode] describes.
+// empty collection and a struct field with the flow option in its yaml tag
+// in flow style. A collection in the YAML that a marshaler returns keeps
+// the style it has in that text, except in a flow collection. A flow
+// collection holds only flow collections. Under [JSONMarshalers], go-yaml
+// converts the JSON of a MarshalJSON method to YAML in block style. A
+// collection in that JSON thus comes out in flow style only inside a flow
+// collection, as [Encoder.Encode] describes. Such a flow collection comes
+// from WithFlow(true) or from a struct field with the flow option. A
+// marshaler's value at the root of the document keeps block style under
+// either setting.
 func WithFlow(flow bool) Option {
 	return func(c *config) {
 		c.flow = flow
@@ -509,11 +512,17 @@ func newDocEncoder(c config) *docEncoder {
 // collection at or left of the column of its key, as it
 // does under [WithIndentSequence] for a key of a mapping in a sequence.
 // Encode moves such a mapping one indent right of its key. It moves such a
-// sequence there when the sequence sits left of its key. In a flow
-// collection, such as one that [WithFlow] produces, go-yaml writes the
-// block collection in block style. YAML forbids block style there, and
-// Encode leaves the collection and the strings in it as go-yaml writes
-// them.
+// sequence there when the sequence sits left of its key. YAML forbids
+// block style in a flow collection, such as one that [WithFlow] produces.
+// Encode writes each collection there in flow style, and it quotes the
+// strings in that collection by the rules of a flow collection. A flow
+// collection takes one line, so Encode drops the blank lines of the
+// marshaler's YAML from it. Go-yaml writes an empty node as nothing. In a
+// flow collection, Encode writes an empty node as null. Under the tag of
+// a scalar type, such as !!str or !!int, it writes an empty quoted string
+// under the tag. Go-yaml reads an empty node under any other tag, such as
+// !!map or a custom tag, as null. So Encode drops such a tag from an
+// empty node in a flow collection.
 //
 // Encode returns an error that matches [ErrEncode] when v does not encode
 // to YAML. A value of a type go-yaml does not encode and a marshaler that

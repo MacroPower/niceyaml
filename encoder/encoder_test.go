@@ -73,6 +73,12 @@ func (r rawYAML) MarshalYAML() ([]byte, error) {
 	return []byte(r), nil
 }
 
+// flowField holds a value under a key with the flow option in its yaml
+// tag.
+type flowField struct {
+	K any `yaml:"k,flow"`
+}
+
 // literal returns s as a literal block that strips the final line break.
 func literal(s string) string {
 	return "|-\n  " + strings.ReplaceAll(s, "\n", "\n  ") + "\n"
@@ -345,7 +351,74 @@ func TestEncoder_Encode_quoting(t *testing.T) {
 			input:   map[string]rawYAML{"k": "? a\n: |"},
 			decoded: map[string]map[string]string{"k": {"a": ""}},
 			opts:    []encoder.Option{flow},
-			want:    stringtest.LinesLF("{k:", "  ? a: |", "}"),
+			want:    stringtest.LinesLF(`{k: {? a: ""}}`),
+		},
+		"marshaled block collections in flow sequence": {
+			input: map[string][]rawYAML{"k": {"a: x\nb:\n  - y\n  - |\n    z\n"}},
+			decoded: map[string][]map[string]any{
+				"k": {{"a": "x", "b": []any{"y", "z\n"}}},
+			},
+			opts: []encoder.Option{flow},
+			want: stringtest.LinesLF(`{k: [{a: x, b: [y, "z\n"]}]}`),
+		},
+		"marshaled control characters in block collection in flow mapping": {
+			input:   map[string]rawYAML{"k": "x: a\x01b\ny:\n  - 'c\x01d'\n"},
+			decoded: map[string]map[string]any{"k": {"x": "a\x01b", "y": []any{"c\x01d"}}},
+			opts:    []encoder.Option{flow},
+			want:    stringtest.LinesLF(`{k: {x: "a\x01b", y: ["c\x01d"]}}`),
+		},
+		"marshaled blank line in flow mapping": {
+			input:   map[string]rawYAML{"k": "x: a\n\ny: b\n"},
+			decoded: map[string]map[string]string{"k": {"x": "a", "y": "b"}},
+			opts:    []encoder.Option{flow},
+			want:    stringtest.LinesLF("{k: {x: a, y: b}}"),
+		},
+		"marshaled blank line in flow field": {
+			input:   map[string]flowField{"a": {K: map[string]rawYAML{"m": "x: a\n\ny: b\n"}}},
+			decoded: map[string]map[string]map[string]map[string]string{"a": {"k": {"m": {"x": "a", "y": "b"}}}},
+			want:    stringtest.LinesLF("a:", "  k: {m: {x: a, y: b}}"),
+		},
+		"marshaled implicit nulls in flow mapping": {
+			input:   map[string]rawYAML{"k": "x:\ny:\n-\n- a\n"},
+			decoded: map[string]map[string]any{"k": {"x": nil, "y": []any{nil, "a"}}},
+			opts:    []encoder.Option{flow},
+			want:    stringtest.LinesLF("{k: {x: null, y: [null, a]}}"),
+		},
+		"marshaled tagged empty node in flow mapping": {
+			input:   map[string]rawYAML{"k": "x: 1\ny: !!str\n"},
+			decoded: map[string]map[string]string{"k": {"x": "1", "y": ""}},
+			opts:    []encoder.Option{flow},
+			want:    stringtest.LinesLF(`{k: {x: 1, y: !!str ""}}`),
+		},
+		"marshaled empty node under float tag in flow mapping": {
+			input:   map[string]rawYAML{"k": "y: !!float\n"},
+			decoded: map[string]map[string]any{"k": {"y": float64(0)}},
+			opts:    []encoder.Option{flow},
+			want:    stringtest.LinesLF(`{k: {y: !!float ""}}`),
+		},
+		"marshaled empty nodes under tags of no scalar type in flow mapping": {
+			input:   map[string]rawYAML{"j": "a: !!map\n", "k": "- !!seq\n", "m": "a: &a !foo\n"},
+			decoded: map[string]any{"j": map[string]any{"a": nil}, "k": []any{nil}, "m": map[string]any{"a": nil}},
+			opts:    []encoder.Option{flow},
+			want:    stringtest.LinesLF(`{j: {a: null}, k: [null], m: {a: &a null}}`),
+		},
+		"marshaled empty key under collection tag in flow mapping": {
+			input:   map[string]rawYAML{"k": "? !!map\n: c\n"},
+			decoded: map[string]map[any]string{"k": {nil: "c"}},
+			opts:    []encoder.Option{flow},
+			want:    stringtest.LinesLF(`{k: {? null: c}}`),
+		},
+		"marshaled literal block as explicit key in flow mapping": {
+			input:   map[string]rawYAML{"k": "? |\n  a\n  b\n: c\n"},
+			decoded: map[string]map[string]string{"k": {"a\nb\n": "c"}},
+			opts:    []encoder.Option{flow},
+			want:    stringtest.LinesLF(`{k: {? "a\nb\n": c}}`),
+		},
+		"marshaled one-line literal block as explicit key in flow sequence": {
+			input:   map[string]rawYAML{"k": "- ? |-\n    ab\n  : c\n"},
+			decoded: map[string][]map[string]string{"k": {{"ab": "c"}}},
+			opts:    []encoder.Option{flow},
+			want:    stringtest.LinesLF(`{k: [{? "ab": c}]}`),
 		},
 		"marshaled single-quoted string": {
 			input:   map[string]rawYAML{"k": "'a b'"},
@@ -412,6 +485,11 @@ func TestEncoder_Encode_quoting(t *testing.T) {
 			input:   map[string]rawYAML{"k": "? a\n: |\n  x\n  y\n"},
 			decoded: map[string]map[string]string{"k": {"a": "x\ny\n"}},
 			want:    stringtest.LinesLF("k:", "  ? a: |", "      x", "      y"),
+		},
+		"marshaled literal block as explicit key under key": {
+			input:   map[string]rawYAML{"k": "? |\n  a\n  b\n: c\n"},
+			decoded: map[string]map[string]string{"k": {"a\nb\n": "c"}},
+			want:    stringtest.LinesLF(`k:`, `  ? "a\nb\n": c`),
 		},
 		"marshaled literal block under explicit key in sequence at indent 1": {
 			input:   []rawYAML{"? a\n: |-\n  x\n  y\n"},
@@ -2234,7 +2312,7 @@ func TestWithFlow(t *testing.T) {
 		"marshaler styles under flow": {
 			input: marshaled,
 			opts:  []encoder.Option{encoder.WithFlow(true)},
-			want:  stringtest.LinesLF("{k:", "  x: [1, 2]", "  y:", "    z: 1}"),
+			want:  "{k: {x: [1, 2], y: {z: 1}}}\n",
 		},
 		"JSON marshaler styles under default": {
 			input: jsonMarshaled,
@@ -2244,7 +2322,19 @@ func TestWithFlow(t *testing.T) {
 		"JSON marshaler styles under flow": {
 			input: jsonMarshaled,
 			opts:  []encoder.Option{jsonMarshalers, encoder.WithFlow(true)},
-			want:  stringtest.LinesLF("{k:", "  a:", "  - 1", "  - 2", "  b:", "    c: 1}"),
+			want:  "{k: {a: [1, 2], b: {c: 1}}}\n",
+		},
+		"JSON marshaler in flow sequence": {
+			input: map[string]any{
+				"k": []any{jsonText{v: map[string]any{"a": []string{"x"}, "b": map[string]int{"c": 1}}}},
+			},
+			opts: []encoder.Option{jsonMarshalers, encoder.WithFlow(true)},
+			want: "{k: [{a: [x], b: {c: 1}}]}\n",
+		},
+		"JSON marshaler in flow field under default": {
+			input: flowField{K: map[string]any{"m": jsonMarshaled["k"]}},
+			opts:  []encoder.Option{jsonMarshalers},
+			want:  "k: {m: {a: [1, 2], b: {c: 1}}}\n",
 		},
 	}
 

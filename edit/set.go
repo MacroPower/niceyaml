@@ -192,7 +192,9 @@ type payload struct {
 // place of a flow collection that holds an entry or an item, and with the
 // [Flow] option. Inside the value, a `yaml:",flow"` struct tag or the YAML
 // of a MarshalYAML method decides the style, so a MarshalYAML method that
-// returns "{x: 1}" writes a flow mapping.
+// returns "{x: 1}" writes a flow mapping. A collection inside a flow
+// collection of the value takes flow style, whatever style the YAML of
+// its marshaler gives it.
 //
 // An empty flow collection, such as "{}", "[]", or "{ }", gives no style.
 // So the first entry or item that a call adds to one outside a flow

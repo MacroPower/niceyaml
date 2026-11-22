@@ -14,10 +14,12 @@ import (
 // not parse. It checks the unquoted, single-quoted, and literal block
 // forms. It first replaces each literal or folded block from a
 // marshaler's YAML with a string, as [quoter.unblock] describes. It then
-// checks the text of such a block as it checks any other string. It
-// leaves a block collection in a flow collection as it is. Go-yaml writes
-// that collection in block style, and quoting does not make block style
-// valid there. Only a marshaler's YAML puts a block collection there.
+// checks the text of such a block as it checks any other string. Only a
+// marshaler's YAML puts a block collection in a flow collection. YAML
+// forbids block style there, so the quoter sets flow style on each
+// collection in a flow collection. In a flow collection, it also writes
+// an empty node as a value that go-yaml prints, because the go-yaml
+// printer writes an empty node as nothing.
 type quoter struct {
 	// Collects the blocks that [quoter.unblock] replaces.
 	blocks *[]block
@@ -46,24 +48,36 @@ func (q quoter) Visit(node ast.Node) ast.Visitor {
 	case *ast.TagNode:
 		q.tagged = true
 
+		if null, ok := n.Value.(*ast.NullNode); ok && q.flow && null.Token.Type == token.ImplicitNullType &&
+			scalarTags[token.ReservedTagKeyword(n.Start.Value)] {
+			// The go-yaml parser rejects a tag on an empty node before
+			// the end of a flow collection. Under the tag of a scalar
+			// type, the quoter writes an empty quoted string instead.
+			// [scalarTags] names the tags where go-yaml reads that string
+			// as another value than the empty node. [quoter.emptyTag]
+			// replaces an empty node under any other tag.
+			pos := *null.Token.Position
+			n.Value = ast.String(&token.Token{Type: token.DoubleQuoteType, Position: &pos})
+		}
+
 		return q
 
 	case *ast.MappingNode:
-		if q.flow && !n.IsFlowStyle {
-			return nil
-		}
+		n.IsFlowStyle = n.IsFlowStyle || q.flow
 
 		return q.within(n.IsFlowStyle)
 
 	case *ast.SequenceNode:
-		if q.flow && !n.IsFlowStyle {
-			return nil
-		}
+		n.IsFlowStyle = n.IsFlowStyle || q.flow
 
 		inner := q.within(n.IsFlowStyle)
 
 		for i, value := range n.Values {
-			n.Values[i] = inner.unblock(value, n.Start.Position.Column, func(v ast.Node) { n.Values[i] = v })
+			n.Values[i] = inner.unblock(
+				inner.emptyTag(value),
+				n.Start.Position.Column,
+				func(v ast.Node) { n.Values[i] = v },
+			)
 
 			if s, ok := n.Values[i].(*ast.StringNode); ok && !inner.flow {
 				quoteEntry(s)
@@ -73,6 +87,16 @@ func (q quoter) Visit(node ast.Node) ast.Visitor {
 		return inner
 
 	case *ast.MappingValueNode:
+		n.IsFlowStyle = n.IsFlowStyle || q.flow
+		if tk := n.Key.GetToken(); q.flow && tk != nil {
+			// The go-yaml printer starts a key on a new line when a blank
+			// line sits before the key in a marshaler's YAML. It indents
+			// that line by the column of the key, which can leave the
+			// line of a flow collection at or left of its block parent.
+			// Without the token before it, the key stays on the line.
+			tk.Prev = nil
+		}
+
 		n.Key = q.keySafe(n.Key)
 
 		col := n.Key.GetToken().Position.Column
@@ -82,7 +106,14 @@ func (q quoter) Visit(node ast.Node) ast.Visitor {
 			col += 2
 		}
 
-		n.Value = q.unblock(n.Value, col, func(v ast.Node) { n.Value = v })
+		n.Value = q.unblock(q.emptyTag(n.Value), col, func(v ast.Node) { n.Value = v })
+
+	case *ast.NullNode:
+		if q.flow && n.Token.Type == token.ImplicitNullType {
+			// The go-yaml printer writes an implicit null as nothing,
+			// which leaves an empty entry in a flow sequence.
+			n.Token.Type = token.NullType
+		}
 
 	case *ast.StringNode:
 		q.quote(n, false)
@@ -99,6 +130,31 @@ func (q quoter) within(flow bool) quoter {
 	q.tagged = false
 
 	return q
+}
+
+// emptyTag returns node, or the empty node under the tag in place of
+// node. It replaces node when node is a tag on an empty node in a flow
+// collection, and the tag is not in [scalarTags]. The go-yaml parser
+// rejects a tag on an empty node before the end of a flow collection.
+// Go-yaml reads an empty node under any tag outside [scalarTags] as null,
+// as under "!!map", "!!seq", or a custom tag. Under such a tag, an empty
+// quoted string does not parse or reads back as a string. So emptyTag
+// drops the tag, and [quoter.Visit] writes the empty node as null.
+// EmptyTag looks through an anchor on node.
+func (q quoter) emptyTag(node ast.Node) ast.Node {
+	switch n := node.(type) {
+	case *ast.TagNode:
+		null, ok := n.Value.(*ast.NullNode)
+		if ok && q.flow && null.Token.Type == token.ImplicitNullType &&
+			!scalarTags[token.ReservedTagKeyword(n.Start.Value)] {
+			return null
+		}
+
+	case *ast.AnchorNode:
+		n.Value = q.emptyTag(n.Value)
+	}
+
+	return node
 }
 
 // block is a literal or folded block of a marshaler's YAML that
@@ -214,9 +270,10 @@ func commentBlocks(root ast.Node, blocks []block) ast.Node {
 // keySafe returns key, or a string in place of key when key is a literal
 // block, as [quoter.unblock] describes. It quotes a string in key under
 // the rules of an implicit key, which double-quote the string of a block
-// whose text holds a line break. It looks through the tags and anchors
-// that a marshaler's YAML can put on a key. It replaces a literal block
-// under them the same way.
+// whose text holds a line break. It looks through the "?" of an explicit
+// key, and through the tags and anchors that a marshaler's YAML can put
+// on a key. It replaces a literal block under them the same way. It
+// replaces a tagged empty node as [quoter.emptyTag] describes.
 func (q quoter) keySafe(key ast.MapKeyNode) ast.MapKeyNode {
 	switch k := key.(type) {
 	case *ast.StringNode:
@@ -227,7 +284,16 @@ func (q quoter) keySafe(key ast.MapKeyNode) ast.MapKeyNode {
 
 		return s
 
+	case *ast.MappingKeyNode:
+		if inner, ok := k.Value.(ast.MapKeyNode); ok {
+			k.Value = q.keySafe(inner)
+		}
+
 	case *ast.TagNode:
+		if null, ok := q.emptyTag(k).(*ast.NullNode); ok {
+			return null
+		}
+
 		if inner, ok := k.Value.(ast.MapKeyNode); ok {
 			tagged := q
 			tagged.tagged = true
@@ -325,13 +391,31 @@ func unprintable(s string) bool {
 	})
 }
 
-// coreScalar matches the plain scalars that the core schema of YAML 1.2
-// reads as a null, a bool, an int, or a float, as its section 10.3.2 lists
-// them. A string of such a text reads as another value when it stays
-// plain.
-var coreScalar = regexp.MustCompile(`^(?:null|Null|NULL|~|true|True|TRUE|false|False|FALSE|` +
-	`[-+]?[0-9]+|0o[0-7]+|0x[0-9a-fA-F]+|[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?|` +
-	`[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))$`)
+var (
+	// CoreScalar matches the plain scalars that the core schema of YAML 1.2
+	// reads as a null, a bool, an int, or a float, as its section 10.3.2 lists
+	// them. A string of such a text reads as another value when it stays
+	// plain.
+	coreScalar = regexp.MustCompile(`^(?:null|Null|NULL|~|true|True|TRUE|false|False|FALSE|` +
+		`[-+]?[0-9]+|0o[0-7]+|0x[0-9a-fA-F]+|[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?|` +
+		`[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))$`)
+
+	// ScalarTags holds the tags of the scalar types of YAML. In a flow
+	// collection, [quoter.Visit] writes an empty node under such a tag as an
+	// empty quoted string. Go-yaml reads that string as it reads the empty
+	// node, except under "!!float", "!!bool", and "!!binary". Under
+	// "!!float", go-yaml reads the empty node as the int 0 and the string as
+	// the float 0. Go-yaml rejects an empty node under the other two tags.
+	scalarTags = map[token.ReservedTagKeyword]bool{
+		token.StringTag:    true,
+		token.IntegerTag:   true,
+		token.FloatTag:     true,
+		token.BooleanTag:   true,
+		token.NullTag:      true,
+		token.BinaryTag:    true,
+		token.TimestampTag: true,
+	}
+)
 
 // quoteEntry double-quotes n, an entry of a block sequence, when go-yaml
 // otherwise writes it as a literal block that does not read back as its
