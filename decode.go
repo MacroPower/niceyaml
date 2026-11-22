@@ -1649,15 +1649,14 @@ func (n *Node) newDecoder(cfg decodeConfig) *yamldecode.Decoder {
 }
 
 // ownDecode decodes the first document of text into an any with go-yaml's
-// decoder alone, as yaml.Unmarshal decodes it. With comments, the decoder
-// parses the text with its comments, as yaml.CommentToMap asks it to. The
-// decoder parses the text itself, because its decode of a parse that it did
-// not make keeps the value that its first pass gave each anchor, so an alias
-// inside the value of its own anchor reads that value there and not the
-// anchor again. The decoder reads the text of each reference document of s,
-// and it takes a key that a mapping repeats only when s allows duplicate
-// keys. A panic of the decoder comes back as a [*PanicError].
-func (s *Source) ownDecode(ctx context.Context, text string, comments bool) (any, error) {
+// decoder alone, as yaml.Unmarshal decodes it. The decoder parses the text
+// itself, because its decode of a parse that it did not make keeps the
+// value that its first pass gave each anchor, so an alias inside the value
+// of its own anchor reads that value there and not the anchor again. The
+// decoder reads the text of each reference document of s, and it takes a
+// key that a mapping repeats only when s allows duplicate keys. A panic of
+// the decoder comes back as a [*PanicError].
+func (s *Source) ownDecode(ctx context.Context, text string) (any, error) {
 	var (
 		v    any
 		err  error
@@ -1670,10 +1669,6 @@ func (s *Source) ownDecode(ctx context.Context, text string, comments bool) (any
 
 	if s.allowDuplicateKeys {
 		opts = append(opts, yaml.AllowDuplicateMapKey())
-	}
-
-	if comments {
-		opts = append(opts, yaml.CommentToMap(yaml.CommentMap{}))
 	}
 
 	func() {

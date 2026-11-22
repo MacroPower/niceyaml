@@ -1001,10 +1001,11 @@
 //
 // Apply also decodes the edited text with go-yaml's decoder alone, as
 // yaml.Unmarshal does, with the reference documents and the rule for
-// duplicate keys of the Source. When that decoder takes the text that the
-// Apply found, it must take the edited text too. When it also reads the
-// text that the Apply found as the decode of niceyaml reads it, it must
-// read the edited text so too. Otherwise the Apply fails with ErrEngine.
+// duplicate keys of the Source. When that decoder reads the text that the
+// Apply found as the decode of niceyaml reads it, and it takes the edited
+// text, it must read the edited text so too. When it reads the edited text
+// otherwise, the Apply fails with ErrEngine, and the error names go-yaml's
+// decoder.
 //
 // An Apply that changes the text also parses the edited text with go-yaml's
 // parser twice. One parse leaves out the comments, as yaml.Unmarshal does,
@@ -1036,26 +1037,6 @@
 // writes such a character fails the same way, and the error names the
 // character. The check skips each character of the user's text that a call
 // keeps or moves.
-//
-// The comment-free parse must also read the text as the parse of the edits
-// reads it. Both must hold the same keys, values, tags, anchors, and
-// aliases at the same places. Go-yaml misreads some texts without their
-// comments. When it misreads the edited text so, the Apply fails with
-// ErrEngine at the first place that the parses read otherwise. The error
-// names go-yaml's parser.
-//
-// Go-yaml's decoder parses a text with its comments when a program asks for
-// them, as with yaml.CommentToMap. The parser misreads some comments. A
-// comment line after an anchor without a value can make the anchor hold the
-// lines after the comment.
-//
-// The decoder must read the edited text alike with and without its comments
-// where it read the user's text alike. It reads a text alike when it
-// refuses either parse or reads one value from both. Otherwise the Apply
-// fails with ErrEngine at the first place that the two parses read
-// otherwise. The error names go-yaml's parser and what the decoder reads
-// there with the comments and without them. When the decoder reads the
-// user's text apart already, the edits follow the parse without comments.
 //
 // Apply returns the first problem and stops there. A failed Apply leaves
 // the Doc as it found it, so the Doc does not keep any of the edits of that

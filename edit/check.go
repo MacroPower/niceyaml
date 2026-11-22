@@ -21,7 +21,6 @@ import (
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/docparse"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
@@ -97,14 +96,12 @@ func (d *Doc) endCall(n *Node, err error) error {
 // check checks the text after the calls of an Apply return. The text must
 // keep the limits of the Source of the user's text, as [Doc.limitProblem]
 // describes. The text must decode, as [Doc.decodeProblem]
-// describes, and go-yaml's parser must take it with and without its comments
-// and read it as the edits do, as [Doc.parseProblem] and
-// [Doc.misreadProblem] describe. Go-yaml must read it alike with and without
-// its comments, as [Doc.commentsProblem] describes. It must hold the values
-// of the model of the calls, as [Doc.checkModel] describes, and go-yaml's
-// decoder alone must read those values too, as [Doc.ownDecodeProblem]
-// describes. The text of start is the text that the Apply found. The parses
-// of [Doc.parseFinal] run beside the checks that do not read them, the check
+// describes, and go-yaml's parser must take it with and without its
+// comments, as [Doc.parseProblem] describes. It must hold the values of the
+// model of the calls, as [Doc.checkModel] describes. Go-yaml's decoder
+// alone must read those values too, as [Doc.ownDecodeProblem] describes.
+// The text of start is the text that the Apply found. The parses of
+// [Doc.parseFinal] run beside the checks that do not read them, the check
 // of the model among them. The problem that check returns is the first in
 // the order of this description.
 func (d *Doc) check(ctx context.Context, start state) error {
@@ -138,33 +135,19 @@ func (d *Doc) check(ctx context.Context, start state) error {
 		return err
 	}
 
-	err = d.misreadProblem(final)
-	if err != nil {
-		return err
-	}
-
-	err = d.commentsProblem(ctx, final, start)
-	if err != nil {
-		return err
-	}
-
 	if modelErr != nil {
 		return modelErr
 	}
 
-	return d.ownDecodeProblem(ctx, final, read, start)
+	return d.ownDecodeProblem(ctx, read, start)
 }
 
-// finalParse holds go-yaml's parses of the current text that
-// [Doc.parseFinal] makes.
+// finalParse holds the problems of go-yaml's parses of the current text
+// that [Doc.parseFinal] makes.
 type finalParse struct {
 	// The problems of the parse without the comments of the text, as
 	// yaml.Unmarshal parses it, and of the parse with them.
 	plain, comments error
-	// The parse without the comments, or nil when it fails, and the parse
-	// with them, or nil when it fails. A text without comments has one
-	// parse for both.
-	file, commented *ast.File
 	// The tokens of the one pass of go-yaml's lexer that both parses read.
 	tokens token.Tokens
 }
@@ -204,38 +187,36 @@ func (d *Doc) parseFinal(start string) func() finalParse {
 		}()
 
 		r.tokens = lexer.Tokenize(text)
-		r.file, r.plain = parseTokens(r.tokens, 0)
+		r.plain = parseTokens(r.tokens, 0)
 
 		// The mode of the parser decides only whether it reads the comment
 		// tokens, so it reads tokens without a comment the same in both.
-		r.commented, r.comments = r.file, r.plain
+		r.comments = r.plain
 		if slices.ContainsFunc(r.tokens, func(tk *token.Token) bool { return tk.Type == token.CommentType }) {
-			r.commented, r.comments = parseTokens(r.tokens, parser.ParseComments)
+			r.comments = parseTokens(r.tokens, parser.ParseComments)
 		}
 	}()
 
 	return func() finalParse { return <-done }
 }
 
-// parseTokens returns go-yaml's parse of tks in mode, or the problem of
-// that parse. A panic of the parser comes back as a [*parserPanicError].
-func parseTokens(tks token.Tokens, mode parser.Mode) (*ast.File, error) {
-	var (
-		f   *ast.File
-		err error
-	)
+// parseTokens returns the problem of go-yaml's parse of tks in mode, or nil
+// when the parser takes tks. A panic of the parser comes back as a
+// [*parserPanicError].
+func parseTokens(tks token.Tokens, mode parser.Mode) error {
+	var err error
 
 	func() {
 		defer func() {
 			if p := recover(); p != nil {
-				f, err = nil, &parserPanicError{value: p}
+				err = &parserPanicError{value: p}
 			}
 		}()
 
-		f, err = parser.Parse(tks, mode, parser.AllowDuplicateMapKey())
+		_, err = parser.Parse(tks, mode, parser.AllowDuplicateMapKey())
 	}()
 
-	return f, err //nolint:wrapcheck // The problem of the check names the parser.
+	return err //nolint:wrapcheck // The problem of the check names the parser.
 }
 
 // parserPanicError is the error of a panic of go-yaml's lexer or parser on
@@ -309,43 +290,30 @@ func (d *Doc) decodeProblem(ctx context.Context) (any, error) {
 	return nil, d.bug(d.rootNode(), cause)
 }
 
-// ownDecodeProblem returns the problem of the current text when go-yaml's
-// decoder alone, as yaml.Unmarshal decodes the text, refuses it or reads
-// other values than read, the decode of the current text. That decode
-// binds each alias as the resolver binds it, and go-yaml's decoder binds
-// some aliases of reused anchor names otherwise. The two read one tree
-// alike unless the decode reads a tree that differs from the text, as
-// [hook.DecodeChanges] tells, so only such a text takes the decode alone.
-// Go-yaml's comment-free parse, which yaml.Unmarshal reads, can still read
-// another text apart from the parse of the edits, as [Doc.misreadProblem]
-// finds it. The decoder parses the current text as yaml.Unmarshal does,
-// and final, the parse of the current text without its comments, places a
-// refusal.
-// A refusal counts only when go-yaml's decoder alone takes start, the text
-// that the Apply found, and other values count only when it reads start as
+// ownDecodeProblem returns the problem of the current text when it differs
+// from start, the text that the Apply found, and go-yaml's decoder alone, as
+// yaml.Unmarshal decodes the text, reads other values than read, the decode
+// of the current text. That decode binds each alias as the resolver binds
+// it, and go-yaml's decoder binds some aliases of reused anchor names
+// otherwise. The two read one tree alike unless the decode reads a tree
+// that differs from the text, as [hook.DecodeChanges] tells, so only such a
+// text takes the decode alone. A text that the decoder alone refuses does
+// not count. Other values count only when the decoder alone reads start as
 // the decode reads it, as [Doc.readsAlike] tells. Where the two read start
 // apart, the edits follow the decode. The problem matches [ErrEngine] and
-// names go-yaml's decoder.
-func (d *Doc) ownDecodeProblem(ctx context.Context, final finalParse, read any, start state) error {
-	if final.file == nil || !hook.DecodeChanges(d.node) {
+// names go-yaml's decoder. It binds at the first place that the two read
+// apart, as [Doc.apartAt] finds it.
+func (d *Doc) ownDecodeProblem(ctx context.Context, read any, start state) error {
+	if d.cur == start.cur || !hook.DecodeChanges(d.node) {
 		return nil
 	}
 
-	own, err := hook.OwnDecode(ctx, d.node, d.cur+d.tail, false)
-	if err == nil && sameReading(own, read) {
-		return nil
+	own, err := hook.OwnDecode(ctx, d.node, d.cur+d.tail)
+	if err != nil || sameReading(own, read) {
+		return nil //nolint:nilerr // A refusal of go-yaml's decoder alone does not count.
 	}
 
-	takes, alike := d.readsAlike(ctx, start)
-	if err != nil {
-		if takes {
-			return d.ownRefusal(final, err)
-		}
-
-		return nil //nolint:nilerr // Go-yaml's decoder alone refuses the text that the Apply found too.
-	}
-
-	if !alike {
+	if _, alike := d.readsAlike(ctx, start); !alike {
 		return nil
 	}
 
@@ -354,11 +322,7 @@ func (d *Doc) ownDecodeProblem(ctx context.Context, final finalParse, read any, 
 	cause := fmt.Errorf("go-yaml's decoder reads %s as %s when yaml.Unmarshal decodes the edited text, not %s",
 		a.path, reads, meant)
 
-	if a.alias == nil {
-		return d.engineAtToken(astnode.StartToken(a.node), cause)
-	}
-
-	return d.engineAtToken(a.alias.Start, fmt.Errorf("%w, because %s", cause, apartRule(a)))
+	return d.engineAtToken(astnode.StartToken(a.node), cause)
 }
 
 // readsAlike reports whether go-yaml's decoder alone, as yaml.Unmarshal
@@ -366,7 +330,7 @@ func (d *Doc) ownDecodeProblem(ctx context.Context, final finalParse, read any, 
 // it reads start as the decode of that text reads it. The text reads alike
 // only when both decodes take it.
 func (d *Doc) readsAlike(ctx context.Context, start state) (bool, bool) {
-	own, err := hook.OwnDecode(ctx, start.node, start.cur+d.tail, false)
+	own, err := hook.OwnDecode(ctx, start.node, start.cur+d.tail)
 	if err != nil {
 		return false, false
 	}
@@ -378,10 +342,9 @@ func (d *Doc) readsAlike(ctx context.Context, start state) (bool, bool) {
 
 // ownApart reports whether go-yaml's decoder alone, as yaml.Unmarshal
 // decodes the text, refuses the current text or reads other values than
-// the decode of the text, where [Doc.ownDecodeProblem] counts that after the
-// last call. A refusal counts when the decoder alone takes the text that the
-// Apply found, and other values count when it reads that text alike, as
-// [Doc.readsAlike] tells.
+// the decode of the text. A refusal counts when the decoder alone takes the
+// text that the Apply found, and other values count when it reads that text
+// alike, as [Doc.readsAlike] tells.
 func (d *Doc) ownApart(ctx context.Context) bool {
 	if !hook.DecodeChanges(d.node) {
 		return false
@@ -392,7 +355,7 @@ func (d *Doc) ownApart(ctx context.Context) bool {
 		return false
 	}
 
-	own, err := hook.OwnDecode(ctx, d.node, d.cur+d.tail, false)
+	own, err := hook.OwnDecode(ctx, d.node, d.cur+d.tail)
 	if err == nil && sameReading(own, read) {
 		return false
 	}
@@ -405,18 +368,6 @@ func (d *Doc) ownApart(ctx context.Context) bool {
 	takes, alike := d.readsAlike(ctx, start)
 
 	return takes && (err != nil || alike)
-}
-
-// fileBody returns the body of the first document of f that holds
-// content, or nil.
-func fileBody(f *ast.File) ast.Node {
-	for _, doc := range f.Docs {
-		if astnode.HasContent(doc.Body) {
-			return doc.Body
-		}
-	}
-
-	return nil
 }
 
 // sameReading reports whether a and b, two decodes into any, hold equal
@@ -459,52 +410,6 @@ func byValue(v any) any {
 	return v
 }
 
-// ownRefusal returns the problem of err, the refusal of go-yaml's decoder
-// alone of the current text, whose parse without comments final holds. It
-// binds at the token that the decoder names, where the parse of the edits
-// holds its text, as [Doc.lexedAt] finds it. A refusal without a token,
-// such as "exceeded max depth", binds at the first alias inside the value
-// of the anchor that it reads, as [Doc.changedAlias] finds it.
-func (d *Doc) ownRefusal(final finalParse, err error) error {
-	msg := err.Error()
-	tk := (*token.Token)(nil)
-
-	if refusal, ok := errors.AsType[yaml.Error](err); ok {
-		msg, tk = refusal.GetMessage(), refusal.GetToken()
-	}
-
-	if p, ok := errors.AsType[*niceyaml.PanicError](err); ok {
-		msg = fmt.Sprintf("it panics: %v", p.Value)
-	}
-
-	cause := fmt.Errorf("%w: %s", errOwnRefuses, msg)
-
-	if at, ok := d.lexedAt(final.tokens, tk); ok {
-		return d.engineAtToken(at, cause)
-	}
-
-	if alias, ok := d.changedAlias(); ok {
-		return d.engineAtToken(alias.Start, cause)
-	}
-
-	return d.bug(d.rootNode(), cause)
-}
-
-// changedAlias returns the first alias of the current text that lies
-// inside the value of the anchor that it reads, which the decode reads as
-// null.
-func (d *Doc) changedAlias() (*ast.AliasNode, bool) {
-	facts := aliasing.StateOf(d.node).Facts()
-
-	for _, a := range facts.Aliases {
-		if facts.Enclosed[a.Node] && a.Node.Start != nil && a.Node.Start.Position != nil {
-			return a.Node, true
-		}
-	}
-
-	return nil, false
-}
-
 // apart is the first place of the current text that go-yaml's decoder
 // alone reads otherwise than the decode of the text, as [Doc.apartAt]
 // finds it.
@@ -513,25 +418,17 @@ type apart struct {
 	own, read any
 	// The node of the text where the walk to the place stopped.
 	node ast.Node
-	// The last alias on the way to the place, or nil, which the two decodes
-	// bind apart.
-	alias *ast.AliasNode
 	// The path of the place.
 	path paths.Path
-	// Whether the way to the alias passes an entry that a `<<` merge key
-	// brings in, and whether the alias is a key.
-	merged, key bool
 }
 
 // apartAt returns the first place of the current text where own, go-yaml's
 // decoder alone, reads otherwise than read, the decode of the text. It
-// walks the text from the root as the decode reads it, through each alias
-// to the anchor that the resolver binds it to, and through each `<<`
-// merge key to the entry that the decode reads, as [Doc.entryRead]
-// finds it. A mapping that the two read with other keys stops the
-// walk. A key that only the decode reads names the alias in that key.
+// walks the text from the root as the decode reads it, through each `<<`
+// merge key to the entry that the decode reads, as [Doc.entryRead] finds
+// it. An alias, and a mapping that the two read with other keys, stop the
+// walk.
 func (d *Doc) apartAt(own, read any) apart {
-	res := d.node.DocumentResolver()
 	a := apart{own: own, read: read, node: d.node.AST(), path: paths.Doc()}
 
 	for node, seen := a.node, map[ast.Node]bool{}; !astnode.IsNil(node) && !seen[node]; {
@@ -545,18 +442,6 @@ func (d *Doc) apartAt(own, read any) apart {
 
 		case *ast.TagNode:
 			node = x.Value
-
-			continue
-
-		case *ast.AliasNode:
-			target, err := res.Deref(x)
-			a.alias, a.key = x, false
-
-			if err != nil {
-				return a
-			}
-
-			node = target
 
 			continue
 		}
@@ -619,20 +504,12 @@ func (d *Doc) apartEntry(a *apart, node ast.Node, own, read map[string]any) (ast
 			continue
 		}
 
-		e, merged, ok := d.entryRead(node, k)
-		if !ok {
+		if !inOwn {
 			return nil, false
 		}
 
-		a.merged = a.merged || merged
-
-		// The decode reads the entry under the key, so an alias in the key
-		// can explain why the two read it apart.
-		if alias, ok := keyAlias(e); ok {
-			a.alias, a.key = alias, true
-		}
-
-		if !inOwn {
+		e, ok := d.entryRead(node, k)
+		if !ok {
 			return nil, false
 		}
 
@@ -645,34 +522,11 @@ func (d *Doc) apartEntry(a *apart, node ast.Node, own, read map[string]any) (ast
 	return nil, false
 }
 
-// keyAlias returns the alias that the key of e holds under its tags and
-// anchors.
-func keyAlias(e *ast.MappingValueNode) (*ast.AliasNode, bool) {
-	key := ast.Node(e.Key)
-	if explicit, ok := key.(*ast.MappingKeyNode); ok {
-		key = explicit.Value
-	}
-
-	for {
-		switch x := key.(type) {
-		case *ast.TagNode:
-			key = x.Value
-		case *ast.AnchorNode:
-			key = x.Value
-		case *ast.AliasNode:
-			return x, x != nil && x.Start != nil
-		default:
-			return nil, false
-		}
-	}
-}
-
 // entryRead returns the entry of node, a mapping, that the decode of the
-// text reads for the key name, and whether a `<<` merge key brings it in.
-// It asks the resolver of the text for a mapping that holds a merge key,
-// as [paths.Resolver.Entry] reads it. It reports false when the decode
-// reads no such entry.
-func (d *Doc) entryRead(node ast.Node, name string) (*ast.MappingValueNode, bool, bool) {
+// text reads for the key name. It asks the resolver of the text for a
+// mapping that holds a merge key, as [paths.Resolver.Entry] reads it. It
+// reports false when the decode reads no such entry.
+func (d *Doc) entryRead(node ast.Node, name string) (*ast.MappingValueNode, bool) {
 	entries, _ := astnode.Entries(node)
 	names := d.decodedKeys()
 
@@ -693,35 +547,15 @@ func (d *Doc) entryRead(node ast.Node, name string) (*ast.MappingValueNode, bool
 	}
 
 	if !merges {
-		return last, false, last != nil
+		return last, last != nil
 	}
 
 	e, err := d.node.DocumentResolver().Entry(node, name)
 	if err != nil {
-		return nil, false, false
+		return nil, false
 	}
 
-	return e, !slices.Contains(entries, e), true
-}
-
-// apartRule returns the rule of go-yaml's decoder that a breaks, in words,
-// for an apart whose alias is set. An alias key that a `<<` merge key
-// brings in reads the anchor whose value holds it. At a merge key, the
-// decoder looks up each alias of the mapping that the merge key brings in
-// again.
-func apartRule(a apart) string {
-	name := aliasText(a.alias)
-
-	switch {
-	case a.key && a.merged:
-		return fmt.Sprintf("it reads %s, an alias key inside the value of its anchor, "+
-			"as that anchor where a merge key brings in the key", name)
-
-	case a.merged:
-		return fmt.Sprintf("it looks up %s again at the merge key that brings in its mapping", name)
-	}
-
-	return fmt.Sprintf("it binds %s to another anchor of its name", name)
+	return e, true
 }
 
 // engineAtToken returns err as the problem of a bug in the engine, bound at
@@ -847,218 +681,6 @@ func (d *Doc) emptiedRootProblem(tk *token.Token) error {
 	return d.fail(d.rootNode(), "%s %s, after which a comment line goes below the %q at the root, and "+
 		"go-yaml's parser refuses a comment line below a flow collection at the root",
 		d.subject(), d.notes[-1-o].emptiedBy, d.cur[s.start:s.end])
-}
-
-// misreadProblem returns the problem of the current text when go-yaml's
-// parse of final without the comments reads it otherwise than the parse of
-// the edits does. That parse keeps the comments, as the Source does. The
-// two read the text the same when their trees hold the same keys, values,
-// tags, anchors, and aliases at the same places, so each alias reads the
-// same anchor. Go-yaml misreads some texts without their comments, such as
-// one where a comment line follows a mapping under a "!!null" tag and an
-// anchor. The problem matches [ErrEngine], and it names go-yaml's parser.
-// It binds at the first place of the text that the parses read otherwise,
-// under the path of that place, which is the key of an entry that differs
-// whole. For a value that the parse without the comments holds and the
-// parse of the edits does not, that place is the collection around it.
-func (d *Doc) misreadProblem(final finalParse) error {
-	if final.file == nil {
-		return nil
-	}
-
-	at, _, ok := misreadAt(d.node.AST(), fileBody(final.file))
-	if !ok {
-		return nil
-	}
-
-	tk := astnode.StartToken(at)
-	if tk == nil {
-		return d.bug(d.rootNode(), errMisread)
-	}
-
-	return d.engineAtToken(tk, errMisread)
-}
-
-// commentsProblem returns the problem of the current text when go-yaml
-// reads it otherwise with its comments than without them, where it read
-// the text of start, the text that the Apply found, alike. Go-yaml's
-// decoder parses a text with its comments when a program asks for them,
-// as with yaml.CommentToMap, and its parser misreads some comments. A
-// comment line after an anchor without a value can make the anchor hold
-// the lines after the comment, as in "r0: &x0", "# c", and "b: 1", where
-// the parse with the comment reads b inside r0. Go-yaml reads a text
-// alike when its decoder refuses either parse or reads one value from
-// both. The problem matches [ErrEngine], and it names go-yaml's parser
-// and the two readings. It binds at the first place of the text that the
-// parses read otherwise, as [misreadAt] finds it in the parse without
-// comments.
-func (d *Doc) commentsProblem(ctx context.Context, final finalParse, start state) error {
-	if final.file == nil || final.commented == nil || final.commented == final.file {
-		return nil
-	}
-
-	plain, commented := fileBody(final.file), fileBody(final.commented)
-
-	at, in, ok := misreadAt(plain, commented)
-	if !ok || !d.readsApart(ctx, d.cur+d.tail) || d.readsApart(ctx, start.cur+d.tail) {
-		return nil
-	}
-
-	cause := fmt.Errorf("%w, so go-yaml reads %s there with the comments and %s without them",
-		errCommentsMisread, readingOf(in), readingOf(at))
-
-	tk, ok := d.lexedAt(final.tokens, astnode.StartToken(at))
-	if !ok {
-		return d.bug(d.rootNode(), cause)
-	}
-
-	return d.engineAtToken(tk, cause)
-}
-
-// readsApart reports whether go-yaml's decoder alone reads text otherwise
-// with its comments than without them, where it takes both parses.
-func (d *Doc) readsApart(ctx context.Context, text string) bool {
-	plain, err := hook.OwnDecode(ctx, d.node, text, false)
-	if err != nil {
-		return false
-	}
-
-	commented, err := hook.OwnDecode(ctx, d.node, text, true)
-
-	return err == nil && !sameReading(plain, commented)
-}
-
-// readingOf returns what go-yaml reads for node, a node of one of its
-// parses of the current text, as a message shows it. The decoder reads node
-// alone, so an alias in node does not find its anchor. The lines of the
-// parse stand for node where that decode fails, and "nothing" stands for a
-// nil node, which the parse lacks.
-func readingOf(node ast.Node) string {
-	if astnode.IsNil(node) {
-		return "nothing"
-	}
-
-	var v any
-
-	err := astnode.StockNodeToValue(node, &v)
-	if err != nil {
-		return fmt.Sprintf("the lines %q", strings.TrimSpace(node.String()))
-	}
-
-	return shownCut(v)
-}
-
-// misreadAt returns the first node of a, in the order of the text, that b
-// reads otherwise, with the node of b in its place, or nil when b lacks
-// it. The tree a is the parse of the edits, or go-yaml's parse without
-// comments, and b is a parse of the same text without comments or with
-// them. An entry whose key reads otherwise differs as a whole. A node of b
-// that a lacks differs at the collection around it in a. It reports false
-// when b reads each node of a as a does. A comment does not take part, and
-// neither do the styles and the places of the nodes.
-func misreadAt(a, b ast.Node) (ast.Node, ast.Node, bool) {
-	if !astnode.HasContent(a) || !astnode.HasContent(b) {
-		return a, b, astnode.HasContent(a) != astnode.HasContent(b)
-	}
-
-	if ea, ok := astnode.Entries(a); ok && !isProps(a) {
-		eb, ok := astnode.Entries(b)
-		if !ok || isProps(b) {
-			return a, b, true
-		}
-
-		for i, e := range ea {
-			if i == len(eb) {
-				return e, nil, true
-			}
-
-			// An entry whose key reads otherwise differs whole.
-			if _, _, ok := misreadAt(e.Key, eb[i].Key); ok {
-				return e, eb[i], true
-			}
-
-			if at, in, ok := misreadAt(e.Value, eb[i].Value); ok {
-				return at, in, true
-			}
-		}
-
-		return a, b, len(eb) > len(ea)
-	}
-
-	if reflect.TypeOf(a) != reflect.TypeOf(b) {
-		return a, b, true
-	}
-
-	switch x := a.(type) {
-	case *ast.SequenceNode:
-		y, _ := b.(*ast.SequenceNode) //nolint:errcheck // The types are equal.
-
-		for i, v := range x.Values {
-			if i == len(y.Values) {
-				return v, nil, true
-			}
-
-			if at, in, ok := misreadAt(v, y.Values[i]); ok {
-				return at, in, true
-			}
-		}
-
-		return a, b, len(y.Values) > len(x.Values)
-
-	case *ast.AnchorNode:
-		y, _ := b.(*ast.AnchorNode) //nolint:errcheck // The types are equal.
-
-		return misreadProps(a, b, x.Name, y.Name, x.Value, y.Value)
-
-	case *ast.TagNode:
-		y, _ := b.(*ast.TagNode) //nolint:errcheck // The types are equal.
-
-		return misreadProps(a, b, x, y, x.Value, y.Value)
-
-	case *ast.AliasNode:
-		y, _ := b.(*ast.AliasNode) //nolint:errcheck // The types are equal.
-
-		return misreadProps(a, b, x.Value, y.Value, nil, nil)
-
-	case *ast.MappingKeyNode:
-		y, _ := b.(*ast.MappingKeyNode) //nolint:errcheck // The types are equal.
-
-		return misreadAt(x.Value, y.Value)
-
-	case *ast.LiteralNode:
-		// The value of the node is its text, header and comment included,
-		// and the string that it holds is the value of its content.
-		y, _ := b.(*ast.LiteralNode) //nolint:errcheck // The types are equal.
-		if x.Value == nil || y.Value == nil {
-			return a, b, x.Value != y.Value
-		}
-
-		return a, b, x.Value.Value != y.Value.Value
-
-	case ast.ScalarNode:
-		y, _ := b.(ast.ScalarNode) //nolint:errcheck // The types are equal.
-
-		return a, b, !sameValue(x.GetValue(), y.GetValue())
-
-	default:
-		return a, b, true
-	}
-}
-
-// misreadProps compares a, an anchor, a tag, or an alias, with b, its node
-// in the other parse. It returns a and b when na, the name of a, differs
-// from nb, the name of b. Otherwise it returns the first node of va, the
-// value of a, that vb reads otherwise, as [misreadAt] does. An anchor and
-// an alias take the name of the anchor, and a tag takes its text.
-func misreadProps(a, b, na, nb, va, vb ast.Node) (ast.Node, ast.Node, bool) {
-	x, _ := astnode.Name(na)
-	y, _ := astnode.Name(nb)
-
-	if x != y {
-		return a, b, true
-	}
-
-	return misreadAt(va, vb)
 }
 
 // lexedAt returns the token of the parse of the edits that holds the text
@@ -1383,9 +1005,6 @@ var (
 	errParserRefuses          = errors.New("go-yaml's parser refuses the edited text")
 	errParserPanicked         = errors.New("go-yaml's parser panicked on the edited text")
 	errDecoderRefuses         = errors.New("go-yaml's decoder refuses the edited text")
-	errOwnRefuses             = errors.New("go-yaml's decoder refuses the edited text when yaml.Unmarshal decodes it")
-	errMisread                = errors.New("go-yaml's parser reads the edited text otherwise without its comments")
-	errCommentsMisread        = errors.New("go-yaml's parser reads the edited text otherwise with its comments")
 )
 
 // userDecode returns the error of a decode of the user's text, or nil when

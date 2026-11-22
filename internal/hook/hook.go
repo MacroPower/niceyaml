@@ -134,14 +134,12 @@ var (
 	Marshalers func(opts any) marshaler.Options
 
 	// OwnDecode decodes the first document of text into an any with
-	// go-yaml's decoder alone, as yaml.Unmarshal decodes it. With comments,
-	// the decoder parses the text with its comments, as it does for a
-	// program that asks for them with yaml.CommentToMap. The decoder reads
-	// the reference documents of the Source of n, a *niceyaml.Node. It
+	// go-yaml's decoder alone, as yaml.Unmarshal decodes it. The decoder
+	// reads the reference documents of the Source of n, a *niceyaml.Node. It
 	// takes a key that a mapping repeats only when that Source allows
 	// duplicate keys. A panic of the decoder comes back as a
 	// *niceyaml.PanicError.
-	OwnDecode func(ctx context.Context, n any, text string, comments bool) (any, error)
+	OwnDecode func(ctx context.Context, n any, text string) (any, error)
 
 	// DecodeChanges reports whether a decode of the document of n, a
 	// *niceyaml.Node, reads a tree that differs from the document, as for a

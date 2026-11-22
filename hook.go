@@ -50,10 +50,10 @@ func init() {
 
 		return doc.scoped(path, node)
 	}
-	hook.OwnDecode = func(ctx context.Context, n any, text string, comments bool) (any, error) {
+	hook.OwnDecode = func(ctx context.Context, n any, text string) (any, error) {
 		node, _ := n.(*Node) //nolint:errcheck // The hook takes a *Node.
 
-		return node.source.ownDecode(ctx, text, comments)
+		return node.source.ownDecode(ctx, text)
 	}
 	hook.SitePath = func(n any, pos position.Position, key bool) (paths.Path, bool, bool) {
 		node, _ := n.(*Node) //nolint:errcheck // The hook takes a *Node.
