@@ -1508,13 +1508,19 @@ func TestDoc_Apply(t *testing.T) {
 				"reads as \"1e+06\"\n|-- report this to the authors of cafe\n`-- the edit sets $.l[0].new",
 			engine: true,
 		},
+		"string with a byte that is not UTF-8 at a new key of a nested mapping": {
+			before: stringtest.LinesLF("m:", "  a: 1"),
+			path:   paths.Doc(),
+			fn:     at(paths.MustParse("$.m.z"), set("x\xffy")),
+			err: "test.yaml:1:1: $.m: go-yaml's encoder writes the byte 0xff, which is not UTF-8, as it is, and YAML " +
+				"does not allow that in a text\n|-- report this to the authors of cafe\n`-- the edit sets $.m.z",
+			engine: true,
+		},
 		"string with a control character at a new key of a nested mapping": {
 			before: stringtest.LinesLF("m:", "  a: 1"),
 			path:   paths.Doc(),
 			fn:     at(paths.MustParse("$.m.z"), set("x\x01y")),
-			err: "test.yaml:1:1: $.m: go-yaml's encoder writes U+0001 as it is, and YAML does not allow that in a " +
-				"text\n|-- report this to the authors of cafe\n`-- the edit sets $.m.z",
-			engine: true,
+			want:   stringtest.LinesLF("m:", "  a: 1", `  z: "x\x01y"`),
 		},
 		"value with two keys that a decode reads as one, after the removal of an earlier item": {
 			// The Set creates the keys, so the problem binds at the value that
@@ -4319,14 +4325,18 @@ func TestDoc_Apply(t *testing.T) {
 			err:    "test.yaml:6:1: $: the edit removes $.r0, which changes the keys of a merge through a merge key that merges a mapping written in place, and cafe does not change the keys of such a merge",
 		},
 		"set of a string with a control character": {
-			// Go-yaml's encoder writes U+0001 as it is, which YAML does not
-			// allow in a text, so the Set fails loudly at the value.
+			// YAML does not allow U+0001 in a text, so the string takes
+			// double quotes, which escape the character.
 			before: "a: 1\n",
 			path:   paths.Doc().Child("a"),
 			fn:     set("x\x01y"),
-			err: "1:4: $.a: go-yaml's encoder writes U+0001 as it is, " +
-				"and YAML does not allow that in a text",
-			engine: true,
+			want:   `a: "x\x01y"` + "\n",
+		},
+		"set of a string with control characters that escape in other forms": {
+			before: "a: 1\n",
+			path:   paths.Doc().Child("a"),
+			fn:     set("\x00\a\x7f\u009f\U0010ffff\uffff"),
+			want:   `a: "\x00\a\x7f\u009f\U0010ffff\uffff"` + "\n",
 		},
 		"set of a string with a next line character": {
 			// YAML allows U+0085 in a text.
@@ -4343,23 +4353,45 @@ func TestDoc_Apply(t *testing.T) {
 				"and YAML does not allow that in a text",
 			engine: true,
 		},
-		"set of a string with a control character in a new entry of a flow mapping": {
+		"set of a string with a byte that is not UTF-8 in a new entry of a flow mapping": {
 			// The call creates the place, so the problem binds at the nearest value above it that the user
 			// wrote, under its path (fix19 G1-1).
 			before: "a: {b: 1}\n",
 			path:   paths.Doc(),
-			fn:     at(paths.MustParse("$.a.c"), set("x\x01y")),
-			err: "1:1: $.a: go-yaml's encoder writes U+0001 as it is, " +
+			fn:     at(paths.MustParse("$.a.c"), set("x\xffy")),
+			err: "1:1: $.a: go-yaml's encoder writes the byte 0xff, which is not UTF-8, as it is, " +
 				"and YAML does not allow that in a text",
 			engine: true,
+		},
+		"set of a string with a control character in a new entry of a flow mapping": {
+			before: "a: {b: 1}\n",
+			path:   paths.Doc(),
+			fn:     at(paths.MustParse("$.a.c"), set("x\x01y")),
+			want:   `a: {b: 1, c: "x\x01y"}` + "\n",
+		},
+		"set of a mapping with a string with a control character": {
+			before: "a: 1\n",
+			path:   paths.Doc().Child("a"),
+			fn:     set(map[string]string{"k": "x\x01y"}),
+			want:   stringtest.LinesLF("a:", `  k: "x\x01y"`),
 		},
 		"rename to a key with a control character": {
 			before: "a: 1\n",
 			path:   paths.Doc().Child("a"),
 			fn:     rename("x\x01y"),
-			err: "1:1: $.a~: go-yaml's encoder writes U+0001 as it is, " +
-				"and YAML does not allow that in a text",
-			engine: true,
+			want:   `"x\x01y": 1` + "\n",
+		},
+		"move to a key with a control character": {
+			before: "a: 1\n",
+			path:   paths.Doc().Child("a"),
+			fn:     move(`$.'x\u0001y'`),
+			want:   `"x\x01y": 1` + "\n",
+		},
+		"move to a key with a control character in a mapping that the move creates": {
+			before: stringtest.LinesLF("m:", "  k: 1"),
+			path:   paths.MustParse("$.m.k"),
+			fn:     move(`$.n.'x\u0001y'`),
+			want:   stringtest.LinesLF("m: {}", `"n":`, `  "x\x01y": 1`),
 		},
 		"rename to a key with a byte that is not UTF-8": {
 			before: "a: 1\nl: [1]\n",
@@ -4400,21 +4432,36 @@ func TestDoc_Apply(t *testing.T) {
 			want:   "\"x\\u0001y\": 1\n",
 		},
 		"move of a quoted string with an escaped control character into a flow sequence": {
-			// The string takes the text of go-yaml's flow encoder, which writes
-			// U+0001 as it is.
+			// The string takes the text of go-yaml's flow encoder, which
+			// escapes U+0001 in double quotes.
 			before: stringtest.LinesLF(`a: "x\u0001`, `  y"`, "b: [1]"),
 			path:   paths.Doc().Child("a"),
 			fn:     move("$.b[1]"),
-			err: "1:4: $.a: go-yaml's encoder writes U+0001 as it is, " +
-				"and YAML does not allow that in a text",
-			engine: true,
+			want:   `b: [1, "x\x01 y"]` + "\n",
 		},
 		"move of a plain string with a control character of the user into a flow sequence": {
-			// The character is the user's, so the move keeps it.
+			// The string takes the text of go-yaml's flow encoder, which
+			// escapes U+0001 in double quotes.
 			before: "a: x\x01y\nb: [1]\n",
 			path:   paths.Doc().Child("a"),
 			fn:     move("$.b[1]"),
-			want:   "b: [1, x\x01y]\n",
+			want:   `b: [1, "x\x01y"]` + "\n",
+		},
+		"set beside a plain string with a control character of the user": {
+			// The U+0001 is the user's and stays at its place, so the check
+			// of the written text skips it.
+			before: "a: x\x01y\nb: 1\n",
+			path:   paths.Doc().Child("b"),
+			fn:     set(2),
+			want:   "a: x\x01y\nb: 2\n",
+		},
+		"move of a plain string with a control character of the user in a block mapping": {
+			// The U+0001 is the user's and the move keeps its text, so the
+			// check of the written text skips it.
+			before: "a: x\x01y\nb: 1\n",
+			path:   paths.Doc().Child("a"),
+			fn:     move("$.c"),
+			want:   "b: 1\nc: x\x01y\n",
 		},
 		"move of CRLF text that an earlier removal left on one line": {
 			before:  stringtest.JoinCRLF("n: {a: 1}", "p: 1"),
@@ -6462,14 +6509,14 @@ func TestDoc_Apply_FailedCall(t *testing.T) {
 		// Whether the error of the call matches edit.ErrEngine.
 		engine bool
 	}{
-		"set of a control character": {
-			// Go-yaml's encoder writes U+0001 as it is, so the Set refuses
-			// the value before it writes.
+		"set of a byte that is not UTF-8": {
+			// Go-yaml's encoder writes the byte 0xff, which is not UTF-8, as
+			// it is, so the Set refuses the value before it writes.
 			text:     stringtest.LinesLF("a: 1", "z: 1"),
-			call:     func(ctx context.Context, n *edit.Node) error { return n.At(paths.Doc().Child("a")).Set(ctx, "\x01") },
+			call:     func(ctx context.Context, n *edit.Node) error { return n.At(paths.Doc().Child("a")).Set(ctx, "\xff") },
 			held:     "$.z",
 			heldText: "1",
-			err:      "go-yaml's encoder writes U+0001 as it is",
+			err:      "go-yaml's encoder writes the byte 0xff, which is not UTF-8, as it is",
 			engine:   true,
 		},
 	}
@@ -9570,7 +9617,7 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 	}
 
 	var (
-		engine  = "go-yaml's encoder writes U+0001 as it is, and YAML does not allow that in a text"
+		engine  = "go-yaml's encoder writes the byte 0xff, which is not UTF-8, as it is, and YAML does not allow that in a text"
 		report  = "|-- report this to the authors of cafe"
 		anchor  = "to a value whose YAML holds the anchor &q, and cafe does not write anchors or aliases"
 		noAlias = "|-- return the YAML of edit_test.yamlMarshaler without anchors and aliases"
@@ -9645,7 +9692,7 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 		},
 		"B1: engine error at a value that a Set created inside the mapping that it wrote": {
 			before:  stringtest.LinesLF("o: 0", "m:", "  a: 1"),
-			applies: []edit.Func{both(at("$.m", set(map[string]int{"b": 2})), at("$.m.b", set("x\x01y")))},
+			applies: []edit.Func{both(at("$.m", set(map[string]int{"b": 2})), at("$.m.b", set("x\xffy")))},
 			err: stringtest.JoinLF(
 				"test.yaml:2:1: $.m: "+engine, report, "|-- v1 sets $.m from this value", "`-- v1 sets $.m.b",
 			),
@@ -9660,21 +9707,21 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 		// and the place that it asked for (fix22 B2, P74).
 		"B2: engine error at a value that an earlier Apply created inside the mapping that it wrote": {
 			before:  "b: 0\n",
-			applies: []edit.Func{at("$.b", set(map[string]int{"q": 1})), at("$.b.q", set("x\x01y"))},
+			applies: []edit.Func{at("$.b", set(map[string]int{"q": 1})), at("$.b.q", set("x\xffy"))},
 			err: stringtest.JoinLF(
 				"test.yaml:1:1: $.b: "+engine, report, "|-- v1 sets $.b from this value", "`-- v2 sets $.b.q",
 			),
 		},
 		"B2: engine error at an item that an earlier Apply created": {
 			before:  "a: 0\n",
-			applies: []edit.Func{at("$.l", set([]int{1, 2})), at("$.l[1]", set("x\x01y"))},
+			applies: []edit.Func{at("$.l", set([]int{1, 2})), at("$.l[1]", set("x\xffy"))},
 			err:     stringtest.JoinLF("test.yaml:1:1: $: "+engine, report, "|-- v1 sets $.l", "`-- v2 sets $.l[1]"),
 		},
 		"B2: engine error at a key that a rename wrote over a key that an earlier Apply created": {
 			before:  "a: 0\n",
-			applies: []edit.Func{at("$.m.k", set(1)), rename("$.m.k", "x\x01y")},
+			applies: []edit.Func{at("$.m.k", set(1)), rename("$.m.k", "x\xffy")},
 			err: stringtest.JoinLF(
-				"test.yaml:1:1: $: "+engine, report, "|-- v1 sets $.m.k", "`-- v2 renames $.m.k to \"x\\x01y\"",
+				"test.yaml:1:1: $: "+engine, report, "|-- v1 sets $.m.k", "`-- v2 renames $.m.k to \"x\\xffy\"",
 			),
 		},
 		// The key that a Move writes keeps the writer of the key or the "-"
@@ -9683,37 +9730,37 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 		// creates binds (fix24 G24-1).
 		"G24-1: engine error at a key that a Move wrote for a key that an earlier Apply created": {
 			before:  "a: 0\n",
-			applies: []edit.Func{at("$.n", set(5)), move("$.n", `$.'x\u0001y'`)},
+			applies: []edit.Func{at("$.n", set(5)), move("$.n", "$.'x\xffy'")},
 			err: stringtest.JoinLF(
-				"test.yaml:1:1: $: "+engine, report, "|-- v1 sets $.n", "`-- v2 moves $.n to $.'x\\u0001y'",
+				"test.yaml:1:1: $: "+engine, report, "|-- v1 sets $.n", "`-- v2 moves $.n to $.x\ufffdy",
 			),
 		},
 		"G24-1: engine error at a key that a Move wrote in another mapping for a key that an earlier Apply created": {
 			before:  stringtest.LinesLF("a:", "  z: 1", "b:", "  y: 1"),
-			applies: []edit.Func{at("$.a.n", set(5)), move("$.a.n", `$.b.'x\u0001y'`)},
+			applies: []edit.Func{at("$.a.n", set(5)), move("$.a.n", "$.b.'x\xffy'")},
 			err: stringtest.JoinLF(
-				"test.yaml:3:1: $.b: "+engine, report, "|-- v1 sets $.a.n", "`-- v2 moves $.a.n to $.b.'x\\u0001y'",
+				"test.yaml:3:1: $.b: "+engine, report, "|-- v1 sets $.a.n", "`-- v2 moves $.a.n to $.b.x\ufffdy",
 			),
 		},
 		"G24-1: engine error at a key that a Move wrote for a key that the same call created": {
 			before:  "a: 0\n",
-			applies: []edit.Func{both(at("$.n", set(5)), move("$.n", `$.'x\u0001y'`))},
+			applies: []edit.Func{both(at("$.n", set(5)), move("$.n", "$.'x\xffy'"))},
 			err: stringtest.JoinLF(
-				"test.yaml:1:1: $: "+engine, report, "|-- v1 sets $.n", "`-- v1 moves $.n to $.'x\\u0001y'",
+				"test.yaml:1:1: $: "+engine, report, "|-- v1 sets $.n", "`-- v1 moves $.n to $.x\ufffdy",
 			),
 		},
 		"G24-1: engine error at a key that a Move wrote for the dash of an item that an earlier Apply created": {
 			before:  stringtest.LinesLF("a:", "  z: 1", "l:", "- 1"),
-			applies: []edit.Func{at("$.l[1]", set(5)), move("$.l[1]", `$.a.'x\u0001y'`)},
+			applies: []edit.Func{at("$.l[1]", set(5)), move("$.l[1]", "$.a.'x\xffy'")},
 			err: stringtest.JoinLF(
-				"test.yaml:1:1: $.a: "+engine, report, "|-- v1 sets $.l[1]", "`-- v2 moves $.l[1] to $.a.'x\\u0001y'",
+				"test.yaml:1:1: $.a: "+engine, report, "|-- v1 sets $.l[1]", "`-- v2 moves $.l[1] to $.a.x\ufffdy",
 			),
 		},
 		"G24-1: engine error at a key that a Move wrote for an item of a flow sequence that an earlier Apply created": {
 			before:  stringtest.LinesLF("l: [0]", "b: 1"),
-			applies: []edit.Func{at("$.l[1]", set(5)), move("$.l[1]", `$.'x\u0001y'`)},
+			applies: []edit.Func{at("$.l[1]", set(5)), move("$.l[1]", "$.'x\xffy'")},
 			err: stringtest.JoinLF(
-				"test.yaml:1:1: $: "+engine, report, "|-- v1 sets $.l[1]", "`-- v2 moves $.l[1] to $.'x\\u0001y'",
+				"test.yaml:1:1: $: "+engine, report, "|-- v1 sets $.l[1]", "`-- v2 moves $.l[1] to $.x\ufffdy",
 			),
 		},
 		"G24-1: caller error at a mapping that an earlier Apply created and a Move took": {
@@ -9723,19 +9770,19 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 		},
 		"G24-1: engine error of a rename of a key that a Move wrote for a key that an earlier Apply created": {
 			before:  "a: 0\n",
-			applies: []edit.Func{at("$.n", set(5)), move("$.n", "$.k"), rename("$.k", "x\x01y")},
+			applies: []edit.Func{at("$.n", set(5)), move("$.n", "$.k"), rename("$.k", "x\xffy")},
 			err: stringtest.JoinLF(
-				"test.yaml:1:1: $: "+engine, report, "|-- v1 sets $.n", "`-- v3 renames $.k to \"x\\x01y\"",
+				"test.yaml:1:1: $: "+engine, report, "|-- v1 sets $.n", "`-- v3 renames $.k to \"x\\xffy\"",
 			),
 		},
 		"B2 control: engine error at a value that the same call set before": {
 			before:  "a: 0\n",
-			applies: []edit.Func{both(at("$.n", set(5)), at("$.n", set("x\x01y")))},
+			applies: []edit.Func{both(at("$.n", set(5)), at("$.n", set("x\xffy")))},
 			err:     stringtest.JoinLF("test.yaml:1:1: $: "+engine, report, "`-- v1 sets $.n"),
 		},
 		"B2 control: engine error at a place that the call creates below a mapping that an earlier Apply wrote": {
 			before:  "b: 0\n",
-			applies: []edit.Func{at("$.b", set(map[string]int{"q": 1})), at("$.b.z", set("x\x01y"))},
+			applies: []edit.Func{at("$.b", set(map[string]int{"q": 1})), at("$.b.z", set("x\xffy"))},
 			err:     stringtest.JoinLF("test.yaml:1:1: $.b: "+engine, report, "`-- v2 sets $.b.z"),
 		},
 		// A renamed key stands for the key of the user, so no call wrote its
@@ -9743,8 +9790,8 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 		// (fix23 G23-1).
 		"G23-1: engine error at a key of the user that a rename writes": {
 			before:  stringtest.LinesLF("m:", "  k: 1"),
-			applies: []edit.Func{rename("$.m.k", "x\x01y")},
-			err:     "test.yaml:2:3: $.m.k~: " + engine + "\n|-- report this to the authors of cafe\n`-- v1 renames $.m.k to \"x\\x01y\"",
+			applies: []edit.Func{rename("$.m.k", "x\xffy")},
+			err:     "test.yaml:2:3: $.m.k~: " + engine + "\n|-- report this to the authors of cafe\n`-- v1 renames $.m.k to \"x\\xffy\"",
 		},
 		// A Set checks its value with go-yaml's encoder before it writes.
 		// Where the Set replaces a value with a token, the error binds where
@@ -9753,7 +9800,7 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 		// P74).
 		"GL1: engine error at a value of the user that an earlier Apply set": {
 			before:  "b: 0\n",
-			applies: []edit.Func{at("$.b", set(5)), at("$.b", set("x\x01y"))},
+			applies: []edit.Func{at("$.b", set(5)), at("$.b", set("x\xffy"))},
 			err: stringtest.JoinLF(
 				"test.yaml:1:4: $.b: "+engine,
 				report,
@@ -9763,7 +9810,7 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 		},
 		"GL1: engine error inside a mapping that a Set writes over a value of the user that an earlier Apply set": {
 			before:  "b: 0\n",
-			applies: []edit.Func{at("$.b", set(5)), at("$.b", set(map[string]string{"a": "x\x01y"}))},
+			applies: []edit.Func{at("$.b", set(5)), at("$.b", set(map[string]string{"a": "x\xffy"}))},
 			err: stringtest.JoinLF(
 				"test.yaml:1:4: $.b: "+engine,
 				report,
@@ -9784,20 +9831,20 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 		},
 		"GL1: engine error inside a mapping that a Set writes over a value of the user": {
 			before:  "b: 0\n",
-			applies: []edit.Func{at("$.b", set(map[string]string{"a": "x\x01y"}))},
+			applies: []edit.Func{at("$.b", set(map[string]string{"a": "x\xffy"}))},
 			err:     stringtest.JoinLF("test.yaml:1:4: $.b: "+engine, report, "`-- v1 sets $.b from this value"),
 		},
 		"GL1: engine error inside a mapping that a Set writes over a mapping that an earlier call of its Apply set": {
 			before: "b: 0\n",
 			applies: []edit.Func{at("$.b", both(
 				set(map[string]int{"q": 1}),
-				set(map[string]string{"a": "x\x01y"}),
+				set(map[string]string{"a": "x\xffy"}),
 			))},
 			err: stringtest.JoinLF("test.yaml:1:1: $.b: "+engine, report, "`-- v1 sets $.b from this value"),
 		},
 		"GL1: engine error at a value of the user that an earlier Apply moved": {
 			before:  stringtest.LinesLF("o: 0", "a: 1"),
-			applies: []edit.Func{move("$.o", "$.n.p"), at("$.n.p", set("x\x01y"))},
+			applies: []edit.Func{move("$.o", "$.n.p"), at("$.n.p", set("x\xffy"))},
 			err:     stringtest.JoinLF("test.yaml:1:4: $.o: "+engine, report, "`-- v2 sets $.n.p from this value"),
 		},
 		"GL1 control: user error of a value of the user that an earlier Apply set": {
@@ -9868,7 +9915,7 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 		},
 		"GL1: engine error at a path through a merge key": {
 			before:  "<<: {}\n",
-			applies: []edit.Func{at("$.<<", set("x\x01y"))},
+			applies: []edit.Func{at("$.<<", set("x\xffy"))},
 			err:     stringtest.JoinLF("test.yaml:1:1: $: "+engine, report, "`-- v1 sets $.<<"),
 		},
 		"GL1 control: user error at a path through a merge key": {
@@ -9942,7 +9989,7 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 		},
 		"B2: engine error past the end of an alias of a sequence": {
 			before:  stringtest.LinesLF("z: &an [1]", "w:", "  *an"),
-			applies: []edit.Func{at("$.w[1]", set("x\x01y"))},
+			applies: []edit.Func{at("$.w[1]", set("x\xffy"))},
 			err:     stringtest.JoinLF("test.yaml:3:3: $.w: "+engine, report, "`-- v1 sets $.w[1]"),
 		},
 		"B2: caller error below the value of an explicit key": {
@@ -10003,7 +10050,7 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 		// kept, as a read of a missing key of the root binds.
 		"engine error at a key created after a removal of the first key": {
 			before:  stringtest.LinesLF("a: 1", "b: 2"),
-			applies: []edit.Func{both(at("$.a", remove), at("$.z", set("x\x01y")))},
+			applies: []edit.Func{both(at("$.a", remove), at("$.z", set("x\xffy")))},
 			err:     stringtest.JoinLF("test.yaml:2:1: $: "+engine, report, "`-- v1 sets $.z"),
 		},
 		"refusal of a value at a key created after a removal of the first key": {
@@ -10028,12 +10075,12 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 		},
 		"control: engine error at a created key of the root": {
 			before:  stringtest.LinesLF("a: 1", "b: 2"),
-			applies: []edit.Func{at("$.z", set("x\x01y"))},
+			applies: []edit.Func{at("$.z", set("x\xffy"))},
 			err:     stringtest.JoinLF("test.yaml:1:1: $: "+engine, report, "`-- v1 sets $.z"),
 		},
 		"engine error at an item created after a removal of the first item": {
 			before:  stringtest.LinesLF("- a", "- b"),
-			applies: []edit.Func{both(at("$[0]", remove), at("$[1]", set("x\x01y")))},
+			applies: []edit.Func{both(at("$[0]", remove), at("$[1]", set("x\xffy")))},
 			err:     stringtest.JoinLF("test.yaml:2:3: $: "+engine, report, "`-- v1 sets $[1]"),
 		},
 		"control: set past the end after a removal of the first item": {
@@ -10044,7 +10091,7 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 		},
 		"engine error at a key created in a flow root after a removal of its first key": {
 			before:  "{a: 1, b: 2}\n",
-			applies: []edit.Func{both(at("$.a", remove), at("$.z", set("x\x01y")))},
+			applies: []edit.Func{both(at("$.a", remove), at("$.z", set("x\xffy")))},
 			err:     stringtest.JoinLF("test.yaml:1:8: $: "+engine, report, "`-- v1 sets $.z"),
 		},
 		"control: read of a missing key of a flow root after a removal of its first key": {
@@ -10057,17 +10104,17 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 		// "[".
 		"engine error at a key created in an empty flow mapping": {
 			before:  "{}\n",
-			applies: []edit.Func{at("$.a", set("x\x01y"))},
+			applies: []edit.Func{at("$.a", set("x\xffy"))},
 			err:     stringtest.JoinLF("test.yaml:1:2: $: "+engine, report, "`-- v1 sets $.a"),
 		},
 		"engine error at an item created in an empty flow sequence": {
 			before:  "[]\n",
-			applies: []edit.Func{at("$[0]", set("x\x01y"))},
+			applies: []edit.Func{at("$[0]", set("x\xffy"))},
 			err:     stringtest.JoinLF("test.yaml:1:2: $: "+engine, report, "`-- v1 sets $[0]"),
 		},
 		"engine error at a key created in an empty flow mapping with a space": {
 			before:  "{ }\n",
-			applies: []edit.Func{at("$.a", set("x\x01y"))},
+			applies: []edit.Func{at("$.a", set("x\xffy"))},
 			err:     stringtest.JoinLF("test.yaml:1:2: $: "+engine, report, "`-- v1 sets $.a"),
 		},
 		"read of a missing key of an empty flow mapping": {
@@ -10078,12 +10125,12 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 		},
 		"control: engine error at a key created in a flow root that an edit emptied": {
 			before:  "{b: 1}\n",
-			applies: []edit.Func{both(at("$.b", remove), at("$.a", set("x\x01y")))},
+			applies: []edit.Func{both(at("$.b", remove), at("$.a", set("x\xffy")))},
 			err:     stringtest.JoinLF("test.yaml:1:2: $: "+engine, report, "`-- v1 sets $.a"),
 		},
 		"control: engine error at a key created in a flow root": {
 			before:  "{b: 1}\n",
-			applies: []edit.Func{at("$.a", set("x\x01y"))},
+			applies: []edit.Func{at("$.a", set("x\xffy"))},
 			err:     stringtest.JoinLF("test.yaml:1:2: $: "+engine, report, "`-- v1 sets $.a"),
 		},
 		// Fix20 P61: an error that a caller binds by a path keeps the path,
@@ -10227,7 +10274,7 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 		},
 		"engine error at a key created in a pair item": {
 			before:  "l: [a: 1, x]\n",
-			applies: []edit.Func{at("$.l[0].z", set("x\x01y"))},
+			applies: []edit.Func{at("$.l[0].z", set("x\xffy"))},
 			err:     stringtest.JoinLF("test.yaml:1:5: $.l[0]: "+engine, report, "`-- v1 sets $.l[0].z"),
 		},
 		"control: move of a braced item of a flow sequence onto a key that exists": {
@@ -10255,7 +10302,7 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 			before: stringtest.LinesLF("z0: 0", "m:", "  a: 1"),
 			applies: []edit.Func{
 				at("$.m.n", set(map[string]any{"p": 1})),
-				at("$.m.n.z", set("x\x01y")),
+				at("$.m.n.z", set("x\xffy")),
 			},
 			err: stringtest.JoinLF("test.yaml:2:1: $.m: "+engine, report, "|-- v1 sets $.m.n", "`-- v2 sets $.m.n.z"),
 		},
@@ -10263,7 +10310,7 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 			before: stringtest.LinesLF("base: &b", "  a: 1", "md: *b"),
 			applies: []edit.Func{
 				at("$.md.n", set(map[string]any{"p": 1})),
-				at("$.md.n.z", set("x\x01y")),
+				at("$.md.n.z", set("x\xffy")),
 			},
 			// The alias binds at itself, as an error at it does (fix20 B2).
 			err: stringtest.JoinLF(
@@ -10276,7 +10323,7 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 		"control: engine error at a place below a value that the same Apply created": {
 			before: stringtest.LinesLF("z0: 0", "m:", "  a: 1"),
 			applies: []edit.Func{
-				both(at("$.m.n", set(map[string]any{"p": 1})), at("$.m.n.z", set("x\x01y"))),
+				both(at("$.m.n", set(map[string]any{"p": 1})), at("$.m.n.z", set("x\xffy"))),
 			},
 			err: stringtest.JoinLF("test.yaml:2:1: $.m: "+engine, report, "|-- v1 sets $.m.n", "`-- v1 sets $.m.n.z"),
 		},
@@ -10287,7 +10334,7 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 			before: stringtest.LinesLF("z0: 0", "m:", "  a: 1"),
 			applies: []edit.Func{
 				at("$.m.n", set(map[string]any{"p": 1})),
-				at("$.m.n.p", set("x\x01y")),
+				at("$.m.n.p", set("x\xffy")),
 			},
 			err: stringtest.JoinLF("test.yaml:2:1: $.m: "+engine, report, "|-- v1 sets $.m.n", "`-- v2 sets $.m.n.p"),
 		},
@@ -10391,7 +10438,7 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 			before: stringtest.LinesLF("o: 0", "r0: 1"),
 			applies: []edit.Func{both(
 				both(at("$.r0", set([]int{1})), at("$.r0", set("q"))),
-				at("$.r0", set("x\x01y")),
+				at("$.r0", set("x\xffy")),
 			)},
 			err: stringtest.JoinLF("test.yaml:2:1: $.r0: "+engine, report, "`-- v1 sets $.r0 from this value"),
 		},
@@ -10413,7 +10460,7 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 			before: stringtest.LinesLF("o: 0", "a: &q 7", "b: *q"),
 			applies: []edit.Func{both(
 				at("$.a", set(map[string]any{"zz": map[string]int{"yy": 1}})),
-				at("$.a.zz.qq", set("x\x01y")),
+				at("$.a.zz.qq", set("x\xffy")),
 			)},
 			err: stringtest.JoinLF(
 				"test.yaml:2:1: $.a: "+engine,
@@ -10753,7 +10800,7 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 			before: stringtest.LinesLF("o: {x: 1}", "t: {a: 1}"),
 			applies: []edit.Func{both(
 				both(move("$.o", "$.t.b"), at("$.t.b", set(map[string]int{"q": 1}))),
-				at("$.t.b.q", set("x\x01y")),
+				at("$.t.b.q", set("x\xffy")),
 			)},
 			err: stringtest.JoinLF(
 				"test.yaml:1:1: $.o: "+engine, report, "|-- v1 sets $.t.b from this value", "`-- v1 sets $.t.b.q",
@@ -10804,20 +10851,20 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 		},
 		"G23-1: engine error at a key of the user that a Move writes": {
 			before:  stringtest.LinesLF("m:", "  k: 1"),
-			applies: []edit.Func{move("$.m.k", `$.m.'x\u0001y'`)},
+			applies: []edit.Func{move("$.m.k", "$.m.'x\xffy'")},
 			err: stringtest.JoinLF(
-				"test.yaml:2:3: $.m.k~: go-yaml's encoder writes U+0001 as it is, and YAML does not allow that in a text",
+				"test.yaml:2:3: $.m.k~: go-yaml's encoder writes the byte 0xff, which is not UTF-8, as it is, and YAML does not allow that in a text",
 				"|-- report this to the authors of cafe",
-				"`-- v1 moves $.m.k to $.m.'x\\u0001y'",
+				"`-- v1 moves $.m.k to $.m.x\ufffdy",
 			),
 		},
 		"G23-1: engine error at a key of the user that a Move writes into a mapping that it creates": {
 			before:  stringtest.LinesLF("o: 0", "m:", "  k: 1"),
-			applies: []edit.Func{move("$.m.k", `$.n.'x\u0001y'`)},
+			applies: []edit.Func{move("$.m.k", "$.n.'x\xffy'")},
 			err: stringtest.JoinLF(
-				"test.yaml:3:3: $.m.k~: go-yaml's encoder writes U+0001 as it is, and YAML does not allow that in a text",
+				"test.yaml:3:3: $.m.k~: go-yaml's encoder writes the byte 0xff, which is not UTF-8, as it is, and YAML does not allow that in a text",
 				"|-- report this to the authors of cafe",
-				"`-- v1 moves $.m.k to $.n.'x\\u0001y'",
+				"`-- v1 moves $.m.k to $.n.x\ufffdy",
 			),
 		},
 		// The key of a moved empty value stands for the value, which the
@@ -10825,9 +10872,9 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 		// G23-4).
 		"G23-4: engine error at an empty value that an earlier Apply moved": {
 			before:  stringtest.LinesLF("a:", "b: 1"),
-			applies: []edit.Func{move("$.a", "$.nn.p"), at("$.nn.p", set("x\x01y"))},
+			applies: []edit.Func{move("$.a", "$.nn.p"), at("$.nn.p", set("x\xffy"))},
 			err: stringtest.JoinLF(
-				"test.yaml:1:1: $.a: go-yaml's encoder writes U+0001 as it is, and YAML does not allow that in a text",
+				"test.yaml:1:1: $.a: go-yaml's encoder writes the byte 0xff, which is not UTF-8, as it is, and YAML does not allow that in a text",
 				"|-- report this to the authors of cafe",
 				"`-- v2 sets $.nn.p from this value",
 			),
@@ -10856,27 +10903,27 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 		// a place that the text does not hold does (fix23 G23-5).
 		"G23-5: engine error at a merge key written in place": {
 			before:  stringtest.LinesLF("m:", "  <<: {a: 1}", "b: 1"),
-			applies: []edit.Func{at("$.m.<<", set("x\x01y"))},
+			applies: []edit.Func{at("$.m.<<", set("x\xffy"))},
 			err: stringtest.JoinLF(
-				"test.yaml:1:1: $.m: go-yaml's encoder writes U+0001 as it is, and YAML does not allow that in a text",
+				"test.yaml:1:1: $.m: go-yaml's encoder writes the byte 0xff, which is not UTF-8, as it is, and YAML does not allow that in a text",
 				"|-- report this to the authors of cafe",
 				"`-- v1 sets $.m.<<",
 			),
 		},
 		"G23-5: engine error at a merge key that reads an alias": {
 			before:  stringtest.LinesLF("s: &s {a: 1}", "m:", "  <<: *s", "  b: 2"),
-			applies: []edit.Func{at("$.m.<<", set("x\x01y"))},
+			applies: []edit.Func{at("$.m.<<", set("x\xffy"))},
 			err: stringtest.JoinLF(
-				"test.yaml:2:1: $.m: go-yaml's encoder writes U+0001 as it is, and YAML does not allow that in a text",
+				"test.yaml:2:1: $.m: go-yaml's encoder writes the byte 0xff, which is not UTF-8, as it is, and YAML does not allow that in a text",
 				"|-- report this to the authors of cafe",
 				"`-- v1 sets $.m.<<",
 			),
 		},
 		"G23-5: engine error at a merge key of a flow mapping": {
 			before:  stringtest.LinesLF("s: &s {a: 1}", "m: {<<: *s, b: 2}"),
-			applies: []edit.Func{at("$.m.<<", set("x\x01y"))},
+			applies: []edit.Func{at("$.m.<<", set("x\xffy"))},
 			err: stringtest.JoinLF(
-				"test.yaml:2:1: $.m: go-yaml's encoder writes U+0001 as it is, and YAML does not allow that in a text",
+				"test.yaml:2:1: $.m: go-yaml's encoder writes the byte 0xff, which is not UTF-8, as it is, and YAML does not allow that in a text",
 				"|-- report this to the authors of cafe",
 				"`-- v1 sets $.m.<<",
 			),
@@ -10982,7 +11029,7 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 		// binds where the user wrote the old value (fix24 G24-3).
 		"G24-3: engine error at a tagged scalar that a marshaler wrote over a value of the user": {
 			before:  stringtest.LinesLF("m:", "  a: 1", "  b: 2"),
-			applies: []edit.Func{at("$.m.b", set(yamlMarshaler("!t x"))), at("$.m.b", set("x\x01y"))},
+			applies: []edit.Func{at("$.m.b", set(yamlMarshaler("!t x"))), at("$.m.b", set("x\xffy"))},
 			err: stringtest.JoinLF(
 				"test.yaml:3:6: $.m.b: "+engine,
 				report,
@@ -11012,7 +11059,7 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 			applies: []edit.Func{
 				at("$.l[0]", set(yamlMarshaler("!t {q: 1}\n"))),
 				move("$.l[0]", "$.nn"),
-				at("$.nn", set("x\x01y")),
+				at("$.nn", set("x\xffy")),
 			},
 			err: stringtest.JoinLF(
 				"test.yaml:1:5: $.l[0]: "+engine,
@@ -11043,7 +11090,7 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 		},
 		"R24-1 control: engine error at a path that names a merge key": {
 			before:  stringtest.LinesLF("s: &s {a: 1}", "m:", "  <<: *s", "  b: 2"),
-			applies: []edit.Func{at("$.m.<<", set("x\x01y"))},
+			applies: []edit.Func{at("$.m.<<", set("x\xffy"))},
 			err:     stringtest.JoinLF("test.yaml:2:1: $.m: "+engine, report, "`-- v1 sets $.m.<<"),
 		},
 		// The key that a move writes for an item of a flow sequence stands for
@@ -11054,7 +11101,7 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 			applies: []edit.Func{
 				at("$.l[0]", set(map[string]int{"q": 1})),
 				move("$.l[0]", "$.nn"),
-				at("$.nn.zz", set("x\x01y")),
+				at("$.nn.zz", set("x\xffy")),
 			},
 			err: stringtest.JoinLF(
 				"test.yaml:1:5: $.l[0]: "+engine,
@@ -11065,7 +11112,7 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 		},
 		"R24-2 control: engine error below a pair without braces that a Set replaced": {
 			before:  "l: [a: 0]\nb: 1\n",
-			applies: []edit.Func{at("$.l[0]", set(map[string]int{"q": 1})), at("$.l[0].zz", set("x\x01y"))},
+			applies: []edit.Func{at("$.l[0]", set(map[string]int{"q": 1})), at("$.l[0].zz", set("x\xffy"))},
 			err: stringtest.JoinLF(
 				"test.yaml:1:5: $.l[0]: "+engine,
 				report,
@@ -11078,7 +11125,7 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 			applies: []edit.Func{
 				at("$.l[0]", set(map[string]int{"q": 1})),
 				move("$.l[0]", "$.nn"),
-				at("$.nn", set("x\x01y")),
+				at("$.nn", set("x\xffy")),
 			},
 			err: stringtest.JoinLF(
 				"test.yaml:1:5: $.l[0]: "+engine,
@@ -11130,7 +11177,7 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 			before: stringtest.LinesLF("a: 1", "b: 2"),
 			applies: []edit.Func{func(ctx context.Context, n *edit.Node) error {
 				return n.At(paths.MustParse("$.a")).Set(ctx, readingMarshaler{
-					node: n.At(paths.MustParse("$.b")), v: "x\x01y",
+					node: n.At(paths.MustParse("$.b")), v: "x\xffy",
 				})
 			}},
 			err: stringtest.JoinLF("test.yaml:1:4: $.a: "+engine, report, "`-- v1 sets $.a from this value"),
@@ -11170,7 +11217,7 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 			before: stringtest.LinesLF("o: 0", "m:", "  z: 1"),
 			applies: []edit.Func{
 				both(at("$.n.p", set(1)), move("$.n", "$.m.k")),
-				at("$.m.k.p", set("x\x01y")),
+				at("$.m.k.p", set("x\xffy")),
 			},
 			err: stringtest.JoinLF("test.yaml:2:1: $.m: "+engine, report, "|-- v1 sets $.n.p", "`-- v2 sets $.m.k.p"),
 		},
@@ -11247,13 +11294,13 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 			before: stringtest.LinesLF("a: 0", "b: 1"),
 			applies: []edit.Func{
 				at("$.a", set(map[string]int{"w": 1, "x": 2})),
-				rename("$.a.w", "x\x01y"),
+				rename("$.a.w", "x\xffy"),
 			},
 			err: stringtest.JoinLF(
 				"test.yaml:1:1: $.a: "+engine,
 				report,
 				"|-- v1 sets $.a from this value",
-				"`-- v2 renames $.a.w to \"x\\x01y\"",
+				"`-- v2 renames $.a.w to \"x\\xffy\"",
 			),
 		},
 		// The key that a move writes for an item of a flow sequence keeps the

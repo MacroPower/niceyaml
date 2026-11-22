@@ -1223,9 +1223,10 @@ func (d *Doc) runSize() int {
 // from start, the text before a call, and holds a character that a call
 // wrote and that YAML does not allow in a text, as [printable] tells. A
 // character of the user's text that a call kept at its place or moved does
-// not count. Go-yaml's encoder writes control characters such as U+0001 as
-// they are, so the problem names the encoder and the character. It matches
-// [ErrEngine], and it binds at the character.
+// not count. Outside double quotes, go-yaml's encoder writes each byte of
+// a string that is not UTF-8 as it is, so the problem names the encoder
+// and the byte. It matches [ErrEngine], and it binds at the byte or the
+// character.
 func (d *Doc) printableProblem(start string) error {
 	if d.cur == start {
 		return nil
@@ -1245,9 +1246,10 @@ func (d *Doc) printableProblem(start string) error {
 }
 
 // unprintableError returns the reason of a text that holds what, the words
-// that name a character that YAML does not allow in a text, as
-// [unprintableAt] names it. Go-yaml's encoder writes such a character as it
-// is.
+// that name a character or a byte that YAML does not allow in a text, as
+// [unprintableAt] names it. Outside double quotes, go-yaml's encoder
+// writes each byte of a string that is not UTF-8 as it is. It also writes
+// each character of a tag as it is.
 func unprintableError(what string) error {
 	return fmt.Errorf("go-yaml's encoder writes %s as it is, and YAML does not allow that in a text", what)
 }

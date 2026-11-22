@@ -1871,18 +1871,18 @@ func TestRegistry_Load_Unversioned(t *testing.T) {
 				manifest.WithKinds(manifest.NewKind[map[string]any]("Cafe",
 					manifest.Unversioned(),
 					manifest.Version("v2"),
-					manifest.Version("v\x013"),
+					manifest.Version("v\x01\xff3"),
 				)),
 			},
 			files: map[string]string{"cafe.yaml": "seats: 40\n"},
 			err: stringtest.JoinLF(
-				"config/cafe.yaml:1:1: $: go-yaml's encoder writes U+0001 as it is, and YAML does not allow "+
-					"that in a text",
+				"config/cafe.yaml:1:1: $: go-yaml's encoder writes the byte 0xff, which is not UTF-8, as it is, "+
+					"and YAML does not allow that in a text",
 				"|-- the document has no apiVersion and no kind, so cafe reads it as an unversioned Cafe",
 				"|-- move the file out of config if it is not a Cafe",
 				"|-- report this to the authors of cafe",
 				"|-- v2 sets $.apiVersion",
-				"`-- v\u24013 sets $.apiVersion",
+				"`-- v\u2401\ufffd3 sets $.apiVersion",
 				"",
 				"   1 | seats: 40",
 				"     | ^^^^^",

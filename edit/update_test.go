@@ -534,7 +534,16 @@ func TestNode_Update(t *testing.T) {
 		"value with a character that the encoder writes as it is": {
 			before:  stringtest.LinesLF("m:", "  a: 1"),
 			path:    paths.Doc().Child("m"),
-			value:   ms("a", "x\x01y"),
+			value:   ms("a", "x\xffy"),
+			err:     "go-yaml's encoder writes the byte 0xff, which is not UTF-8, as it is",
+			likeSet: true,
+			engine:  true,
+		},
+		"value whose marshaler writes a control character in a tag": {
+			// The encoder quotes only strings, so the tag keeps U+0001 as it is.
+			before:  stringtest.LinesLF("m:", "  a: 1"),
+			path:    paths.Doc().Child("m"),
+			value:   ms("a", yamlMarshaler("!t\x01 v")),
 			err:     "go-yaml's encoder writes U+0001 as it is",
 			likeSet: true,
 			engine:  true,

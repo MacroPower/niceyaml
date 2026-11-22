@@ -477,6 +477,14 @@ func newDocEncoder(c config) *docEncoder {
 // marshaler returns decides how a reader reads the scalar, so Encode leaves
 // such a scalar unquoted.
 //
+// YAML allows only its printable characters in a text. Encode
+// double-quotes each UTF-8 string that holds another character, such as
+// U+0001 or U+007F, and the quotes write that character as an escape.
+// Encode leaves a string that is not UTF-8 to go-yaml and to its other
+// quoting rules. In plain text, each byte that is not UTF-8 stays as it
+// is. In double quotes, the byte becomes an escape that YAML reads as
+// another character, as it reads \xff as U+00FF.
+//
 // Encode writes each literal or folded block in the YAML that a marshaler
 // returns as a string that holds the text of the block. Go-yaml makes
 // such a block of a string with a line break in the JSON of a

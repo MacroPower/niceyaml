@@ -3,6 +3,7 @@ package encoder
 import (
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
@@ -254,6 +255,14 @@ func (q quoter) quote(n *ast.StringNode, key bool) {
 		n.Token.Type = token.DoubleQuoteType
 	}
 
+	if unprintable(n.Value) {
+		// YAML does not allow such a character in a text, and the go-yaml
+		// printer writes the characters of a string as they are in every
+		// other form. In double quotes, it writes the escapes of Go, and
+		// YAML reads each of those as the character.
+		n.Token.Type = token.DoubleQuoteType
+	}
+
 	if n.Token.Type == token.SingleQuoteType || n.Token.Type == token.DoubleQuoteType {
 		return
 	}
@@ -291,6 +300,29 @@ func (q quoter) quote(n *ast.StringNode, key bool) {
 	if !safe {
 		n.Token.Type = token.DoubleQuoteType
 	}
+}
+
+// unprintable reports whether s, a UTF-8 string, holds a character that
+// YAML does not allow in a text, such as U+0001. The printable characters
+// of YAML 1.2 include the tab, the line breaks, and U+0085. A string that
+// is not UTF-8 does not count. In double quotes, the go-yaml printer
+// writes each byte that is not UTF-8 as an escape that YAML reads as
+// another character, as YAML reads \xff as U+00FF.
+func unprintable(s string) bool {
+	if !utf8.ValidString(s) {
+		return false
+	}
+
+	return strings.ContainsFunc(s, func(r rune) bool {
+		switch {
+		case r == '\t', r == '\n', r == '\r', r == 0x85:
+			return false
+		case r < 0x20, r >= 0x7f && r < 0xa0:
+			return true
+		default:
+			return r >= 0xfffe && r <= 0xffff
+		}
+	})
 }
 
 // coreScalar matches the plain scalars that the core schema of YAML 1.2

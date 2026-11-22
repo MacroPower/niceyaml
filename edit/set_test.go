@@ -1342,14 +1342,14 @@ func TestNode_Set(t *testing.T) {
 			err: `test.yaml:1:1: $.m: cafe.jacobcolvin.com/v1 sets $.m.x, but the value it writes holds two keys ` +
 				`that a decode reads as "1"`,
 		},
-		"string with a control character through a merge key of a mapping written in place": {
-			// Go-yaml's encoder writes the character as it is, which fails the
-			// Set before the merge key in a refused form does.
+		"string with a byte that is not UTF-8 through a merge key of a mapping written in place": {
+			// Go-yaml's encoder writes the byte as it is, which fails the Set
+			// before the merge key in a refused form does.
 			before: "<<: {8: {}, p: 2}\n",
 			path:   paths.MustParse("$.8"),
-			value:  "\x01",
+			value:  "\xff",
 			engine: true,
-			err:    "go-yaml's encoder writes U+0001 as it is, and YAML does not allow that in a text",
+			err:    "go-yaml's encoder writes the byte 0xff, which is not UTF-8, as it is, and YAML does not allow that in a text",
 		},
 		"string with a control character in place of a quoted scalar through a merge key of a mapping written in place": {
 			// Control: the string keeps the double quotes, which escape the
@@ -1560,12 +1560,27 @@ func TestNode_Set(t *testing.T) {
 			want:   `m: {a: "a\u0001b"}` + "\n",
 		},
 		"string with a control character over a plain scalar in a flow mapping": {
-			// Go-yaml's flow encoder writes U+0001 as it is.
+			// The string takes double quotes, which escape U+0001.
 			before: "m: {a: q}\n",
 			path:   paths.MustParse("$.m.a"),
 			value:  "a\x01b",
-			err: "1:8: $.m.a: go-yaml's encoder writes U+0001 as it is, " +
+			want:   `m: {a: "a\x01b"}` + "\n",
+		},
+		"string with a byte that is not UTF-8 over a plain scalar in a flow mapping": {
+			// Go-yaml's flow encoder writes the byte as it is.
+			before: "m: {a: q}\n",
+			path:   paths.MustParse("$.m.a"),
+			value:  "a\xffb",
+			err: "1:8: $.m.a: go-yaml's encoder writes the byte 0xff, which is not UTF-8, as it is, " +
 				"and YAML does not allow that in a text",
+			engine: true,
+		},
+		"marshaler whose tag holds a control character": {
+			// The encoder quotes only strings, so the tag keeps U+0001 as it is.
+			before: "a: 1\n",
+			path:   paths.MustParse("$.a"),
+			value:  yamlMarshaler("!t\x01 v\n"),
+			err:    "1:4: $.a: go-yaml's encoder writes U+0001 as it is, and YAML does not allow that in a text",
 			engine: true,
 		},
 		"string of several lines keeps its double quotes": {
@@ -3328,25 +3343,25 @@ func TestNode_Set_CreatedPlace(t *testing.T) {
 		"character that the encoder writes as it is at a place that the set creates through an alias": {
 			before: alias,
 			path:   "$.md.z",
-			value:  "x\u0001y",
-			err:    "test.yaml:3:5: $.md: go-yaml's encoder writes U+0001 as it is",
-			detail: "test.yaml:3:5: $.md: go-yaml's encoder writes U+0001 as it is, and YAML does not allow that in a text\n",
+			value:  "x\xffy",
+			err:    "test.yaml:3:5: $.md: go-yaml's encoder writes the byte 0xff, which is not UTF-8, as it is",
+			detail: "test.yaml:3:5: $.md: go-yaml's encoder writes the byte 0xff, which is not UTF-8, as it is, and YAML does not allow that in a text\n",
 			engine: true,
 		},
 		"character that the encoder writes as it is at an item that the set creates through an alias": {
 			before: item,
 			path:   "$.l[0].z",
-			value:  "x\u0001y",
-			err:    "test.yaml:4:5: $.l[0]: go-yaml's encoder writes U+0001 as it is",
-			detail: "test.yaml:4:5: $.l[0]: go-yaml's encoder writes U+0001 as it is, and YAML does not allow that in a text\n",
+			value:  "x\xffy",
+			err:    "test.yaml:4:5: $.l[0]: go-yaml's encoder writes the byte 0xff, which is not UTF-8, as it is",
+			detail: "test.yaml:4:5: $.l[0]: go-yaml's encoder writes the byte 0xff, which is not UTF-8, as it is, and YAML does not allow that in a text\n",
 			engine: true,
 		},
 		"character that the encoder writes as it is at a place that the set creates below an alias": {
 			before: "base: &b\n  sub: {k: 1}\nmd: *b\n",
 			path:   "$.md.sub.z",
-			value:  "x\u0001y",
-			err:    "test.yaml:2:3: $.base.sub: go-yaml's encoder writes U+0001 as it is",
-			detail: "test.yaml:2:3: $.base.sub: go-yaml's encoder writes U+0001 as it is, and YAML does not allow that in a text\n",
+			value:  "x\xffy",
+			err:    "test.yaml:2:3: $.base.sub: go-yaml's encoder writes the byte 0xff, which is not UTF-8, as it is",
+			detail: "test.yaml:2:3: $.base.sub: go-yaml's encoder writes the byte 0xff, which is not UTF-8, as it is, and YAML does not allow that in a text\n",
 			engine: true,
 		},
 		"character that the encoder writes as it is through an alias of a value that a merge key brings in": {
@@ -3354,8 +3369,8 @@ func TestNode_Set_CreatedPlace(t *testing.T) {
 			// own z, so the detail names the place by the path of the Set.
 			before: "m:\n  <<: &b {a: 1}\n  z: 0\nl:\n  - *b\n",
 			path:   "$.l[0].z",
-			value:  "x\u0001y",
-			err:    "test.yaml:5:5: $.l[0]: go-yaml's encoder writes U+0001 as it is",
+			value:  "x\xffy",
+			err:    "test.yaml:5:5: $.l[0]: go-yaml's encoder writes the byte 0xff, which is not UTF-8, as it is",
 			detail: "`-- cafe.jacobcolvin.com/v1 sets $.l[0].z\n",
 			engine: true,
 		},
@@ -5251,7 +5266,13 @@ func TestNode_Insert(t *testing.T) {
 			before: "s: [a]\n",
 			path:   paths.Doc().Child("s").Index(0),
 			value:  "\x01",
-			err:    "go-yaml's encoder writes U+0001",
+			want:   `s: ["\x01", a]` + "\n",
+		},
+		"string with a byte that is not UTF-8": {
+			before: "s: [a]\n",
+			path:   paths.Doc().Child("s").Index(0),
+			value:  "\xff",
+			err:    "go-yaml's encoder writes the byte 0xff",
 			engine: true,
 		},
 		"item past a block scalar with keep chomping without text": {

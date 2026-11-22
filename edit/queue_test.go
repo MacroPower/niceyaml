@@ -161,11 +161,11 @@ func TestDoc_Apply_Queue(t *testing.T) {
 			fn:     setBy(map[string]any{"a": 1, "b": "x", "c": 4}),
 			want:   stringtest.LinesLF("a: 1 # one", "b: x", "c: 4"),
 		},
-		"set of a control character between two sets": {
+		"set of a byte that is not UTF-8 between two sets": {
 			before: stringtest.LinesLF("a: 1", "b: 2", "c: 3"),
 			path:   "$.*",
-			fn:     setBy(map[string]any{"a": "x", "b": "y\x01z", "c": "w"}),
-			err:    "go-yaml's encoder writes U+0001 as it is",
+			fn:     setBy(map[string]any{"a": "x", "b": "y\xffz", "c": "w"}),
+			err:    "go-yaml's encoder writes the byte 0xff, which is not UTF-8, as it is",
 		},
 		"set of a float that go-yaml reads as a string": {
 			before: stringtest.LinesLF("a: 1", "b: 2"),
@@ -515,19 +515,19 @@ func TestDoc_Apply_Queue(t *testing.T) {
 			},
 			err: "stop",
 		},
-		"set of a control character and then an error of the func": {
+		"set of a byte that is not UTF-8 and then an error of the func": {
 			before: stringtest.LinesLF("a: 1", "b: 2"),
 			path:   "$.*",
 			fn: func(*edit.Doc) edit.Func {
 				return func(ctx context.Context, n *edit.Node) error {
 					if n.Key() == "a" {
-						return n.Set(ctx, "\x01")
+						return n.Set(ctx, "\xff")
 					}
 
 					return errors.New("stop")
 				}
 			},
-			err: "go-yaml's encoder writes U+0001 as it is",
+			err: "go-yaml's encoder writes the byte 0xff, which is not UTF-8, as it is",
 		},
 	}
 

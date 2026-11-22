@@ -605,10 +605,9 @@ func TestRegistry_Load_Steps(t *testing.T) {
 			},
 			want: []string{`MenuItem "" cafe.jacobcolvin.com/v1beta1 up-to-date=false`},
 		},
-		// The write of the version field is a call too, so its problem names
-		// it. The message draws the U+0001 of the label as U+2401 (fix23
-		// G23-2).
-		"G23-2: engine error of the write of the version field at a field of the user": {
+		// The write of the version field writes a label that holds U+0001 in
+		// double quotes, with an escape for the character.
+		"write of a version field whose label holds a control character": {
 			opts: []manifest.RegistryOption{
 				manifest.WithAppName("cafe"),
 				manifest.WithKinds(manifest.NewKind[map[string]any]("Hours",
@@ -617,11 +616,26 @@ func TestRegistry_Load_Steps(t *testing.T) {
 				)),
 			},
 			files: map[string]string{"hours.yaml": stringtest.LinesLF("apiVersion: v1", "kind: Hours", "x: 1")},
+			want:  []string{`Hours "" v1 up-to-date=false`},
+		},
+		// The write of the version field is a call too, so its problem names
+		// it. The label holds a byte that is not UTF-8, which go-yaml's
+		// encoder writes as it is. The message draws the U+0001 of the label
+		// as U+2401 and the byte as U+FFFD (fix23 G23-2).
+		"G23-2: engine error of the write of the version field at a field of the user": {
+			opts: []manifest.RegistryOption{
+				manifest.WithAppName("cafe"),
+				manifest.WithKinds(manifest.NewKind[map[string]any]("Hours",
+					manifest.Version("v1"),
+					manifest.Version("v\x01\xff2"),
+				)),
+			},
+			files: map[string]string{"hours.yaml": stringtest.LinesLF("apiVersion: v1", "kind: Hours", "x: 1")},
 			err: stringtest.JoinLF(
-				"config/hours.yaml:1:13: $.apiVersion: go-yaml's encoder writes U+0001 as it is, and YAML does "+
-					"not allow that in a text",
+				"config/hours.yaml:1:13: $.apiVersion: go-yaml's encoder writes the byte 0xff, which is not UTF-8, "+
+					"as it is, and YAML does not allow that in a text",
 				"|-- report this to the authors of cafe",
-				"`-- v\u24012 sets $.apiVersion from this value",
+				"`-- v\u2401\ufffd2 sets $.apiVersion from this value",
 				"",
 				"   1 | apiVersion: v1",
 				"     |             ^^",
@@ -635,15 +649,15 @@ func TestRegistry_Load_Steps(t *testing.T) {
 				manifest.WithVersionOnly(paths.Doc().Child("version")),
 				manifest.WithKinds(manifest.NewKind[map[string]any]("Hours",
 					manifest.Version("1"),
-					manifest.Version("v\x012"),
+					manifest.Version("v\x01\xff2"),
 				)),
 			},
 			files: map[string]string{"hours.yaml": stringtest.LinesLF("version: 1", "x: 1")},
 			err: stringtest.JoinLF(
-				"config/hours.yaml:1:10: $.version: go-yaml's encoder writes U+0001 as it is, and YAML does "+
-					"not allow that in a text",
+				"config/hours.yaml:1:10: $.version: go-yaml's encoder writes the byte 0xff, which is not UTF-8, "+
+					"as it is, and YAML does not allow that in a text",
 				"|-- report this to the authors of cafe",
-				"`-- version v\u24012 sets $.version from this value",
+				"`-- version v\u2401\ufffd2 sets $.version from this value",
 				"",
 				"   1 | version: 1",
 				"     |          ^",
@@ -660,16 +674,16 @@ func TestRegistry_Load_Steps(t *testing.T) {
 				manifest.WithKinds(manifest.NewKind[map[string]any]("Hours",
 					manifest.Version("v1"),
 					manifest.Version("v2"),
-					manifest.Version("v\x013"),
+					manifest.Version("v\x01\xff3"),
 				)),
 			},
 			files: map[string]string{"hours.yaml": stringtest.LinesLF("apiVersion: v1", "kind: Hours", "x: 1")},
 			err: stringtest.JoinLF(
-				"config/hours.yaml:1:13: $.apiVersion: go-yaml's encoder writes U+0001 as it is, and YAML does "+
-					"not allow that in a text",
+				"config/hours.yaml:1:13: $.apiVersion: go-yaml's encoder writes the byte 0xff, which is not UTF-8, "+
+					"as it is, and YAML does not allow that in a text",
 				"|-- report this to the authors of cafe",
 				"|-- v2 sets $.apiVersion from this value",
-				"`-- v\u24013 sets $.apiVersion from this value",
+				"`-- v\u2401\ufffd3 sets $.apiVersion from this value",
 				"",
 				"   1 | apiVersion: v1",
 				"     |             ^^",

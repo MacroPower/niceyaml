@@ -236,12 +236,17 @@ type payload struct {
 // and in flow style, even when it holds a line break. A single-quoted
 // scalar has no escapes. So there, a string with a line break or a
 // character that YAML does not allow in a text takes double quotes. Every
-// other string takes the text of go-yaml's encoder, in flow style inside a
-// flow collection. That text holds a control character of the string, such
-// as U+0001, without an escape. Such a Set thus fails with [ErrEngine],
-// because YAML does not allow that character in a text. It fails so before
-// it checks the constructs of the text that it reaches. YAML allows
-// U+0085, so a string writes that character without an escape.
+// other string takes the text of the encoder of the
+// [go.jacobcolvin.com/niceyaml/encoder] package, in flow style inside a
+// flow collection. That text puts a string that holds a character that
+// YAML does not allow in a text, such as U+0001, in double quotes, with an
+// escape for the character. YAML allows U+0085, so a string writes that
+// character without an escape. The text of a string that is not UTF-8
+// can hold each byte that is not UTF-8 as it is. Such a Set fails with
+// [ErrEngine], because YAML does not allow that byte in a text. It fails
+// so before it checks the constructs of the text that it reaches. In
+// double quotes, the text writes such a byte as an escape that YAML reads
+// as another character, as it reads \xff as U+00FF.
 //
 // Each key that Set creates for a name of its path is a string key, so the
 // name 404 writes the key "404". To write a key of another kind, a [Func]
@@ -1076,10 +1081,13 @@ func (d *Doc) ownProblem(err error) bool {
 //
 // The checks of a Set run in the order that [Node.Set] describes. Go-yaml's
 // checks of the text of the value come first, then the reach of the Set,
-// and the finder on the YAML of the value last. A character that YAML does
-// not allow in a text, which go-yaml's encoder writes as it is, fails with
-// those checks of go-yaml. The problem of such a character binds as
-// [Doc.valueBug] binds it, and so does each problem that matches errEncoder.
+// and the finder on the YAML of the value last. A byte of a string that is
+// not UTF-8, which go-yaml's encoder writes as it is outside double
+// quotes, fails with those checks of go-yaml. A character that YAML does
+// not allow in a text, which go-yaml's encoder writes as it is in the tag
+// of a marshaler's YAML, fails after those checks and before the reach.
+// The problem of such a byte or character binds as [Doc.valueBug] binds
+// it, and so does each problem that matches errEncoder.
 func (d *Doc) renderPayload(
 	ctx context.Context, h *Node, v any, fd flowDepth, step, origin int, old *token.Token, ms []encoder.Marshaler,
 ) (payload, error) {

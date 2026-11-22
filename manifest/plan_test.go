@@ -838,6 +838,26 @@ func TestRegistry_PlanMigration_VersionText(t *testing.T) {
 			text:     "version: 'v1'\n",
 			want:     "version: '2.0'\n",
 		},
+		"control character": {
+			// The label holds U+0001, which YAML does not allow in a text, so
+			// the field takes double quotes and an escape.
+			versions: []string{"v1", "v\x012"},
+			text:     "version: v1\n",
+			want:     "version: \"v\\x012\"\n",
+		},
+		"control character in single quotes": {
+			// A single-quoted scalar has no escapes, so the field takes the
+			// double quotes of the edit package, which writes \u0001.
+			versions: []string{"v1", "v\x012"},
+			text:     "version: 'v1'\n",
+			want:     "version: \"v\\u00012\"\n",
+		},
+		"new field with a control character": {
+			versions:    []string{"v\x012"},
+			unversioned: true,
+			text:        "x: 1\n",
+			want:        stringtest.LinesLF(`version: "v\x012"`, "x: 1"),
+		},
 		"new float field": {
 			versions:    []string{"1.0"},
 			unversioned: true,

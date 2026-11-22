@@ -211,6 +211,44 @@ func TestEncoder_Encode_quoting(t *testing.T) {
 			input: map[string]int{"\ufeffx": 1},
 			want:  stringtest.LinesLF(`"\ufeffx": 1`),
 		},
+		"control character": {
+			input: "a\x01b",
+			want:  stringtest.LinesLF(`"a\x01b"`),
+		},
+		"control character key": {
+			input: map[string]int{"a\x01b": 1},
+			want:  stringtest.LinesLF(`"a\x01b": 1`),
+		},
+		"control character in flow sequence": {
+			input: []string{"a\x01b"},
+			opts:  []encoder.Option{flow},
+			want:  stringtest.LinesLF(`["a\x01b"]`),
+		},
+		"control character with a line break": {
+			input: map[string]string{"k": "a\x01\nb\n"},
+			want:  stringtest.LinesLF(`k: "a\x01\nb\n"`),
+		},
+		"control characters of every escape": {
+			input: []string{"\x00", "\a", "\x1b", "\x7f", "\u0080", "\u009f", "\ufffe", "\uffff"},
+			want: stringtest.LinesLF(
+				`- "\x00"`, `- "\a"`, `- "\x1b"`, `- "\x7f"`, `- "\u0080"`, `- "\u009f"`, `- "\ufffe"`, `- "\uffff"`,
+			),
+		},
+		"control character in a single-quoted scalar of a marshaler": {
+			input:   map[string]any{"k": rawYAML("'a\x01b'")},
+			decoded: map[string]string{"k": "a\x01b"},
+			want:    stringtest.LinesLF(`k: "a\x01b"`),
+		},
+		"control character in a literal block of a marshaler": {
+			input:   map[string]any{"k": rawYAML("|\n  a\x01\n  b\n")},
+			decoded: map[string]string{"k": "a\x01\nb\n"},
+			want:    stringtest.LinesLF(`k: "a\x01\nb\n"`),
+		},
+		"next line character": {
+			// YAML allows U+0085 in a text.
+			input: "a\u0085b",
+			want:  stringtest.LinesLF("a\u0085b"),
+		},
 		"indented line in sequence at indent 1": {
 			input: []string{"x\n y"},
 			opts:  []encoder.Option{encoder.WithIndent(1)},
@@ -510,6 +548,35 @@ func TestEncoder_Encode_quoting(t *testing.T) {
 
 			require.NoError(t, doc.DecodeInto(t.Context(), got.Interface()))
 			assert.Equal(t, decoded, got.Elem().Interface())
+		})
+	}
+}
+
+func TestEncoder_Encode_notUTF8(t *testing.T) {
+	t.Parallel()
+
+	// Encode leaves a string that is not UTF-8 to go-yaml, even when it
+	// holds a control character. YAML reads neither text back as the
+	// string, so these cases check only the encoded text.
+	tcs := map[string]struct {
+		input any
+		want  string
+	}{
+		"control character in a string that is not UTF-8": {
+			input: map[string]string{"k": "a\x01\xff"},
+			want:  stringtest.LinesLF("k: a\x01\xff"),
+		},
+		"control character in a key that is not UTF-8": {
+			input: map[string]int{"a\x01\xff": 1},
+			want:  stringtest.LinesLF("a\x01\xff: 1"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, mustEncode(t, tc.input))
 		})
 	}
 }

@@ -1024,14 +1024,18 @@
 // breaks. The error of a panic binds at the root.
 //
 // The edited text must hold only the characters that YAML allows in a text,
-// the printable characters of YAML 1.2, which include U+0085. Go-yaml's
-// encoder writes a control character of a Go string, such as U+0001,
-// without an escape. A call that writes such a character fails with
-// ErrEngine at the value that it wrote, and the error names the encoder and
-// the character. A Go string that keeps the quotes of a quoted scalar
-// writes such a character as an escape in double quotes, as [Node.Set]
-// describes, so that Set passes. A character of the user's text that a
-// call keeps or moves stays as the user wrote it.
+// the printable characters of YAML 1.2, which include U+0085. A Go string
+// that holds another character, such as U+0001, writes that character as
+// an escape in double quotes, as [Node.Set] describes. Outside double
+// quotes, go-yaml's encoder writes each byte of a Go string that is not
+// UTF-8 as it is, and YAML does not allow such a byte in a text. A call
+// that writes such a byte fails with ErrEngine at the value that it wrote,
+// and the error names the encoder and the byte. The encoder quotes only
+// strings, so the YAML of a marshaler can still hold a character that YAML
+// does not allow in a text outside a string, as in a tag. A call that
+// writes such a character fails the same way, and the error names the
+// character. The check skips each character of the user's text that a call
+// keeps or moves.
 //
 // The comment-free parse must also read the text as the parse of the edits
 // reads it. Both must hold the same keys, values, tags, anchors, and
@@ -1230,11 +1234,11 @@
 //
 // A detail says "from this value" where the problem binds at the site of a
 // value that its call replaced, as a Set replaces the value at its place.
-// So in "b: 0", a Set of $.b to a mapping that holds U+0001 fails at the 0
-// with the detail "the edit sets $.b from this value". After an Apply that
-// v1 labels sets $.b to 5, that Set fails in an Apply that v2 labels. Its
-// details are then "v1 sets $.b from this value" and "v2 sets $.b from this
-// value", in that order. A construct that a call reaches binds at its own
+// So in "b: 0", a Set of $.b to a mapping that holds the byte 0xff fails at
+// the 0 with the detail "the edit sets $.b from this value". After an Apply
+// that v1 labels sets $.b to 5, that Set fails in an Apply that v2 labels.
+// Its details are then "v1 sets $.b from this value" and "v2 sets $.b from
+// this value", in that order. A construct that a call reaches binds at its own
 // token, as a `<<` merge key or the "?" of an explicit key does, so its
 // problem does not say "from this value", whatever path it shows. A Set
 // over a value that an edit created writes a value that an edit created
