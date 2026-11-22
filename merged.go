@@ -582,7 +582,7 @@ func (l resolvedLayer) read(ctx context.Context, i int) (*layermerge.Value, erro
 	cfg := newDecodeConfig(n.source, nil)
 	cfg.skipSelfValidation = true
 
-	err := n.decodeInto(ctx, &discard, cfg, nil)
+	err := n.decodeInto(ctx, &discard, cfg)
 	if err != nil {
 		return nil, err
 	}

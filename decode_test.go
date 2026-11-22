@@ -6547,7 +6547,9 @@ func TestNode_YAMLComments(t *testing.T) {
 			))},
 			want: yaml.CommentMap{"$.b.k": {yaml.HeadComment(" head")}},
 		},
-		"merged comment of a reference document replaces one of the same kind": {
+		"node keeps its own comment of the kind of a merged comment at its path": {
+			// The reference line comment has the key $.a.b.k, where the
+			// document holds a line comment too.
 			input: stringtest.LinesLF("a:", "  <<: *base", "  b:", "    k: 2 # mine"),
 			path:  paths.Doc().Child("a"),
 			source: []niceyaml.SourceOption{yamltest.References(stringtest.LinesLF(
@@ -6555,7 +6557,7 @@ func TestNode_YAMLComments(t *testing.T) {
 				"  b: &base",
 				"    k: 1 # refk",
 			))},
-			want: yaml.CommentMap{"$.b.k": {yaml.LineComment(" refk")}},
+			want: yaml.CommentMap{"$.b.k": {yaml.LineComment(" mine")}},
 		},
 		"node at an item leaves out the head comment of the item": {
 			input: stringtest.LinesLF("items:", "  # first", "  - a # la"),
@@ -6655,6 +6657,67 @@ func TestNode_YAMLComments(t *testing.T) {
 		"document with a head comment on an anchor": {
 			input: stringtest.LinesLF("# head", "&a", "b: 1"),
 			want:  yaml.CommentMap{"$": {yaml.HeadComment(" head")}},
+		},
+		"document with an alias without an anchor": {
+			input: stringtest.LinesLF("a: 1 # one", "b: *missing"),
+			want:  yaml.CommentMap{"$.a": {yaml.LineComment(" one")}},
+		},
+		"document past the alias limit": {
+			input: "# head\n" + yamltest.AliasLevels(7),
+			want:  yaml.CommentMap{"$.a": {yaml.HeadComment(" head")}},
+		},
+		"document with a comment after the anchor of a mapping": {
+			input: stringtest.LinesLF("base: &b # bl", "  x: 1"),
+			want:  yaml.CommentMap{"$.base": {yaml.LineComment(" bl")}},
+		},
+		"document with a comment after an alias": {
+			input: stringtest.LinesLF("- &x 1 # one", "- *x # two"),
+			want: yaml.CommentMap{
+				"$[0]": {yaml.LineComment(" one")},
+				"$[1]": {yaml.LineComment(" two")},
+			},
+		},
+		"document with a comment on a value under a null tag": {
+			input: "a: !!null x # l\n",
+			want:  yaml.CommentMap{"$.a": {yaml.LineComment(" l")}},
+		},
+		"document with two head comments at the path of a flow item": {
+			input: "a: [ # x\n  # h\n  1]\n",
+			want:  yaml.CommentMap{"$.a[0]": {yaml.HeadComment(" x")}},
+		},
+		"document with two line comments at the path of a key": {
+			input: stringtest.LinesLF("a: # x", "  &y # z", "  b: 1"),
+			want:  yaml.CommentMap{"$.a": {yaml.LineComment(" x")}},
+		},
+		"document with a comment on the line of a merged flow mapping": {
+			input: stringtest.LinesLF("a: &a", "  x: 1", "m:", "  <<: {z: 1} # c"),
+			want:  yaml.CommentMap{},
+		},
+		"document with a comment above an item of a merged sequence": {
+			input: stringtest.LinesLF("a: &a", "  x: 1", "m:", "  <<:", "    # h", "    - *a"),
+			want:  yaml.CommentMap{},
+		},
+		"document with a comment on the line of a merged sequence": {
+			input: stringtest.LinesLF("a: &a {x: 1}", "b: &b {y: 1}", "m:", "  <<: [*a, *b] # c"),
+			want:  yaml.CommentMap{},
+		},
+		"document with comments of a merge key and its entries": {
+			input: stringtest.LinesLF(
+				"m:",
+				"  # hm",
+				"  <<: &q # anchor",
+				"    # hz",
+				"    z: 1 # lz",
+				"  # foot",
+			),
+			want: yaml.CommentMap{
+				"$.m.<<":   {yaml.HeadComment(" hm"), yaml.FootComment(" foot")},
+				"$.m.<<.z": {yaml.HeadComment(" hz"), yaml.LineComment(" lz")},
+			},
+		},
+		"document with comments of the entries of a merged sequence": {
+			input: stringtest.LinesLF("m:", "  <<:", "    - z: 1 # lz", "    # hw", "    - w: 2"),
+			want:  yaml.CommentMap{"$.m.<<[0].z": {yaml.LineComment(" lz")}},
 		},
 		"document without comments": {
 			input: "name: api\n",
@@ -6886,21 +6949,18 @@ func TestNode_YAMLComments_Errors(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		err   error
-		input string
+		err    error
+		input  string
+		source []niceyaml.SourceOption
 	}{
 		"document that did not parse": {
 			input: "a: 1 # one\nb: [\n",
 			err:   niceyaml.ErrSyntax,
 		},
-		// The decoder collects the comment of a before it rejects b.
-		"alias with no anchor": {
-			input: "a: 1 # one\nb: *missing\n",
-			err:   niceyaml.ErrDecode,
-		},
-		"document past the alias limit": {
-			input: yamltest.AliasLevels(7),
-			err:   niceyaml.ErrExcessiveAliasing,
+		"reference document that did not parse": {
+			input:  "a: 1 # one\n",
+			source: []niceyaml.SourceOption{yamltest.References("b: [\n")},
+			err:    niceyaml.ErrSyntax,
 		},
 	}
 
@@ -6908,7 +6968,7 @@ func TestNode_YAMLComments_Errors(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.AllDocuments(t, niceyaml.NewSourceFromString(tc.input), 1)[0]
+			doc := yamltest.AllDocuments(t, niceyaml.NewSourceFromString(tc.input, tc.source...), 1)[0]
 
 			got, err := doc.YAMLComments(t.Context())
 			require.ErrorIs(t, err, tc.err)
