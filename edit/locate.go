@@ -39,6 +39,10 @@ type note struct {
 	// was given, as in "sets $.a" or "moves $.a to $.b", which a detail that
 	// names the call names, for a note with a detail.
 	call string
+	// What the call that wrote the text does, as in "removes $.a", for the
+	// "{}" or "[]" that a removal writes for the root that it empties. It
+	// is "" for any other note.
+	emptiedBy string
 	// The string that the block scalar whose header the text is keeps, as
 	// [Doc.keepStrings] keeps it, and whether the note holds one.
 	str  string

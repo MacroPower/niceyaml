@@ -1011,11 +1011,14 @@
 // that holds an anchor without a value before a comment at its end. It
 // refuses others with their comments, such as a flow collection at the root
 // before a comment line. When the parser refuses or panics on the edited
-// text in either parse, the Apply fails with ErrEngine. The error names
-// go-yaml's parser and gives its message. It binds where the text holds the
-// token that the parser names, even where go-yaml's lexer misplaces that
-// token, as in a text with CRLF line breaks. The error of a panic binds at
-// the root.
+// text in either parse, the Apply fails with ErrEngine. A removal that
+// empties a block collection at the root and leaves its "{}" or "[]" above
+// a comment line fails the Apply with a problem of the document instead,
+// as [Node.Remove] describes.
+// Otherwise the error names go-yaml's parser and gives its message. It
+// binds where the text holds the token that the parser names, even where
+// go-yaml's lexer misplaces that token, as in a text with CRLF line
+// breaks. The error of a panic binds at the root.
 //
 // The edited text must hold only the characters that YAML allows in a text,
 // the printable characters of YAML 1.2, which include U+0085. Go-yaml's
@@ -1238,10 +1241,12 @@
 // Transactions section describes. They test its limits, its decodes, its
 // model, and its parses with and without its comments, and their problems
 // name no call. So when go-yaml's parser refuses the edited text in one of
-// those parses, the problem names no call. A difference from the model
-// that these checks find names the call after which the text first
-// differed, in its message. [Doc.Removals] names each value that it lists
-// as the user's text holds it.
+// those parses, the problem names no call. The problem of a call that
+// empties a block collection at the root and leaves its "{}" or "[]" above
+// a comment line names that call in its message, as in "the edit removes
+// $.a". A difference from the model that these checks find names the call
+// after which the text first differed, in its message. [Doc.Removals]
+// names each value that it lists as the user's text holds it.
 //
 // [WithLabel] gives the edits of one Apply a name for its messages, such
 // as the version of a migration step. Without a label, a message names

@@ -971,14 +971,13 @@ func TestDoc_Apply_Documents(t *testing.T) {
 		engine bool
 	}{
 		"refusal of a comment line after a root flow mapping before a later document": {
-			// Go-yaml's parser refuses the comment line after "{}" with its
-			// comments, and the error binds at that line of the file. The
-			// comment line belongs to the later document, so the problem
-			// shows $ and no value of the document.
-			text:   stringtest.LinesLF("a: 1", "# tail", "---", "b: 2"),
-			fn:     func(ctx context.Context, n *edit.Node) error { return remove(ctx, n.At(paths.Doc().Child("a"))) },
-			err:    "test.yaml:2:1: $: go-yaml's parser refuses the edited text with its comments: value is not allowed in this context",
-			engine: true,
+			// Go-yaml's parser refuses the comment line of the later document
+			// below the "{}" that the removal leaves, so the document is at
+			// fault. The problem binds at the root.
+			text: stringtest.LinesLF("a: 1", "# tail", "---", "b: 2"),
+			fn:   func(ctx context.Context, n *edit.Node) error { return remove(ctx, n.At(paths.Doc().Child("a"))) },
+			err: `test.yaml:1:1: $: the edit removes $.a, after which a comment line goes below the "{}" at the root, ` +
+				"and go-yaml's parser refuses a comment line below a flow collection at the root",
 		},
 		"refusal of a comment line after a set in a root flow mapping before a later document": {
 			// The comment line belongs to the later document, so the problem
@@ -990,14 +989,32 @@ func TestDoc_Apply_Documents(t *testing.T) {
 			err:    "test.yaml:2:1: $: go-yaml's parser refuses the edited text with its comments: value is not allowed in this context",
 			engine: true,
 		},
-		"refusal of a comment line of a document between two others": {
-			// The comment line belongs to the last document, so the problem
-			// shows $.
-			text:   stringtest.LinesLF("z: 0", "---", "a: 1", "# tail", "---", "b: 2"),
-			doc:    1,
+		"refusal of a comment line after the removal of the last entry of a root flow mapping before a later document": {
+			// The "{}" keeps the bytes of the user's flow mapping, so no
+			// removal wrote it for the root. The problem stays a problem of
+			// the engine.
+			text:   stringtest.LinesLF("{a: 1}", "# tail", "---", "b: 2"),
 			fn:     func(ctx context.Context, n *edit.Node) error { return remove(ctx, n.At(paths.Doc().Child("a"))) },
-			err:    "test.yaml:4:1: $: go-yaml's parser refuses the edited text with its comments: value is not allowed in this context",
+			err:    "test.yaml:2:1: $: go-yaml's parser refuses the edited text with its comments: value is not allowed in this context",
 			engine: true,
+		},
+		"refusal of a comment line after the removal of the last item of a root flow sequence before a later document": {
+			// The "[]" keeps the bytes of the user's flow sequence, so no
+			// removal wrote it for the root. The problem stays a problem of
+			// the engine.
+			text:   stringtest.LinesLF("[1]", "# tail", "---", "b: 2"),
+			fn:     func(ctx context.Context, n *edit.Node) error { return remove(ctx, n.At(paths.Doc().Index(0))) },
+			err:    "test.yaml:2:1: $: go-yaml's parser refuses the edited text with its comments: value is not allowed in this context",
+			engine: true,
+		},
+		"refusal of a comment line of a document between two others": {
+			// The comment line belongs to the last document, and the problem
+			// binds at the root of the document of the removal.
+			text: stringtest.LinesLF("z: 0", "---", "a: 1", "# tail", "---", "b: 2"),
+			doc:  1,
+			fn:   func(ctx context.Context, n *edit.Node) error { return remove(ctx, n.At(paths.Doc().Child("a"))) },
+			err: `test.yaml:3:1: $: the edit removes $.a, after which a comment line goes below the "{}" at the root, ` +
+				"and go-yaml's parser refuses a comment line below a flow collection at the root",
 		},
 		"refusal of an indented comment line after a blank line before a later document": {
 			// The error binds at the comment line in the user's text, past the
@@ -1069,17 +1086,22 @@ func TestDoc_Apply_DocumentEnd(t *testing.T) {
 		laterErr string
 		// The sentinel of laterErr, or nil for [edit.ErrEngine].
 		laterIs error
+		// Whether the document is at fault for laterErr, which then matches
+		// neither edit.ErrEngine nor laterIs.
+		laterOwn bool
 	}{
 		"removal of the last entry before a comment line indented past its key": {
 			// At the end of a file, the comment line belongs to d, the last
 			// entry of r0, so the removal takes it. Before a later document,
 			// the comment line belongs to that document, so it stays.
-			// Go-yaml's parser refuses the comment line after the "{}" that
-			// the removal leaves, and the error binds at that line.
-			text:     stringtest.LinesLF("r0:", "  d: 1", "   # d"),
-			fn:       at("$.r0", remove),
-			want:     "{}\n",
-			laterErr: "test.yaml:3:4: $: go-yaml's parser refuses the edited text with its comments",
+			// Go-yaml's parser refuses the comment line below the "{}" that
+			// the removal leaves, so the document is at fault.
+			text: stringtest.LinesLF("r0:", "  d: 1", "   # d"),
+			fn:   at("$.r0", remove),
+			want: "{}\n",
+			laterErr: `test.yaml:1:1: $: the edit removes $.r0, after which a comment line goes below the "{}" ` +
+				"at the root, and go-yaml's parser refuses a comment line below a flow collection at the root",
+			laterOwn: true,
 		},
 		"removal of an entry before a comment line indented past its key": {
 			text:  stringtest.LinesLF("r0:", "  c: 1", "  d: 1", "   # d"),
@@ -1239,7 +1261,13 @@ func TestDoc_Apply_DocumentEnd(t *testing.T) {
 
 			err = d.Apply(t.Context(), paths.Doc(), tc.fn)
 			if tc.laterErr != "" {
-				require.ErrorIs(t, err, cmp.Or(tc.laterIs, edit.ErrEngine))
+				if tc.laterOwn {
+					require.Error(t, err)
+					require.NotErrorIs(t, err, edit.ErrEngine)
+				} else {
+					require.ErrorIs(t, err, cmp.Or(tc.laterIs, edit.ErrEngine))
+				}
+
 				assert.Contains(t, niceyaml.FormatError(err), tc.laterErr)
 
 				return
@@ -1412,6 +1440,34 @@ func TestDoc_Apply(t *testing.T) {
 		// The text of a reference document of the Source, when set.
 		ref string
 	}{
+		"removal of each entry of the root around a comment line between blank lines": {
+			// The removal of $.a leaves the "{}" above the comment line, so
+			// the problem names it, not the removal of $.b before it.
+			before: stringtest.LinesLF("a: 1", "", "# note", "", "b: 2"),
+			path:   paths.Doc(),
+			fn:     both(at(paths.Doc().Child("b"), remove), at(paths.Doc().Child("a"), remove)),
+			err: `test.yaml:1:1: $: the edit removes $.a, after which a comment line goes below the "{}" at the root, ` +
+				"and go-yaml's parser refuses a comment line below a flow collection at the root",
+		},
+		"update that empties the root before a comment line": {
+			// Go-yaml's parser refuses the comment line below the "{}" that
+			// the removal of the entries leaves, so the document is at fault.
+			before: stringtest.LinesLF("# head", "a: 1", "b: 2", "# foot"),
+			path:   paths.Doc(),
+			fn: func(ctx context.Context, n *edit.Node) error {
+				return n.Update(ctx, map[string]any{})
+			},
+			err: `test.yaml:2:1: $: the edit updates $, after which a comment line goes below the "{}" at the root, ` +
+				"and go-yaml's parser refuses a comment line below a flow collection at the root",
+		},
+		"new entry after the removal of the last entry of the root before a comment line": {
+			// The new entry writes block lines in place of the "{}", so no
+			// flow collection stays above the comment line.
+			before: stringtest.LinesLF("a: 1", "# foot"),
+			path:   paths.Doc(),
+			fn:     both(at(paths.Doc().Child("a"), remove), at(paths.Doc().Child("c"), set(1))),
+			want:   stringtest.LinesLF("c: 1", "# foot"),
+		},
 		"value that go-yaml's encoder misreads at a new item after the removal of an earlier item": {
 			// The call creates $.l[1], so the problem binds at the key of the
 			// nearest value that the user wrote, under its path, with a detail

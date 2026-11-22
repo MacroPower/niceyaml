@@ -763,7 +763,9 @@ func (d *Doc) engineAtToken(tk *token.Token, err error) error {
 // such as a flow collection at the root before a comment line. The problem
 // matches [ErrEngine], and it names go-yaml's parser. It binds at the
 // token where the parser refused the text, as [Doc.lexedAt] places it, or
-// at the root for a panic.
+// at the root for a panic. A refusal of a comment line below the "{}" or
+// "[]" that a removal wrote for the root gives the problem of the
+// document that [Doc.emptiedRootProblem] gives instead.
 func (d *Doc) parseProblem(final finalParse) error {
 	refusals := []struct{ err, why error }{
 		{final.plain, errRefusedWithoutComments},
@@ -783,6 +785,13 @@ func (d *Doc) parseProblem(final finalParse) error {
 			cause, tk = fmt.Errorf("%w: %s", r.why, refusal.GetMessage()), refusal.GetToken()
 		}
 
+		if errors.Is(r.why, errRefusedWithComments) {
+			problem := d.emptiedRootProblem(tk)
+			if problem != nil {
+				return problem
+			}
+		}
+
 		if at, ok := d.lexedAt(final.tokens, tk); ok {
 			return d.engineAtToken(at, cause)
 		}
@@ -791,6 +800,53 @@ func (d *Doc) parseProblem(final finalParse) error {
 	}
 
 	return nil
+}
+
+// emptiedRootProblem returns the problem of the current text when tk, the
+// token where go-yaml's parser refuses the text with its comments, is a
+// comment below the "{}" or "[]" that a removal wrote for the root that it
+// emptied. Go-yaml's parser refuses a comment line below a flow collection
+// at the root, as in "{}" and "# c". The removal leaves the comment lines
+// after the lines of the root where they are, so the layout of the
+// document decides the problem, and the document is at fault for it. The
+// problem names the call that wrote the "{}" or "[]", such as a Remove or
+// an Update, and it binds at the root. EmptiedRootProblem returns nil for
+// any other refusal, and for a root that a later call wrote again.
+func (d *Doc) emptiedRootProblem(tk *token.Token) error {
+	if tk == nil || tk.Type != token.CommentType {
+		return nil
+	}
+
+	root := astnode.Content(d.node.AST())
+
+	switch x := root.(type) {
+	case *ast.MappingNode:
+		if !x.IsFlowStyle || len(x.Values) > 0 {
+			return nil
+		}
+
+	case *ast.SequenceNode:
+		if !x.IsFlowStyle || len(x.Values) > 0 {
+			return nil
+		}
+
+	default:
+		return nil
+	}
+
+	s, ok := d.nodeSpan(root)
+	if !ok {
+		return nil
+	}
+
+	o := d.originAt(s.start)
+	if o >= 0 || o == math.MinInt || d.notes[-1-o].emptiedBy == "" {
+		return nil
+	}
+
+	return d.fail(d.rootNode(), "%s %s, after which a comment line goes below the %q at the root, and "+
+		"go-yaml's parser refuses a comment line below a flow collection at the root",
+		d.subject(), d.notes[-1-o].emptiedBy, d.cur[s.start:s.end])
 }
 
 // misreadProblem returns the problem of the current text when go-yaml's

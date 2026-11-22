@@ -726,38 +726,44 @@ func TestNode_Remove(t *testing.T) {
 			),
 		},
 		"last entry of the root before a comment line": {
-			// The root holds the comment line, so the problem shows $ (fix25
-			// G25-2).
+			// Go-yaml's parser refuses the comment line below the "{}" that
+			// the removal leaves, so the document is at fault. The problem
+			// binds at the root.
 			before: stringtest.LinesLF("a: 1", "# tail"),
 			path:   paths.Doc().Child("a"),
-			err: "test.yaml:2:1: $: go-yaml's parser refuses the edited text with its comments: value is not allowed in this context\n" +
-				"`-- report this to the authors of cafe",
-			engine: true,
+			err:    "test.yaml:1:1: $: " + emptiedRoot("removes $.a", "{}"),
 		},
 		"last item of the root before a comment line": {
-			// The root holds the comment line, so the problem shows $ (fix25
-			// G25-2).
 			before: stringtest.LinesLF("- 1", "# tail"),
 			path:   paths.Doc().Index(0),
-			err: "test.yaml:2:1: $: go-yaml's parser refuses the edited text with its comments: value is not allowed in this context\n" +
-				"`-- report this to the authors of cafe",
-			engine: true,
+			err:    "test.yaml:1:1: $: " + emptiedRoot("removes $[0]", "[]"),
 		},
 		"last entry of the root before a comment line, in a text of carriage returns and line feeds": {
-			// The root holds the comment line, so the problem shows $ (fix25
-			// G25-2).
 			before: stringtest.LinesCRLF("a: 1", "# tail"),
 			path:   paths.Doc().Child("a"),
-			err:    "2:1: $: go-yaml's parser refuses the edited text with its comments: value is not allowed in this context",
-			engine: true,
+			err:    "test.yaml:1:1: $: " + emptiedRoot("removes $.a", "{}"),
 		},
 		"last item of the root before a comment line, in a text of carriage returns and line feeds": {
-			// The root holds the comment line, so the problem shows $ (fix25
-			// G25-2).
 			before: stringtest.LinesCRLF("- 1", "# tail"),
 			path:   paths.Doc().Index(0),
-			err:    "2:1: $: go-yaml's parser refuses the edited text with its comments: value is not allowed in this context",
-			engine: true,
+			err:    "test.yaml:1:1: $: " + emptiedRoot("removes $[0]", "[]"),
+		},
+		"last entry of the root before a blank line and a comment line": {
+			before: stringtest.LinesLF("# head", "a: 1", "", "# tail"),
+			path:   paths.Doc().Child("a"),
+			err:    "test.yaml:2:1: $: " + emptiedRoot("removes $.a", "{}"),
+		},
+		"last entry of an anchored root before a comment line": {
+			before: stringtest.LinesLF("--- &x", "a: 1", "# tail"),
+			path:   paths.Doc().Child("a"),
+			err:    "test.yaml:2:1: $: " + emptiedRoot("removes $.a", "{}"),
+		},
+		"last entry of the root before a comment line that it holds": {
+			// The comment line goes with the entry, so no comment line
+			// follows the "{}".
+			before: stringtest.LinesLF("a: 1", "  # a"),
+			path:   paths.Doc().Child("a"),
+			want:   "{}\n",
 		},
 		"anchored single-quoted scalar of several lines with an empty line, below a deeper alias": {
 			// The removal takes the anchor that the alias reads.
@@ -1553,6 +1559,16 @@ func TestNode_Remove(t *testing.T) {
 			}
 		})
 	}
+}
+
+// emptiedRoot returns the message of the problem of a call that leaves the
+// "{}" or "[]" of the root above a comment line. The call argument names
+// the call, such as "removes $.a", and the empty argument holds the "{}" or
+// "[]". The message names the call under the label of the Apply of the
+// tests.
+func emptiedRoot(call, empty string) string {
+	return "cafe.jacobcolvin.com/v1 " + call + `, after which a comment line goes below the "` + empty +
+		`" at the root, and go-yaml's parser refuses a comment line below a flow collection at the root`
 }
 
 // aliasChain returns a document whose mapping a holds depth anchored

@@ -747,6 +747,15 @@ func WithReason(reason string) RemoveOption {
 // "a: |", "", "z: 1", "# c", and "b: 1" does. The document is at fault for
 // the problem, and the text stays as it was.
 //
+// Go-yaml's parser also refuses a comment line below a flow collection at
+// the root, as in "{}" and "# c". So an Apply fails where a Remove takes
+// the last entry or item of a block collection at the root and leaves its
+// "{}" or "[]" above a comment line, as a Remove of $.a in "a: 1" and
+// "# c" does. A later call of the Apply that writes an entry or an item in
+// place of the "{}" or "[]" avoids that failure. Otherwise the document is
+// at fault for the problem, which names the Remove and binds at the root,
+// and the text stays as it was.
+//
 // An entry or an item that starts on the line of the "-" of an item leaves
 // the "-" in place. The next entry or item then takes that line, with its
 // comments. When another comment line lies between the two, the "-" ends
@@ -1534,13 +1543,14 @@ func (d *Doc) blankCut(r region) (int, int) {
 // at its key or its "-", under the path of the collection. An item of a
 // flow sequence has neither, so the note binds at the item. For a nil
 // holder, the collection is the root, which binds at its first key or
-// item in the user's text. A key that an edit created gives its note, so
-// an error there names that edit.
+// item in the user's text. That note also names the call that runs, as
+// [Doc.emptiedRootProblem] reads it. A key that an edit created gives its
+// note, so an error there names that edit.
 func (d *Doc) emptiedNote(holder *place) note {
 	if holder == nil {
 		s, ok := d.userRootSite()
 
-		return note{path: paths.Doc(), hasPath: true, at: s.at, located: ok}
+		return note{path: paths.Doc(), hasPath: true, at: s.at, located: ok, emptiedBy: d.callNamed}
 	}
 
 	start, ok := d.startOf(holder)
