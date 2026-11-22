@@ -28,10 +28,10 @@ type positionedComment struct {
 	texts []string
 }
 
-// commentSetter puts comment in one position at target, a node in the
-// tree under root. It returns the error of go-yaml when the node cannot
-// hold a comment in that position.
-type commentSetter func(root, target ast.Node, comment *ast.CommentGroupNode) error
+// commentSetter puts comment in one position at target, a node in tree.
+// It returns the error of go-yaml when the node cannot hold a comment in
+// that position.
+type commentSetter func(tree *commentTree, target ast.Node, comment *ast.CommentGroupNode) error
 
 // parseComments parses each key of cm as a YAML path and returns the
 // entries of cm in the order of their keys. It leaves out a nil comment,
@@ -134,6 +134,12 @@ func commentError(key string, err error) error {
 //   - A path that names a group of nodes, which has a recursive step or a
 //     step after "[*]".
 func setComments(root ast.Node, entries []pathComments) error {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	tree := newCommentTree(root)
+
 	for _, entry := range entries {
 		target, err := entry.path.FilterNode(root)
 		// Go-yaml returns a nil node for a mapping key that the tree
@@ -176,7 +182,7 @@ func setComments(root ast.Node, entries []pathComments) error {
 				tokens = append(tokens, token.New(text, text, nil))
 			}
 
-			err = comment.set(root, target, ast.CommentGroup(tokens))
+			err = comment.set(tree, target, ast.CommentGroup(tokens))
 			if err != nil {
 				return commentError(entry.key, err)
 			}
@@ -187,8 +193,8 @@ func setComments(root ast.Node, entries []pathComments) error {
 }
 
 // setHeadComment puts comment on the line above target.
-func setHeadComment(root, target ast.Node, comment *ast.CommentGroupNode) error {
-	switch parent := ast.Parent(root, target).(type) {
+func setHeadComment(tree *commentTree, target ast.Node, comment *ast.CommentGroupNode) error {
+	switch parent := tree.parent(target).(type) {
 	case *ast.MappingValueNode:
 		return parent.SetComment(comment) //nolint:wrapcheck // Return the original error.
 	case *ast.MappingNode:
@@ -197,7 +203,7 @@ func setHeadComment(root, target ast.Node, comment *ast.CommentGroupNode) error 
 		// A root sequence is its own parent, and its comment goes above
 		// its first entry. An empty sequence has no entry to put it above.
 		if len(parent.Values) == 0 {
-			return yaml.ErrUnsupportedHeadPositionType(root) //nolint:wrapcheck // Return the original error.
+			return yaml.ErrUnsupportedHeadPositionType(tree.root) //nolint:wrapcheck // Return the original error.
 		}
 
 		if len(parent.ValueHeadComments) == 0 {
@@ -209,7 +215,7 @@ func setHeadComment(root, target ast.Node, comment *ast.CommentGroupNode) error 
 		return nil
 
 	default:
-		return yaml.ErrUnsupportedHeadPositionType(root) //nolint:wrapcheck // Return the original error.
+		return yaml.ErrUnsupportedHeadPositionType(tree.root) //nolint:wrapcheck // Return the original error.
 	}
 }
 
@@ -221,12 +227,12 @@ func setHeadComment(root, target ast.Node, comment *ast.CommentGroupNode) error 
 // sequence. A target inside a flow mapping or a flow sequence cannot
 // hold a line comment, so setLineComment returns
 // [yaml.ErrUnsupportedLinePositionType] for that flow collection.
-func setLineComment(root, target ast.Node, comment *ast.CommentGroupNode) error {
+func setLineComment(tree *commentTree, target ast.Node, comment *ast.CommentGroupNode) error {
 	// The printer writes a flow collection on one line and writes the
 	// line comment of a node inside it before the closing bracket or
 	// brace. The comment turns the rest of the line, that bracket or
 	// brace too, into comment text.
-	if flow := flowAncestor(root, target); flow != nil {
+	if flow := tree.flowAncestor(target); flow != nil {
 		return yaml.ErrUnsupportedLinePositionType(flow) //nolint:wrapcheck // Return the original error.
 	}
 
@@ -236,7 +242,7 @@ func setLineComment(root, target ast.Node, comment *ast.CommentGroupNode) error 
 		return target.SetComment(comment) //nolint:wrapcheck // Return the original error.
 	}
 
-	switch parent := ast.Parent(root, target).(type) {
+	switch parent := tree.parent(target).(type) {
 	case *ast.MappingValueNode:
 		// The printer writes a flow sequence on the line of its key, after
 		// the comment of the key. A comment there turns the rest of the
@@ -252,18 +258,103 @@ func setLineComment(root, target ast.Node, comment *ast.CommentGroupNode) error 
 	case *ast.MappingNode:
 		return parent.SetComment(comment) //nolint:wrapcheck // Return the original error.
 	case nil:
-		return yaml.ErrUnsupportedLinePositionType(root) //nolint:wrapcheck // Return the original error.
+		return yaml.ErrUnsupportedLinePositionType(tree.root) //nolint:wrapcheck // Return the original error.
 	default:
 		return yaml.ErrUnsupportedLinePositionType(parent) //nolint:wrapcheck // Return the original error.
 	}
 }
 
+// commentTree holds the parent of each node in the tree under root, so
+// that a comment setter finds a parent without a walk of the whole tree.
+// [ast.Parent] walks the tree from root on each call, so a comment map
+// with an entry for each node takes time that grows with the square of
+// the size of the tree.
+//
+// Create instances with [newCommentTree].
+type commentTree struct {
+	root    ast.Node
+	parents map[ast.Node]ast.Node
+}
+
+// newCommentTree creates a new [commentTree] for the tree under root.
+// It walks the nodes that [ast.Parent] walks, in the same order, and it
+// keeps the first parent it finds for each node, so that
+// [commentTree.parent] returns what [ast.Parent] returns. The comments
+// that the setters add do not change the parents, because the walk
+// does not step into a comment.
+func newCommentTree(root ast.Node) *commentTree {
+	tree := &commentTree{root: root, parents: make(map[ast.Node]ast.Node)}
+	tree.add(root, root)
+
+	return tree
+}
+
+// add records parent as the parent of node and of the nodes under node
+// that the tree does not hold yet.
+func (t *commentTree) add(parent, node ast.Node) {
+	if node == nil {
+		return
+	}
+
+	// A node that the walk already reached has its parent and the
+	// parents of the nodes under it.
+	if _, ok := t.parents[node]; ok {
+		return
+	}
+
+	t.parents[node] = parent
+
+	switch n := node.(type) {
+	case *ast.LiteralNode:
+		t.add(n, n.Value)
+	case *ast.DirectiveNode:
+		t.add(n, n.Name)
+
+		for _, value := range n.Values {
+			t.add(n, value)
+		}
+
+	case *ast.TagNode:
+		t.add(n, n.Value)
+	case *ast.DocumentNode:
+		t.add(n, n.Body)
+	case *ast.MappingNode:
+		for _, value := range n.Values {
+			t.add(n, value)
+		}
+
+	case *ast.MappingKeyNode:
+		t.add(n, n.Value)
+	case *ast.MappingValueNode:
+		t.add(n, n.Key)
+		t.add(n, n.Value)
+
+	case *ast.SequenceNode:
+		for _, value := range n.Values {
+			t.add(n, value)
+		}
+
+	case *ast.AnchorNode:
+		t.add(n, n.Name)
+		t.add(n, n.Value)
+
+	case *ast.AliasNode:
+		t.add(n, n.Value)
+	}
+}
+
+// parent returns the parent of node. The root node is its own parent. It
+// returns nil for a node that the tree does not hold.
+func (t *commentTree) parent(node ast.Node) ast.Node {
+	return t.parents[node]
+}
+
 // flowAncestor returns the closest flow mapping or flow sequence that
-// holds node in the tree under root. It returns nil when no flow
-// collection holds node. The node itself does not count.
-func flowAncestor(root, node ast.Node) ast.Node {
+// holds node. It returns nil when no flow collection holds node. The
+// node itself does not count.
+func (t *commentTree) flowAncestor(node ast.Node) ast.Node {
 	for {
-		parent := ast.Parent(root, node)
+		parent := t.parent(node)
 		// The root node is its own parent.
 		if parent == nil || parent == node {
 			return nil
@@ -286,8 +377,8 @@ func flowAncestor(root, node ast.Node) ast.Node {
 }
 
 // setFootComment puts comment on the line below the parent of target.
-func setFootComment(root, target ast.Node, comment *ast.CommentGroupNode) error {
-	switch parent := ast.Parent(root, target).(type) {
+func setFootComment(tree *commentTree, target ast.Node, comment *ast.CommentGroupNode) error {
+	switch parent := tree.parent(target).(type) {
 	case *ast.MappingValueNode:
 		parent.FootComment = comment
 	case *ast.MappingNode:
@@ -295,7 +386,7 @@ func setFootComment(root, target ast.Node, comment *ast.CommentGroupNode) error 
 	case *ast.SequenceNode:
 		parent.FootComment = comment
 	case nil:
-		return yaml.ErrUnsupportedFootPositionType(root) //nolint:wrapcheck // Return the original error.
+		return yaml.ErrUnsupportedFootPositionType(tree.root) //nolint:wrapcheck // Return the original error.
 	default:
 		return yaml.ErrUnsupportedFootPositionType(parent) //nolint:wrapcheck // Return the original error.
 	}
