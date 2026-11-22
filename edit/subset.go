@@ -998,10 +998,10 @@ func (d *Doc) anchoredEmpty(anchor *ast.AnchorNode) instance {
 // misnestedEmpties returns the instances of [ConstructAnchoredEmpty] and
 // [ConstructTaggedEmpty] that go-yaml's parse of the user's text does not
 // show as empty. Go-yaml nests the lines after an empty value or item with
-// properties in that value, as [misnested] finds them. Each anchor on the
-// collection of such a line is the anchor of an empty value of the text.
-// Each tag there is the tag of an empty value, and it gives an instance
-// when no anchor stands beside it.
+// properties in that value, as [astnode.Misnested] finds them. Each anchor
+// on the collection of such a line is the anchor of an empty value of the
+// text. Each tag there is the tag of an empty value, and it gives an
+// instance when no anchor stands beside it.
 func (d *Doc) misnestedEmpties() []instance {
 	seen := make(map[ast.Node]bool)
 
@@ -1089,8 +1089,8 @@ func (d *Doc) propsAbove(props ast.Node, f func(ast.Node)) {
 
 // misnest is a block entry or item of the current text that go-yaml's
 // parse nests deeper than its indentation lets YAML nest it, as
-// [misnested] finds it. It holds the anchor or the tag on the collection
-// that go-yaml nests the entry or the item in.
+// [astnode.Misnested] finds it. It holds the anchor or the tag on the
+// collection that go-yaml nests the entry or the item in.
 type misnest struct {
 	props ast.Node
 }
@@ -1112,98 +1112,13 @@ func (d *Doc) misnests() []misnest {
 func (d *Doc) readMisnests() []misnest {
 	out := []misnest{}
 
-	misnested(d.node.AST(), 0, 0, nil, func(_ *token.Token, props ast.Node) bool {
+	astnode.Misnested(d.node.AST(), func(_ *token.Token, props ast.Node) bool {
 		out = append(out, misnest{props: props})
 
 		return true
 	})
 
 	return out
-}
-
-// misnested calls found with the token of each block entry or item under
-// node that go-yaml's parse nests deeper than its indentation lets YAML
-// nest it. The calls come in the order of the text. It also passes the anchor or the tag
-// on the collection that holds that entry or item. Misnested stops when
-// found returns false, and it reports whether it stopped. An entry of a
-// block mapping starts at a column of keyMin or more, and an item of a
-// block sequence at a column of seqMin or more. YAML nests a collection
-// below an entry or an item only when the collection starts past the
-// column of that entry or that "-". A block sequence can also start at the
-// column of the key whose value it is. Go-yaml nests the entries after an
-// anchored empty item in the item anyway. It reads r1 of
-// "r0:\n- &x0\nr1: 1" as an entry of the item. The props are the anchor
-// or the tag that holds node. A flow collection does not count, because
-// YAML reads it by its brackets.
-func misnested(node ast.Node, keyMin, seqMin int, props ast.Node, found func(*token.Token, ast.Node) bool) bool {
-	switch n := node.(type) {
-	case *ast.AnchorNode:
-		return misnested(n.Value, keyMin, seqMin, n, found)
-
-	case *ast.TagNode:
-		return misnested(n.Value, keyMin, seqMin, n, found)
-
-	case *ast.MappingValueNode:
-		return misnestedEntry(n, keyMin, props, found)
-
-	case *ast.MappingNode:
-		if n.IsFlowStyle {
-			return false
-		}
-
-		for _, e := range n.Values {
-			if misnestedEntry(e, keyMin, props, found) {
-				return true
-			}
-		}
-
-	case *ast.SequenceNode:
-		if n.IsFlowStyle {
-			return false
-		}
-
-		for i, v := range n.Values {
-			tk := itemMark(n, i)
-			if tk == nil || tk.Position == nil {
-				continue
-			}
-
-			col := tk.Position.Column - 1
-			if col < seqMin && !found(tk, props) {
-				return true
-			}
-
-			if misnested(v, col+1, col+1, nil, found) {
-				return true
-			}
-		}
-	}
-
-	return false
-}
-
-// misnestedEntry calls found with the token of e, an entry of a block
-// mapping, when it starts at a column less than keyMin, as [misnested]
-// reads it. It then calls found for the entries and the items in the key
-// and the value of e. It reports whether found stopped it.
-func misnestedEntry(e *ast.MappingValueNode, keyMin int, props ast.Node, found func(*token.Token, ast.Node) bool) bool {
-	// The token of a key is its first token: the "?" of an explicit key,
-	// the first property of a key with properties, or the key itself.
-	tk := astnode.Token(e.Key)
-	if tk == nil || tk.Position == nil {
-		return false
-	}
-
-	col := tk.Position.Column - 1
-	if col < keyMin && !found(tk, props) {
-		return true
-	}
-
-	if misnested(e.Key, col+1, col+1, nil, found) {
-		return true
-	}
-
-	return misnested(e.Value, col+1, col, nil, found)
 }
 
 // anchorInstances returns the instances of the anchors of the user's text

@@ -720,9 +720,12 @@ type Removal struct {
 // New creates a new [Doc] that holds the text of doc, the root of a
 // document of a [niceyaml.Source], such as one that
 // [niceyaml.Source.Documents] returns. It returns the error of a document
-// that does not parse, or of a reference document of
-// [niceyaml.WithReferences] that does not parse, because a decode of the
-// document then fails. It also returns an error for a nil doc and for a
+// that does not parse, because a decode of the document then fails. For
+// the same reason, it returns the error of a reference document of
+// [niceyaml.WithReferences] that does not parse, or in which go-yaml's
+// parser nests a line deeper than YAML reads it. That error binds in the
+// reference document and matches [niceyaml.ErrDecode] for such a line. It
+// also returns an error for a nil doc and for a
 // Node below the root. Such an error matches [ErrUsage]. So does the error
 // of a path of [WithProtected] that is not a `$` path of names and indexes,
 // which fails New too. The error
@@ -781,11 +784,11 @@ func New(doc *niceyaml.Node, opts ...Option) (*Doc, error) {
 	}
 
 	// Every decode of the document fails on a reference document that does
-	// not parse, so New fails with the error of that parse.
-	for _, ref := range hook.ReferenceDocuments(doc) {
-		if r, ok := ref.(*niceyaml.Node); ok && r.Err() != nil {
-			return nil, r.Err() //nolint:wrapcheck // The error of the document binds in it.
-		}
+	// not parse, or in which go-yaml's parser nests a line deeper than YAML
+	// reads it, so New fails with the error of that reference document.
+	err = hook.ReferenceError(doc)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // The error binds in the reference document.
 	}
 
 	for _, p := range cfg.protected {

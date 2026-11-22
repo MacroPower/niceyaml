@@ -30,16 +30,10 @@ func init() {
 
 		return node.source.referenceName(name)
 	}
-	hook.ReferenceDocuments = func(n any) []any {
+	hook.ReferenceError = func(n any) error {
 		node, _ := n.(*Node) //nolint:errcheck // The hook takes a *Node.
 
-		var out []any
-
-		for _, doc := range node.source.referenceDocuments(map[*Source]bool{}) {
-			out = append(out, doc)
-		}
-
-		return out
+		return node.Bind(node.source.referenceErr)
 	}
 	hook.AliasContent = func(n any, alias *ast.AliasNode) (ast.Node, error) {
 		node, _ := n.(*Node) //nolint:errcheck // The hook takes a *Node.

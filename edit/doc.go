@@ -631,7 +631,10 @@
 // text that go-yaml's parser refuses fails New with the error of the parse.
 // So does a reference document of
 // [go.jacobcolvin.com/niceyaml.WithReferences] that does not parse, because
-// each decode of the document fails with that error.
+// each decode of the document fails with that error. A reference document
+// in which go-yaml's parser nests a line deeper than YAML reads it, as in
+// "x: !t\ny: 1", fails New with an error that matches
+// [go.jacobcolvin.com/niceyaml.ErrDecode] for the same reason.
 //
 // [New] refuses a document that holds one of these, with an error that
 // matches [ErrMisread] and that [go.jacobcolvin.com/niceyaml.IsInvalid]

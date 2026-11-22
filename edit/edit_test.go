@@ -916,6 +916,26 @@ func TestNew_Unparsed(t *testing.T) {
 	})
 }
 
+func TestNew_MisnestedReference(t *testing.T) {
+	t.Parallel()
+
+	// Go-yaml's parser nests "y: 1" in the value of the tag, but YAML reads
+	// it beside x. Each decode of the document fails with the error of that
+	// line. So New fails with it, even where no alias of the document reads
+	// the reference document.
+	ref := niceyaml.NewSourceFromString("base: &b 1\nx: !t\ny: 1\n", niceyaml.WithName("ref.yaml"))
+	doc := yamltest.FirstDocument(t, "a: 1\nc: 2\n", niceyaml.WithName("test.yaml"), niceyaml.WithReferences(ref))
+
+	_, err := edit.New(doc)
+	require.ErrorIs(t, err, niceyaml.ErrDecode)
+	require.NotErrorIs(t, err, edit.ErrEngine)
+	assert.True(t, niceyaml.IsInvalid(err))
+	assert.Equal(t,
+		"ref.yaml:2:4: $.x: go-yaml nests the lines after the tag !t in its value, but YAML reads them outside it",
+		err.Error(),
+	)
+}
+
 func TestNew_Documents(t *testing.T) {
 	t.Parallel()
 

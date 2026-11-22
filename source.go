@@ -171,8 +171,9 @@ type SourceOption func(*sourceConfig)
 // takes it in place of the [Source] that embeds it, so only a constructor
 // can apply one.
 type sourceConfig struct {
-	// The error of the parse of a reference document from WithReferences.
-	// The error fails every decode of the Source.
+	// The error of the parse of a reference document from WithReferences,
+	// or of a line that go-yaml nests too deep in one. The error fails
+	// every decode of the Source.
 	referenceErr error
 	// The file system that filePath names a file in, or nil when the
 	// options did not set one. With nil, filePath names a file on disk.
@@ -670,7 +671,11 @@ func WithAliasLimit(enabled bool) SourceOption {
 // When two of refs define the same anchor name, their order decides which
 // anchor wins. WithReferences skips a nil Source. It parses each Source
 // of refs, and a reference document that does not parse fails every
-// decode of the Source with the error of that parse.
+// decode of the Source with the error of that parse. Go-yaml's parser
+// can nest a line of a reference document deeper than YAML reads it. Such
+// a document fails every decode of the Source with the error that a
+// decode of that document returns, as the Decoding section of the package
+// documentation describes.
 //
 // The edit package does not edit a document that defines and aliases an
 // anchor name that refs define too.
@@ -714,6 +719,10 @@ func WithReferences(refs ...*Source) SourceOption {
 
 			if c.referenceErr == nil {
 				_, c.referenceErr = ref.File()
+			}
+
+			if c.referenceErr == nil {
+				c.referenceErr = ref.misnestError()
 			}
 
 			if !ref.ShowsExcerpts() || ref.noReferenceExcerpts {
@@ -1180,9 +1189,9 @@ func (s *Source) referenceName(name string) (string, bool) {
 }
 
 // referenceDocuments returns the documents of the reference Sources of s,
-// and of their own reference Sources, as [hook.ReferenceDocuments] gives
-// them. Seen holds the Sources that an earlier call read, so a Source that
-// two references read counts once.
+// and of their own reference Sources, once each. Seen holds the Sources
+// that an earlier call read, so a Source that two references read counts
+// once.
 func (s *Source) referenceDocuments(seen map[*Source]bool) []*Node {
 	var out []*Node
 
@@ -2419,6 +2428,7 @@ func newDocuments(src *Source, docs []docparse.Document, errs []error) []*Node {
 		doc.tree = sync.OnceValue(doc.newDecodeTree)
 		doc.pathIndex = sync.OnceValue(func() *pathindex.Index { return pathindex.New(doc.root.Body) })
 		doc.resolver = sync.OnceValue(doc.newResolver)
+		doc.misnest = sync.OnceValue(doc.findMisnest)
 		doc.state = aliasing.NewState(!src.skipAliasLimit, src.budget(), func() (ast.Node, *paths.Resolver) {
 			return doc.root.Body, doc.pathResolver()
 		}, src.referenceWeights)

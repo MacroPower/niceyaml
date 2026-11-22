@@ -59,11 +59,13 @@ var (
 	// reports false when no reference document defines name.
 	ReferenceName func(n any, name string) (string, bool)
 
-	// ReferenceDocuments returns each document, a *niceyaml.Node, of the
-	// reference documents of the Source of n, a *niceyaml.Node, and of
-	// their own reference documents, once each. A document that does not
-	// parse counts too.
-	ReferenceDocuments func(n any) []any
+	// ReferenceError returns the error that every decode of n, a
+	// *niceyaml.Node, returns for the reference documents of its Source,
+	// bound in the reference document that it concerns, or nil. A
+	// reference document that does not parse gives the error of its parse.
+	// One in which go-yaml's parser nests a line deeper than YAML reads it
+	// gives the error of that line, as the decode reports it.
+	ReferenceError func(n any) error
 
 	// AliasContent returns the node that the anchor of alias holds, where
 	// alias belongs to the document of n, a *niceyaml.Node, or to one of

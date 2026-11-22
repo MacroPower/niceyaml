@@ -8146,6 +8146,219 @@ func TestDocument_Decode_AliasErrors(t *testing.T) {
 	}
 }
 
+func TestDocument_Decode_Misnest(t *testing.T) {
+	t.Parallel()
+
+	// Go-yaml's parser nests the lines after a tag on an empty value in
+	// that value, where YAML reads them outside it. Each decode of the
+	// document fails at the tag rather than read the other tree.
+	tcs := map[string]struct {
+		input string
+		want  any
+		err   string
+	}{
+		"tag on an empty value before a key at its column": {
+			input: stringtest.LinesLF("a: !t", "b: 1"),
+			err:   "1:4: $.a: go-yaml nests the lines after the tag !t in its value, but YAML reads them outside it",
+		},
+		"tag on an empty value before a key at a smaller column": {
+			input: stringtest.LinesLF("a:", "  b: !t", "c: 1"),
+			err:   "2:6: $.a.b: go-yaml nests the lines after the tag !t in its value, but YAML reads them outside it",
+		},
+		"tag on an empty item before an item": {
+			input: stringtest.LinesLF("- !t", "- 1"),
+			err:   "1:3: $[0]: go-yaml nests the lines after the tag !t in its value, but YAML reads them outside it",
+		},
+		"tag with a comment on an empty value": {
+			input: stringtest.LinesLF("a: !t # c", "b: 1"),
+			err:   "1:4: $.a: go-yaml nests the lines after the tag !t in its value, but YAML reads them outside it",
+		},
+		"tag after an anchor on an empty value": {
+			input: stringtest.LinesLF("a: &x !t", "b: 1"),
+			err:   "1:7: $.a: go-yaml nests the lines after the tag !t in its value, but YAML reads them outside it",
+		},
+		"tab after a tag": {
+			// Go-yaml's lexer reads the tab and the 5 into the tag.
+			input: stringtest.LinesLF("a: !!int\t5", "z: 1"),
+			err:   "1:4: $.a: go-yaml nests the lines after the tag !!int in its value, but YAML reads them outside it",
+		},
+		"anchor on an empty item before a key": {
+			input: stringtest.LinesLF("r0:", "- &x0", "r1: 1"),
+			err: "2:3: $.r0[0]: go-yaml nests the lines after the anchor &x0 in its value, but YAML reads " +
+				"them outside it",
+		},
+		"anchor on an empty value before a key": {
+			input: stringtest.LinesLF("a: &x", "b: 1"),
+			want:  map[string]any{"a": nil, "b": uint64(1)},
+		},
+		"tag on a mapping on the next line": {
+			input: stringtest.LinesLF("a: !t", "  b: 1"),
+			want:  map[string]any{"a": map[string]any{"b": uint64(1)}},
+		},
+		"tag on a sequence at the column of its key": {
+			input: stringtest.LinesLF("a: !t", "- 1"),
+			want:  map[string]any{"a": []any{uint64(1)}},
+		},
+		"tag on an empty value at the end": {
+			input: stringtest.LinesLF("z: 1", "a: !t"),
+			want:  map[string]any{"a": nil, "z": uint64(1)},
+		},
+		"tag on a flow mapping before a key": {
+			input: stringtest.LinesLF("a: !t {}", "b: 1"),
+			want:  map[string]any{"a": map[string]any{}, "b": uint64(1)},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dd := yamltest.FirstDocument(t, tc.input)
+
+			got, err := dd.Decode[any](t.Context())
+			if tc.err == "" {
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got)
+
+				return
+			}
+
+			require.EqualError(t, err, tc.err)
+			require.ErrorIs(t, err, niceyaml.ErrDecode)
+			assert.True(t, niceyaml.IsInvalid(err))
+		})
+	}
+}
+
+func TestNode_Decode_Misnest(t *testing.T) {
+	t.Parallel()
+
+	// The check covers the whole document. So a decode of a value before
+	// the tag fails too, and a path after the tag does not read as absent.
+	const misnest = "2:4: $.a: go-yaml nests the lines after the tag !t in its value, but YAML reads them outside it"
+
+	dd := yamltest.FirstDocument(t, stringtest.LinesLF("z: 0", "a: !t", "b: 1", "c: 2"))
+
+	t.Run("DecodeAt a value before the tag", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := dd.DecodeAt[int](t.Context(), paths.MustParse("$.z"))
+		require.EqualError(t, err, misnest)
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+	})
+
+	t.Run("DecodeAt a path that go-yaml reads", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := dd.DecodeAt[any](t.Context(), paths.MustParse("$.a.b"))
+		require.EqualError(t, err, misnest)
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+	})
+
+	t.Run("DecodeAt a path that YAML reads", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := dd.DecodeAt[any](t.Context(), paths.MustParse("$.b"))
+		require.EqualError(t, err, misnest)
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+	})
+
+	t.Run("DecodeIfPresent a path that YAML reads", func(t *testing.T) {
+		t.Parallel()
+
+		var v any
+
+		found, err := dd.DecodeIfPresent(t.Context(), paths.MustParse("$.b"), &v)
+		require.EqualError(t, err, misnest)
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+		assert.False(t, found)
+	})
+
+	t.Run("DecodeInto a node inside the tag", func(t *testing.T) {
+		t.Parallel()
+
+		n, err := dd.At(paths.MustParse("$.a.c"))
+		require.NoError(t, err)
+
+		var v int
+
+		err = n.DecodeInto(t.Context(), &v)
+		require.EqualError(t, err, misnest)
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+	})
+
+	t.Run("Source.Decode", func(t *testing.T) {
+		t.Parallel()
+
+		src := niceyaml.NewSourceFromString(stringtest.LinesLF("a: !t", "b: 1"))
+
+		_, err := src.Decode[map[string]any](t.Context())
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+	})
+
+	t.Run("YAMLComments", func(t *testing.T) {
+		t.Parallel()
+
+		got, err := dd.YAMLComments(t.Context())
+		require.EqualError(t, err, misnest)
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+		assert.Nil(t, got)
+	})
+
+	t.Run("a reference document", func(t *testing.T) {
+		t.Parallel()
+
+		// YAML reads base as {x: !t null}, and go-yaml reads it as
+		// {x: {y: 1}}.
+		refs := niceyaml.NewSourceFromString(stringtest.LinesLF("base: &b", "  x: !t", "y: 1"))
+		src := niceyaml.NewSourceFromString(stringtest.LinesLF("a: *b", "z: 0"), niceyaml.WithReferences(refs))
+		doc := yamltest.Document(t, src)
+
+		const want = "2:6: $.base.x: go-yaml nests the lines after the tag !t in its value, but YAML reads them " +
+			"outside it"
+
+		_, err := src.Decode[map[string]any](t.Context())
+		require.EqualError(t, err, want)
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+
+		_, err = doc.DecodeAt[int](t.Context(), paths.MustParse("$.z"))
+		require.EqualError(t, err, want)
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+
+		_, err = doc.YAMLComments(t.Context())
+		require.EqualError(t, err, want)
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+	})
+
+	t.Run("a merge key that reads a reference document", func(t *testing.T) {
+		t.Parallel()
+
+		// YAML reads base as {x: !t null, y: 1}, and go-yaml reads it as
+		// {x: {y: 1}}. So YAML reads $.a.y, and go-yaml does not.
+		refs := niceyaml.NewSourceFromString(stringtest.LinesLF("base: &b", "  x: !t", "  y: 1"))
+		src := niceyaml.NewSourceFromString(
+			stringtest.LinesLF("a:", "  <<: *b", "  k: 1"),
+			niceyaml.WithReferences(refs),
+		)
+		doc := yamltest.Document(t, src)
+		path := paths.MustParse("$.a.y")
+
+		const want = "2:6: $.base.x: go-yaml nests the lines after the tag !t in its value, but YAML reads them " +
+			"outside it"
+
+		_, err := doc.DecodeAt[int](t.Context(), path)
+		require.EqualError(t, err, want)
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+
+		var v int
+
+		found, err := doc.DecodeIfPresent(t.Context(), path, &v)
+		require.EqualError(t, err, want)
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+		assert.False(t, found)
+	})
+}
+
 func TestDocument_DecodeInto(t *testing.T) {
 	t.Parallel()
 

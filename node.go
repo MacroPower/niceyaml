@@ -74,6 +74,9 @@ type document struct {
 	// Returns the index that finds the node of root at a position, and
 	// builds it on the first call of PathAt.
 	pathIndex func() *pathindex.Index
+	// Returns the error of the first line that go-yaml's parse of root
+	// nests too deep, or nil, and finds it on the first call.
+	misnest func() error
 	// The state that the packages of the module reach through
 	// aliasing.StateOf.
 	state *aliasing.State

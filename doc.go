@@ -870,14 +870,16 @@
 //     that wraps [ErrNoWarnings].
 //  2. For a document that did not parse, the decode returns the error of its
 //     parse.
-//  3. A decode of a value that holds an alias fails with an error that
+//  3. For a document in which go-yaml's parser nests a line deeper than YAML
+//     reads it, the decode fails with an error that matches [ErrDecode].
+//  4. A decode of a value that holds an alias fails with an error that
 //     matches [ErrExcessiveAliasing] when nested aliases make a decode of the
 //     document read far more than the document holds. [Node.CheckAliasLimit]
 //     returns the same error. The Alias Limit section names the value that a
 //     decode of a Node at an alias reads.
-//  4. Each [Validator] from [WithValidator] checks the node, in the order the
+//  5. Each [Validator] from [WithValidator] checks the node, in the order the
 //     caller gives them.
-//  5. For a target that reads text, a decode of a value that holds an alias
+//  6. For a target that reads text, a decode of a value that holds an alias
 //     also counts the text that the decoder writes out. It fails with an
 //     error that matches [ErrExcessiveAliasing] when aliases make up too
 //     much of that text. The decode also fails when the aliases of the whole
@@ -889,8 +891,8 @@
 //     text when any type that a decode into it reaches reads text. Those
 //     types include the types of its fields and elements, and the key and
 //     value types of its maps.
-//  6. The go-yaml decoder fills the target.
-//  7. Every value in the result that implements [SelfValidator] or
+//  7. The go-yaml decoder fills the target.
+//  8. Every value in the result that implements [SelfValidator] or
 //     [SelfValidatorContext] validates itself, and each function from
 //     [WithValueCheck] or [WithNodeCheck] checks the values of its type.
 //     [WithSelfValidation] set to false turns this step off, and
@@ -963,6 +965,25 @@
 //     go-yaml where a merge key brings it in. In "b: &b {*b : 1}" and
 //     "m: {<<: *b}", go-yaml reads m as {"map[null:1]": 1}, and niceyaml
 //     reads m as {null: 1}.
+//
+// Go-yaml's parser nests the lines after a tag on an empty value in that
+// value, but YAML reads them outside it. So the parser reads "a: !t" and
+// "b: 1" as {a: {b: 1}}, where YAML reads {a: null, b: 1}. It also nests
+// the lines after an anchor on an empty item, as in "r0:", "- &x0", and
+// "r1: 1". Every path after such a tag or anchor names a value of another
+// tree, so every decode of a Node of the document fails. The error matches
+// [ErrDecode] and binds at the tag or the anchor. [Node.YAMLComments]
+// fails with the same error. Such a reference document from
+// [WithReferences] fails every decode of each Source that reads it.
+//
+// [Node.DecodeAt] and [Node.DecodeIfPresent] fail before the path resolves,
+// for such a document and for such a reference document. So a path that
+// YAML reads does not read as absent, even one that a merge key brings in
+// from a reference document. A value after the tag or the anchor fixes the
+// document, as in "a: !t null". Go-yaml's lexer also reads a tab after a
+// tag, and the text after the tab, into the tag. It thus reads
+// "a: !!int\t5" as a tag on an empty value, and a space in place of the
+// tab fixes it.
 //
 // The [TypeRule] values from [CustomUnmarshaler] and [JSONUnmarshalers] set
 // how the types of the program read YAML, so a program gives them to the
