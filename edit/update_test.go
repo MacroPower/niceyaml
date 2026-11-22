@@ -464,7 +464,7 @@ func TestNode_Update(t *testing.T) {
 			before: "a: 1\n",
 			path:   paths.Doc(),
 			value:  ms("a", 1, "b", ms("s", "x\n\n")),
-			want:   stringtest.LinesLF("a: 1", "b:", `  s: "x\n\n"`),
+			want:   stringtest.LinesLF("a: 1", "b:", "  s: |+", "    x", ""),
 		},
 		"existing item": {
 			before: stringtest.LinesLF("l:", "- 1  # one", "- {a: 1}  # two"),
@@ -515,8 +515,7 @@ func TestNode_Update(t *testing.T) {
 			before: stringtest.LinesLF("a: 1", "", "# c"),
 			path:   paths.Doc(),
 			value:  ms("a", 1, "z", yamlMarshaler("k: |\n")),
-			err: "test.yaml:1:1: $: cafe.jacobcolvin.com/v1 updates $, after which a comment line goes right after " +
-				"the blank lines of a block scalar without text",
+			want:   stringtest.LinesLF("a: 1", "z:", `  k: ""`, "", "# c"),
 		},
 		"block scalar without text from a marshaler as the value of the last key before a blank line and a comment line": {
 			// The value writes as "", as it does in any place.

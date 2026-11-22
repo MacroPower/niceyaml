@@ -284,9 +284,7 @@ type payload struct {
 // block scalar without text. When the parser refuses such a comment line
 // in the text that the Set wrote, the Set fails with the problem that
 // [Node.Remove] gives for such a comment line. That problem does not match
-// ErrEngine. Go-yaml's encoder writes a blank line after a block scalar
-// without text. So the comment line does not need to follow a blank line
-// of the document.
+// ErrEngine.
 //
 // Before the encode, Set reads v as go-yaml's encoder reads it. It calls
 // each MarshalYAML method of v that the encoder calls, and reads what the

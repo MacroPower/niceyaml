@@ -272,21 +272,44 @@ func TestNode_Set(t *testing.T) {
 			want:   stringtest.LinesCRLF("a: 1", "x: |+", "", "z: 1"),
 		},
 		"literal scalar with \"\\r\\n\" lines that a marshaler writes": {
-			// The encoder of go-yaml writes the header with a "\n" and keeps
-			// the "\r\n" lines, so the Set fails loudly.
+			// The encoder writes the string of the block, so the block takes
+			// the line breaks of the document.
 			before: "a: 1\r\n",
 			path:   paths.Doc().Child("a"),
 			value:  yamlMarshaler("|\r\n  p\r\n  q\r\n"),
+			want:   stringtest.LinesCRLF("a: |", "  p", "  q"),
+		},
+		"folded scalar with \"\\r\\n\" lines that a marshaler writes in a mapping": {
+			// The encoder writes the string of the block as a literal block.
+			before: "a: 1\n",
+			path:   paths.Doc().Child("a"),
+			value:  yamlMarshaler("x: >\r\n  p\r\n  q\r\n"),
+			want:   stringtest.LinesLF("a:", "  x: |", "    p q"),
+		},
+		"literal scalar with \"\\r\\n\" lines that a marshaler writes in a block sequence in a flow mapping": {
+			// The encoder leaves a block collection in a flow collection as it
+			// is. Go-yaml's encoder writes the header of the block with a "\n"
+			// and keeps the "\r\n" lines, so the Set fails loudly.
+			before: "a: 1\r\n",
+			path:   paths.Doc().Child("a"),
+			value: struct {
+				M map[string]yamlMarshaler `yaml:"m,flow"`
+			}{M: map[string]yamlMarshaler{"k": "- |\r\n  p\r\n  q\r\n"}},
 			err: `1:4: $.a: go-yaml's encoder writes the value with both "\n" and "\r\n" line breaks, ` +
 				"though the YAML of each marshaler of the value writes one kind",
 			engine: true,
 		},
-		"folded scalar with \"\\r\\n\" lines that a marshaler writes in a mapping": {
+		"literal scalar with an indentation indicator that a marshaler writes in a block sequence in a flow mapping": {
+			// Go-yaml's encoder moves the lines of the block right with the
+			// sequence and keeps the indentation indicator. Go-yaml's decoder
+			// then reads more spaces at the start of each line.
 			before: "a: 1\n",
 			path:   paths.Doc().Child("a"),
-			value:  yamlMarshaler("x: >\r\n  p\r\n  q\r\n"),
-			err: `1:4: $.a: go-yaml's encoder writes the value with both "\n" and "\r\n" line breaks, ` +
-				"though the YAML of each marshaler of the value writes one kind",
+			value: struct {
+				M map[string]yamlMarshaler `yaml:"m,flow"`
+			}{M: map[string]yamlMarshaler{"k": "- |2\r\n   p\r\n  q\r\n"}},
+			err: `1:4: $.a: go-yaml reads the block scalar of " p\nq\n" at 1:5 of the YAML that a marshaler ` +
+				"of the value returns",
 			engine: true,
 		},
 		"Go string that ends with two line breaks": {
@@ -719,21 +742,21 @@ func TestNode_Set(t *testing.T) {
 			engine: true,
 		},
 		"YAML marshaler that writes a block scalar with keep chomping at its end": {
-			// Go-yaml's printer drops the blank line that the string holds, so
-			// the encoder writes the string in double quotes.
+			// The encoder writes the string of the block as it writes a Go
+			// string, so the block keeps the blank line that the string holds.
 			before: stringtest.LinesLF("a: 1", "b: 2"),
 			path:   paths.Doc().Child("b"),
 			value:  yamlMarshaler("a: |+\n  x\n\n"),
-			want:   stringtest.LinesLF("a: 1", "b:", `  a: "x\n\n"`),
+			want:   stringtest.LinesLF("a: 1", "b:", "  a: |+", "    x", ""),
 		},
 		"YAML marshaler that writes a block scalar without text before a blank line and an indented comment line": {
-			// The comment line indents past the key, so go-yaml's parser
-			// reads it as text of the block scalar. The value then keeps its
-			// string in double quotes.
+			// The encoder writes the empty string of the block in double
+			// quotes, so the comment line that indents past the key stays a
+			// comment.
 			before: stringtest.LinesLF("a: 1", "", "  # c", "b: 1"),
 			path:   paths.Doc().Child("a"),
 			value:  yamlMarshaler("|\n"),
-			want:   stringtest.LinesLF(`a: ""`, "", "", "  # c", "b: 1"),
+			want:   stringtest.LinesLF(`a: ""`, "", "  # c", "b: 1"),
 		},
 		"YAML marshaler that writes a tagged flow sequence": {
 			before: stringtest.LinesLF("a: 1", "b: 2"),
@@ -2370,8 +2393,10 @@ func TestNode_Set(t *testing.T) {
 				want: "a: !!str 0x10\n",
 			},
 			"block scalar whose last line ends with a space under strip chomping": {
+				// Go-yaml reads the block as "x", and the encoder writes
+				// that string.
 				yaml: "|-\n  x \n",
-				want: "a: |-\n  x \n",
+				want: "a: x\n",
 			},
 			"int tag on an integer past the range of an int64": {
 				// A control: yaml.Unmarshal reads the integer otherwise than
@@ -3718,18 +3743,16 @@ func TestNode_Set_Placement(t *testing.T) {
 			path:   paths.Doc().Child("z"),
 			value:  yamlMarshaler("|\n"),
 			opts:   []edit.SetOption{edit.After("a")},
-			err: "sets $.z, after which a comment line goes right after the blank lines of a block scalar " +
-				"without text",
+			want:   stringtest.LinesLF("a: 1", `z: ""`, "", "# c", "b: 1"),
 		},
 		"block scalar without text from a marshaler after a key before a comment line": {
-			// Go-yaml's encoder writes a blank line after the header, and the
-			// comment line goes right after it.
+			// The encoder writes the empty string of the block in double
+			// quotes, so the comment line can go right after it.
 			before: stringtest.LinesLF("a: 1", "# c", "b: 1"),
 			path:   paths.Doc().Child("z"),
 			value:  yamlMarshaler("|\n"),
 			opts:   []edit.SetOption{edit.After("a")},
-			err: "sets $.z, after which a comment line goes right after the blank lines of a block scalar " +
-				"without text",
+			want:   stringtest.LinesLF("a: 1", `z: ""`, "# c", "b: 1"),
 		},
 	}
 
@@ -5243,8 +5266,7 @@ func TestNode_Insert(t *testing.T) {
 			before: stringtest.LinesLF("s:", "- 1", "", "# c"),
 			path:   paths.Doc().Child("s").Index(1),
 			value:  yamlMarshaler("|\n"),
-			err: "inserts $.s[1], after which a comment line goes right after the blank lines of a block scalar " +
-				"without text",
+			want:   stringtest.LinesLF("s:", "- 1", `- ""`, "", "# c"),
 		},
 	}
 

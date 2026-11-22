@@ -1,9 +1,7 @@
 package encoder
 
 import (
-	"math"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/goccy/go-yaml/ast"
@@ -13,13 +11,17 @@ import (
 // quoter is an [ast.Visitor] that double-quotes each string that go-yaml
 // otherwise writes in a form that reads back as a different value or does
 // not parse. It checks the unquoted, single-quoted, and literal block
-// forms. It also double-quotes a literal block from a marshaler's YAML
-// that sits where YAML forbids one, or where it does not read back under
-// its key, as [blockSafe] checks. It leaves a block collection in a flow
-// collection as it is. Go-yaml writes that collection in block style, and
-// quoting does not make block style valid there. Only a marshaler's YAML
-// puts a block collection there.
+// forms. It first replaces each literal or folded block from a
+// marshaler's YAML with a string, as [quoter.unblock] describes. It then
+// checks the text of such a block as it checks any other string. It
+// leaves a block collection in a flow collection as it is. Go-yaml writes
+// that collection in block style, and quoting does not make block style
+// valid there. Only a marshaler's YAML puts a block collection there.
 type quoter struct {
+	// Collects the blocks that [quoter.unblock] replaces.
+	blocks *[]block
+	// Holds the spaces per indentation level of the encode.
+	indent int
 	// Reports whether the visited node sits in a flow collection.
 	flow bool
 	// Reports whether a tag stands on the visited node, as in a
@@ -33,44 +35,36 @@ func (q quoter) Visit(node ast.Node) ast.Visitor {
 	switch n := node.(type) {
 	case *ast.AnchorNode:
 		// An anchor name is not a string value.
-		n.Value = q.flowSafe(n.Value)
 		ast.Walk(q, n.Value)
 
 		return nil
 
-	case *ast.AliasNode, *ast.LiteralNode:
-		// An alias holds an anchor name, and a literal block holds the
-		// text it writes.
+	case *ast.AliasNode:
+		// An alias holds an anchor name.
 		return nil
 	case *ast.TagNode:
-		n.Value = q.flowSafe(n.Value)
+		q.tagged = true
 
-		return quoter{flow: q.flow, tagged: true}
+		return q
 
 	case *ast.MappingNode:
 		if q.flow && !n.IsFlowStyle {
 			return nil
 		}
 
-		return quoter{flow: n.IsFlowStyle}
+		return q.within(n.IsFlowStyle)
 
 	case *ast.SequenceNode:
 		if q.flow && !n.IsFlowStyle {
 			return nil
 		}
 
-		inner := quoter{flow: n.IsFlowStyle}
+		inner := q.within(n.IsFlowStyle)
 
 		for i, value := range n.Values {
-			n.Values[i] = inner.flowSafe(value)
+			n.Values[i] = inner.unblock(value, n.Start.Position.Column, func(v ast.Node) { n.Values[i] = v })
 
-			if inner.flow {
-				continue
-			}
-
-			n.Values[i] = entrySafe(n.Values[i])
-
-			if s, ok := value.(*ast.StringNode); ok {
+			if s, ok := n.Values[i].(*ast.StringNode); ok && !inner.flow {
 				quoteEntry(s)
 			}
 		}
@@ -79,7 +73,15 @@ func (q quoter) Visit(node ast.Node) ast.Visitor {
 
 	case *ast.MappingValueNode:
 		n.Key = q.keySafe(n.Key)
-		n.Value = blockSafe(q.flowSafe(n.Value), n.Key.GetToken().Position.Column)
+
+		col := n.Key.GetToken().Position.Column
+		if _, ok := n.Key.(*ast.MappingKeyNode); ok {
+			// The token of an explicit key is its "?" indicator, and the
+			// go-yaml printer writes the key after "? ".
+			col += 2
+		}
+
+		n.Value = q.unblock(n.Value, col, func(v ast.Node) { n.Value = v })
 
 	case *ast.StringNode:
 		q.quote(n, false)
@@ -88,33 +90,147 @@ func (q quoter) Visit(node ast.Node) ast.Visitor {
 	return q
 }
 
-// flowSafe returns n, or a double-quoted string in place of n when n is a
-// literal block in a flow collection. A flow collection cannot hold a
-// literal block. Such a block comes from a marshaler whose output go-yaml
-// parses.
-func (q quoter) flowSafe(n ast.Node) ast.Node {
-	lit, ok := n.(*ast.LiteralNode)
-	if !ok || !q.flow {
-		return n
-	}
+// within returns the quoter for the nodes of a collection. Flow reports
+// whether the collection is a flow collection. A tag on the collection
+// does not stand on the nodes in it.
+func (q quoter) within(flow bool) quoter {
+	q.flow = flow
+	q.tagged = false
 
-	return doubleQuoted(lit)
+	return q
 }
 
-// keySafe returns key, or a double-quoted string in place of key when key
-// is a literal block. A literal block cannot be an implicit key. It quotes
-// a string in key under the rules of an implicit key. It looks through
-// the tags and anchors that a marshaler's YAML can put on a key. It
-// replaces a literal block under them the same way.
+// block is a literal or folded block of a marshaler's YAML that
+// [quoter.unblock] replaces with a string.
+type block struct {
+	// Holds the string that replaces the block.
+	str *ast.StringNode
+	// Puts a node in place of str in the parent of str. It is nil for a
+	// string at the root of the document.
+	set func(ast.Node)
+}
+
+// unblock returns node, or a string in place of node when node is a
+// literal or folded block. Such a block comes from a marshaler whose
+// output go-yaml parses, as the YAML that go-yaml makes of the JSON of a
+// MarshalJSON method. The go-yaml printer writes the lines of such a
+// block with the indentation that they had in that output. The block
+// then does not move with its key or its sequence entry. The string holds
+// the text of the block, and it sits at col, the column of the key or the
+// sequence that holds node. The go-yaml printer indents the string from
+// there by the indent of the encode, as it indents a string that the
+// encoder builds. The string thus loses the folded style and the
+// indentation indicator of the block. Unblock looks through the tags and
+// anchors that a marshaler's YAML can put on the block. Set puts a node
+// in the place of node in its parent, and it is nil for the root of the
+// document. Unblock records the string and set in q.blocks, so that
+// [commentBlocks] can replace the string later.
+func (q quoter) unblock(node ast.Node, col int, set func(ast.Node)) ast.Node {
+	switch n := node.(type) {
+	case *ast.LiteralNode:
+		str := q.blockString(n, col)
+		*q.blocks = append(*q.blocks, block{str: str, set: set})
+
+		return str
+
+	case *ast.TagNode:
+		n.Value = q.unblock(n.Value, col, func(v ast.Node) { n.Value = v })
+	case *ast.AnchorNode:
+		n.Value = q.unblock(n.Value, col, func(v ast.Node) { n.Value = v })
+	}
+
+	return node
+}
+
+// blockString returns a string at the column col that holds the text of
+// lit, as [quoter.unblock] describes. Like each string that go-yaml's
+// encoder builds, the string has its text as its origin. A text without a
+// line break, as of the block "|-\n  a: b", does not print as a block.
+// Go-yaml's encoder double-quotes a Go string of such a text that does
+// not read back unquoted, such as "a: b". BlockString double-quotes the
+// string of such a block by the same rule. It double-quotes that string
+// in a flow collection too.
+func (q quoter) blockString(lit *ast.LiteralNode, col int) *ast.StringNode {
+	pos := *lit.Start.Position
+	pos.Column = col
+	pos.IndentNum = q.indent
+	s := lit.Value.Value
+	tk := token.New(s, s, &pos)
+
+	if !strings.ContainsAny(s, "\n\r") && (q.flow || token.IsNeedQuoted(s)) {
+		tk.Type = token.DoubleQuoteType
+	}
+
+	return ast.String(tk)
+}
+
+// commentBlocks keeps the line comment of each string in blocks that the
+// go-yaml printer writes as a literal block. It returns root, or the node
+// that takes the place of root. The printer drops the line comment of
+// such a string. So commentBlocks puts a literal block in place of the
+// string, with the text that the printer writes for the string. The
+// printer writes the comment of a literal block on the line of its
+// header, after the header. The printer trims every space and line break
+// from the end of the text of a literal block. So the block cannot hold
+// the text of a string that keeps more than one final line break, and
+// commentBlocks double-quotes such a string instead. The printer writes
+// the comment after the quotes.
+func commentBlocks(root ast.Node, blocks []block) ast.Node {
+	for _, b := range blocks {
+		s := b.str
+		if s.GetComment() == nil || s.Token.Type == token.DoubleQuoteType || !strings.Contains(s.Value, "\n") {
+			continue
+		}
+
+		header, lines, _ := strings.Cut(s.String(), "\n")
+		if strings.TrimRight(strings.TrimRight(lines, " "), "\n") != lines {
+			s.Token.Type = token.DoubleQuoteType
+
+			continue
+		}
+
+		pos := *s.Token.Position
+		lit := ast.Literal(token.Literal(header, header, &pos))
+		lit.Value = ast.String(&token.Token{
+			Type:     token.StringType,
+			Value:    s.Value,
+			Origin:   lines,
+			Position: &pos,
+		})
+
+		lit.Comment = s.GetComment()
+
+		if b.set == nil {
+			root = lit
+		} else {
+			b.set(lit)
+		}
+	}
+
+	return root
+}
+
+// keySafe returns key, or a string in place of key when key is a literal
+// block, as [quoter.unblock] describes. It quotes a string in key under
+// the rules of an implicit key, which double-quote the string of a block
+// whose text holds a line break. It looks through the tags and anchors
+// that a marshaler's YAML can put on a key. It replaces a literal block
+// under them the same way.
 func (q quoter) keySafe(key ast.MapKeyNode) ast.MapKeyNode {
 	switch k := key.(type) {
 	case *ast.StringNode:
 		q.quote(k, true)
 	case *ast.LiteralNode:
-		return doubleQuoted(k)
+		s := q.blockString(k, k.Start.Position.Column)
+		q.quote(s, true)
+
+		return s
+
 	case *ast.TagNode:
 		if inner, ok := k.Value.(ast.MapKeyNode); ok {
-			k.Value = quoter{flow: q.flow, tagged: true}.keySafe(inner)
+			tagged := q
+			tagged.tagged = true
+			k.Value = tagged.keySafe(inner)
 		}
 
 	case *ast.AnchorNode:
@@ -124,154 +240,6 @@ func (q quoter) keySafe(key ast.MapKeyNode) ast.MapKeyNode {
 	}
 
 	return key
-}
-
-// blockSafe returns value, the value of a key at the column col, or a
-// double-quoted string in place of value when value is a literal block
-// that does not read back under the key. Such a block comes from a
-// marshaler whose output go-yaml parses, as the YAML that go-yaml makes of
-// the JSON of a MarshalJSON method. The go-yaml printer writes the lines
-// of the block with the indentation that they had in that output. A block
-// whose lines do not sit right of the column of its key ends before them.
-// The indentation indicator of a block counts from the indentation of its
-// key, so a block with an indicator reads back only at the indentation of
-// the output too. The check looks through the tags and anchors that a
-// marshaler's YAML can put on the block. It also quotes a block that
-// [keepsBreaks] reports. [entrySafe] checks a block that is an entry of a
-// block sequence.
-func blockSafe(value ast.Node, col int) ast.Node {
-	switch v := value.(type) {
-	case *ast.LiteralNode:
-		if blockIndent(v) < col || strings.ContainsAny(v.Start.Value, "123456789") || keepsBreaks(v) {
-			return doubleQuoted(v)
-		}
-
-	case *ast.TagNode:
-		v.Value = blockSafe(v.Value, col)
-	case *ast.AnchorNode:
-		v.Value = blockSafe(v.Value, col)
-	}
-
-	return value
-}
-
-// entrySafe returns value, an entry of a block sequence, or a
-// double-quoted string in its place. It quotes a literal or folded block
-// that might not read back as the entry. Such a block comes
-// from a marshaler whose output go-yaml parses. The printer of a block
-// sequence indents each line of an entry by the indentation that the line
-// already has. It moves a line that starts left of the column after the
-// "-" to the right, and it leaves every other line in place. Each
-// sequence that holds the entry indents its lines again, such as an outer
-// sequence or the sequence of a mapping in a sequence. A block whose lines
-// share one indentation moves as a whole, so it reads back. The lines of
-// any other block can come out misaligned. The indentation indicator of a
-// block counts from the indentation of the entry, and the printer changes
-// that indentation, so a block with an indicator does not read back
-// either. It also quotes a block that [keepsBreaks] reports. The check
-// looks through the tags and anchors that a marshaler's YAML can put on
-// the block.
-func entrySafe(value ast.Node) ast.Node {
-	switch v := value.(type) {
-	case *ast.LiteralNode:
-		if !evenBlock(v) || strings.ContainsAny(v.Start.Value, "123456789") || keepsBreaks(v) {
-			return doubleQuoted(v)
-		}
-
-	case *ast.TagNode:
-		v.Value = entrySafe(v.Value)
-	case *ast.AnchorNode:
-		v.Value = entrySafe(v.Value)
-	}
-
-	return value
-}
-
-// keptSafe returns node, the root of a document, or a double-quoted
-// string in place of node when node is a block that [keepsBreaks]
-// reports. It looks through the tags and anchors that a marshaler's YAML
-// can put on the block. [blockSafe] and [entrySafe] check such a block
-// under a key and in a block sequence.
-func keptSafe(node ast.Node) ast.Node {
-	switch n := node.(type) {
-	case *ast.LiteralNode:
-		if keepsBreaks(n) {
-			return doubleQuoted(n)
-		}
-
-	case *ast.TagNode:
-		n.Value = keptSafe(n.Value)
-	case *ast.AnchorNode:
-		n.Value = keptSafe(n.Value)
-	}
-
-	return node
-}
-
-// keepsBreaks reports whether lit is a block with the keep indicator "+"
-// whose string ends in more than one line break, or in spaces before its
-// last line break. Such a block comes from a marshaler whose output
-// go-yaml parses. The YAML that go-yaml makes of a JSON string that ends
-// in two line breaks holds one. The go-yaml printer drops the spaces and
-// the empty lines at the end of a block. The block then reads back with
-// one line break at its end. The check also reports a string whose last
-// line of text ends in a space. Such a string reads back, so the encoder
-// quotes a few blocks that it can write as they are.
-func keepsBreaks(lit *ast.LiteralNode) bool {
-	s := strings.TrimSuffix(lit.Value.Value, "\n")
-
-	return strings.Contains(lit.Start.Value, "+") && s != strings.TrimRight(s, " \n")
-}
-
-// evenBlock reports whether every line of lit that is not empty starts
-// with the same number of spaces, as the go-yaml printer writes the
-// block. A line of spaces alone counts all of its spaces. The printer
-// moves such a line by the same rule as a line of text. The line is part
-// of the value of the block when it is longer than the indentation of the
-// block.
-func evenBlock(lit *ast.LiteralNode) bool {
-	// The printer drops the spaces and line breaks at the end of the block.
-	text := strings.TrimRight(strings.TrimRight(lit.Value.GetToken().Origin, " "), "\n")
-	indent := -1
-
-	for line := range strings.Lines(text) {
-		line = strings.TrimSuffix(line, "\n")
-		if line == "" {
-			continue
-		}
-
-		n := len(line) - len(strings.TrimLeft(line, " "))
-		if indent == -1 {
-			indent = n
-		}
-
-		if n != indent {
-			return false
-		}
-	}
-
-	return true
-}
-
-// blockIndent returns the number of spaces before the first line of lit
-// with content, as the go-yaml printer writes it. It returns
-// [math.MaxInt] for a block without such a line.
-func blockIndent(lit *ast.LiteralNode) int {
-	for line := range strings.Lines(lit.Value.GetToken().Origin) {
-		body := strings.TrimLeft(line, " ")
-		if strings.TrimSpace(body) != "" {
-			return len(line) - len(body)
-		}
-	}
-
-	return math.MaxInt
-}
-
-// doubleQuoted returns a double-quoted string that holds the text of lit.
-func doubleQuoted(lit *ast.LiteralNode) *ast.StringNode {
-	s := lit.Value.Value
-
-	return ast.String(token.DoubleQuote(s, strconv.Quote(s), lit.Start.Position))
 }
 
 // quote double-quotes n when go-yaml otherwise writes it in a form that
@@ -302,7 +270,8 @@ func (q quoter) quote(n *ast.StringNode, key bool) {
 		// literal block, which cannot be an implicit key or sit in a
 		// flow collection. The printer indents the block from the
 		// position of the string. The encoder builds a string at the
-		// position it writes it, with its value as its origin. A plain
+		// position it writes it, with its value as its origin. So does
+		// [quoter.unblock] for a block from a marshaler's YAML. A plain
 		// string from a marshaler's YAML keeps its position in that
 		// YAML, and its origin differs from its value, since only a
 		// blank line puts a line break in a plain value.

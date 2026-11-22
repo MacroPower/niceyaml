@@ -369,7 +369,12 @@ func WithAutoInt(enabled bool) Option {
 // error of go-yaml stays in the chain. Of the paths that select no node,
 // that option skips only a path to a key that its mapping does not have.
 // It fails on the others. As with that option, a line comment on a string
-// that go-yaml writes as a literal block does not reach the output.
+// that go-yaml writes as a literal block does not reach the output. A
+// literal or folded block in the YAML that a marshaler returns is the
+// exception. Encode writes its line comment after the header of the
+// block, as in `k: |- # c`. Encode double-quotes the text of such a block
+// when the text ends in more than one line break, and the comment then
+// follows the quotes.
 //
 // [yaml.WithComment] writes the line comment of a flow sequence under a
 // block mapping key between the key and the sequence, as in `a # x: []`.
@@ -398,11 +403,16 @@ type docEncoder struct {
 	// Holds the go-yaml options of the encode, the options that register
 	// the marshalers last.
 	opts []yaml.EncodeOption
+	// Holds the spaces per indentation level of the encode.
+	indent int
 }
 
 // newDocEncoder creates a new [*docEncoder] with the settings of c.
 func newDocEncoder(c config) *docEncoder {
-	d := &docEncoder{comments: c.comments}
+	d := &docEncoder{comments: c.comments, indent: c.indent}
+	if d.indent == 0 {
+		d.indent = yaml.DefaultIndentSpaces
+	}
 
 	// The value that the function of a type returns encodes with the same
 	// options, so the functions of the encoder reach it too.
@@ -456,24 +466,25 @@ func newDocEncoder(c config) *docEncoder {
 // marshaler returns decides how a reader reads the scalar, so Encode leaves
 // such a scalar unquoted.
 //
-// A literal or folded block in the YAML that a marshaler returns is the
-// exception. Encode writes such a block with the indentation it had in
-// that YAML, as the block of a string with a line break in the JSON of a
-// MarshalJSON method. Encode double-quotes the block where it does not
-// read back: as a key, in a flow collection, or under a key whose column
-// that indentation does not pass. Go-yaml moves the lines of a block in a
-// block sequence right by their indentation, so it can misalign them.
-// Encode thus double-quotes such a block when its lines do not all share
-// one indentation. The indentation indicator of a block counts from the
-// indentation of its key or entry. Encode double-quotes a block with an
-// indicator under a key and in a block sequence too. The go-yaml printer
-// drops the empty lines at the end of a block. Encode thus double-quotes
-// a block with the keep indicator "+" whose string ends in more than one
-// line break, wherever the block sits. Encode also double-quotes a
-// single-quoted string with a line break in a marshaler's YAML, because
-// YAML folds a line break in single quotes.
+// Encode writes each literal or folded block in the YAML that a marshaler
+// returns as a string that holds the text of the block. Go-yaml makes
+// such a block of a string with a line break in the JSON of a
+// MarshalJSON method, for example. Encode indents that string as it does
+// a Go string. It writes a string with a line break as a literal block
+// wherever a literal block of its text reads back. It does so even where
+// go-yaml double-quotes a Go string of the same text, such as one that
+// holds ": ". Encode double-quotes the string in a flow collection and as
+// a key with a line break. It also double-quotes the string where a
+// literal block of its text does not read back.
+// Outside a flow collection, it writes a string without a line break as
+// it writes a Go string of that text. So the block reads back wherever it
+// sits. The string loses the folded style and the indentation indicator
+// of the block. A line comment from [WithYAMLComments] on such a block goes
+// after the header of the block, as that option describes. Encode also
+// double-quotes a single-quoted string with a line break in a marshaler's
+// YAML, because YAML folds a line break in single quotes.
 //
-// A block collection in a marshaler's YAML is the other exception. So is
+// A block collection in a marshaler's YAML is an exception. So is
 // a block collection in the YAML that go-yaml converts from the JSON of a
 // MarshalJSON method under [JSONMarshalers]. Go-yaml can leave such a
 // collection at or left of the column of its key, as it
@@ -565,7 +576,7 @@ func (e *Encoder) build(ctx context.Context, v any, opts []Option) ([]byte, ast.
 		return nil, nil, err
 	}
 
-	node, err := d.node(ctx, v)
+	node, blocks, err := d.node(ctx, v)
 	if err != nil {
 		// The value is not at fault when its context ended, so that error
 		// comes back as it is. So does an error that already names its
@@ -583,6 +594,9 @@ func (e *Encoder) build(ctx context.Context, v any, opts []Option) ([]byte, ast.
 	if err != nil {
 		return nil, nil, err
 	}
+
+	// A block of a marshaler's YAML keeps its line comment in the output.
+	node = commentBlocks(node, blocks)
 
 	return render(node), node, nil
 }
@@ -609,15 +623,16 @@ func (e *Encoder) write(text []byte) error {
 }
 
 // node returns the node of v that the encoder prints, quoted and laid out
-// as [Encoder.Encode] describes. It returns the error of go-yaml's encoder
-// as it is, and an error that matches [ErrNoNode] for a value that
-// encodes to no node.
-func (d *docEncoder) node(ctx context.Context, v any) (ast.Node, error) {
+// as [Encoder.Encode] describes. It also returns the blocks of a
+// marshaler's YAML that it replaced with strings, as [quoter.unblock]
+// describes. It returns the error of go-yaml's encoder as it is, and an
+// error that matches [ErrNoNode] for a value that encodes to no node.
+func (d *docEncoder) node(ctx context.Context, v any) (ast.Node, []block, error) {
 	// A go-yaml encoder keeps every anchor it has seen, even from a call
 	// that failed, so each call marshals with a fresh one.
 	node, err := yaml.NewEncoder(io.Discard, d.opts...).EncodeToNodeContext(ctx, v)
 	if err != nil {
-		return nil, err //nolint:wrapcheck // The caller names the cause.
+		return nil, nil, err //nolint:wrapcheck // The caller names the cause.
 	}
 
 	// The go-yaml encoder leaves a nil node where a value encodes to no
@@ -628,7 +643,7 @@ func (d *docEncoder) node(ctx context.Context, v any) (ast.Node, error) {
 	ast.Walk(&holes, node)
 
 	if holes.found {
-		return nil, &labeled{label: ErrNoNode}
+		return nil, nil, &labeled{label: ErrNoNode}
 	}
 
 	// The go-yaml encoder can leave a collection of a marshaler's YAML at
@@ -638,18 +653,21 @@ func (d *docEncoder) node(ctx context.Context, v any) (ast.Node, error) {
 
 	// The go-yaml encoder leaves some strings unquoted in a form that
 	// reads back as a different value, so Encode quotes them before it
-	// prints the node.
-	ast.Walk(quoter{}, node)
+	// prints the node. The quoter replaces each block of a marshaler's
+	// YAML with a string. Go-yaml places a string at the root in the
+	// first column.
+	var blocks []block
 
-	// The go-yaml printer drops the trailing line breaks of a block that
-	// keeps them, so Encode quotes such a block at the root too.
-	node = keptSafe(node)
+	q := quoter{blocks: &blocks, indent: d.indent}
+	node = q.unblock(node, 1, nil)
+
+	ast.Walk(q, node)
 
 	// Prettier starts a sequence at the root of a document in the first
 	// column, where go-yaml indents it under IndentSequence.
 	outdentRoot(node)
 
-	return node, nil
+	return node, blocks, nil
 }
 
 // marshalText returns the YAML text of v, the value that the function of
@@ -659,7 +677,7 @@ func (d *docEncoder) node(ctx context.Context, v any) (ast.Node, error) {
 // to the caller of the encode, such as the guard of [Encoder.Encode],
 // because marshalText does not recover it.
 func (d *docEncoder) marshalText(ctx context.Context, v any) ([]byte, error) {
-	node, err := d.node(ctx, v)
+	node, _, err := d.node(ctx, v)
 	if err != nil {
 		return nil, err
 	}

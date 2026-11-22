@@ -255,6 +255,10 @@ func TestEncoder_Encode_quoting(t *testing.T) {
 			input: map[anchoredLiteralBlock]int{"x\ny": 1},
 			want:  stringtest.LinesLF(`&k "x\ny": 1`),
 		},
+		"marshaled literal block key of one line": {
+			input: map[literalBlock]int{"x": 1},
+			want:  stringtest.LinesLF("x: 1"),
+		},
 		"marshaled merge key with tag": {
 			input: map[taggedString]int{"<<": 1},
 			want:  stringtest.LinesLF(`!!str "<<": 1`),
@@ -341,51 +345,90 @@ func TestEncoder_Encode_quoting(t *testing.T) {
 		},
 		"marshaled literal block under nested key": {
 			input: map[string]map[string]literalBlock{"a": {"k": "x\ny"}},
-			want:  stringtest.LinesLF("a:", `  k: "x\ny"`),
+			want:  stringtest.LinesLF("a:", "  k: |-", "    x", "    y"),
 		},
 		"marshaled literal block with tag under nested key": {
 			input: map[string]map[string]taggedLiteralBlock{"a": {"k": "x\ny"}},
-			want:  stringtest.LinesLF("a:", `  k: !!str "x\ny"`),
+			want:  stringtest.LinesLF("a:", "  k: !!str |-", "    x", "    y"),
 		},
 		"marshaled literal block with anchor under nested key": {
 			input: map[string]map[string]anchoredLiteralBlock{"a": {"k": "x\ny"}},
-			want:  stringtest.LinesLF("a:", `  k: &k "x\ny"`),
+			want:  stringtest.LinesLF("a:", "  k: &k |-", "    x", "    y"),
+		},
+		"marshaled literal block under nested key at indent 4": {
+			input: map[string]map[string]literalBlock{"a": {"k": "x\n y"}},
+			opts:  []encoder.Option{encoder.WithIndent(4)},
+			want:  stringtest.LinesLF("a:", "    k: |-", "        x", "         y"),
 		},
 		"marshaled literal block in marshaled mapping under key": {
 			input:   map[string]rawYAML{"k": "a: |\n  x\n  y\n"},
 			decoded: map[string]map[string]string{"k": {"a": "x\ny\n"}},
-			want:    stringtest.LinesLF("k:", `  a: "x\ny\n"`),
+			want:    stringtest.LinesLF("k:", "  a: |", "    x", "    y"),
+		},
+		"marshaled literal block under explicit key": {
+			input:   rawYAML("? a\n: |\n  x\n  y\n"),
+			decoded: map[string]string{"a": "x\ny\n"},
+			want:    stringtest.LinesLF("? a: |", "    x", "    y"),
+		},
+		"marshaled literal block under explicit key under key": {
+			input:   map[string]rawYAML{"k": "? a\n: |\n  x\n  y\n"},
+			decoded: map[string]map[string]string{"k": {"a": "x\ny\n"}},
+			want:    stringtest.LinesLF("k:", "  ? a: |", "      x", "      y"),
+		},
+		"marshaled literal block under explicit key in sequence at indent 1": {
+			input:   []rawYAML{"? a\n: |-\n  x\n  y\n"},
+			decoded: []map[string]string{{"a": "x\ny"}},
+			opts:    []encoder.Option{encoder.WithIndent(1)},
+			want:    stringtest.LinesLF("- ? a: |-", "     x", "     y"),
 		},
 		"marshaled literal block in marshaled sequence under key": {
 			input:   map[string]rawYAML{"k": "- |\n  x\n  y\n"},
 			decoded: map[string][]string{"k": {"x\ny\n"}},
 			want:    stringtest.LinesLF("k:", "- |", "  x", "  y"),
 		},
+		"marshaled literal block in marshaled mapping in sequence under IndentSequence": {
+			input:   map[string][]rawYAML{"a": {"k: |-\n  x\n    y\n"}},
+			decoded: map[string][]map[string]string{"a": {{"k": "x\n  y"}}},
+			opts:    []encoder.Option{encoder.WithIndentSequence(true)},
+			want:    stringtest.LinesLF("a:", "  - k: |-", "      x", "        y"),
+		},
 		"marshaled literal block of uneven lines in nested sequence": {
 			input:   map[string]map[string][]rawYAML{"a": {"b": {"|-\n  x\n    y\n"}}},
 			decoded: map[string]map[string][]string{"a": {"b": {"x\n  y"}}},
-			want:    stringtest.LinesLF("a:", "  b:", `  - "x\n  y"`),
+			want:    stringtest.LinesLF("a:", "  b:", "  - |-", "    x", "      y"),
 		},
 		"marshaled literal block of uneven lines in sequence under Pretty": {
 			input:   []rawYAML{"|-\n  x\n    y\n  z\n"},
 			decoded: []string{"x\n  y\nz"},
 			opts:    []encoder.Option{encoder.Pretty()},
-			want:    stringtest.LinesLF(`- "x\n  y\nz"`),
+			want:    stringtest.LinesLF("- |-", "  x", "    y", "  z"),
 		},
 		"marshaled literal block of uneven lines in sequence of sequence": {
 			input:   [][]rawYAML{{"|-\n x\n  y\n"}},
 			decoded: [][]string{{"x\n y"}},
-			want:    stringtest.LinesLF(`- - "x\n y"`),
+			want:    stringtest.LinesLF("- - |-", "    x", "     y"),
 		},
 		"marshaled literal block of uneven lines with tag in nested sequence": {
 			input:   map[string]map[string][]rawYAML{"a": {"b": {"!!str |-\n  x\n    y\n"}}},
 			decoded: map[string]map[string][]string{"a": {"b": {"x\n  y"}}},
-			want:    stringtest.LinesLF("a:", "  b:", `  - !!str "x\n  y"`),
+			want:    stringtest.LinesLF("a:", "  b:", "  - !!str |-", "        x", "          y"),
+		},
+		"marshaled literal block of uneven lines with anchor in sequence under IndentSequence": {
+			input:   map[string][]rawYAML{"a": {"&x |-\n  x\n    y\n"}},
+			decoded: map[string][]string{"a": {"x\n  y"}},
+			opts:    []encoder.Option{encoder.WithIndentSequence(true)},
+			want:    stringtest.LinesLF("a:", "  - &x |-", "        x", "          y"),
 		},
 		"marshaled literal block of even lines in nested sequence": {
 			input:   map[string]map[string][]rawYAML{"a": {"b": {"|-\n  x\n  y\n"}}},
 			decoded: map[string]map[string][]string{"a": {"b": {"x\ny"}}},
-			want:    stringtest.LinesLF("a:", "  b:", "  - |-", "      x", "      y"),
+			want:    stringtest.LinesLF("a:", "  b:", "  - |-", "    x", "    y"),
+		},
+		"marshaled literal block of indented line in sequence at indent 1": {
+			input:   map[string][]rawYAML{"a": {"|-\n  x\n   y\n"}},
+			decoded: map[string][]string{"a": {"x\n y"}},
+			opts:    []encoder.Option{encoder.WithIndent(1)},
+			want:    stringtest.LinesLF("a:", `- "x\n y"`),
 		},
 		"marshaled literal block with indentation indicator in sequence under Pretty": {
 			input:   []rawYAML{"|2-\n   x\n"},
@@ -396,12 +439,53 @@ func TestEncoder_Encode_quoting(t *testing.T) {
 		"marshaled folded block under nested key": {
 			input:   map[string]map[string]rawYAML{"a": {"k": ">\n  x\n  y\n"}},
 			decoded: map[string]map[string]string{"a": {"k": "x y\n"}},
-			want:    stringtest.LinesLF("a:", `  k: "x y\n"`),
+			want:    stringtest.LinesLF("a:", "  k: |", "    x y"),
 		},
 		"marshaled literal block with indentation indicator": {
 			input:   map[string]rawYAML{"k": "|2\n   x\n"},
 			decoded: map[string]string{"k": " x\n"},
 			want:    stringtest.LinesLF(`k: " x\n"`),
+		},
+		"marshaled literal block that keeps its final line breaks under nested key": {
+			input:   map[string]map[string]rawYAML{"a": {"k": "|+\n  x\n\n\n"}},
+			decoded: map[string]map[string]string{"a": {"k": "x\n\n\n"}},
+			want:    stringtest.LinesLF("a:", "  k: |+", "    x", "    ", ""),
+		},
+		"marshaled literal block that keeps its final line breaks at top level": {
+			input:   rawYAML("|+\n  x\n\n"),
+			decoded: rawYAML("x\n\n"),
+			want:    stringtest.LinesLF("|+", "  x", ""),
+		},
+		"marshaled literal block of one line": {
+			input:   map[string]map[string]rawYAML{"a": {"k": "|-\n  x\n"}},
+			decoded: map[string]map[string]string{"a": {"k": "x"}},
+			want:    stringtest.LinesLF("a:", "  k: x"),
+		},
+		"marshaled literal block of one line that reads as a mapping": {
+			input:   map[string]rawYAML{"k": "|-\n  a: b\n"},
+			decoded: map[string]string{"k": "a: b"},
+			want:    stringtest.LinesLF(`k: "a: b"`),
+		},
+		"marshaled literal block of lines that go-yaml quotes as a Go string": {
+			input:   map[string]rawYAML{"k": "|-\n  a: b\n  c\n"},
+			decoded: map[string]string{"k": "a: b\nc"},
+			want:    stringtest.LinesLF("k: |-", "  a: b", "  c"),
+		},
+		"marshaled literal block of one line that reads as a bool": {
+			input:   []rawYAML{"|-\n  true\n"},
+			decoded: []string{"true"},
+			want:    stringtest.LinesLF(`- "true"`),
+		},
+		"marshaled literal block of one line in flow mapping": {
+			input:   map[string]rawYAML{"k": "|-\n  x\n"},
+			decoded: map[string]string{"k": "x"},
+			opts:    []encoder.Option{flow},
+			want:    stringtest.LinesLF(`{k: "x"}`),
+		},
+		"marshaled literal block with a space at the start": {
+			input:   map[string]map[string]rawYAML{"a": {"k": "|2-\n   x\n  y\n"}},
+			decoded: map[string]map[string]string{"a": {"k": " x\ny"}},
+			want:    stringtest.LinesLF("a:", `  k: " x\ny"`),
 		},
 		"plain string": {
 			input: map[string]string{"k": "a-b ?c"},
@@ -2338,6 +2422,63 @@ func TestWithYAMLComments(t *testing.T) {
 			input:    "x",
 			comments: yaml.CommentMap{"$": {yaml.LineComment(" root")}},
 			want:     "x # root\n",
+		},
+		"line comment on a marshaled block at the root": {
+			input:    literalBlock("a\nb"),
+			comments: yaml.CommentMap{"$": {yaml.LineComment(" root")}},
+			want:     stringtest.LinesLF("|- # root", "  a", "  b"),
+		},
+		"line comment on a marshaled block under a key": {
+			input:    map[string]literalBlock{"k": "a\nb"},
+			comments: yaml.CommentMap{"$.k": {yaml.LineComment(" two lines")}},
+			want:     stringtest.LinesLF("k: |- # two lines", "  a", "  b"),
+		},
+		"line comment on a marshaled block with a final line break": {
+			input:    map[string]rawYAML{"k": "|\n  a\n  b\n"},
+			comments: yaml.CommentMap{"$.k": {yaml.LineComment(" clip")}},
+			want:     stringtest.LinesLF("k: | # clip", "  a", "  b"),
+		},
+		"line comment on a marshaled block that keeps its final line breaks": {
+			input:    map[string]rawYAML{"k": "|+\n  a\n  b\n\n"},
+			comments: yaml.CommentMap{"$.k": {yaml.LineComment(" keep")}},
+			want:     `k: "a\nb\n\n" # keep` + "\n",
+		},
+		"line comment on a marshaled block under an indent of four": {
+			input:    map[string]map[string]literalBlock{"a": {"k": "a\nb"}},
+			comments: yaml.CommentMap{"$.a.k": {yaml.LineComment(" four")}},
+			opts:     []encoder.Option{encoder.WithIndent(4)},
+			want:     stringtest.LinesLF("a:", "    k: |- # four", "        a", "        b"),
+		},
+		"line comment on a marshaled block under a nested key": {
+			input:    map[string]map[string]literalBlock{"a": {"k": "a\nb"}},
+			comments: yaml.CommentMap{"$.a.k": {yaml.LineComment(" two lines")}},
+			want:     stringtest.LinesLF("a:", "  k: |- # two lines", "    a", "    b"),
+		},
+		"line comment on a marshaled block in a sequence": {
+			input:    map[string][]literalBlock{"a": {"a\nb", "c\nd"}},
+			comments: yaml.CommentMap{"$.a[0]": {yaml.LineComment(" first")}},
+			want:     stringtest.LinesLF("a:", "- |- # first", "  a", "  b", "- |-", "  c", "  d"),
+		},
+		"line comment on a marshaled block in an indented sequence": {
+			input:    map[string][]literalBlock{"a": {"a\nb", "c\nd"}},
+			comments: yaml.CommentMap{"$.a[1]": {yaml.LineComment(" second")}},
+			opts:     []encoder.Option{encoder.WithIndentSequence(true)},
+			want:     stringtest.LinesLF("a:", "  - |-", "    a", "    b", "  - |- # second", "    c", "    d"),
+		},
+		"line comment on a marshaled block in a root sequence": {
+			input:    []literalBlock{"a\nb"},
+			comments: yaml.CommentMap{"$[0]": {yaml.LineComment(" first")}},
+			want:     stringtest.LinesLF("- |- # first", "  a", "  b"),
+		},
+		"line comment on a marshaled block of one line": {
+			input:    map[string]literalBlock{"k": "a"},
+			comments: yaml.CommentMap{"$.k": {yaml.LineComment(" one line")}},
+			want:     "k: a # one line\n",
+		},
+		"head comment on a marshaled block": {
+			input:    map[string]literalBlock{"k": "a\nb"},
+			comments: yaml.CommentMap{"$.k": {yaml.HeadComment(" head")}},
+			want:     stringtest.LinesLF("# head", "k: |-", "  a", "  b"),
 		},
 		"head comment of two lines": {
 			input:    map[string]int{"a": 1},

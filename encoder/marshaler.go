@@ -176,7 +176,7 @@ func CustomMarshaler[T any](fn func(ctx context.Context, v T) (any, error)) Mars
 // Go-yaml converts the JSON to YAML, and some JSON values do not survive
 // that conversion, such as:
 //
-//   - A string of one line break comes out as a block that reads as "".
+//   - A string of one line break reads back as "".
 //   - A string with a tab at its start or end reads back without the tab.
 //   - A string with a carriage return reads back with a line feed in its
 //     place.

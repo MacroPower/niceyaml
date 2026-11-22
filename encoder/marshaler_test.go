@@ -121,22 +121,22 @@ func TestCustomMarshaler(t *testing.T) {
 		"a string with a line break": {
 			input: map[string]any{"a": map[string]hop{"b": {name: "x\ny\n"}}},
 			opts:  []encoder.Option{encoder.WithMarshalers(hops)},
-			want:  "a:\n  b:\n    name: \"x\\ny\\n\"\n    next: []\n",
+			want:  "a:\n  b:\n    name: |\n      x\n      y\n    next: []\n",
 		},
 		"a string with an indented line in a nested sequence": {
 			input: map[string]map[string][]note{"a": {"b": {{text: "x\n  y"}}}},
 			opts:  []encoder.Option{encoder.WithMarshalers(notes)},
-			want:  "a:\n  b:\n  - \"x\\n  y\"\n",
+			want:  "a:\n  b:\n  - |-\n    x\n      y\n",
 		},
 		"a string with an indented line in a sequence under Pretty": {
 			input: map[string][]note{"a": {{text: "x\n  y\nz"}}},
 			opts:  []encoder.Option{encoder.Pretty(), encoder.WithMarshalers(notes)},
-			want:  "a:\n  - \"x\\n  y\\nz\"\n",
+			want:  "a:\n  - |-\n    x\n      y\n    z\n",
 		},
 		"a string with even lines in a nested sequence": {
 			input: map[string]map[string][]note{"a": {"b": {{text: "x\ny"}}}},
 			opts:  []encoder.Option{encoder.WithMarshalers(notes)},
-			want:  "a:\n  b:\n  - |-\n      x\n      y\n",
+			want:  "a:\n  b:\n  - |-\n    x\n    y\n",
 		},
 		"a mapping under a key in a sequence under Pretty": {
 			input: []struct {
@@ -187,17 +187,17 @@ func TestCustomMarshaler(t *testing.T) {
 		"a string that ends in two line breaks": {
 			input: note{text: "b\n\n"},
 			opts:  []encoder.Option{encoder.WithMarshalers(notes)},
-			want:  "\"b\\n\\n\"\n",
+			want:  "|+\n  b\n\n",
 		},
 		"a string that ends in two line breaks under a key": {
 			input: map[string]note{"k": {text: "b\n\n"}},
 			opts:  []encoder.Option{encoder.WithMarshalers(notes)},
-			want:  "k: \"b\\n\\n\"\n",
+			want:  "k: |+\n  b\n\n",
 		},
 		"a string that ends in two line breaks in a sequence": {
 			input: []note{{text: "b\n\n"}},
 			opts:  []encoder.Option{encoder.WithMarshalers(notes)},
-			want:  "- \"b\\n\\n\"\n",
+			want:  "- |+\n  b\n\n",
 		},
 		"a nil function removes the function before it": {
 			input: tenNet,
@@ -423,22 +423,22 @@ func TestJSONMarshalers(t *testing.T) {
 		"a string with a line break under a nested key": {
 			input: map[string]any{"a": map[string]any{"b": jsonText{v: "x\ny\n"}}},
 			opts:  []encoder.Option{encoder.WithMarshalers(encoder.JSONMarshalers(true))},
-			want:  "a:\n  b: \"x\\ny\\n\"\n",
+			want:  "a:\n  b: |\n    x\n    y\n",
 		},
 		"a string with an indented line in a nested sequence": {
 			input: map[string]any{"a": map[string]any{"b": []jsonText{{v: "x\n  y"}}}},
 			opts:  []encoder.Option{encoder.WithMarshalers(encoder.JSONMarshalers(true))},
-			want:  "a:\n  b:\n  - \"x\\n  y\"\n",
+			want:  "a:\n  b:\n  - |-\n    x\n      y\n",
 		},
 		"a string with an indented line in a sequence under Pretty": {
 			input: map[string]any{"a": []jsonText{{v: "x\n  y\nz"}}},
 			opts:  []encoder.Option{encoder.Pretty(), encoder.WithMarshalers(encoder.JSONMarshalers(true))},
-			want:  "a:\n  - \"x\\n  y\\nz\"\n",
+			want:  "a:\n  - |-\n    x\n      y\n    z\n",
 		},
 		"an object with a string with a line break": {
 			input: map[string]any{"a": map[string]any{"b": jsonText{v: map[string]any{"c": "x\ny", "d": []int{1}}}}},
 			opts:  []encoder.Option{encoder.WithMarshalers(encoder.JSONMarshalers(true))},
-			want:  "a:\n  b:\n    c: \"x\\ny\"\n    d:\n    - 1\n",
+			want:  "a:\n  b:\n    c: |-\n      x\n      y\n    d:\n    - 1\n",
 		},
 		"an object under a key in a sequence under Pretty": {
 			input: map[string][]struct {
@@ -451,17 +451,17 @@ func TestJSONMarshalers(t *testing.T) {
 		"a string that ends in two line breaks": {
 			input: jsonText{v: "foo\n\n"},
 			opts:  []encoder.Option{encoder.WithMarshalers(encoder.JSONMarshalers(true))},
-			want:  "\"foo\\n\\n\"\n",
+			want:  "|+\n  foo\n\n",
 		},
 		"a string that ends in two line breaks under a key": {
 			input: map[string]any{"k": jsonText{v: "foo\n\n"}},
 			opts:  []encoder.Option{encoder.WithMarshalers(encoder.JSONMarshalers(true))},
-			want:  "k: \"foo\\n\\n\"\n",
+			want:  "k: |+\n  foo\n\n",
 		},
 		"a string that ends in two line breaks in a sequence": {
 			input: []jsonText{{v: "foo\n\n"}},
 			opts:  []encoder.Option{encoder.WithMarshalers(encoder.JSONMarshalers(true))},
-			want:  "- \"foo\\n\\n\"\n",
+			want:  "- |+\n  foo\n\n",
 		},
 		"inside the value of a function": {
 			input: tenNet,

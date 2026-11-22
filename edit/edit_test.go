@@ -12712,7 +12712,7 @@ func TestWithMarshalers(t *testing.T) {
 			fn: func(ctx context.Context, n *edit.Node) error {
 				return n.At(paths.Doc().Child("hop")).Set(ctx, hop{name: "b\n\n"})
 			},
-			want: "hop: \"b\\n\\n\"\n",
+			want: "hop: |+\n  b\n\n",
 		},
 		"a JSON method whose string go-yaml converts to another string": {
 			before:     "cpu: 500m\n",
