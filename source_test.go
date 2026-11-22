@@ -9098,8 +9098,7 @@ func TestWithDocumentByteLimit(t *testing.T) {
 			opts:  []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(len(large))},
 		},
 		"a tagged document of exactly both limits": {
-			// The lexer repeats the line ending after the tag, and the
-			// check counts it once.
+			// The line ending after the tag counts once.
 			input: "a: !!str\n  x\n",
 			opts: []niceyaml.SourceOption{
 				niceyaml.WithByteLimit(len("a: !!str\n  x\n")),

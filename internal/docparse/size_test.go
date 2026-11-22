@@ -20,8 +20,7 @@ func TestSize(t *testing.T) {
 		tks  token.Tokens
 		want int
 	}{
-		"text": {tks: tokens.Tokenize(text), want: len(text)},
-		// The lexer repeats the line ending after a tag that ends its line.
+		"text":                 {tks: tokens.Tokenize(text), want: len(text)},
 		"tag that ends a line": {tks: tokens.Tokenize("a: !!str\n  x\n"), want: len("a: !!str\n  x\n")},
 		"tag that ends a CRLF line": {
 			tks:  tokens.Tokenize("a: !!str\r\n  x\r\n"),
@@ -76,8 +75,7 @@ func TestRuns(t *testing.T) {
 			want: []string{"a: &x\n---\nb: 2\n"},
 		},
 		"tag before a header": {
-			// The lexer repeats the line ending after the tag in the
-			// header, and the run of the tag counts it.
+			// The run of the tag holds the line ending after it.
 			text: "a: !!str\n---\nb: 2\n",
 			want: []string{"a: !!str\n", "---\nb: 2\n"},
 		},

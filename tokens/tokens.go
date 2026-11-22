@@ -42,6 +42,18 @@ import (
 // ends too soon for, it reads the escape's backslash into two tokens.
 // Tokenize leaves the backslash only in the second token.
 //
+// The lexer also ends one token with a line ending and opens the next with
+// it again. It does so after a tag that ends its line, and after the
+// invalid token it makes of text that follows a block scalar header.
+// Tokenize drops the repeat from the later token, so the line ending stays
+// with the line it closes. In a CRLF source, the lexer ends a tag with
+// the "\r" alone and opens the next token with the whole CRLF. The tag
+// takes the "\n" back. After header text, the lexer ends the invalid
+// token with the whole CRLF and repeats only the "\n". When that invalid
+// token ends the file without a line ending, the lexer repeats the last
+// rune of its text as a token of its own instead. Tokenize drops that
+// token.
+//
 // # Byte Order Marks
 //
 // Tokenize drops a UTF-8 byte order mark where YAML allows one: at the
@@ -83,14 +95,6 @@ import (
 // and takes any whitespace that ends the source. In a flow collection, the
 // repeat can take the place of the indicator after the tab, and Tokenize
 // keeps such a repeat.
-//
-// The lexer also ends one token with a line ending and opens the next with
-// it again. It does so after a tag that ends its line, and after the
-// invalid token it makes of text that follows a block scalar header.
-// Tokenize keeps the repeat, and a blank line between the two tokens loses
-// its spaces and tabs. When that invalid token ends the file without a line
-// ending, the lexer repeats the last rune of its text as a token of its own
-// instead. Tokenize drops that token.
 //
 // # Positions
 //
@@ -200,6 +204,8 @@ func tokenizeRest(src string) (token.Tokens, int) {
 // does not find one.
 func tokenize(src string) (token.Tokens, int) {
 	tks := dropHeaderRepeat(src, lexer.Tokenize(src))
+	dropLineRepeats(tks)
+
 	if len(tks) == 0 {
 		if src == "" {
 			return tks, -1
@@ -275,10 +281,10 @@ func tokenize(src string) (token.Tokens, int) {
 		// line. Their whitespace then opens the source's final whitespace
 		// only when the match skips those spaces and tabs. A match that
 		// skips can also line the tokens up with a later part of the
-		// source, as after an invalid tab token that swallowed a "-" or
-		// after a line ending the lexer repeated. So it counts only when
-		// the whitespace of the last token follows it in the source the
-		// same way, and the token then keeps every rune it holds.
+		// source, as after an invalid tab token that swallowed a "-". So
+		// it counts only when the whitespace of the last token follows it
+		// in the source the same way, and the token then keeps every rune
+		// it holds.
 		rest, ok = cutWhitespace(tail, held)
 		if ok {
 			_, ok = cutWhitespace(rest, last.Origin[len(text):])
@@ -429,6 +435,44 @@ func dropHeaderRepeat(src string, tks token.Tokens) token.Tokens {
 	prev.Next = nil
 
 	return tks[:len(tks)-1]
+}
+
+// dropLineRepeats removes from each token of tks the line ending that the
+// lexer repeats from the token before it. The lexer ends a tag that ends
+// its line with the line ending, and it opens the next token with the
+// same line ending. It does the same after the invalid token it makes of
+// text that follows a block scalar header. In a CRLF source, it ends a
+// tag with the "\r" and opens the next token with the whole "\r\n". The
+// tag then takes the "\n", so the CRLF stays in one Origin. After header
+// text, the invalid token already holds the whole "\r\n", and the repeat
+// is only its "\n".
+func dropLineRepeats(tks token.Tokens) {
+	for i := 1; i < len(tks); i++ {
+		prev, tk := tks[i-1], tks[i]
+		if prev.Type != token.TagType && prev.Type != token.InvalidType {
+			continue
+		}
+
+		ending := prev.Origin[len(TrimLineEnding(prev.Origin)):]
+
+		// The repeat can start partway into the ending of prev, as a "\n"
+		// that repeats the end of a "\r\n".
+		for j := range len(ending) {
+			rest, ok := strings.CutPrefix(tk.Origin, ending[j:])
+			if !ok {
+				continue
+			}
+
+			tk.Origin = rest
+
+			if ending == "\r" && strings.HasPrefix(rest, "\n") {
+				prev.Origin += "\n"
+				tk.Origin = rest[1:]
+			}
+
+			break
+		}
+	}
 }
 
 // emptyTabRepeats empties the Origin of each token the lexer adds when a
@@ -768,15 +812,12 @@ type span struct {
 // with all the whitespace ahead of its text, blank lines included.
 //
 // The Origins stay as they are on both sides of a token of whitespace
-// alone and of a token whose [span] is not ok. They also stay as they are
-// where the lexer repeats a line ending, such as after a tag, because the
-// repeat adds a line break the source lacks. A blank line there loses its
-// spaces and tabs. One exception holds for the invalid token of a quoted
-// scalar the lexer cut at a tab that indents a later line. When tokens of
-// whitespace alone follow that token, it still takes the spaces and tabs
-// the lexer drops after the tab, as [restoreTabLine] describes. The repair
-// of the final line ending in [Tokenize] handles the whitespace after the
-// last token that holds text.
+// alone and of a token whose [span] is not ok. One exception holds for the
+// invalid token of a quoted scalar the lexer cut at a tab that indents a
+// later line. When tokens of whitespace alone follow that token, it still
+// takes the spaces and tabs the lexer drops after the tab, as
+// [restoreTabLine] describes. The repair of the final line ending in
+// [Tokenize] handles the whitespace after the last token that holds text.
 func restoreWhitespace(src []rune, tks token.Tokens, spans []span) {
 	var (
 		prev     *token.Token
@@ -890,8 +931,7 @@ func restoreTabLine(src []rune, prev *token.Token, prevSpan span, ws string, end
 //
 // A gap that holds anything but whitespace holds text the lexer dropped,
 // so the Origins stay as they are. They also stay as they are when they
-// hold a rune the gap lacks and a different count of line breaks. A line
-// ending that the lexer repeats after a tag is one example.
+// hold a rune the gap lacks and a different count of line breaks.
 func restoreBetween(src []rune, prev *token.Token, prevSpan span, cur *token.Token, curSpan span) {
 	from := 0
 	if prev != nil {

@@ -472,11 +472,6 @@ func (b *TokenBuilder) Build() *token.Token {
 // invalid token instead. The result for a file that holds only a tag is
 // the whole file.
 //
-// The result repeats the line ending after a tag that ends its line and
-// after text that follows a block scalar header. The lexer ends one token
-// with that line ending and opens the next with it again. A blank line
-// between those two tokens loses its spaces.
-//
 // Around a tab used as indentation, the result keeps the text that the
 // lexer produced, and that text can lack a ":" indicator. In a flow
 // collection, a repeat of the tab can take the place of that indicator.
@@ -485,9 +480,10 @@ func (b *TokenBuilder) Build() *token.Token {
 // result keeps every byte order mark but loses more of the source. It
 // loses the final line ending, trailing spaces, and the spaces of
 // whitespace-only lines. It also loses the letter and hex digits of a
-// "\x", "\u", or "\U" escape. It repeats the last rune of text that
-// follows a block scalar header when that text ends the file. It also
-// repeats a tab that indents a later line of a quoted scalar.
+// "\x", "\u", or "\U" escape. It repeats the line ending after a tag
+// that ends its line and after text that follows a block scalar header.
+// It repeats the last rune of such text when that text ends the file. It
+// also repeats a tab that indents a later line of a quoted scalar.
 //
 // A nil token does not add text or a placeholder such as "<nil>", so the
 // output holds only source text.

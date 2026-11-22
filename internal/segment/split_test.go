@@ -79,14 +79,7 @@ func assertOffsetsIncrease(t *testing.T, lines []segment.Line) {
 	for _, l := range lines {
 		for _, seg := range l.Segments {
 			p := seg.Part()
-
-			// The newline a tag repeats holds no new rune, so it may
-			// share an offset.
-			if p.Origin == "\n" || p.Origin == "\r\n" || p.Origin == "\r" {
-				assert.GreaterOrEqual(t, p.Position.Offset, prev, "part %q on line %d", p.Origin, l.Number)
-			} else {
-				assert.Greater(t, p.Position.Offset, prev, "part %q on line %d", p.Origin, l.Number)
-			}
+			assert.Greater(t, p.Position.Offset, prev, "part %q on line %d", p.Origin, l.Number)
 
 			prev = p.Position.Offset
 		}
@@ -123,14 +116,11 @@ func TestSplit_Lines(t *testing.T) {
 		input string
 		want  []string // The content of each line.
 	}{
-		// The cases down to the next comment cover the newline the lexer
-		// repeats. It repeats the newline that ends a tag at the start of
-		// the next token. Split must attach the repeat to the finished line
-		// and still keep one line per source line, including real blank
-		// lines that follow it. A line that holds a tab alone becomes a
-		// token that shares the position of the text after it, and the
-		// repeat can open that token too. The lone newline an empty block
-		// scalar holds is no such repeat, so it opens a line of its own.
+		// The cases down to the next comment cover the line ending after
+		// a tag. Split keeps one line per source line, including real blank
+		// lines that follow the tag. A line that holds a tab alone becomes
+		// a token that shares the position of the text after it. The lone
+		// newline an empty block scalar holds opens a line of its own.
 		"tag then indented key": {
 			input: stringtest.LinesLF("a: !t", "  b: 1"),
 			want:  []string{"a: !t", "  b: 1"},
@@ -282,7 +272,7 @@ func TestSplit_Lines(t *testing.T) {
 			input: stringtest.LinesCRLF("# a", "", "# b", "c: 1"),
 			want:  []string{"# a", "", "# b", "c: 1"},
 		},
-		"crlf repeated after tag": {
+		"crlf after tag": {
 			input: stringtest.LinesCRLF("a: !t", "  b: 1"),
 			want:  []string{"a: !t", "  b: 1"},
 		},
@@ -394,8 +384,7 @@ func TestSplit_Lines(t *testing.T) {
 			assert.Equal(t, tc.want, lineContents(lines))
 
 			// The lines number from 1, and every part on a line reports that
-			// line's number, so a repeated newline landed on the line it
-			// belongs to.
+			// line's number.
 			for i, l := range lines {
 				assert.Equal(t, i+1, l.Number)
 			}
@@ -416,24 +405,23 @@ func TestSplit_PartPosition(t *testing.T) {
 		wantColumn int
 		wantOffset int
 	}{
-		// A pure-newline part starts just past the parts on its line, so
-		// the newline a tag repeats sits one column past the tag, or in
-		// column 1 on a blank line.
-		"repeated newline after a tag": {
+		// The tag keeps the line ending that closes its line, and the
+		// line after it starts with the indentation of the key.
+		"line after a tag": {
 			input:      stringtest.LinesLF("a: !t", "  b: 1"),
-			origin:     "\n",
-			line:       0,
-			idx:        3,
-			wantColumn: 6,
-			wantOffset: 6,
-		},
-		"repeated newline after a long tag": {
-			input:      stringtest.LinesLF("a: !!map", "  b: 1"),
-			origin:     "\n",
-			line:       0,
-			idx:        3,
-			wantColumn: 9,
+			origin:     "  b",
+			line:       1,
+			idx:        0,
+			wantColumn: 3,
 			wantOffset: 9,
+		},
+		"line after a tag in a crlf source": {
+			input:      stringtest.LinesCRLF("a: !t", "  b: 1"),
+			origin:     "  b",
+			line:       1,
+			idx:        0,
+			wantColumn: 3,
+			wantOffset: 10,
 		},
 		"blank line inside a block scalar": {
 			input: stringtest.LinesLF(
@@ -457,33 +445,13 @@ func TestSplit_PartPosition(t *testing.T) {
 			wantColumn: 1,
 			wantOffset: 10,
 		},
-		// A part Split moves onto the line finished last names the rune it
-		// starts with, the same rune its Line and Column name, even when
-		// the previous token already counted that rune. The parts after it
-		// keep the offsets the source gives them.
-		"repeated newline ahead of blank lines": {
-			input:      stringtest.LinesLF("a: !t", "", "", "  b: 1"),
-			origin:     "\n",
-			line:       0,
-			idx:        3,
-			wantColumn: 6,
-			wantOffset: 6,
-		},
-		"blank line after a repeated newline": {
+		"blank line after a tag that ends its line": {
 			input:      stringtest.LinesLF("a: !t", "", "", "  b: 1"),
 			origin:     "\n",
 			line:       1,
 			idx:        0,
 			wantColumn: 1,
 			wantOffset: 7,
-		},
-		"crlf repeated after a tag": {
-			input:      stringtest.LinesCRLF("a: !t", "  b: 1"),
-			origin:     "\r\n",
-			line:       0,
-			idx:        3,
-			wantColumn: 6,
-			wantOffset: 6,
 		},
 		"empty content of a keep block scalar": {
 			input:      "a: |+\n",
@@ -495,8 +463,7 @@ func TestSplit_PartPosition(t *testing.T) {
 		},
 		// The lexer closes a comment with "\r" and opens the next token
 		// with "\n". That "\n" is a new rune, so it advances the column
-		// and the offset by one, while the "\r" a tag repeats before
-		// "\r\n" does not.
+		// and the offset by one.
 		"newline of a crlf cut after a comment": {
 			input:      stringtest.LinesCRLF("# c", "k: v"),
 			origin:     "\n",
@@ -513,11 +480,10 @@ func TestSplit_PartPosition(t *testing.T) {
 			wantColumn: 5,
 			wantOffset: 10,
 		},
-		// The repeated newline is the same rune the previous token already
-		// counted, so it must not push later offsets forward. "a: !t\n"
-		// (6) + "  b: 1\n" (7) + "c: \"x\n" (6) puts the continuation at
+		// The line ending after a tag counts once. "a: !t\n" (6) +
+		// "  b: 1\n" (7) + "c: \"x\n" (6) puts the continuation at
 		// 1-indexed offset 20.
-		"quoted continuation after a repeated newline": {
+		"quoted continuation after a tag": {
 			input: stringtest.LinesLF(
 				"a: !t",
 				"  b: 1",
@@ -534,7 +500,7 @@ func TestSplit_PartPosition(t *testing.T) {
 		// "a: !t\r\n" (7) + "  b: 1\r\n" (8) + "c: 'x\r\n" (7) puts the
 		// continuation at 1-indexed offset 23. Tokenize gives the final
 		// line ending back to the last token, so the part carries it.
-		"quoted continuation after a repeated crlf": {
+		"quoted continuation after a tag in a crlf source": {
 			input:      stringtest.LinesCRLF("a: !t", "  b: 1", "c: 'x", "  y'"),
 			origin:     "  y'\r\n",
 			line:       3,
@@ -1075,12 +1041,9 @@ func TestSplit_Allocations(t *testing.T) {
 			input:  strings.Repeat("key: value # c\r\n", repeats),
 			joined: repeats,
 		},
-		"bare CR lines":            {input: strings.Repeat("key: value\r", repeats)},
-		"blank lines between keys": {input: strings.Repeat("key: value\n\n\n", repeats)},
-		"tags before nested values": {
-			input:  strings.Repeat("a: !!str\n  b\n", repeats),
-			joined: repeats,
-		},
+		"bare CR lines":                 {input: strings.Repeat("key: value\r", repeats)},
+		"blank lines between keys":      {input: strings.Repeat("key: value\n\n\n", repeats)},
+		"tags before nested values":     {input: strings.Repeat("a: !!str\n  b\n", repeats)},
 		"literal scalar of many lines":  {input: "text: |\n" + strings.Repeat("  line\n", repeats)},
 		"literal scalar of blank lines": {input: "text: |\n" + strings.Repeat("\n", repeats) + "  line\n"},
 		"plain scalar of many lines":    {input: "text: a\n" + strings.Repeat("  b\n", repeats)},
@@ -1154,19 +1117,19 @@ func lineParts(lines []segment.Line) token.Tokens {
 
 // TestSplit_SegmentStarts verifies that each segment of a line that Split
 // returns starts at the column where the segment before it ends. A line
-// that takes a part after Split finished it, such as the line ending that
-// the lexer repeats after a tag, keeps that order.
+// that takes a part after Split finished it, such as the "\n" of a CRLF
+// that the lexer cuts after a comment, keeps that order.
 func TestSplit_SegmentStarts(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]string{
-		"flow sequence":               "[a, {b: 1}, \"c\"]\n",
-		"multi-byte runes":            "日本: 語 # コメント\n",
-		"block scalar":                "a: |\n  one\n  two\nb: 2\n",
-		"block scalar that keeps":     "a: |+\n  one\n\n",
-		"repeated ending after a tag": "a: !!str\n  b\n",
-		"crlf after a comment":        "a: 1 # c\r\nb: 2\r\n",
-		"indented keys":               "a:\n  b:\n    c: 1\n",
+		"flow sequence":           "[a, {b: 1}, \"c\"]\n",
+		"multi-byte runes":        "日本: 語 # コメント\n",
+		"block scalar":            "a: |\n  one\n  two\nb: 2\n",
+		"block scalar that keeps": "a: |+\n  one\n\n",
+		"line ending after a tag": "a: !!str\n  b\n",
+		"crlf after a comment":    "a: 1 # c\r\nb: 2\r\n",
+		"indented keys":           "a:\n  b:\n    c: 1\n",
 	}
 
 	for name, input := range tcs {

@@ -582,31 +582,33 @@ var (
 				"  b: 2",
 			),
 		},
+		// The lexer ends a tag that ends its line with the line ending
+		// and opens the next token with it again. Tokenize drops the
+		// repeat.
 		"line ending the lexer repeats after a tag": {
-			// The source holds one line break where the Origins hold two,
-			// so Tokenize keeps the Origins the lexer made.
 			input: stringtest.LinesLF(
 				"u: !t",
 				"  v: 1",
 			),
-			want: stringtest.LinesLF(
+		},
+		"line ending the lexer repeats after a tag in a crlf source": {
+			input: stringtest.LinesCRLF(
 				"u: !t",
-				"",
 				"  v: 1",
 			),
 		},
+		"line ending the lexer repeats after a tag before a bare cr": {input: "u: !t\r  v: 1\r"},
 		"blank line after a line ending the lexer repeats": {
-			// Tokenize keeps the Origins the lexer made around the
-			// repeat, so the blank line loses its spaces.
 			input: stringtest.LinesLF(
 				"a: !t",
 				"  ",
 				"  b: 1",
 			),
-			want: stringtest.LinesLF(
+		},
+		"blank line after a crlf the lexer repeats": {
+			input: stringtest.LinesCRLF(
 				"a: !t",
-				"",
-				"",
+				"  ",
 				"  b: 1",
 			),
 		},
@@ -615,11 +617,6 @@ var (
 			// text after it, and repeats the line ending that closes it.
 			input: stringtest.LinesLF(
 				"a: | x",
-				"  b",
-			),
-			want: stringtest.LinesLF(
-				"a: | x",
-				"",
 				"  b",
 			),
 		},
@@ -632,11 +629,6 @@ var (
 		"bad block header in a later entry": {
 			// The line ending after the first header repeats as well.
 			input: "- |ab\n- |ab",
-			want: stringtest.JoinLF(
-				"- |ab",
-				"",
-				"- |ab",
-			),
 		},
 		"text after a block scalar header at the end": {
 			// The lexer reads the last rune of the text a second time,
@@ -1756,21 +1748,24 @@ func TestTokenize_FinalTabToken(t *testing.T) {
 			),
 			want: "\t",
 		},
-		"line ending the lexer repeats after a tag": {
+		// The lexer repeats the line ending after the tag and after the
+		// header text, and Tokenize drops the repeat, so the last token
+		// takes the final line ending of the source.
+		"tab lines after a tag": {
 			input: stringtest.LinesLF(
 				"a: !t",
 				"\t",
 				"\t",
 			),
-			want: "\n\t",
+			want: "\n\t\n",
 		},
-		"line ending the lexer repeats after header text": {
+		"tab lines after header text": {
 			input: stringtest.LinesLF(
 				`a: |"x`,
 				"\t",
 				"\t",
 			),
-			want: "\n\t",
+			want: "\n\t\n",
 		},
 	}
 
@@ -1788,6 +1783,52 @@ func TestTokenize_FinalTabToken(t *testing.T) {
 			last := tks[len(tks)-1]
 			assert.Equal(t, token.InvalidType, last.Type)
 			assert.Equal(t, tc.want, last.Origin)
+		})
+	}
+}
+
+func TestTokenize_LineEndingRepeat(t *testing.T) {
+	t.Parallel()
+
+	// The lexer ends a tag that ends its line with the line ending and
+	// opens the next token with it again. It does the same after the
+	// invalid token it makes of text after a block scalar header. The line
+	// ending stays with the token it closes, and the next token loses the
+	// repeat.
+	tcs := map[string]struct {
+		input string
+		want  []string // The Origins of the token that ends the line and the token after it.
+	}{
+		"tag":                       {input: "a: !t\nb: 1\n", want: []string{" !t\n", "b"}},
+		"tag in a sequence":         {input: "- !t\n- x\n", want: []string{" !t\n", "-"}},
+		"tag before a crlf":         {input: "a: !t\r\nb: 1\r\n", want: []string{" !t\r\n", "b"}},
+		"tag before a cr":           {input: "a: !t\rb: 1\r", want: []string{" !t\r", "b"}},
+		"tag before indent":         {input: "a: !t\n  x\n", want: []string{" !t\n", "  x\n"}},
+		"header text":               {input: "a: | x\nb: 1\n", want: []string{" | x\n", "b"}},
+		"header text before a crlf": {input: "a: | x\r\nb: 1\r\n", want: []string{" | x\r\n", "b"}},
+		"tag before a blank line": {
+			input: stringtest.LinesLF(
+				"a: !t",
+				"  ",
+				"b: 1",
+			),
+			want: []string{" !t\n  \n", "b"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tks := tokens.Tokenize(tc.input)
+
+			i := slices.IndexFunc(tks, func(tk *token.Token) bool {
+				return tk.Type == token.TagType || tk.Type == token.InvalidType
+			})
+			require.GreaterOrEqual(t, i, 0)
+			require.Less(t, i+1, len(tks))
+
+			assert.Equal(t, tc.want, []string{tks[i].Origin, tks[i+1].Origin})
 		})
 	}
 }

@@ -80,16 +80,14 @@ func TestLine_Runes(t *testing.T) {
 			input: stringtest.JoinLF("k: héllo", "z: 1"),
 			want:  []string{"k: héllo\n", "z: 1"},
 		},
-		// The lexer repeats the newline after a tag at the start of the next
-		// token. The line still yields it once.
-		"newline repeated after tag": {
+		"newline after tag": {
 			input: stringtest.LinesLF(
 				"a: !!map",
 				"  b: 1",
 			),
 			want: []string{"a: !!map\n", "  b: 1\n"},
 		},
-		"crlf repeated after tag": {
+		"crlf after tag": {
 			input: stringtest.LinesCRLF(
 				"a: !t",
 				"  b: 1",

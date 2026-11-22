@@ -61,9 +61,8 @@ type Line struct {
 // The lexer keeps a CRLF in Origin and normalizes it to "\n" in Value. A
 // bare "\r" ends a line for Split as it does for the lexer. The lexer
 // absorbs blank lines into the previous token's Origin. It also cuts a
-// CRLF between a comment and the next token, and repeats the line ending
-// after a tag at the start of the next token. Split puts each such line
-// ending on the line it closes.
+// CRLF between a comment and the next token. Split puts the "\n" of such a
+// CRLF on the line that the "\r" closes.
 func Split(tks token.Tokens) []Line {
 	b := newBuilder(tks)
 	if b == nil {
@@ -94,65 +93,15 @@ func Split(tks token.Tokens) []Line {
 
 	b.lines = make([]Line, 0, lines)
 
-	ahead := breaksAhead(tks)
-
-	for i, tk := range tks {
+	for _, tk := range tks {
 		if tk == nil {
 			continue
 		}
 
-		b.AddToken(tk, ahead[i])
+		b.AddToken(tk)
 	}
 
 	return b.Build()
-}
-
-// breaksAhead returns, for each token of tks, the number of line breaks
-// the tokens after it hold before the next rune of text. The count
-// includes every line break of a later token whose Origin holds
-// whitespace alone. It also includes the line breaks in the whitespace
-// that opens the next Origin that holds text. It skips nil tokens.
-//
-// When text does not follow the tokens and the last of them ends with a
-// line ending, the count leaves that final line ending out.
-// [tokens.Tokenize] and [tokens.ResetPositions] place a token without
-// text after it at the end of the last line, before that line ending. So
-// the Position.Line of that token never counts the line ending. A stream
-// cut from a longer one keeps a Next on its last token. The Next names
-// the text that follows, so the count keeps the final line ending there.
-func breaksAhead(tks token.Tokens) []int {
-	ahead := make([]int, len(tks))
-	n := 0
-
-	for _, tk := range slices.Backward(tks) {
-		if tk != nil {
-			if tk.Next == nil && lineEnding(tk.Origin) != "" {
-				n = -1
-			}
-
-			break
-		}
-	}
-
-	for i := len(tks) - 1; i >= 0; i-- {
-		ahead[i] = n
-
-		tk := tks[i]
-		if tk == nil {
-			continue
-		}
-
-		text := strings.TrimLeft(tk.Origin, " \t\r\n")
-		lead := lineend.CountBreaks(tk.Origin[:len(tk.Origin)-len(text)])
-
-		if text == "" {
-			n += lead
-		} else {
-			n = lead
-		}
-	}
-
-	return ahead
 }
 
 // builder constructs [Line] values from [token.Tokens].
@@ -266,9 +215,7 @@ func startAnchor(tks token.Tokens) (*token.Token, string) {
 }
 
 // AddToken splits tk into per-line parts and adds each part to the lines.
-// The ahead argument is the number of line breaks the tokens after tk hold
-// before the next rune of text, as [breaksAhead] counts them.
-func (b *builder) AddToken(tk *token.Token, ahead int) {
+func (b *builder) AddToken(tk *token.Token) {
 	// Detect if this token is block scalar content by checking if it follows a
 	// Literal/Folded header in the stream.
 	isBlockScalarContent := isBlockScalarContent(tk, b.prevType)
@@ -287,8 +234,6 @@ func (b *builder) AddToken(tk *token.Token, ahead int) {
 
 	ctx := &partContext{
 		tk:                   tk,
-		breaksAhead:          ahead,
-		leadingNewlines:      countLeadingNewlineParts(parts),
 		isBlockScalarContent: isBlockScalarContent,
 		lastContentPartIdx:   findLastContentPartIndex(parts),
 	}
@@ -300,7 +245,8 @@ func (b *builder) AddToken(tk *token.Token, ahead int) {
 		b.processPart(ctx)
 	}
 
-	// Remember how this token's Origin ended for duplicate detection.
+	// Remember how this token's Origin ended, to rejoin a CRLF that the
+	// lexer cut.
 	b.prevLineEnding = lineEnding(origin)
 }
 
@@ -408,8 +354,6 @@ type partContext struct {
 	tk                   *token.Token
 	part                 string
 	partIndex            int
-	breaksAhead          int // Line breaks the later tokens hold before the next text.
-	leadingNewlines      int // Number of pure-newline parts at the start of parts.
 	lastContentPartIdx   int
 	isBlockScalarContent bool
 	textPlaced           bool // Whether an earlier part held the token's first text.
@@ -419,10 +363,11 @@ type partContext struct {
 func (b *builder) processPart(ctx *partContext) {
 	partIsPureNewline := isPureNewline(ctx.part)
 
-	// A leading newline part can belong to the line the previous token
-	// closed. Skipping the part would leave the parts unable to rebuild the
-	// Origin, so the builder appends it to the previous line. The Origin
-	// then keeps the newline without an extra line advance.
+	// The "\n" of a CRLF that the lexer cut belongs to the line the
+	// previous token closed. Skipping the part would leave the parts unable
+	// to rebuild the Origin, so the builder appends it to the previous
+	// line. The Origin then keeps the newline without an extra line
+	// advance.
 	if b.continuesPreviousLine(ctx) && len(b.lines) > 0 {
 		b.appendToPreviousLine(ctx)
 
@@ -637,24 +582,17 @@ func textPosition(tk *token.Token, col, offset int) (int, int) {
 	return col, offset
 }
 
-// appendToPreviousLine attaches the pure-newline part that opens the token
-// to the line finished last, which the part closes. A repeated line ending
-// starts on the rune where the ending that closed that line starts. The
-// "\n" of a CRLF that the lexer cut starts one rune past its "\r". The
-// part's Line, Column, and Offset name that rune. The previous token
-// might already have counted that rune, so only the runes that the part
-// adds beyond that line ending advance the offset.
+// appendToPreviousLine attaches the "\n" that opens the token to the line
+// finished last, as [builder.continuesPreviousLine] reports. The "\r" that
+// closed that line ends the previous token. The part's Line, Column, and
+// Offset name the rune of the "\n", one past the "\r".
 func (b *builder) appendToPreviousLine(ctx *partContext) {
 	lastLine := &b.lines[len(b.lines)-1]
 
-	// The part starts past the runes of the previous line ending it does
-	// not share. Line endings are ASCII, so byte and rune counts agree.
-	delta := len(b.prevLineEnding) - lineEndingOverlap(b.prevLineEnding, ctx.part)
-
 	newTk := b.newPart(ctx.tk, ctx.tk.Type, ctx.part, "", token.Position{
 		Line:        lastLine.Number,
-		Column:      max(b.prevLineEndColumn, 1) + delta,
-		Offset:      b.prevLineEndOffset + delta,
+		Column:      max(b.prevLineEndColumn, 1) + len(b.prevLineEnding),
+		Offset:      b.prevLineEndOffset + len(b.prevLineEnding),
 		IndentNum:   b.prevLineIndentNum,
 		IndentLevel: b.currentIndentLevel,
 	})
@@ -664,59 +602,16 @@ func (b *builder) appendToPreviousLine(ctx *partContext) {
 
 	lastLine.Segments = append(lastLine.Segments, New(ctx.tk, newTk))
 
-	// The previous token's Origin already counted the runes it shares
-	// with this part, so only the rest advances currentOffset. Line
-	// endings are ASCII, so byte and rune counts agree.
-	b.currentOffset += len(ctx.part) - lineEndingOverlap(b.prevLineEnding, ctx.part)
+	b.currentOffset += len(ctx.part)
 }
 
-// continuesPreviousLine reports whether the part, a pure newline that opens
-// its token, belongs to the line the previous token closed rather than
-// starting a line of its own. The go-yaml lexer produces such a part in
-// these ways:
-//
-//   - It cuts a CRLF between tokens. It closes a comment with the "\r" and
-//     opens the next token with the "\n". A "\r" and the "\n" immediately
-//     after it form one line break in every convention, so the "\n" joins
-//     the "\r".
-//   - It repeats a line ending at both the end of one token and the start
-//     of the next. After a tag it repeats "\n" as "\n", and in a CRLF
-//     document it closes the tag with "\r" and opens the next token with
-//     the full "\r\n". Position.Line names the line that the token's text
-//     starts on, and each leading pure-newline part advances one line from
-//     currentLine. So when the leading newlines outnumber the lines to
-//     advance, the first one is the repeat. Comparing counts rather than
-//     checking currentLine == Position.Line also catches a repeat that real
-//     blank lines follow.
-//
-// A token whose Origin holds whitespace alone, such as the invalid token
-// the lexer makes of a line that holds a tab alone, shares the Position of
-// the next text. Its Position.Line then also counts the line breaks that
-// the tokens between it and that text hold, so the count leaves those out.
-//
-// Block scalar content never reaches the count, because handleGap leaves
-// currentLine on the content line for it. Otherwise a line does not remain
-// to advance. The count then reads the lone newline of an empty scalar as
-// a repeat and drops the blank line it stands for.
+// continuesPreviousLine reports whether the part is the "\n" of a CRLF
+// that the go-yaml lexer cut between two tokens. The lexer closes a
+// comment with the "\r" and opens the next token with the "\n". A "\r"
+// and the "\n" immediately after it form one line break in every
+// convention, so the "\n" belongs to the line that the "\r" closes.
 func (b *builder) continuesPreviousLine(ctx *partContext) bool {
-	if ctx.partIndex != 0 || !isPureNewline(ctx.part) || b.prevLineEnding == "" {
-		return false
-	}
-
-	if b.prevLineEnding == "\r" && ctx.part == "\n" {
-		return true
-	}
-
-	if ctx.isBlockScalarContent || ctx.tk.Position == nil {
-		return false
-	}
-
-	advance := ctx.tk.Position.Line - b.currentLine
-	if strings.Trim(ctx.tk.Origin, " \t\r\n") == "" {
-		advance -= ctx.breaksAhead
-	}
-
-	return ctx.leadingNewlines > advance
+	return ctx.partIndex == 0 && ctx.part == "\n" && b.prevLineEnding == "\r"
 }
 
 // handleGap detects and handles line number gaps for simple tokens.
@@ -770,22 +665,6 @@ func countLeadingWhitespace(s string) int {
 	return count
 }
 
-// countLeadingNewlineParts returns the number of pure-newline parts at the
-// start of parts.
-func countLeadingNewlineParts(parts []string) int {
-	count := 0
-
-	for _, p := range parts {
-		if !isPureNewline(p) {
-			break
-		}
-
-		count++
-	}
-
-	return count
-}
-
 // updateIndentLevel calculates indent level based on indentation changes.
 // It mirrors the updateIndentLevel logic of the go-yaml scanner.
 func updateIndentLevel(prevIndentNum, currentIndentNum, currentLevel int) int {
@@ -826,19 +705,6 @@ func isPureNewline(s string) bool {
 // one.
 func lineEnding(s string) string {
 	return s[len(tokens.TrimLineEnding(s)):]
-}
-
-// lineEndingOverlap returns the length of the longest suffix of prev that
-// part starts with. A repeated "\n" after "\n" overlaps fully, but "\r\n"
-// after a bare "\r" overlaps by one byte.
-func lineEndingOverlap(prev, part string) int {
-	for i := range len(prev) {
-		if strings.HasPrefix(part, prev[i:]) {
-			return len(prev) - i
-		}
-	}
-
-	return 0
 }
 
 // isPureHorizontalWhitespace reports whether s contains only spaces and tabs.
