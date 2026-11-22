@@ -364,24 +364,33 @@ func WithAutoInt(enabled bool) Option {
 // applies to.
 //
 // The paths are those of [yaml.WithComment], and so is the placement of
-// each comment, except for the line comment of a flow sequence under a
-// block mapping key and a line comment inside a flow collection. The
-// error of go-yaml stays in the chain. Of the paths that select no node,
-// that option skips only a path to a key that its mapping does not have.
-// It fails on the others. As with that option, a line comment on a string
-// that go-yaml writes as a literal block does not reach the output. A
-// literal or folded block in the YAML that a marshaler returns is the
-// exception. Encode writes its line comment after the header of the
-// block, as in `k: |- # c`. Encode double-quotes the text of such a block
-// when the text ends in more than one line break, and the comment then
-// follows the quotes.
+// each comment, except for these line comments:
 //
-// [yaml.WithComment] writes the line comment of a flow sequence under a
-// block mapping key between the key and the sequence, as in `a # x: []`.
-// The sequence then becomes comment text. The encoder writes the comment
-// after the sequence, as in `a: [] # x`. Go-yaml writes an empty sequence
-// in flow style. [yaml.WithComment] writes a line comment inside a flow
-// collection, as in `{a: 1 # x}`, and the encoder fails on it.
+//   - [yaml.WithComment] writes the line comment of a flow sequence under
+//     a block mapping key between the key and the sequence, as in
+//     `a # x: []`. The sequence then becomes comment text. The encoder
+//     writes the comment after the sequence, as in `a: [] # x`. Go-yaml
+//     writes an empty sequence in flow style.
+//   - [yaml.WithComment] writes a line comment inside a flow collection,
+//     as in `{a: 1 # x}`, and the encoder fails on it.
+//   - [yaml.WithComment] drops the line comment of a scalar or a flow
+//     collection that has an anchor or a tag. The encoder writes the
+//     comment after the value, as in `k: !!str x # c` or `k: &a [1] # c`.
+//     As with [yaml.WithComment], the line comment of a block mapping or
+//     a block sequence that has an anchor or a tag does not reach the
+//     output. The encoder writes such a collection on the lines after
+//     its anchor or tag, and no comment can follow the anchor or the
+//     tag.
+//
+// The error of go-yaml stays in the chain. Of the paths that select no
+// node, [yaml.WithComment] skips only a path to a key that its mapping
+// does not have. It fails on the others. As with that option, a line
+// comment on a string that go-yaml writes as a literal block does not
+// reach the output. A literal or folded block in the YAML that a
+// marshaler returns is the exception. Encode writes its line comment
+// after the header of the block, as in `k: |- # c`. Encode double-quotes
+// the text of such a block when the text ends in more than one line
+// break, and the comment then follows the quotes.
 func WithYAMLComments(cm yaml.CommentMap) Option {
 	return func(c *config) {
 		c.comments = cm

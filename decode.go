@@ -2756,9 +2756,10 @@ func (c *encodableConverter) convertSlice(x []any) []any {
 // value. It drops the comments of a removed value, because their path
 // does not select a node. A go-yaml path does not step into a value that
 // has an anchor or a tag. The encoder thus also drops the comments of the
-// keys and items in a value that it writes with an anchor or a tag. The
-// value of a struct field with the anchor option in its yaml tag is such
-// a value.
+// keys and items in a value that it writes with an anchor or a tag. It
+// drops the line comment of such a value too when it writes the value as
+// a block mapping or a block sequence. The value of a struct field with
+// the anchor option in its yaml tag is such a value.
 //
 // A path with an index names a position in a list, not the item that
 // held it. After the program inserts or removes a list item, the comment

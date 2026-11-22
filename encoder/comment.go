@@ -246,14 +246,16 @@ func commentError(key string, err error) error {
 // in the tree under root. It skips an entry whose path does not select a
 // node, as [commentTree.selectNode] reports it. It places each comment
 // where the go-yaml encoder places it for a [yaml.WithComment] map,
-// except for the line comment of a flow or empty sequence under a mapping
-// key and a line comment inside a flow collection. Go-yaml puts the line
-// comment of a flow or empty sequence under a mapping key on the key,
-// before the sequence. Here the sequence holds it, and the printer
-// writes it after the sequence. Go-yaml writes a line comment inside a
-// flow collection, before the closing bracket or brace. Here that
-// comment fails. Each of these returns an error that matches
-// [ErrComment] and wraps the error of go-yaml:
+// except for three kinds of line comment. Go-yaml puts the line comment
+// of a flow or empty sequence under a mapping key on the key, before the
+// sequence. Here the sequence holds it, and the printer writes it after
+// the sequence. Go-yaml writes a line comment inside a flow collection,
+// before the closing bracket or brace. Here that comment fails. Go-yaml
+// puts the line comment of a node with a tag or an anchor on the tag or
+// the anchor, and the printer does not write it there. Here the scalar
+// or flow collection under the tag or the anchor holds it, as
+// [setLineComment] describes. Each of these returns an error that
+// matches [ErrComment] and wraps the error of go-yaml:
 //
 //   - A comment that its node cannot hold, such as a line comment
 //     inside a flow collection.
@@ -329,7 +331,9 @@ func setHeadComment(tree *commentTree, target ast.Node, comment *ast.CommentGrou
 // sequence holds the comment itself, so the printer writes it after the
 // sequence. A target inside a flow mapping or a flow sequence cannot
 // hold a line comment, so setLineComment returns
-// [yaml.ErrUnsupportedLinePositionType] for that flow collection.
+// [yaml.ErrUnsupportedLinePositionType] for that flow collection. The
+// node under the tags and anchors of a target holds the comment of the
+// target, as [setPropertyLineComment] describes.
 func setLineComment(tree *commentTree, target ast.Node, comment *ast.CommentGroupNode) error {
 	// The printer writes a flow collection on one line and writes the
 	// line comment of a node inside it before the closing bracket or
@@ -337,6 +341,10 @@ func setLineComment(tree *commentTree, target ast.Node, comment *ast.CommentGrou
 	// brace too, into comment text.
 	if flow := tree.flowAncestor(target); flow != nil {
 		return yaml.ErrUnsupportedLinePositionType(flow) //nolint:wrapcheck // Return the original error.
+	}
+
+	if value, ok := propertyValue(target); ok {
+		return setPropertyLineComment(value, comment)
 	}
 
 	switch target.(type) {
@@ -365,6 +373,58 @@ func setLineComment(tree *commentTree, target ast.Node, comment *ast.CommentGrou
 	default:
 		return yaml.ErrUnsupportedLinePositionType(parent) //nolint:wrapcheck // Return the original error.
 	}
+}
+
+// propertyValue returns the value under the tags and anchors of node.
+// It reports false when node has neither a tag nor an anchor.
+func propertyValue(node ast.Node) (ast.Node, bool) {
+	value := node
+
+	for {
+		switch n := value.(type) {
+		case *ast.TagNode:
+			value = n.Value
+
+			continue
+
+		case *ast.AnchorNode:
+			value = n.Value
+
+			continue
+		}
+
+		return value, value != node
+	}
+}
+
+// setPropertyLineComment puts comment at the end of the line of a node
+// with a tag or an anchor. Value is the node under the tags and anchors,
+// as [propertyValue] returns it. A go-yaml path selects the tag or the
+// anchor and does not step to the value. The printer does not write the
+// comment of a tag or an anchor. It writes the comment of a scalar or a
+// flow collection after the value, so value holds the comment, as in
+// `k: !!str x # c`. The printer writes a block collection on the lines
+// after its tag or anchor, and no node holds a comment after either. For
+// a block collection, setPropertyLineComment drops the comment and
+// returns nil, as [yaml.WithComment] does.
+func setPropertyLineComment(value ast.Node, comment *ast.CommentGroupNode) error {
+	// The printer writes an empty collection as `[]` or `{}` even when its
+	// node is not in flow style, and the comment follows the brackets.
+	switch v := value.(type) {
+	case nil, *ast.MappingValueNode:
+		return nil
+	case *ast.MappingNode:
+		if !v.IsFlowStyle && len(v.Values) > 0 {
+			return nil
+		}
+
+	case *ast.SequenceNode:
+		if !v.IsFlowStyle && len(v.Values) > 0 {
+			return nil
+		}
+	}
+
+	return value.SetComment(comment) //nolint:wrapcheck // Return the original error.
 }
 
 // commentTree holds the parent of each node in the tree under root, so

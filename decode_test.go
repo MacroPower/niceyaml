@@ -6914,6 +6914,39 @@ func TestNode_YAMLComments(t *testing.T) {
 		}
 	})
 
+	t.Run("the encoder drops the line comment of an anchored block", func(t *testing.T) {
+		t.Parallel()
+
+		type shared struct {
+			Name string `yaml:"name"`
+		}
+
+		type config struct {
+			A *shared `yaml:"a,anchor"`
+			B string  `yaml:"b"`
+		}
+
+		cfgDoc := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"a: # the a block",
+			"  name: x",
+			"b: y # bee",
+		))
+
+		cfg, err := cfgDoc.Decode[config](t.Context())
+		require.NoError(t, err)
+
+		comments, err := cfgDoc.YAMLComments(t.Context())
+		require.NoError(t, err)
+
+		out, err := encoder.Marshal(t.Context(), cfg, encoder.WithYAMLComments(comments))
+		require.NoError(t, err)
+		assert.Equal(t, stringtest.LinesLF(
+			"a: &a",
+			"  name: x",
+			`b: "y" # bee`,
+		), string(out))
+	})
+
 	t.Run("each call returns a map of its own", func(t *testing.T) {
 		t.Parallel()
 

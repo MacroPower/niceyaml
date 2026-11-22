@@ -2475,6 +2475,105 @@ func TestWithYAMLComments(t *testing.T) {
 			comments: yaml.CommentMap{"$.k": {yaml.LineComment(" one line")}},
 			want:     "k: a # one line\n",
 		},
+		"line comment on a scalar with a tag": {
+			input:    map[string]rawYAML{"k": "!!str x"},
+			comments: yaml.CommentMap{"$.k": {yaml.LineComment(" c")}},
+			want:     "k: !!str x # c\n",
+		},
+		"line comment on a scalar with an anchor": {
+			input:    map[string]rawYAML{"k": "&a x"},
+			comments: yaml.CommentMap{"$.k": {yaml.LineComment(" c")}},
+			want:     "k: &a x # c\n",
+		},
+		"line comment on a scalar with an anchor and a tag": {
+			input:    map[string]rawYAML{"k": "&a !!str x"},
+			comments: yaml.CommentMap{"$.k": {yaml.LineComment(" c")}},
+			want:     "k: &a !!str x # c\n",
+		},
+		"line comment on a field with the anchor option": {
+			input: struct {
+				A string `yaml:"a,anchor"`
+			}{A: "x"},
+			comments: yaml.CommentMap{"$.a": {yaml.LineComment(" c")}},
+			want:     "a: &a x # c\n",
+		},
+		"line comment on a null with an anchor": {
+			input:    map[string]rawYAML{"k": "&a null"},
+			comments: yaml.CommentMap{"$.k": {yaml.LineComment(" c")}},
+			want:     "k: &a null # c\n",
+		},
+		"line comment on a scalar with a tag in a sequence": {
+			input:    []taggedString{"x", "y"},
+			comments: yaml.CommentMap{"$[1]": {yaml.LineComment(" c")}},
+			want:     stringtest.LinesLF("- !!str x", "- !!str y # c"),
+		},
+		"line comment on a root scalar with a tag": {
+			input:    taggedString("x"),
+			comments: yaml.CommentMap{"$": {yaml.LineComment(" c")}},
+			want:     "!!str x # c\n",
+		},
+		"line comment on a flow sequence with a tag": {
+			input:    map[string]rawYAML{"k": "!!seq [1, 2]"},
+			comments: yaml.CommentMap{"$.k": {yaml.LineComment(" c")}},
+			want:     "k: !!seq [1, 2] # c\n",
+		},
+		"line comment on a flow mapping with an anchor": {
+			input:    map[string]rawYAML{"k": "&a {b: 1}"},
+			comments: yaml.CommentMap{"$.k": {yaml.LineComment(" c")}},
+			want:     "k: &a {b: 1} # c\n",
+		},
+		"line comment on a marshaled block with a tag": {
+			input:    map[string]taggedLiteralBlock{"k": "a\nb"},
+			comments: yaml.CommentMap{"$.k": {yaml.LineComment(" c")}},
+			want:     stringtest.LinesLF("k: !!str |- # c", "  a", "  b"),
+		},
+		"line comment on a marshaled block with an anchor": {
+			input:    map[string]anchoredLiteralBlock{"k": "a\nb"},
+			comments: yaml.CommentMap{"$.k": {yaml.LineComment(" c")}},
+			want:     stringtest.LinesLF("k: &k |- # c", "  a", "  b"),
+		},
+		"line comment on a mapping with a tag": {
+			input: map[string]any{"a": taggedMapping{}, "b": 1},
+			comments: yaml.CommentMap{
+				"$.a": {yaml.LineComment(" x")},
+				"$.b": {yaml.LineComment(" one")},
+			},
+			want: stringtest.LinesLF("a: !custom", "  name: x", "b: 1 # one"),
+		},
+		"line comment on a mapping with an anchor": {
+			input:    anchoredDoc{A: &shared{Name: "x"}},
+			comments: yaml.CommentMap{"$.a": {yaml.LineComment(" x")}},
+			want:     stringtest.LinesLF("a: &a", "  name: x"),
+		},
+		"line comment on a sequence with an anchor": {
+			input:    map[string]rawYAML{"a": "&s\n- 1\n"},
+			comments: yaml.CommentMap{"$.a": {yaml.LineComment(" x")}},
+			want:     stringtest.LinesLF("a: &s", "- 1"),
+		},
+		"line comment on an empty sequence with an anchor": {
+			input: struct {
+				A []string `yaml:"a,anchor"`
+			}{A: []string{}},
+			comments: yaml.CommentMap{"$.a": {yaml.LineComment(" c")}},
+			want:     stringtest.LinesLF("a: &a", "[] # c"),
+		},
+		"line comment on an empty mapping with an anchor": {
+			input: struct {
+				A map[string]int `yaml:"a,anchor"`
+			}{A: map[string]int{}},
+			comments: yaml.CommentMap{"$.a": {yaml.LineComment(" c")}},
+			want:     stringtest.LinesLF("a: &a", "{} # c"),
+		},
+		"line comment on a root mapping with a tag": {
+			input:    taggedMapping{},
+			comments: yaml.CommentMap{"$": {yaml.LineComment(" x")}},
+			want:     stringtest.LinesLF("!custom", "name: x"),
+		},
+		"head and foot comments on a scalar with a tag": {
+			input:    map[string]taggedString{"k": "x"},
+			comments: yaml.CommentMap{"$.k": {yaml.HeadComment(" h"), yaml.FootComment(" f")}},
+			want:     stringtest.LinesLF("# h", "k: !!str x", "# f"),
+		},
 		"head comment on a marshaled block": {
 			input:    map[string]literalBlock{"k": "a\nb"},
 			comments: yaml.CommentMap{"$.k": {yaml.HeadComment(" head")}},
