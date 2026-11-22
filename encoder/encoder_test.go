@@ -2585,6 +2585,61 @@ func TestWithYAMLComments(t *testing.T) {
 			comments: yaml.CommentMap{"$.m.b": {yaml.LineComment(" two")}},
 			want:     stringtest.LinesLF("m:", "  b: 2 # two", `  '"x': 1`),
 		},
+		"path with a quoted key that holds a dot": {
+			input:    map[string]int{"a.b": 1, "a": 2},
+			comments: yaml.CommentMap{"$.'a.b'": {yaml.LineComment(" x")}},
+			want:     stringtest.LinesLF("a: 2", "a.b: 1 # x"),
+		},
+		"path with an escaped quote in a quoted key": {
+			input:    map[string]int{"it's": 1},
+			comments: yaml.CommentMap{`$.'it\'s'`: {yaml.LineComment(" x")}},
+			want:     "it's: 1 # x\n",
+		},
+		"path with escaped quotes around a quoted key": {
+			input:    map[string]int{"a": 1, "'a'": 2},
+			comments: yaml.CommentMap{`$.'\'a\''`: {yaml.LineComment(" x")}},
+			want:     stringtest.LinesLF(`"'a'": 2`, "a: 1 # x"),
+		},
+		"path with an escaped backslash in a quoted key": {
+			input:    map[string]int{`a\b`: 1},
+			comments: yaml.CommentMap{`$.'a\\b'`: {yaml.LineComment(" x")}},
+			want:     `"a\\b": 1 # x` + "\n",
+		},
+		"path to a key that encodes in double quotes": {
+			input:    map[string]int{"a\tb": 1, "a": 2},
+			comments: yaml.CommentMap{"$.'a\tb'": {yaml.LineComment(" x")}},
+			want:     stringtest.LinesLF("a: 2", `"a\tb": 1 # x`),
+		},
+		"path to a key in single quotes": {
+			input:    map[string]any{"m": rawYAML("'a': 1\nb: 2\n")},
+			comments: yaml.CommentMap{"$.m.a": {yaml.LineComment(" x")}},
+			want:     stringtest.LinesLF("m:", "  'a': 1 # x", "  b: 2"),
+		},
+		"path that starts again after an index": {
+			input:    map[string]int{"a": 1},
+			comments: yaml.CommentMap{"$[0]$.a": {yaml.LineComment(" x")}},
+			want:     "a: 1 # x\n",
+		},
+		"path with a repeated root": {
+			input:    map[string]int{"a": 1},
+			comments: yaml.CommentMap{"$$.a": {yaml.LineComment(" x")}},
+			want:     "a: 1 # x\n",
+		},
+		"path to the key of a lone map item": {
+			input:    yaml.MapItem{Key: "a", Value: 1},
+			comments: yaml.CommentMap{"$.a": {yaml.LineComment(" x")}},
+			want:     "a: 1 # x\n",
+		},
+		"path to a key that a lone map item does not have": {
+			input:    yaml.MapItem{Key: "a", Value: 1},
+			comments: yaml.CommentMap{"$.b": {yaml.LineComment(" x")}},
+			want:     "a: 1\n",
+		},
+		"path to an index of a nested sequence": {
+			input:    map[string][][]int{"items": {{1}, {2, 3}}},
+			comments: yaml.CommentMap{"$.items[1][1]": {yaml.LineComment(" x")}},
+			want:     stringtest.LinesLF("items:", "- - 1", "- - 2", "  - 3 # x"),
+		},
 		"path that ends in an index wildcard": {
 			input:    map[string][]string{"items": {"one", "two"}},
 			comments: yaml.CommentMap{"$.items[*]": {yaml.FootComment(" end")}},

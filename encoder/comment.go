@@ -5,21 +5,52 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 )
 
+// errNoKey indicates a path step to a key that a mapping does not have.
+var errNoKey = errors.New("mapping does not have the key")
+
 // pathComments holds the comments for the node that a YAML path selects.
 // Its key holds the path as the caller wrote it in the comment map. An
 // error names the entry by its key, because [yaml.Path.String] can spell
 // the same path another way, such as "$.a" for "$.'a'".
 type pathComments struct {
-	path     *yaml.Path
 	key      string
+	steps    []pathStep
 	comments []positionedComment
 }
+
+// pathStep is one step of a YAML path, which moves from a node to the
+// nodes under it.
+type pathStep struct {
+	// Holds the mapping key that a stepKey step selects.
+	name string
+	// Holds the sequence index that a stepIndex step selects.
+	index uint
+	kind  stepKind
+}
+
+// stepKind names the kind of a [pathStep].
+type stepKind int
+
+const (
+	// A stepKey step selects the value of a mapping key, as in "$.a".
+	stepKey stepKind = iota
+	// A stepIndex step selects an item of a sequence, as in "$[0]".
+	stepIndex
+	// A stepIndexAll step selects every item of a sequence, as in
+	// "$[*]".
+	stepIndexAll
+	// A stepRecursive step selects the values of a key at any depth, as
+	// in "$..a".
+	stepRecursive
+)
 
 // positionedComment holds the lines of one comment and the function that
 // puts the comment in its position.
@@ -47,12 +78,12 @@ func parseComments(cm yaml.CommentMap) ([]pathComments, error) {
 	entries := make([]pathComments, 0, len(cm))
 
 	for _, key := range slices.Sorted(maps.Keys(cm)) {
-		path, err := parsePath(key)
+		steps, err := parsePath(key)
 		if err != nil {
 			return nil, commentError(key, err)
 		}
 
-		entry := pathComments{path: path, key: key}
+		entry := pathComments{key: key, steps: steps}
 
 		for _, comment := range cm[key] {
 			if comment == nil {
@@ -89,13 +120,14 @@ func positionSetter(position yaml.CommentPosition) (commentSetter, error) {
 	}
 }
 
-// parsePath parses key as a YAML path. It returns an error that wraps
-// [yaml.ErrInvalidPathString] for the two kinds of key that make go-yaml
-// panic. The go-yaml parser turns an empty key into a path that does not
-// have a root. That path panics when it selects a node. The parser itself
-// panics on a key that ends inside an index, such as "$.a[0", because it
-// reads past the end of the key.
-func parsePath(key string) (_ *yaml.Path, err error) {
+// parsePath parses key as a YAML path and returns its steps. It returns
+// the error of [yaml.PathString] for a key that is not a path, and an
+// error that wraps [yaml.ErrInvalidPathString] for the two kinds of key
+// that make go-yaml panic. The go-yaml parser turns an empty key into a
+// path that does not have a root. That path panics when it selects a
+// node. The parser itself panics on a key that ends inside an index,
+// such as "$.a[0", because it reads past the end of the key.
+func parsePath(key string) (_ []pathStep, err error) {
 	if key == "" {
 		return nil, fmt.Errorf("required '$' character at first: %w", yaml.ErrInvalidPathString)
 	}
@@ -106,7 +138,102 @@ func parsePath(key string) (_ *yaml.Path, err error) {
 		}
 	}()
 
-	return yaml.PathString(key) //nolint:wrapcheck // Return the original error.
+	_, err = yaml.PathString(key)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // Return the original error.
+	}
+
+	return pathSteps(key), nil
+}
+
+// pathSteps returns the steps of key, a path that [yaml.PathString]
+// reads. It reads key the way PathString does, so that the steps select
+// the node that [yaml.Path.FilterNode] selects. A "$" after an index
+// starts the path again, so "$[0]$.a" has the steps of "$.a". A quoted
+// key such as "$.'a.b'" holds the text between its quotes, and a "\"
+// in it stands for the character after it. FilterNode strips one more
+// pair of single quotes from around the text of a key, so this path
+// selects the key a:
+//
+//	$.'\'a\''
+func pathSteps(key string) []pathStep {
+	buf := []rune(key)
+
+	// NameEnd returns the position of the first "." or "[" at or after
+	// start, or the end of buf.
+	nameEnd := func(start int) int {
+		for i := start; i < len(buf); i++ {
+			if buf[i] == '.' || buf[i] == '[' {
+				return i
+			}
+		}
+
+		return len(buf)
+	}
+
+	var steps []pathStep
+
+	for i := 0; i < len(buf); {
+		switch {
+		case buf[i] == '$':
+			steps = steps[:0]
+			i++
+
+		case buf[i] == '[':
+			end := i + slices.Index(buf[i:], ']')
+			text := string(buf[i+1 : end])
+			i = end + 1
+
+			if text == "*" {
+				steps = append(steps, pathStep{kind: stepIndexAll})
+				continue
+			}
+
+			// PathString read the text as an int64, so it parses.
+			index, _ := strconv.ParseUint(text, 10, 64) //nolint:errcheck // The text parses.
+			steps = append(steps, pathStep{kind: stepIndex, index: uint(index)})
+
+		// Every other step starts with a ".", and PathString rejects a
+		// "." at the end of a path.
+		case buf[i+1] == '.':
+			i = nameEnd(i + 2)
+
+			steps = append(steps, pathStep{kind: stepRecursive})
+
+		case buf[i+1] == '\'':
+			var name []rune
+
+			for i += 2; buf[i] != '\''; i++ {
+				if buf[i] == '\\' {
+					i++
+				}
+
+				name = append(name, buf[i])
+			}
+
+			i++
+
+			steps = append(steps, pathStep{kind: stepKey, name: trimQuotes(string(name))})
+
+		default:
+			end := nameEnd(i + 1)
+			steps = append(steps, pathStep{kind: stepKey, name: string(buf[i+1 : end])})
+			i = end
+		}
+	}
+
+	return steps
+}
+
+// trimQuotes returns name without the single quotes around it. It
+// returns name as it is when name does not start and end with a single
+// quote.
+func trimQuotes(name string) string {
+	if len(name) > 1 && name[0] == '\'' && name[len(name)-1] == '\'' {
+		return name[1 : len(name)-1]
+	}
+
+	return name
 }
 
 // commentError returns err, the problem with the comments under key, as an
@@ -116,8 +243,8 @@ func commentError(key string, err error) error {
 }
 
 // setComments puts the comments of each entry on the node its path selects
-// in the tree under root. It skips an entry when go-yaml reports that the
-// path of keys and indexes does not select a node. It places each comment
+// in the tree under root. It skips an entry whose path does not select a
+// node, as [commentTree.selectNode] reports it. It places each comment
 // where the go-yaml encoder places it for a [yaml.WithComment] map,
 // except for the line comment of a flow or empty sequence under a mapping
 // key and a line comment inside a flow collection. Go-yaml puts the line
@@ -134,48 +261,24 @@ func commentError(key string, err error) error {
 //   - A path that names a group of nodes, which has a recursive step or a
 //     step after "[*]".
 func setComments(root ast.Node, entries []pathComments) error {
-	if len(entries) == 0 {
+	if len(entries) == 0 || root == nil {
 		return nil
 	}
 
 	tree := newCommentTree(root)
 
 	for _, entry := range entries {
-		target, err := entry.path.FilterNode(root)
-		// Go-yaml returns a nil node for a mapping key that the tree
-		// does not have. It returns this error for an index past the end
-		// of a sequence and for a step into a node of another kind. An
-		// anchor, a tag, and an alias are nodes of another kind too,
-		// because a go-yaml path does not step through them. Every such
-		// path selects no node.
-		if errors.Is(err, yaml.ErrInvalidQuery) {
+		target, err := tree.selectNode(root, entry.steps)
+		if errors.Is(err, errNoKey) || errors.Is(err, yaml.ErrInvalidQuery) {
 			continue
 		}
 
-		// Go-yaml returns one other error. It unquotes each mapping key
-		// whose token value starts with a double quote, and two kinds of
-		// key do not unquote. One is a key from a marshaler's YAML, such
-		// as '"x'. The other is a string key that starts with a double
-		// quote and holds a line break, under
-		// [WithLiteralBlocks]. With that option, go-yaml
-		// leaves a string key with a line break unquoted, so the token
-		// value of the key is its raw text. The quoter marks that key as
-		// double-quoted and does not change its value. The path can
-		// select a node after either key, so setComments does not skip
-		// the entry.
 		if err != nil {
 			return commentError(entry.key, err)
 		}
 
-		if target == nil {
-			continue
-		}
-
-		// For a recursive step and for a step after "[*]", go-yaml
-		// returns a sequence that it builds to hold the nodes it found.
-		// It builds the sequence even when it found no node. The tree
-		// does not hold that sequence, so each setter returns its error
-		// for the position.
+		// A group of nodes is a sequence that the tree does not hold, so
+		// each setter returns its error for the position.
 		for _, comment := range entry.comments {
 			tokens := make([]*token.Token, 0, len(comment.texts))
 			for _, text := range comment.texts {
@@ -274,6 +377,67 @@ func setLineComment(tree *commentTree, target ast.Node, comment *ast.CommentGrou
 type commentTree struct {
 	root    ast.Node
 	parents map[ast.Node]ast.Node
+	keys    map[*ast.MappingNode]*mappingKeys
+}
+
+// mappingKeys holds the keys of a mapping as [yaml.Path.FilterNode] reads
+// them, so that a path step finds its key without a comparison against
+// each key of the mapping. FilterNode compares the keys in order and
+// returns the error of the first key that it cannot read. The keys
+// after that key thus never select a value.
+//
+// Create instances with [newMappingKeys].
+type mappingKeys struct {
+	// Holds the first entry of each key before the first key that
+	// FilterNode cannot read.
+	values map[string]*ast.MappingValueNode
+	// Holds the error of the first key that FilterNode cannot read.
+	err error
+}
+
+// newMappingKeys creates new [mappingKeys] for mapping. FilterNode reads
+// the text of the first token of each key. It unquotes a text that starts
+// with a double quote, and it strips the single quotes from around a text
+// that starts and ends with one.
+func newMappingKeys(mapping *ast.MappingNode) *mappingKeys {
+	keys := &mappingKeys{values: make(map[string]*ast.MappingValueNode, len(mapping.Values))}
+
+	for _, value := range mapping.Values {
+		key := value.Key.GetToken().Value
+		if strings.HasPrefix(key, `"`) {
+			var err error
+
+			key, err = strconv.Unquote(key)
+			if err != nil {
+				keys.err = err
+
+				break
+			}
+		} else {
+			key = trimQuotes(key)
+		}
+
+		if _, ok := keys.values[key]; !ok {
+			keys.values[key] = value
+		}
+	}
+
+	return keys
+}
+
+// value returns the entry of name. It returns the error of the first key
+// that FilterNode cannot read when no key before that one is name, and
+// [errNoKey] when the mapping does not have name.
+func (k *mappingKeys) value(name string) (*ast.MappingValueNode, error) {
+	if value, ok := k.values[name]; ok {
+		return value, nil
+	}
+
+	if k.err != nil {
+		return nil, k.err
+	}
+
+	return nil, errNoKey
 }
 
 // newCommentTree creates a new [commentTree] for the tree under root.
@@ -283,7 +447,11 @@ type commentTree struct {
 // that the setters add do not change the parents, because the walk
 // does not step into a comment.
 func newCommentTree(root ast.Node) *commentTree {
-	tree := &commentTree{root: root, parents: make(map[ast.Node]ast.Node)}
+	tree := &commentTree{
+		root:    root,
+		parents: make(map[ast.Node]ast.Node),
+		keys:    make(map[*ast.MappingNode]*mappingKeys),
+	}
 	tree.add(root, root)
 
 	return tree
@@ -347,6 +515,113 @@ func (t *commentTree) add(parent, node ast.Node) {
 // returns nil for a node that the tree does not hold.
 func (t *commentTree) parent(node ast.Node) ast.Node {
 	return t.parents[node]
+}
+
+// selectNode returns the node that steps select from node, the node that
+// [yaml.Path.FilterNode] returns for the same path. It returns [errNoKey]
+// for a key that a mapping does not have, where FilterNode returns a nil
+// node. It returns [yaml.ErrInvalidQuery], as FilterNode does, for an
+// index past the end of a sequence and for a step into a node of another
+// kind. An anchor, a tag, and an alias are nodes of another kind too,
+// because a go-yaml path does not step through them. No such path
+// selects a node.
+//
+// A recursive step and a step after "[*]" select a group of nodes, so
+// selectNode returns a sequence that it builds and that the tree does
+// not hold. A recursive step ends the path, as it does in go-yaml. A
+// step after "[*]" goes on into each item of the sequence. When an item
+// returns an error other than errNoKey, selectNode returns that error.
+// It returns the group otherwise, even when no item has the rest of the
+// path.
+//
+// For a step past a mapping key that go-yaml cannot read, selectNode
+// returns the error of go-yaml, which [mappingKeys] holds. Two kinds of
+// key do not unquote. One is a key from a marshaler's YAML, such as
+// '"x'. The other is a string key that starts with a double quote and
+// holds a line break, under [WithLiteralBlocks]. With that option,
+// go-yaml leaves a string key with a line break unquoted, so the token
+// value of the key is its raw text. The quoter marks that key as
+// double-quoted and does not change its value.
+func (t *commentTree) selectNode(node ast.Node, steps []pathStep) (ast.Node, error) {
+	for i, step := range steps {
+		switch step.kind {
+		case stepKey:
+			switch n := node.(type) {
+			case *ast.MappingNode:
+				value, err := t.keysOf(n).value(step.name)
+				if err != nil {
+					return nil, err
+				}
+
+				node = value.Value
+
+			// Go-yaml compares the text of a lone entry with name as it
+			// is.
+			case *ast.MappingValueNode:
+				if n.Key.GetToken().Value != step.name {
+					return nil, errNoKey
+				}
+
+				node = n.Value
+
+			default:
+				return nil, yaml.ErrInvalidQuery
+			}
+
+		case stepIndex:
+			seq, ok := node.(*ast.SequenceNode)
+			if !ok || step.index >= uint(len(seq.Values)) {
+				return nil, yaml.ErrInvalidQuery
+			}
+
+			node = seq.Values[step.index]
+
+		case stepIndexAll:
+			seq, ok := node.(*ast.SequenceNode)
+			if !ok {
+				return nil, yaml.ErrInvalidQuery
+			}
+
+			rest := steps[i+1:]
+			if len(rest) == 0 {
+				return seq, nil
+			}
+
+			// Go-yaml puts a nil node in the group for an item that
+			// does not have a key of the path.
+			for _, value := range seq.Values {
+				_, err := t.selectNode(value, rest)
+				if err != nil && !errors.Is(err, errNoKey) {
+					return nil, err
+				}
+			}
+
+			return newGroup(), nil
+
+		case stepRecursive:
+			return newGroup(), nil
+		}
+	}
+
+	return node, nil
+}
+
+// keysOf returns the [mappingKeys] of mapping. It builds them on the
+// first call for mapping.
+func (t *commentTree) keysOf(mapping *ast.MappingNode) *mappingKeys {
+	keys, ok := t.keys[mapping]
+	if !ok {
+		keys = newMappingKeys(mapping)
+		t.keys[mapping] = keys
+	}
+
+	return keys
+}
+
+// newGroup creates a new sequence that holds a group of nodes, as
+// go-yaml builds for a path that selects one. The tree does not hold it.
+func newGroup() *ast.SequenceNode {
+	return &ast.SequenceNode{BaseNode: &ast.BaseNode{}}
 }
 
 // flowAncestor returns the closest flow mapping or flow sequence that
