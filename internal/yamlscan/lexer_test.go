@@ -923,6 +923,45 @@ func TestTokenize_Patches(t *testing.T) {
 				{token.MappingEndType, "}\n"},
 			},
 		},
+		// YAML ends a plain value at a ":" that a blank or a flow
+		// indicator follows, but go-yaml's lexer reads the ":" into the
+		// value. The copy reports the value and the ":" as invalid.
+		"key on the line of a value of a flow mapping": {
+			input: "{a: b c: d, e: f}\n",
+			want: []tok{
+				{token.MappingStartType, "{"},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.InvalidType, " b c:"},
+				{token.StringType, " d"},
+				{token.CollectEntryType, ","},
+				{token.StringType, " e"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " f"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		"colon before the end on the line of a value of a flow mapping": {
+			input: "{a: b c:}\n",
+			want: []tok{
+				{token.MappingStartType, "{"},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.InvalidType, " b c:"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		// YAML keeps a ":" that text follows in the plain value.
+		"colon before text in a value of a flow mapping": {
+			input: "{a: 12:30}\n",
+			want: []tok{
+				{token.MappingStartType, "{"},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " 12:30"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
 		// YAML ends the value at the ":" of the key below it. The copy
 		// cuts the value at the line of the key, as go-yaml's lexer does,
 		// so the parser refuses the key.

@@ -115,6 +115,14 @@ import (
 //     a key of a flow mapping that spans lines, as the lexer reads it in a
 //     key on one line. So the copy and the lexer read "{a\n b:c}" as the
 //     key "a b" and the value c.
+//   - Inside a flow mapping, a ":" that a blank or a flow indicator
+//     follows ends the plain value of a key on one line, as YAML ends it.
+//     The lexer keeps each ":" of that value in the scalar, so it reads
+//     "{a: b c: d}" as the value "b c: d". YAML refuses the text, because
+//     a "," must come before the next key. The copy reports the value and
+//     the second ":" as an invalid token. So the decode of "{a: b c: d}"
+//     and of "{a: b c: d, e: f}" fails. A ":" that another character
+//     follows stays in the value, as in "{a: 12:30}".
 //   - A ":" right before a "," or a "]" ends the plain scalar of an
 //     explicit key in a flow sequence, as it ends a key inside a flow
 //     mapping. The lexer keeps that ":" in the scalar, so it reads

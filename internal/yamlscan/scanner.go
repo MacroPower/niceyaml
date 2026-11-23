@@ -1115,7 +1115,21 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 	} else if s.startedFlowMapNum > 0 {
 		tk := ctx.lastToken()
 		if tk != nil && tk.Type == token.MappingValueType {
-			return false, nil
+			// niceyaml: the plain value of a key keeps a ":" that a
+			// character other than a blank or a flow indicator follows, as
+			// in "{a: 12:30}". YAML ends the value at any other ":" and
+			// then refuses the text, because a "," must come before the
+			// next key. The scan reports such a ":" as an invalid token,
+			// so the decode fails whatever follows it, as in
+			// "{a: b c: d, e: f}". Upstream keeps every ":" of the value,
+			// so it reads "{a: b c: d}" as {a: "b c: d"}.
+			if !endsPlain(nc) {
+				return false, nil
+			}
+			invalidTk := token.Invalid("a value of a flow mapping cannot hold an implicit key", string(ctx.obuf), s.pos())
+			invalidTk.Origin += ":"
+			s.progressColumn(ctx, 1)
+			return false, ErrInvalidToken(invalidTk)
 		}
 	}
 

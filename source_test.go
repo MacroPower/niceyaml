@@ -2340,6 +2340,74 @@ func TestSource_File_ErrSyntax(t *testing.T) {
 			input: stringtest.LinesLF("{a: b", " - c}"),
 			want:  []bool{false},
 		},
+		// YAML ends a plain value at a ":" that a blank or a flow
+		// indicator follows, so a comma must come between the two
+		// entries. The go-yaml lexer reads the ":" into the value.
+		"key on the line of a value in a flow mapping": {
+			input: "{a: b c: d}\n",
+			want:  []bool{true},
+		},
+		"key on the line of a value in a nested flow mapping": {
+			input: "{a: {b: c d: e}}\n",
+			want:  []bool{true},
+		},
+		"key with a tab on the line of a value in a flow mapping": {
+			input: "{a: b c:\td}\n",
+			want:  []bool{true},
+		},
+		"key without a value before a comma on the line of a value in a flow mapping": {
+			input: "{a: b c:, x: y}\n",
+			want:  []bool{true},
+		},
+		"key without a value before the end on the line of a value in a flow mapping": {
+			input: "{a: b c:}\n",
+			want:  []bool{true},
+		},
+		"spaced colon on the line of a value in a flow mapping": {
+			input: "{a: b c : d}\n",
+			want:  []bool{true},
+		},
+		"key before a comma on the line of a value in a flow mapping": {
+			input: "{a: b c: d, e: f}\n",
+			want:  []bool{true},
+		},
+		"key before a trailing comma on the line of a value in a flow mapping": {
+			input: "{a: b c: d,}\n",
+			want:  []bool{true},
+		},
+		"key of one word on the line of a value in a flow mapping": {
+			input: "{a: b: c, d: e}\n",
+			want:  []bool{true},
+		},
+		"key on the line of a value in a flow mapping in a flow sequence": {
+			input: "[{a: b c: d, e: f}]\n",
+			want:  []bool{true},
+		},
+		"key with a flow sequence value on the line of a value in a flow mapping": {
+			input: "{a: b c: [d], e: f}\n",
+			want:  []bool{true},
+		},
+		"colon before a flow sequence on the line of a value in a flow mapping": {
+			input: "{a: b c:[d]}\n",
+			want:  []bool{true},
+		},
+		"colon before a flow mapping on the line of a value in a flow mapping": {
+			input: "{a: b c:{d}}\n",
+			want:  []bool{true},
+		},
+		"colon before a flow sequence and a comma on the line of a value in a flow mapping": {
+			input: "{a: b c:[d], e: f}\n",
+			want:  []bool{true},
+		},
+		"empty key at the start of a value in a flow mapping": {
+			input: "{a: : b}\n",
+			want:  []bool{true},
+		},
+		// YAML keeps a ":" that text follows in the plain value.
+		"colon before text in a value of a flow mapping": {
+			input: "{a: b c:d, e: 12:30}\n",
+			want:  []bool{false},
+		},
 		// YAML ends the value at the ":" of the key below it, so a comma
 		// must come between the two entries.
 		"key on the line below a value in a flow mapping": {
