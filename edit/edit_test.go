@@ -895,6 +895,11 @@ func TestNew_Unparsed(t *testing.T) {
 			// Go-yaml's parser reads a as "-", and the Source refuses the text.
 			text: "{a: -}\n",
 		},
+		"flow indicator in a plain scalar of a flow sequence": {
+			// Go-yaml's parser reads the text as ["a}"], and the Source refuses
+			// it.
+			text: "[a}]\n",
+		},
 		"plain scalar on two lines of an explicit key": {
 			// YAML reads the key as "a - b", but go-yaml's parser reads it as
 			// a key a with the value [b]. The Source refuses the text.

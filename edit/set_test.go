@@ -788,6 +788,16 @@ func TestNode_Set(t *testing.T) {
 			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 cannot write the value of $.b: the MarshalYAML method of " +
 				`edit_test.yamlMarshaler writes a "-" before a flow indicator at 1:9 of that YAML, which YAML does not allow`,
 		},
+		"YAML marshaler that writes a flow indicator in a plain scalar of a flow sequence": {
+			// Go-yaml's parser reads the string "b}", but YAML does not allow
+			// the text, so the problem is the marshaler's.
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("b"),
+			value:  yamlMarshaler("[a, b}]\n"),
+			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 cannot write the value of $.b: the MarshalYAML method of " +
+				"edit_test.yamlMarshaler writes a plain scalar that holds a flow indicator in a flow collection " +
+				"at 1:5 of that YAML, which YAML does not allow",
+		},
 		"YAML marshaler that writes a dash before a flow indicator below an explicit key": {
 			// Control: YAML folds the line that starts with the "-" into the
 			// key above it, but go-yaml's parser reads the "-" as the value of

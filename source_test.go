@@ -2362,6 +2362,25 @@ func TestSource_File_ErrSyntax(t *testing.T) {
 			input: "{-: 1}\n",
 			want:  []bool{false},
 		},
+		// YAML ends a plain scalar in a flow collection at each flow
+		// indicator. The go-yaml parser reads a "}" in a flow sequence and a
+		// "]" in a flow mapping into the scalar, and the Source refuses it.
+		"brace in a plain scalar of a flow sequence": {
+			input: "[a}]\n",
+			want:  []bool{true},
+		},
+		"bracket in a plain scalar of a flow mapping": {
+			input: "{a: b]}\n",
+			want:  []bool{true},
+		},
+		"brace in a plain scalar of a flow sequence in the second document": {
+			input: stringtest.LinesLF("a: 1", "---", "b: [c, d}]", "---", "e: 3"),
+			want:  []bool{false, true, false},
+		},
+		"brace in a plain scalar of a block mapping": {
+			input: "a: b}\n",
+			want:  []bool{false},
+		},
 		// The parser takes an alias with no anchor, and a decode rejects
 		// it.
 		"alias with no anchor": {

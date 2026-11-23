@@ -205,6 +205,15 @@
 // holds the string that the parser reads. A "-" right before a ":" starts a
 // plain scalar, so "{-: 1}" holds the key "-".
 //
+// YAML ends a plain scalar inside a flow collection at each flow indicator,
+// so such a scalar does not hold a ",", a "[", a "]", a "{", or a "}". The
+// go-yaml lexer reads a "}" inside a flow sequence and a "]" inside a flow
+// mapping into the scalar, so yaml.Unmarshal reads "[a}]" as ["a}"] and
+// "{a: b]}" as {a: "b]"}. The parse of a Source refuses that scalar with a
+// syntax error at the start of the scalar. A quoted scalar holds any flow
+// indicator, as in "['a}']". Outside a flow collection, a plain scalar holds
+// a flow indicator after its first character, as in "a: b}".
+//
 // Inside a flow collection, YAML folds a line that starts with a "-" into the
 // plain scalar on the line above. Go-yaml's parser refuses such a "-" after a
 // mapping value, as in "{a: b\n - c}", and the document fails with the error
@@ -2499,8 +2508,9 @@
 // The error for text that the go-yaml parser rejects matches [ErrSyntax]. So
 // do the errors for a "-" right after a tag on its line, for a "-" that
 // starts an entry inside a flow collection, and for a "-" there right before
-// a flow indicator. So does the error for a "-" that continues a plain scalar
-// after an explicit key there. The parser takes each such "-". The error for
+// a flow indicator. So do the error for a plain scalar there that holds a
+// flow indicator and the error for a "-" that continues a plain scalar after
+// an explicit key there. The parser takes each such token. The error for
 // YAML that parsed but does not decode matches [ErrDecode]. The errors for a
 // value of the wrong kind, a number out of range, and an unknown field each
 // match a sentinel of their own beside ErrDecode, as [ErrUnknownField]

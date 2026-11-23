@@ -225,12 +225,14 @@ var (
 	// ErrSyntax also indicates a "-" right after a tag on its line, as in
 	// "a: !t - 1", and a "-" that starts an entry inside a flow collection,
 	// as in "[- 1]". It also indicates a "-" in a flow collection right
-	// before a flow indicator, as in "[-]". The parser takes each such "-",
-	// but YAML refuses it, so the parse of a Source fails the document with
-	// a syntax error at the "-". That error matches ErrSyntax, as the
-	// errors of the parser do. So does the error of a "-" that continues a
-	// plain scalar after an explicit key in a flow collection, as in
-	// "{? A\n - B}". YAML allows that "-", but the parser misreads it.
+	// before a flow indicator, as in "[-]", and a plain scalar there that
+	// holds a flow indicator, as in "[a}]". The parser takes each such
+	// token, but YAML refuses it, so the parse of a Source fails the
+	// document with a syntax error at the token. That error matches
+	// ErrSyntax, as the errors of the parser do. So does the error of a
+	// "-" that continues a plain scalar after an explicit key in a flow
+	// collection, as in "{? A\n - B}". YAML allows that "-", but the
+	// parser misreads it.
 	//
 	// A document past the depth limit of [WithDepthLimit] or the byte limit
 	// of [WithDocumentByteLimit] does not parse either. Neither does the one

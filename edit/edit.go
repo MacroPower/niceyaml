@@ -142,9 +142,11 @@ var (
 	// document, that repeats a key, or that holds a "-" right after an
 	// anchor or a tag on its line, a "-" that starts an entry inside a flow
 	// collection, or a "-" there right before a flow indicator, as in "[-]".
-	// So does a chain of more than 1,000 marshalers. It fails so with a
-	// value that holds a string that is not UTF-8, as a value or as
-	// a key, and that error also matches
+	// So does YAML of a marshaler with a plain scalar in a flow collection
+	// that holds a flow indicator, as in "[a}]", and so does a chain of
+	// more than 1,000 marshalers. It fails so with a value that holds a
+	// string that is not UTF-8, as a value or as a key, and that error also
+	// matches
 	// [go.jacobcolvin.com/niceyaml/encoder.ErrEncode]. The error binds at
 	// the place of the call. The program wrote the value, so
 	// [go.jacobcolvin.com/niceyaml.IsInvalid] reports false for the error.

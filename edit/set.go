@@ -333,8 +333,9 @@ type payload struct {
 // node, so text of more than one document fails the Set. So does a mapping
 // that repeats a key, as go-yaml's decoder reads each key. So do a "-"
 // right after an anchor or a tag on its line and a "-" that starts an
-// entry inside a flow collection. So does a "-" there right before a flow
-// indicator, as in "[-]", because YAML does not allow any of them.
+// entry inside a flow collection. So do a "-" there right before a flow
+// indicator, as in "[-]", and a plain scalar there that holds a flow
+// indicator, as in "[a}]", because YAML does not allow any of them.
 // The problem names the path of the Set and the marshaler, and it matches
 // ErrValue.
 // Every other problem of the text is go-yaml's, and it fails the Set with

@@ -324,6 +324,7 @@ func TestParse_FlowSequence(t *testing.T) {
 		tagMsg    = "sequence entries are not allowed after tag on the same line"
 		contMsg   = "a \"-\" that continues a plain scalar in a flow collection is not supported"
 		indMsg    = "a plain scalar cannot start with a \"-\" before a flow indicator"
+		scalarMsg = "a plain scalar in a flow collection cannot hold a flow indicator"
 	)
 
 	tcs := map[string]struct {
@@ -556,6 +557,89 @@ func TestParse_FlowSequence(t *testing.T) {
 			input: stringtest.LinesLF("{? a", " -}"),
 			at:    new(position.New(1, 1)),
 			msg:   contMsg,
+		},
+		// The lexer ends a plain scalar at a "}" only inside a flow mapping,
+		// and at a "]" only inside a flow sequence. YAML ends it at each
+		// flow indicator inside a flow collection.
+		"brace in a plain scalar of a flow sequence": {
+			input: "[a}]\n",
+			at:    new(position.New(0, 1)),
+			msg:   scalarMsg,
+		},
+		"brace inside a plain scalar of a flow sequence": {
+			input: "[a, b}c]\n",
+			at:    new(position.New(0, 4)),
+			msg:   scalarMsg,
+		},
+		"dash before a brace in a flow sequence": {
+			input: "[-}]\n",
+			at:    new(position.New(0, 1)),
+			msg:   scalarMsg,
+		},
+		"brace in a key of a flow sequence": {
+			input: "[a}: b]\n",
+			at:    new(position.New(0, 1)),
+			msg:   scalarMsg,
+		},
+		"brace in a plain scalar of a nested flow sequence": {
+			input: "[[a}]]\n",
+			at:    new(position.New(0, 2)),
+			msg:   scalarMsg,
+		},
+		"brace on the second line of a plain scalar of a flow sequence": {
+			input: stringtest.LinesLF("[a", "}]"),
+			at:    new(position.New(0, 1)),
+			msg:   scalarMsg,
+		},
+		"brace in a plain scalar after a tag": {
+			input: "[!t a}]\n",
+			at:    new(position.New(0, 4)),
+			msg:   scalarMsg,
+		},
+		"bracket in a value of a flow mapping": {
+			input: "{a: b]}\n",
+			at:    new(position.New(0, 4)),
+			msg:   scalarMsg,
+		},
+		"bracket in a key of a flow mapping": {
+			input: "{a]: 1}\n",
+			at:    new(position.New(0, 1)),
+			msg:   scalarMsg,
+		},
+		"brace in a plain scalar above a sequence entry": {
+			input: stringtest.LinesLF("a: [b}]", "c: [- 1]"),
+			at:    new(position.New(0, 4)),
+			msg:   scalarMsg,
+		},
+		// The lexer reads the second "}" as a plain scalar. The parser
+		// refuses that scalar too, but the error of the scalar wins at the
+		// same token.
+		"brace after the end of a flow mapping": {
+			input: "[{a: b}}]\n",
+			at:    new(position.New(0, 7)),
+			msg:   scalarMsg,
+		},
+		// The parser refuses the "[" after the first scalar, before the "}".
+		"brace in a plain scalar after a refused token": {
+			input: "[a[b, c}]]\n",
+			at:    new(position.New(0, 2)),
+			msg:   "',' or ']' must be specified",
+		},
+		"brace in a quoted scalar of a flow sequence": {
+			input: "[\"a}\", 'b]']\n",
+		},
+		"brace in a plain scalar of a block mapping": {
+			input: stringtest.LinesLF("a: b}", "c]: d"),
+		},
+		// The content of a block scalar is not a plain scalar.
+		"brace in a literal scalar of a flow sequence": {
+			input: stringtest.LinesLF("[x, |", "  a}", "]"),
+		},
+		"bracket in a folded scalar of a flow mapping": {
+			input: stringtest.LinesLF("{k: > # c", "  a,b]", "}"),
+		},
+		"dash in a literal scalar of a flow sequence": {
+			input: stringtest.LinesLF("[x, |-", "  -", "]"),
 		},
 		"a negative number": {
 			input: "[-1]\n",

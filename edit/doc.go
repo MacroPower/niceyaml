@@ -619,10 +619,12 @@
 // with a "-" that starts an entry inside a flow collection, as in "[- 1]",
 // and one with a "-" there right before a flow indicator, as in "[-]".
 // YAML refuses each such "-", but the parser takes it. They also include
-// one with a "-" that continues a plain scalar after an explicit key in a
-// flow collection, as in "{? A\n - B}", which the parser misreads. A
-// reference document of [go.jacobcolvin.com/niceyaml.WithReferences] that
-// does not parse fails
+// one with a plain scalar in a flow collection that holds a flow
+// indicator, as in "[a}]", which YAML refuses and the parser takes. They
+// also include one with a "-" that continues a plain scalar after an
+// explicit key in a flow collection, as in "{? A\n - B}", which the
+// parser misreads. A reference document of
+// [go.jacobcolvin.com/niceyaml.WithReferences] that does not parse fails
 // New the same way, because each decode of the document fails with that
 // error. A reference document
 // in which go-yaml's parser nests a line deeper than YAML reads it, as in
