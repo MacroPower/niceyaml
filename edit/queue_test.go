@@ -711,47 +711,69 @@ func median(ds []time.Duration) time.Duration {
 func TestDoc_Apply_Queue_FailedSets(t *testing.T) {
 	t.Parallel()
 
-	// For each of 2,000 small scalars, the Func sets the protected kind of
+	// For each of 200 small scalars, the Func sets the protected kind of
 	// the document and ignores the error. Each such Set fails before it
 	// joins the queue, so it leaves no queue behind it. A Set that fails
-	// costs the same whatever the size of the text. So the Apply takes
-	// about as long on a text with a long string after the scalars as on
-	// the text without it. A Set that fails but still takes memory that
-	// grows with the text makes the Apply on the longer text take about
-	// five times as long. The slower of two Applies on the shorter text
-	// sets the bound, so that a load on the machine in one of them does
-	// not shrink it.
-	const items = 2000
+	// costs the same whatever the size of the text. So a Set on a text with
+	// a long string after the scalars takes about as long as a Set on the
+	// text without it. A Set that fails but still takes memory that grows
+	// with the text takes several times as long on the longer text, even
+	// under the race detector. The longer text holds 1 MiB of string. That
+	// string is more than the default byte limit, so both Docs turn the
+	// limits off.
+	//
+	// The test compares the median time of a Set on the two texts. The
+	// Applies on the two texts take turns, so a load on the machine that
+	// lasts for several turns slows the Sets on both texts. A shorter
+	// burst of load slows only the Sets that run during it, so it moves a
+	// median only when it lasts for more than half of the turns on one
+	// text.
+	const (
+		items = 200
+		turns = 10
+	)
 
 	short := "kind: Cafe\ns:\n" + strings.Repeat("  - 1\n", items)
-	long := short + "pad: " + strings.Repeat("x", 200<<10) + "\n"
+	long := short + "pad: " + strings.Repeat("x", 1<<20) + "\n"
 	kind := paths.Doc().Child("kind")
 
-	failTime := func(text string) time.Duration {
-		d := newDoc(t, text)
+	// FailTimes runs one Apply on d, whose text is text, and adds the time
+	// of each Set to times. Every Set fails, so d keeps its text, and the
+	// next turn can run its Apply on the same d.
+	failTimes := func(d *edit.Doc, text string, times []time.Duration) []time.Duration {
 		fails := 0
-		start := time.Now()
 
 		err := d.Apply(t.Context(), paths.MustParse("$.s[*]"), func(ctx context.Context, n *edit.Node) error {
-			if n.At(kind).Set(ctx, "x") != nil {
+			start := time.Now()
+			err := n.At(kind).Set(ctx, "x")
+
+			times = append(times, time.Since(start))
+
+			if err != nil {
 				fails++
 			}
 
 			return nil
 		})
-		elapsed := time.Since(start)
 
 		require.NoError(t, err)
 		assert.Equal(t, items, fails)
 		assert.Equal(t, text, d.Text())
 
-		return elapsed
+		return times
 	}
 
-	unit := max(failTime(short), failTime(short))
-	elapsed := failTime(long)
+	var shortTimes, longTimes []time.Duration
 
-	assert.Less(t, elapsed, 3*unit)
+	shortDoc := newDoc(t, short, niceyaml.WithoutLimits())
+	longDoc := newDoc(t, long, niceyaml.WithoutLimits())
+
+	for range turns {
+		shortTimes = failTimes(shortDoc, short, shortTimes)
+		longTimes = failTimes(longDoc, long, longTimes)
+	}
+
+	assert.Less(t, median(longTimes), 3*median(shortTimes))
 }
 
 func TestDoc_Apply_Queue_ContextEnded(t *testing.T) {
