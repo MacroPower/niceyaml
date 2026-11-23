@@ -8922,8 +8922,9 @@ func TestWithAliasLimit_ReferenceLoop(t *testing.T) {
 	t.Run("anchor on an alias of its name without the limit", func(t *testing.T) {
 		t.Parallel()
 
-		// The anchor e holds the alias *e itself. A decode into any or
-		// into a type that reads text takes that alias as null.
+		// The anchor e holds the alias *e itself. A decode into any, into
+		// a type that reads text, or into a typed target takes that alias
+		// as null.
 		const refs = "e: &e\n  *e\n"
 
 		doc := yamltest.FirstDocument(t, "v: *e\n",
@@ -8936,6 +8937,212 @@ func TestWithAliasLimit_ReferenceLoop(t *testing.T) {
 		text, err := doc.Decode[map[string]rawString](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, map[string]rawString{"v": "null"}, text)
+
+		type inner struct {
+			A int `yaml:"a"`
+		}
+
+		maps, err := doc.Decode[map[string]map[string]int](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]map[string]int{"v": nil}, maps)
+
+		structs, err := doc.Decode[map[string]inner](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]inner{"v": {}}, structs)
+
+		field, err := doc.Decode[struct {
+			V inner `yaml:"v"`
+		}](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, inner{}, field.V)
+
+		list, err := doc.Decode[map[string][]int](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string][]int{"v": nil}, list)
+
+		pointers, err := doc.Decode[map[string]*inner](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]*inner{"v": nil}, pointers)
+
+		pointerField, err := doc.Decode[struct {
+			V *inner `yaml:"v"`
+		}](t.Context())
+		require.NoError(t, err)
+		assert.Nil(t, pointerField.V)
+
+		// A scalar takes the null as a null value, and a pointer to a
+		// scalar takes it as nil.
+		ints, err := doc.Decode[map[string]int](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]int{"v": 0}, ints)
+
+		intPointers, err := doc.Decode[map[string]*int](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]*int{"v": nil}, intPointers)
+
+		// The alias at the root of a document reads as null too, so a
+		// pointer of the document reads it as nil.
+		root := yamltest.FirstDocument(t, "*e\n",
+			yamltest.References(refs), niceyaml.WithAliasLimit(false))
+
+		rootPointer, err := root.Decode[*inner](t.Context())
+		require.NoError(t, err)
+		assert.Nil(t, rootPointer)
+
+		filled := &inner{A: 1}
+		require.NoError(t, root.DecodeInto(t.Context(), &filled))
+		assert.Nil(t, filled)
+
+		// A pointer to a type that reads text reads the text of the null.
+		rootText, err := root.Decode[*rawString](t.Context())
+		require.NoError(t, err)
+		require.NotNil(t, rootText)
+		assert.Equal(t, rawString("null"), *rootText)
+
+		// The decode fills the value that a filled pointer points to.
+		heldText := rawString("keep")
+		textPointer := &heldText
+		require.NoError(t, root.DecodeInto(t.Context(), &textPointer))
+		assert.Same(t, &heldText, textPointer)
+		assert.Equal(t, rawString("null"), heldText)
+
+		// A pointer to the AST node interface points to the alias.
+		rootNode, err := root.Decode[*ast.Node](t.Context())
+		require.NoError(t, err)
+		require.NotNil(t, rootNode)
+		require.IsType(t, &ast.AliasNode{}, *rootNode)
+		assert.Equal(t, "*e", (*rootNode).String())
+
+		// A filled pointer to the node interface takes the alias in place.
+		var heldNode ast.Node = ast.Null(nil)
+
+		nodePointer := &heldNode
+		require.NoError(t, root.DecodeInto(t.Context(), &nodePointer))
+		assert.Same(t, &heldNode, nodePointer)
+		require.IsType(t, &ast.AliasNode{}, heldNode)
+
+		// A tag on the alias of the document applies to a scalar.
+		tagged := yamltest.FirstDocument(t, "v: !!str *e\n",
+			yamltest.References(refs), niceyaml.WithAliasLimit(false))
+
+		_, err = tagged.Decode[map[string]int](t.Context())
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+		require.ErrorContains(t, err, "expected integer, got string")
+
+		taggedStructs, err := tagged.Decode[map[string]inner](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]inner{"v": {}}, taggedStructs)
+	})
+
+	t.Run("anchor on a tagged alias of its name without the limit", func(t *testing.T) {
+		t.Parallel()
+
+		// The anchor e holds the alias *e under a tag. A decode into any
+		// or into a scalar reads the tag of the null, and a map, a struct,
+		// or a pointer to one takes the alias as null.
+		const refs = "e: &e !!str *e\n"
+
+		doc := yamltest.FirstDocument(t, "v: *e\n",
+			yamltest.References(refs), niceyaml.WithAliasLimit(false))
+
+		got, err := doc.Decode[map[string]any](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"v": ""}, got)
+
+		_, err = doc.Decode[map[string]int](t.Context())
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+		require.ErrorContains(t, err, "expected integer, got string")
+
+		_, err = doc.Decode[map[string]*int](t.Context())
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+		require.ErrorContains(t, err, "expected integer, got string")
+
+		type inner struct {
+			A int `yaml:"a"`
+		}
+
+		maps, err := doc.Decode[map[string]map[string]int](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]map[string]int{"v": nil}, maps)
+
+		structs, err := doc.Decode[map[string]inner](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]inner{"v": {}}, structs)
+
+		pointers, err := doc.Decode[map[string]*inner](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]*inner{"v": nil}, pointers)
+
+		root := yamltest.FirstDocument(t, "*e\n",
+			yamltest.References(refs), niceyaml.WithAliasLimit(false))
+
+		rootPointer, err := root.Decode[*inner](t.Context())
+		require.NoError(t, err)
+		assert.Nil(t, rootPointer)
+
+		// A pointer to a scalar at the root reads the tag too.
+		_, err = root.Decode[*int](t.Context())
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+		require.ErrorContains(t, err, "expected integer, got string")
+
+		rootString, err := root.Decode[*string](t.Context())
+		require.NoError(t, err)
+		require.NotNil(t, rootString)
+		assert.Empty(t, *rootString)
+
+		// The decode fills the string that a filled pointer points to.
+		heldString := "keep"
+		stringPointer := &heldString
+		require.NoError(t, root.DecodeInto(t.Context(), &stringPointer))
+		assert.Same(t, &heldString, stringPointer)
+		assert.Empty(t, heldString)
+	})
+
+	t.Run("anchors on aliases of each other without the limit", func(t *testing.T) {
+		t.Parallel()
+
+		// The anchors x and y each hold the alias of the other. The read
+		// of x reads y, and the alias *x inside y reads as null.
+		const refs = "x: &x\n  *y\ny: &y\n  *x\n"
+
+		doc := yamltest.FirstDocument(t, "v: *x\n",
+			yamltest.References(refs), niceyaml.WithAliasLimit(false))
+
+		got, err := doc.Decode[map[string]map[string]int](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]map[string]int{"v": nil}, got)
+
+		type inner struct {
+			A int `yaml:"a"`
+		}
+
+		structs, err := doc.Decode[map[string]inner](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]inner{"v": {}}, structs)
+
+		pointers, err := doc.Decode[map[string]*inner](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]*inner{"v": nil}, pointers)
+
+		pointerField, err := doc.Decode[struct {
+			V *inner `yaml:"v"`
+		}](t.Context())
+		require.NoError(t, err)
+		assert.Nil(t, pointerField.V)
+
+		root := yamltest.FirstDocument(t, "*x\n",
+			yamltest.References(refs), niceyaml.WithAliasLimit(false))
+
+		rootPointer, err := root.Decode[*inner](t.Context())
+		require.NoError(t, err)
+		assert.Nil(t, rootPointer)
+
+		merged := yamltest.FirstDocument(t, "v: {<<: *x}\n",
+			yamltest.References(refs), niceyaml.WithAliasLimit(false))
+
+		_, err = merged.Decode[map[string]map[string]int](t.Context())
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+		assert.ErrorContains(t, err, "merge key loops back to anchor x")
 	})
 
 	t.Run("loop of more names without the limit", func(t *testing.T) {

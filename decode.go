@@ -1417,6 +1417,56 @@ func (n *Node) readContent(node ast.Node) (ast.Node, *ast.AliasNode) {
 	return value, alias
 }
 
+// loopsToAnchor reports whether the decoder reads node as null in a
+// value of the pointer type typ. Such a node leads, through its tags,
+// anchors, and aliases, to an alias of an anchor that the walk already
+// read, such as the alias inside "&e *e". A pointer to a type that decodes
+// itself, as u reads it, or to the [ast.Node] interface reads the alias
+// as a value. A tag on the walk still applies to a pointer to a scalar.
+// Only pointers to maps, structs, slices, and arrays read a tagged alias
+// as null.
+func (n *Node) loopsToAnchor(node ast.Node, typ reflect.Type, u unmarshaler.Options) bool {
+	base := unmarshaler.Base(typ)
+	if _, whole := u.Whole(base); whole || base == reflect.TypeFor[ast.Node]() {
+		return false
+	}
+
+	read := map[*ast.AnchorNode]bool{}
+	tagged := false
+
+	for {
+		switch c := node.(type) {
+		case *ast.TagNode:
+			tagged = true
+			node = c.Value
+
+		case *ast.AnchorNode:
+			read[c] = true
+			node = c.Value
+
+		case *ast.AliasNode:
+			anchor, err := n.doc.aliasAnchor(c)
+			if err != nil {
+				return false
+			}
+
+			if read[anchor] {
+				switch base.Kind() {
+				case reflect.Map, reflect.Struct, reflect.Slice, reflect.Array:
+					return true
+				default:
+					return !tagged
+				}
+			}
+
+			node = anchor
+
+		default:
+			return false
+		}
+	}
+}
+
 // commentMap returns the comments of node and of the nodes below it, in
 // the map that [Node.YAMLComments] returns. Each key is a path from base,
 // so `$` names base. Without base, the keys start from node. Without node,
@@ -1615,6 +1665,13 @@ func (n *Node) decodeUnbound(
 	// the tests for a null read that content, with any tag on it.
 	null := astnode.IsNil(value) || value.Type() == ast.NullType
 	kind := reflect.TypeOf(v).Elem().Kind()
+
+	// An alias that leads back to an anchor that its read already opened
+	// reads as null in most pointer targets. The decoder sets such a
+	// pointer to nil, so the decode does not start the value under it.
+	if kind == reflect.Pointer && n.loopsToAnchor(node, reflect.TypeOf(v).Elem(), cfg.unmarshalers) {
+		null = true
+	}
 
 	if !astnode.HasContent(node) || astnode.IsTaggedNull(value) ||
 		null && kind != reflect.Pointer && kind != reflect.Interface {

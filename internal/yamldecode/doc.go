@@ -103,6 +103,23 @@
 //     breaks and the blank lines after an alias whose text ends its line,
 //     such as an alias to a block scalar. So a block scalar with keep
 //     chomping keeps its value.
+//   - An alias in a typed target or under a merge key reads its anchor.
+//     An alias that the anchor holds then reads inside that anchor. An
+//     anchor can hold an alias of its own name, or an alias that leads
+//     back to it, bare or under a tag. An alias of such an anchor still
+//     reads as null in a typed target. A merge of such an alias fails
+//     with a [MergeLoopError]. Go-yaml follows those aliases until the
+//     decode fails with exceeded max depth. A tag on the way to the
+//     alias still applies to a scalar, or to a pointer to one. So a
+//     "!!str" tag gives the empty string there. Only maps, structs,
+//     slices, and arrays, and pointers to them, read a tagged alias as
+//     null. An alias that reads as null sets a pointer to nil. A pointer
+//     to a type that decodes itself is the exception, because that type
+//     reads the text of the null with its tag. A pointer to an AST node
+//     type or to the [github.com/goccy/go-yaml/ast.Node] interface is
+//     another exception, because it points to the node. The null leaves
+//     a value that is not a pointer or an interface at its start, as a
+//     null does.
 //
 // The files that sync.sh does not write stand in for the parts of go-yaml
 // that the copy needs outside those files. The decode options are copies of

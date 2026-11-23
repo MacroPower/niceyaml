@@ -1,0 +1,208 @@
+--- a/decode.go
++++ b/decode.go
+@@ -141,29 +141,57 @@
+ // enterMerge returns ctx for the reads of the entries that node, the value
+ // of a merge key or an element of a sequence under a merge key, brings in.
+ // For an alias, the decoder reads those entries inside the anchor of the
+-// alias. A merge of an alias inside the anchor that it reads closes a loop,
+-// so it fails with a MergeLoopError.
++// alias. It also reads them inside the anchor of each alias that the anchor
++// holds in turn. A merge of an alias inside the anchor that it reads closes
++// a loop, so it fails with a MergeLoopError.
+ func (d *Decoder) enterMerge(ctx context.Context, node ast.Node) (context.Context, error) {
+ 	for {
++		alias, ok := nodeContent(node).(*ast.AliasNode)
++		if !ok {
++			return ctx, nil
++		}
++		key := d.aliasKey(alias)
++		if _, ok := getAnchorMap(ctx)[key]; ok {
++			return ctx, &MergeLoopError{Alias: alias}
++		}
++		ctx = withAnchor(ctx, key)
++		node = d.anchorNodeMap[key]
++	}
++}
++
++// readsAliasTarget reports whether decodeValue reads an alias that src
++// holds, under its tags, inside the anchor of that alias. An interface
++// reads the alias through nodeToValue, which reads an alias inside its
++// anchor as null, and an [ast.Node] interface holds the node itself. A
++// pointer to the type of src, or to the [ast.Node] interface, points to
++// the node itself too. A pointer to a type that decodes itself hands that
++// type the text of the alias, as createDecodedNewValue does.
++func (d *Decoder) readsAliasTarget(dst reflect.Value, src ast.Node) bool {
++	if dst.Kind() == reflect.Interface {
++		return false
++	}
++	if dst.Kind() == reflect.Ptr && d.canDecodeByUnmarshaler(reflect.New(baseType(dst.Type())).Elem()) {
++		return false
++	}
++	if baseType(dst.Type()) == astNodeType {
++		return false
++	}
++	_, pointed := pointedNode(dst.Type(), src)
++	return !pointed
++}
++
++// nodeContent returns node without the anchors and the tags around it.
++func nodeContent(node ast.Node) ast.Node {
++	for {
+ 		switch n := node.(type) {
+ 		case *ast.TagNode:
+ 			node = n.Value
+-			continue
+ 		case *ast.AnchorNode:
+ 			node = n.Value
+-			continue
+-		}
+-		break
+-	}
+-	open := getAnchorMap(ctx)
+-	if alias, ok := node.(*ast.AliasNode); ok {
+-		key := d.aliasKey(alias)
+-		if _, ok := open[key]; ok {
+-			return ctx, &MergeLoopError{Alias: alias}
++		default:
++			return node
+ 		}
+-		return withAnchor(ctx, key), nil
+ 	}
+-	return ctx, nil
+ }
+ 
+ // mapEntries returns an iterator over the entries that a read of node goes
+@@ -188,26 +216,18 @@
+ 			d.anchorNodeMap[d.anchorKey(n)] = n.Value
+ 			return d.mapEntries(ctx, n.Value, isMerge)
+ 		case *ast.AliasNode:
+-			// The caller opened the anchor of the alias. A sequence that
+-			// the alias reads brings in its elements as a sequence under
+-			// the merge key does.
++			// The caller opened the anchor of the alias, and the anchor of
++			// each alias that the anchor holds in turn. A sequence that the
++			// alias reads brings in its elements as a sequence under the
++			// merge key does.
+ 			anchor := d.anchorNodeMap[d.aliasKey(n)]
+ 			if anchor == nil {
+ 				return nil, &MissingAnchorError{Alias: n}
+ 			}
+-			content := anchor
+-		unwrap:
+-			for {
+-				switch c := content.(type) {
+-				case *ast.TagNode:
+-					content = c.Value
+-				case *ast.AnchorNode:
+-					content = c.Value
+-				default:
+-					break unwrap
+-				}
+-			}
+-			if _, ok := content.(*ast.SequenceNode); ok {
++			switch content := nodeContent(anchor).(type) {
++			case *ast.AliasNode:
++				return d.mapEntries(ctx, content, isMerge)
++			case *ast.SequenceNode:
+ 				return d.mapEntries(ctx, anchor, isMerge)
+ 			}
+ 		case *ast.SequenceNode:
+@@ -1663,6 +1683,27 @@
+ 		}
+ 		return nil
+ 	}
++	if d.readsAliasTarget(dst, src) && d.readsOpenAlias(ctx, dst.Type(), src) {
++		// src leads, through its tags and aliases, to an alias inside the
++		// anchor that it names.
++		alias, _ := nodeContent(src).(*ast.AliasNode)
++		key := d.aliasKey(alias)
++		if _, open := getAnchorMap(ctx)[key]; !open {
++			// The alias reads its anchor, which holds another alias. That
++			// alias reads inside the anchor, so an alias that leads back
++			// to the anchor reads as null.
++			d.freshAnchor = fresh
++			return d.decodeValue(withAnchor(ctx, key), dst, d.anchorNodeMap[key])
++		}
++		// An alias inside the anchor it names reads as null, as
++		// nodeToValue reads it. A pointer reads the null as nil, and any
++		// other value stays at its start.
++		d.openNulls++
++		if dst.Kind() != reflect.Ptr {
++			return nil
++		}
++		src = ast.Null(token.New("null", "null", alias.GetToken().Position))
++	}
+ 	valueType := dst.Type()
+ 	switch valueType.Kind() {
+ 	case reflect.Ptr:
+@@ -2202,6 +2243,19 @@
+ 			defer func() { d.aliasDepth-- }()
+ 		}
+ 	}
++	if typ.Kind() == reflect.Ptr && baseType(typ) != astNodeType &&
++		d.readsOpenAlias(ctx, typ, node) &&
++		!d.canDecodeByUnmarshaler(reflect.New(baseType(typ)).Elem()) {
++		// The node leads to an alias that reads as null, so the pointer
++		// reads the null as nil. A decode of the value under the pointer
++		// leaves that value at its start, and the pointer then points to
++		// that start. A pointer to the [ast.Node] interface points to the
++		// node instead.
++		if _, ok := pointedNode(typ, node); !ok {
++			d.openNulls++
++			return reflect.Zero(typ), nil
++		}
++	}
+ 	// A null sets a pointer to nil, and leaves any other value at its
+ 	// start.
+ 	newValue := start
+@@ -2230,6 +2284,50 @@
+ 	return d.castToAssignableValue(newValue, typ, node)
+ }
+ 
++// readsOpenAlias reports whether a read of node into a value of type typ
++// takes node as null. Such a node leads, through its tags, anchors, and
++// aliases, to an alias inside the anchor that it names. The anchors that
++// ctx opens count, and so does each anchor that the walk reads. A tag on
++// the walk still applies to a scalar, or to a pointer to one. nodeToValue
++// reads the tag of the alias for those. Only maps, structs, slices, and
++// arrays, and pointers to them, read a tagged alias as null.
++func (d *Decoder) readsOpenAlias(ctx context.Context, typ reflect.Type, node ast.Node) bool {
++	open := getAnchorMap(ctx)
++	read := map[string]struct{}{}
++	isOpen := func(key string) bool {
++		_, inCtx := open[key]
++		_, inRead := read[key]
++		return inCtx || inRead
++	}
++	tagged := false
++	for {
++		switch n := node.(type) {
++		case *ast.TagNode:
++			tagged = true
++			node = n.Value
++		case *ast.AnchorNode:
++			read[d.anchorKey(n)] = struct{}{}
++			node = n.Value
++		case *ast.AliasNode:
++			key := d.aliasKey(n)
++			if isOpen(key) {
++				if !tagged {
++					return true
++				}
++				switch baseType(typ).Kind() {
++				case reflect.Map, reflect.Struct, reflect.Slice, reflect.Array:
++					return true
++				}
++				return false
++			}
++			read[key] = struct{}{}
++			node = d.anchorNodeMap[key]
++		default:
++			return false
++		}
++	}
++}
++
+ // pointedNode returns node, or the value of the anchors and tags around
+ // node, when typ is a pointer to the type of that node. A pointer to the
+ // type of the node points to the node itself.

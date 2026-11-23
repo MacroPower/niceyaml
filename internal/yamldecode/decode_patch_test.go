@@ -353,6 +353,262 @@ func TestUnmarshalMergeInsideItsAnchor(t *testing.T) {
 	}
 }
 
+func TestUnmarshalAnchorOnItsOwnAlias(t *testing.T) {
+	t.Parallel()
+
+	// The anchor x holds the alias *x itself, bare or under a tag. The
+	// alias *x of b reads the anchor, and the alias inside reads as null
+	// in each typed target. A null sets a pointer to nil, and it leaves a
+	// value that is not a pointer or an interface at its start. An any
+	// value, a scalar, and a pointer to a scalar read the tag of the
+	// alias.
+	const (
+		bare   = "a: &x\n  *x\nb: *x\n"
+		tagged = "a: &x !!str *x\nb: *x\n"
+	)
+
+	type pair struct{ K, J int }
+
+	tcs := map[string]struct {
+		target func() any
+		want   any
+		src    string
+		err    string
+	}{
+		"any": {
+			src:    bare,
+			target: func() any { return new(map[string]any) },
+			want:   map[string]any{"a": nil, "b": nil},
+		},
+		"map": {
+			src:    bare,
+			target: func() any { return new(map[string]map[string]int) },
+			want:   map[string]map[string]int{"a": nil, "b": nil},
+		},
+		"struct": {
+			src:    bare,
+			target: func() any { return new(map[string]pair) },
+			want:   map[string]pair{"a": {}, "b": {}},
+		},
+		"slice": {
+			src:    bare,
+			target: func() any { return new(map[string][]int) },
+			want:   map[string][]int{"a": nil, "b": nil},
+		},
+		"integer": {
+			src:    bare,
+			target: func() any { return new(map[string]int) },
+			want:   map[string]int{"a": 0, "b": 0},
+		},
+		"pointer to struct": {
+			src:    bare,
+			target: func() any { return new(map[string]*pair) },
+			want:   map[string]*pair{"a": nil, "b": nil},
+		},
+		"pointer to integer": {
+			src:    bare,
+			target: func() any { return new(map[string]*int) },
+			want:   map[string]*int{"a": nil, "b": nil},
+		},
+		"pointer field": {
+			src:    bare,
+			target: func() any { return new(struct{ A, B *pair }) },
+			want:   struct{ A, B *pair }{},
+		},
+		"pointer to a type that decodes itself": {
+			// The type reads the text of the null, as at an anchored null.
+			src:    bare,
+			target: func() any { return new(map[string]*bytesValue) },
+			want:   map[string]*bytesValue{"a": {s: "null"}, "b": {s: "null"}},
+		},
+		"pointer to string": {
+			src:    bare,
+			target: func() any { return new(map[string]*string) },
+			want:   map[string]*string{"a": nil, "b": nil},
+		},
+		"pointer to any": {
+			// A pointer to an interface other than the AST node interface
+			// reads the null as nil.
+			src:    bare,
+			target: func() any { return new(map[string]*any) },
+			want:   map[string]*any{"a": nil, "b": nil},
+		},
+		"document pointer to a type that decodes itself": {
+			// The pointer of the document reads the text of the tagged
+			// null, as a pointer under a key does.
+			src:    "&x !!str *x\n",
+			target: func() any { return new(*bytesValue) },
+			want:   &bytesValue{s: "!!str null"},
+		},
+		"tagged any": {
+			src:    tagged,
+			target: func() any { return new(map[string]any) },
+			want:   map[string]any{"a": "", "b": ""},
+		},
+		"tagged map": {
+			src:    tagged,
+			target: func() any { return new(map[string]map[string]int) },
+			want:   map[string]map[string]int{"a": nil, "b": nil},
+		},
+		"tagged struct": {
+			src:    tagged,
+			target: func() any { return new(map[string]pair) },
+			want:   map[string]pair{"a": {}, "b": {}},
+		},
+		"tagged slice": {
+			src:    tagged,
+			target: func() any { return new(map[string][]int) },
+			want:   map[string][]int{"a": nil, "b": nil},
+		},
+		"tagged pointer to struct": {
+			src:    tagged,
+			target: func() any { return new(map[string]*pair) },
+			want:   map[string]*pair{"a": nil, "b": nil},
+		},
+		"tagged array": {
+			src:    tagged,
+			target: func() any { return new(map[string][2]int) },
+			want:   map[string][2]int{"a": {}, "b": {}},
+		},
+		"tagged string": {
+			src:    tagged,
+			target: func() any { return new(map[string]string) },
+			want:   map[string]string{"a": "", "b": ""},
+		},
+		"tagged pointer to string": {
+			src:    tagged,
+			target: func() any { return new(map[string]*string) },
+			want:   map[string]*string{"a": new(string), "b": new(string)},
+		},
+		"tagged integer": {
+			src:    tagged,
+			target: func() any { return new(map[string]int) },
+			err:    "cannot unmarshal string into Go value of type int",
+		},
+		"tagged pointer to integer": {
+			src:    tagged,
+			target: func() any { return new(map[string]*int) },
+			err:    "cannot unmarshal string into Go value of type int",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := tc.target()
+			err := yaml.Unmarshal([]byte(tc.src), got)
+
+			if tc.err != "" {
+				require.ErrorContains(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, reflect.ValueOf(got).Elem().Interface())
+		})
+	}
+
+	// A target of an AST node type holds the alias of the document that
+	// the anchor holds, as it holds the node of any other anchor.
+	wantLines := map[string]int{"a": 2, "b": 2}
+
+	t.Run("node", func(t *testing.T) {
+		t.Parallel()
+
+		var got map[string]ast.Node
+
+		require.NoError(t, yaml.Unmarshal([]byte(bare), &got))
+
+		for key, line := range wantLines {
+			require.IsType(t, &ast.AliasNode{}, got[key], key)
+			assert.Equal(t, "*x", got[key].String(), key)
+			assert.Equal(t, line, got[key].GetToken().Position.Line, key)
+		}
+	})
+
+	t.Run("pointer to alias", func(t *testing.T) {
+		t.Parallel()
+
+		var got map[string]*ast.AliasNode
+
+		require.NoError(t, yaml.Unmarshal([]byte(bare), &got))
+
+		for key, line := range wantLines {
+			require.NotNil(t, got[key], key)
+			assert.Equal(t, "*x", got[key].String(), key)
+			assert.Equal(t, line, got[key].GetToken().Position.Line, key)
+		}
+	})
+
+	t.Run("pointer to node", func(t *testing.T) {
+		t.Parallel()
+
+		var got map[string]*ast.Node
+
+		require.NoError(t, yaml.Unmarshal([]byte(bare), &got))
+
+		for key, line := range wantLines {
+			require.NotNil(t, got[key], key)
+			require.IsType(t, &ast.AliasNode{}, *got[key], key)
+			assert.Equal(t, "*x", (*got[key]).String(), key)
+			assert.Equal(t, line, (*got[key]).GetToken().Position.Line, key)
+		}
+	})
+
+	t.Run("node of an alias to an alias", func(t *testing.T) {
+		t.Parallel()
+
+		var got map[string]ast.Node
+
+		require.NoError(t, yaml.Unmarshal([]byte("c: &c {k: 1}\nb: &b\n  *c\na: &a\n  *b\n"), &got))
+		assert.Equal(t, "*b", got["a"].String())
+		assert.Equal(t, "*c", got["b"].String())
+	})
+
+	// A merge of the alias reads the anchor, and the alias inside closes
+	// the loop. So does a merge of an alias whose anchor holds the alias
+	// of a sequence with the loop.
+	merges := map[string]struct {
+		src  string
+		name string
+		col  int
+	}{
+		"alias":             {src: "a: &x\n  *x\nb: {<<: *x}\n", col: 3, name: "x"},
+		"sequence":          {src: "a: &x\n  *x\nb: {<<: [*x]}\n", col: 3, name: "x"},
+		"alias of sequence": {src: "c: &c [*c]\nb: &b\n  *c\nd: {<<: *b}\n", col: 8, name: "c"},
+	}
+
+	for name, tc := range merges {
+		t.Run("merge "+name, func(t *testing.T) {
+			t.Parallel()
+
+			var loop *yaml.MergeLoopError
+
+			require.ErrorAs(t, yaml.Unmarshal([]byte(tc.src), new(map[string]any)), &loop)
+			assert.Equal(t, tc.col, loop.Alias.GetToken().Position.Column)
+			assert.EqualError(t, loop, "merge key loops back to anchor "+tc.name)
+		})
+	}
+
+	// A merge of an alias whose anchor holds the alias of a sequence reads
+	// the entries inside both anchors, as a merge of the inner alias does.
+	t.Run("merge alias of sequence without a loop", func(t *testing.T) {
+		t.Parallel()
+
+		for _, src := range []string{
+			"c: &c [{k: *c}]\nb: &b\n  *c\nd: {<<: *b}\n",
+			"c: &c [{k: *c}]\nd: {<<: *c}\n",
+		} {
+			var got map[string]any
+
+			require.NoError(t, yaml.Unmarshal([]byte(src), &got), src)
+			assert.Equal(t, map[string]any{"k": nil}, got["d"], src)
+		}
+	})
+}
+
 func TestUnmarshalContextEnds(t *testing.T) {
 	t.Parallel()
 
@@ -1822,6 +2078,126 @@ func TestResolveAliasLoopAcrossAnchors(t *testing.T) {
 			assert.Equal(t, wantTyped, got)
 		})
 	}
+}
+
+func TestResolveAliasAnchorsOnEachOthersAlias(t *testing.T) {
+	t.Parallel()
+
+	// The anchors x and y of another parse each hold the alias of the
+	// other. The alias *x of the document reads x, which reads y through
+	// its alias, and the alias *x inside y reads as null.
+	ref := parseBody(t, "x: &x\n  *y\ny: &y\n  *x\n")
+	refMapping, ok := ref.(*ast.MappingNode)
+	require.True(t, ok)
+
+	anchors := map[string]ast.Node{}
+
+	for _, value := range refMapping.Values {
+		anchor, ok := value.Value.(*ast.AnchorNode)
+		require.True(t, ok)
+
+		anchors[anchor.Name.GetToken().Value] = anchor.Value
+	}
+
+	resolve := yaml.ResolveAlias(func(alias *ast.AliasNode) (ast.Node, bool) {
+		node, ok := anchors[alias.Value.GetToken().Value]
+		return node, ok
+	})
+
+	type pair struct{ K, J int }
+
+	tcs := map[string]struct {
+		target func() any
+		want   any
+	}{
+		"any": {
+			target: func() any { return new(map[string]any) },
+			want:   map[string]any{"v": nil},
+		},
+		"map": {
+			target: func() any { return new(map[string]map[string]int) },
+			want:   map[string]map[string]int{"v": nil},
+		},
+		"struct": {
+			target: func() any { return new(map[string]pair) },
+			want:   map[string]pair{"v": {}},
+		},
+		"slice": {
+			target: func() any { return new(map[string][]int) },
+			want:   map[string][]int{"v": nil},
+		},
+		"pointer to struct": {
+			target: func() any { return new(map[string]*pair) },
+			want:   map[string]*pair{"v": nil},
+		},
+		"pointer field": {
+			target: func() any { return new(struct{ V *pair }) },
+			want:   struct{ V *pair }{},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := tc.target()
+			body := parseBody(t, "v: *x\n")
+
+			require.NoError(t, yaml.NewDecoder(bytes.NewReader(nil), resolve).DecodeFromNode(body, got))
+			assert.Equal(t, tc.want, reflect.ValueOf(got).Elem().Interface())
+		})
+	}
+
+	t.Run("filled pointer", func(t *testing.T) {
+		t.Parallel()
+
+		// A decode of the alias alone into a pointer that holds a value
+		// reads the null too, and sets the pointer to nil.
+		got := &pair{K: 1}
+		body := parseBody(t, "*x\n")
+
+		require.NoError(t, yaml.NewDecoder(bytes.NewReader(nil), resolve).DecodeFromNode(body, &got))
+		assert.Nil(t, got)
+	})
+
+	t.Run("pointer to alias", func(t *testing.T) {
+		t.Parallel()
+
+		// A pointer to the type of the node that the anchor holds points
+		// to that node.
+		var got *ast.AliasNode
+
+		body := parseBody(t, "*x\n")
+
+		require.NoError(t, yaml.NewDecoder(bytes.NewReader(nil), resolve).DecodeFromNode(body, &got))
+		assert.Same(t, anchors["x"], got)
+	})
+
+	t.Run("pointer to node", func(t *testing.T) {
+		t.Parallel()
+
+		// A pointer to the AST node interface points to the alias of the
+		// document, as an [ast.Node] value holds it.
+		var got *ast.Node
+
+		body := parseBody(t, "*x\n")
+
+		require.NoError(t, yaml.NewDecoder(bytes.NewReader(nil), resolve).DecodeFromNode(body, &got))
+		require.NotNil(t, got)
+		assert.Same(t, body, *got)
+	})
+
+	t.Run("merge", func(t *testing.T) {
+		t.Parallel()
+
+		body := parseBody(t, "v: {<<: *x}\n")
+
+		var loop *yaml.MergeLoopError
+
+		err := yaml.NewDecoder(bytes.NewReader(nil), resolve).DecodeFromNode(body, new(map[string]map[string]int))
+		require.ErrorAs(t, err, &loop)
+		assert.EqualError(t, loop, "merge key loops back to anchor x")
+	})
 }
 
 func TestResolveAliasBelowDocumentReadsAnchorOnce(t *testing.T) {
