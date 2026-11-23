@@ -91,6 +91,10 @@
 //     flow collection. A string whose text reads as another value inside a
 //     flow collection becomes a double-quoted string. The text leaves out
 //     the comments of the anchor.
+//   - The text that the decoder hands an unmarshaler leaves out the line
+//     breaks and the blank lines after an alias whose text ends its line,
+//     such as an alias to a block scalar. So a block scalar with keep
+//     chomping keeps its value.
 //
 // The files that sync.sh does not write stand in for the parts of go-yaml
 // that the copy needs outside those files. The decode options are copies of

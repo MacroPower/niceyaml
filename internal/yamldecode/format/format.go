@@ -218,6 +218,9 @@ type Formatter struct {
 	// flow counts the flow collections that hold the node that the
 	// formatter writes.
 	flow int
+	// lineEnded reports whether the text of an alias that the formatter
+	// wrote last ends its line, as the content of a block scalar does.
+	lineEnded bool
 }
 
 // Origins holds the text that a [Formatter] writes for each token of the
@@ -365,6 +368,23 @@ func (f *Formatter) origin(tk *token.Token) string {
 		// that end the text of the parse. They belong to no node, so the
 		// text of an alias leaves them out.
 		text = strings.TrimRight(text, " \t\r\n")
+	}
+	return f.afterAlias(text)
+}
+
+// afterAlias returns text without the line breaks and the blank lines at
+// its start when the text of an alias before it ends its line. In the
+// document, those line breaks end the line of the alias, and the text of
+// the alias ends that line already. A block scalar with keep chomping
+// reads each extra line break as a line break of its value.
+func (f *Formatter) afterAlias(text string) string {
+	if !f.lineEnded || text == "" {
+		return text
+	}
+	f.lineEnded = false
+	lead := text[:len(text)-len(strings.TrimLeft(text, " \t\r\n"))]
+	if end := strings.LastIndexAny(lead, "\r\n"); end >= 0 {
+		return text[end+1:]
 	}
 	return text
 }
@@ -538,6 +558,7 @@ func (f *Formatter) formatAlias(n *ast.AliasNode) string {
 			if f.flow > 0 {
 				return formatted
 			}
+			f.lineEnded = strings.HasSuffix(formatted, "\n") || strings.HasSuffix(formatted, "\r")
 			// If formatted text contains newline characters, indentation needs to be considered.
 			if strings.Contains(formatted, "\n") {
 				// If the first character is not a newline, the first line should be output without indentation.
@@ -690,7 +711,7 @@ func (f *Formatter) formatComment(n *ast.CommentNode) string {
 	if n == nil {
 		return ""
 	}
-	return n.Token.Origin
+	return f.afterAlias(n.Token.Origin)
 }
 
 // nolint: unused

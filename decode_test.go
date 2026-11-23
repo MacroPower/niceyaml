@@ -20882,6 +20882,60 @@ func TestDocument_Decode_TextOfAliasInFlow(t *testing.T) {
 	}
 }
 
+func TestDocument_Decode_TextOfBlockScalarAlias(t *testing.T) {
+	t.Parallel()
+
+	// A type that reads text gets each alias to a block scalar written out
+	// as the scalar with the line breaks of its content. The line breaks
+	// after the alias stay out of the text, so a scalar with keep chomping
+	// reads as the value of the document. An anchor of a reference document
+	// gives the same text.
+	tcs := map[string]struct {
+		anchor string
+		input  string
+		want   rawString
+	}{
+		"keep literal before a key": {
+			anchor: "m: &m |+\n  text\n\n",
+			input:  "v:\n  a: *m\n  b: 1\n",
+			want:   "a: |+\n  text\n\nb: 1\n",
+		},
+		"keep folded before a sequence entry": {
+			anchor: "m: &m >+\n  text\n",
+			input:  "v:\n  - *m\n\n  - 1\n",
+			want:   "- >+\n  text\n- 1\n",
+		},
+		"keep literal at the end": {
+			anchor: "m: &m |+\n  text\n\n",
+			input:  "v:\n  a: *m\n",
+			want:   "a: |+\n  text\n\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			want, err := yamltest.FirstDocument(t, tc.anchor+tc.input).Decode[map[string]any](t.Context())
+			require.NoError(t, err)
+
+			docs := map[string]*niceyaml.Node{
+				"same document": yamltest.FirstDocument(t, tc.anchor+tc.input),
+				"reference":     yamltest.FirstDocument(t, tc.input, yamltest.References(tc.anchor)),
+			}
+			for source, doc := range docs {
+				got, err := doc.Decode[map[string]rawString](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got["v"], source)
+
+				reread, err := yamltest.FirstDocument(t, string(got["v"])).Decode[any](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, want["v"], reread, source)
+			}
+		})
+	}
+}
+
 func TestNode_Decode_AnchorBeforeNodeReadsReference(t *testing.T) {
 	t.Parallel()
 

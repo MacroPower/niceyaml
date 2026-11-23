@@ -1295,6 +1295,72 @@ func TestUnmarshalerBytesAliasInFlow(t *testing.T) {
 	}
 }
 
+func TestUnmarshalerBytesAliasOfBlockScalar(t *testing.T) {
+	t.Parallel()
+
+	// The content of a block scalar ends with its line breaks, and so does
+	// the text of an alias to it. The line breaks and the blank lines after
+	// the alias stay out of the text, so a block scalar with keep chomping
+	// keeps its value.
+	tcs := map[string]struct {
+		src  string
+		want string
+	}{
+		"keep literal before a key": {
+			src:  "m: &m |+\n  text\n\nv:\n  a: *m\n  b: 1",
+			want: "a: |+\n  text\n\nb: 1",
+		},
+		"keep literal without a blank line": {
+			src:  "m: &m |+\n  text\nv:\n  a: *m\n  b: 1",
+			want: "a: |+\n  text\nb: 1",
+		},
+		"keep folded before a key": {
+			src:  "m: &m >+\n  text\n\nv:\n  a: *m\n  b: 1",
+			want: "a: >+\n  text\n\nb: 1",
+		},
+		"keep literal before a sequence entry": {
+			src:  "m: &m |+\n  text\n\nv:\n  - *m\n  - 1",
+			want: "- |+\n  text\n\n- 1",
+		},
+		"keep literal before a blank line": {
+			src:  "m: &m |+\n  text\n\nv:\n  a: *m\n\n  b: 1",
+			want: "a: |+\n  text\n\nb: 1",
+		},
+		"keep literal before a comment": {
+			src:  "m: &m |+\n  text\n\nv:\n  a: *m\n\n  # c\n  b: 1",
+			want: "a: |+\n  text\n\n# c\nb: 1",
+		},
+		"keep literal inside an alias": {
+			src:  "m: &m |+\n  text\n\nn: &n\n  x: *m\nv:\n  a: *n\n  b: 1",
+			want: "a:\n  x: |+\n    text\n\nb: 1",
+		},
+		"keep literal at the end": {
+			src:  "m: &m |+\n  text\n\nv:\n  a: *m\nw: 1",
+			want: "a: |+\n  text\n\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var want struct{ V any }
+
+			require.NoError(t, yaml.Unmarshal([]byte(tc.src), &want))
+
+			var got struct{ V bytesValue }
+
+			require.NoError(t, yaml.NewDecoder(bytes.NewReader(nil)).DecodeFromNode(parseBody(t, tc.src), &got))
+			assert.Equal(t, tc.want, got.V.s)
+
+			var reread any
+
+			require.NoError(t, yaml.Unmarshal([]byte(got.V.s), &reread))
+			assert.Equal(t, want.V, reread)
+		})
+	}
+}
+
 func TestDecodeFromNodePointerToNodeType(t *testing.T) {
 	t.Parallel()
 
