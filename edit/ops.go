@@ -50,10 +50,8 @@ type KeyValue interface {
 // A float whose text reads back as another value than the text fails the
 // rename with [ErrUnsupported], as [ConstructKeyText] names it. The float
 // 1.0 is such a key, because its text 1.0 reads as 1. So are the floats
-// that the encoder writes as -0.0, .inf, and .nan. The problem has InValue
-// set, because the key comes from the program. A float whose text
-// go-yaml's decoder reads as a string, as it reads 1e+30, fails the rename
-// with [ErrEngine], as such a key fails a Set.
+// that the encoder writes as -0.0, 1.0e+30, .inf, and .nan. The problem
+// has InValue set, because the key comes from the program.
 //
 // The place of a key can decide how a decode reads it. Go-yaml reads the
 // first key of a block mapping under a tag such as !t as a string. So

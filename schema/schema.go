@@ -983,9 +983,6 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 // encoder writes a []byte inside a typed value as a sequence of integers.
 // Such a []byte thus does not check as the base64 text that a !!binary
 // scalar decodes to, or that a []byte in the decoded form converts to.
-// The encoder writes some floats, such as 1000000.0 and 0.00001, in
-// exponent form without a fraction (1e+06, 1e-05). The decode reads that
-// text as a string, so a type or number keyword reports such a field.
 // Each call costs one encode and one decode for each typed value in data.
 //
 // ValidateValue does not take encoder options. A type that writes its

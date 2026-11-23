@@ -2829,21 +2829,17 @@ func TestNode_MarshalYAML(t *testing.T) {
 		assert.Equal(t, before, d.Text())
 	})
 
-	t.Run("float that the encoder writes without a fraction", func(t *testing.T) {
+	t.Run("float that the encoder writes with an exponent", func(t *testing.T) {
 		t.Parallel()
 
-		before := stringtest.LinesLF("src: {lr: 0.00001}", "dst: old")
-		d := newDoc(t, before)
+		d := newDoc(t, stringtest.LinesLF("src: {lr: 0.00001}", "dst: old"))
 
 		err := d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, root *edit.Node) error {
 			return root.At(paths.Doc().Child("dst")).Set(ctx, root.At(paths.Doc().Child("src")))
 		}, label)
 
-		requireEdit(t, d, err,
-			`test.yaml:2:6: $.dst: go-yaml's encoder writes the float 1e-05 as text that `+
-				`go-yaml's decoder reads as "1e-05"`, "")
-		require.ErrorIs(t, err, edit.ErrEngine)
-		assert.Equal(t, before, d.Text())
+		require.NoError(t, err)
+		assert.Equal(t, stringtest.LinesLF("src: {lr: 0.00001}", "dst:", "  lr: 1.0e-05"), d.Text())
 	})
 
 	t.Run("item that a Func inserts", func(t *testing.T) {

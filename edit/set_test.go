@@ -367,14 +367,18 @@ func TestNode_Set(t *testing.T) {
 			want:   "a:\r\n  x: 1\r\n  y: 2\r\n",
 		},
 		"float that go-yaml's encoder writes in an exponent form": {
-			// The encoder of go-yaml writes 1e+06, which its decoder reads as
-			// a string, so the Set fails loudly.
+			// Go-yaml's encoder writes 1e+06, which its decoder reads as a
+			// string, so the encode writes a decimal point into it.
 			before: "replicas: 3\n",
 			path:   paths.Doc().Child("replicas"),
 			value:  1000000.0,
-			err: "1:11: $.replicas: go-yaml's encoder writes the float 1e+06 " +
-				`as text that go-yaml's decoder reads as "1e+06"`,
-			engine: true,
+			want:   "replicas: 1.0e+06\n",
+		},
+		"float that go-yaml's encoder writes in an exponent form in a flow sequence": {
+			before: "l: [1]\n",
+			path:   paths.MustParse("$.l[0]"),
+			value:  1000000.0,
+			want:   "l: [1.0e+06]\n",
 		},
 		"map with an array key, which go-yaml's encoder writes as a string": {
 			// The encoder writes the key as the string that fmt prints for
@@ -427,19 +431,13 @@ func TestNode_Set(t *testing.T) {
 			before: "replicas: 3\n",
 			path:   paths.Doc().Child("replicas"),
 			value:  1e-5,
-			err: "1:11: $.replicas: go-yaml's encoder writes the float 1e-05 " +
-				`as text that go-yaml's decoder reads as "1e-05"`,
-			engine: true,
+			want:   "replicas: 1.0e-05\n",
 		},
 		"large float in a new entry that go-yaml's encoder writes in an exponent form": {
-			// The call creates the place, so the problem binds at the nearest value above it that the user
-			// wrote, under its path (fix19 G1-1).
 			before: "replicas: 3\n",
 			path:   paths.MustParse("$.scale.max"),
-			value:  map[string]any{"n": 1e20},
-			err: "1:1: $: go-yaml's encoder writes the float 1e+20 " +
-				`as text that go-yaml's decoder reads as "1e+20"`,
-			engine: true,
+			value:  map[string]any{"x": -1e20},
+			want:   stringtest.LinesLF("replicas: 3", "scale:", "  max:", "    x: -1.0e+20"),
 		},
 		"mapping with a key that holds a colon in place of a scalar": {
 			// Go-yaml reads the key of a block mapping up to the ": ".
@@ -1430,21 +1428,21 @@ func TestNode_Set(t *testing.T) {
 			value:  "\x01",
 			err:    "which goes through a merge key that merges a mapping written in place",
 		},
-		"value of a marshaler with an anchor beside a float that go-yaml's decoder reads as a string": {
-			// The float fails the round trip of the encode, whatever the YAML
-			// of the marshaler holds.
+		"value of a marshaler with an anchor beside a key that go-yaml's encoder writes as a string": {
+			// The key fails the round trip of the encode, whatever the YAML of
+			// the marshaler holds.
 			before: "a: 1\n",
 			path:   paths.MustParse("$.b"),
-			value:  map[string]any{"x": yamlMarshaler("&q 1\n"), "y": 1e6},
+			value:  map[string]any{"x": yamlMarshaler("&q 1\n"), "y": map[[1]int]int{{1}: 1}},
 			engine: true,
-			err:    `go-yaml's encoder writes the float 1e+06 as text that go-yaml's decoder reads as "1e+06"`,
+			err:    `go-yaml's encoder writes a key of type [1]int as the string "[1]"`,
 		},
 		"value of a marshaler with an alias that the YAML does not anchor": {
 			// Control: the alias makes go-yaml's decoder refuse the text of the
 			// encode, and the Set fails with the alias.
 			before: "a: 1\n",
 			path:   paths.MustParse("$.b"),
-			value:  map[string]any{"x": yamlMarshaler("*q\n"), "y": 1e6},
+			value:  map[string]any{"x": yamlMarshaler("*q\n"), "y": 1},
 			err:    "sets $.b to a value whose YAML holds the alias *q",
 		},
 		"string of the text of a block scalar and a line break at the end of a text without a line break": {

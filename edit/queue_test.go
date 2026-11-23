@@ -167,10 +167,10 @@ func TestDoc_Apply_Queue(t *testing.T) {
 			fn:     setBy(map[string]any{"a": "x", "b": yamlMarshaler("!t\x01 v"), "c": "w"}),
 			err:    "go-yaml's encoder writes U+0001 as it is",
 		},
-		"set of a float that go-yaml reads as a string": {
+		"set of a key that go-yaml's encoder writes as a string": {
 			before: stringtest.LinesLF("a: 1", "b: 2"),
 			path:   "$.*",
-			fn:     setBy(map[string]any{"a": 2, "b": 1e-07}),
+			fn:     setBy(map[string]any{"a": 2, "b": map[[1]int]int{{1}: 1}}),
 			err:    "$.b",
 		},
 		"set of a protected value": {

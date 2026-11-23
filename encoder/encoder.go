@@ -290,7 +290,7 @@ func WithOmitZero(enabled bool) Option {
 // float with a magnitude of less than one million as an integer, such as
 // 1.0 as 1. The default is false, and 1.0 then writes as 1.0. The encoder
 // writes a whole float with a magnitude of one million or more with an
-// exponent under either setting, such as 1e6 as 1e+06.
+// exponent under either setting, such as 1e6 as 1.0e+06.
 func WithAutoInt(enabled bool) Option {
 	return func(c *config) {
 		c.autoInt = enabled
@@ -486,6 +486,11 @@ func newDocEncoder(c config) *docEncoder {
 // and YAML 1.2 reads as a float. The tag of a scalar in the YAML that a
 // marshaler returns decides how a reader reads the scalar, so Encode leaves
 // such a scalar unquoted.
+//
+// Encode writes each float with an exponent with a decimal point too, so
+// 1000000.0 writes as 1.0e+06 and 0.00001 as 1.0e-05. Go-yaml's encoder
+// writes such a float in the form of [strconv.FormatFloat], such as
+// 1e+06. Go-yaml reads that text as a string.
 //
 // YAML allows only its printable characters in a text. Encode
 // double-quotes each UTF-8 string that holds another character, such as
@@ -697,6 +702,10 @@ func (d *docEncoder) node(ctx context.Context, v any) (ast.Node, []block, error)
 	if bools.found {
 		return nil, nil, fmt.Errorf("%w: empty node under the %s tag", ErrEncode, token.BooleanTag)
 	}
+
+	// Go-yaml's encoder writes some floats with an exponent and without a
+	// decimal point, which its decoder reads as a string.
+	ast.Walk(floatPointer{}, node)
 
 	// The go-yaml encoder can leave a collection of a marshaler's YAML at
 	// or left of the column of its key. The quoter reads the columns that
@@ -986,6 +995,46 @@ func (h *holeFinder) Visit(node ast.Node) ast.Visitor {
 	}
 
 	return h
+}
+
+// floatPointer is an [ast.Visitor] that writes a decimal point into each
+// float of a tree whose text has an exponent and no decimal point, as in
+// 1.0e+06 for 1e+06. Go-yaml's encoder writes a Go float that way when
+// [strconv.FormatFloat] does, such as 1000000.0 and 0.00001. Go-yaml's
+// decoder reads such text as a string, and it reads the text with the
+// decimal point as the float. Go-yaml's parser reads such text in a
+// marshaler's YAML as a string. So a float node of such text comes only
+// from the encoder. The visitor also gives the node the value of its
+// text, where the encoder gave it 0.
+type floatPointer struct{}
+
+// Visit implements [ast.Visitor].
+func (p floatPointer) Visit(node ast.Node) ast.Visitor {
+	n, ok := node.(*ast.FloatNode)
+	if !ok {
+		return p
+	}
+
+	text := n.Token.Value
+
+	e := strings.IndexAny(text, "eE")
+	if e < 0 || strings.Contains(text, ".") {
+		return p
+	}
+
+	pointed := text[:e] + ".0" + text[e:]
+
+	n.Token.Origin = strings.Replace(n.Token.Origin, text, pointed, 1)
+	n.Token.Value = pointed
+	n.Token.Type = token.FloatType
+
+	if num := token.ToNumber(pointed); num != nil {
+		if v, ok := num.Value.(float64); ok {
+			n.Value = v
+		}
+	}
+
+	return p
 }
 
 // emptyBoolFinder is an [ast.Visitor] that reports whether a tree holds an

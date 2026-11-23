@@ -86,10 +86,9 @@ type renderedHeader struct {
 // the encode, such as the plain timestamp of a [time.Time]. The model holds
 // the value that go-yaml's encoder meant, as the node of the encode holds
 // it, and the text holds what go-yaml's parse of the encoded text reads.
-// When the two differ, as for a float that the encoder writes as 1e+06 and
-// the decoder reads as a string, render returns an error that matches
-// errEncoder. So does a refusal of go-yaml's parser of the encoded text.
-// So does a byte order mark there, as [Doc.valueMisread] finds it. So do
+// When the two differ, render returns an error that matches errEncoder.
+// So does a refusal of go-yaml's parser of the encoded text. So does a
+// byte order mark there, as [Doc.valueMisread] finds it. So do
 // line breaks of both kinds in the encoded text where the YAML of no
 // marshaler of v holds both. The encoder wrote them then, as it writes the
 // header of a block scalar of "\r\n" lines with a "\n". After those
@@ -305,8 +304,8 @@ var (
 	// writes without end.
 	errSelfReference = errors.New("it refers to itself")
 	// The reason of a value with a scalar whose text go-yaml's decoder
-	// reads as a value of another kind, as the float 1e+06 reads as a
-	// string. It matches errEncoder.
+	// reads as a value of another kind, or with a key that go-yaml's
+	// encoder writes as a string. It matches errEncoder.
 	errScalarKind = fmt.Errorf("%w writes", errEncoder)
 )
 
@@ -663,16 +662,14 @@ func readsAs(node ast.Node, text string) bool {
 // is the node that go-yaml's encoder made. The decoder refuses an alias
 // inside its own anchor, as in "&a !!str *a", whose value has no end.
 // The error names the first scalar of meant that the parse reads so, by
-// the type of its node and its text. A float that the encoder writes as
-// 1e+06 is such a scalar, because the decoder reads that text as a string.
-// For a scalar of the YAML of a marshaler, a block scalar among them, the
-// error is a [*marshalerError]. It names the scalar at its place in that
-// YAML and the text that the encoder writes for it, with its tags.
+// the type of its node and its text. For a scalar of the YAML of a
+// marshaler, a block scalar among them, the error is a [*marshalerError].
+// It names the scalar at its place in that YAML and the text that the
+// encoder writes for it, with its tags.
 // The scalars of meant do not hold the values that a decode reads, because
-// go-yaml's encoder keeps the quotes of a string in its value and gives the
-// float 1e+06 the value 0. The decoder still reads each of them as a value
-// of the kind that the encoder meant, so the check compares the kinds of
-// the two decodes.
+// go-yaml's encoder keeps the quotes of a string in its value. The decoder
+// still reads each of them as a value of the kind that the encoder meant,
+// so the check compares the kinds of the two decodes.
 func readsBack(meant, body ast.Node) error {
 	var got any
 

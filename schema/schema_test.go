@@ -1839,15 +1839,11 @@ func TestSchema_ValidateValue_Typed(t *testing.T) {
 		"bytes inside a map": {
 			data: map[string]any{"data": []byte("hi")},
 		},
-		// The encoder writes some floats in exponent form without a
-		// fraction, and the decode reads that text as a string.
 		"large float in exponent form": {
 			data: typedRatio{Ratio: 1000000.0},
-			want: `$.ratio: expected "number", got "string"`,
 		},
 		"small float in exponent form": {
 			data: typedRatio{Ratio: 0.00001},
-			want: `$.ratio: expected "number", got "string"`,
 		},
 		"float with a fraction": {
 			data: typedRatio{Ratio: 0.5},

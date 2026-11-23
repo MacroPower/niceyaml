@@ -6391,7 +6391,7 @@ func TestNode_MarshalYAML(t *testing.T) {
 		})
 	}
 
-	t.Run("float that the encoder writes without a fraction", func(t *testing.T) {
+	t.Run("float that the encoder writes with an exponent", func(t *testing.T) {
 		t.Parallel()
 
 		doc := yamltest.FirstDocument(t, "a: 1000000.0\nb: 0.00001\nc: 1234567.0\n")
@@ -6402,12 +6402,11 @@ func TestNode_MarshalYAML(t *testing.T) {
 
 		got, err := encoder.Marshal(t.Context(), doc)
 		require.NoError(t, err)
-		assert.Equal(t, stringtest.LinesLF("a: 1e+06", "b: 1e-05", "c: 1.234567e+06"), string(got))
+		assert.Equal(t, stringtest.LinesLF("a: 1.0e+06", "b: 1.0e-05", "c: 1.234567e+06"), string(got))
 
-		// Go-yaml reads an exponent without a fraction as a string.
 		back, err := yamltest.FirstDocument(t, string(got)).Decode[any](t.Context())
 		require.NoError(t, err)
-		assert.Equal(t, map[string]any{"a": "1e+06", "b": "1e-05", "c": 1.234567e+06}, back)
+		assert.Equal(t, want, back)
 	})
 
 	t.Run("mappings and sequences of the value", func(t *testing.T) {

@@ -1460,9 +1460,10 @@ func TestDoc_Apply(t *testing.T) {
 		"changes the string of the scalar, when it "
 	recursive := "test.yaml:1:4: $.a: the edit moves $.b to $.a.q, which makes a document with an alias inside the " +
 		"value of the anchor that it reads, such as *y, and cafe does not edit such a document"
-	// The encoder of go-yaml writes this float as 1e+06, which its decoder
-	// reads as a string, so a Set of it fails with ErrEngine at its place.
-	misread := 1000000.0
+	// Go-yaml's encoder writes the key of this map as the string "[1]",
+	// which does not read back as the array, so a Set of it fails with
+	// ErrEngine at its place.
+	misread := map[[1]int]int{{1}: 1}
 
 	tcs := map[string]struct {
 		fn     edit.Func
@@ -1522,16 +1523,16 @@ func TestDoc_Apply(t *testing.T) {
 			before: stringtest.LinesLF("l:", "  - 0", "  - 1"),
 			path:   paths.Doc(),
 			fn:     both(at(paths.MustParse("$.l[0]"), remove), at(paths.MustParse("$.l[1]"), set(misread))),
-			err: "test.yaml:1:1: $.l: go-yaml's encoder writes the float 1e+06 as text that go-yaml's decoder reads " +
-				"as \"1e+06\"\n|-- report this to the authors of cafe\n`-- the edit sets $.l[1]",
+			err: "test.yaml:1:1: $.l: go-yaml's encoder writes a key of type [1]int as the string \"[1]\"" +
+				"\n|-- report this to the authors of cafe\n`-- the edit sets $.l[1]",
 			engine: true,
 		},
 		"value that go-yaml's encoder misreads at a new key of an item after the removal of an earlier item": {
 			before: stringtest.LinesLF("z0: 0", "l:", "  - 0", "  - x: 1"),
 			path:   paths.Doc(),
 			fn:     both(at(paths.MustParse("$.l[0]"), remove), at(paths.MustParse("$.l[0].new"), set(misread))),
-			err: "test.yaml:4:3: $.l[1]: go-yaml's encoder writes the float 1e+06 as text that go-yaml's decoder " +
-				"reads as \"1e+06\"\n|-- report this to the authors of cafe\n`-- the edit sets $.l[0].new",
+			err: "test.yaml:4:3: $.l[1]: go-yaml's encoder writes a key of type [1]int as the string \"[1]\"" +
+				"\n|-- report this to the authors of cafe\n`-- the edit sets $.l[0].new",
 			engine: true,
 		},
 		"string with a byte that is not UTF-8 at a new key of a nested mapping": {
@@ -1706,8 +1707,7 @@ func TestDoc_Apply(t *testing.T) {
 			before: stringtest.LinesLF("z0: 0", "m:", "  <<: {a: 1}"),
 			path:   paths.Doc(),
 			fn:     at(paths.MustParse("$.m.a"), set(misread)),
-			err: "test.yaml:3:11: $.m: go-yaml's encoder writes the float 1e+06 as text that go-yaml's decoder " +
-				"reads as \"1e+06\"",
+			err:    "test.yaml:3:11: $.m: go-yaml's encoder writes a key of type [1]int as the string \"[1]\"",
 			engine: true,
 		},
 		"set past the end of a root sequence whose first item holds a sequence": {
@@ -3014,7 +3014,7 @@ func TestDoc_Apply(t *testing.T) {
 				at(paths.Doc().Child("r1"), rename("z")),
 				at(paths.MustParse("$.z.z"), set(misread)),
 			),
-			err: `4:5: $.r1: go-yaml's encoder writes the float 1e+06 as text that go-yaml's decoder reads as "1e+06"` +
+			err: `4:5: $.r1: go-yaml's encoder writes a key of type [1]int as the string "[1]"` +
 				"\n|-- report this to the authors of cafe\n`-- the edit sets $.z.z",
 			engine: true,
 		},
@@ -3603,7 +3603,7 @@ func TestDoc_Apply(t *testing.T) {
 			before: "-",
 			path:   paths.Doc(),
 			fn:     at(paths.MustParse("$[1]"), set(misread)),
-			err:    `1:1: $: go-yaml's encoder writes the float 1e+06 as text that go-yaml's decoder reads as "1e+06"`,
+			err:    `1:1: $: go-yaml's encoder writes a key of type [1]int as the string "[1]"`,
 			engine: true,
 		},
 		"removal through a merge list after a set copies an anchor that the list reads twice": {
@@ -5694,10 +5694,10 @@ func TestDoc_Apply_Fault(t *testing.T) {
 			},
 			err: `cafe.jacobcolvin.com/v1 renames "a" to "b", which already exists`,
 		},
-		"float that go-yaml reads as a string": {
+		"key that go-yaml's encoder writes as a string": {
 			before: "a: 1\n",
 			call: func(ctx context.Context, root *edit.Node) error {
-				return root.At(a).Set(ctx, 1000000.0)
+				return root.At(a).Set(ctx, map[[1]int]int{{1}: 1})
 			},
 			sentinel: edit.ErrEngine,
 			err:      "go-yaml",
@@ -9656,6 +9656,9 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 		// The value that a Set writes to raise an engine error. The encoder
 		// quotes only strings, so the tag keeps U+0001 as it is.
 		badTag = yamlMarshaler("!t\x01 v")
+		// The value that a Set writes to raise an engine error before the
+		// encode. Go-yaml's encoder writes the key as the string "[1]".
+		misread = map[[1]int]int{{1}: 1}
 	)
 
 	tcs := map[string]struct {
@@ -9851,12 +9854,11 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 				"`-- v2 sets $.b from this value",
 			),
 		},
-		"GL1: float that go-yaml's encoder writes in an exponent form over a value that an earlier Apply set": {
+		"GL1: key that go-yaml's encoder writes as a string over a value that an earlier Apply set": {
 			before:  "b: 0\n",
-			applies: []edit.Func{at("$.b", set(5)), at("$.b", set(1e6))},
+			applies: []edit.Func{at("$.b", set(5)), at("$.b", set(misread))},
 			err: stringtest.JoinLF(
-				`test.yaml:1:4: $.b: go-yaml's encoder writes the float 1e+06 as text that go-yaml's decoder `+
-					`reads as "1e+06"`,
+				`test.yaml:1:4: $.b: go-yaml's encoder writes a key of type [1]int as the string "[1]"`,
 				report,
 				"|-- v1 sets $.b from this value",
 				"`-- v2 sets $.b from this value",
@@ -9908,10 +9910,9 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 		// error of a Set over it binds.
 		"GL1: engine error at an item of the user that holds a tag alone": {
 			before:  "- !!null\n",
-			applies: []edit.Func{at("$[0]", set(1e6))},
+			applies: []edit.Func{at("$[0]", set(misread))},
 			err: stringtest.JoinLF(
-				`test.yaml:1:3: $[0]: go-yaml's encoder writes the float 1e+06 as text that go-yaml's decoder `+
-					`reads as "1e+06"`,
+				`test.yaml:1:3: $[0]: go-yaml's encoder writes a key of type [1]int as the string "[1]"`,
 				report,
 				"`-- v1 sets $[0] from this value",
 			),
@@ -9925,11 +9926,10 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 			before: stringtest.LinesLF("t:", "  b: 1", "r: 1"),
 			applies: []edit.Func{
 				both(at("$.t.b", remove), at("$.t.c", set(1))),
-				at("$.t", set(1e6)),
+				at("$.t", set(misread)),
 			},
 			err: stringtest.JoinLF(
-				`test.yaml:1:1: $.t: go-yaml's encoder writes the float 1e+06 as text that go-yaml's decoder `+
-					`reads as "1e+06"`,
+				`test.yaml:1:1: $.t: go-yaml's encoder writes a key of type [1]int as the string "[1]"`,
 				report,
 				"`-- v2 sets $.t from this value",
 			),
@@ -11002,10 +11002,10 @@ func TestDoc_Locate_Tokenless(t *testing.T) {
 			before: stringtest.LinesLF("t: {b: 1}", "r2: 1"),
 			applies: []edit.Func{
 				both(at("$.t.b", remove), at("$.t.c", set(1))),
-				at("$.t", set(1e6)),
+				at("$.t", set(misread)),
 			},
 			err: stringtest.JoinLF(
-				`test.yaml:1:1: $.t: go-yaml's encoder writes the float 1e+06 as text that go-yaml's decoder reads as "1e+06"`,
+				`test.yaml:1:1: $.t: go-yaml's encoder writes a key of type [1]int as the string "[1]"`,
 				"|-- report this to the authors of cafe",
 				"`-- v2 sets $.t from this value",
 			),

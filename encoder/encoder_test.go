@@ -645,6 +645,42 @@ func TestEncoder_Encode_quoting(t *testing.T) {
 			input: map[string]string{"k": "a-b ?c"},
 			want:  "k: a-b ?c\n",
 		},
+		"large float with an exponent": {
+			input: map[string]float64{"k": 1e6},
+			want:  stringtest.LinesLF("k: 1.0e+06"),
+		},
+		"small float with an exponent": {
+			input: map[string]float64{"k": 0.00001},
+			want:  stringtest.LinesLF("k: 1.0e-05"),
+		},
+		"negative float with an exponent": {
+			input: map[string]float64{"k": -1e30},
+			want:  stringtest.LinesLF("k: -1.0e+30"),
+		},
+		"float with an exponent and a fraction": {
+			input: map[string]float64{"k": 1.5e6},
+			want:  stringtest.LinesLF("k: 1.5e+06"),
+		},
+		"float32 with an exponent": {
+			input: map[string]float32{"k": 1e21},
+			want:  stringtest.LinesLF("k: 1.0e+21"),
+		},
+		"float with an exponent in a flow sequence": {
+			input: []float64{1e6, 5e-324},
+			opts:  []encoder.Option{flow},
+			want:  stringtest.LinesLF("[1.0e+06, 5.0e-324]"),
+		},
+		"float key with an exponent": {
+			input: map[float64]int{1e21: 1},
+			want:  stringtest.LinesLF("1.0e+21: 1"),
+		},
+		"marshaled exponent without a decimal point": {
+			input: map[string]rawYAML{"k": "1e6"},
+			// Go-yaml reads the text of the marshaler as a string, so the
+			// encode keeps the string and quotes it.
+			decoded: map[string]string{"k": "1e6"},
+			want:    stringtest.LinesLF(`k: "1e6"`),
+		},
 	}
 
 	for name, tc := range tcs {
@@ -2605,15 +2641,15 @@ func TestWithAutoInt(t *testing.T) {
 		want string
 	}{
 		"default": {
-			want: stringtest.LinesLF("f: 1.0", "g: 1.5", "h: 1e+06"),
+			want: stringtest.LinesLF("f: 1.0", "g: 1.5", "h: 1.0e+06"),
 		},
 		"auto int": {
 			opts: []encoder.Option{encoder.WithAutoInt(true)},
-			want: stringtest.LinesLF("f: 1", "g: 1.5", "h: 1e+06"),
+			want: stringtest.LinesLF("f: 1", "g: 1.5", "h: 1.0e+06"),
 		},
 		"default after auto int": {
 			opts: []encoder.Option{encoder.WithAutoInt(true), encoder.WithAutoInt(false)},
-			want: stringtest.LinesLF("f: 1.0", "g: 1.5", "h: 1e+06"),
+			want: stringtest.LinesLF("f: 1.0", "g: 1.5", "h: 1.0e+06"),
 		},
 	}
 

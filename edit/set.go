@@ -275,21 +275,21 @@ type payload struct {
 // The model of the Apply holds the node that the encoder makes for v, and
 // the text holds what go-yaml's parse of the encode reads. Set fails with
 // [ErrEngine] at its place when the parse reads a scalar of v as a value of
-// another kind. For example, go-yaml's encoder writes the float 1000000 as
-// 1e+06, and go-yaml's decoder reads that text as a string. Go-yaml's
-// encoder writes some keys as the string that fmt prints for them, such as
-// an array or a struct. Such a key fails the Set the same way, before the
-// encode. The encoder writes that string for a key whose encode fails too,
-// as for a key whose MarshalYAML method returns an error. The Set then
-// fails before the encode with that error, which matches ErrValue, as the
-// error of the marshaler of a value does. A text of the encode that
-// go-yaml's parser or decoder refuses fails the Set with ErrEngine. The
-// message of each of these ErrEngine problems names go-yaml. The encoder
-// quotes a string key that YAML reads as a << merge key or as an explicit
-// key, so the parse reads such a key as the string. Set does not recover a
-// panic, such as a panic of a marshaler of v or of go-yaml's encoder on a
-// map key that is nil. The panic unwinds through the [Func], and
-// [Doc.Apply] fails with it at the place of the call.
+// another kind. The encode writes each float with an exponent with a decimal
+// point, so the float 1000000 writes as 1.0e+06, which reads back as the
+// float. Go-yaml's encoder writes some keys as the string that fmt prints
+// for them, such as an array or a struct. Such a key fails the Set the same
+// way, before the encode. The encoder writes that string for a key whose
+// encode fails too, as for a key whose MarshalYAML method returns an error.
+// The Set then fails before the encode with that error, which matches
+// ErrValue, as the error of the marshaler of a value does. A text of the
+// encode that go-yaml's parser or decoder refuses fails the Set with
+// ErrEngine. The message of each of these ErrEngine problems names go-yaml.
+// The encoder quotes a string key that YAML reads as a << merge key or as an
+// explicit key, so the parse reads such a key as the string. Set does not
+// recover a panic, such as a panic of a marshaler of v or of go-yaml's
+// encoder on a map key that is nil. The panic unwinds through the [Func],
+// and [Doc.Apply] fails with it at the place of the call.
 //
 // Go-yaml's parser refuses a comment line right after the blank lines of a
 // block scalar without text. When the parser refuses such a comment line

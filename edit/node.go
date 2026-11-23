@@ -1373,12 +1373,6 @@ func (n *Node) DecodeInto(ctx context.Context, v any, opts ...niceyaml.DecodeOpt
 // !!timestamp. A scalar with one of those tags thus decodes to the same
 // bytes or the same time in the copy.
 //
-// Go-yaml's encoder writes some floats in exponent form without a
-// fraction, such as 1e-05 for 0.00001 and 1e+06 for 1000000.0. Go-yaml
-// reads that text as a string. A Set of a node whose value holds such a
-// float thus fails with [ErrEngine], as [Node.Set] describes for a
-// float64.
-//
 // A Set of a node at a place that does not hold a value fails. So does a
 // Set of a node that lost its place to an earlier edit. The document
 // decides such a problem for a node of the Doc of the Set. So the error of

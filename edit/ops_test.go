@@ -551,11 +551,15 @@ func TestNode_SetKey_Typed(t *testing.T) {
 			fix:       `make the key a Go string, as in "9"`,
 			err:       `renames $.a.9 to 9, which writes the key 9, a key that reads as the string "9" at its place`,
 		},
-		"float that reads as a string": {
-			before: "a: 1\n",
-			fn:     at("$.a", func(_ context.Context, n *edit.Node) error { return n.SetKey(1e30) }),
-			engine: true,
-			err:    `go-yaml's encoder writes the float 1e+30 as text that go-yaml's decoder reads as "1e+30"`,
+		"float with an exponent": {
+			// The encoder writes the key as 1.0e+30, which reads back as the
+			// float, and a decode into a string key reads it as 1e+30.
+			before:    "a: 1\n",
+			fn:        at("$.a", func(_ context.Context, n *edit.Node) error { return n.SetKey(1e30) }),
+			construct: edit.ConstructKeyText,
+			fix:       `make the key a Go string, as in "1.0e+30"`,
+			err: "renames $.a to 1.0e+30, which writes the key 1.0e+30, a key that reads as 1e+30 rather than as " +
+				"its text",
 		},
 	}
 
@@ -1634,12 +1638,12 @@ func TestDoc_Apply_EngineProblem(t *testing.T) {
 		// The Set fails before it writes the value, at the value that it
 		// replaces, so the detail that names the Set says "from this value"
 		// (P74).
-		"set of a float that go-yaml's encoder writes in an exponent form": {
+		"set of a key that go-yaml's encoder writes as a string": {
 			before: "a: 1\n",
 			fn: func(ctx context.Context, root *edit.Node) error {
-				return root.At(paths.MustParse("$.a")).Set(ctx, 1e6)
+				return root.At(paths.MustParse("$.a")).Set(ctx, map[[1]int]int{{1}: 1})
 			},
-			want:    `go-yaml's encoder writes the float 1e+06 as text that go-yaml's decoder reads as "1e+06"`,
+			want:    `go-yaml's encoder writes a key of type [1]int as the string "[1]"`,
 			details: []string{"report this to the authors of this program", "the edit sets $.a from this value"},
 		},
 		"removal whose text go-yaml's parser refuses": {

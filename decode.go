@@ -2323,11 +2323,6 @@ func (n *Node) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, erro
 // decode reads each key as a string, so the encode writes a key such as 1
 // or true in quotes.
 //
-// Go-yaml's encoder writes some floats in exponent form without a
-// fraction, such as 1e-05 for 0.00001 and 1e+06 for 1000000.0. Go-yaml
-// reads that text as a string, so the encode of a Node that holds such a
-// float decodes to a string in its place.
-//
 // MarshalYAML returns each mapping as a [yaml.MapSlice] and each sequence
 // as a []any. It returns the value of a !!binary or a !!timestamp scalar
 // as a value of an internal type that marshals to the tagged scalar. The
