@@ -21,7 +21,8 @@ import (
 // an empty node as a value that go-yaml prints, because the go-yaml
 // printer writes an empty node as nothing. In any style, it writes an
 // empty node under the "!!binary" tag as an empty quoted string, which
-// go-yaml reads as empty bytes.
+// go-yaml reads as empty bytes. Outside a flow collection, it writes each
+// explicit key as an implicit key, as [quoter.implicitKey] describes.
 type quoter struct {
 	// Collects the blocks that [quoter.unblock] replaces.
 	blocks *[]block
@@ -105,6 +106,9 @@ func (q quoter) Visit(node ast.Node) ast.Visitor {
 		}
 
 		n.Key = q.keySafe(n.Key)
+		if !n.IsFlowStyle {
+			n.Key = q.implicitKey(n.Key)
+		}
 
 		col := n.Key.GetToken().Position.Column
 		if _, ok := n.Key.(*ast.MappingKeyNode); ok {
@@ -314,6 +318,86 @@ func (q quoter) keySafe(key ast.MapKeyNode) ast.MapKeyNode {
 	}
 
 	return key
+}
+
+// implicitKey returns key, or the node after the "?" of key when key is an
+// explicit key in a block mapping. Only a marshaler's YAML, the YAML that
+// go-yaml converts from the JSON of a MarshalJSON method, or an AST node
+// in the value holds such a key. The go-yaml printer writes the value of
+// an explicit key on the line of the key, as in "? 1: 2". Go-yaml reads
+// that line as the key 1 with the value 2. YAML 1.2 reads it as an
+// explicit key that holds the mapping {1: 2}, with a null value. The node
+// after "?" passed [quoter.keySafe], which quotes it by the rules of an
+// implicit key, so it reads back as the same key without "?". Go-yaml
+// does not read a tag on an empty node as an implicit key when the tag is
+// not in [scalarTags], as in "!!map : 2". So the function replaces such a
+// node as [quoter.emptyTag] does in a flow collection, and the printer
+// writes the empty node as null. Go-yaml reads the empty node under such
+// a tag as null too. The function moves the node to the column of "?".
+//
+// The printer writes a blank line before a key when the line of the key
+// sits two or more lines after the token that the key links to. The node
+// after "?" links to "?", to a comment, or to no token when keySafe built
+// a string in place of a literal block. So the function puts the node on
+// the line of "?" and links it to the token before "?". When "?" opens a
+// sequence entry, the printer measures from the token before the "-" and
+// subtracts the line breaks in the text of the key. That text runs up to
+// the ":" on the next line. So the function also skips each "-" before "?"
+// and puts the node on the line of the outermost "-" that it skips. The
+// printer then misses a blank line after a skipped "-". So the function
+// moves the node one line down when the input has such a blank line.
+func (q quoter) implicitKey(key ast.MapKeyNode) ast.MapKeyNode {
+	explicit, ok := key.(*ast.MappingKeyNode)
+	if !ok {
+		return key
+	}
+
+	inner, ok := explicit.Value.(ast.MapKeyNode)
+	if !ok {
+		return key
+	}
+
+	if k, ok := q.within(true).emptyTag(inner).(ast.MapKeyNode); ok {
+		inner = k
+	}
+
+	if null, ok := unanchor(inner).(*ast.NullNode); ok {
+		null.Token.Type = token.NullType
+	}
+
+	mark, tk := explicit.Start, inner.GetToken()
+	inner.AddColumn(mark.Position.Column - tk.Position.Column)
+
+	first, prev := mark, mark.Prev
+	for prev != nil && prev.Type == token.SequenceEntryType {
+		first, prev = prev, prev.Prev
+	}
+
+	tk.Prev = prev
+	tk.Position.Line = first.Position.Line
+
+	for t := first; t != mark; t = t.Next {
+		if t.Next.Position.Line-t.Position.Line > 1 {
+			tk.Position.Line++
+
+			break
+		}
+	}
+
+	return inner
+}
+
+// unanchor returns the node under the anchors on node, or node when no
+// anchor stands on it.
+func unanchor(node ast.Node) ast.Node {
+	for {
+		a, ok := node.(*ast.AnchorNode)
+		if !ok {
+			return node
+		}
+
+		node = a.Value
+	}
 }
 
 // quote double-quotes n when go-yaml otherwise writes it in a form that

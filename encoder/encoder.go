@@ -394,6 +394,14 @@ func WithAutoInt(enabled bool) Option {
 //   - [yaml.WithComment] drops the line comment of an alias. The encoder
 //     writes the comment after the alias, as in `b: *x # c`.
 //
+// A path also reaches the key after the "?" of an explicit key in a
+// block mapping, because [Encoder.Encode] writes that key as an implicit
+// key. A marshaler's YAML can hold such a key. So can an AST node in the
+// value, and the YAML that go-yaml converts from the JSON of a
+// MarshalJSON method under [JSONMarshalers]. [yaml.WithComment] skips
+// such a path, because go-yaml compares the path with the "?" of the
+// key.
+//
 // The error of go-yaml stays in the chain. Of the paths that select no
 // node, [yaml.WithComment] skips only a path to a key that its mapping
 // does not have. It fails on the others. As with that option, a line
@@ -534,6 +542,21 @@ func newDocEncoder(c config) *docEncoder {
 // the !!binary tag in block style too. Encode writes an empty quoted
 // string under that tag in every style, and go-yaml reads that string
 // as empty bytes.
+//
+// Outside a flow collection, Encode writes each explicit key, as in
+// "? 1", without its "?". A marshaler's YAML, the YAML that go-yaml
+// converts from the JSON of a MarshalJSON method under [JSONMarshalers],
+// and an AST node in v can hold such a key. Encode quotes the key by the
+// rules of an implicit key. Go-yaml writes the value of an explicit key
+// on the line of the key, as in "? 1: 2", and reads that line as the key
+// 1 with the value 2. YAML 1.2 reads it as a key that holds the mapping
+// {1: 2}, with a null value. In a flow collection, Encode keeps the "?",
+// because YAML 1.2 reads "{? 1: 2}" as the key 1 with the value 2.
+//
+// Go-yaml does not read an empty implicit key under the tag of a
+// collection or under a custom tag, such as "!!map" or "!t". Go-yaml
+// reads the empty node under such a tag as null. So Encode writes such
+// an explicit key in block style as null.
 //
 // Encode returns an error that matches [ErrEncode] when v does not encode
 // to YAML. A value of a type go-yaml does not encode and a marshaler that

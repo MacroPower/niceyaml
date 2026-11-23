@@ -90,6 +90,8 @@ func TestEncoder_Encode_quoting(t *testing.T) {
 	flow := encoder.WithFlow(true)
 	literalStyle := encoder.WithLiteralBlocks(true)
 	emptyBinary := yamltest.FirstDocument(t, "x: !!binary\n").AST()
+	explicitKey := yamltest.FirstDocument(t, "? a\n: c\n").AST()
+	explicitMapKey := yamltest.FirstDocument(t, "? !!map\n: c\n").AST()
 
 	tcs := map[string]struct {
 		input any
@@ -427,7 +429,7 @@ func TestEncoder_Encode_quoting(t *testing.T) {
 		"marshaled empty key under binary tag": {
 			input:   map[string]rawYAML{"k": "? !!binary\n: c\n"},
 			decoded: map[string]map[string]string{"k": {"": "c"}},
-			want:    stringtest.LinesLF("k:", `  ? !!binary "": c`),
+			want:    stringtest.LinesLF("k:", `  !!binary "": c`),
 		},
 		"AST with empty node under binary tag as a map value": {
 			input:   map[string]any{"k": emptyBinary},
@@ -517,23 +519,143 @@ func TestEncoder_Encode_quoting(t *testing.T) {
 		"marshaled literal block under explicit key": {
 			input:   rawYAML("? a\n: |\n  x\n  y\n"),
 			decoded: map[string]string{"a": "x\ny\n"},
-			want:    stringtest.LinesLF("? a: |", "    x", "    y"),
+			want:    stringtest.LinesLF("a: |", "  x", "  y"),
 		},
 		"marshaled literal block under explicit key under key": {
 			input:   map[string]rawYAML{"k": "? a\n: |\n  x\n  y\n"},
 			decoded: map[string]map[string]string{"k": {"a": "x\ny\n"}},
-			want:    stringtest.LinesLF("k:", "  ? a: |", "      x", "      y"),
+			want:    stringtest.LinesLF("k:", "  a: |", "    x", "    y"),
+		},
+		"marshaled explicit key under key": {
+			input:   map[string]rawYAML{"k": "? a\n: c\n"},
+			decoded: map[string]map[string]string{"k": {"a": "c"}},
+			want:    stringtest.LinesLF("k:", "  a: c"),
+		},
+		"marshaled explicit key without value": {
+			input:   map[string]rawYAML{"k": "? a\n"},
+			decoded: map[string]map[string]any{"k": {"a": nil}},
+			want:    stringtest.LinesLF("k:", "  a:"),
+		},
+		"marshaled explicit key with mapping value": {
+			input:   map[string]rawYAML{"k": "? a\n: x: 1\n"},
+			decoded: map[string]map[string]map[string]int{"k": {"a": {"x": 1}}},
+			want:    stringtest.LinesLF("k:", "  a:", "    x: 1"),
+		},
+		"marshaled explicit key with sequence value": {
+			input:   rawYAML("? a\n: - 1\n  - 2\n"),
+			decoded: map[string][]int{"a": {1, 2}},
+			want:    stringtest.LinesLF("a:", "  - 1", "  - 2"),
+		},
+		"marshaled explicit key under tag": {
+			input:   map[string]rawYAML{"k": "? !!str\n: c\n"},
+			decoded: map[string]map[string]string{"k": {"": "c"}},
+			want:    stringtest.LinesLF("k:", "  !!str : c"),
+		},
+		"marshaled empty explicit key under map tag": {
+			input:   map[string]rawYAML{"k": "? !!map\n: c\n"},
+			decoded: map[string]map[any]string{"k": {nil: "c"}},
+			want:    stringtest.LinesLF("k:", "  null: c"),
+		},
+		"marshaled empty explicit key under seq tag without value": {
+			input:   map[string]rawYAML{"k": "? !!seq\n"},
+			decoded: map[string]map[any]any{"k": {nil: nil}},
+			want:    stringtest.LinesLF("k:", "  null:"),
+		},
+		"marshaled empty explicit key under custom tag": {
+			input:   map[string]rawYAML{"k": "? !t\n: c\n"},
+			decoded: map[string]map[any]string{"k": {nil: "c"}},
+			want:    stringtest.LinesLF("k:", "  null: c"),
+		},
+		"marshaled empty explicit key under map tag in sequence": {
+			input:   map[string]rawYAML{"k": "- a: b\n\n- ? !!map\n  : c\n"},
+			decoded: map[string][]map[any]string{"k": {{"a": "b"}, {nil: "c"}}},
+			want:    stringtest.LinesLF("k:", "- a: b", "", "- null: c"),
+		},
+		"AST with empty explicit key under map tag": {
+			input:   map[string]any{"k": explicitMapKey},
+			decoded: map[string]map[any]string{"k": {nil: "c"}},
+			want:    stringtest.LinesLF("k:", "  null: c"),
+		},
+		"marshaled explicit key under anchor": {
+			input:   rawYAML("? &x a\n: c\nz: *x\n"),
+			decoded: map[string]string{"a": "c", "z": "a"},
+			want:    stringtest.LinesLF("&x a: c", "z: *x"),
+		},
+		"marshaled quoted explicit key": {
+			input:   rawYAML("? \"a: b\"\n: c\n"),
+			decoded: map[string]string{"a: b": "c"},
+			want:    stringtest.LinesLF(`"a: b": c`),
+		},
+		"marshaled explicit key after blank line": {
+			input:   map[string]rawYAML{"k": "x: s\n\n? a\n: c\ny: t\n"},
+			decoded: map[string]map[string]string{"k": {"a": "c", "x": "s", "y": "t"}},
+			want:    stringtest.LinesLF("k:", "  x: s", "", "  a: c", "  y: t"),
+		},
+		"marshaled explicit keys in sequence": {
+			input:   map[string]rawYAML{"k": "- ? a\n  : c\n- ? b\n  : - d\n"},
+			decoded: map[string][]map[string]any{"k": {{"a": "c"}, {"b": []any{"d"}}}},
+			want:    stringtest.LinesLF("k:", "- a: c", "- b:", "    - d"),
+		},
+		"marshaled explicit key in sequence after blank line": {
+			input:   map[string]rawYAML{"k": "- x\n\n- ? a\n  : c\n"},
+			decoded: map[string][]any{"k": {"x", map[string]any{"a": "c"}}},
+			want:    stringtest.LinesLF("k:", "- x", "", "- a: c"),
+		},
+		"marshaled explicit keys in sequence with blank line between": {
+			input:   map[string]rawYAML{"k": "- ? a\n  : c\n\n- ? b\n  : d\n"},
+			decoded: map[string][]map[string]string{"k": {{"a": "c"}, {"b": "d"}}},
+			want:    stringtest.LinesLF("k:", "- a: c", "", "- b: d"),
+		},
+		"marshaled explicit key on line after sequence entry": {
+			input:   map[string]rawYAML{"k": "- x\n-\n  ? a\n  : c\n"},
+			decoded: map[string][]any{"k": {"x", map[string]any{"a": "c"}}},
+			want:    stringtest.LinesLF("k:", "- x", "- a: c"),
+		},
+		"marshaled explicit key after blank line inside sequence entry": {
+			input:   map[string]rawYAML{"k": "- x\n-\n\n  ? a\n  : c\n"},
+			decoded: map[string][]any{"k": {"x", map[string]any{"a": "c"}}},
+			want:    stringtest.LinesLF("k:", "- x", "", "- a: c"),
+		},
+		"marshaled explicit key after blank line inside nested sequence entry": {
+			input:   map[string]rawYAML{"k": "- x\n- -\n\n    ? a\n    : c\n"},
+			decoded: map[string][]any{"k": {"x", []any{map[string]any{"a": "c"}}}},
+			want:    stringtest.LinesLF("k:", "- x", "", "- - a: c"),
+		},
+		"marshaled explicit key in nested sequence after blank line": {
+			input:   map[string]rawYAML{"k": "- x\n\n- - ? a\n    : c\n"},
+			decoded: map[string][]any{"k": {"x", []any{map[string]any{"a": "c"}}}},
+			want:    stringtest.LinesLF("k:", "- x", "", "- - a: c"),
+		},
+		"marshaled explicit key after comment after blank line": {
+			input:   map[string]rawYAML{"k": "x: s\n\n? # note\n  a\n: c\n"},
+			decoded: map[string]map[string]string{"k": {"a": "c", "x": "s"}},
+			want:    stringtest.LinesLF("k:", "  x: s", "", "  a: c"),
+		},
+		"marshaled literal block as explicit key after blank line": {
+			input:   map[string]rawYAML{"k": "x: s\n\n? |\n  a\n: c\n"},
+			decoded: map[string]map[string]string{"k": {"a\n": "c", "x": "s"}},
+			want:    stringtest.LinesLF("k:", "  x: s", "", `  "a\n": c`),
+		},
+		"AST with explicit key as a map value": {
+			input:   map[string]any{"k": explicitKey},
+			decoded: map[string]map[string]string{"k": {"a": "c"}},
+			want:    stringtest.LinesLF("k:", "  a: c"),
+		},
+		"marshaled explicit key in flow mapping": {
+			input:   map[string]rawYAML{"k": "{? a : c}\n"},
+			decoded: map[string]map[string]string{"k": {"a": "c"}},
+			want:    stringtest.LinesLF("k: {? a: c}"),
 		},
 		"marshaled literal block as explicit key under key": {
 			input:   map[string]rawYAML{"k": "? |\n  a\n  b\n: c\n"},
 			decoded: map[string]map[string]string{"k": {"a\nb\n": "c"}},
-			want:    stringtest.LinesLF(`k:`, `  ? "a\nb\n": c`),
+			want:    stringtest.LinesLF(`k:`, `  "a\nb\n": c`),
 		},
 		"marshaled literal block under explicit key in sequence at indent 1": {
 			input:   []rawYAML{"? a\n: |-\n  x\n  y\n"},
 			decoded: []map[string]string{{"a": "x\ny"}},
 			opts:    []encoder.Option{encoder.WithIndent(1)},
-			want:    stringtest.LinesLF("- ? a: |-", "     x", "     y"),
+			want:    stringtest.LinesLF("- a: |-", "   x", "   y"),
 		},
 		"marshaled literal block in marshaled sequence under key": {
 			input:   map[string]rawYAML{"k": "- |\n  x\n  y\n"},
@@ -2667,6 +2789,7 @@ func TestWithYAMLComments(t *testing.T) {
 	t.Parallel()
 
 	s := &shared{Name: "x"}
+	explicitKey := yamltest.FirstDocument(t, "? a\n: c\n").AST()
 
 	tcs := map[string]struct {
 		input    any
@@ -2744,6 +2867,21 @@ func TestWithYAMLComments(t *testing.T) {
 			input:    map[string]literalBlock{"k": "a\nb"},
 			comments: yaml.CommentMap{"$.k": {yaml.LineComment(" two lines")}},
 			want:     stringtest.LinesLF("k: |- # two lines", "  a", "  b"),
+		},
+		"head comment on a marshaled explicit key": {
+			input:    map[string]rawYAML{"k": "? a\n: c\n"},
+			comments: yaml.CommentMap{"$.k.a": {yaml.HeadComment(" hc")}},
+			want:     stringtest.LinesLF("k:", "  # hc", "  a: c"),
+		},
+		"line comment on a marshaled explicit key": {
+			input:    map[string]rawYAML{"k": "? a\n: c\nb: d\n"},
+			comments: yaml.CommentMap{"$.k.a": {yaml.LineComment(" lc")}},
+			want:     stringtest.LinesLF("k:", "  a: c # lc", "  b: d"),
+		},
+		"line comment on an explicit key in an AST node": {
+			input:    map[string]any{"k": explicitKey},
+			comments: yaml.CommentMap{"$.k.a": {yaml.LineComment(" lc")}},
+			want:     stringtest.LinesLF("k:", "  a: c # lc"),
 		},
 		"line comment on a marshaled block with a final line break": {
 			input:    map[string]rawYAML{"k": "|\n  a\n  b\n"},

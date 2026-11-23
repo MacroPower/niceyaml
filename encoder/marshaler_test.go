@@ -361,7 +361,7 @@ func TestJSONMarshalers(t *testing.T) {
 		"a string with a YAML indicator that go-yaml converts to a mapping": {
 			input: map[string]any{"k": jsonText{v: "? x"}},
 			opts:  []encoder.Option{encoder.WithMarshalers(encoder.JSONMarshalers(true))},
-			want:  "k:\n  ? x:\n",
+			want:  "k:\n  x:\n",
 		},
 		"a string of a tab that go-yaml converts to no value": {
 			input: map[string]any{"k": jsonText{v: "\t"}},
