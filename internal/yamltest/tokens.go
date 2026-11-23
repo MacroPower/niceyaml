@@ -457,33 +457,18 @@ func (b *TokenBuilder) Build() *token.Token {
 // DumpTokenOrigins joins the Origin fields of tks into one string.
 //
 // For a stream from [go.jacobcolvin.com/niceyaml/tokens.Tokenize], the
-// result matches the source except where Tokenize leaves the lexer's text,
-// as its doc describes. The result lacks the byte order marks that
-// Tokenize drops and keeps any other mark, such as one inside a scalar.
-//
-// When a tag ends a file that holds other text, the result also lacks the
-// text of the tag. It can also lack some or all of the whitespace in front
-// of the tag, line breaks included. For example, the result for "a:\n!t"
-// is "a:", but the result for "a: b\n!t" is "a: b\n".
-//
-// Only a space, a line break, or a "," in a flow collection closes a tag.
-// The lost text can therefore hold flow indicators, such as the "]" of
-// "[!t]". A "{" or "}" in the tag makes the lexer keep its text as an
-// invalid token instead. The result for a file that holds only a tag is
-// the whole file.
-//
-// Around a tab used as indentation, the result keeps the text that the
-// lexer produced, and that text can lack a ":" indicator. In a flow
-// collection, a repeat of the tab can take the place of that indicator.
+// result matches the source without the byte order marks that Tokenize
+// drops. It keeps any other mark, such as one inside a scalar.
 //
 // For a raw stream from [github.com/goccy/go-yaml/lexer.Tokenize], the
 // result keeps every byte order mark but loses more of the source. It
 // loses the final line ending, trailing spaces, and the spaces of
 // whitespace-only lines. It also loses the letter and hex digits of a
-// "\x", "\u", or "\U" escape. It repeats the line ending after a tag
-// that ends its line and after text that follows a block scalar header.
-// It repeats the last rune of such text when that text ends the file. It
-// also repeats a tab that indents a later line of a quoted scalar.
+// "\x", "\u", or "\U" escape, and a tag that ends a file after other
+// text. It repeats the line ending after a tag that ends its line and
+// after text that follows a block scalar header. It repeats the last rune
+// of such text when that text ends the file. It also repeats a tab that
+// indents a later line of a quoted scalar.
 //
 // A nil token does not add text or a placeholder such as "<nil>", so the
 // output holds only source text.

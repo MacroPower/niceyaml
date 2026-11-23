@@ -27,7 +27,7 @@ func TestReset(t *testing.T) {
 		"whole stream": {
 			input: "a: 1\nb:\n  - c\n",
 		},
-		"swallowed indicator": {
+		"indicator after an opening tab": {
 			input: "\t- a\nb: 1\n",
 		},
 		"documents cut from a stream": {

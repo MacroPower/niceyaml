@@ -3688,6 +3688,14 @@ func TestNode_Append(t *testing.T) {
 			value:  "--verbose",
 			want:   stringtest.LinesLF("args:", "  - --quiet # first", "  - --color", "  - --verbose"),
 		},
+		"item with a tag that ends the text": {
+			// Go-yaml drops the tag, and the "-" holds its text. The new
+			// sequence writes over the tag.
+			before: "- !t",
+			path:   paths.MustParse("$[0]"),
+			value:  "z",
+			want:   "- - z",
+		},
 		"flow sequence": {
 			before: "args: [a, b]\n",
 			path:   paths.Doc().Child("args"),

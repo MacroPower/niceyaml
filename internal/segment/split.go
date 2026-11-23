@@ -60,9 +60,7 @@ type Line struct {
 //
 // The lexer keeps a CRLF in Origin and normalizes it to "\n" in Value. A
 // bare "\r" ends a line for Split as it does for the lexer. The lexer
-// absorbs blank lines into the previous token's Origin. It also cuts a
-// CRLF between a comment and the next token. Split puts the "\n" of such a
-// CRLF on the line that the "\r" closes.
+// absorbs blank lines into the previous token's Origin.
 func Split(tks token.Tokens) []Line {
 	b := newBuilder(tks)
 	if b == nil {
@@ -110,9 +108,6 @@ func Split(tks token.Tokens) []Line {
 type builder struct {
 	// Result accumulation.
 	lastPart *token.Token // Most recent part on the current line, for linking.
-
-	// Token tracking.
-	prevLineEnding string // Line ending that closed the previous token's Origin, or "".
 
 	lines               []Line
 	currentLineSegments Segments
@@ -244,10 +239,6 @@ func (b *builder) AddToken(tk *token.Token) {
 
 		b.processPart(ctx)
 	}
-
-	// Remember how this token's Origin ended, to rejoin a CRLF that the
-	// lexer cut.
-	b.prevLineEnding = lineEnding(origin)
 }
 
 // Build finalizes and returns the constructed [Line] values.
@@ -363,17 +354,6 @@ type partContext struct {
 func (b *builder) processPart(ctx *partContext) {
 	partIsPureNewline := isPureNewline(ctx.part)
 
-	// The "\n" of a CRLF that the lexer cut belongs to the line the
-	// previous token closed. Skipping the part would leave the parts unable
-	// to rebuild the Origin, so the builder appends it to the previous
-	// line. The Origin then keeps the newline without an extra line
-	// advance.
-	if b.continuesPreviousLine(ctx) && len(b.lines) > 0 {
-		b.appendToPreviousLine(ctx)
-
-		return
-	}
-
 	// The token's text starts in the first part that holds any, and that
 	// part carries the token's own position. Parts before it hold line
 	// endings or whitespace alone.
@@ -462,8 +442,7 @@ func (b *builder) processPart(ctx *partContext) {
 	b.currentLineSegments = append(b.currentLineSegments, seg)
 
 	// Count past the part. The first text part counts from the position it
-	// took, so the parts after it follow the source where the Origin
-	// opened with whitespace the lexer dropped.
+	// took, so the parts after it follow the source.
 	b.currentColumn = col - lead + seg.Width()
 	b.currentOffset = offset - lead + utf8.RuneCountInString(ctx.part)
 
@@ -580,38 +559,6 @@ func textPosition(tk *token.Token, col, offset int) (int, int) {
 	}
 
 	return col, offset
-}
-
-// appendToPreviousLine attaches the "\n" that opens the token to the line
-// finished last, as [builder.continuesPreviousLine] reports. The "\r" that
-// closed that line ends the previous token. The part's Line, Column, and
-// Offset name the rune of the "\n", one past the "\r".
-func (b *builder) appendToPreviousLine(ctx *partContext) {
-	lastLine := &b.lines[len(b.lines)-1]
-
-	newTk := b.newPart(ctx.tk, ctx.tk.Type, ctx.part, "", token.Position{
-		Line:        lastLine.Number,
-		Column:      max(b.prevLineEndColumn, 1) + len(b.prevLineEnding),
-		Offset:      b.prevLineEndOffset + len(b.prevLineEnding),
-		IndentNum:   b.prevLineIndentNum,
-		IndentLevel: b.currentIndentLevel,
-	})
-	if n := len(lastLine.Segments); n > 0 {
-		linkParts(lastLine.Segments[n-1].Part(), newTk)
-	}
-
-	lastLine.Segments = append(lastLine.Segments, New(ctx.tk, newTk))
-
-	b.currentOffset += len(ctx.part)
-}
-
-// continuesPreviousLine reports whether the part is the "\n" of a CRLF
-// that the go-yaml lexer cut between two tokens. The lexer closes a
-// comment with the "\r" and opens the next token with the "\n". A "\r"
-// and the "\n" immediately after it form one line break in every
-// convention, so the "\n" belongs to the line that the "\r" closes.
-func (b *builder) continuesPreviousLine(ctx *partContext) bool {
-	return ctx.partIndex == 0 && ctx.part == "\n" && b.prevLineEnding == "\r"
 }
 
 // handleGap detects and handles line number gaps for simple tokens.

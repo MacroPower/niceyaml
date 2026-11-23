@@ -20,6 +20,21 @@ type Context struct {
 	obuf               []rune
 	tokens             token.Tokens
 	mstate             *MultiLineState
+	// niceyaml: tagClosed reports that a line at or left of the last
+	// delimiter follows the tag that is the last token, so the tag has no
+	// value and does not type the next token.
+	tagClosed bool
+	// niceyaml: tagEndedLine reports that a line break follows the tag
+	// that is the last token. A key on a later line is then the first key
+	// of the mapping that the tag is on, and the tag does not type it.
+	tagEndedLine bool
+	// niceyaml: compat holds the option of the scanner that
+	// [WithCompat] sets.
+	compat bool
+	// niceyaml: lineBefore reports that the token before holds the line
+	// ending in front of the origin buffer, where upstream opens the
+	// buffer with that line ending.
+	lineBefore bool
 }
 
 type MultiLineState struct {
@@ -63,6 +78,7 @@ func (c *Context) release() {
 func (c *Context) clear() {
 	c.resetBuffer()
 	c.mstate = nil
+	c.lineBefore = false // niceyaml: the next origin buffer starts empty.
 }
 
 func (c *Context) reset(src []rune) {
@@ -72,6 +88,10 @@ func (c *Context) reset(src []rune) {
 	c.tokens = c.tokens[:0]
 	c.resetBuffer()
 	c.mstate = nil
+	// niceyaml: a new scan starts without a tag before it.
+	c.tagClosed = false
+	c.tagEndedLine = false
+	c.lineBefore = false // niceyaml: and without a line ending before it.
 }
 
 func (c *Context) resetBuffer() {
@@ -266,6 +286,10 @@ func (c *Context) addToken(tk *token.Token) {
 	if tk == nil {
 		return
 	}
+	// niceyaml: the flags describe the tag that is the last token, so a
+	// new last token clears them.
+	c.tagClosed = false
+	c.tagEndedLine = false
 	c.tokens = append(c.tokens, tk)
 }
 
@@ -296,14 +320,63 @@ func (c *Context) addOriginBuf(r rune) {
 	}
 }
 
-func (c *Context) removeRightSpaceFromBuf() {
+// abandoned returns tk, the invalid token of an escape that the scanner
+// abandons, with an Origin that lacks the backslash that ends it. The
+// scanner reads the escape again from that backslash, so the next token
+// holds it. With compat, a tab earlier in the scalar moves the next scan
+// past the backslash, and [Scanner.Scan] gives it back to tk. The Value
+// keeps the backslash, as upstream writes it.
+// niceyaml: upstream does not have this function.
+func abandoned(tk *token.Token) *token.Token {
+	tk.Origin = strings.TrimSuffix(tk.Origin, `\`)
+	return tk
+}
+
+// addOriginRunes adds rs to the origin buffer. niceyaml: upstream does not
+// have this function.
+func (c *Context) addOriginRunes(rs []rune) {
+	for _, r := range rs {
+		c.addOriginBuf(r)
+	}
+}
+
+// removeRightSpaceFromBuf reports whether the origin buffer ends with
+// spaces or tabs. niceyaml: the origin keeps them, where upstream cuts
+// them off.
+func (c *Context) removeRightSpaceFromBuf() bool {
 	trimmedBuf := c.obuf[:c.notSpaceOrgCharPos]
 	buflen := len(trimmedBuf)
 	diff := len(c.obuf) - buflen
 	if diff > 0 {
-		c.obuf = c.obuf[:buflen]
 		c.buf = c.bufferedSrc()
 	}
+	return diff > 0
+}
+
+// tabIndented reports whether the origin buffer opens with a tab, after
+// one space at most, as upstream reads it from a buffer without the
+// spaces and tabs that end a line. A first line of spaces and tabs alone
+// thus does not count. With compat, a buffer after a line ending that the
+// token before holds does not count either, because upstream opens that
+// buffer with the line ending. niceyaml: upstream does not have this
+// function.
+func (c *Context) tabIndented() bool {
+	if c.compat && c.lineBefore {
+		return false
+	}
+	i := 0
+	if len(c.obuf) > 0 && c.obuf[0] == ' ' {
+		i = 1
+	}
+	if i >= len(c.obuf) || c.obuf[i] != '\t' {
+		return false
+	}
+	for _, r := range c.obuf {
+		if r != ' ' && r != '\t' {
+			return r != '\n' && r != '\r'
+		}
+	}
+	return true
 }
 
 func (c *Context) isEOS() bool {
@@ -435,7 +508,9 @@ func (c *Context) setTokenTypeByPrevTag(tk *token.Token) {
 	if lastTk == nil {
 		return
 	}
-	if lastTk.Type != token.TagType {
+	// niceyaml: without compat, a tag that a later line closes does not
+	// type this token.
+	if lastTk.Type != token.TagType || c.tagClosed && !c.compat {
 		return
 	}
 	tag := token.ReservedTagKeyword(lastTk.Value)

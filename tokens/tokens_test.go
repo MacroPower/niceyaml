@@ -188,12 +188,7 @@ var (
 			"---",
 		),
 		"escape cut short after a unicode escape":                       `a: "\u00e9\u"`,
-		"long escape cut short after a hex escape and a tab":            `k: "\x41` + "\t" + `\U12"` + "\n",
 		"escape cut short after an escaped backslash before hex digits": `k: "\x41\\x41\u"` + "\n",
-		"high surrogate without a low one after a tab": stringtest.LinesLF(
-			`- ":`+"\t\t"+`\N\uD83D\u`+"\t"+`"`,
-			"b: 1",
-		),
 		"long escape that takes a header before a second header": stringtest.LinesLF(
 			`k: "\U12\"`,
 			"---",
@@ -212,12 +207,9 @@ var (
 		"escape cut short after an escape": `a: "caf\u00e9 \u1"` + "\n",
 	}
 
-	// DroppedLineBreaks holds sources with line breaks the lexer drops. The want
-	// field holds the joined Origins of a source where they differ from it,
-	// around the invalid token the lexer makes for a tab on a blank line.
+	// DroppedLineBreaks holds sources with line breaks the lexer drops.
 	droppedLineBreaks = map[string]struct {
 		input string
-		want  string
 	}{
 		"key after a flow sequence": {
 			input: stringtest.LinesLF(
@@ -346,20 +338,13 @@ var (
 		},
 		"crlf key after a blank line the lexer rewrites": {
 			// The lexer turns the CRLF in front of the invalid blank line
-			// into "\n".
+			// into "\n", and the copy of the scanner keeps the CRLF.
 			input: stringtest.LinesCRLF(
 				"x:",
 				"  a: \"t\tb\"",
 				" \t",
 				"  ",
 				"? b",
-			),
-			want: stringtest.LinesLF(
-				"x:\r",
-				"  a: \"t\tb\"",
-				" \t\r",
-				"\r",
-				"? b\r",
 			),
 		},
 		"key after blank lines of spaces after bare crs": {
@@ -371,9 +356,7 @@ var (
 		},
 		"document header after a cut scalar and bare crs": {input: `- "\u\q` + "\r\r \n---\n"},
 		"key after a blank line and blank lines of spaces after bare crs": {
-			// The lexer reads each "\r", space, and "\n" as one CRLF, so
-			// the breaks Tokenize puts back end with a bare "\r" in front
-			// of the "\n" that opens the Origin.
+			// The lexer reads each "\r", space, and "\n" as one CRLF.
 			input: stringtest.LinesLF(
 				"",
 				"\r ",
@@ -390,9 +373,8 @@ var (
 			),
 		},
 		"key after blank lines of spaces after a comment that ends with a bare cr": {
-			// The comment's Origin ends with a bare "\r", so a "\n" that
-			// opens the breaks Tokenize puts back would join it into one
-			// CRLF.
+			// The comment's Origin ends with a bare "\r", and a "\n"
+			// that opens the next Origin would join it into one CRLF.
 			input: stringtest.JoinLF(
 				"a: 1 # c\r ",
 				"\r ",
@@ -408,20 +390,11 @@ var (
 		},
 		"key after a bare cr and a line of spaces between tab lines of a quoted scalar": {
 			// The lexer reads the "\r", the space, and the "\n" as one
-			// CRLF in a token of whitespace alone, so the key's Origin
-			// takes the line break the stream lacks.
+			// CRLF in a token of whitespace alone.
 			input: stringtest.LinesLF(
 				`a: "x`,
 				"\t\r ",
 				"\t",
-				"",
-				"b: 1",
-			),
-			want: stringtest.LinesLF(
-				`a: "x`,
-				"\t\r",
-				"\t",
-				"",
 				"",
 				"b: 1",
 			),
@@ -433,27 +406,12 @@ var (
 				"\t\"",
 				"b: 1",
 			),
-			want: stringtest.LinesLF(
-				`a: "x`,
-				"\t\r",
-				"\t",
-				"\t\"",
-				"b: 1",
-			),
 		},
 		"key after a bare cr and a line of spaces between tab lines of plain text": {
 			input: stringtest.LinesLF(
 				"a: x",
 				"\t\r ",
 				"\t",
-				"",
-				"b: 1",
-			),
-			want: stringtest.LinesLF(
-				"a: x",
-				"\t\r",
-				"\t",
-				"",
 				"",
 				"b: 1",
 			),
@@ -473,26 +431,18 @@ var (
 		"key after trailing spaces the lexer drops": {
 			// The lexer drops the spaces after the flow mapping and makes
 			// an invalid token of the blank line, whose indentation must
-			// not repeat. Tokenize leaves the whitespace around that
-			// token as the lexer made it.
+			// not repeat.
 			input: stringtest.LinesLF(
 				"{a: b}  ",
-				" \t",
-				"? k",
-			),
-			want: stringtest.LinesLF(
-				"{a: b}",
 				" \t",
 				"? k",
 			),
 		},
 	}
 
-	// DroppedWhitespace holds sources with whitespace the lexer drops. The want
-	// field holds the joined Origins of a source where they differ from it.
+	// DroppedWhitespace holds sources with whitespace the lexer drops.
 	droppedWhitespace = map[string]struct {
 		input string
-		want  string
 	}{
 		"space before a colon after quoted flow keys":    {input: `{"a" : 1, "b" : "x"}` + "\n"},
 		"space before a colon after an alias key":        {input: "&a a : 1\n*a : 2\n"},
@@ -582,9 +532,8 @@ var (
 				"  b: 2",
 			),
 		},
-		// The lexer ends a tag that ends its line with the line ending
-		// and opens the next token with it again. Tokenize drops the
-		// repeat.
+		// The go-yaml lexer ends a tag that ends its line with the line
+		// ending and opens the next token with it again.
 		"line ending the lexer repeats after a tag": {
 			input: stringtest.LinesLF(
 				"u: !t",
@@ -621,8 +570,8 @@ var (
 			),
 		},
 		"bad block header at the end": {
-			// The lexer repeats the header's last rune as a token of its
-			// own when no line ending follows, and Tokenize drops it.
+			// The go-yaml lexer repeats the header's last rune as a token
+			// of its own when no line ending follows.
 			input: "key: >foo",
 		},
 		"bad block header and comment at the end": {input: "k: |ab # c"},
@@ -631,48 +580,27 @@ var (
 			input: "- |ab\n- |ab",
 		},
 		"text after a block scalar header at the end": {
-			// The lexer reads the last rune of the text a second time,
-			// and Tokenize drops the token it makes of it.
+			// The go-yaml lexer reads the last rune of the text a second
+			// time.
 			input: "key: |abc",
 		},
 		"text after a folded scalar header at the end": {input: "a: >x y"},
 		"lone tag marker at the end": {
-			// The lexer drops the "!" and the spaces in front of it.
+			// The lexer does not emit a tag that ends the source, and
+			// the token in front of it ends with its text.
 			input: "a: !",
-			want:  "a:",
 		},
-		"lone tag marker on the last line": {
-			input: "a: b\n!",
-			want:  "a: b\n",
-		},
-		"named tag at the end": {
-			input: "a: !t",
-			want:  "a:",
-		},
-		"secondary tag at the end": {
-			input: "a: !!str",
-			want:  "a:",
-		},
-		"named tag on the last line": {
-			// The line break in front of the tag goes with it.
-			input: "a:\n!t",
-			want:  "a:",
-		},
-		"named tag on the line after a plain scalar": {
-			// The scalar in front of the tag keeps the line break.
-			input: "a: b\n!t",
-			want:  "a: b\n",
-		},
+		"lone tag marker on the last line":           {input: "a: b\n!"},
+		"named tag at the end":                       {input: "a: !t"},
+		"secondary tag at the end":                   {input: "a: !!str"},
+		"named tag on the last line":                 {input: "a:\n!t"},
+		"named tag on the line after a plain scalar": {input: "a: b\n!t"},
 		"tag holding a flow end at the end": {
 			// Only a space, a line break, or a "," in a flow collection
 			// closes a tag.
 			input: "[!t]",
-			want:  "[",
 		},
-		"tag holding a comma at the end": {
-			input: "a: !t,",
-			want:  "a:",
-		},
+		"tag holding a comma at the end":          {input: "a: !t,"},
 		"tag before a comma in a flow collection": {input: "[!t,"},
 		"tag holding a brace at the end": {
 			// The lexer keeps the tag's text as an invalid token.
@@ -838,9 +766,9 @@ var (
 			want: []string{"1:1:1", "1:2:2", "1:4:4", "2:1:9", "2:2:10", "2:4:12"},
 		},
 		"key after a truncated escape": {
-			// The lexer cuts "x41" out of the Origin, so the source does
-			// not hold the scalar's text. Tokenize must not place the key
-			// after it inside the scalar, where "c" also appears.
+			// The go-yaml lexer cuts "x41" out of the Origin. The copy of
+			// the scanner keeps it, so the key sits after the whole scalar,
+			// not inside it where "c" also appears.
 			input: stringtest.LinesLF(
 				`a: "x\x41 b c"`,
 				"c: 2",
@@ -878,8 +806,8 @@ var (
 			want: []string{"1:1:1", "1:2:2", "2:3:6", "3:3:12", "3:11:20", "3:13:22", "4:3:26", "4:4:27", "4:6:29"},
 		},
 		"tab indentation": {
-			// The lexer drops the ":" after the tab, so the value's text
-			// sits further on than the cursor.
+			// The invalid token of the tab holds the ":", and the value
+			// starts after it.
 			input: stringtest.LinesLF(
 				"\ta: 1",
 				"b: 2",
@@ -913,16 +841,6 @@ var (
 			input: cutEscapeAtHeader,
 			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:1:10", "3:1:14", "3:2:15", "3:4:17"},
 		},
-		"comment after a header the lexer shortened": {
-			// The lexer reads "---" as "--" one rune on, so the shift
-			// taken from it misses the comment by one rune.
-			input: stringtest.LinesLF(
-				"\"\t1",
-				"---",
-				"# c",
-			),
-			want: []string{"1:1:1", "2:1:5", "3:1:9"},
-		},
 		"escaped line break before a tab line that opens with a backslash": {
 			input: stringtest.JoinLF(
 				`b: "\`,
@@ -931,16 +849,16 @@ var (
 			want: []string{"1:1:1", "1:2:2", "1:4:4", "2:3:9"},
 		},
 		"text on the line after a tab line that swallows its indicator": {
-			// The token the lexer makes of the second tab swallows the ":"
-			// that ends the line, and the tokens of whitespace alone sit on
-			// that ":". The text of the next token opens the line after it.
+			// The token the lexer makes of the second tab holds the ":"
+			// that ends the line. The token of whitespace alone after it
+			// sits on the text of the next line.
 			input: stringtest.JoinLF(
 				`a: "x`,
 				"\t\t:",
 				"\t,,",
 				"\t",
 			),
-			want: []string{"1:1:1", "1:2:2", "1:4:4", "2:3:9", "2:3:9", "3:2:12"},
+			want: []string{"1:1:1", "1:2:2", "1:4:4", "2:3:9", "3:2:12", "3:2:12"},
 		},
 		"quote on the line after a tab line that swallows its indicator": {
 			input: stringtest.JoinLF(
@@ -949,7 +867,7 @@ var (
 				"\t\"\r",
 				"\t",
 			),
-			want: []string{"1:1:1", "1:2:2", "1:4:4", "2:3:9", "2:3:9", "3:2:12", "4:2:16"},
+			want: []string{"1:1:1", "1:2:2", "1:4:4", "2:3:9", "3:2:12", "3:2:12"},
 		},
 	}
 
@@ -1213,20 +1131,12 @@ var (
 func TestTokenize_TabIndentsQuotedLine(t *testing.T) {
 	t.Parallel()
 
-	// When a tab indents a later line of a quoted scalar, the lexer ends
-	// the scalar's invalid token with the tab and reads the tab again as a
-	// token of its own. Tokenize drops that repeat and gives the scalar the
-	// whitespace the lexer drops after the tab, so the joined Origins equal
-	// the input, and each token on the tab's line starts past the one
-	// before it. The tokens on both sides of a repeat link to each other.
-	// A backslash that ends the scalar's text stays with it when the tab's
-	// line opens with one. The want field holds the joined Origins where
-	// they differ from the input. The lexer drops a lone "!". It also
-	// drops the code of a "\x" or "\u" escape, which Tokenize does not
-	// restore in a scalar the lexer cut at a tab.
+	// When a tab indents a later line of a quoted scalar, the scalar's
+	// invalid token ends with the tab, and the scan goes on after it. The
+	// joined Origins equal the input, and each token on the tab's line
+	// starts past the one before it.
 	tcs := map[string]struct {
 		input string
-		want  string
 	}{
 		"double-quoted": {
 			input: stringtest.LinesLF(
@@ -1303,23 +1213,10 @@ func TestTokenize_TabIndentsQuotedLine(t *testing.T) {
 				`  more"`,
 				"b: 1",
 			),
-			want: stringtest.LinesLF(
-				`a: "caf\`,
-				"\t",
-				`  more"`,
-				"b: 1",
-			),
 		},
 		"escape code and two lines": {
 			input: stringtest.LinesLF(
 				`a: "caf\u00e9`,
-				"\t",
-				"\t",
-				`  more"`,
-				"b: 1",
-			),
-			want: stringtest.LinesLF(
-				`a: "caf\`,
 				"\t",
 				"\t",
 				`  more"`,
@@ -1340,17 +1237,11 @@ func TestTokenize_TabIndentsQuotedLine(t *testing.T) {
 				`a: "x`,
 				"\t!",
 			),
-			want: stringtest.JoinLF(`a: "x`, "\t"),
 		},
 		"dropped text before a bare cr on the tab line": {
 			input: stringtest.JoinLF(
 				"a: \"\t\t\t]",
 				"\t?\r\u00e9>",
-				"\t",
-			),
-			want: stringtest.JoinLF(
-				"a: \"\t\t\t]",
-				"\t\u00e9>",
 				"\t",
 			),
 		},
@@ -1409,10 +1300,6 @@ func TestTokenize_TabIndentsQuotedLine(t *testing.T) {
 				`a: "c\x41`,
 				"\t\\x42\"",
 			),
-			want: stringtest.LinesLF(
-				`a: "c\`,
-				"\t\\x42\"",
-			),
 		},
 		"escaped line break before a backslash": {
 			input: stringtest.LinesLF(
@@ -1433,12 +1320,6 @@ func TestTokenize_TabIndentsQuotedLine(t *testing.T) {
 				"\t\t\\x4|",
 				"\t\t",
 			),
-			want: stringtest.JoinLF(
-				`:: "`,
-				`\`,
-				"\t\t\\x4|",
-				"\t\t",
-			),
 		},
 	}
 
@@ -1447,7 +1328,7 @@ func TestTokenize_TabIndentsQuotedLine(t *testing.T) {
 			t.Parallel()
 
 			tks := tokens.Tokenize(tc.input)
-			assert.Equal(t, cmp.Or(tc.want, tc.input), yamltest.DumpTokenOrigins(tks))
+			assert.Equal(t, tc.input, yamltest.DumpTokenOrigins(tks))
 			require.NoError(t, yamltest.ValidateLines(line.NewLines(tks)))
 
 			require.NoError(t, yamltest.ValidateTokenLinks(tks))
@@ -1460,10 +1341,9 @@ func TestTokenize_TabAfterBlockTextThatOpensWithQuote(t *testing.T) {
 
 	// When a tab indents the line after text that follows a block scalar
 	// header and opens with a quote, the lexer makes an invalid token of
-	// the text that looks like a quoted scalar it cut at a tab. The lexer
-	// repeats no tab after that token, so Tokenize drops no token. The
-	// joined Origins equal the input, and each token on a line starts past
-	// the one before it.
+	// the text that looks like a quoted scalar it cut at a tab. The joined
+	// Origins equal the input, and each token on a line starts past the
+	// one before it.
 	tcs := map[string]struct {
 		input string
 	}{
@@ -1516,19 +1396,63 @@ func TestTokenize_TabAfterBlockTextThatOpensWithQuote(t *testing.T) {
 	}
 }
 
+func TestTokenize_TabInDoubleQuotedScalar(t *testing.T) {
+	t.Parallel()
+
+	// Each tab between the text of a double-quoted scalar makes the go-yaml
+	// lexer step one rune past the text that it reads, and the copy of the
+	// scanner does the same. Around the invalid token of such a scalar, the
+	// next scan starts after those runes, and the invalid token holds
+	// them. The joined Origins equal the input, and each position names
+	// the rune of the source where its token starts.
+	tcs := map[string]struct {
+		input string
+		pos   []string
+	}{
+		"document header after an unclosed scalar": {
+			input: stringtest.LinesLF(
+				"\"\t1",
+				"---",
+				"# c",
+			),
+			pos: []string{"1:1:1", "2:2:6", "3:1:9"},
+		},
+		"long escape cut short after a hex escape and a tab": {
+			input: `k: "\x41` + "\t" + `\U12"` + "\n",
+			pos:   []string{"1:1:1", "1:2:2", "1:4:4", "1:11:11"},
+		},
+		"high surrogate without a low one after a tab": {
+			input: stringtest.LinesLF(
+				`- ":`+"\t\t"+`\N\uD83D\u`+"\t"+`"`,
+				"b: 1",
+			),
+			pos: []string{"1:1:1", "1:3:3", "1:11:11", "2:1:20", "2:2:21", "2:4:23"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tks := tokens.Tokenize(tc.input)
+			assert.Equal(t, tc.input, yamltest.DumpTokenOrigins(tks))
+			assert.Equal(t, tc.pos, positionsOf(tks))
+		})
+	}
+}
+
 func TestTokenize_NumericEscape(t *testing.T) {
 	t.Parallel()
 
-	// The lexer drops the code of a "\x", "\u", or "\U" escape from a
-	// double-quoted scalar's Origin, and Tokenize restores the Origin from
-	// the source, so the joined Origins equal the input. An escape that
-	// reads the closing quote as a hex digit leaves the scalar open, and the
-	// lexer makes an invalid token of the rest of the source. Tokenize
-	// restores that token the same way. It does the same for the invalid
-	// token of a scalar the lexer cuts at a "---" or "..." line or at an
-	// escape it rejects. When
-	// the lexer gives up on a "\u" or "\U" escape, it reads the backslash
-	// into two tokens, and Tokenize leaves it in the second alone.
+	// The go-yaml lexer drops the code of a "\x", "\u", or "\U" escape
+	// from a double-quoted scalar's Origin, and the copy of the scanner
+	// keeps it, so the joined Origins equal the input. An escape that reads
+	// the closing quote as a hex digit leaves the scalar open, and the
+	// lexer makes an invalid token of the rest of the source. That token
+	// keeps the code too, and so does the invalid token of a scalar that
+	// the lexer cuts at a "---" or "..." line or at an escape it rejects.
+	// When the lexer gives up on a "\u" or "\U" escape, the backslash
+	// opens the next token alone.
 	for name, input := range numericEscapes {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -1542,21 +1466,13 @@ func TestTokenize_NumericEscape(t *testing.T) {
 func TestTokenize_FinalBlankLines(t *testing.T) {
 	t.Parallel()
 
-	// The stream keeps the blank lines that end the file, even when the
-	// lexer rewrote the last token, cut it short, or gave it whitespace
-	// alone. The whitespace comes back once, so a block scalar header that
-	// holds the start of it does not repeat it. A line that ends in spaces
-	// the lexer dropped does not cost the file its final lines, and neither
-	// does a blank line of spaces. A last token that sits in front of text
-	// the lexer dropped keeps the line ending it holds.
+	// The stream keeps the blank lines that end the file, even where the
+	// go-yaml lexer rewrites the last token, cuts it short, or gives it
+	// whitespace alone. The whitespace appears once, so a block scalar
+	// header that holds the start of it does not repeat it. The joined
+	// Origins equal the input.
 	tcs := map[string]struct {
 		input string
-		// The end of the input's final whitespace that the joined Origins
-		// hold, when the lexer drops spaces ahead of it. Empty means all
-		// of it.
-		tail string
-		// The joined Origins equal the input.
-		whole bool
 	}{
 		"trailing space inside the last scalar": {
 			input: stringtest.LinesLF(
@@ -1596,7 +1512,6 @@ func TestTokenize_FinalBlankLines(t *testing.T) {
 				"\t",
 				"",
 			),
-			whole: true,
 		},
 		"invalid tab token after a header": {
 			input: stringtest.LinesLF(
@@ -1604,7 +1519,6 @@ func TestTokenize_FinalBlankLines(t *testing.T) {
 				"\t",
 				"",
 			),
-			whole: true,
 		},
 		"invalid tab token after a trailing space": {
 			input: stringtest.LinesLF(
@@ -1613,11 +1527,9 @@ func TestTokenize_FinalBlankLines(t *testing.T) {
 				"\t\t",
 				"",
 			),
-			tail: "\n\t\t\n\n",
 		},
 		"invalid tab token after a trailing space crlf": {
 			input: "  b: 2 \r\n\t\t\n",
-			tail:  "\r\n\t\t\n",
 		},
 		"invalid tab token after a blank line of spaces": {
 			input: stringtest.LinesLF(
@@ -1626,7 +1538,6 @@ func TestTokenize_FinalBlankLines(t *testing.T) {
 				"  ",
 				"\t\t",
 			),
-			tail: "\n\t\t\n",
 		},
 		"invalid tab token of a space and a tab after a trailing space": {
 			input: stringtest.LinesLF(
@@ -1634,23 +1545,18 @@ func TestTokenize_FinalBlankLines(t *testing.T) {
 				"  b: 1 ",
 				"\t \t",
 			),
-			tail: "\n\t \t\n",
 		},
 		"truncated escape": {
 			input: `a: "\x41"` + "\n\n",
-			whole: true,
 		},
 		"empty block scalar content": {
 			input: "a: |\n\n",
-			whole: true,
 		},
 		"empty block scalar content crlf": {
 			input: "a: |+\r\n\r\n",
-			whole: true,
 		},
 		"empty block scalar in a sequence": {
 			input: "- |\n\n",
-			whole: true,
 		},
 		"header with trailing spaces": {
 			input: stringtest.LinesLF(
@@ -1658,39 +1564,16 @@ func TestTokenize_FinalBlankLines(t *testing.T) {
 				"  ",
 				" ",
 			),
-			whole: true,
 		},
-		"dropped text ends the file": {input: "a: 1\n!"},
-		"tab indentation": {
-			// The lexer swallows characters after a tab used as
-			// indentation, so the joined Origins are not a prefix of the
-			// source.
-			input: "\ta: 1\n",
-		},
+		"tag ends the file": {input: "a: 1\n!"},
+		"tab indentation":   {input: "\ta: 1\n"},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tks := tokens.Tokenize(tc.input)
-			require.NotEmpty(t, tks)
-
-			got := yamltest.DumpTokenOrigins(tks)
-			assert.Equal(t, countLineBreaks(tc.input), countLineBreaks(got), "joined origins %q", got)
-
-			tail := tc.input[len(strings.TrimRight(tc.input, " \t\r\n")):]
-			if tc.tail != "" {
-				require.True(t, strings.HasSuffix(tail, tc.tail), "input tail %q", tail)
-
-				tail = tc.tail
-			}
-
-			assert.True(t, strings.HasSuffix(got, tail), "joined origins %q", got)
-
-			if tc.whole {
-				assert.Equal(t, tc.input, got)
-			}
+			assert.Equal(t, tc.input, yamltest.DumpTokenOrigins(tokens.Tokenize(tc.input)))
 		})
 	}
 }
@@ -1699,58 +1582,52 @@ func TestTokenize_FinalTabToken(t *testing.T) {
 	t.Parallel()
 
 	// The last token of each source is the invalid token the lexer makes
-	// of a tab, and it keeps the Origin the lexer gave it. When a tab used
-	// as indentation opens the file, that token can swallow the rest of the
-	// text, and the whitespace after the swallowed text follows it. In a
-	// longer source, the whitespace of the tokens before it can match a
-	// later part of the source's final whitespace once the match skips
-	// spaces and tabs. Its own whitespace does not follow there, so it
-	// keeps the tab it holds.
+	// of a tab used as indentation. It holds the "-" or ":" indicator
+	// after the tab, and it ends with the whitespace that ends the source.
 	tcs := map[string]struct {
 		input string
 		want  string // The Origin of the last token.
 		// The token is the only one of the stream.
 		alone bool
 	}{
-		"opening tab swallows a sequence entry":                 {input: "\t-", want: "\t", alone: true},
-		"opening tab swallows a mapping value":                  {input: "\t:", want: "\t", alone: true},
-		"opening tab swallows an entry before a line ending":    {input: "\t-\n", want: "\t\n", alone: true},
-		"opening tab swallows an entry before a blank line":     {input: "\t-\n\n", want: "\t\n\n", alone: true},
-		"opening tab swallows an entry before a trailing space": {input: "\t- ", want: "\t ", alone: true},
-		"opening tab after a space swallows an entry":           {input: " \t-", want: " \t", alone: true},
-		"two opening tabs swallow an entry before a crlf":       {input: "\t\t-\r\n", want: "\t\t\r\n", alone: true},
+		"opening tab swallows a sequence entry":                 {input: "\t-", want: "\t-", alone: true},
+		"opening tab swallows a mapping value":                  {input: "\t:", want: "\t:", alone: true},
+		"opening tab swallows an entry before a line ending":    {input: "\t-\n", want: "\t-\n", alone: true},
+		"opening tab swallows an entry before a blank line":     {input: "\t-\n\n", want: "\t-\n\n", alone: true},
+		"opening tab swallows an entry before a trailing space": {input: "\t- ", want: "\t- ", alone: true},
+		"opening tab after a space swallows an entry":           {input: " \t-", want: " \t-", alone: true},
+		"two opening tabs swallow an entry before a crlf":       {input: "\t\t-\r\n", want: "\t\t-\r\n", alone: true},
 		"swallowed sequence entry before a space": {
 			input: stringtest.LinesLF(
 				"# c",
 				"\t- ",
 			),
-			want: "\t",
+			want: "\t- \n",
 		},
 		"swallowed mapping value before a space": {
 			input: stringtest.LinesLF(
 				"# c",
 				"\t: ",
 			),
-			want: "\t",
+			want: "\t: \n",
 		},
 		"swallowed sequence entry before a tab": {
 			input: stringtest.LinesLF(
 				"# c",
 				"\t-\t",
 			),
-			want: "\t",
+			want: "\t-\t\n",
 		},
-		"swallowed sequence entry between bare crs": {input: "# c\r\t- \r", want: "\t"},
+		"swallowed sequence entry between bare crs": {input: "# c\r\t- \r", want: "\t- \r"},
 		"swallowed mapping values in a nested mapping": {
 			input: stringtest.JoinLF(
 				"a:",
 				"  b: 1:\t:\t: \t",
 			),
-			want: "\t",
+			want: "\t: \t",
 		},
-		// The lexer repeats the line ending after the tag and after the
-		// header text, and Tokenize drops the repeat, so the last token
-		// takes the final line ending of the source.
+		// The tag and the header text each end with their line ending,
+		// so the last token takes only the lines after it.
 		"tab lines after a tag": {
 			input: stringtest.LinesLF(
 				"a: !t",
@@ -1961,14 +1838,15 @@ func TestTokenize_ByteOrderMark(t *testing.T) {
 func TestTokenize_OpenFlowAtMarker(t *testing.T) {
 	t.Parallel()
 
-	// The lexer keeps its counts of open flow collections across a marker.
-	// On its own, it reads the documents after a "{" or "[" that nothing
+	// The go-yaml lexer keeps its counts of open flow collections across a
+	// marker. It reads the documents after a "{" or "[" that nothing
 	// closes as the inside of a flow collection, and misses the flow
 	// sequence after a "]" that closes nothing. Each head ends in such a
-	// document. The tokens from the marker that opens tail on are those of
-	// tail as a source of its own, moved to where tail sits in the input.
-	// The tail of many cases is markerAndComma. Its comma reads as a flow
-	// indicator while the lexer counts a flow as open.
+	// document. The copy of the scanner closes the flow collections at the
+	// marker, so the tokens from the marker that opens tail on are those
+	// of tail as a source of its own, moved to where tail sits in the
+	// input. The tail of many cases is markerAndComma. Its comma reads as
+	// a flow indicator while the lexer counts a flow as open.
 	markerAndComma := stringtest.LinesLF("---", "k: v, w")
 
 	tcs := map[string]struct {
@@ -2060,6 +1938,12 @@ func TestTokenize_OpenFlowAtMarker(t *testing.T) {
 			tail: markerAndComma,
 			want: []string{"---", "k", ":", "v, w"},
 		},
+		"indicator after a tab inside the flow": {
+			// The invalid token of the tab holds the ":".
+			head: "{\t: \n",
+			tail: markerAndComma,
+			want: []string{"---", "k", ":", "v, w"},
+		},
 		"unclosed quote inside the flow": {
 			head: `a: ["b` + "\n",
 			tail: markerAndComma,
@@ -2084,8 +1968,6 @@ func TestTokenize_OpenFlowAtMarker(t *testing.T) {
 				"---", "l", ":", "[", "a", ",", "b", "]",
 			},
 		},
-		// The second open flow sits past the first window of lines that
-		// Tokenize lexes from the first marker.
 		"open flows far apart": {
 			head: "a: {b\n",
 			tail: "---\n" +
@@ -2093,7 +1975,6 @@ func TestTokenize_OpenFlowAtMarker(t *testing.T) {
 				stringtest.LinesLF("c: [", "---") +
 				strings.Repeat("k: v, w\n", 20),
 		},
-		// The windows end inside the block scalar and the quoted scalar.
 		"scalars of many lines between open flows": {
 			head: "a: [b\n",
 			tail: stringtest.LinesLF("---", "s: |") +
@@ -2139,32 +2020,6 @@ func TestTokenize_OpenFlowAtMarker(t *testing.T) {
 			require.NoError(t, yamltest.ValidateTokenLinks(got))
 		})
 	}
-}
-
-func TestTokenize_OpenFlowBehindSwallowedText(t *testing.T) {
-	t.Parallel()
-
-	// A tab in front of a ":" makes the lexer swallow the ":", so the
-	// source holds text between the "{" and the marker that no token
-	// holds. Tokenize leaves the stream as the lexer made it there, and
-	// the "," of the next document still reads as a flow indicator.
-	input := stringtest.LinesLF(
-		"{\t: ",
-		"---",
-		"k: v, w",
-	)
-
-	want := lexer.Tokenize(input)
-	got := tokens.Tokenize(input)
-
-	require.Len(t, got, len(want))
-
-	for i, tk := range got {
-		assert.Equal(t, want[i].Type, tk.Type, "token %d %q", i, tk.Origin)
-		assert.Equal(t, want[i].Value, tk.Value, "token %d %q", i, tk.Origin)
-	}
-
-	assert.Equal(t, token.CollectEntryType, got[len(got)-2].Type)
 }
 
 func TestIsPlaceholder(t *testing.T) {
@@ -2320,9 +2175,9 @@ func TestTokenize_RestoresDroppedLineBreaks(t *testing.T) {
 
 	// The lexer drops the line breaks and indentation between some tokens
 	// and a "?" or ":" indicator that follows them, and a blank line from
-	// a run of them after a double-quoted scalar that holds a tab.
-	// Tokenize puts them back, so the Origins ahead of each token's text
-	// hold as many line breaks as the source does. The sources also go
+	// a run of them after a double-quoted scalar that holds a tab. The
+	// copy of the scanner keeps them, so the Origins ahead of each token's
+	// text hold as many line breaks as the source does. The sources also go
 	// through TestTokenize_PositionsLocateText, which checks the rune that
 	// each position names.
 	for name, tc := range droppedLineBreaks {
@@ -2352,7 +2207,7 @@ func TestTokenize_RestoresDroppedLineBreaks(t *testing.T) {
 				joined.WriteString(tk.Origin)
 			}
 
-			assert.Equal(t, cmp.Or(tc.want, tc.input), joined.String())
+			assert.Equal(t, tc.input, joined.String())
 		})
 	}
 }
@@ -2450,13 +2305,13 @@ func TestTokenize_RestoresDroppedWhitespace(t *testing.T) {
 	// The lexer drops the spaces and tabs that end a line, the spaces of a
 	// blank line, the space in front of a ":" after a quoted or alias key,
 	// the space between a "-" and a "?", and the line breaks in front of a
-	// "?" key. Tokenize gives them back, so the joined Origins equal the
-	// input.
+	// "?" key. The copy of the scanner keeps them, so the joined Origins
+	// equal the input.
 	for name, tc := range droppedWhitespace {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, cmp.Or(tc.want, tc.input), yamltest.DumpTokenOrigins(tokens.Tokenize(tc.input)))
+			assert.Equal(t, tc.input, yamltest.DumpTokenOrigins(tokens.Tokenize(tc.input)))
 		})
 	}
 }
@@ -2653,27 +2508,23 @@ func TestResetPositions(t *testing.T) {
 		assert.Equal(t, "2:1:4", positionsOf(got)[0])
 	})
 
-	t.Run("counts from the joined Origins after a swallowed indicator", func(t *testing.T) {
+	t.Run("keeps the positions of a stream that opens with a tab indicator", func(t *testing.T) {
 		t.Parallel()
 
-		// The lexer swallows a "-" or ":" after a tab that indents the
-		// first line. Tokenize counts the swallowed rune in its positions,
-		// but the joined Origins lack it, so the clones of a whole stream
-		// move to where the Origins hold their text.
+		// The invalid token of a tab that indents the first line holds the
+		// "-" or ":" after the tab, so the clones of the whole stream keep
+		// their positions.
 		tcs := map[string]struct {
-			input   string
-			origins string
-			want    []string
+			input string
+			want  []string
 		}{
 			"sequence entry before a key": {
-				input:   "\t- a\nb: 1\n",
-				origins: "\t a\nb: 1\n",
-				want:    []string{"1:1:1", "1:3:3", "2:2:6", "2:4:8"},
+				input: "\t- a\nb: 1\n",
+				want:  []string{"1:2:2", "1:4:4", "2:2:7", "2:4:9"},
 			},
 			"mapping value alone": {
-				input:   "\t:\n",
-				origins: "\t\n",
-				want:    []string{"1:1:1"},
+				input: "\t:\n",
+				want:  []string{"1:2:2"},
 			},
 		}
 
@@ -2681,9 +2532,11 @@ func TestResetPositions(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				got := tokens.ResetPositions(tokens.Tokenize(tc.input))
+				tks := tokens.Tokenize(tc.input)
+				got := tokens.ResetPositions(tks)
 
-				assert.Equal(t, tc.origins, yamltest.DumpTokenOrigins(got))
+				assert.Equal(t, tc.input, yamltest.DumpTokenOrigins(got))
+				assert.Equal(t, tc.want, positionsOf(tks))
 				assert.Equal(t, tc.want, positionsOf(got))
 			})
 		}
@@ -3216,8 +3069,8 @@ func TestTokenize_PositionsLocateText(t *testing.T) {
 				require.NotNil(t, tk.Position, "token %d", i)
 
 				// The first line of text in the Origin is in the source at
-				// Offset. Tokenize restores the Origin of a double-quoted
-				// scalar from the source, so all of its text is there.
+				// Offset. The Origin of a double-quoted scalar holds the
+				// text of the source, so all of its text is there.
 				text := firstTextLine(tk.Origin)
 				if tk.Type == token.DoubleQuoteType {
 					text = strings.Trim(tk.Origin, " \t\r\n")
@@ -3298,8 +3151,8 @@ func TestTokenize_ParsesAsTheLexerDoes(t *testing.T) {
 			assert.Equal(t, nodeShape(want), nodeShape(got))
 
 			// The rendering of a file spaces its nodes by their Lines, so
-			// the blank lines the lexer's drift adds or drops are the
-			// one difference the repair may make to it.
+			// the blank lines that the lexer's positions add or drop are
+			// the one difference that Tokenize can make to it.
 			assert.Equal(t, withoutBlankLines(want.String()), withoutBlankLines(got.String()))
 		})
 	}

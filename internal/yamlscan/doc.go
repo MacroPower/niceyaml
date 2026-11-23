@@ -1,10 +1,32 @@
-// Package yamlscan is a copy of the scanner of go-yaml.
+// Package yamlscan is a patched copy of the scanner of go-yaml.
 //
 // The copy holds go-yaml's scanner package and the Tokenize function of its
 // lexer package at the commit that UPSTREAM_COMMIT names. It emits the
 // [github.com/goccy/go-yaml/token.Token] values of the go-yaml module that
 // go.mod requires, so the commit of the copy must match that version.
 // LICENSE holds the license of go-yaml.
+//
+// # Patches
+//
+// The patches make the Origins of the tokens join to the source, and they
+// make each position name the rune where the text of its token starts.
+// Each patch to a copied file carries a comment that opens with
+// "niceyaml:". The copy keeps the spaces and tabs that end a line, the
+// whitespace in front of a ":" or "?", and the code of a "\x", "\u", or
+// "\U" escape. It ends the last token with the text that ends the input,
+// and it gives a source without tokens, such as one of whitespace alone,
+// one token that holds the whole text. It reads each line ending once,
+// and a CRLF stays whole in one Origin. It does not repeat the end of a
+// token as a token of its own. It closes the flow collections that a
+// document leaves open at a "---" or "..." marker.
+//
+// Tokenize counts the positions from the joined Origins, in place of the
+// counts of the scanner. It also moves the whitespace that go-yaml drops
+// from an Origin to the token where niceyaml's tokens package expects it.
+// The files position.go and settle.go hold those passes.
+//
+// The [WithCompat] option keeps the token types and values of go-yaml
+// where a patch would change what the go-yaml parser reads.
 //
 // # Sync
 //
@@ -25,5 +47,11 @@
 //     package, and the other side is the unchanged copy of the new commit.
 //     Resolve each conflict that sync.sh reports.
 //  4. Run the tests of this package. The corpus test reads each input under
-//     testdata/corpus with the copy and with the lexer of go-yaml.
+//     testdata/corpus with and without [WithCompat]. It checks that the
+//     Origins join to the input and that each position names the rune
+//     where the text of its token starts. With [WithCompat], it also
+//     checks that the tokens have the types and values that go-yaml's
+//     lexer gives them. That check skips each input where either stream
+//     holds an invalid token and each input where the lexer does not give
+//     any token.
 package yamlscan

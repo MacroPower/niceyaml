@@ -302,7 +302,7 @@ func TestSplit_Lines(t *testing.T) {
 		// drops the blank lines between a comment, a quoted scalar, or a
 		// flow collection and a "?" or ":" indicator after it, and a blank
 		// line from a run of them after a double-quoted scalar that holds a
-		// tab. Tokenize gives them back with the spaces they hold, so Split
+		// tab. Tokenize keeps them with the spaces they hold, so Split
 		// keeps every line, its number, and its content.
 		"key after a comment": {
 			input: stringtest.LinesLF("# c", "", "? b", ": c"),
@@ -342,7 +342,7 @@ func TestSplit_Lines(t *testing.T) {
 				"  ",
 				"? b",
 			),
-			want: []string{"x:", "  a: \"t\tb\"", " \t", "", "? b"},
+			want: []string{"x:", "  a: \"t\tb\"", " \t", "  ", "? b"},
 		},
 		"plain scalar after a blank line of spaces": {
 			input: stringtest.LinesLF("t: \"a\tb\"", "  ", "  r'", "- e"),
@@ -461,25 +461,6 @@ func TestSplit_PartPosition(t *testing.T) {
 			wantColumn: 6,
 			wantOffset: 6,
 		},
-		// The lexer closes a comment with "\r" and opens the next token
-		// with "\n". That "\n" is a new rune, so it advances the column
-		// and the offset by one.
-		"newline of a crlf cut after a comment": {
-			input:      stringtest.LinesCRLF("# c", "k: v"),
-			origin:     "\n",
-			line:       0,
-			idx:        1,
-			wantColumn: 5,
-			wantOffset: 5,
-		},
-		"newline of a crlf cut between comments": {
-			input:      stringtest.LinesCRLF("# a", "# b", "c: 1"),
-			origin:     "\n",
-			line:       1,
-			idx:        1,
-			wantColumn: 5,
-			wantOffset: 10,
-		},
 		// The line ending after a tag counts once. "a: !t\n" (6) +
 		// "  b: 1\n" (7) + "c: \"x\n" (6) puts the continuation at
 		// 1-indexed offset 20.
@@ -498,8 +479,8 @@ func TestSplit_PartPosition(t *testing.T) {
 			wantOffset: 20,
 		},
 		// "a: !t\r\n" (7) + "  b: 1\r\n" (8) + "c: 'x\r\n" (7) puts the
-		// continuation at 1-indexed offset 23. Tokenize gives the final
-		// line ending back to the last token, so the part carries it.
+		// continuation at 1-indexed offset 23. The last token ends with
+		// the final line ending, so the part carries it.
 		"quoted continuation after a tag in a crlf source": {
 			input:      stringtest.LinesCRLF("a: !t", "  b: 1", "c: 'x", "  y'"),
 			origin:     "  y'\r\n",
@@ -603,12 +584,10 @@ func TestSplit_Invariants(t *testing.T) {
 	t.Parallel()
 
 	// Every part on a line reports the number of that line. Offsets grow
-	// from part to part through the whole stream, across the tokens the
-	// lexer positions short, such as those after a comment or a tag, and
-	// across a CRLF it cuts between two tokens. The first part of a token
-	// that holds text carries the token's own Line, Column, and Offset,
-	// whatever whitespace and line endings the Origin opens with and
-	// whatever the lexer dropped before it.
+	// from part to part through the whole stream, such as across the
+	// tokens after a comment or a tag, and across a CRLF. The first part of
+	// a token that holds text carries the token's own Line, Column, and
+	// Offset, whatever whitespace and line endings the Origin opens with.
 	tcs := map[string]string{
 		"comments": stringtest.LinesLF(
 			"# head",
@@ -713,13 +692,12 @@ func TestSplit_PartsKeepTokenFields(t *testing.T) {
 	t.Parallel()
 
 	// Every part of a token carries the token's CharacterType, Indicator,
-	// and Error, including a line ending Split moves onto the line finished
-	// last. The lexer gives an Error to the invalid token it makes of a tab
-	// that opens a line.
+	// and Error. The lexer gives an Error to the invalid token it makes of
+	// a tab that opens a line.
 	tcs := map[string]string{
-		"tab after a comment cut from its crlf": stringtest.LinesCRLF("a: 1 # c", "\tb: 1"),
-		"tab line after a tag":                  stringtest.LinesLF("a: !!map", "\t", "  b: 1"),
-		"tab that opens a line":                 stringtest.LinesLF("a: 1", "\tb: 2"),
+		"tab after a comment that ends with a crlf": stringtest.LinesCRLF("a: 1 # c", "\tb: 1"),
+		"tab line after a tag":                      stringtest.LinesLF("a: !!map", "\t", "  b: 1"),
+		"tab that opens a line":                     stringtest.LinesLF("a: 1", "\tb: 2"),
 	}
 
 	for name, input := range tcs {
@@ -1116,9 +1094,7 @@ func lineParts(lines []segment.Line) token.Tokens {
 }
 
 // TestSplit_SegmentStarts verifies that each segment of a line that Split
-// returns starts at the column where the segment before it ends. A line
-// that takes a part after Split finished it, such as the "\n" of a CRLF
-// that the lexer cuts after a comment, keeps that order.
+// returns starts at the column where the segment before it ends.
 func TestSplit_SegmentStarts(t *testing.T) {
 	t.Parallel()
 

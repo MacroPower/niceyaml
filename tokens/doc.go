@@ -1,12 +1,14 @@
-// Package tokens is the module's entry point to the go-yaml lexer. It also
-// provides utilities for working with the lexer's token streams: position
-// resets and line ending handling.
+// Package tokens reads the token streams of YAML files. It also provides
+// utilities for working with those streams: position resets and line
+// ending handling.
 //
 // # Tokenizing
 //
-// [Tokenize] returns the token stream for a YAML file. This package is the
-// one place niceyaml calls the go-yaml lexer, so a future change of lexer
-// touches this package alone:
+// [Tokenize] returns the token stream for a YAML file. It reads the tokens
+// with niceyaml's copy of the go-yaml scanner. The tokens that the go-yaml
+// parser reads have the types and values of the go-yaml lexer, with the
+// exception that [Tokenize] lists. The Origins of all tokens join to the
+// text of the file:
 //
 //	tks := tokens.Tokenize("key: value")
 //
@@ -25,9 +27,10 @@
 //
 // # Line Endings
 //
-// The go-yaml lexer keeps line endings in a token's Origin and can split a
-// CRLF ending across two tokens. [TrimLineEnding] strips whichever form a
-// token carries so callers can measure and compare content consistently.
+// The go-yaml lexer keeps line endings in a token's Origin. A line ends
+// with "\n", "\r\n", or a bare "\r". [TrimLineEnding] strips whichever
+// form a token carries so callers can measure and compare content
+// consistently.
 //
 // # Multi-Document YAML
 //

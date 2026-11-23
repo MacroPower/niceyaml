@@ -40,6 +40,28 @@ func TestParse(t *testing.T) {
 			want:     []string{"", stringtest.JoinLF("---", "b: 1")},
 			failures: 1,
 		},
+		"a run cut by a tab after a tab in a double-quoted scalar keeps the next document": {
+			input:    "a: \"x\ty\n\t\n---\nb: 1\n",
+			want:     []string{"", stringtest.JoinLF("---", "b: 1")},
+			failures: 1,
+		},
+		"a tab before a '-' on the line after a tag": {
+			input: "!t\n\t- a\n",
+			want:  []string{stringtest.JoinLF("!t", " - a")},
+		},
+		"a tab before a '-' on the line after a comment that ends with a CRLF": {
+			input: "# c\r\n\t- a\r\n",
+			want:  []string{stringtest.JoinLF(" # c", " - a")},
+		},
+		"a tab before a key on the line after a comment that ends with a CRLF": {
+			input: "# c\r\n\ta: 1\r\n",
+			want:  []string{stringtest.JoinLF(" # c", " a: 1")},
+		},
+		"a tab before a key on the line after an invalid block scalar header keeps the next document": {
+			input:    "|x\n\ta: |\n---\nc: 1\n",
+			want:     []string{"", stringtest.JoinLF("---", "c: 1")},
+			failures: 1,
+		},
 		"a stream of markers holds one document": {
 			input: stringtest.LinesLF("...", "..."),
 			want:  []string{"..."},

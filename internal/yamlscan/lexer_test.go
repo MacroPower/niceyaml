@@ -3,92 +3,633 @@ package yamlscan_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/goccy/go-yaml/lexer"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.jacobcolvin.com/niceyaml/internal/lineend"
 	"go.jacobcolvin.com/niceyaml/internal/yamlscan"
 )
 
-// fields holds every field of a [*token.Token]. Prev and Next hold the index
-// of the linked token in its stream, or -1 for nil.
-type fields struct {
-	Position      *token.Position
-	Type          token.Type
-	CharacterType token.CharacterType
-	Indicator     token.Indicator
-	Value         string
-	Origin        string
-	Error         string
-	Prev          int
-	Next          int
+// CompatFlowReset holds the inputs of the corpus whose token types or
+// values differ from those of go-yaml's lexer with [yamlscan.WithCompat].
+// Each holds a document after an unclosed flow collection. The copy closes
+// the collection at the document marker, but go-yaml's lexer reads the
+// later documents as the inside of the collection.
+var compatFlowReset = map[string]bool{
+	"testdata/corpus/ny/0a63f443bad091c2.yaml":                          true,
+	"testdata/corpus/ny/170ab8343bfa65b2.yaml":                          true,
+	"testdata/corpus/ny/1c1e6fbd6da10194.yaml":                          true,
+	"testdata/corpus/ny/1c811ebbe7b2f54a.yaml":                          true,
+	"testdata/corpus/ny/37767ad8a8c8bb88.yaml":                          true,
+	"testdata/corpus/ny/6fe609943a0f0183.yaml":                          true,
+	"testdata/corpus/ny/7639c9a81a881762.yaml":                          true,
+	"testdata/corpus/ny/873ef8d7ce64ae87.yaml":                          true,
+	"testdata/corpus/ny/8c8891b0297506d0.yaml":                          true,
+	"testdata/corpus/ny/8cf93a89ea05cbf0.yaml":                          true,
+	"testdata/corpus/ny/9e82b5ac83955dec.yaml":                          true,
+	"testdata/corpus/ny/bce30c8a70314e21.yaml":                          true,
+	"testdata/corpus/ny/c5cd9ce6e5f815f1.yaml":                          true,
+	"testdata/corpus/ny/c72f638b107edba4.yaml":                          true,
+	"testdata/corpus/ny/cd9937f542fa35fe.yaml":                          true,
+	"testdata/corpus/ny/d3b1448f35c9e6d8.yaml":                          true,
+	"testdata/corpus/suite/invalid-document-markers-in-flow-style.yaml": true,
 }
 
-// tokenFields returns the fields of each token of tks.
-func tokenFields(tks token.Tokens) []fields {
-	indexes := make(map[*token.Token]int, len(tks))
-	for i, tk := range tks {
-		indexes[tk] = i
+// place is the line, the column, and the rune offset of a rune, each
+// counted from 1.
+type place struct {
+	Line, Column, Offset int
+}
+
+// joined returns the Origins of tks joined.
+func joined(tks token.Tokens) string {
+	var sb strings.Builder
+
+	for _, tk := range tks {
+		sb.WriteString(tk.Origin)
 	}
 
-	index := func(tk *token.Token) int {
-		i, ok := indexes[tk]
-		if !ok {
-			return -1
+	return sb.String()
+}
+
+// wantPlaces returns the place where each token of tks belongs in the
+// joined Origins. A token that holds text belongs at the first rune of
+// its text. A token without text belongs where the next text starts, or
+// at the end of the last line when no text follows it. When the Origins
+// hold whitespace alone, every token belongs at the first rune.
+func wantPlaces(tks token.Tokens) []place {
+	text := joined(tks)
+	if strings.Trim(text, " \t\r\n") == "" {
+		out := make([]place, len(tks))
+		for i := range out {
+			out[i] = place{Line: 1, Column: 1, Offset: 1}
 		}
 
-		return i
+		return out
 	}
 
-	out := make([]fields, len(tks))
-	for i, tk := range tks {
-		out[i] = fields{
-			Position:      tk.Position,
-			Type:          tk.Type,
-			CharacterType: tk.CharacterType,
-			Indicator:     tk.Indicator,
-			Value:         tk.Value,
-			Origin:        tk.Origin,
-			Error:         tk.Error,
-			Prev:          index(tk.Prev),
-			Next:          index(tk.Next),
+	// The place of each rune of text, and of the rune past its end.
+	places := make([]place, 0, utf8.RuneCountInString(text)+1)
+	line, col := 1, 1
+
+	for ln := range lineend.Lines(text) {
+		for range ln {
+			places = append(places, place{Line: line, Column: col, Offset: len(places) + 1})
+			col++
 		}
+
+		if lineend.Trim(ln) != ln {
+			line, col = line+1, 1
+		}
+	}
+
+	places = append(places, place{Line: line, Column: col, Offset: len(places) + 1})
+
+	endLine, endCol := lineend.Advance(1, 1, lineend.Trim(text))
+	end := place{Line: endLine, Column: endCol, Offset: utf8.RuneCountInString(lineend.Trim(text)) + 1}
+
+	out := make([]place, len(tks))
+	pending := []int{}
+	off := 0
+
+	for i, tk := range tks {
+		rest := strings.TrimLeft(tk.Origin, " \t\r\n")
+		if rest == "" {
+			pending = append(pending, i)
+			off += utf8.RuneCountInString(tk.Origin)
+
+			continue
+		}
+
+		at := places[off+utf8.RuneCountInString(tk.Origin)-utf8.RuneCountInString(rest)]
+		for _, j := range append(pending, i) {
+			out[j] = at
+		}
+
+		pending = pending[:0]
+		off += utf8.RuneCountInString(tk.Origin)
+	}
+
+	for _, j := range pending {
+		out[j] = end
 	}
 
 	return out
 }
 
-// TestTokenize compares the copy with go-yaml's lexer on every input of the
-// corpus, and finds every field of every token equal.
+// typedValue holds the type and the value of a token.
+type typedValue struct {
+	Value string
+	Type  token.Type
+}
+
+// typedValues returns the type and the value of each token of tks, and
+// reports whether tks holds an invalid token.
+func typedValues(tks token.Tokens) ([]typedValue, bool) {
+	out := make([]typedValue, len(tks))
+	invalid := false
+
+	for i, tk := range tks {
+		out[i] = typedValue{Type: tk.Type, Value: tk.Value}
+		invalid = invalid || tk.Type == token.InvalidType
+	}
+
+	return out, invalid
+}
+
+// gotPlaces returns the place that the position of each token of tks
+// names.
+func gotPlaces(tks token.Tokens) []place {
+	out := make([]place, len(tks))
+	for i, tk := range tks {
+		out[i] = place{Line: tk.Position.Line, Column: tk.Position.Column, Offset: tk.Position.Offset}
+	}
+
+	return out
+}
+
+// TestTokenize reads every input of the corpus with and without
+// [yamlscan.WithCompat]. The Origins join to the source, no two tokens
+// cut a CRLF, and each position names the place where its token belongs.
+// With the option, the tokens have the types and values that go-yaml's
+// lexer gives them, except for the inputs of compatFlowReset. The test
+// skips that check where either stream holds an invalid token, and where
+// the lexer gives no token, as for a source of whitespace alone.
 func TestTokenize(t *testing.T) {
 	t.Parallel()
 
 	files, err := filepath.Glob(filepath.Join("testdata", "corpus", "*", "*.yaml"))
 	require.NoError(t, err)
-	require.Len(t, files, 1580)
+	require.Len(t, files, 1582)
 
 	for _, file := range files {
-		t.Run(filepath.ToSlash(file), func(t *testing.T) {
+		name := filepath.ToSlash(file)
+
+		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
 			src, err := os.ReadFile(file)
 			require.NoError(t, err)
 
-			want := tokenFields(lexer.Tokenize(string(src)))
-			got := tokenFields(yamlscan.Tokenize(string(src)))
+			for _, compat := range []bool{false, true} {
+				tks := yamlscan.Tokenize(string(src), yamlscan.WithCompat(compat))
 
-			// A diff of the whole stream of a large input takes minutes,
-			// so the test reports the first token that differs.
-			for i := range min(len(want), len(got)) {
-				if !assert.Equal(t, want[i], got[i], "token %d", i) {
-					return
+				if compat {
+					want, wantInvalid := typedValues(lexer.Tokenize(string(src)))
+					got, gotInvalid := typedValues(tks)
+
+					switch {
+					case len(want) == 0 || wantInvalid || gotInvalid:
+					case compatFlowReset[name]:
+						assert.NotEqual(t, want, got, "types and values")
+					default:
+						assert.Equal(t, want, got, "types and values")
+					}
+				}
+
+				assert.Equal(t, string(src), joined(tks), "compat=%t", compat)
+
+				// A CRLF stays whole in one Origin.
+				for i := 1; i < len(tks); i++ {
+					if strings.HasSuffix(tks[i-1].Origin, "\r") && strings.HasPrefix(tks[i].Origin, "\n") {
+						assert.Fail(t, "CRLF cut", "compat=%t token %d %q", compat, i, tks[i].Origin)
+					}
+				}
+
+				// A diff of the whole stream of a large input takes
+				// minutes, so the test reports the first token that
+				// differs.
+				want, got := wantPlaces(tks), gotPlaces(tks)
+				for i := range want {
+					if !assert.Equal(t, want[i], got[i], "compat=%t token %d %q", compat, i, tks[i].Origin) {
+						break
+					}
 				}
 			}
+		})
+	}
+}
 
-			assert.Len(t, got, len(want))
+// tok holds the type and the Origin of a token.
+type tok struct {
+	Type   token.Type
+	Origin string
+}
+
+// toks returns the type and the Origin of each token of tks.
+func toks(tks token.Tokens) []tok {
+	out := make([]tok, len(tks))
+	for i, tk := range tks {
+		out[i] = tok{Type: tk.Type, Origin: tk.Origin}
+	}
+
+	return out
+}
+
+// TestTokenize_Patches reads one input for each patch of the copy, with and
+// without [yamlscan.WithCompat].
+func TestTokenize_Patches(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  []tok
+		// The tokens with the option, where they differ from want.
+		compat []tok
+	}{
+		"trailing spaces before a key": {
+			input: "a: b  \n? c\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " b  \n"},
+				{token.MappingKeyType, "?"},
+				{token.StringType, " c\n"},
+			},
+		},
+		"whitespace alone": {
+			input: "  \n",
+			want:  []tok{{token.StringType, "  \n"}},
+		},
+		"space before the colon of an alias key": {
+			input: "*a : 2\n",
+			want: []tok{
+				{token.AliasType, "*"},
+				{token.StringType, "a"},
+				{token.MappingValueType, " :"},
+				{token.IntegerType, " 2\n"},
+			},
+		},
+		"hex escape": {
+			input: `a: "\x41"` + "\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.DoubleQuoteType, ` "\x41"` + "\n"},
+			},
+		},
+		"unicode escape that swallows the quote": {
+			input: `a: "\u12"` + "\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.InvalidType, ` "\u12"` + "\n"},
+			},
+		},
+		"abandoned unicode escape": {
+			// The scan reads the escape again from its backslash.
+			input: `a: "\u: 1`,
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.InvalidType, ` "`},
+				{token.StringType, `\u`},
+				{token.MappingValueType, ":"},
+				{token.IntegerType, " 1"},
+			},
+		},
+		"crlf after a comment": {
+			input: "# c\r\nd: 1\r\n",
+			want: []tok{
+				{token.CommentType, "# c\r\n"},
+				{token.StringType, "d"},
+				{token.MappingValueType, ":"},
+				{token.IntegerType, " 1\r\n"},
+			},
+		},
+		"crlf after an alias": {
+			input: "- *a\r\n- b\r\n",
+			want: []tok{
+				{token.SequenceEntryType, "-"},
+				{token.AliasType, " *"},
+				{token.StringType, "a"},
+				{token.SequenceEntryType, "\r\n-"},
+				{token.StringType, " b\r\n"},
+			},
+		},
+		"crlf after a tag": {
+			input: "a: !t\r\nb: 1\r\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.TagType, " !t\r\n"},
+				{token.StringType, "b"},
+				{token.MappingValueType, ":"},
+				{token.IntegerType, " 1\r\n"},
+			},
+		},
+		"text after a block scalar header": {
+			input: "a: |x\nb: 1\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.InvalidType, " |x\n"},
+				{token.StringType, "b"},
+				{token.MappingValueType, ":"},
+				{token.IntegerType, " 1\n"},
+			},
+		},
+		"text after a block scalar header that ends the input": {
+			input: `key: >"q"`,
+			want: []tok{
+				{token.StringType, "key"},
+				{token.MappingValueType, ":"},
+				{token.InvalidType, ` >"q"`},
+			},
+		},
+		"tab before a sequence entry": {
+			input: "\t- a\n",
+			want: []tok{
+				{token.InvalidType, "\t-"},
+				{token.StringType, " a\n"},
+			},
+		},
+		"tab that indents a later line of a quoted scalar": {
+			input: "a: \"x\n\ty\"\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.InvalidType, " \"x\n\t"},
+				{token.StringType, "y\"\n"},
+			},
+		},
+		"tab that indents a line after a tab in a double-quoted scalar": {
+			// With the option, the scan steps past the text after the first
+			// tab, as go-yaml does, and does not step past the second.
+			input: "a: \"x\ty\n\t\n---\nb: 1\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.InvalidType, " \"x\ty\n\t"},
+				{token.DocumentHeaderType, "\n---"},
+				{token.StringType, "\nb"},
+				{token.MappingValueType, ":"},
+				{token.IntegerType, " 1\n"},
+			},
+		},
+		"comment on a line that a tab indents after a tab in a double-quoted scalar": {
+			input: "a: \"\t]\n\t#c\nb: 1\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.InvalidType, " \"\t]\n\t"},
+				{token.CommentType, "#c\n"},
+				{token.StringType, "b"},
+				{token.MappingValueType, ":"},
+				{token.IntegerType, " 1\n"},
+			},
+		},
+		"tab before a sequence entry on the line after a tag": {
+			input: "!t\n\t- a\n",
+			want: []tok{
+				{token.TagType, "!t\n"},
+				{token.InvalidType, "\t-"},
+				{token.StringType, " a\n"},
+			},
+			compat: []tok{
+				{token.TagType, "!t\n"},
+				{token.SequenceEntryType, "\t-"},
+				{token.StringType, " a\n"},
+			},
+		},
+		"tab before a key on the line after a comment that ends with a crlf": {
+			input: "# c\r\n\ta: 1\r\n",
+			want: []tok{
+				{token.CommentType, "# c\r\n"},
+				{token.InvalidType, "\ta:"},
+				{token.IntegerType, " 1\r\n"},
+			},
+			compat: []tok{
+				{token.CommentType, "# c\r\n"},
+				{token.StringType, "\ta"},
+				{token.MappingValueType, ":"},
+				{token.IntegerType, " 1\r\n"},
+			},
+		},
+		"tab before a key on the line after an invalid block scalar header": {
+			// Go-yaml leaves the line ending of the header to the next
+			// scan, so it reads the key, and the "---" ends the document.
+			input: "|x\n\ta: |\n---\nc: 1\n",
+			want: []tok{
+				{token.InvalidType, "|x\n"},
+				{token.InvalidType, "\ta:"},
+				{token.LiteralType, " |\n"},
+				{token.StringType, "---\nc: 1\n"},
+			},
+			compat: []tok{
+				{token.InvalidType, "|x\n"},
+				{token.StringType, "\ta"},
+				{token.MappingValueType, ":"},
+				{token.LiteralType, " |\n"},
+				{token.StringType, ""},
+				{token.DocumentHeaderType, "---"},
+				{token.StringType, "\nc"},
+				{token.MappingValueType, ":"},
+				{token.IntegerType, " 1\n"},
+			},
+		},
+		"flow sequence open at a header": {
+			input: "a: [b\n---\nk: v, w\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.SequenceStartType, " ["},
+				{token.StringType, "b\n"},
+				{token.DocumentHeaderType, "---"},
+				{token.StringType, "\nk"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " v, w\n"},
+			},
+		},
+		"flow sequence open at a document end": {
+			input: "a: [b\n...\nm: x, y\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.SequenceStartType, " ["},
+				{token.StringType, "b\n"},
+				{token.DocumentEndType, "..."},
+				{token.StringType, "\nm"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " x, y\n"},
+			},
+		},
+		"flow sequence after a sequence end that closes nothing": {
+			input: "a: ]\n---\nx: [a, b]\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.SequenceEndType, " ]"},
+				{token.DocumentHeaderType, "\n---"},
+				{token.StringType, "\nx"},
+				{token.MappingValueType, ":"},
+				{token.SequenceStartType, " ["},
+				{token.StringType, "a"},
+				{token.CollectEntryType, ","},
+				{token.StringType, " b"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
+		"tag that ends the input": {
+			input: "a: !t",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.TagType, " !t"},
+			},
+			compat: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ": !t"},
+			},
+		},
+		"tag before the key of the next line": {
+			input: "a: !t\n1: x\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.TagType, " !t\n"},
+				{token.IntegerType, "1"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " x\n"},
+			},
+			compat: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.TagType, " !t\n"},
+				{token.StringType, "1"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " x\n"},
+			},
+		},
+		"tag on a mapping": {
+			input: "!t\n1: x\n",
+			want: []tok{
+				{token.TagType, "!t\n"},
+				{token.IntegerType, "1"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " x\n"},
+			},
+			compat: []tok{
+				{token.TagType, "!t\n"},
+				{token.StringType, "1"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " x\n"},
+			},
+		},
+		"space after a double-quoted scalar with a tab": {
+			input: "a: \"t\tb\" \nb: 1\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.DoubleQuoteType, " \"t\tb\" \n"},
+				{token.StringType, "b"},
+				{token.MappingValueType, ":"},
+				{token.IntegerType, " 1\n"},
+			},
+			compat: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.DoubleQuoteType, " \"t\tb\" "},
+				{token.StringType, "\nb"},
+				{token.MappingValueType, ":"},
+				{token.IntegerType, " 1\n"},
+			},
+		},
+		"invalid escape after a tab in a double-quoted scalar": {
+			// With the option, the scan steps one rune past the escape, as
+			// go-yaml does, and the invalid token holds that rune.
+			input: "a: \"x\t\\q\"\nb: 1\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.InvalidType, " \"x\t\\"},
+				{token.StringType, "q\"\n"},
+				{token.StringType, "b"},
+				{token.MappingValueType, ":"},
+				{token.IntegerType, " 1\n"},
+			},
+			compat: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.InvalidType, " \"x\t\\q"},
+				{token.InvalidType, "\"\nb: 1\n"},
+			},
+		},
+		"crlf after an invalid double-quoted scalar with two tabs": {
+			// With the option, the scan steps past the "\r" of the CRLF,
+			// and the next token opens with it.
+			input: "a: \"\tx\ty\\q\r\nb: 1\r\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.InvalidType, " \"\tx\ty\\"},
+				{token.StringType, "q\r\n"},
+				{token.StringType, "b"},
+				{token.MappingValueType, ":"},
+				{token.IntegerType, " 1\r\n"},
+			},
+			compat: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.InvalidType, " \"\tx\ty\\q"},
+				{token.StringType, "\r\nb"},
+				{token.MappingValueType, ":"},
+				{token.IntegerType, " 1\r\n"},
+			},
+		},
+		"crlf after a double-quoted scalar with two tabs": {
+			// With the option, the scan steps past the "y" and the "\r",
+			// and the next token opens with the "\r".
+			input: "a: \"\t\tx\"y\r\nb: 1\r\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.DoubleQuoteType, " \"\t\tx\""},
+				{token.StringType, "y\r\n"},
+				{token.StringType, "b"},
+				{token.MappingValueType, ":"},
+				{token.IntegerType, " 1\r\n"},
+			},
+			compat: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.DoubleQuoteType, " \"\t\tx\"y"},
+				{token.StringType, "\r\nb"},
+				{token.MappingValueType, ":"},
+				{token.IntegerType, " 1\r\n"},
+			},
+		},
+		"crlf after a double-quoted scalar with a tab": {
+			input: "a: \"t\tb\"\r\nb: 1\r\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.DoubleQuoteType, " \"t\tb\""},
+				{token.StringType, "\r\nb"},
+				{token.MappingValueType, ":"},
+				{token.IntegerType, " 1\r\n"},
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, toks(yamlscan.Tokenize(tc.input)), "without the option")
+
+			compat := tc.compat
+			if compat == nil {
+				compat = tc.want
+			}
+
+			assert.Equal(t, compat, toks(yamlscan.Tokenize(tc.input, yamlscan.WithCompat(true))), "with the option")
 		})
 	}
 }

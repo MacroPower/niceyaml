@@ -17,9 +17,8 @@ func BenchmarkTokenize(b *testing.B) {
 		unit string
 	}{
 		// Each unit is a double-quoted scalar with a second line a tab
-		// indents. The lexer cuts every scalar at its tab and reads the tab
-		// again as a token of its own, and Tokenize drops each of those
-		// repeats.
+		// indents. The go-yaml lexer cuts every scalar at its tab and
+		// reads the tab again as a token of its own.
 		{
 			name: "TabRepeats",
 			unit: stringtest.LinesLF(
@@ -28,9 +27,8 @@ func BenchmarkTokenize(b *testing.B) {
 			),
 		},
 		// Each unit is a document that leaves a flow sequence open. The
-		// lexer reads each document after the first as the inside of that
-		// sequence, and Tokenize lexes the source again from the marker of
-		// each one.
+		// go-yaml lexer reads each document after the first as the inside
+		// of that sequence.
 		{
 			name: "OpenFlows",
 			unit: stringtest.LinesLF(

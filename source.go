@@ -1508,8 +1508,7 @@ func (s *Source) Text() string {
 // is LF, CRLF, or a bare CR, as [line.Lines.Runes] yields it. A byte
 // that is not valid UTF-8 takes one column too. A byte order mark that
 // [tokens.Tokenize] dropped lies before column 0 of its line, so the
-// offset of column 0 is past the mark. Offset counts in the text, so it
-// counts text the lexer left out of the lines, as Tokenize describes.
+// offset of column 0 is past the mark.
 //
 // A position can name the end of a line or of the text, as the End of a
 // range does. The offset of the column past a line ending is where the

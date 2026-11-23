@@ -342,9 +342,7 @@ func (l *Line) Width() int {
 //
 // The iteration includes the line ending as a single '\n' at column
 // [Line.Width], the column after the last visible rune. It yields '\n'
-// whether the source used LF, CRLF, or a bare CR. A line yields at most
-// one newline, even when the lexer cuts a CRLF after a comment across two
-// segments.
+// whether the source used LF, CRLF, or a bare CR.
 func (l *Line) Runes() iter.Seq2[int, rune] {
 	return func(yield func(int, rune) bool) {
 		col := 0

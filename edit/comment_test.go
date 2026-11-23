@@ -708,6 +708,14 @@ func TestNode_SetLineComment(t *testing.T) {
 			err: "test.yaml:2:4: $.a: cafe.jacobcolvin.com/v1 sets the line comment of $.a, " +
 				"whose tag ends the text without a line break",
 		},
+		"tag of an item that ends the text": {
+			// Go-yaml drops the tag, and the "-" holds its text.
+			before: "z: 1\nl:\n  - !!str",
+			path:   paths.MustParse("$.l[0]"),
+			text:   "d",
+			err: "test.yaml:3:5: $.l[0]: cafe.jacobcolvin.com/v1 sets the line comment of $.l[0], " +
+				"whose tag ends the text without a line break",
+		},
 		"empty text on a tag that ends the text": {
 			before: "z: 1\na: !!str",
 			path:   paths.MustParse("$.a"),

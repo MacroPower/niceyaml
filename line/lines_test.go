@@ -587,9 +587,9 @@ func TestNewLines_PerLine(t *testing.T) {
 				"   1 | key: value",
 			},
 		},
-		// The lexer drops the line ending ahead of some tokens, such as a
-		// "?" after a document header or a value indicator after a
-		// directive. Tokenize restores it, so the token opens a new line
+		// The go-yaml lexer drops the line ending ahead of some tokens,
+		// such as a "?" after a document header or a value indicator after
+		// a directive. Tokenize keeps it, so the token opens a new line
 		// rather than joining the one before it.
 		"explicit key after header": {
 			input: stringtest.LinesLF(

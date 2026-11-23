@@ -45,6 +45,14 @@ func TestNode_Set(t *testing.T) {
 		// and the Apply recovers the panic.
 		panicked bool
 	}{
+		"item with a tag that ends the text": {
+			// Go-yaml drops the tag, and the "-" holds its text. The value
+			// writes over the tag.
+			before: "- !t",
+			path:   paths.MustParse("$[0]"),
+			value:  "y",
+			want:   `- "y"`,
+		},
 		"string of several lines at the end of a document before a comment line deeper than its text": {
 			// The comment line above the next "---" belongs to the next
 			// document, so the new entry goes above it. The lines of the block

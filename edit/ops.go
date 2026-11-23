@@ -1742,7 +1742,7 @@ func (d *Doc) indicatorEnd(p *place) int {
 		}
 
 	case p.seq != nil && p.index >= 0 && p.index < len(p.seq.Entries) && p.seq.Entries[p.index].Start != nil:
-		if s, ok := d.tokenSpan(p.seq.Entries[p.index].Start); ok {
+		if s, ok := d.indicatorSpan(p.seq.Entries[p.index].Start); ok {
 			return s.end
 		}
 	}

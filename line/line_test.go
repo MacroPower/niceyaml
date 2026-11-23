@@ -94,9 +94,17 @@ func TestLine_Runes(t *testing.T) {
 			),
 			want: []string{"a: !t\n", "  b: 1\n"},
 		},
-		"crlf cut after comment": {
+		"crlf after comment": {
 			input: stringtest.LinesCRLF("a: b # c", "d: e"),
 			want:  []string{"a: b # c\n", "d: e\n"},
+		},
+		"crlf after a double-quoted scalar with two tabs": {
+			input: stringtest.LinesCRLF("a: \"\t\tx\"y", "b: 1"),
+			want:  []string{"a: \"\t\tx\"y\n", "b: 1\n"},
+		},
+		"crlf after an invalid double-quoted scalar with two tabs": {
+			input: stringtest.LinesCRLF("a: \"\tx\ty\\q", "b: 1"),
+			want:  []string{"a: \"\tx\ty\\q\n", "b: 1\n"},
 		},
 		"bare cr ending": {input: "a: 1\rb: 2\r", want: []string{"a: 1\n", "b: 2\n"}},
 		"blank line after tag": {
