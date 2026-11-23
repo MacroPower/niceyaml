@@ -82,6 +82,24 @@ func AllowFieldPrefixes(prefixes ...string) DecodeOption {
 	}
 }
 
+// AllowUnknownField has a decode under [DisallowUnknownField] or
+// [ReportUnknownField] accept each unknown field for which allow reports
+// true. The decoder passes allow the node of the key and the name that it
+// read from the key. A field that allow accepts does not fail the decode,
+// and the decode does not report it. A field with a prefix of
+// [AllowFieldPrefixes] does not reach allow.
+//
+// The decoder asks allow each time that it reads the mapping of the key.
+// An alias that takes the value that the decoder read for its anchor does
+// not read the mapping again. So allow must give one answer for a key at
+// every read.
+func AllowUnknownField(allow func(key ast.Node, name string) bool) DecodeOption {
+	return func(d *Decoder) error {
+		d.allowUnknownField = allow
+		return nil
+	}
+}
+
 // AllowDuplicateMapKey ignore syntax error when mapping keys that are duplicates.
 func AllowDuplicateMapKey() DecodeOption {
 	return func(d *Decoder) error {

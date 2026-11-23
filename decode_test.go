@@ -2758,10 +2758,9 @@ func TestWithAllowedFields(t *testing.T) {
 			},
 			err: `4:3: $.base.type~: unknown field "type"`,
 		},
-		// A key of its own makes the merge key read a copy of the anchor
-		// without that key. The copy also leaves out each other key that
-		// the decode admits at the anchor.
-		"a merge key before a key of its own reads the anchor as the cut leaves it": {
+		// The decode admits the key of its own at the mapping and each
+		// other key at the anchor that the merge key reads.
+		"a merge key before a key of its own": {
 			input: stringtest.LinesLF(
 				"bucket: b",
 				"base: &b",
@@ -2793,6 +2792,18 @@ func TestWithAllowedFields(t *testing.T) {
 			input: "type: s3\nbucket: b\nnote: n\n",
 			opts:  []niceyaml.DecodeOption{niceyaml.WithAllowedFields(rootType)},
 		},
+		"admits a key with a tag": {
+			input: "!!str type: s3\nbucket: b\n",
+			opts:  []niceyaml.DecodeOption{strict, niceyaml.WithAllowedFields(rootType)},
+		},
+		"admits a key with an anchor": {
+			input: "&k type: s3\nbucket: b\n",
+			opts:  []niceyaml.DecodeOption{strict, niceyaml.WithAllowedFields(rootType)},
+		},
+		"admits an explicit key": {
+			input: "? type\n: s3\nbucket: b\n",
+			opts:  []niceyaml.DecodeOption{strict, niceyaml.WithAllowedFields(rootType)},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -2823,8 +2834,10 @@ func TestWithAllowedFields(t *testing.T) {
 		assert.Equal(t, typed{Type: "s3", Bucket: "b"}, got)
 	})
 
-	// An anchor whose type declares the key keeps it, so the alias or the
-	// merge key that reads the anchor elsewhere sees the key too.
+	// An anchor whose type declares the key fills the field. The alias or
+	// the merge key that reads the anchor for a type without the field
+	// accepts the key, because the decode admits it where the document
+	// writes it.
 	type mix struct {
 		Base   typed  `yaml:"base"`
 		Nested nested `yaml:"nested"`
@@ -2866,21 +2879,21 @@ func TestWithAllowedFields(t *testing.T) {
 			doc := yamltest.FirstDocument(t, tc.input)
 			allowed := niceyaml.WithAllowedFields(tc.keys...)
 
-			_, err := doc.Decode[mix](t.Context(), strict, allowed)
-			require.EqualError(t, err, `2:3: $.nested.type~: unknown field "type"`)
+			got, err := doc.Decode[mix](t.Context(), strict, allowed)
+			require.NoError(t, err)
+			assert.Equal(t, "x", got.Base.Type)
 
 			w := niceyaml.NewWarnings()
-			got, err := doc.Decode[mix](w.Context(t.Context()),
+			got, err = doc.Decode[mix](w.Context(t.Context()),
 				niceyaml.WithUnknownFields(niceyaml.UnknownFieldsWarn), allowed)
 			require.NoError(t, err)
 			assert.Equal(t, "x", got.Base.Type)
-			require.EqualError(t, w.Err(), `2:3: warning: $.nested.type~: unknown field "type"`)
+			require.NoError(t, w.Err())
 		})
 	}
 
-	// An interface or a map keeps each key that it reads, so it holds
-	// the key of the anchor. The alias that nested reads then reports the
-	// key.
+	// An interface or a map holds each key that it reads, so it holds the
+	// key of the anchor. The alias that nested reads accepts the key.
 	keepers := map[string]struct {
 		decode func(context.Context, *niceyaml.Node, ...niceyaml.DecodeOption) (any, error)
 	}{
@@ -2899,15 +2912,16 @@ func TestWithAllowedFields(t *testing.T) {
 			doc := yamltest.FirstDocument(t, "base: &b\n  type: x\nnested: *b\n")
 			allowed := niceyaml.WithAllowedFields(nestedType)
 
-			_, err := tc.decode(t.Context(), doc, strict, allowed)
-			require.EqualError(t, err, `2:3: $.nested.type~: unknown field "type"`)
+			got, err := tc.decode(t.Context(), doc, strict, allowed)
+			require.NoError(t, err)
+			assert.EqualValues(t, map[string]any{"type": "x"}, got)
 
 			w := niceyaml.NewWarnings()
-			got, err := tc.decode(w.Context(t.Context()), doc,
+			got, err = tc.decode(w.Context(t.Context()), doc,
 				niceyaml.WithUnknownFields(niceyaml.UnknownFieldsWarn), allowed)
 			require.NoError(t, err)
 			assert.EqualValues(t, map[string]any{"type": "x"}, got)
-			require.EqualError(t, w.Err(), `2:3: warning: $.nested.type~: unknown field "type"`)
+			require.NoError(t, w.Err())
 		})
 	}
 
@@ -2980,8 +2994,8 @@ func TestWithAllowedFields(t *testing.T) {
 		})
 	}
 
-	// A merge key before a key of its own reads a copy of the anchor
-	// outside the node, without each key that the decode admits there.
+	// A merge key before a key of its own reads the anchor outside the
+	// node, and the decode admits the keys there.
 	t.Run("a merge key before a key of its own reads an anchor outside the node", func(t *testing.T) {
 		t.Parallel()
 
@@ -3083,9 +3097,8 @@ func TestWithAllowedFields(t *testing.T) {
 		assert.Equal(t, nested{A: 1}, got.Top[8][8][8][8][8][8][8][8])
 	})
 
-	// An alias reads the content of its anchor as the cut leaves it. So an
-	// anchor outside the node, which the node reads only through another
-	// anchor, loses the key too.
+	// The decode admits a key of an anchor outside the node that the node
+	// reads only through another anchor.
 	t.Run("a scoped decode reads nested anchors outside its node", func(t *testing.T) {
 		t.Parallel()
 
@@ -3113,7 +3126,7 @@ func TestWithAllowedFields(t *testing.T) {
 		require.ErrorIs(t, err, niceyaml.ErrUnknownField)
 	})
 
-	t.Run("a value that decodes itself does not read the key", func(t *testing.T) {
+	t.Run("a value that decodes itself reads the key", func(t *testing.T) {
 		t.Parallel()
 
 		type config struct {
@@ -3126,7 +3139,44 @@ func TestWithAllowedFields(t *testing.T) {
 			niceyaml.WithAllowedFields(paths.Doc().Child("base", "type")))
 		require.NoError(t, err)
 		assert.Contains(t, string(got.Base), "a: 1")
-		assert.NotContains(t, string(got.Base), "type")
+		assert.Contains(t, string(got.Base), "type: x")
+	})
+
+	// The decode function of a CustomUnmarshaler does not admit the key,
+	// so it rejects the key for a value without a field for it.
+	t.Run("the decode function of a custom unmarshaler rejects the key", func(t *testing.T) {
+		t.Parallel()
+
+		type base struct {
+			A int `yaml:"a"`
+		}
+
+		type config struct {
+			Base base `yaml:"base"`
+		}
+
+		custom := niceyaml.OverrideTypeRules(niceyaml.CustomUnmarshaler(
+			func(_ context.Context, b *base, decode func(any) error) error {
+				var f struct {
+					A int `yaml:"a"`
+				}
+
+				err := decode(&f)
+				b.A = f.A
+
+				return err
+			},
+		))
+
+		doc := yamltest.FirstDocument(t, "base:\n  a: 1\n  type: x\n")
+		allowed := niceyaml.WithAllowedFields(paths.Doc().Child("base", "type"))
+
+		_, err := doc.Decode[config](t.Context(), strict, allowed, custom)
+		require.ErrorIs(t, err, niceyaml.ErrUnknownField)
+
+		got, err := doc.Decode[config](t.Context(), strict, allowed)
+		require.NoError(t, err)
+		assert.Equal(t, 1, got.Base.A)
 	})
 
 	// The decode cannot tell which keys a merge key from a reference
@@ -3145,6 +3195,37 @@ func TestWithAllowedFields(t *testing.T) {
 		got, err := doc.Decode[config](t.Context(), strict, niceyaml.WithAllowedFields(nestedType))
 		require.NoError(t, err)
 		assert.Equal(t, typed{Type: "x", Bucket: "b"}, got.Nested)
+	})
+
+	// The decode admits a key of the document. A key of a reference
+	// document at the line and the column of an admitted key stays
+	// unknown.
+	t.Run("a key of a reference document at the place of an admitted key", func(t *testing.T) {
+		t.Parallel()
+
+		type bucket struct {
+			Bucket string `yaml:"bucket"`
+		}
+
+		type config struct {
+			Ref    bucket `yaml:"ref"`
+			Nested nested `yaml:"nested"`
+		}
+
+		refs := niceyaml.NewSourceFromString("r: &r\n  type: y\n  bucket: b\n")
+		src := niceyaml.NewSourceFromString("nested:\n  type: x\n  a: 1\nref: *r\n", niceyaml.WithReferences(refs))
+		doc := yamltest.Document(t, src)
+		allowed := niceyaml.WithAllowedFields(nestedType)
+
+		_, err := doc.Decode[config](t.Context(), strict, allowed)
+		require.EqualError(t, err, `4:6: $.ref.type~: unknown field "type"`)
+
+		w := niceyaml.NewWarnings()
+		got, err := doc.Decode[config](w.Context(t.Context()),
+			niceyaml.WithUnknownFields(niceyaml.UnknownFieldsWarn), allowed)
+		require.NoError(t, err)
+		assert.Equal(t, config{Ref: bucket{Bucket: "b"}, Nested: nested{A: 1}}, got)
+		require.EqualError(t, w.Err(), `4:6: warning: $.ref.type~: unknown field "type"`)
 	})
 
 	// A map that a struct holds inline takes every key of the mapping, even
@@ -3274,9 +3355,9 @@ func TestWithAllowedFields(t *testing.T) {
 		}
 	})
 
-	// A struct that holds a map inline keeps the admitted key of an anchor
+	// A struct that holds a map inline takes the admitted key of an anchor
 	// that it reads. A struct without a field for the key that reads the
-	// same anchor through an alias then reports the key.
+	// same anchor through an alias accepts the key.
 	t.Run("an inline map and a strict struct share an anchor", func(t *testing.T) {
 		t.Parallel()
 
@@ -3296,16 +3377,18 @@ func TestWithAllowedFields(t *testing.T) {
 		allowed := niceyaml.WithAllowedFields(paths.Doc().Child("a", "type"))
 		want := map[string]any{"type": "s3", "bucket": "b"}
 
-		_, err := doc.Decode[shared](t.Context(), strict, allowed)
-		require.EqualError(t, err, `2:3: $.b.type~: unknown field "type"`)
+		got, err := doc.Decode[shared](t.Context(), strict, allowed)
+		require.NoError(t, err)
+		assert.Equal(t, want, got.A.Extra)
+		assert.Equal(t, "b", got.B.Bucket)
 
 		w := niceyaml.NewWarnings()
-		got, err := doc.Decode[shared](w.Context(t.Context()),
+		got, err = doc.Decode[shared](w.Context(t.Context()),
 			niceyaml.WithUnknownFields(niceyaml.UnknownFieldsWarn), allowed)
 		require.NoError(t, err)
 		assert.Equal(t, want, got.A.Extra)
 		assert.Equal(t, "b", got.B.Bucket)
-		require.EqualError(t, w.Err(), `2:3: warning: $.b.type~: unknown field "type"`)
+		require.NoError(t, w.Err())
 
 		got, err = doc.Decode[shared](t.Context(),
 			niceyaml.WithUnknownFields(niceyaml.UnknownFieldsIgnore), allowed)
@@ -8366,9 +8449,9 @@ func TestDocument_Decode_SyntaxNodes(t *testing.T) {
 		assert.Same(t, yamltest.At(t, doc, paths.MustParse("$.c")).AST(), got.C.node)
 	})
 
-	// A node type keeps every admitted key below it, so the decode does not
-	// cut the key out of the node. A struct that reads the same anchor
-	// then reports the key it does not declare, as it does beside a map.
+	// A node type gets the node of the document with each admitted key in
+	// it. A struct that reads the same anchor accepts the key that it does
+	// not declare.
 	t.Run("node with an admitted key", func(t *testing.T) {
 		t.Parallel()
 
@@ -8393,12 +8476,15 @@ func TestDocument_Decode_SyntaxNodes(t *testing.T) {
 
 		doc = yamltest.FirstDocument(t, "d: &d {a: 1, x: 2}\nmap: *d\ns: *d\n")
 
-		_, err = doc.Decode[shared](t.Context(), append(admit, niceyaml.WithAllowedFields(paths.MustParse("$.d")))...)
-		require.EqualError(t, err, `1:14: $.s.x~: unknown field "x"`)
+		sharedGot, err := doc.Decode[shared](t.Context(),
+			append(admit, niceyaml.WithAllowedFields(paths.MustParse("$.d")))...)
+		require.NoError(t, err)
+		assert.Equal(t, 1, sharedGot.S.A)
+		assert.Equal(t, "{a: 1, x: 2}", sharedGot.Map.String())
 	})
 
-	// An unmarshaler does not keep an admitted key below it, so it gets a
-	// copy of its node without the key.
+	// An unmarshaler gets the node of the document with the admitted key
+	// in it.
 	t.Run("unmarshaler with an admitted key", func(t *testing.T) {
 		t.Parallel()
 
@@ -8412,8 +8498,8 @@ func TestDocument_Decode_SyntaxNodes(t *testing.T) {
 			niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject),
 			niceyaml.WithAllowedFields(paths.MustParse("$.m.x")))
 		require.NoError(t, err)
-		assert.Equal(t, "{a: 1}", got.M.text)
-		assert.NotSame(t, yamltest.At(t, doc, paths.MustParse("$.m")).AST(), got.M.node)
+		assert.Equal(t, "{a: 1, x: 2}", got.M.text)
+		assert.Same(t, yamltest.At(t, doc, paths.MustParse("$.m")).AST(), got.M.node)
 	})
 
 	// The decoder sets a node held by value to a copy that shares its

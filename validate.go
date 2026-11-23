@@ -1352,7 +1352,7 @@ func (w *selfWalker) pathResolver() *paths.Resolver {
 // starts from the defaults of its type.
 func (w *selfWalker) keyDecoder() *yamldecode.Decoder {
 	if w.decoder == nil {
-		w.decoder = w.node.newDecoder(w.cfg, nil, w.cfg.defaults.startOption())
+		w.decoder = w.node.newDecoder(w.cfg, w.cfg.defaults.startOption())
 	}
 
 	return w.decoder

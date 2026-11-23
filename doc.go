@@ -961,10 +961,7 @@
 //
 // The node that the decoder hands an UnmarshalYAML method is a node of the
 // document too, and so is each node inside a type that decodes itself. A
-// decode with [WithAllowedFields] under [UnknownFieldsReject] or
-// [UnknownFieldsWarn] is the exception. Such a method gets a copy of its
-// node without the admitted keys that the decode leaves out, as
-// [WithAllowedFields] describes. A node inside an anchor of a reference
+// node inside an anchor of a reference
 // document from [WithReferences] is a node of that reference document,
 // which the resolver of the document does not know.
 //

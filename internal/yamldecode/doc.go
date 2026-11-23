@@ -82,6 +82,9 @@
 //     another parse. The text that the decoder hands an unmarshaler holds
 //     such an alias written out as the value of that anchor. The space and
 //     the line breaks that end the other parse stay out of the text.
+//   - With [AllowUnknownField], a decode accepts each unknown field that a
+//     function allows by the node of its key. The decode does not fail for
+//     such a field, and it does not report one.
 //
 // The files that sync.sh does not write stand in for the parts of go-yaml
 // that the copy needs outside those files. The decode options are copies of

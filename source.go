@@ -22,7 +22,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/bom"
-	"go.jacobcolvin.com/niceyaml/internal/decodewalk"
 	"go.jacobcolvin.com/niceyaml/internal/docparse"
 	"go.jacobcolvin.com/niceyaml/internal/filepaths"
 	"go.jacobcolvin.com/niceyaml/internal/limitread"
@@ -93,18 +92,6 @@ type Source struct {
 	// The anchors a Source that reads this one through WithReferences
 	// finds in it, as exportedAnchors builds them.
 	exported lazy[*reftable.Table]
-	// The keys of the merge sources of the documents that the lookups
-	// beside the `<<` merge keys of reference documents read, for every
-	// document. The lookups read each source once, whatever the number of
-	// documents that merge it. So the keys grow with the text of the
-	// Source. The reference table keeps the keys of each merge source of a
-	// reference document for every Source that reads it, as
-	// [Node.referenceAnchorKeys] describes. It does not keep the names of
-	// the alias keys there. Such a key reads the anchor that the references
-	// of the Source pick. Two Sources that read one reference can thus find
-	// different names for it. So the names of such keys belong to the
-	// Source, and they grow with the alias keys of the reference documents.
-	mergeKeys decodewalk.Keys
 	// The line breaks of the text that the edit package read, as
 	// hook.LineBreaks keeps them.
 	lineBreaks lazy[any]

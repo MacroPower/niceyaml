@@ -81,6 +81,9 @@ type Decoder struct {
 	// does not hold a value of its own, so that the place starts from the
 	// start of its type.
 	freshAnchor bool
+	// allowUnknownField, from AllowUnknownField, reports whether the
+	// decoder accepts an unknown field by the node of its key and its name.
+	allowUnknownField func(key ast.Node, name string) bool
 }
 
 // placeStart is the value that the place of an anchor started from under
@@ -2676,6 +2679,9 @@ func (d *Decoder) decodeStruct(ctx context.Context, dst reflect.Value, src ast.N
 					ok = true
 					break
 				}
+			}
+			if !ok && d.allowUnknownField != nil {
+				ok = d.allowUnknownField(unknownFields[key], key)
 			}
 			if !ok {
 				err := errors.ErrUnknownField(fmt.Sprintf(`unknown field "%s"`, key), unknownFields[key].GetToken())

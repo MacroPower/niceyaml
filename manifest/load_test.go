@@ -6569,8 +6569,10 @@ func TestRegistry_Load_SelfDecodingTypes(t *testing.T) {
 		// The options of the registry, whose unmarshaler counts each of
 		// its calls in calls. The registry holds one kind, of version v1.
 		opts func(calls *atomic.Int32) []manifest.RegistryOption
-		// The value of the manifest.
+		// The value of the manifest, when the load succeeds.
 		want any
+		// The error of the load.
+		err string
 		// The name of the kind.
 		kind string
 		// The calls that the load makes to the unmarshaler of opts.
@@ -6595,7 +6597,11 @@ func TestRegistry_Load_SelfDecodingTypes(t *testing.T) {
 					manifest.WithKinds(manifest.NewKind[Cafe]("Cafe", named, manifest.Version("v1"))),
 				}
 			},
-			want:  Cafe{Metadata: yamull},
+			// The decode of the unmarshaler rejects the type fields,
+			// because Cafe does not have a field for them.
+			err: "cafe.yaml: 2 errors\n" +
+				`cafe.yaml:1:1: $.apiVersion~: unknown field "apiVersion"` + "\n" +
+				`cafe.yaml:2:1: $.kind~: unknown field "kind"`,
 			calls: 1,
 		},
 		"custom unmarshaler of a kind that declares the type fields": {
@@ -6617,8 +6623,8 @@ func TestRegistry_Load_SelfDecodingTypes(t *testing.T) {
 					manifest.WithKinds(manifest.NewKind[Brew]("Brew", named, manifest.Version("v1"))),
 				}
 			},
-			// The unmarshaler does not see the type fields.
-			want:  Brew{Metadata: yamull},
+			// The unmarshaler sees the type fields.
+			want:  Brew{TypeMeta: TypeMeta{APIVersion: "v1", Kind: "Brew"}, Metadata: yamull},
 			calls: 1,
 		},
 		"custom unmarshaler below the kind": {
@@ -6651,7 +6657,8 @@ func TestRegistry_Load_SelfDecodingTypes(t *testing.T) {
 					manifest.WithKinds(manifest.NewKind[jsonCafe]("Cafe", named, manifest.Version("v1"))),
 				}
 			},
-			want: jsonCafe{Metadata: yamull},
+			// The UnmarshalJSON method of jsonCafe rejects the type fields.
+			err: `cafe.yaml:1:1: $: decode cafe: json: unknown field "apiVersion"`,
 		},
 	}
 
@@ -6667,6 +6674,14 @@ func TestRegistry_Load_SelfDecodingTypes(t *testing.T) {
 
 			set, err := reg.Load(t.Context(),
 				input.Sources(niceyaml.NewSourceFromString(doc, niceyaml.WithName("cafe.yaml"))))
+			assert.Equal(t, tc.calls, calls.Load())
+
+			if tc.err != "" {
+				require.EqualError(t, err, tc.err)
+
+				return
+			}
+
 			require.NoError(t, err)
 
 			var got []any
@@ -6676,7 +6691,6 @@ func TestRegistry_Load_SelfDecodingTypes(t *testing.T) {
 			}
 
 			assert.Equal(t, []any{tc.want}, got)
-			assert.Equal(t, tc.calls, calls.Load())
 		})
 	}
 }

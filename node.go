@@ -121,15 +121,6 @@ func (d *document) newResolver() *paths.Resolver {
 	return paths.NewResolver(d.root, limit, paths.WithReferenceAnchors(src.referenceValue))
 }
 
-// pastAliasLimit reports whether the aliases of the document take it past
-// the alias limit, as [aliasing.PastLimit] reports it. A lookup of the
-// entries that a `<<` merge key brings in reads its merge sources through
-// the aliases of the document. Those reads are part of what the limit
-// weighs, so a document past the limit does not read them.
-func (d *document) pastAliasLimit() bool {
-	return aliasing.PastLimit(d.node)
-}
-
 // Node is a scope in a YAML document. It is either the root of the
 // document, which [Source.Documents] and [Source.Document] return, or a
 // node that a path selects. Every method reads from the node and resolves

@@ -2003,6 +2003,74 @@ func TestReportUnknownFieldCallbackFails(t *testing.T) {
 	}
 }
 
+func TestAllowUnknownField(t *testing.T) {
+	t.Parallel()
+
+	type item struct {
+		Name string `yaml:"name"`
+	}
+
+	type target struct {
+		Kind  string `yaml:"kind"`
+		Items []item `yaml:"items"`
+		Again item   `yaml:"again"`
+	}
+
+	// The note of the first item sits in an anchor that the alias of again
+	// reads. The note of the second item has the name of an allowed key at
+	// another place.
+	src := []byte(strings.Join([]string{
+		"kind: x",
+		"x-note: allowed at the root",
+		"items:",
+		"  - &i {name: a, note: allowed in the anchor}",
+		"  - {name: b, note: not allowed}",
+		"again: *i",
+		"",
+	}, "\n"))
+
+	var asked []string
+
+	allow := yaml.AllowUnknownField(func(key ast.Node, name string) bool {
+		pos := key.GetToken().Position
+		asked = append(asked, fmt.Sprintf("%d:%d %s", pos.Line, pos.Column, name))
+
+		return pos.Line == 2 || pos.Line == 4
+	})
+
+	var v target
+
+	err := yaml.UnmarshalWithOptions(src, &v, yaml.DisallowUnknownField(), allow, yaml.CollectErrors())
+
+	// The decode fails for the one key that the function does not allow.
+	require.ErrorAs(t, err, new(*up.UnknownFieldError))
+	require.NotErrorAs(t, err, new(yaml.Errors))
+	assert.Equal(t, "5:15", errorAt(t, err))
+	assert.Equal(t, "$.items[1].note~", pathOf(err))
+
+	// Each struct asks after the structs inside it. The alias takes the
+	// value of its anchor and does not ask again.
+	assert.Equal(t, []string{"4:18 note", "5:15 note", "2:1 x-note"}, asked)
+
+	// A decode that reports unknown fields does not report an allowed one.
+	var reported []string
+
+	report := yaml.ReportUnknownField(func(err error) {
+		reported = append(reported, errorAt(t, err)+" "+pathOf(err))
+	})
+
+	require.NoError(t, yaml.UnmarshalWithOptions(src, &v, report, allow, yaml.CollectErrors()))
+	assert.Equal(t, []string{"5:15 $.items[1].note~"}, reported)
+
+	// A prefix of AllowFieldPrefixes accepts a key before the function.
+	asked = nil
+
+	err = yaml.UnmarshalWithOptions(src, &v, yaml.DisallowUnknownField(), allow,
+		yaml.AllowFieldPrefixes("x-"), yaml.CollectErrors())
+	require.ErrorAs(t, err, new(*up.UnknownFieldError))
+	assert.Equal(t, []string{"4:18 note", "5:15 note"}, asked)
+}
+
 func TestCollectErrorsInlineMapOrder(t *testing.T) {
 	t.Parallel()
 

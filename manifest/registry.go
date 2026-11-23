@@ -171,7 +171,9 @@ func WithMigrateHint(hint string) RegistryOption {
 // niceyaml.WithUnknownFields(niceyaml.UnknownFieldsWarn) among them, the
 // unknown fields of each manifest become warnings of the load. Neither
 // UnknownFieldsWarn nor UnknownFieldsReject reports the type fields that
-// the registry reads.
+// the registry reads, except through the decode function of a
+// [niceyaml.CustomUnmarshaler]. That function does not admit them, as the
+// package documentation describes.
 func WithDecodeOptions(opts ...niceyaml.DecodeOption) RegistryOption {
 	return func(c *registryConfig) {
 		c.decodeOptions = append(c.decodeOptions, opts...)

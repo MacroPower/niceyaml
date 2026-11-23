@@ -728,10 +728,12 @@ func (d *docState) checkSchema(ctx context.Context, v *versionEntry, detail erro
 
 // decode decodes the working copy into a value of the Go type of the kind,
 // and reports whether the decode passed. The decode admits the type
-// fields, and fills each field of the Go type that reads one, unless a
-// value on the way decodes itself. By default, it rejects every other key
-// that the Go type does not declare. A [niceyaml.WithUnknownFields] among
-// the decode options of the registry or the kind replaces that mode.
+// fields, and fills each field of the Go type that reads one. A value on
+// the way that decodes itself sees the type fields too, so the decode
+// fails when that value rejects them. By default, the decode rejects every
+// other key that the Go type does not declare. A
+// [niceyaml.WithUnknownFields] among the decode options of the registry
+// or the kind replaces that mode.
 func (d *docState) decode(ctx context.Context) bool {
 	reg := d.l.reg
 	entry := d.route.kind

@@ -467,11 +467,15 @@
 // those too. A Go type that reads the type fields, such as one that embeds
 // the TypeMeta of Kubernetes or a map[string]any, gets the names of the
 // current version. Each validator of [WithDecodeOptions] and
-// [DecodeOptions] sees them too. A value that decodes itself does not see
-// a type field below it, whether it decodes through a method such as
+// [DecodeOptions] sees them too. A value that decodes itself sees each
+// type field below it as well, whether it decodes through a method such as
 // UnmarshalYAML or through a [niceyaml.CustomUnmarshaler] of
-// [WithTypeRules]. Every error and every warning binds in the file of the
-// user.
+// [WithTypeRules]. A kind whose own decode rejects the type fields thus
+// fails to load, such as one with an UnmarshalJSON method that rejects
+// unknown fields. The decode function that a CustomUnmarshaler gets does
+// not admit the type fields. By default, it rejects them when the value
+// that it fills does not declare them. Every error and every warning
+// binds in the file of the user.
 //
 // The decode reads the document in the layout of the current version,
 // which can be a copy that the load made. Each validator of

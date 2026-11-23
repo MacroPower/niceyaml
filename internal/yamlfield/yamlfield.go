@@ -7,16 +7,7 @@
 // the decoder does. The fields of an inline struct sit beside the
 // fields of its parent. Go-yaml zeroes each such field whose name a field
 // of the parent that is not inline also uses. [OwnNames] returns the
-// names of the parent that zero such a field. An inline map takes every
-// entry of the mapping, and [InlinesMap] reports a struct that holds one,
-// directly or through inline structs.
-//
-// One kind of field does not read an entry of the mapping. An inline
-// field that carries an alias option gets the value of the anchor a `<<`
-// key names. [ReadsAnchor] reports such a field, so the pairing code can
-// leave its struct alone. With an omitempty option beside the alias
-// option, go-yaml also leaves out the entries that the `<<` keys of the
-// mapping bring in. [IgnoresMerges] reports that case.
+// names of the parent that zero such a field.
 //
 // Code that searches for a type the decoder can reach from another, such
 // as a type with a method that a decode calls, uses [Reaches]. [Reaches]
@@ -50,94 +41,6 @@ func Name(field reflect.StructField) (string, bool, bool) {
 	}
 
 	return name, slices.Contains(options[1:], "inline"), false
-}
-
-// ReadsAnchor reports whether go-yaml fills field from an anchor in
-// place of the entries of the mapping it decodes. It does so for an
-// inline field whose tag carries an alias option that does not name an
-// anchor, such as `yaml:",inline,alias"`. The field gets the value of the
-// anchor that a `<<` key of the mapping names with an alias, and stays
-// zero when the mapping lacks such a key. Any option that starts with
-// alias and does not hold an = counts as that option, as it does in
-// go-yaml.
-func ReadsAnchor(field reflect.StructField) bool {
-	// Few tags hold the word, so most fields return before the split.
-	tag, skip := fieldTag(field)
-	if skip || !strings.Contains(tag, "alias") {
-		return false
-	}
-
-	options := strings.Split(tag, ",")[1:]
-
-	return slices.Contains(options, "inline") && slices.ContainsFunc(options, func(option string) bool {
-		return strings.HasPrefix(option, "alias") && !strings.Contains(option, "=")
-	})
-}
-
-// IgnoresMerges reports whether go-yaml leaves out the entries a `<<`
-// merge key brings in when it decodes a mapping into t, a struct type.
-// It does so when t holds a field that [ReadsAnchor] reports and whose
-// tag carries the omitempty option too, such as
-// `yaml:",inline,alias,omitempty"`. The fields of t then read only the
-// entries of the mapping itself.
-func IgnoresMerges(t reflect.Type) bool {
-	for field := range t.Fields() {
-		if !ReadsAnchor(field) {
-			continue
-		}
-
-		tag, _ := fieldTag(field)
-		if slices.Contains(strings.Split(tag, ",")[1:], "omitempty") {
-			return true
-		}
-	}
-
-	return false
-}
-
-// InlinesMap reports whether t, a struct type, holds a field inline whose
-// type is neither a struct nor a pointer to one, such as a map, or holds
-// a struct inline that does, at any depth. Such a field takes every entry
-// of the mapping, including the entries that other fields read. A field
-// that [ReadsAnchor] reports does not count, because it reads an anchor
-// and not the entries. The search reads each inline struct once, so it
-// ends for a struct that holds itself inline.
-func InlinesMap(t reflect.Type) bool {
-	return inlinesMap(t, map[reflect.Type]bool{})
-}
-
-// inlinesMap is [InlinesMap] for a search that has read the structs in
-// seen.
-func inlinesMap(t reflect.Type, seen map[reflect.Type]bool) bool {
-	seen[t] = true
-
-	var inline []reflect.Type
-
-	for field := range t.Fields() {
-		_, isInline, skip := Name(field)
-		if skip || !isInline || ReadsAnchor(field) {
-			continue
-		}
-
-		inner := field.Type
-		if inner.Kind() == reflect.Pointer {
-			inner = inner.Elem()
-		}
-
-		if inner.Kind() != reflect.Struct {
-			return true
-		}
-
-		inline = append(inline, inner)
-	}
-
-	for _, inner := range inline {
-		if !seen[inner] && inlinesMap(inner, seen) {
-			return true
-		}
-	}
-
-	return false
 }
 
 // fieldTag returns the tag go-yaml reads for field, which is the yaml

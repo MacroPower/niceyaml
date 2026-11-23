@@ -22,7 +22,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/datapath"
 	"go.jacobcolvin.com/niceyaml/internal/decodetree"
-	"go.jacobcolvin.com/niceyaml/internal/decodewalk"
 	"go.jacobcolvin.com/niceyaml/internal/multierr"
 	"go.jacobcolvin.com/niceyaml/internal/rejection"
 	"go.jacobcolvin.com/niceyaml/internal/taggedscalar"
@@ -591,7 +590,9 @@ func (m *UnknownFieldsMode) UnmarshalText(text []byte) error {
 // UnknownFieldsReject reports these keys:
 //
 //   - A key under a prefix that [WithAllowedFieldPrefixes] allows.
-//   - A key at a path that [WithAllowedFields] admits.
+//   - A key at a path that [WithAllowedFields] admits, except below a
+//     value that the decode function of a [CustomUnmarshaler] decodes, as
+//     [WithAllowedFields] describes.
 //   - A key below a field of an interface type.
 //   - A key in a mapping that holds a key that the decoder does not read as
 //     a string.
@@ -664,44 +665,38 @@ func WithAllowedFieldPrefixes(prefixes ...string) DecodeOption {
 //
 // The decode admits each key where the document writes it. A path that
 // reaches its entry through an alias or a `<<` merge key finds the key
-// in the anchored mapping. The decode reads that key at the anchor and at
-// every alias and merge key that reads the anchor. With `$.nested.type`
-// admitted, the decode thus also accepts the key at `$.base.type` here.
-// It does so when the type of base does not have a field for the key:
+// in the anchored mapping. The decode admits that key at the anchor and
+// at every alias and merge key that reads the anchor. With `$.nested.type`
+// admitted, the decode thus also accepts the key at `$.base.type` here:
 //
 //	base: &b
 //	  type: x
 //	nested: *b
 //
 // A path whose mapping writes the key itself finds that key, so a `<<`
-// merge key in that mapping does not admit the key of its anchor.
+// merge key in that mapping does not admit the key of its anchor. The
+// decode does not admit a key of a reference document from
+// [WithReferences], even one that an alias of the document reads.
 //
-// A read keeps an admitted key when a field of a struct, a map, or an
-// interface takes the key. The decoder fills each field that takes it. A
-// value of a node type of the go-yaml ast package keeps every key below
-// it, so it gets the node of the document. When one read of a key keeps
-// it, each read of the key that does not keep it reports an unknown
-// field. In the document shown, a type of
-// base with a type field thus has the decode report `$.nested.type~`
-// when the type of nested does not have one.
+// The decode reads each admitted key where the document writes it. A
+// field of a struct, a map, or an interface that takes the key gets its
+// value, and each other read of the key accepts it. In the document shown,
+// a type of base with a type field thus gets the value of the key, and a
+// type of nested without one accepts the key.
 //
 // A struct can hold inline a field of a type other than a struct, such
 // as a map, directly or through inline structs. That field takes every
-// key of the mapping, so the struct keeps each admitted key, and the
-// field holds the key under every [UnknownFieldsMode]. In the document
-// shown, a type of base that holds a map inline thus has the decode
-// report `$.nested.type~` when the type of nested does not have a field
-// for the key. An inline field that reads an anchor, as a
+// key of the mapping, so it holds an admitted key under every
+// [UnknownFieldsMode]. An inline field that reads an anchor, as a
 // `yaml:",inline,alias"` tag sets, does not take the keys of the mapping.
 //
-// The decode leaves out each admitted key that no read keeps. A value
-// that decodes itself, such as one with an UnmarshalYAML method, does not
-// keep an admitted key below it. Its unmarshaler thus sees the key only
-// when another read keeps it, and it gets a copy of its node without the
-// key. An admitted key that the decode leaves out
-// also hides each entry of its name that a `<<` merge key before it
-// brings in. The decode leaves those entries out too. A [Validator] of
-// the decode still sees each key.
+// A value that decodes itself, such as one with an UnmarshalYAML method,
+// sees each admitted key below it. The decode function that a
+// [CustomUnmarshaler] gets does not admit any key. Under
+// [UnknownFieldsReject], it thus rejects an admitted key when the value
+// that it fills does not have a field for the key. A value of a node type
+// of the go-yaml ast package gets the node of the document with the key
+// in it. A [Validator] of the decode sees each key too.
 //
 // Each WithAllowedFields adds to the keys given before it. The option
 // does not change a decode under [UnknownFieldsIgnore].
@@ -792,7 +787,8 @@ func typeRulesConfig(rules []TypeRule) decodeConfig {
 // The function gets the context of the decode and a decode function. The
 // decode function decodes the value with the type rules of the [Source],
 // defaults included, and the options of the decode. It reads an alias as the
-// content of its anchor, and it does not run a [Validator]. A decode into a
+// content of its anchor, and it does not run a [Validator]. It does not
+// admit the keys of [WithAllowedFields]. A decode into a
 // pointer to T calls fn again, so the decode function returns an error
 // for such a target. A function that decodes T by its fields decodes
 // into a second type with those fields, such as `type fields T`. A
@@ -1287,26 +1283,15 @@ func checkTarget(v any, sentinel error, needPointer bool) error {
 
 // newDecoder returns a go-yaml decoder for a decode of n with cfg. It
 // applies the options of the source, then those of cfg. The decoder binds
-// each alias as the document does, through [document.resolveAlias]. Where
-// cut is not nil, an alias reads the content of its anchor as cut leaves
-// it, as [keyCut.readNode] returns it, when the decoder reads the alias.
-func (n *Node) newDecoder(cfg decodeConfig, cut *keyCut, extra ...yamldecode.DecodeOption) *yamldecode.Decoder {
+// each alias as the document does, through [document.resolveAlias].
+func (n *Node) newDecoder(cfg decodeConfig, extra ...yamldecode.DecodeOption) *yamldecode.Decoder {
 	decode := func(ctx context.Context, text []byte, dst any) error {
 		return n.decodeValue(ctx, text, dst, cfg)
 	}
 
-	resolve := func(alias *ast.AliasNode) (ast.Node, bool) {
-		node, ok := n.doc.resolveAlias(alias)
-		if ok && cut != nil {
-			node = cut.readNode(node)
-		}
-
-		return node, ok
-	}
-
 	opts := slices.Concat(
 		n.source.decodeOptions(),
-		[]yamldecode.DecodeOption{yamldecode.ResolveAlias(resolve)},
+		[]yamldecode.DecodeOption{yamldecode.ResolveAlias(n.doc.resolveAlias)},
 		cfg.unmarshalers.YAMLOptions(decode),
 	)
 
@@ -1636,18 +1621,17 @@ func (n *Node) decodeUnbound(
 		return nil
 	}
 
-	// The decoders read each alias as the cut leaves its anchor, so they
-	// read the cut that admitKnownKeys returns. The decoder of the decode
-	// reports every problem of the document. The walks ask a decoder that
-	// stops at the first problem it finds.
-	var (
-		cut     keyCut
-		unknown fieldReports
-	)
+	// The decoder reports every problem of the document. It accepts each
+	// known key of cfg.
+	var unknown fieldReports
 
 	opts := []yamldecode.DecodeOption{yamldecode.CollectErrors()}
 	if cfg.unknownFields == UnknownFieldsWarn {
 		opts = append(opts, yamldecode.ReportUnknownField(unknown.add))
+	}
+
+	if allow := n.allowKnownKeys(cfg); allow != nil {
+		opts = append(opts, allow)
 	}
 
 	// The decoder starts each value that it creates from the defaults of
@@ -1658,10 +1642,7 @@ func (n *Node) decodeUnbound(
 	// needs both rules.
 	opts = append(opts, cfg.defaults.startOption())
 
-	dec := n.newDecoder(cfg, &cut, opts...)
-
-	cut = n.admitKnownKeys(ctx, n.walkRules(ctx, n.newDecoder(cfg, &cut), cfg.unmarshalers), cfg,
-		reflect.TypeOf(v).Elem(), node)
+	dec := n.newDecoder(cfg, opts...)
 
 	// For a null, the decoder sets *v to nil.
 	target := v
@@ -1676,11 +1657,11 @@ func (n *Node) decodeUnbound(
 	// The recover turns a panic in the go-yaml decoder, in a value's own
 	// UnmarshalYAML, or in a function of TypeDefaults into an error that
 	// holds a PanicError.
-	err = decodeWithRecover(ctx, dec, n.readRoot(node, cut), target)
+	err = decodeWithRecover(ctx, dec, n.readRoot(node), target)
 
-	n.warnUnknownFields(ctx, unknown.found, cut.view, err)
+	n.warnUnknownFields(ctx, unknown.found, node, err)
 
-	return n.decodeErrors(err, cut.view)
+	return n.decodeErrors(err, node)
 }
 
 // fieldReports gathers the unknown fields that the decoder of a decode
@@ -1721,26 +1702,6 @@ func (n *Node) warnUnknownFields(ctx context.Context, found []error, scope ast.N
 	}
 }
 
-// firstError returns one error of err, an error of a decoder under
-// [yamldecode.CollectErrors], without its path. The decoder lists its
-// errors in the order of the document. The function returns the first
-// error of that list that is not an unknown field, or the first unknown
-// field when the list holds only unknown fields.
-func firstError(err error) error {
-	list, ok := withoutPaths(err).(yamldecode.Errors) //nolint:errorlint // The decoder returns its list unwrapped.
-	if !ok {
-		return withoutPaths(err)
-	}
-
-	for _, e := range list {
-		if _, unknown := e.(*yaml.UnknownFieldError); !unknown { //nolint:errorlint // The decoder returns it unwrapped.
-			return e
-		}
-	}
-
-	return list[0]
-}
-
 // withoutPaths returns err, an error of a decoder under
 // [yamldecode.CollectErrors], without the path of each error in it.
 func withoutPaths(err error) error {
@@ -1761,19 +1722,19 @@ func withoutPaths(err error) error {
 }
 
 // readRoot returns the node that the decoder reads for node, the node of
-// a decode, as cut leaves it. At the root of a decode, the go-yaml decoder
+// a decode. At the root of a decode, the go-yaml decoder
 // hands an UnmarshalText method empty text for an alias whose anchor
 // another parse holds, as a reference document does. The decoder reads the
 // anchor in place of such an alias. An alias inside the anchor that names
 // it then reads null, as it does where the alias lies below the root.
-func (n *Node) readRoot(node ast.Node, cut keyCut) ast.Node {
+func (n *Node) readRoot(node ast.Node) ast.Node {
 	if _, alias := n.readContent(node); alias != nil {
 		if anchor, ok := n.rootReference(alias); ok {
 			return anchor
 		}
 	}
 
-	return cut.read
+	return node
 }
 
 // rootReference returns the anchor of a reference document that alias
@@ -2654,8 +2615,7 @@ func (n *Node) DecodeIfPresent(ctx context.Context, path paths.Path, v any, opts
 // read the value of the problem. A value that several aliases or `<<`
 // merge keys read thus gives one problem for each use. [Node.decodeProblem]
 // places each problem, and [problemsError] reports them together. The
-// argument scope is the node as the decoder read it, without the entries
-// that the known keys of the decode cut.
+// argument scope is the node that the decoder read.
 //
 // When an unmarshaler returns the error of a context that ended,
 // decodeErrors returns that error alone, without the other problems.
@@ -3103,38 +3063,6 @@ func sortProblems(problems []decodeProblem) {
 	slices.SortFunc(problems, func(a, b decodeProblem) int {
 		return cmp.Or(a.at.Compare(b.at), cmp.Compare(a.order, b.order))
 	})
-}
-
-// walkRules returns the [decodewalk.Rules] of a decode of n with the
-// unmarshalers u, for a walk that asks dec about the values it reaches.
-// The walk reads one error of each decode, the error that [firstError]
-// picks.
-func (n *Node) walkRules(ctx context.Context, dec *yamldecode.Decoder, u unmarshaler.Options) decodewalk.Rules {
-	return decodewalk.Rules{
-		Resolver: n.doc.pathResolver(),
-		Decode: func(node ast.Node, v any) error {
-			return firstError(decodeWithRecover(ctx, dec, node, v))
-		},
-		Unmarshalers:   u,
-		Anchor:         n.source.referenceAlias,
-		AnchorKeys:     n.referenceAnchorKeys,
-		PastAliasLimit: n.doc.pastAliasLimit,
-		Keys:           &n.source.mergeKeys,
-	}
-}
-
-// referenceAnchorKeys returns the keys of the merge sources under the
-// anchor of a reference document that alias reads, as
-// [reftable.Table.Keys] keeps them. The walks of every Source that reads
-// the anchor share them. It returns nil when the reference documents do
-// not define an anchor of the name of alias.
-func (n *Node) referenceAnchorKeys(alias *ast.AliasNode) *decodewalk.Keys {
-	name, ok := astnode.Name(alias.Value)
-	if !ok {
-		return nil
-	}
-
-	return n.source.referenceAnchors().Keys(name)
 }
 
 // rejectionLabel returns the sentinel a rejection of the given label

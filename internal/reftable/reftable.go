@@ -8,7 +8,6 @@ import (
 
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
-	"go.jacobcolvin.com/niceyaml/internal/decodewalk"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -26,30 +25,18 @@ import (
 // its name, the anchor that every decode reads for the alias.
 //
 // The go-yaml decoder reads the trees of a table and does not write to
-// them, so the decodes of many goroutines share them. The table also keeps
-// the keys of the merge sources under its anchors that walks read, as
-// [Table.Keys] describes. A nil Table does not hold any anchors.
+// them, so the decodes of many goroutines share them. A nil Table does not
+// hold any anchors.
 //
 // Create instances with [New].
 type Table struct {
 	// The anchors of the documents of the table, the last of each name.
-	own map[string]*entry
+	own map[string]*ast.AnchorNode
 	// The weights of the anchors that the table holds, as [Table.Weights]
 	// returns them.
 	weights *aliasing.ReferenceWeights
-	// The keys of the merge sources under the anchors of own, as
-	// [Table.Keys] returns them.
-	keys decodewalk.Keys
 	// The tables whose anchors those of own hide, in order.
 	refs []*Table
-}
-
-// entry is an anchor of a [Table].
-type entry struct {
-	// The anchor, a node of a reference document.
-	anchor *ast.AnchorNode
-	// The keys of the table whose documents hold the anchor.
-	keys *decodewalk.Keys
 }
 
 // New creates a new [*Table] of the anchors under bodies, the bodies of
@@ -57,7 +44,7 @@ type entry struct {
 // in refs.
 func New(bodies []ast.Node, refs ...*Table) *Table {
 	t := &Table{
-		own:  map[string]*entry{},
+		own:  map[string]*ast.AnchorNode{},
 		refs: slices.DeleteFunc(slices.Clone(refs), isNil),
 	}
 	t.weights = aliasing.NewReferenceWeights(t.Anchor)
@@ -68,7 +55,7 @@ func New(bodies []ast.Node, refs ...*Table) *Table {
 		astnode.Inspect(body, func(n ast.Node) bool {
 			if anchor, ok := n.(*ast.AnchorNode); ok {
 				if name, ok := astnode.Name(anchor.Name); ok {
-					t.own[name] = t.newEntry(anchor)
+					t.own[name] = anchor
 				}
 			}
 
@@ -84,20 +71,24 @@ func isNil(t *Table) bool {
 	return t == nil
 }
 
-// newEntry creates a new [*entry] of t for anchor.
-func (t *Table) newEntry(anchor *ast.AnchorNode) *entry {
-	return &entry{anchor: anchor, keys: &t.keys}
-}
-
 // Anchor returns the anchor the table holds for name, and reports false
 // when it does not hold one.
 func (t *Table) Anchor(name string) (*ast.AnchorNode, bool) {
-	e := t.entry(name)
-	if e == nil {
+	if t == nil {
 		return nil, false
 	}
 
-	return e.anchor, true
+	if anchor, ok := t.own[name]; ok {
+		return anchor, true
+	}
+
+	for _, ref := range slices.Backward(t.refs) {
+		if anchor, ok := ref.Anchor(name); ok {
+			return anchor, true
+		}
+	}
+
+	return nil, false
 }
 
 // Weights returns what the alias limit weighs for the anchors that the
@@ -112,27 +103,6 @@ func (t *Table) Weights() *aliasing.ReferenceWeights {
 	}
 
 	return t.weights
-}
-
-// Keys returns the [decodewalk.Keys] that keep the keys of the merge
-// sources under the anchor that the table holds for name, as
-// [decodewalk.Rules.AnchorKeys] describes. The anchors of the documents
-// of a table share one Keys, and every table that reads that table
-// returns it for those anchors. So the walks of every Source that reads
-// the anchors share it, and the keys stay as long as the table does.
-//
-// A walk keeps the keys of a source under the node that it reads, a node
-// of the documents of the table. So the Keys hold the keys of each mapping
-// of the documents at most once, however many anchors hold it. They grow
-// with the text of the documents alone. Keys returns nil when the table
-// does not hold an anchor for name.
-func (t *Table) Keys(name string) *decodewalk.Keys {
-	e := t.entry(name)
-	if e == nil {
-		return nil
-	}
-
-	return e.keys
 }
 
 // maxPlaces is the count of places at which a lookup of [Places] stops. A
@@ -477,23 +447,4 @@ func (w *placeWalk) keyName(key ast.Node) (string, bool) {
 	}
 
 	return w.p.names.KeyName(anchor.Value)
-}
-
-// entry returns the entry the table holds for name, or nil.
-func (t *Table) entry(name string) *entry {
-	if t == nil {
-		return nil
-	}
-
-	if e, ok := t.own[name]; ok {
-		return e
-	}
-
-	for _, ref := range slices.Backward(t.refs) {
-		if e := ref.entry(name); e != nil {
-			return e
-		}
-	}
-
-	return nil
 }
