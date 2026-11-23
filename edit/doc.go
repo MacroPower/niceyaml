@@ -613,10 +613,13 @@
 // YAML does, the reads return go-yaml's reading, and a program that needs
 // the reading of YAML fixes the text itself. A call on such a text can fail
 // with [ErrEngine] where the engine cannot write go-yaml's reading back. A
-// text that go-yaml's parser refuses fails New with the error of the parse.
-// So does a reference document of
-// [go.jacobcolvin.com/niceyaml.WithReferences] that does not parse, because
-// each decode of the document fails with that error. A reference document
+// text that the Source does not parse fails New with the error of the
+// parse. Such texts include one that go-yaml's parser refuses. They also
+// include one with a "-" on the line of a tag, as in "a: !t - 1". YAML
+// refuses that "-", but the parser takes it. A reference document of
+// [go.jacobcolvin.com/niceyaml.WithReferences] that does not parse fails
+// New the same way, because each decode of the document fails with that
+// error. A reference document
 // in which go-yaml's parser nests a line deeper than YAML reads it, as in
 // "x: !t\ny: 1", fails New with an error that matches
 // [go.jacobcolvin.com/niceyaml.ErrDecode] for the same reason. So does one

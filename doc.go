@@ -181,6 +181,13 @@
 // and [Node.Validate]. [Node.AST] returns nil for it, and [Node.View] renders
 // its lines as it renders those of any document.
 //
+// YAML puts a line break between the tag of a block sequence and its first
+// "-". Go-yaml's parser refuses a "-" on the line of an anchor, as in
+// "a: &x - 1", but it takes one on the line of a tag. So yaml.Unmarshal reads
+// "a: !t - 1" as {a: [1]}. The parse of a Source refuses that "-" as it
+// refuses the one after an anchor. The document fails with a syntax error at
+// the "-", and a line break after the tag fixes it.
+//
 // A "---" header that directly follows an anchor without a value parses
 // together with the document above it. A syntax error in either document thus
 // fails both, and both return that one error. The two documents also share
@@ -2475,14 +2482,15 @@
 // niceyaml's own types, and [paths.Path.YAMLPath] converts to go-yaml's
 // path type when a caller needs it.
 //
-// The error for text that the go-yaml parser rejects matches [ErrSyntax], and
-// the error for YAML that parsed but does not decode matches [ErrDecode]. The
-// errors for a value of the wrong kind, a number out of range, and an unknown
-// field each match a sentinel of their own beside ErrDecode, as
-// [ErrUnknownField] describes. A caller thus distinguishes these cases
-// without naming go-yaml's error types. The package returns a panic in
-// go-yaml, or in an unmarshaler that go-yaml calls, as a [PanicError] that
-// does not match any of those sentinels.
+// The error for text that the go-yaml parser rejects matches [ErrSyntax]. So
+// does the error for a "-" right after a tag on its line, although the parser
+// takes that "-". The error for YAML that parsed but does not decode matches
+// [ErrDecode]. The errors for a value of the wrong kind, a number out of
+// range, and an unknown field each match a sentinel of their own beside
+// ErrDecode, as [ErrUnknownField] describes. A caller thus distinguishes
+// these cases without naming go-yaml's error types. The package returns a
+// panic in go-yaml, or in an unmarshaler that go-yaml calls, as a
+// [PanicError] that does not match any of those sentinels.
 //
 // The go-yaml settings that niceyaml supports have named options, such as
 // [WithAllowDuplicateKeys], [CustomUnmarshaler], or

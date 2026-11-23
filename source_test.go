@@ -2300,6 +2300,21 @@ func TestSource_File_ErrSyntax(t *testing.T) {
 			),
 			want: []bool{true, false, true},
 		},
+		// YAML puts a line break between the tag of a block sequence and
+		// its first "-". The go-yaml parser takes the "-" on the line of
+		// the tag, and the Source refuses it.
+		"sequence entry on the line of a tag": {
+			input: stringtest.LinesLF("a: !t - 1", "b: 1"),
+			want:  []bool{true},
+		},
+		"sequence entry on the line of a tag in the second document": {
+			input: stringtest.LinesLF("a: 1", "---", "- !t - 1", "---", "c: 3"),
+			want:  []bool{false, true, false},
+		},
+		"sequence entry on the line below a tag": {
+			input: stringtest.LinesLF("a: !t", "  - 1", "b: 1"),
+			want:  []bool{false},
+		},
 		// The parser takes an alias with no anchor, and a decode rejects
 		// it.
 		"alias with no anchor": {

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
@@ -202,6 +203,119 @@ func TestParse(t *testing.T) {
 	}
 }
 
+func TestParse_TagSequence(t *testing.T) {
+	t.Parallel()
+
+	const tagMsg = "sequence entries are not allowed after tag on the same line"
+
+	tcs := map[string]struct {
+		input string
+		// The line and column of the token that the failure binds at, or
+		// nil when the text parses.
+		at *position.Position
+		// The message of the failure, when the text does not parse.
+		msg string
+	}{
+		"after a tag on a value": {
+			input: stringtest.LinesLF("a: !t - 1", "b: 1"),
+			at:    new(position.New(0, 6)),
+			msg:   tagMsg,
+		},
+		"after a tab after a tag": {
+			input: stringtest.LinesLF("a: !t\t- 1", "b: 1"),
+			at:    new(position.New(0, 6)),
+			msg:   tagMsg,
+		},
+		"after a tag on an entry": {
+			input: "- !t - 1\n",
+			at:    new(position.New(0, 5)),
+			msg:   tagMsg,
+		},
+		"after a tag at the root": {
+			input: "!t - 1\n",
+			at:    new(position.New(0, 3)),
+			msg:   tagMsg,
+		},
+		"after a tag after an anchor": {
+			input: "a: &x !t - 1\n",
+			at:    new(position.New(0, 9)),
+			msg:   tagMsg,
+		},
+		"after a scalar tag": {
+			input: "a: !!str - 1\n",
+			at:    new(position.New(0, 9)),
+			msg:   tagMsg,
+		},
+		"after a tag in a flow sequence": {
+			input: "[!t - 1]\n",
+			at:    new(position.New(0, 4)),
+			msg:   tagMsg,
+		},
+		// The run fails with its first error in file order, whether the
+		// parser or the check of the tag finds it.
+		"after an anchor above a tag": {
+			input: stringtest.LinesLF("a: &x - 1", "b: !t - 1"),
+			at:    new(position.New(0, 6)),
+			msg:   "sequence entries are not allowed after anchor on the same line",
+		},
+		"in a block mapping above a tag": {
+			input: stringtest.LinesLF("a: - 1", "b: !t - 1"),
+			at:    new(position.New(0, 3)),
+			msg:   "block sequence entries are not allowed in this context",
+		},
+		"in an open flow sequence above a tag": {
+			input: stringtest.LinesLF("a: [1", "b: !t - 1"),
+			at:    new(position.New(1, 0)),
+			msg:   "',' or ']' must be specified",
+		},
+		"after a tag above an anchor": {
+			input: stringtest.LinesLF("a: !t - 1", "b: &x - 1"),
+			at:    new(position.New(0, 6)),
+			msg:   tagMsg,
+		},
+		"after a tag above an open flow sequence": {
+			input: stringtest.LinesLF("a: !t - 1", "b: [1"),
+			at:    new(position.New(0, 6)),
+			msg:   tagMsg,
+		},
+		"on the line below a tag": {
+			input: stringtest.LinesLF("a: !t", "  - 1"),
+		},
+		"in the column of the key below a tag": {
+			input: stringtest.LinesLF("a: !t", "- 1"),
+		},
+		"below a comment after a tag": {
+			input: stringtest.LinesLF("a: !t # c", "  - 1"),
+		},
+		"a negative number after a tag": {
+			input: "a: !t -1\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			r := docparse.Parse(tokens.Tokenize(tc.input))
+
+			if tc.at == nil {
+				require.Empty(t, r.Failures)
+
+				return
+			}
+
+			require.Len(t, r.Failures, 1)
+
+			var syntaxErr *yaml.SyntaxError
+
+			require.ErrorAs(t, r.Failures[0].Err, &syntaxErr)
+			assert.Equal(t, tc.msg, syntaxErr.Message)
+			require.NotNil(t, syntaxErr.Token)
+			assert.Equal(t, *tc.at, position.NewFromToken(syntaxErr.Token))
+		})
+	}
+}
+
 func TestParse_EmptyAnchor(t *testing.T) {
 	t.Parallel()
 
@@ -255,6 +369,31 @@ func TestParse_Panic(t *testing.T) {
 	// The stand-in of the run takes the place of its document.
 	require.Len(t, r.File.Docs, 1)
 	assert.Nil(t, r.File.Docs[0].Body)
+}
+
+func TestParse_PanicTagSequence(t *testing.T) {
+	t.Parallel()
+
+	// The go-yaml parser dereferences the position of this token, above
+	// the "-" after the tag.
+	tks := tokens.Tokenize(stringtest.LinesLF("a: 1", "b: !t - 1"))
+	tks[2].Position = nil
+
+	r := docparse.Parse(tks)
+	require.Len(t, r.Failures, 1)
+
+	// The error of the tag takes the place of the panic.
+	f := r.Failures[0]
+	assert.Nil(t, f.Panic)
+
+	// The Error method of the error panics on the token without a position,
+	// so the test reads the fields of the error alone.
+	var syntaxErr *yaml.SyntaxError
+
+	require.ErrorAs(t, f.Err, &syntaxErr)
+	assert.Equal(t, docparse.TagSequenceMessage, syntaxErr.Message)
+	require.NotNil(t, syntaxErr.Token)
+	assert.Equal(t, position.New(1, 6), position.NewFromToken(syntaxErr.Token))
 }
 
 func TestFail(t *testing.T) {

@@ -873,6 +873,10 @@ func TestNew_Unparsed(t *testing.T) {
 			// it.
 			text: stringtest.LinesLF("a: 1", "\ufeff# c", "---", "b: 1"),
 		},
+		"sequence entry on the line of a tag": {
+			// Go-yaml's parser reads a as [1], and the Source refuses the text.
+			text: stringtest.LinesLF("a: !t - 1", "b: 1"),
+		},
 	}
 
 	for name, tc := range tcs {
@@ -5672,6 +5676,14 @@ func TestDoc_Apply_Fault(t *testing.T) {
 			},
 			sentinel: edit.ErrValue,
 			err:      "writes a mapping that repeats the key x, which YAML does not allow",
+		},
+		"marshaler YAML with a sequence entry on the line of a tag": {
+			before: "a: 1\n",
+			call: func(ctx context.Context, root *edit.Node) error {
+				return root.At(a).Set(ctx, yamlMarshaler("x: !t - 1\n"))
+			},
+			sentinel: edit.ErrValue,
+			err:      `writes a "-" on the line of a tag at 1:7 of that YAML, which YAML does not allow`,
 		},
 		"chain of 1,001 marshalers": {
 			before: "a: 1\n",

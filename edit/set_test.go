@@ -735,6 +735,25 @@ func TestNode_Set(t *testing.T) {
 			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 cannot write the value of $.b: the MarshalYAML method of " +
 				"edit_test.yamlMarshaler writes a mapping that repeats the key a, which YAML does not allow",
 		},
+		"YAML marshaler that writes a sequence entry on the line of a tag": {
+			// Go-yaml's parser takes the text, but YAML does not allow it, so
+			// the problem is the marshaler's.
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("b"),
+			value:  yamlMarshaler("!t - 1\n"),
+			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 cannot write the value of $.b: the MarshalYAML method of " +
+				`edit_test.yamlMarshaler writes a "-" on the line of a tag at 1:4 of that YAML, which YAML does not allow`,
+		},
+		"YAML marshaler that writes a repeated key and a sequence entry on the line of a tag": {
+			// Go-yaml's parser refuses the repeated key, and the finder
+			// refuses the "-". YAML allows neither, so the problem is the
+			// marshaler's.
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("b"),
+			value:  yamlMarshaler("a: 1\na: 2\nb: !t - 1\n"),
+			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 cannot write the value of $.b: the MarshalYAML method of " +
+				`edit_test.yamlMarshaler writes a "-" on the line of a tag at 3:7 of that YAML, which YAML does not allow`,
+		},
 		"YAML marshaler that writes a float key and a string key of one text": {
 			// Control: go-yaml's decoder reads the keys apart, but its parser
 			// compares them by their text.

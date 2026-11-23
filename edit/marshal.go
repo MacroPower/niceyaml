@@ -16,6 +16,7 @@ import (
 	"github.com/goccy/go-yaml/parser"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/docparse"
 )
 
 // goyamlError is a problem of go-yaml with the value of a Set, such as a
@@ -79,8 +80,10 @@ func refusal(err error, text string) string {
 //
 // The check parses doc as go-yaml's encoder parses it, without its
 // comments. Text of more than one document is the problem of the
-// marshaler, because a value is one node, and the problem names it. Each
-// other problem is go-yaml's, and it matches errEncoder. Go-yaml's encoder
+// marshaler, because a value is one node, and the problem names it. So
+// are a mapping that repeats a key and a "-" right after a tag on its
+// line, because YAML does not allow either. Each other problem is
+// go-yaml's, and it matches errEncoder. Go-yaml's encoder
 // writes a directive alone for text with one before its value, as
 // [directiveProblem] tells. Go-yaml's parser can refuse the text, with its
 // comments or without them, or panic on it. The text can hold no value, as
@@ -103,8 +106,15 @@ func marshaledYAML(v reflect.Value, method string, doc []byte, err error) ([]ins
 		return nil, goyamlProblem("go-yaml's parser panicked on the YAML that %s writes: %v", who, panicked.value)
 	case err != nil:
 		// YAML does not allow a mapping that repeats a key, so a refusal of
-		// such a text is the problem of the marshaler.
+		// such a text is the problem of the marshaler. The finder takes a
+		// repeated key but refuses a "-" right after a tag on its line. That
+		// refusal is also the problem of the marshaler.
 		enc, derr := encodedDoc(string(doc))
+		problem := tagSequenceProblem(derr, who)
+		if problem != nil {
+			return nil, problem
+		}
+
 		if derr == nil {
 			if key, repeats := enc.repeatedKey(); repeats {
 				return nil, fmt.Errorf("%s writes a mapping that repeats the key %s, which YAML does not allow",
@@ -146,6 +156,11 @@ func marshaledYAML(v reflect.Value, method string, doc []byte, err error) ([]ins
 	// name the places of the text of the marshaler.
 	enc, err := encodedDoc(string(doc))
 	if err != nil {
+		problem := tagSequenceProblem(err, who)
+		if problem != nil {
+			return nil, problem
+		}
+
 		return nil, goyamlProblem("go-yaml's parser refuses the YAML that %s writes, with its comments: %s",
 			who, refusal(err, "that YAML"))
 	}
@@ -155,6 +170,24 @@ func marshaledYAML(v reflect.Value, method string, doc []byte, err error) ([]ins
 	}
 
 	return enc.valueInstances(fmt.Sprintf("%T", v.Interface())), nil
+}
+
+// tagSequenceProblem returns the problem of the marshaler that who names
+// when err is the refusal of the finder of a "-" right after a tag on its
+// line in the YAML of the marshaler, or nil otherwise. Go-yaml's parser
+// takes such a "-", but YAML does not allow it, so the refusal is the
+// problem of the marshaler.
+func tagSequenceProblem(err error, who string) error {
+	syntax, ok := errors.AsType[*yaml.SyntaxError](err)
+	if !ok || syntax.Message != docparse.TagSequenceMessage || syntax.Token == nil ||
+		syntax.Token.Position == nil {
+		return nil
+	}
+
+	pos := syntax.Token.Position
+
+	return fmt.Errorf("%s writes a \"-\" on the line of a tag at %d:%d of that YAML, which YAML does not allow",
+		who, pos.Line, pos.Column)
 }
 
 // convertedJSON returns the problem of doc, the YAML that go-yaml converts

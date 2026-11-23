@@ -139,9 +139,10 @@ var (
 	// channel or a function, and with a value that holds one. It fails so
 	// with a value that holds itself or that holds two keys that a decode
 	// reads as one. So does YAML of a marshaler that holds more than one
-	// document or that repeats a key, and a chain of more than 1,000
-	// marshalers. It fails so with a value that holds a string that is not
-	// UTF-8, as a value or as a key, and that error also matches
+	// document, that repeats a key, or that holds a "-" right after a tag
+	// on its line, and a chain of more than 1,000 marshalers. It fails so
+	// with a value that holds a string that is not UTF-8, as a value or as
+	// a key, and that error also matches
 	// [go.jacobcolvin.com/niceyaml/encoder.ErrEncode]. The error binds at
 	// the place of the call. The program wrote the value, so
 	// [go.jacobcolvin.com/niceyaml.IsInvalid] reports false for the error.

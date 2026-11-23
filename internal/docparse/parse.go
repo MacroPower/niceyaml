@@ -1,11 +1,13 @@
 package docparse
 
 import (
+	"errors"
 	"math"
 	"runtime/debug"
 	"slices"
 	"strings"
 
+	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/parser"
 	"github.com/goccy/go-yaml/token"
@@ -40,12 +42,14 @@ type Result struct {
 // Failure is a run of tokens that did not parse. The parser rejected the
 // run or panicked on it, or the run failed before the parser read it. A
 // run past a limit of [ParseLimits] fails that way, and so does the
-// stream of [Fail].
+// stream of [Fail]. A run also fails when it holds a "-" right after a
+// tag on its line, which the parser takes.
 type Failure struct {
 	// Err is the error of the run, or nil after a panic. It is the error
 	// that the parser returned, the [*SizeError] of a run past the byte
-	// limit, the [*DepthError] of a run past the depth limit, or the error
-	// that the caller handed [Fail].
+	// limit, the [*DepthError] of a run past the depth limit, the
+	// [*yaml.SyntaxError] of a "-" right after a tag on its line, or the
+	// error that the caller handed [Fail].
 	Err error
 	// Panic is the value the parser panicked with, or nil.
 	Panic any
@@ -157,6 +161,14 @@ func parse(tks token.Tokens, limits Limits, mode parser.Mode, opts []parser.Opti
 		}
 
 		f, failure := parseRun(dropStrandedComments(run), mode, opts)
+
+		// The run fails with its first error in file order. The error of
+		// the parser thus wins only when it binds before the "-".
+		tagErr := tagSequenceError(run)
+		if tagErr != nil && !r.bindsBefore(failure, tagErr.Token) {
+			failure = &Failure{Err: tagErr}
+		}
+
 		if failure == nil {
 			nullEmptyAnchors(f)
 
@@ -300,6 +312,31 @@ func parseRun(run token.Tokens, mode parser.Mode, opts []parser.Option) (*ast.Fi
 	}()
 
 	return f, failure
+}
+
+// TagSequenceMessage is the message of the [*yaml.SyntaxError] of a "-"
+// right after a tag on its line, which fails the run of the "-".
+const TagSequenceMessage = "sequence entries are not allowed after tag on the same line"
+
+// tagSequenceError returns the syntax error of the first "-" of run that
+// directly follows a tag on its line, or nil. YAML puts a line break
+// between the properties of a block sequence and its first "-", and a "-"
+// does not start a node in a flow collection. The go-yaml parser refuses a
+// "-" right after an anchor on its line, as in "a: &x - 1". It takes one
+// right after a tag, and it reads "a: !t - 1" as {a: [1]}. So the run fails
+// with this error unless the parser refuses a token before the "-". The
+// error binds at the "-", and its message matches the message of the
+// anchor.
+func tagSequenceError(run token.Tokens) *yaml.SyntaxError {
+	for i := 1; i < len(run); i++ {
+		tk := run[i]
+
+		if tk.Type == token.SequenceEntryType && run[i-1].Type == token.TagType && sameLine(run[i-1], tk) {
+			return &yaml.SyntaxError{Message: TagSequenceMessage, Token: tk}
+		}
+	}
+
+	return nil
 }
 
 // isDocumentGroup reports whether group, a token group of [SplitGroups],
@@ -772,4 +809,20 @@ func sameLine(a, b *token.Token) bool {
 func startsBelow(tk, mark *token.Token) bool {
 	return mark != nil && tk.Position != nil && mark.Position != nil &&
 		tk.Position.Line > mark.Position.Line
+}
+
+// bindsBefore reports whether failure holds an error of the parser that
+// binds at a token before tk, a token of the run of failure. A failure
+// after a panic, and an error without a token of the run, do not bind
+// before any token.
+func (r *Result) bindsBefore(failure *Failure, tk *token.Token) bool {
+	var yamlErr yaml.Error
+
+	if failure == nil || !errors.As(failure.Err, &yamlErr) {
+		return false
+	}
+
+	at, ok := r.Index[yamlErr.GetToken()]
+
+	return ok && at < r.Index[tk]
 }

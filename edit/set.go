@@ -331,9 +331,10 @@ type payload struct {
 //
 // The YAML text that a MarshalYAML method returns must be YAML of one
 // node, so text of more than one document fails the Set. So does a mapping
-// that repeats a key, as go-yaml's decoder reads each key, because YAML
-// does not allow it. The problem names the path of the Set and the
-// marshaler, and it matches ErrValue.
+// that repeats a key, as go-yaml's decoder reads each key, and so does a
+// "-" right after a tag on its line, because YAML does not allow either.
+// The problem names the path of the Set and the marshaler, and it matches
+// ErrValue.
 // Every other problem of the text is go-yaml's, and it fails the Set with
 // ErrEngine at its place. Go-yaml's parser can refuse the text, with its
 // comments or without them. It refuses some text that YAML allows, such as

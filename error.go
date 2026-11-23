@@ -222,6 +222,11 @@ var (
 	// reference document from [WithReferences] does not parse, every decode
 	// of a Source that reads it returns the error of that document.
 	//
+	// ErrSyntax also indicates a "-" right after a tag on its line, as in
+	// "a: !t - 1". The parser takes that "-", but YAML refuses it, so the
+	// parse of a Source fails the document with a syntax error at the "-".
+	// That error matches ErrSyntax, as the errors of the parser do.
+	//
 	// A document past the depth limit of [WithDepthLimit] or the byte limit
 	// of [WithDocumentByteLimit] does not parse either. Neither does the one
 	// document of a text past the byte limit of [WithByteLimit]. The errors
@@ -240,7 +245,9 @@ var (
 	//
 	// A panic in the parser does not match. The same calls return the panic
 	// as a [PanicError], bound at the first token with a position among the
-	// tokens the parser was reading.
+	// tokens the parser was reading. A document that holds a "-" right after
+	// a tag on its line is the exception. The calls return the syntax error
+	// of that "-" in place of the panic, and that error matches ErrSyntax.
 	//
 	// [errors.Is] reports whether any problem of an error matches ErrSyntax,
 	// so an error that matches can hold a problem of another kind beside it. A

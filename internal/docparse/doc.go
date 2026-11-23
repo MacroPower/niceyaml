@@ -3,17 +3,19 @@
 // The go-yaml parser rejects or misreads some valid YAML. It drops the
 // rest of a stream after a "---" header that directly follows another.
 // It rejects a comment on a line of its own in several places. One bad
-// document also costs it the whole stream.
+// document also costs it the whole stream. It also takes a "-" on the
+// line of a tag, as in "a: !t - 1", which YAML refuses.
 //
 // [Parse] avoids each of these faults. It cuts the stream into runs that
 // each parse on their own, and drops the comments that make the parser
-// reject or misread valid YAML. For each document of a run that the
-// parser rejects or panics on, it puts a stand-in into the file. The
-// [Result] holds the file, the copies of the tokens the parser read, and a
-// [Failure] for each run that did not parse. [ParseLimits] also fails a
-// run past a byte limit or a depth limit before the parser reads it. [Fail]
-// gives the Result of a stream that the caller refuses before the parse,
-// with one stand-in for the whole stream.
+// reject or misread valid YAML. It fails a run with a "-" on the line of a
+// tag, unless the parser refuses an earlier token of the run. For each
+// document of a run that does not parse, it puts a stand-in into the file.
+// The [Result] holds the file, the copies of the tokens the parser read,
+// and a [Failure] for each run that did not parse. [ParseLimits] also fails
+// a run past a byte limit or a depth limit before the parser reads it.
+// [Fail] gives the Result of a stream that the caller refuses before the
+// parse, with one stand-in for the whole stream.
 //
 // The parser cuts the comments and directives above a header, and the
 // comments after a "..." marker, into nodes of their own.
