@@ -624,7 +624,16 @@
 // each decode of the document fails with that error. A reference document
 // in which go-yaml's parser nests a line deeper than YAML reads it, as in
 // "x: !t\ny: 1", fails New with an error that matches
-// [go.jacobcolvin.com/niceyaml.ErrDecode] for the same reason.
+// [go.jacobcolvin.com/niceyaml.ErrDecode] for the same reason. So does one
+// in which the parser leaves a line out, as in "x: !!str &k [1]\ny: 1".
+// The text itself can hold a line that the parser leaves out, as in
+// "x: !!int &k\n  1\ny: 1".
+// Each decode of the document then fails with the error of that line, so
+// New fails with it too. That error matches
+// [go.jacobcolvin.com/niceyaml.ErrDecode]. New returns the error of such a
+// line only for a document that it does not refuse. It refuses
+// "a: !!str &x {a: 1}\nb: 1" for the tag that converts a collection, even
+// though the parser leaves out "b: 1".
 //
 // [New] refuses a document that holds one of these, with an error that
 // matches [ErrMisread] and that [go.jacobcolvin.com/niceyaml.IsInvalid]

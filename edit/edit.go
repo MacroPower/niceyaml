@@ -727,13 +727,17 @@ type Removal struct {
 // that does not parse, because a decode of the document then fails. For
 // the same reason, it returns the error of a reference document of
 // [niceyaml.WithReferences] that does not parse, or in which go-yaml's
-// parser nests a line deeper than YAML reads it. That error binds in the
-// reference document and matches [niceyaml.ErrDecode] for such a line. It
-// also returns an error for a nil doc and for a
-// Node below the root. Such an error matches [ErrUsage]. So does the error
-// of a path of [WithProtected] that is not a `$` path of names and indexes,
-// which fails New too. The error
-// of a Node below the root also matches [niceyaml.ErrScopedNode]. A path
+// parser nests a line deeper than YAML reads it or leaves a line out. That
+// error binds in the reference document and matches [niceyaml.ErrDecode]
+// for such a line. New returns the error of a document in which go-yaml's
+// parser leaves a line out too, because every decode of the document then
+// fails. That error matches [niceyaml.ErrDecode]. New returns that error
+// only for a document that it does not refuse, as the Supported YAML
+// section of the package documentation describes. New also returns an
+// error for a nil doc and for a Node below the root. Such an error matches
+// [ErrUsage]. So does the error of a path of [WithProtected] that is not a
+// `$` path of names and indexes, which fails New too. The error of a Node
+// below the root also matches [niceyaml.ErrScopedNode]. A path
 // that selects the root, as [paths.Doc] does in [niceyaml.Node.At], gives
 // the root itself, so New takes that Node. So does a
 // [niceyaml.Node.NodeAt] that finds the root. New reads the document as
@@ -786,7 +790,8 @@ func New(doc *niceyaml.Node, opts ...Option) (*Doc, error) {
 
 	// Every decode of the document fails on a reference document that does
 	// not parse, or in which go-yaml's parser nests a line deeper than YAML
-	// reads it, so New fails with the error of that reference document.
+	// reads it or leaves a line out. So New fails with the error of that
+	// reference document.
 	err = hook.ReferenceError(doc)
 	if err != nil {
 		return nil, err //nolint:wrapcheck // The error binds in the reference document.
@@ -806,6 +811,15 @@ func New(doc *niceyaml.Node, opts ...Option) (*Doc, error) {
 	err = d.newRefusal()
 	if err != nil {
 		return nil, err
+	}
+
+	// Every decode of a document in which go-yaml's parser leaves a line
+	// out fails, so every Apply on its Doc fails too. New thus fails with
+	// the error of that line. It returns the refusal of a document first,
+	// because the refusal says what to write instead.
+	err = hook.DroppedError(doc)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // The error binds in the document.
 	}
 
 	d.readUserScalars()

@@ -76,6 +76,9 @@ type document struct {
 	// Returns the error of the first line that go-yaml's parse of root
 	// nests too deep, or nil, and finds it on the first call.
 	misnest func() error
+	// Returns the error of the first line that go-yaml's parse of root
+	// leaves out, or nil, and finds it on the first call.
+	dropped func() error
 	// The state that the packages of the module reach through
 	// aliasing.StateOf.
 	state *aliasing.State

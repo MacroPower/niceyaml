@@ -629,7 +629,9 @@ func TestNew_GoYAMLReading(t *testing.T) {
 			text: "a: 1\nb: !t",
 		},
 		"core tag before an anchor with its scalar on the next line": {
-			text: stringtest.LinesLF("a: !!int &k", "  1", "b: 2"),
+			// The value comes last, because go-yaml's parser leaves out the
+			// line after it.
+			text: stringtest.LinesLF("b: 2", "a: !!int &k", "  1"),
 		},
 		"alias of a reference document that go-yaml misreads": {
 			text: "m: *r\n",

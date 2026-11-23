@@ -871,7 +871,8 @@
 //  2. For a document that did not parse, the decode returns the error of its
 //     parse.
 //  3. For a document in which go-yaml's parser nests a line deeper than YAML
-//     reads it, the decode fails with an error that matches [ErrDecode].
+//     reads it, or leaves a line out, the decode fails with an error that
+//     matches [ErrDecode].
 //  4. A decode of a value that holds an alias fails with an error that
 //     matches [ErrExcessiveAliasing] when nested aliases make a decode of the
 //     document read far more than the document holds. [Node.CheckAliasLimit]
@@ -990,6 +991,16 @@
 // tag, and the text after the tab, into the tag. It thus reads
 // "a: !!int\t5" as a tag on an empty value, and a space in place of the
 // tab fixes it.
+//
+// Go-yaml's parser also leaves out the line after the value of an anchor
+// under a scalar tag, such as !!str or !!null. It does so when that value
+// is a collection or starts on a line below the anchor. So it reads
+// "c: !!null &k {x: 1}", "d: 2", and "a: 1" as {c: null, a: 1}, where
+// YAML reads d too. Every decode of a Node of such a document, or of a
+// Source with such a reference document, fails the same way. The error
+// binds at the tag and names the line that the parser leaves out. A
+// collection without the tag, or a scalar on the line of the anchor, fixes
+// the document.
 //
 // The [TypeRule] values from [CustomUnmarshaler] and [JSONUnmarshalers] set
 // how the types of the program read YAML, so a program gives them to the

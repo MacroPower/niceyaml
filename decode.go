@@ -1040,9 +1040,9 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // finds in one error. A panic in the decoder or in an unmarshaler comes
 // back as an error that holds a [PanicError] and does not match
 // ErrDecode. A decode of any Node of a document in which go-yaml's parser
-// nests a line deeper than YAML reads it fails with an error that matches
-// ErrDecode. The Decoding section describes the messages, the sentinels
-// of each problem, and where each error binds.
+// nests a line deeper than YAML reads it, or leaves a line out, fails with
+// an error that matches ErrDecode. The Decoding section describes the
+// messages, the sentinels of each problem, and where each error binds.
 func (n *Node) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) error {
 	return n.decodeInto(enterCall(ctx), v, newDecodeConfig(n.source, opts))
 }
@@ -1160,9 +1160,9 @@ func (n *Node) aliasingError(err error) error {
 // treeError returns the error that fails every decode of n before it
 // reads a value, or nil. A reference document that does not parse, or
 // one past a limit, fails every decode with the error of its parse. One
-// that go-yaml misnests fails every decode with the error of its
-// misnest, and so does the document of n, as [Node.misnestError]
-// describes.
+// that go-yaml misnests or leaves a line out of fails every decode with
+// the error of that line, and so does the document of n, as
+// [Node.misnestError] describes.
 func (n *Node) treeError() error {
 	if n.source.referenceErr != nil {
 		return n.Bind(n.source.referenceErr)
@@ -1173,19 +1173,33 @@ func (n *Node) treeError() error {
 
 // misnestError returns the error of a decode of n when go-yaml's parse
 // of the document of n nests a line too deep, as [document.findMisnest]
-// finds it, or nil. The error binds in the document of n.
+// finds it, or nil. Without such a line, it returns the error of
+// [Node.droppedError]. The error binds in the document of n.
 func (n *Node) misnestError() error {
 	err := n.doc.misnest()
 	if err == nil {
-		return nil
+		return n.droppedError()
 	}
 
 	return n.Bind(err)
 }
 
+// droppedError returns the error of a decode of n when go-yaml's parse
+// of the document of n leaves a line out, as [document.findDropped] finds
+// it, or nil. A document in which the parse also nests a line too deep
+// gets nil, because a decode fails with the error of that line instead.
+// The error binds in the document of n.
+func (n *Node) droppedError() error {
+	if n.doc.misnest() != nil {
+		return nil //nolint:nilerr // A decode fails with the error of the nested line.
+	}
+
+	return n.Bind(n.doc.dropped())
+}
+
 // misnestError returns the error of [Node.misnestError] for the first
-// document of s that holds a line that go-yaml nests too deep, or nil.
-// The error binds in that document.
+// document of s that holds a line that go-yaml nests too deep or leaves
+// out, or nil. The error binds in that document.
 func (s *Source) misnestError() error {
 	for _, doc := range s.documents() {
 		err := doc.misnestError()
@@ -1227,11 +1241,9 @@ func (d *document) findMisnest() error {
 
 	switch p := props.(type) {
 	case *ast.TagNode:
-		// Go-yaml's lexer reads a tab after a tag, and the text after the
-		// tab, into the tag, as in "!!int\t5".
-		name, _, _ := strings.Cut(p.Start.Value, "\t")
 		at = p.Start
-		msg = fmt.Sprintf("go-yaml nests the lines after the tag %s in its value, but YAML reads them outside it", name)
+		msg = fmt.Sprintf("go-yaml nests the lines after the tag %s in its value, but YAML reads them outside it",
+			tagName(p))
 
 	case *ast.AnchorNode:
 		name, _ := astnode.Name(p.Name)
@@ -1247,6 +1259,50 @@ func (d *document) findMisnest() error {
 	}
 
 	return Invalid(markDecode(errors.New(msg)), opts...)
+}
+
+// findDropped returns the error of the first line that go-yaml's parse of
+// the document leaves out, as [astnode.Dropped] finds it, or nil. Go-yaml
+// leaves out the line after the value of an anchor under a scalar tag,
+// when that value is a collection or starts on a line below the anchor.
+// So it reads "c: !!null &k {x: 1}\nd: 2\na: 1" as {c: null, a: 1},
+// where YAML reads d too. The error binds at the tag and names its path
+// and the line that the parse leaves out.
+func (d *document) findDropped() error {
+	var (
+		tag  *ast.TagNode
+		left *token.Token
+	)
+
+	astnode.Dropped(d.root.Body, d.positioned, func(t *ast.TagNode, tk *token.Token) bool {
+		tag, left = t, tk
+
+		return false
+	})
+
+	if tag == nil {
+		return nil
+	}
+
+	msg := fmt.Sprintf("go-yaml leaves out line %d after the value of the tag %s, but YAML reads it",
+		left.Position.Line, tagName(tag))
+
+	opts := []ErrorOption{AtToken(tag.Start)}
+
+	if path, ok := d.node.PathOf(tag); ok {
+		opts = append(opts, AtPath(path))
+	}
+
+	return Invalid(markDecode(errors.New(msg)), opts...)
+}
+
+// tagName returns the name of tag as its text spells it. Go-yaml's lexer
+// reads a tab after a tag, and the text after the tab, into the tag, as
+// in "!!int\t5", so the name ends before any tab.
+func tagName(tag *ast.TagNode) string {
+	name, _, _ := strings.Cut(tag.Start.Value, "\t")
+
+	return name
 }
 
 // checkDecode returns the error of a decode into v with cfg that cannot
@@ -2270,10 +2326,10 @@ func (c *encodableConverter) convertSlice(x []any) []any {
 // with a reference document that did not parse, YAMLComments returns the
 // error of that parse and a nil map. It does the same for a context that
 // has ended. Go-yaml's parser can nest a line deeper than YAML reads it,
-// as the Decoding section of the package documentation describes. For
-// such a document, YAMLComments returns the error of a decode of the node
-// and a nil map. For a node that does not hold a value,
-// YAMLComments returns an empty map.
+// or leave a line out, as the Decoding section of the package
+// documentation describes. For such a document, YAMLComments returns the
+// error of a decode of the node and a nil map. For a node that does not
+// hold a value, YAMLComments returns an empty map.
 //
 // Each key is a path from the node, so `$` names the value that a decode
 // of the same Node returns. The map thus pairs with an encode of that
@@ -2322,7 +2378,8 @@ func (n *Node) YAMLComments(ctx context.Context) (yaml.CommentMap, error) {
 	}
 
 	// The map keys each comment by its path. A path after a line that
-	// go-yaml nests too deep names a value of another tree.
+	// go-yaml nests too deep names a value of another tree, and a line
+	// that it leaves out has no comments in the map.
 	err = n.treeError()
 	if err != nil {
 		return nil, err
@@ -2356,11 +2413,12 @@ func (n *Node) YAMLComments(ctx context.Context) (yaml.CommentMap, error) {
 // does not select a node returns the error of At, such as
 // "cfg.yaml:1:1: $.kind: not found". A document that did not parse
 // returns the error that [Node.Err] returns. A document in which go-yaml's
-// parser nests a line deeper than YAML reads it returns the error of
-// Decode. So does a document that reads a reference document from
-// [WithReferences] that does not parse or that go-yaml misnests. Both
-// errors come before the path resolves, as the Decoding section of the
-// package documentation describes.
+// parser nests a line deeper than YAML reads it, or leaves a line out,
+// returns the error of Decode. So does a document that reads a reference
+// document from [WithReferences] that does not parse or that go-yaml
+// misnests or leaves a line out of. Both errors come before the path
+// resolves, as the Decoding section of the package documentation
+// describes.
 //
 // In a document without content, which [Node.IsEmpty] reports, every
 // path with a selector returns an error that wraps [paths.ErrNoDocument].
@@ -2383,7 +2441,8 @@ func (n *Node) DecodeAt[T any](ctx context.Context, path paths.Path, opts ...Dec
 	var zero T
 
 	// A path after a line that go-yaml nests too deep can name a value of
-	// another tree, in the document or in a reference document that a
+	// another tree, and a line that it leaves out reads as absent. Either
+	// line can sit in the document or in a reference document that a
 	// merge key reads, so the check runs before the path resolves.
 	err := n.treeError()
 	if err != nil {
@@ -2421,13 +2480,14 @@ func (n *Node) DecodeAt[T any](ctx context.Context, path paths.Path, opts ...Dec
 // false and the error. Those failures include the error of a document
 // that did not parse, an alias on the path that does not resolve, and a
 // wildcard path. They include the error of a document in which go-yaml's
-// parser nests a line deeper than YAML reads it, as the Decoding section
-// of the package documentation describes. They include the error of a
-// reference document from [WithReferences] that does not parse or that
-// go-yaml misnests. Both errors come before the path resolves, so
-// DecodeIfPresent returns them for an absent path too. They also include
-// every error of the decode, even one that matches paths.ErrNotFound. A
-// node that fails a [Validator] thus never reads as absent.
+// parser nests a line deeper than YAML reads it, or leaves a line out, as
+// the Decoding section of the package documentation describes. They
+// include the error of a reference document from [WithReferences] that
+// does not parse or that go-yaml misnests or leaves a line out of. Both
+// errors come before the path resolves, so DecodeIfPresent returns them
+// for an absent path too. They also include every error of the decode,
+// even one that matches paths.ErrNotFound. A node that fails a
+// [Validator] thus never reads as absent.
 //
 // A null is present, so `version: ~` reports true and leaves version at
 // its default. When v points to a pointer or an interface, such a null
@@ -2450,7 +2510,8 @@ func (n *Node) DecodeIfPresent(ctx context.Context, path paths.Path, v any, opts
 	}
 
 	// A path after a line that go-yaml nests too deep can name a value of
-	// another tree, in the document or in a reference document that a
+	// another tree, and a line that it leaves out reads as absent. Either
+	// line can sit in the document or in a reference document that a
 	// merge key reads, so the check runs before the path resolves.
 	err = n.treeError()
 	if err != nil {

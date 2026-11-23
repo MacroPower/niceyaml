@@ -8421,11 +8421,10 @@ func TestDocument_Decode_AliasErrors(t *testing.T) {
 		// The decoder reads the mapping under !!null as null, so it does not
 		// read the anchor inside it. The alias reads that anchor all the
 		// same, as the document binds it. Go-yaml's parser leaves out the
-		// line after the flow mapping.
+		// comment line after the flow mapping.
 		dd := yamltest.FirstDocument(
 			t,
-			stringtest.LinesLF("c: !!null &k1 {B: &k0 {x: 1}}", "<<: *k0", "a: 1", "<<: *k0"),
-			niceyaml.WithAllowDuplicateKeys(true),
+			stringtest.LinesLF("c: !!null &k1 {B: &k0 {x: 1}}", "# l", "<<: *k0", "a: 1"),
 		)
 
 		got, err := dd.Decode[any](t.Context())
@@ -8494,6 +8493,42 @@ func TestDocument_Decode_Misnest(t *testing.T) {
 		"tag on a flow mapping before a key": {
 			input: stringtest.LinesLF("a: !t {}", "b: 1"),
 			want:  map[string]any{"a": map[string]any{}, "b": uint64(1)},
+		},
+		"null tag on an anchored flow mapping before a key": {
+			// Go-yaml's parser leaves the entry d out of the tree.
+			input: stringtest.LinesLF("c: !!null &k1 {B: &k0 {x: 1}}", "d: *k0", "a: 1"),
+			err:   "1:4: $.c: go-yaml leaves out line 2 after the value of the tag !!null, but YAML reads it",
+		},
+		"string tag on an anchored flow sequence before a merge key": {
+			input: stringtest.LinesLF("s: &s {x: 1}", "c: !!str &k [1]", "<<: *s"),
+			err:   "2:4: $.c: go-yaml leaves out line 3 after the value of the tag !!str, but YAML reads it",
+		},
+		"string tag on an anchored block mapping before a key": {
+			input: stringtest.LinesLF("a:", "  c: !!str &k", "    x: 1", "  d: 2"),
+			err:   "2:6: $.a.c: go-yaml leaves out line 4 after the value of the tag !!str, but YAML reads it",
+		},
+		"int tag on an anchored scalar on the next line before a key": {
+			input: stringtest.LinesLF("a: !!int &k", "  1", "b: 2"),
+			err:   "1:4: $.a: go-yaml leaves out line 3 after the value of the tag !!int, but YAML reads it",
+		},
+		"line comment after a tagged anchored flow mapping": {
+			// The parser takes the comment as the line comment of the mapping
+			// and leaves out the entry below it.
+			input: stringtest.LinesLF("c: !!null &k {x: 1} # l", "d: 2"),
+			err:   "1:4: $.c: go-yaml leaves out line 2 after the value of the tag !!null, but YAML reads it",
+		},
+		"comment line after a tagged anchored flow mapping": {
+			// The parser leaves out only the comment.
+			input: stringtest.LinesLF("c: !!null &k {x: 1}", "# l", "d: 2"),
+			want:  map[string]any{"c": nil, "d": uint64(2)},
+		},
+		"string tag on an anchored scalar in a flow mapping": {
+			input: "{x: !!str &k a, y: 2}",
+			want:  map[string]any{"x": "a", "y": uint64(2)},
+		},
+		"tagged anchored flow mapping at the end": {
+			input: stringtest.LinesLF("d: 2", "c: !!null &k {x: 1}"),
+			want:  map[string]any{"c": nil, "d": uint64(2)},
 		},
 	}
 
@@ -8644,6 +8679,48 @@ func TestNode_Decode_Misnest(t *testing.T) {
 		require.EqualError(t, err, want)
 		require.ErrorIs(t, err, niceyaml.ErrDecode)
 		assert.False(t, found)
+	})
+}
+
+func TestNode_Decode_Dropped(t *testing.T) {
+	t.Parallel()
+
+	// Go-yaml's parser leaves out the line after the value of an anchor
+	// under a scalar tag. So a path to that line does not read as absent.
+	const dropped = "1:4: $.c: go-yaml leaves out line 2 after the value of the tag !!null, but YAML " +
+		"reads it"
+
+	dd := yamltest.FirstDocument(t, stringtest.LinesLF("c: !!null &k {x: 1}", "d: 2", "a: 1"))
+
+	t.Run("DecodeIfPresent the line that go-yaml leaves out", func(t *testing.T) {
+		t.Parallel()
+
+		var v int
+
+		found, err := dd.DecodeIfPresent(t.Context(), paths.MustParse("$.d"), &v)
+		require.EqualError(t, err, dropped)
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+		assert.False(t, found)
+	})
+
+	t.Run("DecodeAt a value after the line", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := dd.DecodeAt[int](t.Context(), paths.MustParse("$.a"))
+		require.EqualError(t, err, dropped)
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+	})
+
+	t.Run("a reference document", func(t *testing.T) {
+		t.Parallel()
+
+		refs := niceyaml.NewSourceFromString(stringtest.LinesLF("base: &b", "  c: !!str &k [1]", "  d: 2"))
+		src := niceyaml.NewSourceFromString(stringtest.LinesLF("a: *b"), niceyaml.WithReferences(refs))
+
+		_, err := src.Decode[map[string]any](t.Context())
+		require.EqualError(t, err,
+			"2:6: $.base.c: go-yaml leaves out line 3 after the value of the tag !!str, but YAML reads it")
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
 	})
 }
 

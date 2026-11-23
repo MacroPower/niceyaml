@@ -63,9 +63,18 @@ var (
 	// *niceyaml.Node, returns for the reference documents of its Source,
 	// bound in the reference document that it concerns, or nil. A
 	// reference document that does not parse gives the error of its parse.
-	// One in which go-yaml's parser nests a line deeper than YAML reads it
-	// gives the error of that line, as the decode reports it.
+	// One in which go-yaml's parser nests a line deeper than YAML reads it,
+	// or leaves a line out, gives the error of that line, as the decode
+	// reports it.
 	ReferenceError func(n any) error
+
+	// DroppedError returns the error that every decode of n, a
+	// *niceyaml.Node, returns for a line that go-yaml's parse of its
+	// document leaves out, or nil. The error binds in that document. A
+	// document in which the parser nests a line deeper than YAML reads it
+	// gives nil, because every decode of it fails with the error of that
+	// line instead.
+	DroppedError func(n any) error
 
 	// AliasContent returns the node that the anchor of alias holds, where
 	// alias belongs to the document of n, a *niceyaml.Node, or to one of

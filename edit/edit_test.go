@@ -942,6 +942,55 @@ func TestNew_MisnestedReference(t *testing.T) {
 	)
 }
 
+func TestNew_DroppedLine(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		text string
+		err  string
+		// The sentinel that the error matches.
+		sentinel error
+	}{
+		"line that go-yaml leaves out": {
+			// Go-yaml's parser leaves out "b: 2" after the value of the tag,
+			// but YAML reads it. Each decode of the document fails with the
+			// error of that line, so New fails with it, and no Doc reaches an
+			// Apply that fails.
+			text:     stringtest.LinesLF("x: 0", "a: !!int &k", "  1", "b: 2"),
+			err:      "2:4: $.a: go-yaml leaves out line 4 after the value of the tag !!int, but YAML reads it",
+			sentinel: niceyaml.ErrDecode,
+		},
+		"line that go-yaml nests too deep after a line that it leaves out": {
+			// New returns its refusal of a document before the error of a
+			// line that go-yaml leaves out.
+			text: stringtest.LinesLF("c: !!int &k", "  1", "d: 2", "a: !t", "b: 1"),
+			err: "4:4: $.a: this program does not edit a document with a tag on an empty value before a line " +
+				"that go-yaml nests in it, such as !t",
+			sentinel: edit.ErrUnsupported,
+		},
+		"tag that converts a collection before a line that go-yaml leaves out": {
+			// Go-yaml's parser leaves out "b: 1", but New refuses the tag
+			// first.
+			text: stringtest.LinesLF("a: !!str &x {a: 1}", "b: 1"),
+			err: "1:4: $.a: this program does not edit a document with a tag that converts a collection, " +
+				"such as !!str",
+			sentinel: edit.ErrUnsupported,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := edit.New(yamltest.FirstDocument(t, tc.text))
+			require.ErrorIs(t, err, tc.sentinel)
+			require.NotErrorIs(t, err, edit.ErrEngine)
+			assert.True(t, niceyaml.IsInvalid(err))
+			assert.Equal(t, tc.err, err.Error())
+		})
+	}
+}
+
 func TestNew_Documents(t *testing.T) {
 	t.Parallel()
 

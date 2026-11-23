@@ -162,8 +162,8 @@ type SourceOption func(*sourceConfig)
 // can apply one.
 type sourceConfig struct {
 	// The error of the parse of a reference document from WithReferences,
-	// or of a line that go-yaml nests too deep in one. The error fails
-	// every decode of the Source.
+	// or of a line that go-yaml nests too deep or leaves out in one. The
+	// error fails every decode of the Source.
 	referenceErr error
 	// The file system that filePath names a file in, or nil when the
 	// options did not set one. With nil, filePath names a file on disk.
@@ -663,10 +663,10 @@ func WithAliasLimit(enabled bool) SourceOption {
 // anchor wins. WithReferences skips a nil Source. It parses each Source
 // of refs, and a reference document that does not parse fails every
 // decode of the Source with the error of that parse. Go-yaml's parser
-// can nest a line of a reference document deeper than YAML reads it. Such
-// a document fails every decode of the Source with the error that a
-// decode of that document returns, as the Decoding section of the package
-// documentation describes.
+// can nest a line of a reference document deeper than YAML reads it, or
+// leave a line out. Such a document fails every decode of the Source with
+// the error that a decode of that document returns, as the Decoding
+// section of the package documentation describes.
 //
 // The edit package does not edit a document that defines and aliases an
 // anchor name that refs define too.
@@ -2379,6 +2379,7 @@ func newDocuments(src *Source, docs []docparse.Document, errs []error) []*Node {
 		doc.pathIndex = sync.OnceValue(func() *pathindex.Index { return pathindex.New(doc.root.Body) })
 		doc.resolver = sync.OnceValue(doc.newResolver)
 		doc.misnest = sync.OnceValue(doc.findMisnest)
+		doc.dropped = sync.OnceValue(doc.findDropped)
 		doc.state = aliasing.NewState(!src.skipAliasLimit, src.budget(), func() (ast.Node, *paths.Resolver) {
 			return doc.root.Body, doc.pathResolver()
 		}, src.referenceWeights)

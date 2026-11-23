@@ -35,6 +35,11 @@ func init() {
 
 		return node.Bind(node.source.referenceErr)
 	}
+	hook.DroppedError = func(n any) error {
+		node, _ := n.(*Node) //nolint:errcheck // The hook takes a *Node.
+
+		return node.droppedError()
+	}
 	hook.AliasContent = func(n any, alias *ast.AliasNode) (ast.Node, error) {
 		node, _ := n.(*Node) //nolint:errcheck // The hook takes a *Node.
 
