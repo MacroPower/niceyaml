@@ -71,10 +71,16 @@
 //     other than a blank or a flow indicator follows stays in a value or in
 //     an item of a flow sequence that spans lines, as YAML keeps it. So the
 //     copy reads "{a: !t b\n c :d}" as {a: "b c :d"}, where go-yaml refuses
-//     the ":" after its cut. On one line, go-yaml reads such a ":" as an
-//     indicator after a tag or an anchor on a value and in a flow sequence
-//     inside a flow mapping. So go-yaml reads "{a: [b c:d]}" as
-//     {a: [{"b c": d}]}, and the copy reads "{a: [b\n c:d]}" as
+//     the ":" after its cut. The copy reads a value the same way below a
+//     comment line after the ":" of its key. So it reads
+//     "{a: # c\n b\n c:d}" as {a: "b c:d"}, and it refuses
+//     "{a: # c\n b\n c: d}". On one line inside a flow mapping, go-yaml
+//     reads such a ":" as an indicator after a tag or an anchor on a value.
+//     It also reads that ":" as an indicator on the line below a comment
+//     line after the ":" of the key, and in an item of a flow sequence. So
+//     go-yaml refuses "{a: # c\n b c:d}", and the copy reads
+//     "{a: # c\n b\n c:d}" as {a: "b c:d"}. Go-yaml reads "{a: [b c:d]}"
+//     as {a: [{"b c": d}]}, and the copy reads "{a: [b\n c:d]}" as
 //     {a: ["b c:d"]}. A ":" before such a character ends a key of a flow
 //     mapping that spans lines, as go-yaml reads it in a key on one line.
 //     So the copy reads "{a\n b:c}" as {"a b": c}, as go-yaml reads

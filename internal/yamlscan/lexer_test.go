@@ -1300,6 +1300,60 @@ func TestTokenize_Patches(t *testing.T) {
 				{token.MappingEndType, "}\n"},
 			},
 		},
+		// A comment line between the ":" of the key and its value does not
+		// change the reading of a ":" on a folded line of the value.
+		"colon before text on the line below a value below a comment line": {
+			input: "{a: # c\n b\n c:d}\n",
+			want: []tok{
+				{token.MappingStartType, "{"},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.CommentType, " # c\n"},
+				{token.StringType, " b\n c:d"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		"colon before text on the line below a tagged value below a comment line": {
+			input: "{a: !t # c\n b\n c:d}\n",
+			want: []tok{
+				{token.MappingStartType, "{"},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.TagType, " !t "},
+				{token.CommentType, "# c\n"},
+				{token.StringType, " b\n c:d"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		"key on the line below a value below a comment line": {
+			input: "{a: # c\n !t b\n c: d}\n",
+			want: []tok{
+				{token.MappingStartType, "{"},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.CommentType, " # c\n"},
+				{token.TagType, " !t "},
+				{token.StringType, "b\n "},
+				{token.StringType, "c"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " d"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		// YAML takes a key on two lines after a "?", also below a comment
+		// line.
+		"key on two lines after an explicit key below a comment line": {
+			input: "[? # c\n a\n b: c]\n",
+			want: []tok{
+				{token.SequenceStartType, "["},
+				{token.MappingKeyType, "?"},
+				{token.CommentType, " # c\n"},
+				{token.StringType, " a\n b"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " c"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
 		// Such a ":" ends a key of a flow mapping, as go-yaml reads it in
 		// "{a b:c}" on one line.
 		"colon before text on the line below a key of a flow mapping": {

@@ -2418,6 +2418,10 @@ func TestSource_File_ErrSyntax(t *testing.T) {
 			input: stringtest.LinesLF("{a: &x b", " c: d}"),
 			want:  []bool{true},
 		},
+		"key on the line below a value below a comment line in a flow mapping": {
+			input: stringtest.LinesLF("{a: # c", " b", " c: d}"),
+			want:  []bool{true},
+		},
 		"key on the line below a value with a number anchor name in a flow mapping": {
 			input: stringtest.LinesLF("{a: &1 b", " c: d}"),
 			want:  []bool{true},

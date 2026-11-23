@@ -8111,6 +8111,20 @@ func TestDocument_Decode_YAMLReadings(t *testing.T) {
 			input: stringtest.LinesLF("{a: &x b", " c :d}"),
 			want:  map[string]any{"a": "b c :d"},
 		},
+		"colon before text that continues a value below a comment line": {
+			input: stringtest.LinesLF("{a: # c", " b", " c:d}"),
+			want:  map[string]any{"a": "b c:d"},
+		},
+		"colon before text that continues a tagged value below a comment line": {
+			input: stringtest.LinesLF("{a: !t # c", " b", " c:d}"),
+			want:  map[string]any{"a": "b c:d"},
+		},
+		"explicit key on two lines below a comment line of a flow sequence": {
+			// Go-yaml reads the second line as a key of its own, so it reads
+			// [{a: null, b: c}].
+			input: stringtest.LinesLF("[? # c", " a", " b: c]"),
+			want:  []any{map[string]any{"a b": "c"}},
+		},
 		"colon before text that ends an explicit key on two lines of a flow mapping": {
 			// Go-yaml reads the text on one line the same way.
 			input: stringtest.LinesLF("{? a", " c:d}"),

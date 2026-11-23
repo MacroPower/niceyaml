@@ -1077,10 +1077,12 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 	// niceyaml: a plain scalar that spans lines of a flow collection can
 	// hold a ":" that a character other than a blank or a flow indicator
 	// follows. The scalar keeps that ":" when the scalar is the value of a
-	// key or stands in a flow sequence, as YAML keeps it. The scan of one
-	// line reads such a ":" as an indicator after a tag or an anchor on a
-	// value and in a flow sequence inside a flow mapping. So the readings
-	// of one line and of two lines differ there. In a key of a flow
+	// key or stands in a flow sequence, as YAML keeps it. Inside a flow
+	// mapping, the scan of one line reads such a ":" as an indicator after
+	// a tag or an anchor on a value. It also reads that ":" as an indicator
+	// on the line below a comment line after the ":" of the key, and in a
+	// scalar that stands in a flow sequence. So the readings of one line
+	// and of two lines differ in each of those places. In a key of a flow
 	// mapping, that ":" ends the key, as the scan of one line reads
 	// "{a b:c}".
 	cut := ctx.folded() && s.refusesFoldedKey(ctx)
@@ -1587,11 +1589,11 @@ func endsPlain(nc rune) bool {
 // refusesFoldedKey reports whether YAML refuses the plain scalar of the
 // buffer, which spans lines, as the key of a ":". YAML takes a key on
 // more than one line only after a "?" or inside a flow mapping. So it
-// refuses the value of a key, past any tag or anchor, as in
-// "{a: b\n c: d}". It also refuses an implicit key inside a flow
-// sequence, as in "{x: [a\n b: c]}". YAML ends the value at the ":" of
-// the key, so a "," must come between the two entries. niceyaml: upstream
-// does not have this function.
+// refuses the value of a key, past any comment, tag, or anchor, as in
+// "{a: b\n c: d}" and "{a: # c\n b\n c: d}". It also refuses an
+// implicit key inside a flow sequence, as in "{x: [a\n b: c]}". YAML
+// ends the value at the ":" of the key, so a "," must come between the
+// two entries. niceyaml: upstream does not have this function.
 func (s *Scanner) refusesFoldedKey(ctx *Context) bool {
 	switch beforeProperties(ctx.tokens) {
 	case token.MappingValueType:
@@ -1680,12 +1682,14 @@ func plainScalar(t token.Type) bool {
 }
 
 // beforeProperties returns the type of the last token of tks before the
-// tags and anchors at the end of tks, or [token.UnknownType] when tks
-// holds no other token. niceyaml: upstream does not have this function.
+// comments, tags, and anchors at the end of tks, or [token.UnknownType]
+// when tks holds no other token. A comment line can stand between a ":"
+// or "?" and the node that it opens. niceyaml: upstream does not have
+// this function.
 func beforeProperties(tks token.Tokens) token.Type {
 	for i := len(tks) - 1; i >= 0; i-- {
 		switch tks[i].Type {
-		case token.TagType:
+		case token.TagType, token.CommentType:
 			continue
 		case token.MappingValueType, token.MappingKeyType:
 		default:
