@@ -31,12 +31,16 @@ const (
 	// The copy keeps the rune after a double-quoted scalar that holds a
 	// tab between its text, but go-yaml's lexer skips that rune.
 	readTab reading = "rune after a double-quoted scalar with a tab"
+	// The copy keeps a tab after the text of a plain scalar on its line in
+	// the value, but go-yaml's lexer drops it.
+	readPlainTab reading = "tab inside a plain scalar"
 )
 
 // Readings holds each input of the corpus whose token types or values
 // differ from those of go-yaml's lexer, with the patch that makes them
 // differ.
 var readings = map[string]reading{
+	"testdata/corpus/ny/00120d396df24ffe.yaml":                          readPlainTab,
 	"testdata/corpus/ny/020e1d155680ba18.yaml":                          readTab,
 	"testdata/corpus/ny/0a63f443bad091c2.yaml":                          readFlow,
 	"testdata/corpus/ny/170ab8343bfa65b2.yaml":                          readFlow,
@@ -1504,6 +1508,16 @@ func TestTokenize_Patches(t *testing.T) {
 				{token.MappingValueType, ":"},
 				{token.StringType, " e"},
 				{token.SequenceEndType, "]\n"},
+			},
+		},
+		// The tab stays in the value "1\t2", so the scalar is a string.
+		// Go-yaml's lexer drops the tab and reads the integer 12.
+		"tab inside a plain scalar": {
+			input: "a: 1\t2\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " 1\t2\n"},
 			},
 		},
 	}

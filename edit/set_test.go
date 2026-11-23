@@ -70,6 +70,14 @@ func TestNode_Set(t *testing.T) {
 			value:  2,
 			want:   "a: &x\t1\nb: *x\nc: 2\n",
 		},
+		"value after a plain value with a tab inside it": {
+			// Go-yaml's lexer drops the tab from the value. The check reads
+			// the text as YAML does.
+			before: "a: b\tc\nb: 1\n",
+			path:   paths.Doc().Child("b"),
+			value:  2,
+			want:   "a: b\tc\nb: 2\n",
+		},
 		"value after an explicit key without a value in a flow sequence": {
 			// Go-yaml's parser refuses the explicit key without a value. The
 			// check reads the text as YAML does.

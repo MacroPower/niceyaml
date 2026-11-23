@@ -2048,6 +2048,14 @@ func (s *Scanner) scan(ctx *Context) error {
 				s.closeName(ctx)
 				continue
 			}
+			// niceyaml: a tab after the text of a plain scalar on its line
+			// belongs to the scalar, as a space does. Upstream puts the tab
+			// in the origin alone when the tab sits right of the last
+			// indicator, or when no indicator came before. So it reads
+			// "a: b\tc" as {a: "bc"}.
+			if !s.isFirstCharAtLine && ctx.existsBuffer() {
+				break
+			}
 			if ctx.existsBuffer() && s.lastDelimColumn == 0 {
 				// tab indent for plain text (yaml-test-suite's spec-example-7-12-plain-lines).
 				s.indentNum++

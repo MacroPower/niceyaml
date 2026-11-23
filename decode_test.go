@@ -8183,6 +8183,49 @@ func TestDocument_Decode_YAMLReadings(t *testing.T) {
 			input: stringtest.LinesLF("{x: [a", "\tb]}"),
 			want:  map[string]any{"x": []any{"a b"}},
 		},
+		"tab inside a plain value": {
+			// Go-yaml drops the tab and reads {a: "bc"}.
+			input: "a: b\tc\n",
+			want:  map[string]any{"a": "b\tc"},
+		},
+		"tab inside a plain value of a flow mapping": {
+			input: "{a: b\tc}\n",
+			want:  map[string]any{"a": "b\tc"},
+		},
+		"tab inside an item of a flow sequence": {
+			input: "[b\tc]\n",
+			want:  []any{"b\tc"},
+		},
+		"space and a tab inside a plain value of a flow mapping": {
+			// Go-yaml reads {a: "b c"}.
+			input: "{a: b \tc}\n",
+			want:  map[string]any{"a": "b \tc"},
+		},
+		"tab between two digits": {
+			// Go-yaml reads the integer 12.
+			input: "a: 1\t2\n",
+			want:  map[string]any{"a": "1\t2"},
+		},
+		"tab inside a plain key": {
+			input: "b\tc: d\n",
+			want:  map[string]any{"b\tc": "d"},
+		},
+		"tab inside each line of a plain value on two lines": {
+			input: stringtest.LinesLF("a: b\tc", "  d\te"),
+			want:  map[string]any{"a": "b\tc d\te"},
+		},
+		"tab inside a plain root scalar": {
+			input: "b\tc\n",
+			want:  "b\tc",
+		},
+		"tab at the end of a plain value": {
+			input: "a: b\t\n",
+			want:  map[string]any{"a": "b"},
+		},
+		"tab before a comment after a plain value": {
+			input: "a: b\t# c\n",
+			want:  map[string]any{"a": "b"},
+		},
 		"explicit key on two lines before its value": {
 			input: stringtest.LinesLF("{? a", " b: c}"),
 			want:  map[string]any{"a b": "c"},

@@ -102,6 +102,12 @@
 //     quoted key, an alias, or a comment after the key, as in
 //     "[? a # c\n:]", go-yaml reads that ":" as a plain scalar, and the
 //     copy reads it as an indicator.
+//   - A tab after the text of a plain scalar on its line stays in the
+//     scalar, as a space does and as YAML keeps it. Go-yaml drops such a
+//     tab from the value and keeps it in the Origin alone. So it reads
+//     "a: b\tc" as {a: "bc"} and "a: 1\t2" as {a: 12}, and the copy reads
+//     them as {a: "b\tc"} and {a: "1\t2"}. A tab that opens a line stays
+//     out of the scalar, as YAML drops it with the indent.
 //
 // # Sync
 //

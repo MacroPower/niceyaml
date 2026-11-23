@@ -1034,7 +1034,8 @@
 // one with a double-quoted scalar after which the lexer skips a line
 // break, and one with a tab after a tag or after the name of an anchor.
 // They also include one with a plain scalar that continues on a later
-// line in a flow collection, as in "{a: b\n - c}". The decode of
+// line in a flow collection, as in "{a: b\n - c}", and one with a tab
+// inside a plain scalar, as in "a: b\tc". The decode of
 // yaml.Unmarshal reads such a text apart from niceyaml, so the check
 // against go-yaml's decoder alone skips it.
 //
@@ -1042,7 +1043,8 @@
 // lexer places each other token as the tokenizer does. The parse of
 // go-yaml's parser then still reads the tokens of the lexer. It reads the
 // tokenizer's tokens only in a text where the lexer moves, drops, or cuts
-// other tokens, or reads a tab after a tag or a name into it. They are the
+// other tokens, reads a tab after a tag or a name into it, or drops a tab
+// inside a plain scalar from its value. They are the
 // tokenizer's tokens as well where the lexer reads a tab that opens a line
 // of a flow collection into a plain scalar, or a key on such a line, as
 // in "{a: b\n    c: d}". The lexer moves each

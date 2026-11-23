@@ -132,6 +132,12 @@ import (
 //     quoted key, an alias, or a comment after the key, as in "[? 'a':]"
 //     and "[? a # c\n:]", the lexer reads that ":" as a plain scalar, and
 //     the copy reads it as an indicator.
+//   - A tab after the text of a plain scalar on its line stays in the
+//     value of the scalar, as a space does. The lexer keeps such a tab in
+//     the Origin alone and drops it from the value. So the lexer reads
+//     "a: b\tc" as the value "bc" and "a: 1\t2" as the integer 12, and the
+//     copy reads the strings "b\tc" and "1\t2". A tab that opens a line
+//     stays out of the scalar as part of the indent.
 //
 // A tab used as indentation makes the lexer read an invalid token. When a
 // "-" or ":" indicator follows the tab, the invalid token holds it. The

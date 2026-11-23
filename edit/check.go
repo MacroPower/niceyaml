@@ -185,8 +185,9 @@ type emptiedRoot struct {
 // reads a tab after a tag into the tag. The same holds where the lexer
 // reads a tab after the name of an anchor or an alias into the name. It
 // holds as well where the lexer cuts a plain scalar of a flow collection
-// at a line, or reads a key on such a line into the scalar. The
-// parser changes only the links between the tokens, which it does not
+// at a line, or reads a key on such a line into the scalar. It holds as
+// well where the lexer drops a tab inside a plain scalar from its value.
+// The parser changes only the links between the tokens, which it does not
 // read, so the second parse reads the tokens as the first read them. The
 // parses run beside the checks of [Doc.check]. The function that
 // parseFinal returns waits for them. A panic of the lexer or the parser
@@ -244,7 +245,8 @@ func (d *Doc) parseFinal(start string) func() finalParse {
 // name of an anchor or an alias into the name. It cuts a plain scalar
 // that continues on a later line of a flow collection into more tokens,
 // as in "{a: b\n - c}". It reads a key on such a line into the scalar, as
-// in "{a: b\n    c: d}". ParserTokens then returns
+// in "{a: b\n    c: d}". It drops a tab inside a plain scalar from the
+// value, as in "a: b\tc". ParserTokens then returns
 // the copies of tks that [tokens.ForParser] makes. Either way, each token
 // stands at the index of the token of tks that holds its text. A panic of
 // the lexer reaches the caller.

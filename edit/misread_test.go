@@ -603,6 +603,10 @@ func TestNew_GoYAMLReading(t *testing.T) {
 			// x.
 			text: stringtest.LinesLF("a: !!str\t|", "  x", "b: 1"),
 		},
+		"tab inside a plain value": {
+			// Go-yaml's lexer drops the tab and reads the integer 12.
+			text: stringtest.LinesLF("a: 1\t2", "b: 1"),
+		},
 		"tag before an anchor on a number": {
 			text: stringtest.LinesLF("a: !t &k 1", "b: *k"),
 		},
