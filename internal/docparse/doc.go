@@ -11,14 +11,17 @@
 // takes a "-" that starts a line of a flow collection after an explicit
 // key, where the line does not pass the indent of the block node that
 // holds the collection, as in "key: {? A\n- b}". YAML refuses each of
-// them.
+// them. The parser also refuses an explicit key without a value in a flow
+// sequence, as in "[? A]", which YAML reads as [{A: null}].
 //
 // [Parse] avoids each of these faults. It cuts the stream into runs that
 // each parse on their own, and drops the comments that make the parser
 // reject or misread valid YAML. It fails a run with any such "-" or
 // plain scalar, unless the parser refuses an earlier token of the run.
 // The error of the parser also wins for a "-" that starts a line right
-// below a plain scalar whenever the parser refuses the run.
+// below a plain scalar whenever the parser refuses the run. It hands the
+// parser a null after each explicit key of a flow sequence that lacks its
+// value, as [NullFlowPairs] adds it.
 // For each document of a run that does not parse, it puts a stand-in
 // into the file.
 // The [Result] holds the file, the copies of the tokens the parser read,

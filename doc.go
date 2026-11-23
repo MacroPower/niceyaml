@@ -223,6 +223,12 @@
 // the parser refuses such a "-", the document fails with the error of the
 // parser.
 //
+// YAML reads an explicit key in a flow sequence as a mapping of one pair,
+// and a key without a value holds null. Go-yaml's parser refuses that key
+// when the pair lacks a value, so yaml.Unmarshal refuses "[? A]" and
+// "[? A: ]". The parse of a Source reads each as [{A: null}], as the parser
+// reads "{? A}" as {A: null}.
+//
 // A "---" header that directly follows an anchor without a value parses
 // together with the document above it. A syntax error in either document thus
 // fails both, and both return that one error. The two documents also share

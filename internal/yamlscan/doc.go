@@ -79,6 +79,15 @@
 //     mapping that spans lines, as go-yaml reads it in a key on one line.
 //     So the copy reads "{a\n b:c}" as {"a b": c}, as go-yaml reads
 //     "{a b:c}".
+//   - A ":" right before a "," or a "]" ends the plain scalar of an
+//     explicit key in a flow sequence, as it ends a key inside a flow
+//     mapping. Go-yaml keeps that ":" in the scalar, so it reads "[? a:]"
+//     with the key "a:". The copy reads the key a, and the ":" as an
+//     indicator, also below a comment line above the key or above its
+//     tag or anchor, as in "[? # c\n a:]" and "[? # c\n &x a:]". After a
+//     quoted key, an alias, or a comment after the key, as in
+//     "[? a # c\n:]", go-yaml reads that ":" as a plain scalar, and the
+//     copy reads it as an indicator.
 //
 // # Sync
 //

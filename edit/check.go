@@ -233,7 +233,9 @@ func (d *Doc) parseFinal(start string) func() finalParse {
 // reads it, when [linesUp] tells that each of them stands at the index of
 // the token of tks that holds its text. The parser then refuses text where
 // yaml.Unmarshal refuses it, as for a token that the lexer misplaces. The
-// lexer's tokens line up with tks below a tag without a value and before a
+// exception is an explicit key of a flow sequence that lacks its value,
+// which [parseTokens] reads with a null. The lexer's tokens line up with
+// tks below a tag without a value and before a
 // tag that ends the text, where the lexer reads the constructs otherwise
 // than the tokenizer but places each token as the tokenizer does.
 // Otherwise the lexer moves or drops other tokens, as after a
@@ -422,7 +424,10 @@ func blanksToBreak(rest []rune) bool {
 }
 
 // parseTokens returns the problem of go-yaml's parse of tks in mode, or nil
-// when the parser takes tks. A panic of the parser comes back as a
+// when the parser takes tks. The parser reads tks with the null of each
+// explicit key of a flow sequence that lacks its value, as
+// [docparse.NullFlowPairs] adds it, because the parse of a Source reads
+// that null too. A panic of the parser comes back as a
 // [*parserPanicError].
 func parseTokens(tks token.Tokens, mode parser.Mode) error {
 	var err error
@@ -434,7 +439,7 @@ func parseTokens(tks token.Tokens, mode parser.Mode) error {
 			}
 		}()
 
-		_, err = parser.Parse(tks, mode, parser.AllowDuplicateMapKey())
+		_, err = parser.Parse(docparse.NullFlowPairs(tks), mode, parser.AllowDuplicateMapKey())
 	}()
 
 	return err //nolint:wrapcheck // The problem of the check names the parser.

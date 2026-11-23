@@ -87,6 +87,10 @@ type standIn struct {
 // [tokens.ForParser] makes. The caller shares tks, and the copies keep tks
 // untouched while the parser relinks comment tokens. After the parser
 // returns, each copy takes back the Origin and position of its own token.
+// The parser also reads the null that [NullFlowPairs] adds after each
+// explicit key of a flow sequence that lacks its value. Neither
+// [Result.Tokens] nor [Result.Index] holds such a null, as neither holds a
+// null that the parser makes itself.
 //
 // Each run of documents parses on its own, so a run the parser rejects
 // costs the file only its own documents. [Result.File] holds stand-ins in
@@ -167,7 +171,7 @@ func parse(tks token.Tokens, limits Limits, mode parser.Mode, opts []parser.Opti
 			continue
 		}
 
-		f, failure := parseRun(dropStrandedComments(run), mode, opts)
+		f, failure := parseRun(NullFlowPairs(dropStrandedComments(run)), mode, opts)
 
 		// The run fails with its first error in file order. The error of
 		// the parser thus wins when it binds before the token of the misread.
@@ -782,6 +786,208 @@ func (s *scan) drops(i, next int) (bool, bool) {
 	default:
 		return stranded, false
 	}
+}
+
+// NullFlowPairs returns tks with a null after each explicit key of a flow
+// sequence that lacks its value. YAML reads such a key as a pair, so
+// "[? A]" and "[? A: ]" each hold [{A: null}]. The go-yaml parser gives a
+// null to an explicit key without a value in a flow mapping, as in
+// "{? A}", but it refuses the key in a flow sequence. [Parse] hands the
+// parser each run with these nulls, and so the parser reads the pair as
+// YAML does. NullFlowPairs adds a null only after a key that holds one
+// node, so the parser still refuses a key without a node, as in "[? ]".
+//
+// The null goes after the last token of the key, or after its ":". It
+// takes the position right after the start of the last token of the pair
+// on the line of the "?". In a flow mapping, the parser places the null
+// of an explicit key right after the start of the last token of the pair.
+// That token can be a ":" on a line below the "?", but the parser refuses
+// the flow sequence when the null sits on such a line. It reads a null on
+// the line of the "?" as the value of the key at any indent.
+// NullFlowPairs returns tks itself when it does not add a null.
+func NullFlowPairs(tks token.Tokens) token.Tokens {
+	type null struct {
+		tk    *token.Token
+		after int
+	}
+
+	var (
+		nulls []null
+		// The types of the "[" and "{" tokens of the flow collections that
+		// hold the token, the innermost last.
+		flows []token.Type
+	)
+
+	for i, tk := range tks {
+		switch tk.Type {
+		case token.SequenceStartType, token.MappingStartType:
+			flows = append(flows, tk.Type)
+
+		case token.SequenceEndType, token.MappingEndType:
+			if len(flows) > 0 {
+				flows = flows[:len(flows)-1]
+			}
+
+		case token.MappingKeyType:
+			if len(flows) == 0 || flows[len(flows)-1] != token.SequenceStartType {
+				continue
+			}
+
+			if at := pairEnd(tks, i); at >= 0 {
+				nulls = append(nulls, null{after: at, tk: implicitNull(tks, i, at)})
+			}
+
+		default:
+		}
+	}
+
+	if len(nulls) == 0 {
+		return tks
+	}
+
+	// The pair of a key inside another key ends before the pair of the
+	// outer key, so the nulls go in the order of the tokens they follow.
+	slices.SortStableFunc(nulls, func(a, b null) int { return a.after - b.after })
+
+	filled := make(token.Tokens, 0, len(tks)+len(nulls))
+	from := 0
+
+	for _, n := range nulls {
+		filled = append(append(filled, tks[from:n.after+1]...), n.tk)
+		from = n.after + 1
+	}
+
+	return append(filled, tks[from:]...)
+}
+
+// pairEnd returns the index of the last token of the pair of the explicit
+// key at tks[key] in a flow sequence when the pair lacks its value. That
+// token is the last token of the key, or the ":" after it. The key holds
+// one node: the properties of the node, an anchor or a tag or both, and
+// then a scalar, an alias, or a flow collection. A "," or a "]" ends the
+// pair, right after the key or after its ":". PairEnd returns -1 for any
+// other pair, such as one that holds a value, one whose key does not hold
+// a node, as in "[? ]", one whose key holds two scalars, as in
+// "- [? A\n- B]" at the indent of the block sequence that holds the
+// collection, or one whose key has a tag on a line above its node, as in
+// "[? !T\n A]".
+func pairEnd(tks token.Tokens, key int) int {
+	j := nextBody(tks, key)
+
+	// The properties of the node. The name of an anchor follows its "&".
+	var tag *token.Token
+
+	for j < len(tks) && (tks[j].Type == token.AnchorType || tks[j].Type == token.TagType) {
+		if tks[j].Type == token.AnchorType {
+			j = nextBody(tks, j)
+		} else {
+			tag = tks[j]
+		}
+
+		j = nextBody(tks, j)
+	}
+
+	// The parser reads a tag at the end of a line of a flow collection as
+	// the tag of a null, so it does not read the node below as the key.
+	if j >= len(tks) || startsBelow(tks[j], tag) {
+		return -1
+	}
+
+	switch t := tks[j].Type; {
+	case t == token.AliasType:
+		// The name of the alias follows its "*".
+		j = nextBody(tks, j)
+
+	case t == token.SequenceStartType || t == token.MappingStartType:
+		j = flowEnd(tks, j)
+
+	case plainScalar(t) || t == token.MergeKeyType || t == token.SingleQuoteType || t == token.DoubleQuoteType:
+
+	default:
+		return -1
+	}
+
+	if j >= len(tks) {
+		return -1
+	}
+
+	last := j
+	j = nextBody(tks, j)
+
+	if j < len(tks) && tks[j].Type == token.MappingValueType {
+		last = j
+		j = nextBody(tks, j)
+	}
+
+	if j >= len(tks) || tks[j].Type != token.CollectEntryType && tks[j].Type != token.SequenceEndType {
+		return -1
+	}
+
+	return last
+}
+
+// nextBody returns the index of the first token after tks[i] that is not a
+// comment, or len(tks) when every token after tks[i] is a comment.
+func nextBody(tks token.Tokens, i int) int {
+	i++
+	for i < len(tks) && tks[i].Type == token.CommentType {
+		i++
+	}
+
+	return i
+}
+
+// flowEnd returns the index of the "]" or "}" that closes the flow
+// collection that the "[" or "{" at tks[start] opens, or len(tks) when the
+// collection does not close.
+func flowEnd(tks token.Tokens, start int) int {
+	depth := 0
+
+	for j := start; j < len(tks); j++ {
+		switch tks[j].Type {
+		case token.SequenceStartType, token.MappingStartType:
+			depth++
+
+		case token.SequenceEndType, token.MappingEndType:
+			depth--
+			if depth == 0 {
+				return j
+			}
+
+		default:
+		}
+	}
+
+	return len(tks)
+}
+
+// implicitNull returns the null that [NullFlowPairs] adds after tks[at],
+// the last token of the pair of the explicit key at tks[key]. The null
+// starts right after the start of the last token of the pair on the line
+// of the "?". The parser refuses the flow sequence when the null sits on
+// a line below the "?". The null does not have a position when the "?"
+// does not have one.
+func implicitNull(tks token.Tokens, key, at int) *token.Token {
+	base := tks[key]
+
+	for j := key + 1; j <= at; j++ {
+		if tks[j].Type != token.CommentType && sameLine(tks[j], base) {
+			base = tks[j]
+		}
+	}
+
+	var pos *token.Position
+
+	if base.Position != nil {
+		p := *base.Position
+		p.Column++
+		pos = &p
+	}
+
+	tk := token.New("null", " null", pos)
+	tk.Type = token.ImplicitNullType
+
+	return tk
 }
 
 // nullEmptyAnchors puts a null in place of each comment that the parser

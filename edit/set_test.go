@@ -70,6 +70,14 @@ func TestNode_Set(t *testing.T) {
 			value:  2,
 			want:   "a: &x\t1\nb: *x\nc: 2\n",
 		},
+		"value after an explicit key without a value in a flow sequence": {
+			// Go-yaml's parser refuses the explicit key without a value. The
+			// check reads the text as YAML does.
+			before: "a: [? x]\nb: 1\n",
+			path:   paths.Doc().Child("b"),
+			value:  2,
+			want:   "a: [? x]\nb: 2\n",
+		},
 		"anchored value after a tab after its anchor": {
 			// The Set replaces the tab and 1, as it replaces a space and 1.
 			before: "a: &x\t1\nb: *x\n",
@@ -887,15 +895,13 @@ func TestNode_Set(t *testing.T) {
 				"at 2:5 of that YAML",
 		},
 		"YAML marshaler that writes an explicit key on two lines of a flow sequence": {
-			// Control: YAML reads [{"x y": null}], but go-yaml's parser
-			// refuses the explicit key without a value in a flow sequence, so
-			// the refusal is go-yaml's.
+			// YAML reads [{"x y": null}], and so does the parse of the YAML,
+			// so the Set fails at the explicit key.
 			before: stringtest.LinesLF("a: 1", "b: 2"),
 			path:   paths.Doc().Child("b"),
 			value:  yamlMarshaler(stringtest.LinesLF("[? x", " y]")),
-			err: "2:4: $.b: go-yaml's parser refuses the YAML that the MarshalYAML method of " +
-				"edit_test.yamlMarshaler writes: could not find '[' character corresponding to ']' at 2:3 of that YAML",
-			engine: true,
+			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 sets $.b to a value whose YAML holds an explicit key, " +
+				"and cafe does not write explicit keys",
 		},
 		"YAML marshaler that writes a dash line at the indent of the key of a flow mapping": {
 			// Go-yaml's parser reads {y: [z]} after the explicit key, but YAML

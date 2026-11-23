@@ -444,12 +444,8 @@ func TestParse_FlowSequence(t *testing.T) {
 		"on the line below an explicit key after an entry of a flow mapping": {
 			input: stringtest.LinesLF("{a: b, ? c", " - d}"),
 		},
-		// The parser refuses an explicit key in a flow sequence, as it
-		// refuses "[? A - b]".
 		"on the line below an explicit key of a flow sequence": {
 			input: stringtest.LinesLF("[? a", " - b]"),
-			at:    new(position.New(1, 4)),
-			msg:   "could not find '[' character corresponding to ']'",
 		},
 		// The tokenizer cuts the "-" out of the scalar at a line that does
 		// not pass the indent of the block node of the collection, and at a
@@ -702,6 +698,195 @@ func TestParse_FlowSequence(t *testing.T) {
 			assert.Equal(t, tc.msg, syntaxErr.Message)
 			require.NotNil(t, syntaxErr.Token)
 			assert.Equal(t, *tc.at, position.NewFromToken(syntaxErr.Token))
+		})
+	}
+}
+
+func TestParse_ExplicitKey(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		// The value of the document, when the text parses.
+		want any
+		// The message of the failure, when the text does not parse.
+		msg string
+	}{
+		"without a value in a flow sequence": {
+			input: "[? a]\n",
+			want:  []any{map[string]any{"a": nil}},
+		},
+		"without a value after its colon in a flow sequence": {
+			input: "[? a : , b]\n",
+			want:  []any{map[string]any{"a": nil}, "b"},
+		},
+		"without a value in a flow sequence in a flow mapping": {
+			input: "{k: [? a]}\n",
+			want:  map[string]any{"k": []any{map[string]any{"a": nil}}},
+		},
+		// The null after the ":" sits on the line of the "?", so the parser
+		// reads it as the value of the key at any indent.
+		"without a value after its colon left of the key": {
+			input: stringtest.LinesLF("[  ? a", " :", " ]"),
+			want:  []any{map[string]any{"a": nil}},
+		},
+		"without a value at the indent of its key": {
+			input: stringtest.LinesLF("[", "? a", "]"),
+			want:  []any{map[string]any{"a": nil}},
+		},
+		"with a value in a flow sequence": {
+			input: "[? a: b]\n",
+			want:  []any{map[string]any{"a": "b"}},
+		},
+		"without a value in a flow mapping": {
+			input: "{? a}\n",
+			want:  map[string]any{"a": nil},
+		},
+		// The parser reads a tag at the end of a line as the tag of a
+		// null, so the parse does not add a null after the key.
+		"with a tag above its node without a value in a flow sequence": {
+			input: stringtest.LinesLF("[? !t", " a: ]"),
+			msg:   "could not find '[' character corresponding to ']'",
+		},
+		// The parser refuses a key without a node.
+		"without a node in a flow sequence": {
+			input: "[? ]\n",
+			msg:   "unexpected scalar value type",
+		},
+		"without a node before its colon in a flow sequence": {
+			input: "[? :]\n",
+			msg:   "unexpected scalar value type",
+		},
+		// The parser refuses a flow collection as a key.
+		"of a flow sequence without a value in a flow sequence": {
+			input: "[? [a]]\n",
+			msg:   "unexpected scalar value type",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			r := docparse.Parse(tokens.Tokenize(tc.input))
+
+			if tc.msg != "" {
+				require.Len(t, r.Failures, 1)
+
+				var syntaxErr *yaml.SyntaxError
+
+				require.ErrorAs(t, r.Failures[0].Err, &syntaxErr)
+				assert.Equal(t, tc.msg, syntaxErr.Message)
+
+				return
+			}
+
+			require.Empty(t, r.Failures)
+			require.Len(t, r.File.Docs, 1)
+
+			var got any
+
+			require.NoError(t, yaml.NodeToValue(r.File.Docs[0].Body, &got))
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestNullFlowPairs(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		// The index of each null in the result, and its position.
+		want map[int]position.Position
+	}{
+		"after the key": {
+			input: "[? a]\n",
+			want:  map[int]position.Position{3: position.New(0, 4)},
+		},
+		"after the colon": {
+			input: "[? a : ]\n",
+			want:  map[int]position.Position{4: position.New(0, 6)},
+		},
+		"after a key that goes on below the question mark": {
+			input: stringtest.LinesLF("[? a", " b]"),
+			want:  map[int]position.Position{3: position.New(0, 4)},
+		},
+		"after a colon right after the key": {
+			input: "[? a:]\n",
+			want:  map[int]position.Position{4: position.New(0, 5)},
+		},
+		"after a merge key": {
+			input: "[? <<: ]\n",
+			want:  map[int]position.Position{4: position.New(0, 6)},
+		},
+		"after a colon below the question mark": {
+			input: stringtest.LinesLF("[  ? a", " :", " ]"),
+			want:  map[int]position.Position{4: position.New(0, 6)},
+		},
+		"after the keys of nested flow sequences": {
+			input: "[? a, [? b], ? c: d]\n",
+			want: map[int]position.Position{
+				3: position.New(0, 4),
+				8: position.New(0, 10),
+			},
+		},
+		"after a key inside a key": {
+			input: "[? [? a]]\n",
+			want: map[int]position.Position{
+				5: position.New(0, 7),
+				7: position.New(0, 8),
+			},
+		},
+		"after the properties and the key": {
+			input: "[? &x !t a # c\n]\n",
+			want:  map[int]position.Position{6: position.New(0, 10)},
+		},
+		"not after a key with a value": {
+			input: "[? a: b]\n",
+		},
+		"not after a key without a node": {
+			input: "[? ]\n",
+		},
+		"not after a key that holds two nodes": {
+			input: stringtest.LinesLF("- [", "? 1", "-]"),
+		},
+		"not after a key with a tag above its node": {
+			input: stringtest.LinesLF("[? !t", " a: ]"),
+		},
+		"not after a key in a flow mapping": {
+			input: "{? a}\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tks := tokens.Tokenize(tc.input)
+			got := docparse.NullFlowPairs(tks)
+
+			require.Len(t, got, len(tks)+len(tc.want))
+
+			nulls := map[int]position.Position{}
+
+			for i, tk := range got {
+				if tk.Type != token.ImplicitNullType {
+					continue
+				}
+
+				assert.Equal(t, "null", tk.Value)
+
+				nulls[i] = position.NewFromToken(tk)
+			}
+
+			if len(tc.want) == 0 {
+				assert.Empty(t, nulls)
+
+				return
+			}
+
+			assert.Equal(t, tc.want, nulls)
 		})
 	}
 }

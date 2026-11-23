@@ -1092,7 +1092,18 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 	// scalar at the start of its last line. Any other ":" after a scalar
 	// that spans lines ends the scalar, also before a flow indicator in a
 	// flow sequence.
-	if !ctx.folded() && s.startedFlowMapNum <= 0 && nc != ' ' && nc != '\t' && !s.isNewLineChar(nc) && !ctx.isNextEOS() {
+	//
+	// niceyaml: outside a flow mapping, a ":" on one line that a character
+	// other than a blank or a line break follows stays in the scalar, as
+	// upstream reads it. A ":" before a "," or a "]" after the scalar of an
+	// explicit key of a flow sequence ends the scalar, as YAML ends it. It
+	// ends the scalar also below a comment line between the "?" and the
+	// key or its tag or anchor. The scan of a key on two lines and the
+	// scan inside a flow mapping end the scalar there too. Such a ":"
+	// after a quoted key, an alias, a comment after the key, or an empty
+	// key of a flow sequence is an indicator, as YAML reads it.
+	if !ctx.folded() && s.startedFlowMapNum <= 0 && nc != ' ' && nc != '\t' && !s.isNewLineChar(nc) && !ctx.isNextEOS() &&
+		!s.endsExplicitKey(ctx, nc) {
 		return false, nil
 	}
 	if s.startedFlowMapNum > 0 && nc == '/' {
@@ -1568,15 +1579,101 @@ func endsPlain(nc rune) bool {
 // the key, so a "," must come between the two entries. niceyaml: upstream
 // does not have this function.
 func (s *Scanner) refusesFoldedKey(ctx *Context) bool {
+	switch beforeProperties(ctx.tokens) {
+	case token.MappingValueType:
+		return true
+	case token.MappingKeyType:
+		return false
+	}
+	return s.innerFlow() == token.SequenceStartType
+}
+
+// endsExplicitKey reports whether a ":" that nc follows is the indicator
+// of the value of an explicit key indicator in a flow sequence, as in
+// "[? a:]" and "[? 'a' :]". YAML reads a ":" before a "," or a "]" of a
+// flow collection as an indicator, so the ":" ends the plain scalar of
+// the buffer, also when a comment line stands between the "?" and the
+// key or its tag or anchor. When the buffer is empty, the key is a
+// quoted scalar, an alias, a plain scalar that a comment ends, or no node
+// at all, and the ":" stands on its own. niceyaml: upstream does not have
+// this function.
+func (s *Scanner) endsExplicitKey(ctx *Context, nc rune) bool {
+	if (nc != ',' && nc != ']') || s.innerFlow() != token.SequenceStartType {
+		return false
+	}
 	tks := ctx.tokens
+	// A comment line can stand between the "?" and the key. A comment also
+	// ends the plain scalar of a key on the line of the comment, so that
+	// scalar is a token here.
+	n := len(tks)
+	for n > 0 && tks[n-1].Type == token.CommentType {
+		n--
+	}
+	if ctx.existsBuffer() {
+		return keyBefore(tks[:n])
+	}
+	commented := n < len(tks)
+	switch {
+	case n == 0:
+	case tks[n-1].Type == token.SingleQuoteType || tks[n-1].Type == token.DoubleQuoteType:
+		n--
+	case n > 1 && tks[n-2].Type == token.AliasType:
+		// The name of an alias follows its "*".
+		n -= 2
+	case commented && plainScalar(tks[n-1].Type) && (n == 1 || tks[n-2].Type != token.AnchorType):
+		// The scalar is the key. KeyBefore steps over the name of an
+		// anchor.
+		n--
+	}
+	return keyBefore(tks[:n])
+}
+
+// keyBefore reports whether a "?" is the last token of tks before the
+// comments, tags, and anchors at the end of tks. niceyaml: upstream does
+// not have this function.
+func keyBefore(tks token.Tokens) bool {
+	for {
+		n := len(tks)
+		for n > 0 && tks[n-1].Type == token.CommentType {
+			n--
+		}
+		tks = tks[:n]
+		switch {
+		case n == 0:
+			return false
+		case tks[n-1].Type == token.TagType:
+			tks = tks[:n-1]
+		case n > 1 && tks[n-2].Type == token.AnchorType:
+			// The name of an anchor follows its "&".
+			tks = tks[:n-2]
+		default:
+			return tks[n-1].Type == token.MappingKeyType
+		}
+	}
+}
+
+// plainScalar reports whether t is the type of a plain scalar. niceyaml:
+// upstream does not have this function.
+func plainScalar(t token.Type) bool {
+	switch t {
+	case token.StringType, token.NullType, token.BoolType, token.IntegerType,
+		token.BinaryIntegerType, token.OctetIntegerType, token.HexIntegerType,
+		token.FloatType, token.InfinityType, token.NanType:
+		return true
+	default:
+		return false
+	}
+}
+
+// beforeProperties returns the type of the last token of tks before the
+// tags and anchors at the end of tks, or [token.UnknownType] when tks
+// holds no other token. niceyaml: upstream does not have this function.
+func beforeProperties(tks token.Tokens) token.Type {
 	for i := len(tks) - 1; i >= 0; i-- {
 		switch tks[i].Type {
-		case token.MappingValueType:
-			return true
-		case token.MappingKeyType:
-			return false
 		case token.TagType:
 			continue
+		case token.MappingValueType, token.MappingKeyType:
 		default:
 			// The name of an anchor follows its "&". The lexer types a
 			// name such as 1 or true as a number or a boolean.
@@ -1585,9 +1682,9 @@ func (s *Scanner) refusesFoldedKey(ctx *Context) bool {
 				continue
 			}
 		}
-		break
+		return tks[i].Type
 	}
-	return s.innerFlow() == token.SequenceStartType
+	return token.UnknownType
 }
 
 // innerFlow returns the type of the "[" or "{" of the innermost flow

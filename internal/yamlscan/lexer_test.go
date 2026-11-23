@@ -1287,6 +1287,105 @@ func TestTokenize_Patches(t *testing.T) {
 				{token.SequenceEndType, "]\n"},
 			},
 		},
+		// Upstream keeps a ":" before a flow indicator on one line in the
+		// scalar of the key.
+		"colon before the end of a flow sequence after an explicit key": {
+			input: "[? a:]\n",
+			want: []tok{
+				{token.SequenceStartType, "["},
+				{token.MappingKeyType, "?"},
+				{token.StringType, " a"},
+				{token.MappingValueType, ":"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
+		"colon before a comma after a space after an anchored explicit key": {
+			input: "[? &x a :, b]\n",
+			want: []tok{
+				{token.SequenceStartType, "["},
+				{token.MappingKeyType, "?"},
+				{token.AnchorType, " &"},
+				{token.StringType, "x"},
+				{token.StringType, " a "},
+				{token.MappingValueType, ":"},
+				{token.CollectEntryType, ","},
+				{token.StringType, " b"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
+		// Upstream reads the ":" after a quoted key or an alias as a plain
+		// scalar.
+		"colon before the end of a flow sequence after a quoted explicit key": {
+			input: "[? 'a':]\n",
+			want: []tok{
+				{token.SequenceStartType, "["},
+				{token.MappingKeyType, "?"},
+				{token.SingleQuoteType, " 'a'"},
+				{token.MappingValueType, ":"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
+		"colon before a comma after an alias as an explicit key": {
+			input: "[&x a, ? *x :, b]\n",
+			want: []tok{
+				{token.SequenceStartType, "["},
+				{token.AnchorType, "&"},
+				{token.StringType, "x"},
+				{token.StringType, " a"},
+				{token.CollectEntryType, ","},
+				{token.MappingKeyType, " ?"},
+				{token.AliasType, " *"},
+				{token.StringType, "x"},
+				{token.MappingValueType, " :"},
+				{token.CollectEntryType, ","},
+				{token.StringType, " b"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
+		"colon below a comment after an explicit key": {
+			input: "[? a # c\n:]\n",
+			want: []tok{
+				{token.SequenceStartType, "["},
+				{token.MappingKeyType, "?"},
+				{token.StringType, " a "},
+				{token.CommentType, "# c\n"},
+				{token.MappingValueType, ":"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
+		"colon after an explicit key below a comment line": {
+			input: "[? # c\n a:]\n",
+			want: []tok{
+				{token.SequenceStartType, "["},
+				{token.MappingKeyType, "?"},
+				{token.CommentType, " # c\n"},
+				{token.StringType, " a"},
+				{token.MappingValueType, ":"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
+		"colon after an explicit key with an anchor below a comment line": {
+			input: "[? # c\n &x a:]\n",
+			want: []tok{
+				{token.SequenceStartType, "["},
+				{token.MappingKeyType, "?"},
+				{token.CommentType, " # c\n"},
+				{token.AnchorType, " &"},
+				{token.StringType, "x"},
+				{token.StringType, " a"},
+				{token.MappingValueType, ":"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
+		"colon before the end of a flow sequence after an empty explicit key": {
+			input: "[? :]\n",
+			want: []tok{
+				{token.SequenceStartType, "["},
+				{token.MappingKeyType, "?"},
+				{token.MappingValueType, " :"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
 		// The value above the key becomes two tokens, so the go-yaml
 		// parser refuses the key after the single pair.
 		"key below a value on two lines of a single pair in a flow sequence": {

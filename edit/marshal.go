@@ -98,8 +98,7 @@ func refusal(err error, text string) string {
 // before its value, as [directiveProblem] tells. Go-yaml's parser can
 // refuse the text without its comments, refuse a text with comments that
 // it took without them, or panic on it. It can also refuse the text as the
-// finder reads it after it took the text, as for an explicit key on two
-// lines of a flow sequence. The text can hold no value, as a
+// finder reads it after it took the text. The text can hold no value, as a
 // comment alone does. Go-yaml also reads a byte order mark of the text as
 // text, as [Doc.valueMisread] finds it. After those checks, marshaledYAML
 // returns the instances that the finder finds in the text, as

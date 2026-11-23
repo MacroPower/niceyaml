@@ -115,6 +115,15 @@ import (
 //     a key of a flow mapping that spans lines, as the lexer reads it in a
 //     key on one line. So the copy and the lexer read "{a\n b:c}" as the
 //     key "a b" and the value c.
+//   - A ":" right before a "," or a "]" ends the plain scalar of an
+//     explicit key in a flow sequence, as it ends a key inside a flow
+//     mapping. The lexer keeps that ":" in the scalar, so it reads
+//     "[? a:]" as the key "a:". The copy reads the key a, and the ":" as
+//     an indicator, also below a comment line above the key or above its
+//     tag or anchor, as in "[? # c\n a:]" and "[? # c\n &x a:]". After a
+//     quoted key, an alias, or a comment after the key, as in "[? 'a':]"
+//     and "[? a # c\n:]", the lexer reads that ":" as a plain scalar, and
+//     the copy reads it as an indicator.
 //
 // A tab used as indentation makes the lexer read an invalid token. When a
 // "-" or ":" indicator follows the tab, the invalid token holds it. The

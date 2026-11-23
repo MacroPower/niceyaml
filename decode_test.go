@@ -8194,6 +8194,121 @@ func TestDocument_Decode_YAMLReadings(t *testing.T) {
 			input: stringtest.LinesLF("? a", ": {b: c", " - d}"),
 			want:  map[string]any{"a": map[string]any{"b": "c - d"}},
 		},
+		"explicit key without a value in a flow sequence": {
+			// Go-yaml refuses the "]" after the key.
+			input: "[? a]\n",
+			want:  []any{map[string]any{"a": nil}},
+		},
+		"explicit key of two words without a value in a flow sequence": {
+			input: "[? a b]\n",
+			want:  []any{map[string]any{"a b": nil}},
+		},
+		"explicit key without a value before an item of a flow sequence": {
+			input: "[? a, b]\n",
+			want:  []any{map[string]any{"a": nil}, "b"},
+		},
+		"explicit key without a value after an item of a flow sequence": {
+			input: "[x, ? a]\n",
+			want:  []any{"x", map[string]any{"a": nil}},
+		},
+		"explicit keys without values in a flow sequence": {
+			input: "[? a, ? b: c, ? d]\n",
+			want:  []any{map[string]any{"a": nil}, map[string]any{"b": "c"}, map[string]any{"d": nil}},
+		},
+		"explicit key without a value after its colon in a flow sequence": {
+			input: "[? a : ]\n",
+			want:  []any{map[string]any{"a": nil}},
+		},
+		"explicit key without a value after its colon before an item": {
+			input: "[? a: , b]\n",
+			want:  []any{map[string]any{"a": nil}, "b"},
+		},
+		"explicit key without a value right before its colon and the end": {
+			// Go-yaml's lexer reads "a:" as the key.
+			input: "[? a:]\n",
+			want:  []any{map[string]any{"a": nil}},
+		},
+		"explicit key without a value before its colon and an item": {
+			input: "[? a :, b]\n",
+			want:  []any{map[string]any{"a": nil}, "b"},
+		},
+		"quoted explicit key without a value right before its colon and the end": {
+			// Go-yaml's lexer reads the ":" as a plain scalar.
+			input: "[? 'a':]\n",
+			want:  []any{map[string]any{"a": nil}},
+		},
+		"quoted explicit key without a value before its colon and an item": {
+			input: "[? \"a\" :, b]\n",
+			want:  []any{map[string]any{"a": nil}, "b"},
+		},
+		"quoted explicit key without a value above its colon": {
+			input: stringtest.LinesLF("[? 'a'", " :]"),
+			want:  []any{map[string]any{"a": nil}},
+		},
+		"alias as an explicit key without a value before its colon and the end": {
+			input: "[&x a, ? *x :]\n",
+			want:  []any{"a", map[string]any{"a": nil}},
+		},
+		"explicit key without a value above a comment and its colon": {
+			// Go-yaml's lexer reads the ":" as a plain scalar.
+			input: stringtest.LinesLF("[? a # c", ":]"),
+			want:  []any{map[string]any{"a": nil}},
+		},
+		"quoted explicit key without a value above a comment and its colon": {
+			input: stringtest.LinesLF("[? 'a' # c", ":]"),
+			want:  []any{map[string]any{"a": nil}},
+		},
+		"explicit key without a value above a comment and its colon before an item": {
+			input: stringtest.LinesLF("[? a # c", " :, b]"),
+			want:  []any{map[string]any{"a": nil}, "b"},
+		},
+		"explicit key without a value below a comment line before an item": {
+			// Go-yaml's lexer keeps the ":" in the scalar.
+			input: stringtest.LinesLF("[? # c", " a:, b]"),
+			want:  []any{map[string]any{"a": nil}, "b"},
+		},
+		"explicit key with an anchor without a value below a comment line": {
+			// Go-yaml's lexer keeps the ":" in the scalar.
+			input: stringtest.LinesLF("[? # c", " &x a:]"),
+			want:  []any{map[string]any{"a": nil}},
+		},
+		"quoted explicit key without a value below a comment line": {
+			// Go-yaml's lexer reads the ":" as a plain scalar.
+			input: stringtest.LinesLF("[? # c", " 'a':]"),
+			want:  []any{map[string]any{"a": nil}},
+		},
+		"alias as an explicit key without a value below a comment line": {
+			input: stringtest.LinesLF("[&x a, ? # c", " *x :]"),
+			want:  []any{"a", map[string]any{"a": nil}},
+		},
+		"explicit key with properties right before its colon and the end": {
+			input: "[x: y, ? &x !!str a:]\n",
+			want:  []any{map[string]any{"x": "y"}, map[string]any{"a": nil}},
+		},
+		"explicit key without a value in a nested flow sequence": {
+			input: "{k: [[? a]]}\n",
+			want:  map[string]any{"k": []any{[]any{map[string]any{"a": nil}}}},
+		},
+		"explicit key without a value in a flow sequence on a value": {
+			input: "k: [? a]\n",
+			want:  map[string]any{"k": []any{map[string]any{"a": nil}}},
+		},
+		"quoted explicit key without a value in a flow sequence": {
+			input: "[? \"a\"]\n",
+			want:  []any{map[string]any{"a": nil}},
+		},
+		"explicit key with properties without a value in a flow sequence": {
+			input: "[? &x !!str a, *x]\n",
+			want:  []any{map[string]any{"a": nil}, "a"},
+		},
+		"explicit key on two lines without a value in a flow sequence": {
+			input: stringtest.LinesLF("[? a", " b]"),
+			want:  []any{map[string]any{"a b": nil}},
+		},
+		"explicit key without a value above the end of a flow sequence": {
+			input: stringtest.LinesLF("[", "? a # c", "]"),
+			want:  []any{map[string]any{"a": nil}},
+		},
 	}
 
 	for name, tc := range tcs {
