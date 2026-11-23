@@ -583,6 +583,11 @@ func TestNew_GoYAMLReading(t *testing.T) {
 			// the anchor x.
 			text: stringtest.LinesLF("a: !t\t&x 1", "b: *x"),
 		},
+		"value after a tab after an anchor": {
+			// Go-yaml's lexer reads the anchor "x1" on an empty value, so it
+			// does not find the anchor x.
+			text: stringtest.LinesLF("a: &x\t1", "b: *x"),
+		},
 		"block scalar header after a tab after a tag": {
 			// Go-yaml's lexer reads the tag "!!str\t|" on the plain scalar
 			// x.

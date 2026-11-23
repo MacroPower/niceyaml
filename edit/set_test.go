@@ -61,6 +61,22 @@ func TestNode_Set(t *testing.T) {
 			value:  2,
 			want:   "a: \"x\ty\"\nb: 2\n",
 		},
+		"value after a value after a tab after an anchor": {
+			// Go-yaml's lexer reads the anchor "x1" on an empty value, so it
+			// does not find the anchor that b aliases. The check reads the
+			// text as YAML does.
+			before: "a: &x\t1\nb: *x\nc: 1\n",
+			path:   paths.Doc().Child("c"),
+			value:  2,
+			want:   "a: &x\t1\nb: *x\nc: 2\n",
+		},
+		"anchored value after a tab after its anchor": {
+			// The Set replaces the tab and 1, as it replaces a space and 1.
+			before: "a: &x\t1\nb: *x\n",
+			path:   paths.Doc().Child("a"),
+			value:  2,
+			want:   "a: &x 2\nb: *x\n",
+		},
 		"value after an anchor after a tab after a tag": {
 			// Go-yaml's lexer reads the tab and the anchor into the tag, so
 			// it does not find the anchor that b aliases. The check reads the

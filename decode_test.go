@@ -7855,6 +7855,49 @@ func TestDocument_Decode_YAMLReadings(t *testing.T) {
 			input: "a: !!str\t# c\n",
 			want:  map[string]any{"a": ""},
 		},
+		"value after a tab after an anchor": {
+			// Go-yaml reads the anchor "x1" on an empty value, so it does
+			// not find the anchor x.
+			input: stringtest.LinesLF("a: &x\t1", "b: *x"),
+			want:  map[string]any{"a": uint64(1), "b": uint64(1)},
+		},
+		"flow mapping after a tab after an anchor": {
+			// Go-yaml reads the anchor "x{y:".
+			input: stringtest.LinesLF("a: &x\t{y: 1}", "b: *x"),
+			want:  map[string]any{"a": map[string]any{"y": uint64(1)}, "b": map[string]any{"y": uint64(1)}},
+		},
+		"value after a tab after an anchor in a flow sequence": {
+			// Go-yaml reads the anchor "x1" on an empty item.
+			input: "[&x\t1, *x]\n",
+			want:  []any{uint64(1), uint64(1)},
+		},
+		"key after a tab after an anchor": {
+			// Go-yaml reads the anchor "xa:" on the scalar 1.
+			input: "&x\ta: 1\n",
+			want:  map[string]any{"a": uint64(1)},
+		},
+		"key after a tab and a space after an anchor": {
+			input: "&x\t a: 1\n",
+			want:  map[string]any{"a": uint64(1)},
+		},
+		"key after a tab after an anchor in a sequence": {
+			input: "- &x\ta: 1\n",
+			want:  []any{map[string]any{"a": uint64(1)}},
+		},
+		"key after a tab after an anchor in a flow mapping": {
+			input: "{&x\ta: 1}\n",
+			want:  map[string]any{"a": uint64(1)},
+		},
+		"colon after a tab after an alias": {
+			// Go-yaml reads the colon into the alias name "a:", so it refuses
+			// the 2 after it as a value outside a mapping.
+			input: stringtest.LinesLF("a: &a 1", "*a\t: 2"),
+			want:  map[string]any{"a": uint64(1), "1": uint64(2)},
+		},
+		"colon after a tab and a space after an alias": {
+			input: stringtest.LinesLF("a: &a 1", "*a\t : 2"),
+			want:  map[string]any{"a": uint64(1), "1": uint64(2)},
+		},
 	}
 
 	for name, tc := range tcs {

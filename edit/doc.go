@@ -1021,19 +1021,22 @@
 // texts include one with a tag that ends it and one with a key that the
 // lexer reads as a string below a tag without a value. They also include
 // one with a double-quoted scalar after which the lexer skips a line
-// break, and one with a tab after a tag. The decode of yaml.Unmarshal
-// reads such a text apart from niceyaml, so the check against go-yaml's
-// decoder alone skips it.
+// break, and one with a tab after a tag or after the name of an anchor.
+// The decode of yaml.Unmarshal reads such a text apart from niceyaml, so
+// the check against go-yaml's decoder alone skips it.
 //
 // Below a tag without a value and before a tag that ends the text, go-yaml's
 // lexer places each other token as the tokenizer does. The parse of
 // go-yaml's parser then still reads the tokens of the lexer. It reads the
 // tokenizer's tokens only in a text where the lexer moves or drops other
-// tokens, or reads a tab after a tag into the tag. The lexer moves each
+// tokens, or reads a tab after a tag or a name into it. The lexer moves each
 // later token when it skips a line break after a double-quoted scalar. It
 // reads a tab after a tag into the tag, with the text after the tab up to
 // the next space, line break, or "," in a flow collection. So it drops the
-// tokens of that text.
+// tokens of that text. It reads a tab after the name of an anchor or an
+// alias, and the text after the tab, into the name in the same way. That
+// text ends at the next space, line break, or comment, or at a flow
+// indicator such as "," in a flow collection.
 //
 // The edited text must hold only the characters that YAML allows in a text,
 // the printable characters of YAML 1.2, which include U+0085. A Go string

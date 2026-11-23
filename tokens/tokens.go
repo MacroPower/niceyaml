@@ -59,6 +59,12 @@ import (
 //     "a: !t\t&x 1" as the tag "!t\t&x" on 1, without the anchor x. It
 //     reads "a: !!str\t|" as the tag "!!str\t|" on the plain scalar of
 //     the next line, and not as a literal block scalar.
+//   - A tab after the name of an anchor or an alias closes the name, as a
+//     space does. The lexer reads the tab and the text after it into the
+//     name, up to the next space, line break, or comment. In a flow
+//     collection a flow indicator such as "," ends the name too. So the
+//     lexer reads "a: &x\t1" as the anchor x1 on an empty value, and an
+//     alias *x does not find the anchor x.
 //   - The copy reads the rune after a double-quoted scalar that holds a
 //     tab between its quotes. The lexer skips one rune after the closing
 //     quote for each tab of the text that a rune other than a space or a

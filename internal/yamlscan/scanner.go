@@ -1376,6 +1376,63 @@ func (s *Scanner) scanAlias(ctx *Context) bool {
 	return true
 }
 
+// inName reports whether the scan stands in the name of an anchor or an
+// alias, right after its indicator token. The anchor and alias flags stay
+// set after an error and after a tag that follows the indicator. So the
+// flags alone do not show that the scan stands in a name. niceyaml:
+// upstream does not have this function.
+func (s *Scanner) inName(ctx *Context) bool {
+	if !s.isAnchor && !s.isAlias {
+		return false
+	}
+	tk := ctx.lastToken()
+	return tk != nil && (tk.Type == token.AnchorType || tk.Type == token.AliasType)
+}
+
+// blankRunEndsLine reports whether the run of spaces and tabs that starts
+// where the scan stands ends at a line break. niceyaml: upstream does not
+// have this function.
+func blankRunEndsLine(ctx *Context) bool {
+	for i := ctx.idx; i < ctx.size; i++ {
+		switch ctx.src[i] {
+		case ' ', '\t':
+			continue
+		case '\n', '\r':
+			return true
+		}
+		return false
+	}
+	return false
+}
+
+// closeNameAtTab ends the name of an anchor or an alias at the tab where
+// the scan stands. The name token takes the run of spaces and tabs from
+// that tab through the last tab of the run, as a tag takes the tab that
+// ends it. So the origin of the next token does not open with a tab. The
+// spaces after the last tab open that origin as after any token. A key
+// after the tab then reads as a key after a space. niceyaml: upstream does
+// not have this function.
+func (s *Scanner) closeNameAtTab(ctx *Context) {
+	s.addBufferedTokenIfExists(ctx)
+	s.isAnchor = false
+	s.isAlias = false
+
+	end := ctx.idx
+	for i := ctx.idx; i < ctx.size; i++ {
+		c := ctx.src[i]
+		if c != ' ' && c != '\t' {
+			break
+		}
+		if c == '\t' {
+			end = i + 1
+		}
+	}
+
+	tk := ctx.lastToken()
+	tk.Origin += ctx.source(ctx.idx, end)
+	s.progressColumn(ctx, end-ctx.idx)
+}
+
 func (s *Scanner) scanReservedChar(ctx *Context, c rune) error {
 	if ctx.existsBuffer() {
 		return nil
@@ -1573,6 +1630,15 @@ func (s *Scanner) scan(ctx *Context) error {
 				return err
 			}
 		case '\t':
+			// niceyaml: a tab closes an anchor or an alias, as a space
+			// does. Upstream reads the tab and the text after it into the
+			// name. When the blanks run to a line break, upstream already
+			// ends the name there and gives the name token the blanks and
+			// the line break, as after a space.
+			if s.inName(ctx) && !blankRunEndsLine(ctx) {
+				s.closeNameAtTab(ctx)
+				continue
+			}
 			if ctx.existsBuffer() && s.lastDelimColumn == 0 {
 				// tab indent for plain text (yaml-test-suite's spec-example-7-12-plain-lines).
 				s.indentNum++

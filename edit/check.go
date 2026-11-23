@@ -182,13 +182,15 @@ type emptiedRoot struct {
 // lexer, as yaml.Unmarshal reads them. They are the tokenizer's tokens in a
 // text where the lexer moves or drops tokens other than a tag that ends the
 // text. They are the tokenizer's tokens as well in a text where the lexer
-// reads a tab after a tag into the tag. The parser changes only the links
-// between the tokens, which it does not read, so the second parse reads the
-// tokens as the first read them. The parses run beside the checks of
-// [Doc.check]. The function that parseFinal returns waits for them. A panic
-// of the lexer or the parser comes back as the problem of the parse, as
-// [parseTokens] gives it. The parses take a key that the text repeats. The
-// parse of the edits already reads the keys as the Source does.
+// reads a tab after a tag into the tag. The same holds where the lexer
+// reads a tab after the name of an anchor or an alias into the name. The
+// parser changes only the links between the tokens, which it does not
+// read, so the second parse reads the tokens as the first read them. The
+// parses run beside the checks of [Doc.check]. The function that
+// parseFinal returns waits for them. A panic of the lexer or the parser
+// comes back as the problem of the parse, as [parseTokens] gives it. The
+// parses take a key that the text repeats. The parse of the edits already
+// reads the keys as the Source does.
 func (d *Doc) parseFinal(start string) func() finalParse {
 	if d.cur == start {
 		return func() finalParse { return finalParse{} }
@@ -233,10 +235,12 @@ func (d *Doc) parseFinal(start string) func() finalParse {
 // tag that ends the text, where the lexer reads the constructs otherwise
 // than the tokenizer but places each token as the tokenizer does.
 // Otherwise the lexer moves or drops other tokens, as after a
-// double-quoted scalar after which it skips a line break, or reads a tab
-// after a tag into the tag. ParserTokens then returns the copies of tks
-// that [tokens.ForParser] makes. Either way, each token stands at the index
-// of the token of tks that holds its text. A panic of the lexer reaches the caller.
+// double-quoted scalar after which it skips a line break. It also drops
+// tokens where it reads a tab after a tag into the tag, or a tab after the
+// name of an anchor or an alias into the name. ParserTokens then returns
+// the copies of tks that [tokens.ForParser] makes. Either way, each token
+// stands at the index of the token of tks that holds its text. A panic of
+// the lexer reaches the caller.
 func parserTokens(text string, tks token.Tokens) token.Tokens {
 	if lexedTks := lexerTokens(text); linesUp(lexedTks, tks) {
 		return lexedTks

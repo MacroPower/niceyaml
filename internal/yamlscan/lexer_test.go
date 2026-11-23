@@ -543,6 +543,179 @@ func TestTokenize_Patches(t *testing.T) {
 				{token.CommentType, "#c\n"},
 			},
 		},
+		"value after a tab after an anchor": {
+			input: "a: &x\t1\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.AnchorType, " &"},
+				{token.StringType, "x\t"},
+				{token.IntegerType, "1\n"},
+			},
+		},
+		"value after a tab and a space after an anchor": {
+			input: "a: &x\t 1\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.AnchorType, " &"},
+				{token.StringType, "x\t"},
+				{token.IntegerType, " 1\n"},
+			},
+		},
+		"value after a tab after an anchor in a flow sequence": {
+			input: "[&x\t1, *x]\n",
+			want: []tok{
+				{token.SequenceStartType, "["},
+				{token.AnchorType, "&"},
+				{token.StringType, "x\t"},
+				{token.IntegerType, "1"},
+				{token.CollectEntryType, ","},
+				{token.AliasType, " *"},
+				{token.StringType, "x"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
+		"tag after a tab after an anchor": {
+			input: "a: &x\t!t 1\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.AnchorType, " &"},
+				{token.StringType, "x\t"},
+				{token.TagType, "!t "},
+				{token.StringType, "1\n"},
+			},
+		},
+		"colon after a tab after an alias": {
+			input: "*a\t: 2\n",
+			want: []tok{
+				{token.AliasType, "*"},
+				{token.StringType, "a\t"},
+				{token.MappingValueType, ":"},
+				{token.IntegerType, " 2\n"},
+			},
+		},
+		"key after a tab after an anchor": {
+			input: "&x\ta: 1\n",
+			want: []tok{
+				{token.AnchorType, "&"},
+				{token.StringType, "x\t"},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.IntegerType, " 1\n"},
+			},
+		},
+		"key after tabs and a space after an anchor": {
+			input: "&x\t \ta: 1\n",
+			want: []tok{
+				{token.AnchorType, "&"},
+				{token.StringType, "x\t \t"},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.IntegerType, " 1\n"},
+			},
+		},
+		"key after a tab and a space after an anchor": {
+			input: "&x\t a: 1\n",
+			want: []tok{
+				{token.AnchorType, "&"},
+				{token.StringType, "x\t"},
+				{token.StringType, " a"},
+				{token.MappingValueType, ":"},
+				{token.IntegerType, " 1\n"},
+			},
+		},
+		"colon after a tab and a space after an alias": {
+			input: "*a\t : 2\n",
+			want: []tok{
+				{token.AliasType, "*"},
+				{token.StringType, "a"},
+				{token.MappingValueType, "\t :"},
+				{token.IntegerType, " 2\n"},
+			},
+		},
+		"key after a tab after an anchor in a flow mapping": {
+			input: "{&x\ta: 1}\n",
+			want: []tok{
+				{token.MappingStartType, "{"},
+				{token.AnchorType, "&"},
+				{token.StringType, "x\t"},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.IntegerType, " 1"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		"line break after a tab after an anchor": {
+			input: "a: &x\t\nb: 1\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.AnchorType, " &"},
+				{token.StringType, "x\t\n"},
+				{token.StringType, "b"},
+				{token.MappingValueType, ":"},
+				{token.IntegerType, " 1\n"},
+			},
+		},
+		"line break after a tab after an alias": {
+			input: "a: *x\t\nb: 1\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.AliasType, " *"},
+				{token.StringType, "x\t\n"},
+				{token.StringType, "b"},
+				{token.MappingValueType, ":"},
+				{token.IntegerType, " 1\n"},
+			},
+		},
+		"crlf after a tab after an anchor": {
+			input: "a: &x\t\r\nb: 1\r\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.AnchorType, " &"},
+				{token.StringType, "x\t\r\n"},
+				{token.StringType, "b"},
+				{token.MappingValueType, ":"},
+				{token.IntegerType, " 1\r\n"},
+			},
+		},
+		"line break after tabs and a space after an anchor": {
+			input: "a: &x\t \t\n  b: 1\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.AnchorType, " &"},
+				{token.StringType, "x\t \t\n"},
+				{token.StringType, "  b"},
+				{token.MappingValueType, ":"},
+				{token.IntegerType, " 1\n"},
+			},
+		},
+		"tab after an error after an anchor": {
+			// The scan after the error starts at the tab, outside the name.
+			input: "a: &!{\t1\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.AnchorType, " &"},
+				{token.InvalidType, "!{"},
+				{token.IntegerType, "\t1\n"},
+			},
+		},
+		"tab in a scalar after a tag after an anchor": {
+			input: "a: &!t 1\t2\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.AnchorType, " &"},
+				{token.TagType, "!t "},
+				{token.StringType, "1\t2\n"},
+			},
+		},
 		"space after a double-quoted scalar with a tab": {
 			input: "a: \"t\tb\" \nb: 1\n",
 			want: []tok{

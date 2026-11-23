@@ -42,6 +42,11 @@
 //     tab and the text after it up to the next space, line break, or ","
 //     in a flow collection into the tag. So it reads "!t\t&x 1" as the tag
 //     "!t\t&x" on 1, without the anchor x.
+//   - A tab after the name of an anchor or an alias closes the name, as a
+//     space does. Go-yaml reads the tab and the text after it into the
+//     name, up to the next space, line break, or comment. In a flow
+//     collection a flow indicator such as "," ends the name too. So
+//     go-yaml reads "&x\t1" as the anchor x1 on an empty value.
 //
 // # Sync
 //

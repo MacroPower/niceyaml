@@ -980,7 +980,9 @@
 // and niceyaml reads b as "". In "a: !t" and "  0x10: 1", go-yaml reads
 // the key 0x10 under a as "0x10", and niceyaml reads it as 16. In
 // "a: !t\t&x 1", go-yaml reads the tag "!t\t&x" on 1 without an anchor,
-// and niceyaml reads the tag !t and the anchor x on 1.
+// and niceyaml reads the tag !t and the anchor x on 1. In "a: &x\t1",
+// go-yaml reads the anchor x1 on an empty value, and niceyaml reads the
+// anchor x on 1.
 //
 // Go-yaml's parser nests the lines after a tag on an empty value in that
 // value, but YAML reads them outside it. So the parser reads "a: !t" and
