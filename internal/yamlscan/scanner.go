@@ -1107,14 +1107,9 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 	// niceyaml: a plain scalar that spans lines of a flow collection can
 	// hold a ":" that a character other than a blank or a flow indicator
 	// follows. The scalar keeps that ":" when the scalar is the value of a
-	// key or stands in a flow sequence, as YAML keeps it. Inside a flow
-	// mapping, the scan of one line reads such a ":" as an indicator after
-	// a tag or an anchor on a value. It also reads that ":" as an indicator
-	// on the line below a comment line after the ":" of the key, and in a
-	// scalar that stands in a flow sequence. So the readings of one line
-	// and of two lines differ in each of those places. In a key of a flow
-	// mapping, that ":" ends the key, as the scan of one line reads
-	// "{a b:c}".
+	// key or stands in a flow sequence, as YAML keeps it. The scan of one
+	// line keeps it there too. In a key of a flow mapping, that ":" ends
+	// the key, as the scan of one line reads "{a b:c}".
 	cut := ctx.folded() && s.refusesFoldedKey(ctx)
 	if ctx.folded() && !endsPlain(nc) && (cut || s.innerFlow() == token.SequenceStartType) {
 		return false, nil
@@ -1145,19 +1140,21 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 	if cut {
 		s.cutFold(ctx)
 	} else if s.startedFlowMapNum > 0 {
+		// niceyaml: a plain scalar keeps a ":" that a character other
+		// than a blank, a line break, or a flow indicator follows when the
+		// scalar is the value of a key or stands in a flow sequence, as in
+		// "{a: 12:30}", "{a: !t b c:d}", and "{a: [b c:d]}".
+		if !endsPlain(nc) && s.keepsColon(ctx) {
+			return false, nil
+		}
 		tk := ctx.lastToken()
 		if tk != nil && tk.Type == token.MappingValueType {
-			// niceyaml: the plain value of a key keeps a ":" that a
-			// character other than a blank or a flow indicator follows, as
-			// in "{a: 12:30}". YAML ends the value at any other ":" and
-			// then refuses the text, because a "," must come before the
-			// next key. The scan reports such a ":" as an invalid token,
-			// so the decode fails whatever follows it, as in
-			// "{a: b c: d, e: f}". Upstream keeps every ":" of the value,
-			// so it reads "{a: b c: d}" as {a: "b c: d"}.
-			if !endsPlain(nc) {
-				return false, nil
-			}
+			// niceyaml: YAML ends the plain value of a key at any other
+			// ":" and then refuses the text, because a "," must come
+			// before the next key. The scan reports such a ":" as an
+			// invalid token, so the decode fails whatever follows it, as
+			// in "{a: b c: d, e: f}". Upstream keeps every ":" of the
+			// value, so it reads "{a: b c: d}" as {a: "b c: d"}.
 			invalidTk := token.Invalid("a value of a flow mapping cannot hold an implicit key", string(ctx.obuf), s.pos())
 			invalidTk.Origin += ":"
 			s.progressColumn(ctx, 1)
@@ -1707,6 +1704,26 @@ func endsPlain(nc rune) bool {
 	switch nc {
 	case 0, ' ', '\t', '\n', '\r', ',', '[', ']', '{', '}':
 		return true
+	}
+	return false
+}
+
+// keepsColon reports whether a plain scalar of one line inside a flow
+// mapping keeps a ":" that an ns-plain-safe character follows. YAML keeps
+// that ":" in every plain scalar of a flow collection. The scan keeps it
+// in the value of a key, past any comment, tag, or anchor, as in
+// "{a: !t b c:d}", and in a scalar that stands in a flow sequence, as in
+// "{a: [b c:d]}" and "{a: [? b c:d]}". There the ":" can also start the
+// scalar, as in "{a: [:b]}". In a key of a flow mapping, the ":" ends
+// the key, as the scan reads "{a b:c}". After a quoted scalar or a flow
+// collection, the ":" is an indicator, as YAML reads "{a: ["b":c]}".
+// niceyaml: upstream does not have this function.
+func (s *Scanner) keepsColon(ctx *Context) bool {
+	switch beforeProperties(ctx.tokens) {
+	case token.MappingValueType:
+		return true
+	case token.SequenceStartType, token.CollectEntryType, token.MappingKeyType:
+		return s.innerFlow() == token.SequenceStartType
 	}
 	return false
 }

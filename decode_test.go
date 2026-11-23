@@ -8165,6 +8165,42 @@ func TestDocument_Decode_YAMLReadings(t *testing.T) {
 			input: stringtest.LinesLF("{a: b", " c:d}"),
 			want:  map[string]any{"a": "b c:d"},
 		},
+		"colon before text in a tagged value of a flow mapping": {
+			// Go-yaml reads the ":" as the indicator of a key and refuses
+			// the text.
+			input: "{a: !t b c:d}\n",
+			want:  map[string]any{"a": "b c:d"},
+		},
+		"colon before text in an anchored value of a flow mapping": {
+			input: "{a: &x b c:d, e: *x}\n",
+			want:  map[string]any{"a": "b c:d", "e": "b c:d"},
+		},
+		"colon before text in a value below a comment line": {
+			input: stringtest.LinesLF("{a: # c", " b c:d}"),
+			want:  map[string]any{"a": "b c:d"},
+		},
+		"colon before text in an item of a flow sequence in a flow mapping": {
+			// Go-yaml reads the ":" as the indicator of a single pair, so it
+			// reads {a: [{b c: d}]}.
+			input: "{a: [b c:d]}\n",
+			want:  map[string]any{"a": []any{"b c:d"}},
+		},
+		"colon before text in a later item of a flow sequence in a flow mapping": {
+			input: "{a: [b, c d:e]}\n",
+			want:  map[string]any{"a": []any{"b", "c d:e"}},
+		},
+		"colon before text in an explicit key of a flow sequence in a flow mapping": {
+			input: "{x: [? a c:d]}\n",
+			want:  map[string]any{"x": []any{map[string]any{"a c:d": nil}}},
+		},
+		"colon that opens an item of a flow sequence in a flow mapping": {
+			input: "{x: [:c]}\n",
+			want:  map[string]any{"x": []any{":c"}},
+		},
+		"colon before text after a quoted key of a flow sequence in a flow mapping": {
+			input: "{x: [\"b\":c]}\n",
+			want:  map[string]any{"x": []any{map[string]any{"b": "c"}}},
+		},
 		"key on two lines of a flow mapping": {
 			input: stringtest.LinesLF("{x: y, a", " b: c}"),
 			want:  map[string]any{"x": "y", "a b": "c"},

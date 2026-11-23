@@ -133,7 +133,11 @@ import (
 //     a "," must come before the next key. The copy reports the value and
 //     the second ":" as an invalid token. So the decode of "{a: b c: d}"
 //     and of "{a: b c: d, e: f}" fails. A ":" that another character
-//     follows stays in the value, as in "{a: 12:30}".
+//     follows stays in the value, as in "{a: 12:30}". It also stays in a
+//     value after a tag or an anchor and in an item of a flow sequence,
+//     where the lexer reads it as an indicator. So the lexer reads
+//     "{a: [b c:d]}" as the key "b c" and the value d, and the copy reads
+//     the item "b c:d".
 //   - A ":" right before a "," or a "]" ends the plain scalar of an
 //     explicit key in a flow sequence, as it ends a key inside a flow
 //     mapping. The lexer keeps that ":" in the scalar, so it reads

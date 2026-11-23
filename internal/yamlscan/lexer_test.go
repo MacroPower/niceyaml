@@ -966,6 +966,82 @@ func TestTokenize_Patches(t *testing.T) {
 				{token.MappingEndType, "}\n"},
 			},
 		},
+		"colon before text in a tagged value of a flow mapping": {
+			input: "{a: !t b c:d}\n",
+			want: []tok{
+				{token.MappingStartType, "{"},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.TagType, " !t "},
+				{token.StringType, "b c:d"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		"colon before text in an anchored value of a flow mapping": {
+			input: "{a: &x b c:d}\n",
+			want: []tok{
+				{token.MappingStartType, "{"},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.AnchorType, " &"},
+				{token.StringType, "x"},
+				{token.StringType, " b c:d"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		"colon before text in an item of a flow sequence in a flow mapping": {
+			input: "{a: [b c:d]}\n",
+			want: []tok{
+				{token.MappingStartType, "{"},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.SequenceStartType, " ["},
+				{token.StringType, "b c:d"},
+				{token.SequenceEndType, "]"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		"colon before text in a later item of a flow sequence in a flow mapping": {
+			input: "{a: [b, c d:e]}\n",
+			want: []tok{
+				{token.MappingStartType, "{"},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.SequenceStartType, " ["},
+				{token.StringType, "b"},
+				{token.CollectEntryType, ","},
+				{token.StringType, " c d:e"},
+				{token.SequenceEndType, "]"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		"colon that opens an item of a flow sequence in a flow mapping": {
+			input: "{a: [:b]}\n",
+			want: []tok{
+				{token.MappingStartType, "{"},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.SequenceStartType, " ["},
+				{token.StringType, ":b"},
+				{token.SequenceEndType, "]"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		// YAML reads a ":" right after a quoted scalar as an indicator.
+		"colon before text after a quoted key of a flow sequence in a flow mapping": {
+			input: "{a: [\"b\":c]}\n",
+			want: []tok{
+				{token.MappingStartType, "{"},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.SequenceStartType, " ["},
+				{token.DoubleQuoteType, "\"b\""},
+				{token.MappingValueType, ":"},
+				{token.StringType, "c"},
+				{token.SequenceEndType, "]"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
 		// YAML ends the value at the ":" of the key below it. The copy
 		// cuts the value at the line of the key, as go-yaml's lexer does,
 		// so the parser refuses the key.
