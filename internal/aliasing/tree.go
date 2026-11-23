@@ -33,7 +33,7 @@ type Node interface {
 // with niceyaml.WithAliasLimit.
 //
 // An alias that only a reference document resolves counts what the
-// anchors of its name hold there, as [ReferenceWeights] weighs them. Each
+// anchor of its name holds there, as [ReferenceWeights] weighs it. Each
 // reference anchor that the aliases of the document reach also counts
 // once, as the definition of an anchor counts in its own document. A
 // reached anchor inside another reached anchor counts as part of the
@@ -42,10 +42,8 @@ type Node interface {
 // A document thus gets the verdict that it gets with those anchors defined
 // inside it, unless the anchors form a loop of names or share a name.
 // Where the reference documents define one anchor name more than once,
-// each alias of the name weighs the largest anchor that a decode can read
-// for it. A document whose decode reads a smaller anchor of the name can
-// thus fail. ReferenceWeights describes what a loop and a shared name
-// weigh.
+// each alias of the name weighs the anchor that a decode reads for it.
+// ReferenceWeights describes what a loop and a shared name weigh.
 //
 // The count depends on the document and its reference documents alone, so
 // the document keeps it. A check of each item of a list thus counts the
@@ -102,7 +100,7 @@ func PastLimit(n Node) bool {
 // result of CheckDecode.
 //
 // An alias that only a reference document resolves writes out the text
-// that the anchors of its name hold there. That text counts against the
+// that the anchor of its name holds there. That text counts against the
 // limit and the Budget as the text of an anchor of the document does. An
 // alias inside a reference anchor is not an alias of the document. Its
 // text spends the Budget only as a part of that text.
@@ -289,8 +287,8 @@ const (
 // The tree is the body of a document, or an anchor of a reference
 // document that [ReferenceWeights] weighs. In a document, the resolver
 // binds each alias to its content. An alias that the resolver leaves to
-// the reference documents reads the anchors of its name there, and the
-// reference function returns their [refWeight]. Every alias of a
+// the reference documents reads the anchor of its name there, and the
+// reference function returns its [refWeight]. Every alias of a
 // reference anchor reads by name, so its counter does not hold a
 // resolver. That holds for an alias inside an anchor of its own name
 // too, so the nulls set of such a counter is empty.
@@ -430,7 +428,7 @@ func newTreeCounter(nulls map[*ast.AliasNode]bool) *treeCounter {
 //
 //   - The content of an anchor of the tree, which is the first result.
 //     That content can be nil.
-//   - The anchors of its name in the reference documents, whose weight is
+//   - The anchor of its name in the reference documents, whose weight is
 //     the second result.
 //
 // In a document, the resolver follows a chain such as *a for `&a *b` to
@@ -804,7 +802,7 @@ func (c *treeCounter) alias(alias *ast.AliasNode, top bool, mode readMode) int {
 
 // contentSize returns the number of nodes that an alias repeats as mode.
 // The alias reads target, the content of an anchor of the tree, or ref,
-// the weight of the anchors of its name in the reference documents. The
+// the weight of the anchor of its name in the reference documents. The
 // counter reads the content of each anchor of the tree once for each
 // mode.
 func (c *treeCounter) contentSize(target ast.Node, ref *refWeight, mode readMode) int {
@@ -918,18 +916,6 @@ func (e *extent) nest(child extent) {
 	e.levels = aliaslimit.AddCapped(e.levels, aliaslimit.AddCapped(child.levels, child.lines))
 	e.spelled = aliaslimit.AddCapped(e.spelled, child.spelled)
 	e.spelledLines = aliaslimit.AddCapped(e.spelledLines, child.spelledLines)
-}
-
-// widen grows e to hold o as well, so that e weighs at least what either
-// extent weighs at every level. The result is a leaf only when both are.
-func (e *extent) widen(o extent) {
-	e.depth = max(e.depth, o.depth)
-	e.units = max(e.units, o.units)
-	e.lines = max(e.lines, o.lines)
-	e.levels = max(e.levels, o.levels)
-	e.spelled = max(e.spelled, o.spelled)
-	e.spelledLines = max(e.spelledLines, o.spelledLines)
-	e.leaf = e.leaf && o.leaf
 }
 
 // measure returns the [extent] of node. A mapping or a sequence nests one
@@ -1055,7 +1041,7 @@ var leafExtent = extent{units: 1, lines: 1, leaf: true}
 
 // contentExtent returns the [extent] of what an alias reads. The alias
 // reads target, the content of an anchor of the tree, or ref, the weight
-// of the anchors of its name in the reference documents. The extents map
+// of the anchor of its name in the reference documents. The extents map
 // holds the extent of the content of each anchor of the tree. A chain of
 // nested aliases thus costs one walk per anchor.
 func (c *treeCounter) contentExtent(target ast.Node, ref *refWeight) extent {

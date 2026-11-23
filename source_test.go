@@ -8494,12 +8494,6 @@ func TestWithAliasLimit_ReferenceLoop(t *testing.T) {
 			refs:  "a: &a {b: &b {k: *a, j: *a}}\n",
 			input: "v: *b\n",
 		},
-		"anchor inside another before the last of its name": {
-			// A read of the anchor o follows each alias inside it to the
-			// last anchor a.
-			refs:  "o: &o {k: &a [*a, *a]}\nb: &a [x, y]\n",
-			input: "v: *o\n",
-		},
 	}
 
 	for name, tc := range tcs {
@@ -8530,6 +8524,21 @@ func TestWithAliasLimit_ReferenceLoop(t *testing.T) {
 		got, err := doc.Decode[tree](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, tree{"v": {"k": {}}}, got)
+	})
+
+	t.Run("anchor inside another before the last of its name", func(t *testing.T) {
+		t.Parallel()
+
+		// The anchor a inside o holds aliases of its own name. A read of
+		// o follows each of them to the last anchor a, which does not
+		// hold an alias.
+		doc := yamltest.FirstDocument(t, "v: *o\n", yamltest.References("o: &o {k: &a [*a, *a]}\nb: &a [x, y]\n"))
+
+		got, err := doc.Decode[any](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{
+			"v": map[string]any{"k": []any{[]any{"x", "y"}, []any{"x", "y"}}},
+		}, got)
 	})
 
 	t.Run("the same anchor inside the document", func(t *testing.T) {

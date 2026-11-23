@@ -37,15 +37,14 @@
 //
 // Both counts read through an alias that only a reference document of the
 // decode resolves, such as one of niceyaml.WithReferences. The alias
-// counts what the anchors of its name hold in the reference documents,
+// counts what the anchor of its name holds in the reference documents,
 // and [ReferenceWeights] keeps that weight for every document that reads
 // them. For the alias limit, a document thus gets the verdict that it gets
 // with the reference anchors that it reaches defined inside it. Reference
 // anchors that form a loop of names are past the limit instead. An alias
-// of a name that several reference anchors share weighs the largest of
-// them that a decode can read. A document whose decode reads a smaller
-// anchor of the name can thus fail. ReferenceWeights describes what a loop
-// and a shared name weigh.
+// of a name that several reference anchors share weighs the anchor that a
+// decode reads for it. ReferenceWeights describes what a loop and a shared
+// name weigh.
 //
 // The Budget does not give that same verdict. It bounds the text that the
 // aliases of the document write out, and an alias inside a reference

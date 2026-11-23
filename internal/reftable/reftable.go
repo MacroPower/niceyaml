@@ -22,10 +22,8 @@ import (
 // not follow an anchor of its name. It also decides every alias inside a
 // reference document, wherever a decode reads it.
 //
-// [Table.Anchors] lists the anchor that the rule picks for a name, and
-// each anchor of the name inside another anchor that a decode reads.
-// [Table.Weights] weighs an alias by the largest of them, an upper
-// estimate of what the alias repeats.
+// [Table.Weights] weighs an alias by the anchor that the rule picks for
+// its name, the anchor that every decode reads for the alias.
 //
 // The go-yaml decoder reads the trees of a table and does not write to
 // them, so the decodes of many goroutines share them. The table also keeps
@@ -36,12 +34,6 @@ import (
 type Table struct {
 	// The anchors of the documents of the table, the last of each name.
 	own map[string]*entry
-	// The anchors of the documents of the table that lie inside another
-	// anchor, by name, in document order.
-	inner map[string][]*ast.AnchorNode
-	// The anchor that each anchor of the documents of the table lies
-	// directly inside, for each anchor that lies inside another.
-	outer map[*ast.AnchorNode]*ast.AnchorNode
 	// The weights of the anchors that the table holds, as [Table.Weights]
 	// returns them.
 	weights *aliasing.ReferenceWeights
@@ -65,50 +57,23 @@ type entry struct {
 // in refs.
 func New(bodies []ast.Node, refs ...*Table) *Table {
 	t := &Table{
-		own:   map[string]*entry{},
-		inner: map[string][]*ast.AnchorNode{},
-		outer: map[*ast.AnchorNode]*ast.AnchorNode{},
-		refs:  slices.DeleteFunc(slices.Clone(refs), isNil),
+		own:  map[string]*entry{},
+		refs: slices.DeleteFunc(slices.Clone(refs), isNil),
 	}
-	t.weights = aliasing.NewReferenceWeights(t.Anchors)
-
-	var (
-		// The anchors the walk is inside, innermost last.
-		around []*ast.AnchorNode
-		visit  func(ast.Node) bool
-	)
+	t.weights = aliasing.NewReferenceWeights(t.Anchor)
 
 	// The walk visits the anchors in the order their names appear in the
 	// text, so an anchor inside another comes after it.
-	visit = func(n ast.Node) bool {
-		anchor, ok := n.(*ast.AnchorNode)
-		if !ok {
-			return true
-		}
-
-		if len(around) > 0 {
-			t.outer[anchor] = around[len(around)-1]
-		}
-
-		if name, ok := astnode.Name(anchor.Name); ok {
-			t.own[name] = t.newEntry(anchor)
-
-			if len(around) > 0 {
-				t.inner[name] = append(t.inner[name], anchor)
-			}
-		}
-
-		around = append(around, anchor)
-
-		astnode.Inspect(anchor.Value, visit)
-
-		around = around[:len(around)-1]
-
-		return false
-	}
-
 	for _, body := range bodies {
-		astnode.Inspect(body, visit)
+		astnode.Inspect(body, func(n ast.Node) bool {
+			if anchor, ok := n.(*ast.AnchorNode); ok {
+				if name, ok := astnode.Name(anchor.Name); ok {
+					t.own[name] = t.newEntry(anchor)
+				}
+			}
+
+			return true
+		})
 	}
 
 	return t
@@ -133,73 +98,6 @@ func (t *Table) Anchor(name string) (*ast.AnchorNode, bool) {
 	}
 
 	return e.anchor, true
-}
-
-// Anchors returns the anchors that the alias limit weighs for an alias of
-// name, or nil when the table does not hold an anchor for name. The first
-// is the anchor that the table holds for name, as [Table.Anchor] returns
-// it, which the alias reads. The rest are the anchors of that name that
-// lie inside another anchor that a decode can read, in the documents of
-// the table and of the tables that it reads.
-//
-// A decode reads each anchor that the table holds for a name, and every
-// anchor inside such an anchor. Anchors leaves out an anchor that lies
-// only inside anchors that later anchors of their names hide, because no
-// decode reads it.
-func (t *Table) Anchors(name string) []*ast.AnchorNode {
-	e := t.entry(name)
-	if e == nil {
-		return nil
-	}
-
-	return t.appendInner(t, []*ast.AnchorNode{e.anchor}, name, map[*Table]bool{})
-}
-
-// appendInner appends to anchors each anchor of name that lies inside
-// another anchor that a decode of root can read, in the documents of the
-// table and of the tables that it reads. The first of anchors is the
-// anchor that an alias of name reads under the rule of root, and
-// appendInner skips that anchor. It reads each table once and records the
-// table in visited, so the result holds each anchor once when two tables
-// read the same table.
-func (t *Table) appendInner(
-	root *Table,
-	anchors []*ast.AnchorNode,
-	name string,
-	visited map[*Table]bool,
-) []*ast.AnchorNode {
-	if visited[t] {
-		return anchors
-	}
-
-	visited[t] = true
-
-	for _, anchor := range t.inner[name] {
-		if anchor != anchors[0] && root.decoded(t, t.outer[anchor]) {
-			anchors = append(anchors, anchor)
-		}
-	}
-
-	for _, ref := range t.refs {
-		anchors = ref.appendInner(root, anchors, name, visited)
-	}
-
-	return anchors
-}
-
-// decoded reports whether a decode of a document that reads the table
-// can read anchor, an anchor of the documents of in. A decode reads the
-// anchor that the table holds for a name, and every anchor inside it.
-func (t *Table) decoded(in *Table, anchor *ast.AnchorNode) bool {
-	for at := anchor; at != nil; at = in.outer[at] {
-		if name, ok := astnode.Name(at.Name); ok {
-			if e := t.entry(name); e != nil && e.anchor == at {
-				return true
-			}
-		}
-	}
-
-	return false
 }
 
 // Weights returns what the alias limit weighs for the anchors that the

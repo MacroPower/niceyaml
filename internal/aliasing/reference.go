@@ -28,9 +28,12 @@ import (
 // anchor inside it. The document then counts only the read of the outer
 // anchor, so each node of the reference documents counts once.
 //
-// The decoder can read one of several anchors for a name, and the
-// function that [NewReferenceWeights] takes lists them. The weight takes
-// the largest of each measure among them, so it is an upper estimate.
+// The function that [NewReferenceWeights] takes finds the anchor that
+// the decoder reads for a name. Every alias that the reference documents
+// resolve reads that anchor, an alias inside a reference document too, so
+// the weight of the name is the weight of that anchor. Where the reference
+// documents define a name more than once, the weight thus counts only the
+// anchor that the decoder reads.
 //
 // The anchors of reference documents can reach each other by name in a
 // loop, as `&x [*y]` and `&y [*x]` do. An anchor that holds an alias of
@@ -56,13 +59,6 @@ import (
 // the loop first at b. A decode of that document into a recursive Go
 // type might not end.
 //
-// A loop counts when it closes through any anchor that the function lists
-// for a name. With `&o {x: &x [*y]}`, `&y [*x]`, and a last `&x 1`, the
-// loop closes only through the anchor x inside o. An alias of x reads
-// `&x 1`, so a decode ends. The weights take the largest measure among the
-// anchors that the function lists, so a document whose aliases reach the
-// name is past the limit all the same.
-//
 // The weights depend on the reference documents alone, so every document
 // that reads those documents shares them, and a ReferenceWeights weighs
 // each name once. It also keeps what it found under each anchor. The
@@ -77,9 +73,8 @@ import (
 //
 // Create instances with [NewReferenceWeights].
 type ReferenceWeights struct {
-	// Returns the anchors that an alias of a name can read. The anchor
-	// that the reference documents hold for the name comes first.
-	anchors func(name string) []*ast.AnchorNode
+	// Returns the anchor that an alias of a name reads.
+	anchor func(name string) (*ast.AnchorNode, bool)
 	// The weight of each name that a call has weighed, or nil for a name
 	// without an anchor.
 	weights map[string]*refWeight
@@ -98,14 +93,13 @@ type ReferenceWeights struct {
 }
 
 // NewReferenceWeights creates new [*ReferenceWeights] for the reference
-// documents whose anchors the function anchors finds. The function
-// returns the anchors that an alias of name can read, or nil when the
-// reference documents do not define the name. The first of them is the
-// anchor that an alias of the name reads. The function must return the
-// same anchors for a name at every call.
-func NewReferenceWeights(anchors func(name string) []*ast.AnchorNode) *ReferenceWeights {
+// documents whose anchors the function anchor finds. The function returns
+// the anchor that an alias of name reads, and reports false when the
+// reference documents do not define the name. The function must return
+// the same anchor for a name at every call.
+func NewReferenceWeights(anchor func(name string) (*ast.AnchorNode, bool)) *ReferenceWeights {
 	return &ReferenceWeights{
-		anchors: anchors,
+		anchor:  anchor,
 		weights: map[string]*refWeight{},
 		open:    map[string]bool{},
 		reads:   map[*ast.AnchorNode]*refAnchor{},
@@ -234,8 +228,8 @@ func (r *ReferenceWeights) read(anchor *ast.AnchorNode) *refAnchor {
 	return a
 }
 
-// refWeight is what the anchors of one name of the reference documents
-// weigh, as [ReferenceWeights] describes.
+// refWeight is what the anchor that the reference documents hold for
+// one name weighs, as [ReferenceWeights] describes.
 type refWeight struct {
 	// The anchor that the reference documents hold for the name. The
 	// decoder reads the anchors that its aliases name before it reads
@@ -275,29 +269,13 @@ var loopWeight = &refWeight{
 	repeats: true,
 }
 
-// widen grows what one alias weighs in w to hold what one weighs in o as
-// well.
-func (w *refWeight) widen(o *refWeight) {
-	for mode := range w.sizes {
-		w.sizes[mode] = max(w.sizes[mode], o.sizes[mode])
-	}
-
-	for t := range w.traits {
-		w.traits[t] = w.traits[t] || o.traits[t]
-	}
-
-	w.repeats = w.repeats || o.repeats
-
-	w.extent.widen(o.extent)
-}
-
 // weight returns the weight of name, or nil when the reference documents
 // do not hold an anchor for name. The first call for a name weighs it,
-// with every name that its anchors reach.
+// with every name that its anchor reaches.
 //
 // A stack holds the names on the way from name to the name that the call
 // weighs. A long chain of anchors thus stays out of the call stack. The
-// call weighs a name after the names that the aliases under its anchors
+// call weighs a name after the names that the aliases under its anchor
 // read, as [ReferenceWeights.nextRead] lists them. A name on the stack is
 // open. An alias that reads an open name closes a loop of names, which
 // [ReferenceWeights.weighed] reports.
@@ -355,15 +333,14 @@ func (r *ReferenceWeights) lookup() func(name string) *refWeight {
 
 // weighing is a name on the stack of [ReferenceWeights.weight].
 type weighing struct {
+	// The anchor that an alias of the name reads, or nil when the name
+	// does not have an anchor.
+	read *refAnchor
 	name string
-	// The anchors that an alias of the name can read.
-	candidates []*refAnchor
 	// The anchors whose aliases the call is listing for the name. The
-	// first is a candidate, and each of the others lies directly inside
-	// the one before it.
+	// first is read, and each of the others lies directly inside the one
+	// before it.
 	path []*refAnchor
-	// The index of the next candidate.
-	next int
 }
 
 // begin opens name and returns its place on the stack.
@@ -371,20 +348,22 @@ func (r *ReferenceWeights) begin(name string) *weighing {
 	r.open[name] = true
 
 	w := &weighing{name: name}
-	for _, anchor := range r.anchors(name) {
-		w.candidates = append(w.candidates, r.read(anchor))
+	if anchor, ok := r.anchor(name); ok {
+		w.read = r.read(anchor)
+		w.path = []*refAnchor{w.read}
 	}
 
 	return w
 }
 
-// nextRead returns the next name that an alias under the candidates of w
+// nextRead returns the next name that an alias under the anchor of w
 // reads and that a call has neither weighed nor opened. It reports false
 // after the last such name. A call has then weighed or opened every name
-// that an alias under the candidates reads. Every alias under a candidate
-// reads the anchors of its name, an alias inside an anchor of its own
-// name too. The name of such an alias is open while a call weighs its
-// anchors, so the alias closes a loop of one name.
+// that an alias under the anchor reads. Every alias under the anchor
+// reads the anchor of its name, an alias inside another anchor of its own
+// name too. An alias inside the anchor that its own name reads finds that
+// name open while a call weighs the anchor. Such an alias closes a loop of
+// one name.
 //
 // The calls list the items of each anchor one time, whatever name reaches
 // the anchor. The listed count of an anchor holds how many of its items a
@@ -393,20 +372,13 @@ func (r *ReferenceWeights) begin(name string) *weighing {
 // however many anchors lie around the alias.
 //
 // Another name on the stack can be in the middle of the list of an
-// anchor under a candidate. The last listed item of such an anchor is the
-// alias whose name is open, or an anchor inside that is in the middle of
-// its list. The call goes on with those lists from where they stand.
+// anchor under the anchor of w. The last listed item of such an anchor is
+// the alias whose name is open, or an anchor inside that is in the middle
+// of its list. The call goes on with those lists from where they stand.
 func (r *ReferenceWeights) nextRead(w *weighing) (string, bool) {
 	for {
 		if len(w.path) == 0 {
-			if w.next == len(w.candidates) {
-				return "", false
-			}
-
-			w.path = append(w.path, w.candidates[w.next])
-			w.next++
-
-			continue
+			return "", false
 		}
 
 		at := w.path[len(w.path)-1]
@@ -444,35 +416,25 @@ func (r *ReferenceWeights) nextRead(w *weighing) (string, bool) {
 }
 
 // finish returns the weight of the name of w, or nil when the name does
-// not have an anchor. One alias of the name weighs the largest of what it
-// weighs for each candidate. The read of the anchor that the reference
-// documents hold for the name, the first candidate, counts as the
+// not have an anchor. The read of the anchor of the name counts as the
 // definition of an anchor counts in its own document.
 func (r *ReferenceWeights) finish(w *weighing) *refWeight {
-	var weight *refWeight
+	if w.read == nil {
+		return nil
+	}
 
-	for i, candidate := range w.candidates {
-		counter := newTreeCounter(nil)
-		counter.reference = r.weighed
-		counter.kept = &r.kept
+	counter := newTreeCounter(nil)
+	counter.reference = r.weighed
+	counter.kept = &r.kept
 
-		content := counter.contentWeight(candidate)
+	weight := counter.contentWeight(w.read)
+	weight.read = w.read
 
-		if i > 0 {
-			weight.widen(content)
+	for mode := range readModes {
+		counter.distinct, counter.aliased = 0, 0
+		counter.count(w.read.anchor, true, mode)
 
-			continue
-		}
-
-		weight = content
-		weight.read = candidate
-
-		for mode := range readModes {
-			counter.distinct, counter.aliased = 0, 0
-			counter.count(candidate.anchor, true, mode)
-
-			weight.distinct[mode], weight.aliased[mode] = counter.distinct, counter.aliased
-		}
+		weight.distinct[mode], weight.aliased[mode] = counter.distinct, counter.aliased
 	}
 
 	return weight

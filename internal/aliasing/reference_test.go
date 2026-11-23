@@ -76,8 +76,9 @@ func TestReferenceWeights(t *testing.T) {
 		// alias of the other name.
 		taggedLoop = "x: &x !foo *y\ny: &y !foo *x\n"
 
-		// The anchors x and y reach each other only through the anchor x
-		// inside o, which the last anchor x hides.
+		// The anchor x inside o holds an alias of y, and y holds an alias
+		// of x. Every alias of x reads the last anchor x, so the anchors
+		// do not form a loop.
 		hiddenLoop = "o: &o {x: &x [*y]}\ny: &y [*x]\nx: &x 1\n"
 
 		// The anchors a and b reach each other, and b lies inside a.
@@ -315,10 +316,10 @@ func TestReferenceWeights(t *testing.T) {
 		},
 		"alias inside an anchor of its name before the last of the name": {
 			// The anchor a inside o holds aliases of its own name. A read
-			// of o follows them to the last anchor a.
+			// of o follows them to the last anchor a, which does not hold
+			// an alias, so the anchors do not form a loop.
 			refs:  []string{"o: &o {k: &a [*a, *a]}\nb: &a [x, y]\n"},
 			input: "v: *o\n",
-			want:  "1:4: " + ratio,
 		},
 		"aliases to an anchor on an alias without an anchor": {
 			refs:    []string{"e: &e\n  *missing\n"},
@@ -358,17 +359,14 @@ func TestReferenceWeights(t *testing.T) {
 			want:  "1:5: " + ratio,
 		},
 		"anchor inside another anchor before the last of its name": {
-			// An alias of d reads the last anchor of the name, but the
-			// count weighs each anchor of the name inside an anchor that a
-			// decode reads, so it takes the larger.
+			// Every alias of d reads the last anchor of the name, a
+			// scalar, so the larger anchor d inside o does not count.
 			refs:  []string{"o: &o {" + strings.TrimSuffix(wide, "\n") + "}\ne: &d x\n"},
 			input: "v: " + yamltest.FlowSequence("*d", 500) + "\n",
-			want:  "1:5: " + ratio,
 		},
 		"anchor inside another anchor of a reference document below": {
 			refs:  []string{"o: &o {" + strings.TrimSuffix(wide, "\n") + "}\n", "e: &d x\n"},
 			input: "v: " + yamltest.FlowSequence("*d", 500) + "\n",
-			want:  "1:5: " + ratio,
 		},
 		"one alias to a large last anchor after a small one inside another": {
 			// The decode reads the last anchor d, and that read counts
@@ -451,19 +449,20 @@ func TestReferenceWeights(t *testing.T) {
 			text: true,
 			want: "1:4: " + ratio,
 		},
-		"loop of names through an anchor inside another anchor": {
-			// The count weighs the anchor x inside o as an anchor that an
-			// alias of x can read, and it follows the loop from y through
-			// that anchor. The count cannot tell whether a decode reads o,
-			// so every document that reaches the loop is past the limit.
+		"anchor inside another anchor around an alias to an anchor around an alias of its name": {
+			// The alias inside y reads the last anchor x, so a decode of
+			// y ends.
 			refs:  []string{hiddenLoop},
 			input: "v: *y\n",
-			want:  "1:4: " + ratio,
 		},
-		"name whose anchor inside another anchor closes a loop": {
+		"anchor around an anchor inside it around an alias to an anchor around an alias of its name": {
+			// A read of o follows the alias inside y to the last anchor x.
+			refs:  []string{hiddenLoop},
+			input: "v: *o\n",
+		},
+		"name of an anchor inside another anchor around an alias to an anchor around an alias of its name": {
 			refs:  []string{hiddenLoop},
 			input: "v: *x\n",
-			want:  "1:4: " + ratio,
 		},
 		"aliases to a small last anchor after a large one inside a hidden anchor": {
 			// The anchor b hides the first anchor o, so no decode reads
@@ -474,14 +473,7 @@ func TestReferenceWeights(t *testing.T) {
 			input:   "v: " + yamltest.FlowSequence("*x", 300) + "\n",
 			oneFile: true,
 		},
-		"loop of names through an anchor inside a hidden anchor": {
-			// The loop closes only through the anchor x inside the first
-			// anchor o, which the anchor b hides. A decode reads the last
-			// anchor x for the alias inside y and ends.
-			refs:  []string{"a: &o {x: &x [*y]}\nb: &o 1\ny: &y [*x]\nc: &x 1\n"},
-			input: "v: *y\n",
-		},
-		"anchor beside a loop through an anchor inside another anchor": {
+		"anchor beside an alias to an anchor inside another anchor": {
 			refs:  []string{hiddenLoop + small},
 			input: "v: *d\n",
 		},
@@ -567,13 +559,13 @@ func TestReferenceWeights(t *testing.T) {
 			oneFile: true,
 		},
 		"alias keys to an anchor inside another before the last of its name": {
-			// The larger anchor d is a sequence, so the decoder writes
-			// each key out as text.
+			// The anchor d inside o is a sequence, which the decoder writes
+			// out as text at each key. Every alias of d reads the last
+			// anchor d, a scalar, instead.
 			refs: []string{
 				"o: &o {d: &d " + yamltest.FlowSequence(strings.Repeat("x", 1000), 2) + "}\ne: &d x\n",
 			},
 			input: "v: " + yamltest.FlowSequence("{? *d : 1}", 300) + "\n",
-			want:  "1:8: " + ratio,
 		},
 		"text of aliases to an anchor on an alias past the document byte limit": {
 			refs:    []string{"d: &d " + yamltest.FlowSequence("x", 100) + "\nk: &k\n  *d\n"},
@@ -584,12 +576,12 @@ func TestReferenceWeights(t *testing.T) {
 			oneFile: true,
 		},
 		"text of aliases to an anchor inside another before the last of its name": {
-			// The document byte limit bounds the text of the larger anchor d.
+			// The aliases write out the text of the last anchor d, and not
+			// that of the larger anchor d inside o.
 			refs:  []string{"o: &o {d: &d " + yamltest.FlowSequence("x", 100) + "}\ne: &d x\n"},
 			input: "v: " + yamltest.FlowSequence("*d", 20) + "\n",
 			opts:  []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(4096)},
 			text:  true,
-			want:  "1:25: aliases repeat more than 4 KiB of text",
 		},
 		"alias to an anchor around an alias inside another anchor": {
 			// The alias under b reads d wherever an alias reaches b.
@@ -683,15 +675,12 @@ func TestReferenceWeights(t *testing.T) {
 			oneFile: true,
 		},
 		"text of an alias to a deeper anchor inside another before the last of its name": {
-			// An alias of x reads the last anchor of the name, but the
-			// count weighs each anchor of the name inside an anchor that a
-			// decode reads, so the depth limit bounds the deeper of the
-			// anchors x.
+			// An alias of x reads the last anchor of the name, a scalar,
+			// so the deeper anchor x inside o does not count.
 			refs:  []string{"o: &o {x: &x " + deep + "}\nx: &x 1\n"},
 			input: "v: *x\n",
 			opts:  []niceyaml.SourceOption{niceyaml.WithDepthLimit(5)},
 			text:  true,
-			want:  "1:4: aliases nest the document more than 5 levels",
 		},
 		"text of an alias to an anchor on an alias past the depth limit": {
 			// The anchor a does not define content of its own, so its
@@ -751,20 +740,21 @@ func TestReferenceWeights(t *testing.T) {
 		},
 		"text of aliases to a longer scalar inside another before the last of its name": {
 			// The anchor x inside o holds one scalar of 400 bytes, and the
-			// last anchor x holds 100 short scalars. The document byte limit bounds
-			// the larger scalar text of the two.
+			// last anchor x holds 100 short scalars. The aliases write out
+			// the text of the last anchor x, so the second alias passes
+			// the document byte limit.
 			refs: []string{
 				"o: &o {x: &x [" + strings.Repeat("y", 400) + "]}\nx: &x " + yamltest.FlowSequence("b", 100) + "\n",
 			},
 			input: "v: [*x, *x]\n",
 			opts:  []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
 			text:  true,
-			want:  "1:5: aliases repeat more than 1 KiB of text",
+			want:  "1:9: aliases repeat more than 1 KiB of text",
 		},
 		"text of aliases to an anchor with a comment inside another before the last of its name": {
 			// The anchor x inside o spells a comment of 600 bytes between
-			// its elements, and the last anchor x spells 3 bytes. The byte
-			// limit bounds the longer spelling.
+			// its elements, and the last anchor x spells 3 bytes. The
+			// aliases copy the spelling of the last anchor x.
 			refs: []string{stringtest.LinesLF(
 				"o: &o",
 				"  x: &x",
@@ -776,29 +766,26 @@ func TestReferenceWeights(t *testing.T) {
 			input: "v: [*x, *x]\n",
 			opts:  []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
 			text:  true,
-			want:  "1:9: aliases repeat more than 1 KiB of text",
 		},
 		"text of an indented alias to commented lines inside another before the last of its name": {
 			// The anchor d inside o spells 40 lines, and the last anchor d
-			// spells one. The copy indents each line of the longer
-			// spelling to the line of the alias, 60 columns in.
+			// spells one. The alias copies the one line of the last
+			// anchor d, 60 columns in.
 			refs:  []string{"o: &o\n  d: &d\n" + commented("    ") + "d: &d 1\n"},
 			input: indented(60),
 			opts:  []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
 			text:  true,
-			want:  "3:64: aliases repeat more than 1 KiB of text",
 		},
 		"text of an alias to a mapping around an alias to a sequence before a scalar of its name": {
-			// The anchor x inside o is a sequence, and the last anchor x is
-			// a scalar. The value of k under m thus counts as a sequence,
-			// which writes each of its 200 elements on a line of its own.
+			// The anchor x inside o is a sequence of 200 elements, and the
+			// last anchor x is a scalar. The alias under m reads the
+			// scalar, so the value of k counts as a scalar.
 			refs: []string{
 				"o: &o {x: &x " + yamltest.FlowSequence("a", 200) + "}\nm: &m {k: *x}\nx: &x 1\n",
 			},
 			input: "v: *m\n",
 			opts:  []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
 			text:  true,
-			want:  "1:4: aliases repeat more than 1 KiB of text",
 		},
 		"loop of names through tagged aliases": {
 			// Each anchor lies on a tagged alias of the other name, and

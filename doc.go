@@ -2263,12 +2263,9 @@
 //
 // The reference documents can define one anchor name more than once. The
 // count then weighs the anchor of the name that the rule of the References
-// section picks. It also weighs each anchor of the name inside another
-// anchor that a decode reads, and it takes the largest. A document whose
-// decode reads a smaller anchor of the name can thus fail, even with one
-// alias. One file that defines the same anchors counts the anchor that its
-// decode reads, so that file can pass. Give each reference anchor a name
-// of its own to avoid that refusal.
+// section picks, the anchor that every decode reads for an alias of the
+// name. One file that defines the same anchors reads each alias by the
+// position of its anchors, so that file can get another verdict.
 //
 // Reference anchors that reach each other by name in a loop count as past
 // the limit, so a document whose aliases reach the loop fails. An anchor
@@ -2278,10 +2275,6 @@
 // refuses a document whose aliases reach such an anchor, whatever reads the
 // document. One file that defines the anchor reads the alias as null in
 // every decode, so that file can pass.
-//
-// A loop counts when it closes through any of those anchors of a name. An
-// alias of the name reads the last anchor of the name, but the count refuses
-// every document whose aliases reach the loop.
 //
 // [WithAliasLimit] on the Source that reads the reference documents decides
 // whether the count runs. The option on a reference Source does not change

@@ -72,7 +72,7 @@ func TestState_Facts(t *testing.T) {
 func TestState_References(t *testing.T) {
 	t.Parallel()
 
-	refs := aliasing.NewReferenceWeights(func(string) []*ast.AnchorNode { return nil })
+	refs := aliasing.NewReferenceWeights(func(string) (*ast.AnchorNode, bool) { return nil, false })
 
 	s := aliasing.NewState(true, aliasing.Budget{}, nil, func() *aliasing.ReferenceWeights { return refs })
 
