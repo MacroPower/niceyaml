@@ -91,6 +91,14 @@
 //     flow collection. A string whose text reads as another value inside a
 //     flow collection becomes a double-quoted string. The text leaves out
 //     the comments of the anchor.
+//   - The text that the decoder hands an unmarshaler holds the whole key of
+//     each mapping entry, where go-yaml writes only its first token, such as
+//     the `*` of an alias or the `&` of an anchor. It writes a key that is
+//     an alias as its anchor in flow style on one line, because an implicit
+//     key sits on one line. Under the `?` of an explicit key in a block
+//     mapping, the colon after such an alias stays on the line where the
+//     document puts it. When the document has no colon there, the text gets
+//     one on the next line, so the key does not read as a mapping.
 //   - The text that the decoder hands an unmarshaler leaves out the line
 //     breaks and the blank lines after an alias whose text ends its line,
 //     such as an alias to a block scalar. So a block scalar with keep

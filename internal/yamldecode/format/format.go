@@ -338,10 +338,22 @@ func getIndentNumByFirstLineToken(tk *token.Token) int {
 func (f *Formatter) format(n ast.Node) string {
 	return f.trimSpacePrefix(
 		f.trimIndentSpace(
-			getIndentNumByFirstLineToken(getFirstToken(n)),
+			getIndentNum(n),
 			f.trimNewLineCharPrefix(f.formatNode(n)),
 		),
 	)
+}
+
+// getIndentNum returns the indent of the lines of n. The first token of a
+// block mapping starts its first key, so the column of that token gives
+// the indent, also when the key starts with an alias, an anchor, a tag, or
+// the `?` of an explicit key.
+func getIndentNum(n ast.Node) int {
+	tk := getFirstToken(n)
+	if nn, ok := n.(*ast.MappingNode); ok && !nn.IsFlowStyle {
+		return tk.Position.Column - 1
+	}
+	return getIndentNumByFirstLineToken(tk)
 }
 
 func (f *Formatter) formatFile(file *ast.File) string {
@@ -446,8 +458,75 @@ func (f *Formatter) formatMergeKey(n *ast.MergeKeyNode) string {
 
 func (f *Formatter) formatMappingValue(n *ast.MappingValueNode) string {
 	return f.formatCommentGroup(n.Comment) +
-		f.origin(n.Key.GetToken()) + ":" + f.formatCommentGroup(n.Key.GetComment()) + f.formatNode(n.Value) +
+		f.formatKey(n) + ":" + f.formatCommentGroup(n.Key.GetComment()) + f.formatNode(n.Value) +
 		f.formatCommentGroup(n.FootComment)
+}
+
+// formatKey writes the key of n without the comment of the key, which
+// follows the colon. A key that keyAlias finds an alias in writes the
+// anchor of the alias in flow style on one line, because an implicit key
+// sits on one line. Under the `?` of an explicit key in a block mapping,
+// such a key keeps the line breaks before the colon of n. The lexer leaves
+// those line breaks out of the text of the alias name, so formatKey writes
+// them from the line of the colon. An explicit key without a colon gets a
+// line break before the colon that the formatter writes, so the colon
+// does not turn the key into a mapping.
+func (f *Formatter) formatKey(n *ast.MappingValueNode) string {
+	alias := keyAlias(n.Key)
+	if alias == nil {
+		return f.formatKeyNode(n.Key)
+	}
+	explicit, ok := n.Key.(*ast.MappingKeyNode)
+	block := ok && f.flow == 0
+	f.flow++
+	text := f.formatKeyNode(n.Key)
+	f.flow--
+	if !block {
+		return text
+	}
+	colon := n.Start
+	if colon == nil || colon.Type != token.MappingValueType {
+		return text + "\n" + strings.Repeat(" ", explicit.Start.Position.Column-1)
+	}
+	breaks := colon.Position.Line - alias.Start.Position.Line
+	if breaks <= 0 {
+		return text
+	}
+	return text + strings.Repeat("\n", breaks) + strings.Repeat(" ", colon.Position.Column-1)
+}
+
+// formatKeyNode writes key without the comment of key.
+func (f *Formatter) formatKeyNode(key ast.Node) string {
+	switch k := key.(type) {
+	case *ast.AliasNode:
+		return f.formatAlias(k)
+	case *ast.AnchorNode:
+		return f.formatAnchor(k)
+	case *ast.TagNode:
+		return f.formatTag(k)
+	case *ast.MappingKeyNode:
+		return f.formatMappingKey(k)
+	}
+	return f.origin(key.GetToken())
+}
+
+// keyAlias returns the alias that key is, also under the `?` of an
+// explicit key, a tag, or an anchor. It returns nil for any other key.
+func keyAlias(key ast.Node) *ast.AliasNode {
+	for {
+		switch k := key.(type) {
+		case *ast.MappingKeyNode:
+			key = k.Value
+		case *ast.TagNode:
+			key = k.Value
+		case *ast.AnchorNode:
+			key = k.Value
+		case *ast.AliasNode:
+			return k
+		default:
+			return nil
+		}
+	}
 }
 
 func (f *Formatter) formatDirective(n *ast.DirectiveNode) string {

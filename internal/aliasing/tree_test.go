@@ -562,6 +562,35 @@ func TestCheckDecodeText(t *testing.T) {
 			err:   &aliasing.ExpansionError{Limit: 1100},
 			alias: "12:5",
 		},
+		"aliases of escaped content in keys past the document byte limit": {
+			// An alias that is a key writes the 60 backslashes of m as a
+			// double-quoted string of 124 bytes, as inside a flow
+			// collection, so the fifth alias brings the text past 600
+			// bytes.
+			input: stringtest.LinesLF(
+				"m: &m |",
+				"  "+strings.Repeat(`\`, 60),
+				"v:",
+			) + strings.Repeat("  - *m : 1\n", 8),
+			opts:  []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(600)},
+			err:   &aliasing.ExpansionError{Limit: 600},
+			alias: "8:5",
+		},
+		"aliases in a block sequence of escaped content in a key past the document byte limit": {
+			// The *m inside n is a key, so each *n writes the
+			// double-quoted string of 124 bytes. The seventh *n brings the
+			// text past 1100 bytes.
+			input: stringtest.LinesLF(
+				"m: &m |",
+				"  "+strings.Repeat(`\`, 60),
+				"n: &n",
+				"  *m : 1",
+				"v:",
+			) + strings.Repeat("  - *n\n", 8),
+			opts:  []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1100)},
+			err:   &aliasing.ExpansionError{Limit: 1100},
+			alias: "12:5",
+		},
 		"aliases in a block sequence of an anchored alias of escaped content in a flow sequence past the document byte limit": {
 			// The anchor c inside n holds *m, which n writes in flow style
 			// too. The eighth *n brings the text past 1150 bytes.

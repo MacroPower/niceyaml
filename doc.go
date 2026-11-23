@@ -2344,6 +2344,8 @@
 // The go-yaml decoder writes the node of each value that reads text out as
 // text, with each alias in full. Inside a flow collection, it writes the anchor
 // of each alias in flow style, so the text reads as the value of the document.
+// It writes an alias that is the key of a mapping entry in flow style too,
+// because an implicit key sits on one line.
 // Types that read text include those with an UnmarshalText method or an
 // UnmarshalYAML method that takes bytes, and those that a function of
 // [CustomUnmarshaler] decodes. A target reads text when any type that a decode
@@ -2358,9 +2360,10 @@
 //     block style, with each entry and each element on a line indented to
 //     its level in the document. The other way copies the content as the
 //     document spells it, comments and spaces included, and indents each
-//     line to the line of the alias. For an alias inside a flow collection,
-//     the count also writes the content in flow style on one line, with the
-//     escapes of each double-quoted string, and takes the longest text.
+//     line to the line of the alias. For an alias inside a flow collection
+//     or an alias that is a key, the count also writes the content in flow
+//     style on one line, with the escapes of each double-quoted string, and
+//     takes the longest text.
 //   - Every alias keeps the nesting of the document within the depth limit.
 //     An alias nests the levels around it and the levels that its content
 //     nests, through the aliases there.

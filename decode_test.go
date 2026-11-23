@@ -12620,6 +12620,15 @@ func TestDocument_Decode_AliasExpansion(t *testing.T) {
 		"v: "+yamltest.FlowSequence("*m", 8),
 	)
 
+	// The aliases are keys of the same block scalar. The decoder writes
+	// each one as a double-quoted string, as it does inside a flow
+	// sequence.
+	escapedKeys := stringtest.LinesLF(
+		"m: &m |",
+		"  "+strings.Repeat(`\`, 60),
+		"v:",
+	) + strings.Repeat("  - *m : 1\n", 8)
+
 	customList := niceyaml.OverrideTypeRules(
 		niceyaml.CustomUnmarshaler(func(_ context.Context, l *aliasList, decode func(any) error) error {
 			return decode((*[]string)(l))
@@ -12726,6 +12735,20 @@ func TestDocument_Decode_AliasExpansion(t *testing.T) {
 			target: func() any { return new(map[string]rawString) },
 			opts:   []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1100)},
 			err:    "doc.yaml:12:5: aliases repeat more than 1100 bytes of text",
+		},
+		"text unmarshaler of escaped strings in keys": {
+			// An alias that is a key writes its anchor in flow style, as
+			// inside a flow collection, so the fifth key brings the quoted
+			// strings past 600 bytes.
+			input:  escapedKeys,
+			target: func() any { return new(map[string]rawString) },
+			opts:   []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(600)},
+			err:    "doc.yaml:8:5: aliases repeat more than 600 bytes of text",
+		},
+		"text unmarshaler of escaped strings in keys within the document byte limit": {
+			input:  escapedKeys,
+			target: func() any { return new(map[string]rawString) },
+			opts:   []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
 		},
 		"text unmarshaler elements": {
 			input: repeated,
@@ -20798,6 +20821,16 @@ func TestDocument_Decode_TextOfReferenceAlias(t *testing.T) {
 			input: "v:\n  a: *m\n",
 			want:  "a: |\n  text\n",
 		},
+		"alias as a key in a flow mapping": {
+			ref:   "m: &m x\n",
+			input: "v: {*m : 1}\n",
+			want:  "{x: 1}\n",
+		},
+		"alias as a key in a block mapping": {
+			ref:   "m: &m x\n",
+			input: "v:\n  *m : 1\n",
+			want:  "x: 1\n",
+		},
 		"literal with a header comment keeps its line break": {
 			ref:   "m: &m | # c\n  text\n",
 			input: "v:\n  a: *m\n",
@@ -20822,6 +20855,82 @@ func TestDocument_Decode_TextOfReferenceAlias(t *testing.T) {
 				require.NoError(t, err)
 				assert.Equal(t, tc.want, got["v"], "alias limit %t", limit)
 			}
+		})
+	}
+}
+
+func TestDocument_Decode_TextOfAliasKey(t *testing.T) {
+	t.Parallel()
+
+	// A type that reads text gets each alias that is a key written out as
+	// its anchor in flow style on one line. The text reads as the value
+	// that a decode of the document into any gives.
+	tcs := map[string]struct {
+		input string
+		want  rawString
+	}{
+		"flow mapping": {
+			input: "m: &m x\nv: {*m : 1}\n",
+			want:  "{x: 1}\n",
+		},
+		"flow mapping after a key": {
+			input: "m: &m x\nv: {a: 2, *m : 1}\n",
+			want:  "{a: 2, x: 1}\n",
+		},
+		"block mapping": {
+			input: "m: &m x\nv:\n  *m : 1\n",
+			want:  "x: 1\n",
+		},
+		"block mapping between keys": {
+			input: "m: &m x\nv:\n  a: 1\n  *m : 2\n  c: 3\n",
+			want:  "a: 1\nx: 2\nc: 3\n",
+		},
+		"block mapping before a key": {
+			input: "m: &m x\nv:\n  *m : 1 # c\n  b: 2\n",
+			want:  "x: 1 # c\nb: 2\n",
+		},
+		"alias as the value too": {
+			input: "m: &m x\nv:\n  *m : *m\n",
+			want:  "x: x\n",
+		},
+		"plain with a colon": {
+			input: "m: &m 'a: b'\nv:\n  *m : 1\n",
+			want:  "'a: b': 1\n",
+		},
+		"literal": {
+			input: "m: &m |\n  text\nv:\n  *m : 1\n",
+			want:  "\"text\\n\": 1\n",
+		},
+		"explicit key": {
+			input: "m: &m x\nv:\n  ? *m\n  : 1\n",
+			want:  "? x\n: 1\n",
+		},
+		"explicit key after a key": {
+			input: "m: &m x\nv:\n  a: 1\n  ? *m\n  : 2\n",
+			want:  "a: 1\n? x\n: 2\n",
+		},
+		"explicit key without a value": {
+			input: "m: &m x\nv:\n  ? *m\n  b: 2\n",
+			want:  "? x\n:\nb: 2\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input)
+
+			got, err := doc.Decode[map[string]rawString](t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got["v"])
+
+			want, err := doc.Decode[map[string]any](t.Context())
+			require.NoError(t, err)
+
+			reread, err := yamltest.FirstDocument(t, string(got["v"])).Decode[any](t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, want["v"], reread)
 		})
 	}
 }

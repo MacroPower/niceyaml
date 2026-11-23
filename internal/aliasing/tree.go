@@ -139,7 +139,9 @@ type Budget struct {
 	// reads as another value there as a double-quoted string. An alias
 	// inside a flow collection weighs that text as a third way. So does
 	// each alias inside a flow collection of the content of another
-	// alias, within the copy of that content.
+	// alias, within the copy of that content. The decoder writes an alias
+	// that is the key of a mapping entry in flow style too, so such an
+	// alias weighs as one inside a flow collection.
 	Bytes int
 	// Depth is the most levels that the document nests with each alias
 	// written out in full. An alias nests the levels around it and the
@@ -657,7 +659,9 @@ func (c *treeCounter) count(node ast.Node, top bool, mode readMode) int {
 
 // entry returns the number of nodes that a decode of the key and the
 // value of a mapping entry reads, as [treeCounter.count] counts them. The key
-// counts as text where the decoder writes it out as text.
+// counts as text where the decoder writes it out as text. The decoder writes
+// a key that [isAliasKey] reports in flow style, so the counter weighs it as
+// an alias inside a flow collection.
 func (c *treeCounter) entry(entry *ast.MappingValueNode, top bool, mode readMode) int {
 	if entry == nil {
 		return 0
@@ -668,7 +672,28 @@ func (c *treeCounter) entry(entry *ast.MappingValueNode, top bool, mode readMode
 		keyMode = readText
 	}
 
-	return aliaslimit.AddCapped(c.count(entry.Key, top, keyMode), c.count(entry.Value, top, mode))
+	flows := top && isAliasKey(entry.Key)
+	if flows {
+		c.flows++
+	}
+
+	key := c.count(entry.Key, top, keyMode)
+
+	if flows {
+		c.flows--
+	}
+
+	return aliaslimit.AddCapped(key, c.count(entry.Value, top, mode))
+}
+
+// isAliasKey reports whether key, the key of a mapping entry, is an alias,
+// also under the `?` of an explicit key, a tag, or an anchor. The decoder
+// writes the content of such an alias in flow style on one line, because
+// an implicit key sits on one line.
+func isAliasKey(key ast.Node) bool {
+	_, ok := astnode.Content(key).(*ast.AliasNode)
+
+	return ok
 }
 
 // keyAsText reports whether the decoder writes key out as text. It does
@@ -1092,13 +1117,24 @@ func (c *treeCounter) anchorExtent(anchor *ast.AnchorNode) extent {
 
 // measureEntry nests the key and the value of entry, an entry of the
 // mapping of e, in e. A leaf value goes on the line of its key, so it
-// does not start a line of its own.
+// does not start a line of its own. The decoder writes a key that
+// [isAliasKey] reports in flow style, so measure reads it as an alias
+// inside a flow collection.
 func (c *treeCounter) measureEntry(e *extent, entry *ast.MappingValueNode) {
 	if entry == nil {
 		return
 	}
 
+	flows := isAliasKey(entry.Key)
+	if flows {
+		c.flows++
+	}
+
 	e.nest(c.measure(entry.Key))
+
+	if flows {
+		c.flows--
+	}
 
 	value := c.measure(entry.Value)
 	if value.leaf {

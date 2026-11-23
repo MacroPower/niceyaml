@@ -1295,6 +1295,95 @@ func TestUnmarshalerBytesAliasInFlow(t *testing.T) {
 	}
 }
 
+func TestUnmarshalerBytesKey(t *testing.T) {
+	t.Parallel()
+
+	// The text that an unmarshaler gets holds the whole key of each entry.
+	// An alias that is a key writes its anchor in flow style on one line,
+	// as an implicit key sits on one line.
+	tcs := map[string]struct {
+		src  string
+		want string
+	}{
+		"alias in a flow mapping": {
+			src:  "m: &m x\nv: {*m : 1}\n",
+			want: "{x: 1}",
+		},
+		"alias in a block mapping": {
+			src:  "m: &m x\nv:\n  *m : 1\n",
+			want: "x: 1",
+		},
+		"alias before a key": {
+			src:  "m: &m x\nv:\n  *m : 1 # c\n  b: 2\n",
+			want: "x: 1 # c\nb: 2",
+		},
+		"alias to a literal": {
+			src:  "m: &m |\n  text\nv:\n  *m : 1\n",
+			want: "\"text\\n\": 1",
+		},
+		"alias with a comment after the colon": {
+			src:  "m: &m x\nv:\n  *m : # c\n    1\n",
+			want: "x: # c\n  1",
+		},
+		"alias under an explicit key": {
+			src:  "m: &m x\nv:\n  ? *m\n  : 1\n",
+			want: "? x\n: 1",
+		},
+		"alias under an explicit key after a key": {
+			src:  "m: &m x\nv:\n  a: 1\n  ? *m\n  : 2\n",
+			want: "a: 1\n? x\n: 2",
+		},
+		"alias under an explicit key before a blank line": {
+			src:  "m: &m x\nv:\n  ? *m\n\n  : 1\n",
+			want: "? x\n\n: 1",
+		},
+		"alias under an explicit key without a value": {
+			src:  "m: &m x\nv:\n  ? *m\n",
+			want: "? x\n: null",
+		},
+		"alias under an explicit key without a value before a key": {
+			src:  "m: &m x\nv:\n  ? *m\n  b: 2\n",
+			want: "? x\n:\nb: 2",
+		},
+		"alias under an explicit key on the line of the colon": {
+			src:  "m: &m x\nv:\n  ? *m : 1\n",
+			want: "? x: 1",
+		},
+		"anchor": {
+			src:  "m: &m x\nv:\n  &k a: 1\n",
+			want: "&k a: 1",
+		},
+		"tag before a key": {
+			src:  "m: &m x\nv:\n  !!str a: 1\n  b: 2\n",
+			want: "!!str a: 1\nb: 2",
+		},
+		"explicit key before a key": {
+			src:  "m: &m x\nv:\n  ? a\n  : 1\n  b: 2\n",
+			want: "? a\n: 1\nb: 2",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var want struct{ V any }
+
+			require.NoError(t, yaml.Unmarshal([]byte(tc.src), &want))
+
+			var got struct{ V bytesValue }
+
+			require.NoError(t, yaml.NewDecoder(bytes.NewReader(nil)).DecodeFromNode(parseBody(t, tc.src), &got))
+			assert.Equal(t, tc.want, strings.TrimSpace(got.V.s))
+
+			var reread any
+
+			require.NoError(t, yaml.Unmarshal([]byte(got.V.s), &reread))
+			assert.Equal(t, want.V, reread)
+		})
+	}
+}
+
 func TestUnmarshalerBytesAliasOfBlockScalar(t *testing.T) {
 	t.Parallel()
 
