@@ -725,7 +725,9 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 	for idx, c := range ctx.src[ctx.idx:] {
 		progress = idx + 1
 		switch c {
-		case ' ':
+		// niceyaml: a tab closes the tag too, where upstream reads the tab
+		// and the text after it into the tag.
+		case ' ', '\t':
 			ctx.addOriginBuf(c)
 			value := ctx.source(ctx.idx-1, ctx.idx+idx)
 			ctx.addToken(token.Tag(value, string(ctx.obuf), s.pos()))

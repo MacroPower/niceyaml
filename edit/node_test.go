@@ -2057,6 +2057,14 @@ func TestNode_Scalar(t *testing.T) {
 			kind:   niceyaml.NodeScalar,
 			ok:     true,
 		},
+		"block scalar header after a tab after a tag": {
+			// Go-yaml's lexer reads the tag "!!str\t|" on the plain scalar
+			// y, but YAML reads the tab as separation.
+			before: stringtest.LinesLF("a: !!str\t|", "  y", "b: 1"),
+			want:   "y\n",
+			kind:   niceyaml.NodeScalar,
+			ok:     true,
+		},
 		"alias of a block scalar of the document": {
 			before: stringtest.LinesLF("b: &b |", "  y", "  z", "a: *b"),
 			want:   "y\nz\n",

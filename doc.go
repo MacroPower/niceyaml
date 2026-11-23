@@ -971,7 +971,9 @@
 // So yaml.Unmarshal reads such a document apart from a decode of niceyaml
 // too. In "b: !!str" without a final line break, go-yaml reads b as null,
 // and niceyaml reads b as "". In "a: !t" and "  0x10: 1", go-yaml reads
-// the key 0x10 under a as "0x10", and niceyaml reads it as 16.
+// the key 0x10 under a as "0x10", and niceyaml reads it as 16. In
+// "a: !t\t&x 1", go-yaml reads the tag "!t\t&x" on 1 without an anchor,
+// and niceyaml reads the tag !t and the anchor x on 1.
 //
 // Go-yaml's parser nests the lines after a tag on an empty value in that
 // value, but YAML reads them outside it. So the parser reads "a: !t" and
@@ -987,10 +989,7 @@
 // for such a document and for such a reference document. So a path that
 // YAML reads does not read as absent, even one that a merge key brings in
 // from a reference document. A value after the tag or the anchor fixes the
-// document, as in "a: !t null". Go-yaml's lexer also reads a tab after a
-// tag, and the text after the tab, into the tag. It thus reads
-// "a: !!int\t5" as a tag on an empty value, and a space in place of the
-// tab fixes it.
+// document, as in "a: !t null".
 //
 // Go-yaml's parser also leaves out the line after the value of an anchor
 // under a scalar tag, such as !!str or !!null. It does so when that value

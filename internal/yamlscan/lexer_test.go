@@ -502,6 +502,47 @@ func TestTokenize_Patches(t *testing.T) {
 				{token.StringType, " x\n"},
 			},
 		},
+		"anchor after a tab after a tag": {
+			input: "a: !t\t&x 1\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.TagType, " !t\t"},
+				{token.AnchorType, "&"},
+				{token.StringType, "x"},
+				{token.IntegerType, " 1\n"},
+			},
+		},
+		"block scalar header after a tab after a tag": {
+			input: "a: !!str\t|\n  x\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.TagType, " !!str\t"},
+				{token.LiteralType, "|\n"},
+				{token.StringType, "  x\n"},
+			},
+		},
+		"scalar after a tab after a tag in a flow sequence": {
+			input: "[!t\t1, 2]\n",
+			want: []tok{
+				{token.SequenceStartType, "["},
+				{token.TagType, "!t\t"},
+				{token.StringType, "1"},
+				{token.CollectEntryType, ","},
+				{token.IntegerType, " 2"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
+		"comment after a tab after a tag": {
+			input: "a: !t\t#c\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.TagType, " !t\t"},
+				{token.CommentType, "#c\n"},
+			},
+		},
 		"space after a double-quoted scalar with a tab": {
 			input: "a: \"t\tb\" \nb: 1\n",
 			want: []tok{

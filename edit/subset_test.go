@@ -519,19 +519,7 @@ func TestNew_Unsupported(t *testing.T) {
 				"`-- write a value after !t, such as null",
 			),
 		},
-		"tab after a tag before a line at its column": {
-			// Go-yaml's lexer reads the tab and 5 into the tag, so the tag
-			// stands on an empty value.
-			before:    stringtest.LinesLF("a: !!int\t5", "z: 1"),
-			construct: edit.ConstructTaggedEmpty,
-			err: stringtest.JoinLF(
-				"test.yaml:1:4: $.a: this program does not edit a document with a tag on an empty value before a line that go-yaml nests in it, such as !!int",
-				"`-- write a space in place of the tab after !!int",
-			),
-		},
 		"tab after a tag at the end of its line before a line at its column": {
-			// No value follows the tab, so a space in place of it leaves the
-			// tag on an empty value.
 			before:    stringtest.LinesLF("a: !t\t", "b: 1"),
 			construct: edit.ConstructTaggedEmpty,
 			err: stringtest.JoinLF(
@@ -540,9 +528,6 @@ func TestNew_Unsupported(t *testing.T) {
 			),
 		},
 		"tab after a tag before a comment before a line at its column": {
-			// The lexer reads the tab and the comment into the tag. A space
-			// in place of the tab leaves the tag on an empty value, because
-			// YAML reads the comment as a comment.
 			before:    stringtest.LinesLF("a: !t\t#c", "b: 1"),
 			construct: edit.ConstructTaggedEmpty,
 			err: stringtest.JoinLF(

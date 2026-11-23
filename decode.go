@@ -1243,7 +1243,7 @@ func (d *document) findMisnest() error {
 	case *ast.TagNode:
 		at = p.Start
 		msg = fmt.Sprintf("go-yaml nests the lines after the tag %s in its value, but YAML reads them outside it",
-			tagName(p))
+			p.Start.Value)
 
 	case *ast.AnchorNode:
 		name, _ := astnode.Name(p.Name)
@@ -1285,7 +1285,7 @@ func (d *document) findDropped() error {
 	}
 
 	msg := fmt.Sprintf("go-yaml leaves out line %d after the value of the tag %s, but YAML reads it",
-		left.Position.Line, tagName(tag))
+		left.Position.Line, tag.Start.Value)
 
 	opts := []ErrorOption{AtToken(tag.Start)}
 
@@ -1294,15 +1294,6 @@ func (d *document) findDropped() error {
 	}
 
 	return Invalid(markDecode(errors.New(msg)), opts...)
-}
-
-// tagName returns the name of tag as its text spells it. Go-yaml's lexer
-// reads a tab after a tag, and the text after the tab, into the tag, as
-// in "!!int\t5", so the name ends before any tab.
-func tagName(tag *ast.TagNode) string {
-	name, _, _ := strings.Cut(tag.Start.Value, "\t")
-
-	return name
 }
 
 // checkDecode returns the error of a decode into v with cfg that cannot

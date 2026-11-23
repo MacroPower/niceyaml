@@ -38,6 +38,10 @@
 //     line, nor the first key of the mapping below the tag. Go-yaml reads
 //     that key as a string, so it reads the key 0x10 below "a: !t" as
 //     "0x10" and not as 16.
+//   - A tab after a tag closes the tag, as a space does. Go-yaml reads the
+//     tab and the text after it up to the next space, line break, or ","
+//     in a flow collection into the tag. So it reads "!t\t&x 1" as the tag
+//     "!t\t&x" on 1, without the anchor x.
 //
 // # Sync
 //

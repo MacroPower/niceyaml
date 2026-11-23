@@ -573,6 +573,21 @@ func TestNew_GoYAMLReading(t *testing.T) {
 		"tab after a tag at the end of a mapping": {
 			text: stringtest.LinesLF("z: 1", "a: !!int\t5"),
 		},
+		"tab after a tag before a line at its column": {
+			// Go-yaml's lexer reads the tab and 5 into the tag, and nests z
+			// in the value of a.
+			text: stringtest.LinesLF("a: !!int\t5", "z: 1"),
+		},
+		"anchor after a tab after a tag": {
+			// Go-yaml's lexer reads the tag "!t\t&x", so it does not find
+			// the anchor x.
+			text: stringtest.LinesLF("a: !t\t&x 1", "b: *x"),
+		},
+		"block scalar header after a tab after a tag": {
+			// Go-yaml's lexer reads the tag "!!str\t|" on the plain scalar
+			// x.
+			text: stringtest.LinesLF("a: !!str\t|", "  x", "b: 1"),
+		},
 		"tag before an anchor on a number": {
 			text: stringtest.LinesLF("a: !t &k 1", "b: *k"),
 		},

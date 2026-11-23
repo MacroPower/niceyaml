@@ -57,11 +57,6 @@ const (
 	// A tag on an empty value at the end of the document is not such a
 	// construct, because the parser reads that value as empty. Neither is a
 	// tag with an anchor beside it, which [ConstructAnchoredEmpty] names.
-	// Go-yaml's lexer reads a tab after a tag as a part of the tag. It
-	// reads some values after the tab into the tag as well, such as the 5
-	// of "a: !!int\t5". That tag then stands on an empty value, so it is
-	// such a construct when a line such as "z: 1" follows it. A space in
-	// place of the tab fixes it.
 	ConstructTaggedEmpty
 	// ConstructLineBreaks is a text with both "\n" and "\r\n" line breaks,
 	// or with a "\r" alone.

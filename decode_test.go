@@ -7833,6 +7833,28 @@ func TestDocument_Decode_YAMLReadings(t *testing.T) {
 			input: stringtest.LinesLF("!t", "0x10: 1"),
 			want:  map[string]any{"16": uint64(1)},
 		},
+		"anchor after a tab after a tag": {
+			// Go-yaml reads the tag "!t\t&x", so it does not find the
+			// anchor x.
+			input: stringtest.LinesLF("a: !t\t&x 1", "b: *x"),
+			want:  map[string]any{"a": uint64(1), "b": uint64(1)},
+		},
+		"block scalar header after a tab after a tag": {
+			// Go-yaml reads the tag "!!str\t|" on the plain scalar x.
+			input: stringtest.LinesLF("a: !!str\t|", "  x", "b: 1"),
+			want:  map[string]any{"a": "x\n", "b": uint64(1)},
+		},
+		"value after a tab after a tag": {
+			// Go-yaml reads the tag "!!int\t5" on an empty value, and nests
+			// b in it.
+			input: stringtest.LinesLF("a: !!int\t5", "b: 1"),
+			want:  map[string]any{"a": 5, "b": uint64(1)},
+		},
+		"comment after a tab after a tag": {
+			// Go-yaml reads the tag "!!str\t#" on the plain scalar c.
+			input: "a: !!str\t# c\n",
+			want:  map[string]any{"a": ""},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -8464,10 +8486,9 @@ func TestDocument_Decode_Misnest(t *testing.T) {
 			input: stringtest.LinesLF("a: &x !t", "b: 1"),
 			err:   "1:7: $.a: go-yaml nests the lines after the tag !t in its value, but YAML reads them outside it",
 		},
-		"tab after a tag": {
-			// Go-yaml's lexer reads the tab and the 5 into the tag.
-			input: stringtest.LinesLF("a: !!int\t5", "z: 1"),
-			err:   "1:4: $.a: go-yaml nests the lines after the tag !!int in its value, but YAML reads them outside it",
+		"tab after a tag on an empty value": {
+			input: stringtest.LinesLF("a: !t\t", "z: 1"),
+			err:   "1:4: $.a: go-yaml nests the lines after the tag !t in its value, but YAML reads them outside it",
 		},
 		"anchor on an empty item before a key": {
 			input: stringtest.LinesLF("r0:", "- &x0", "r1: 1"),
@@ -8510,6 +8531,11 @@ func TestDocument_Decode_Misnest(t *testing.T) {
 		"int tag on an anchored scalar on the next line before a key": {
 			input: stringtest.LinesLF("a: !!int &k", "  1", "b: 2"),
 			err:   "1:4: $.a: go-yaml leaves out line 3 after the value of the tag !!int, but YAML reads it",
+		},
+		"null tag and a tab on an anchored flow mapping before a key": {
+			// The tab closes the tag, as a space does.
+			input: stringtest.LinesLF("c: !!null\t&k {x: 1}", "d: 2"),
+			err:   "1:4: $.c: go-yaml leaves out line 2 after the value of the tag !!null, but YAML reads it",
 		},
 		"line comment after a tagged anchored flow mapping": {
 			// The parser takes the comment as the line comment of the mapping

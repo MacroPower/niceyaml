@@ -299,11 +299,6 @@
 //   - both "\n" and "\r\n" line breaks in the file of the document, or a
 //     "\r" alone
 //
-// Go-yaml's lexer reads a tab after a tag, and some values after the tab,
-// as a part of the tag. So it reads "a: !!int\t5" as a tag on an empty
-// value, and New refuses that line before "z: 1" as such a tag. A space in
-// place of the tab fixes it.
-//
 // The error of New holds a problem for each instance of these and for each
 // byte order mark that New refuses. It also holds a problem for each
 // misread of go-yaml that New refuses with [ErrMisread]. A document with a
@@ -1023,15 +1018,19 @@
 // texts include one with a tag that ends it and one with a key that the
 // lexer reads as a string below a tag without a value. They also include
 // one with a double-quoted scalar after which the lexer skips a line
-// break. The decode of yaml.Unmarshal reads such a text apart from
-// niceyaml, so the check against go-yaml's decoder alone skips it.
+// break, and one with a tab after a tag. The decode of yaml.Unmarshal
+// reads such a text apart from niceyaml, so the check against go-yaml's
+// decoder alone skips it.
 //
 // Below a tag without a value and before a tag that ends the text, go-yaml's
 // lexer places each other token as the tokenizer does. The parse of
 // go-yaml's parser then still reads the tokens of the lexer. It reads the
 // tokenizer's tokens only in a text where the lexer moves or drops other
-// tokens. The lexer moves each later token when it skips a line break after
-// a double-quoted scalar.
+// tokens, or reads a tab after a tag into the tag. The lexer moves each
+// later token when it skips a line break after a double-quoted scalar. It
+// reads a tab after a tag into the tag, with the text after the tab up to
+// the next space, line break, or "," in a flow collection. So it drops the
+// tokens of that text.
 //
 // The edited text must hold only the characters that YAML allows in a text,
 // the printable characters of YAML 1.2, which include U+0085. A Go string

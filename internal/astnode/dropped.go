@@ -76,8 +76,7 @@ func Dropped(node ast.Node, tks token.Tokens, found func(tag *ast.TagNode, tk *t
 
 // scalarTag reports whether tag is a scalar tag that go-yaml reserves,
 // such as !!int or !!null. It matches the text of the tag as the parser
-// does, so a tag that the lexer reads with a tab and the text after it
-// does not match.
+// does.
 func scalarTag(tag *ast.TagNode) bool {
 	if tag.Start == nil {
 		return false

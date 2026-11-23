@@ -1030,26 +1030,15 @@ func (d *Doc) misnestedEmpties() []instance {
 
 // taggedEmpty returns the instance of [ConstructTaggedEmpty] of tag, a tag
 // on an empty value or an empty item of the user's text under which
-// go-yaml's parse nests the lines after it. Go-yaml's lexer reads a tab
-// after a tag as a part of the tag, so it reads "!!int\t5" as a tag on an
-// empty value. The words of such an instance name the tag before the tab.
-// Its fix replaces the tab when a value follows it. It asks for a value
-// after the tag otherwise, as after "!t\t" at the end of a line. The lexer
-// also reads a comment after the tab into the tag. But YAML reads "#" after
-// a tab as the start of a comment, so the fix asks for a value there too.
+// go-yaml's parse nests the lines after it.
 func (d *Doc) taggedEmpty(tag *ast.TagNode) instance {
-	text, rest, _ := strings.Cut(tagText(tag), "\t")
-	fix := fmt.Sprintf("write a value after %s, such as null", text)
-
-	if r := strings.TrimLeft(rest, " \t"); r != "" && !strings.HasPrefix(r, "#") {
-		fix = fmt.Sprintf("write a space in place of the tab after %s", text)
-	}
+	text := tagText(tag)
 
 	return instance{
 		construct: ConstructTaggedEmpty,
 		at:        d.nodeSite(tag, false),
 		what:      "a document with a tag on an empty value before a line that go-yaml nests in it, such as " + text,
-		fix:       fix,
+		fix:       fmt.Sprintf("write a value after %s, such as null", text),
 		nests:     true,
 	}
 }

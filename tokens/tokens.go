@@ -50,9 +50,15 @@ import (
 //
 //   - A tag that ends the source is a token, where the lexer drops it.
 //     A decode reads "b: !!str" as an empty string, as it reads the same
-//     text with a final line break. Only a space, a line break, or a ","
-//     in a flow collection closes a tag, so in a file of "[!t]" the tag
-//     "!t]" ends the source.
+//     text with a final line break. Only a space, a tab, a line break, or
+//     a "," in a flow collection closes a tag, so in a file of "[!t]" the
+//     tag "!t]" ends the source.
+//   - A tab after a tag closes the tag, as a space does. The lexer reads
+//     the tab and the text after it up to the next space, line break, or
+//     "," in a flow collection into the tag. So the lexer reads
+//     "a: !t\t&x 1" as the tag "!t\t&x" on 1, without the anchor x. It
+//     reads "a: !!str\t|" as the tag "!!str\t|" on the plain scalar of
+//     the next line, and not as a literal block scalar.
 //   - The copy reads the rune after a double-quoted scalar that holds a
 //     tab between its quotes. The lexer skips one rune after the closing
 //     quote for each tab of the text that a rune other than a space or a

@@ -61,6 +61,30 @@ func TestNode_Set(t *testing.T) {
 			value:  2,
 			want:   "a: \"x\ty\"\nb: 2\n",
 		},
+		"value after an anchor after a tab after a tag": {
+			// Go-yaml's lexer reads the tab and the anchor into the tag, so
+			// it does not find the anchor that b aliases. The check reads the
+			// text as YAML does.
+			before: "a: !t\t&x 1\nb: *x\nc: 1\n",
+			path:   paths.Doc().Child("c"),
+			value:  2,
+			want:   "a: !t\t&x 1\nb: *x\nc: 2\n",
+		},
+		"value after a literal block scalar after a tab after a tag": {
+			// Go-yaml's lexer reads the tab and the "|" into the tag.
+			before: "a: !!str\t|\n  x\nb: 1\n",
+			path:   paths.Doc().Child("b"),
+			value:  2,
+			want:   "a: !!str\t|\n  x\nb: 2\n",
+		},
+		"value after a tab after a tag": {
+			// The Set replaces the tag, the tab, and 5, as it does after a
+			// space.
+			before: "a: !!int\t5\nb: 1\n",
+			path:   paths.Doc().Child("a"),
+			value:  6,
+			want:   "a: 6\nb: 1\n",
+		},
 		"value after a double-quoted scalar of two lines with a tab on its first line": {
 			// The text after the tab on its line makes go-yaml's lexer skip
 			// the line break after the closing quote on the next line.
