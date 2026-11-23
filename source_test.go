@@ -8455,8 +8455,9 @@ func TestWithAliasLimit_ReferenceLoop(t *testing.T) {
 
 	const want = "upload.yaml:1:4: aliases expand the document past the alias limit"
 
-	// A decode into a recursive type follows a loop of aliases for as
-	// many levels as the loop gives it.
+	// Each reader ends at a loop of aliases, a decode into a recursive
+	// type too. The alias limit still rejects every document whose
+	// aliases reach the loop.
 	type tree map[string]tree
 
 	readers := map[string]func(t *testing.T, n *niceyaml.Node) error{
@@ -8554,6 +8555,115 @@ func TestWithAliasLimit_ReferenceLoop(t *testing.T) {
 		assert.Equal(t, map[string]any{
 			"v": map[string]any{"k": []any{[]any{"x", "y"}, []any{"x", "y"}}},
 		}, got)
+	})
+
+	t.Run("loop of one name without the limit", func(t *testing.T) {
+		t.Parallel()
+
+		// A decode takes the alias inside the anchor of its name as null,
+		// whatever its target, so it ends at the loop.
+		type node struct {
+			K *node `yaml:"k"`
+			J *node `yaml:"j"`
+		}
+
+		type pair struct {
+			K map[string]any `yaml:"k"`
+			J map[string]any `yaml:"j"`
+		}
+
+		tcs := map[string]struct {
+			read  func(t *testing.T, n *niceyaml.Node) (any, error)
+			want  any
+			input string
+		}{
+			"decode into a recursive map": {
+				read: func(t *testing.T, n *niceyaml.Node) (any, error) {
+					t.Helper()
+
+					return n.Decode[tree](t.Context())
+				},
+				input: "v: *m\n",
+				want:  tree{"v": {"k": nil, "j": nil}},
+			},
+			"decode into a recursive struct": {
+				read: func(t *testing.T, n *niceyaml.Node) (any, error) {
+					t.Helper()
+
+					return n.Decode[map[string]*node](t.Context())
+				},
+				input: "v: *m\n",
+				want:  map[string]*node{"v": {}},
+			},
+			"decode into a struct": {
+				read: func(t *testing.T, n *niceyaml.Node) (any, error) {
+					t.Helper()
+
+					return n.Decode[map[string]pair](t.Context())
+				},
+				input: "v: *m\n",
+				want:  map[string]pair{"v": {}},
+			},
+			"decode into a type that reads text": {
+				read: func(t *testing.T, n *niceyaml.Node) (any, error) {
+					t.Helper()
+
+					return n.Decode[map[string]rawString](t.Context())
+				},
+				input: "v: *m\n",
+				want:  map[string]rawString{"v": "{k: null, j: null}\n"},
+			},
+			"merge into a recursive map": {
+				read: func(t *testing.T, n *niceyaml.Node) (any, error) {
+					t.Helper()
+
+					return n.Decode[tree](t.Context())
+				},
+				input: "v: {<<: *m}\n",
+				want:  tree{"v": {"k": nil, "j": nil}},
+			},
+			"merge into any": {
+				read: func(t *testing.T, n *niceyaml.Node) (any, error) {
+					t.Helper()
+
+					return n.Decode[any](t.Context())
+				},
+				input: "v: {<<: *m}\n",
+				want:  map[string]any{"v": map[string]any{"k": nil, "j": nil}},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input,
+					yamltest.References(loop), niceyaml.WithAliasLimit(false))
+
+				got, err := tc.read(t, doc)
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got)
+			})
+		}
+	})
+
+	t.Run("anchor on an alias of its name without the limit", func(t *testing.T) {
+		t.Parallel()
+
+		// The anchor e holds the alias *e itself. A decode into any or
+		// into a type that reads text takes that alias as null.
+		const refs = "e: &e\n  *e\n"
+
+		doc := yamltest.FirstDocument(t, "v: *e\n",
+			yamltest.References(refs), niceyaml.WithAliasLimit(false))
+
+		got, err := doc.Decode[any](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"v": nil}, got)
+
+		text, err := doc.Decode[map[string]rawString](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]rawString{"v": "null"}, text)
 	})
 
 	t.Run("loop of more names without the limit", func(t *testing.T) {

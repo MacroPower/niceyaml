@@ -2277,11 +2277,11 @@
 // Reference anchors that reach each other by name in a loop count as past
 // the limit, so a document whose aliases reach the loop fails. An anchor
 // that holds an alias of its own name, as in "m: &m {k: *m}", is a loop of
-// one name. A decode into an any value takes that alias as null, but a
-// decode into a Go type follows it and might not end. The count thus
-// refuses a document whose aliases reach such an anchor, whatever reads the
-// document. One file that defines the anchor reads the alias as null in
-// every decode, so that file can pass.
+// one name. A decode takes the alias inside m as null and ends, whatever
+// its target. The content that an alias of m stands for does not end.
+// The count thus refuses a document whose aliases reach such an anchor,
+// whatever reads the document. One file that defines the anchor reads the
+// alias as null in every decode, so that file can pass.
 //
 // [WithAliasLimit] on the Source that reads the reference documents decides
 // whether the count runs. The option on a reference Source does not change

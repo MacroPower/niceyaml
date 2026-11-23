@@ -281,9 +281,10 @@ func TestReferenceWeights(t *testing.T) {
 			oneFile: true,
 		},
 		"alias inside an anchor of its name": {
-			// The anchor m is a loop of one name. A decode into a Go type
-			// follows the alias inside it, so one alias to the anchor is
-			// past the limit. One file reads the alias inside m as null.
+			// The anchor m is a loop of one name, so one alias to the
+			// anchor is past the limit. A decode of the alias reads the
+			// alias inside m as null, whatever its target. One file reads
+			// the alias inside m as null too.
 			refs:  []string{selfLoop},
 			input: "v: *m\n",
 			want:  "1:4: " + ratio,

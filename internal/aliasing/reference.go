@@ -42,13 +42,23 @@ import (
 // closes a loop of names therefore weighs [aliaslimit.CountCap], and a
 // document whose aliases reach the loop is past the limit.
 //
-// What a read does at a loop of one name depends on the reader. A decode
-// into any that reads the anchor on its own takes the alias inside it as
-// null and ends. A decode into a Go type follows that alias once for each
-// level of the type, and a `<<` merge of the anchor follows it too. A
-// decode into a recursive Go type or into a type that reads text might
-// not end. The weights hold one verdict for the loop, so a document that
-// reaches it is past the limit for every reader.
+// A decode ends at a loop of one name, whatever its target. In
+// `&m {k: *m}`, the alias is a value inside a collection of the anchor,
+// and an item of a sequence reads the same way. A decode into any or into
+// a Go type takes such an alias as null, a recursive Go type included. A
+// `<<` merge of the anchor does the same, and a decode into a type that
+// reads text writes the alias out as null. Where the alias is the value
+// of a `<<` merge key inside the anchor of its own name, as in
+// `&m {<<: *m}`, the decode fails to find the anchor, in one file too.
+//
+// Where the anchor holds the alias itself, as `&e *e` does, a decode into
+// any or into a type that reads text takes the alias as null. A decode of
+// that anchor into a Go map, struct, or slice fails when it passes the
+// bound of the decoder on nesting, whatever the depth limit of the
+// source. A `<<` merge of the anchor fails the same way.
+//
+// The weights hold one verdict for every loop of one name, so a document
+// that reaches the loop is past the limit for every reader.
 //
 // A decode into any also ends at a loop of more names. It takes an alias
 // as null where it is still reading the anchor of the alias. With x and
