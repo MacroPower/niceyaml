@@ -1403,6 +1403,25 @@ func TestNode_Set(t *testing.T) {
 			err: "test.yaml:1:1: $.a: cafe.jacobcolvin.com/v1 cannot write the value of $.a: value does not encode: " +
 				"string holds the byte 0xff, which is not UTF-8",
 		},
+		"string with a byte that is not UTF-8 beside an anchor in the YAML of a marshaler": {
+			// The encoder refuses the string, but the finder refuses the
+			// anchor, so the Set fails with the anchor after its reach.
+			before: "a: q\n",
+			path:   paths.Doc().Child("a"),
+			value:  map[string]any{"m": yamlMarshaler("&x 1"), "s": "\xff"},
+			err: "test.yaml:1:4: $.a: cafe.jacobcolvin.com/v1 sets $.a to a value whose YAML holds the anchor &x, " +
+				"and cafe does not write anchors or aliases",
+		},
+		"string with a byte that is not UTF-8 beside the YAML of a marshaler that go-yaml's parser refuses": {
+			// The check of the value reads the YAML of the marshaler before
+			// the encode refuses the string.
+			before: "a: q\n",
+			path:   paths.Doc().Child("a"),
+			value:  map[string]any{"m": yamlMarshaler("["), "s": "\xff"},
+			err: "test.yaml:1:4: $.a: go-yaml's parser refuses the YAML that the MarshalYAML method of " +
+				"edit_test.yamlMarshaler writes: sequence end token ']' not found at 1:1 of that YAML",
+			engine: true,
+		},
 		"string with a control character in place of a quoted scalar through a merge key of a mapping written in place": {
 			// Control: the string keeps the double quotes, which escape the
 			// character, so the merge key in a refused form fails the Set.

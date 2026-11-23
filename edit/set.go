@@ -246,7 +246,10 @@ type payload struct {
 // character without an escape. YAML cannot hold a string that is not
 // UTF-8, so the encoder refuses such a string in v, as a value or as a
 // key. A Set of such a value fails with [ErrValue], and the error matches
-// [go.jacobcolvin.com/niceyaml/encoder.ErrEncode] too.
+// [go.jacobcolvin.com/niceyaml/encoder.ErrEncode] too. The YAML of a
+// marshaler of v can hold a construct that the engine does not write. The
+// Set then fails with that construct after its reach instead, as the
+// paragraph on such constructs describes.
 //
 // Each key that Set creates for a name of its path is a string key, so the
 // name 404 writes the key "404". YAML has no escape for a byte that is not
@@ -1082,13 +1085,26 @@ func (d *Doc) ownProblem(err error) bool {
 // holds two keys that a decode reads as one fails the call of h before it
 // writes, as [Doc.ownRepeat] describes.
 //
-// The checks of a Set run in the order that [Node.Set] describes. Go-yaml's
-// checks of the text of the value come first, then the reach of the Set,
-// and the finder on the YAML of the value last. Go-yaml's encoder writes
-// a character that YAML does not allow in a text as it is in the tag of a
-// marshaler's YAML. Such a character fails after those checks and before
-// the reach. The problem of such a character binds as [Doc.valueBug] binds
-// it, and so does each problem that matches errEncoder.
+// The checks of a Set run in the order that [Node.Set] describes. The
+// checks of the value before the encode come first. Among them are
+// go-yaml's reads of the YAML of each marshaler and of each key of a map
+// alone. The encode of the value follows, then go-yaml's checks of the
+// text of the encode, then the reach of the Set. The finder on the YAML of
+// the value runs last.
+//
+// The encode refuses a Go string that is not UTF-8, as a value or as a
+// key, before go-yaml's encoder writes any text, as [encoder.Marshal]
+// refuses it. Such a string fails the Set in the encode, with a problem
+// that matches [ErrValue] and [encoder.ErrEncode] and binds as
+// [Doc.valueProblem] binds it. When the YAML of a marshaler of the value
+// holds a construct that the finder refuses, the Set fails with that
+// construct after the reach instead.
+//
+// Go-yaml's encoder writes a character that YAML does not allow in a text
+// as it is in the tag of a marshaler's YAML. Such a character fails after
+// go-yaml's checks of the text and before the reach. The problem of such a
+// character binds as [Doc.valueBug] binds it, and so does each problem that
+// matches errEncoder.
 func (d *Doc) renderPayload(
 	ctx context.Context, h *Node, v any, fd flowDepth, step, origin int, old *token.Token, ms []encoder.Marshaler,
 ) (payload, error) {
