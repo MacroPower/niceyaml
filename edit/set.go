@@ -243,19 +243,20 @@ type payload struct {
 // flow collection. That text puts a string that holds a character that
 // YAML does not allow in a text, such as U+0001, in double quotes, with an
 // escape for the character. YAML allows U+0085, so a string writes that
-// character without an escape. The text of a string that is not UTF-8
-// can hold each byte that is not UTF-8 as it is. Such a Set fails with
-// [ErrEngine], because YAML does not allow that byte in a text. It fails
-// so before it checks the constructs of the text that it reaches. In
-// double quotes, the text writes such a byte as an escape that YAML reads
-// as another character, as it reads \xff as U+00FF.
+// character without an escape. YAML cannot hold a string that is not
+// UTF-8, so the encoder refuses such a string in v, as a value or as a
+// key. A Set of such a value fails with [ErrValue], and the error matches
+// [go.jacobcolvin.com/niceyaml/encoder.ErrEncode] too.
 //
 // Each key that Set creates for a name of its path is a string key, so the
-// name 404 writes the key "404". To write a key of another kind, a [Func]
-// calls [Node.SetKey] after the Set on a Node at the path of that key.
-// SetKey(404) on the same Node renames the last key of the path. A parent
-// that the Set created takes another kind through a Node at its own path.
-// After a Set of the path 8080.name below a Node n, the call
+// name 404 writes the key "404". YAML has no escape for a byte that is not
+// UTF-8, so a key with such a byte keeps the byte as it is in double
+// quotes. A Set that creates such a key fails with [ErrEngine], because
+// YAML does not allow that byte in a text. To write a key of another
+// kind, a [Func] calls [Node.SetKey] after the Set on a Node at the path
+// of that key. SetKey(404) on the same Node renames the last key of the
+// path. A parent that the Set created takes another kind through a Node at
+// its own path. After a Set of the path 8080.name below a Node n, the call
 // n.At(paths.Current().Child("8080")).SetKey(8080) writes the plain key
 // 8080.
 //
@@ -1083,12 +1084,10 @@ func (d *Doc) ownProblem(err error) bool {
 //
 // The checks of a Set run in the order that [Node.Set] describes. Go-yaml's
 // checks of the text of the value come first, then the reach of the Set,
-// and the finder on the YAML of the value last. A byte of a string that is
-// not UTF-8, which go-yaml's encoder writes as it is outside double
-// quotes, fails with those checks of go-yaml. A character that YAML does
-// not allow in a text, which go-yaml's encoder writes as it is in the tag
-// of a marshaler's YAML, fails after those checks and before the reach.
-// The problem of such a byte or character binds as [Doc.valueBug] binds
+// and the finder on the YAML of the value last. Go-yaml's encoder writes
+// a character that YAML does not allow in a text as it is in the tag of a
+// marshaler's YAML. Such a character fails after those checks and before
+// the reach. The problem of such a character binds as [Doc.valueBug] binds
 // it, and so does each problem that matches errEncoder.
 func (d *Doc) renderPayload(
 	ctx context.Context, h *Node, v any, fd flowDepth, step, origin int, old *token.Token, ms []encoder.Marshaler,

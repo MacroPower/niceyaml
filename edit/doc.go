@@ -1027,16 +1027,17 @@
 // The edited text must hold only the characters that YAML allows in a text,
 // the printable characters of YAML 1.2, which include U+0085. A Go string
 // that holds another character, such as U+0001, writes that character as
-// an escape in double quotes, as [Node.Set] describes. Outside double
-// quotes, go-yaml's encoder writes each byte of a Go string that is not
-// UTF-8 as it is, and YAML does not allow such a byte in a text. A call
-// that writes such a byte fails with ErrEngine at the value that it wrote,
-// and the error names the encoder and the byte. The encoder quotes only
-// strings, so the YAML of a marshaler can still hold a character that YAML
-// does not allow in a text outside a string, as in a tag. A call that
-// writes such a character fails the same way, and the error names the
-// character. The check skips each character of the user's text that a call
-// keeps or moves.
+// an escape in double quotes, as [Node.Set] describes. YAML cannot hold a
+// Go string that is not UTF-8, so a Set or an Insert of such a value fails
+// with ErrValue. YAML has no escape for a byte that is not UTF-8, so a key
+// that a call writes for a name, such as the key of [Node.SetKey], keeps
+// such a byte as it is in double quotes. That call fails with ErrEngine at
+// the key that it wrote, and the error names the byte. The encoder quotes
+// only strings, so the YAML of a marshaler can still hold a character that
+// YAML does not allow in a text outside a string, as in a tag. A call that
+// writes such a character fails with ErrEngine too, and the error names
+// the character. The check skips each character of the user's text that a
+// call keeps or moves.
 //
 // Apply returns the first problem and stops there. A failed Apply leaves
 // the Doc as it found it, so the Doc does not keep any of the edits of that

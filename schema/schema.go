@@ -1101,10 +1101,11 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 // slice, or pointer that contains itself, it returns an error wrapping
 // [ErrValidate]. For a typed value that the encoder does not write, such
 // as a channel, ValidateValue returns an error wrapping ErrValidate with
-// the error of the encoder in its chain. It also returns an error wrapping
+// the error of the encoder in its chain. A string that is not UTF-8 is
+// such a value too. ValidateValue also returns an error wrapping
 // ErrValidate when the text that the encoder writes does not decode, such
-// as the text of a string that is not UTF-8. The text of that error names
-// the problem.
+// as the text of a marshaler that writes a merge key of a scalar. The
+// text of that error names the problem.
 //
 // Go-yaml's encoder panics on some values, such as a struct that embeds
 // an unexported named slice. For such a value, ValidateValue returns an

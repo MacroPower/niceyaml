@@ -531,13 +531,12 @@ func TestNode_Update(t *testing.T) {
 			err:     "cafe.jacobcolvin.com/v1 cannot write the value of $.b",
 			likeSet: true,
 		},
-		"value with a character that the encoder writes as it is": {
+		"value with a byte that is not UTF-8": {
 			before:  stringtest.LinesLF("m:", "  a: 1"),
 			path:    paths.Doc().Child("m"),
 			value:   ms("a", "x\xffy"),
-			err:     "go-yaml's encoder writes the byte 0xff, which is not UTF-8, as it is",
+			err:     "value does not encode: string holds the byte 0xff, which is not UTF-8",
 			likeSet: true,
-			engine:  true,
 		},
 		"value whose marshaler writes a control character in a tag": {
 			// The encoder quotes only strings, so the tag keeps U+0001 as it is.

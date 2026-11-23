@@ -117,13 +117,12 @@ func isBreak(text string, off int) bool {
 }
 
 // parse parses the current text with its tail, as the parser reads the
-// document in its file, and records its lines. The parse reads the text
-// as [lexed] gives it, so a byte that is not UTF-8 and that a call wrote
-// reaches [Doc.printableProblem]. That problem names the byte and the
-// encoder that wrote it. The user's text holds no such byte, because [New]
-// refuses it. The problem of a text that
-// go-yaml's parser refuses names the parser and gives its message and its
-// place. The engine wrote that text, so the problem does not keep the
+// document in its file, and records its lines. The parse reads the text as
+// [lexed] gives it, so a byte that is not UTF-8 and that a call wrote
+// reaches [Doc.printableProblem]. That problem names the byte. The user's
+// text holds no such byte, because [New] refuses it. The problem of a text
+// that go-yaml's parser refuses names the parser and gives its message and
+// its place. The engine wrote that text, so the problem does not keep the
 // fault of the document that the parse declares. A refusal at a byte that
 // an edit created keeps the path of the site where it binds, as
 // [Doc.locate] gives it. The problem also holds whether the parser refuses

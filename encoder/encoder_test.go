@@ -668,35 +668,6 @@ func TestEncoder_Encode_quoting(t *testing.T) {
 	}
 }
 
-func TestEncoder_Encode_notUTF8(t *testing.T) {
-	t.Parallel()
-
-	// Encode leaves a string that is not UTF-8 to go-yaml, even when it
-	// holds a control character. YAML reads neither text back as the
-	// string, so these cases check only the encoded text.
-	tcs := map[string]struct {
-		input any
-		want  string
-	}{
-		"control character in a string that is not UTF-8": {
-			input: map[string]string{"k": "a\x01\xff"},
-			want:  stringtest.LinesLF("k: a\x01\xff"),
-		},
-		"control character in a key that is not UTF-8": {
-			input: map[string]int{"a\x01\xff": 1},
-			want:  stringtest.LinesLF("a\x01\xff: 1"),
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, mustEncode(t, tc.input))
-		})
-	}
-}
-
 // itemList is a document that lists its items under a key.
 type itemList struct {
 	Items []string `yaml:"items"`
@@ -1260,6 +1231,17 @@ func (failingMarshaler) MarshalYAML() (any, error) {
 	return nil, errMarshal
 }
 
+// stringMarshaler is a string whose MarshalYAML method returns it as a
+// string value.
+type stringMarshaler string
+
+func (s stringMarshaler) MarshalYAML() (any, error) {
+	return string(s), nil
+}
+
+// label is a string that a function of [encoder.CustomMarshaler] writes.
+type label string
+
 // requireOnly checks that err matches each sentinel in errs and no other
 // sentinel of the encoder package.
 func requireOnly(t *testing.T, err error, errs ...error) {
@@ -1281,6 +1263,10 @@ func TestEncoder_Encode_errors(t *testing.T) {
 	t.Parallel()
 
 	emptyBool := yamltest.FirstDocument(t, "x: !!bool\n").AST()
+
+	labelMarshaler := encoder.CustomMarshaler(func(_ context.Context, l label) (any, error) {
+		return string(l), nil
+	})
 
 	tcs := map[string]struct {
 		input    any
@@ -1353,6 +1339,62 @@ func TestEncoder_Encode_errors(t *testing.T) {
 			input: map[string]any{"k": emptyBool},
 			errs:  []error{encoder.ErrEncode},
 			msg:   "value does not encode: empty node under the !!bool tag",
+		},
+		// YAML cannot hold a string that is not UTF-8. Go-yaml writes the
+		// byte as it is in a plain string or a literal block, where its
+		// decoder reads it as U+FFFD. In double quotes, it writes the
+		// escape \xff, which YAML reads as U+00FF.
+		"string that is not UTF-8": {
+			input: map[string]string{"k": "a\xff"},
+			errs:  []error{encoder.ErrEncode},
+			msg:   "value does not encode: string holds the byte 0xff, which is not UTF-8",
+		},
+		"string that is not UTF-8 in double quotes": {
+			input: map[string]string{"k": "x: \xff"},
+			errs:  []error{encoder.ErrEncode},
+			msg:   "value does not encode: string holds the byte 0xff, which is not UTF-8",
+		},
+		"string that is not UTF-8 in a literal block": {
+			input: map[string]string{"k": "\xff\n"},
+			errs:  []error{encoder.ErrEncode},
+			msg:   "value does not encode: string holds the byte 0xff, which is not UTF-8",
+		},
+		"string that is not UTF-8 with a control character": {
+			input: map[string]string{"k": "a\x01\xff"},
+			errs:  []error{encoder.ErrEncode},
+			msg:   "value does not encode: string holds the byte 0xff, which is not UTF-8",
+		},
+		"string that is not UTF-8 at the root": {
+			input: "\xff",
+			errs:  []error{encoder.ErrEncode},
+			msg:   "value does not encode: string holds the byte 0xff, which is not UTF-8",
+		},
+		"string that is not UTF-8 in a flow sequence": {
+			input: []string{"a", "\xff"},
+			opts:  []encoder.Option{encoder.WithFlow(true)},
+			errs:  []error{encoder.ErrEncode},
+			msg:   "value does not encode: string holds the byte 0xff, which is not UTF-8",
+		},
+		"key that is not UTF-8": {
+			input: map[string]int{"\xff": 1},
+			errs:  []error{encoder.ErrEncode},
+			msg:   "value does not encode: string holds the byte 0xff, which is not UTF-8",
+		},
+		"key that is not UTF-8 in double quotes": {
+			input: map[string]int{"x: \xff": 1},
+			errs:  []error{encoder.ErrEncode},
+			msg:   "value does not encode: string holds the byte 0xff, which is not UTF-8",
+		},
+		"string that is not UTF-8 from a marshaler": {
+			input: map[string]any{"k": stringMarshaler("x: \xff")},
+			errs:  []error{encoder.ErrEncode},
+			msg:   "value does not encode: string holds the byte 0xff, which is not UTF-8",
+		},
+		"string that is not UTF-8 from a marshaler function": {
+			input: map[string]any{"k": label("x: \xff")},
+			opts:  []encoder.Option{encoder.WithMarshalers(labelMarshaler)},
+			errs:  []error{encoder.ErrEncode},
+			msg:   "value does not encode: string holds the byte 0xff, which is not UTF-8",
 		},
 		"comment key that is not a path": {
 			input:    map[string]int{"a": 1},

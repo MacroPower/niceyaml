@@ -1971,14 +1971,17 @@ func TestSchema_ValidateValue_Typed(t *testing.T) {
 					"reflect.Value.Interface: cannot return value obtained from unexported field or method",
 				panicked: "reflect.Value.Interface: cannot return value obtained from unexported field or method",
 			},
+			// YAML cannot hold a string that is not UTF-8, so the encoder
+			// refuses it.
+			"named scalar of text that is not UTF-8": {
+				data: map[string]any{"mode": typedMode("\xff")},
+				err:  encoder.ErrEncode,
+				want: "validate schema: encode schema_test.typedMode: value does not encode: " +
+					"string holds the byte 0xff, which is not UTF-8",
+			},
 			// The encoder writes text that the decode of the check does
 			// not read. The text of the error names the problem without
 			// the position of the encoded text.
-			"named scalar of text that is not UTF-8": {
-				data: map[string]any{"mode": typedMode("\xff")},
-				err:  schema.ErrValidate,
-				want: "validate schema: read the encoded schema_test.typedMode: byte 0xff is not UTF-8",
-			},
 			"marshaler writing a merge key of a scalar": {
 				data: map[string]any{"listen": taggedText("<<: 1")},
 				err:  schema.ErrValidate,

@@ -238,6 +238,23 @@ func TestNode_SetKey(t *testing.T) {
 			key:    "x",
 			err: `test.yaml:2:3: $.m.r1: cafe.jacobcolvin.com/v1 renames $.m.r1 to "x", which reaches an entry ` +
 				"with an explicit key",
+		}, "rename to a key with a byte that is not UTF-8 that go-yaml's encoder writes in double quotes": {
+			// The encoder refuses the key, so the key takes the double quotes
+			// that keep the byte as it is, and the check of the text names it.
+			before: "a: 1\n",
+			path:   paths.Doc().Child("a"),
+			key:    "x: \xff",
+			err: "test.yaml:1:1: $.a~: the edit writes the byte 0xff, which is not UTF-8, " +
+				"and YAML does not allow that in a text",
+			engine: true,
+		},
+		"rename of a double-quoted key to a key with a byte that is not UTF-8": {
+			before: "\"a\": 1\n",
+			path:   paths.Doc().Child("a"),
+			key:    "\xff",
+			err: "test.yaml:1:1: $.a~: the edit writes the byte 0xff, which is not UTF-8, " +
+				"and YAML does not allow that in a text",
+			engine: true,
 		},
 	}
 

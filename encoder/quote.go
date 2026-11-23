@@ -378,9 +378,7 @@ func (q quoter) quote(n *ast.StringNode, key bool) {
 // unprintable reports whether s, a UTF-8 string, holds a character that
 // YAML does not allow in a text, such as U+0001. The printable characters
 // of YAML 1.2 include the tab, the line breaks, and U+0085. A string that
-// is not UTF-8 does not count. In double quotes, the go-yaml printer
-// writes each byte that is not UTF-8 as an escape that YAML reads as
-// another character, as YAML reads \xff as U+00FF.
+// is not UTF-8 does not count, because [Encoder.Encode] refuses it.
 func unprintable(s string) bool {
 	if !utf8.ValidString(s) {
 		return false

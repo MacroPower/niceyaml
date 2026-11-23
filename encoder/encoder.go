@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"strconv"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -31,6 +34,7 @@ var (
 	//   - A value that encodes to no YAML node, which [ErrNoNode] labels.
 	//   - A marshaler's YAML or an AST node with an empty node under the
 	//     "!!bool" tag.
+	//   - A string that is not UTF-8, as a value or as a key.
 	//
 	// The error of the context of the call does not match after that
 	// context ended, even when a marshaler returns it. A context error
@@ -486,10 +490,6 @@ func newDocEncoder(c config) *docEncoder {
 // YAML allows only its printable characters in a text. Encode
 // double-quotes each UTF-8 string that holds another character, such as
 // U+0001 or U+007F, and the quotes write that character as an escape.
-// Encode leaves a string that is not UTF-8 to go-yaml and to its other
-// quoting rules. In plain text, each byte that is not UTF-8 stays as it
-// is. In double quotes, the byte becomes an escape that YAML reads as
-// another character, as it reads \xff as U+00FF.
 //
 // Encode writes each literal or folded block in the YAML that a marshaler
 // returns as a string that holds the text of the block. Go-yaml makes
@@ -534,10 +534,14 @@ func newDocEncoder(c config) *docEncoder {
 // to YAML. A value of a type go-yaml does not encode and a marshaler that
 // returns an error are such values. So is a marshaler's YAML or an AST
 // node with an empty node under the !!bool tag, because go-yaml does not
-// decode that node in any form that Encode can write. The error matches
-// [ErrNoNode] too when a value in v does not encode to a YAML node. That
-// value is v itself, an entry of a sequence in v, or the value of a map
-// key in v.
+// decode that node in any form that Encode can write. So is a string that
+// is not UTF-8, as a value or as a key, because YAML cannot hold such a
+// string. A marshaler that returns such a string as its value, such as a
+// function of [CustomMarshaler], fails the encode too. A marshaler's YAML
+// is text, and go-yaml reads each byte of that text that is not UTF-8 as
+// U+FFFD. The error matches [ErrNoNode] too when a value in v does not
+// encode to a YAML node. That value is v itself, an entry of a sequence
+// in v, or the value of a map key in v.
 // After ctx ended, Encode returns its error as it is. A marshaler can
 // return a context error of its own while ctx lives, and that error
 // matches ErrEncode. A comment from [WithYAMLComments] that the encoder
@@ -663,7 +667,8 @@ func (e *Encoder) write(text []byte) error {
 // as [Encoder.Encode] describes. It also returns the blocks of a
 // marshaler's YAML that it replaced with strings, as [quoter.unblock]
 // describes. It returns the error of go-yaml's encoder as it is, and an
-// error that matches [ErrNoNode] for a value that encodes to no node.
+// error that matches [ErrNoNode] for a value that encodes to no node. It
+// refuses a string that is not UTF-8.
 func (d *docEncoder) node(ctx context.Context, v any) (ast.Node, []block, error) {
 	// A go-yaml encoder keeps every anchor it has seen, even from a call
 	// that failed, so each call marshals with a fresh one.
@@ -713,6 +718,19 @@ func (d *docEncoder) node(ctx context.Context, v any) (ast.Node, []block, error)
 	// Prettier starts a sequence at the root of a document in the first
 	// column, where go-yaml indents it under IndentSequence.
 	outdentRoot(node)
+
+	// YAML cannot hold a byte that is not UTF-8 in a string. The go-yaml
+	// printer writes such a byte as it is, which go-yaml's decoder reads
+	// as U+FFFD. In double quotes, it writes an escape of Go, as \xff,
+	// which YAML reads as another character, as U+00FF. The finder runs
+	// after the quoter, which can put a string in double quotes.
+	var invalid utf8Finder
+
+	ast.Walk(&invalid, node)
+
+	if invalid.found {
+		return nil, nil, fmt.Errorf("%w: string holds the byte %#x, which is not UTF-8", ErrEncode, invalid.b)
+	}
 
 	return node, blocks, nil
 }
@@ -989,6 +1007,50 @@ func (f *emptyBoolFinder) Visit(node ast.Node) ast.Visitor {
 		f.found = true
 
 		return nil
+	}
+
+	return f
+}
+
+// utf8Finder is an [ast.Visitor] that finds the first byte that is not
+// UTF-8 in the strings of a tree. Go-yaml's encoder gives a string that
+// it quotes the text that [strconv.Quote] writes for the string, quotes
+// included. The finder reads the string from that text.
+type utf8Finder struct {
+	// Holds the first byte that is not UTF-8.
+	b byte
+	// Reports whether the finder found such a byte.
+	found bool
+}
+
+// Visit implements [ast.Visitor].
+func (f *utf8Finder) Visit(node ast.Node) ast.Visitor {
+	if f.found {
+		return nil
+	}
+
+	n, ok := node.(*ast.StringNode)
+	if !ok {
+		return f
+	}
+
+	s := n.Value
+	if n.Token.Type == token.StringType && strings.HasPrefix(s, `"`) {
+		text, err := strconv.Unquote(s)
+		if err == nil {
+			s = text
+		}
+	}
+
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && size == 1 {
+			f.b, f.found = s[i], true
+
+			return nil
+		}
+
+		i += size
 	}
 
 	return f

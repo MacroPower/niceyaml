@@ -340,6 +340,15 @@ func TestNode_Move(t *testing.T) {
 				"refuses the edited text: invalid number of indent is specified in the multi-line header",
 			engine: true,
 		},
+		"entry to a key with a byte that is not UTF-8 that go-yaml's encoder writes in double quotes": {
+			// The encoder refuses the key, so the key takes the double quotes
+			// that keep the byte as it is, and the check of the text names it.
+			before: "a: 1\n",
+			moves:  [][2]paths.Path{{paths.Doc().Child("a"), paths.Doc().Child("x: \xff")}},
+			err: "test.yaml:1:1: $.a~: the edit writes the byte 0xff, which is not UTF-8, " +
+				"and YAML does not allow that in a text",
+			engine: true,
+		},
 		"block scalar with strip chomping to the end of a text without a final newline": {
 			before: stringtest.JoinLF("x: |-", "  q", "<<: {}"),
 			moves:  [][2]paths.Path{{paths.Doc().Child("x"), paths.Doc().Child("z0")}},

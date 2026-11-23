@@ -619,9 +619,9 @@ func TestRegistry_Load_Steps(t *testing.T) {
 			want:  []string{`Hours "" v1 up-to-date=false`},
 		},
 		// The write of the version field is a call too, so its problem names
-		// it. The label holds a byte that is not UTF-8, which go-yaml's
-		// encoder writes as it is. The message draws the U+0001 of the label
-		// as U+2401 and the byte as U+FFFD (fix23 G23-2).
+		// it. The label holds a byte that is not UTF-8, which the encoder
+		// refuses. The message draws the U+0001 of the label as U+2401 and
+		// the byte as U+FFFD (fix23 G23-2).
 		"G23-2: engine error of the write of the version field at a field of the user": {
 			opts: []manifest.RegistryOption{
 				manifest.WithAppName("cafe"),
@@ -632,13 +632,36 @@ func TestRegistry_Load_Steps(t *testing.T) {
 			},
 			files: map[string]string{"hours.yaml": stringtest.LinesLF("apiVersion: v1", "kind: Hours", "x: 1")},
 			err: stringtest.JoinLF(
-				"config/hours.yaml:1:13: $.apiVersion: go-yaml's encoder writes the byte 0xff, which is not UTF-8, "+
-					"as it is, and YAML does not allow that in a text",
+				"config/hours.yaml:1:13: $.apiVersion: value does not encode: string holds the byte 0xff, "+
+					"which is not UTF-8",
 				"|-- report this to the authors of cafe",
 				"`-- v\u2401\ufffd2 sets $.apiVersion from this value",
 				"",
 				"   1 | apiVersion: v1",
 				"     |             ^^",
+				"   2 | kind: Hours",
+				"   3 | x: 1",
+			),
+		},
+		// The double quotes of the field keep the byte as it is, so the
+		// edit, not go-yaml's encoder, writes the byte.
+		"engine error of the write of the version field in double quotes": {
+			opts: []manifest.RegistryOption{
+				manifest.WithAppName("cafe"),
+				manifest.WithKinds(manifest.NewKind[map[string]any]("Hours",
+					manifest.Version("v1"),
+					manifest.Version("v\xff2"),
+				)),
+			},
+			files: map[string]string{"hours.yaml": stringtest.LinesLF(`apiVersion: "v1"`, "kind: Hours", "x: 1")},
+			err: stringtest.JoinLF(
+				"config/hours.yaml:1:13: $.apiVersion: the edit writes the byte 0xff, which is not UTF-8, "+
+					"and YAML does not allow that in a text",
+				"|-- report this to the authors of cafe",
+				"`-- v\ufffd2 sets $.apiVersion from this value",
+				"",
+				`   1 | apiVersion: "v1"`,
+				"     |             ^^^^",
 				"   2 | kind: Hours",
 				"   3 | x: 1",
 			),
@@ -654,8 +677,8 @@ func TestRegistry_Load_Steps(t *testing.T) {
 			},
 			files: map[string]string{"hours.yaml": stringtest.LinesLF("version: 1", "x: 1")},
 			err: stringtest.JoinLF(
-				"config/hours.yaml:1:10: $.version: go-yaml's encoder writes the byte 0xff, which is not UTF-8, "+
-					"as it is, and YAML does not allow that in a text",
+				"config/hours.yaml:1:10: $.version: value does not encode: string holds the byte 0xff, "+
+					"which is not UTF-8",
 				"|-- report this to the authors of cafe",
 				"`-- version v\u2401\ufffd2 sets $.version from this value",
 				"",
@@ -679,8 +702,8 @@ func TestRegistry_Load_Steps(t *testing.T) {
 			},
 			files: map[string]string{"hours.yaml": stringtest.LinesLF("apiVersion: v1", "kind: Hours", "x: 1")},
 			err: stringtest.JoinLF(
-				"config/hours.yaml:1:13: $.apiVersion: go-yaml's encoder writes the byte 0xff, which is not UTF-8, "+
-					"as it is, and YAML does not allow that in a text",
+				"config/hours.yaml:1:13: $.apiVersion: value does not encode: string holds the byte 0xff, "+
+					"which is not UTF-8",
 				"|-- report this to the authors of cafe",
 				"|-- v2 sets $.apiVersion from this value",
 				"`-- v\u2401\ufffd3 sets $.apiVersion from this value",

@@ -195,6 +195,10 @@ func (d *Doc) replaceField(ctx context.Context, n *Node, p *place, text string) 
 	// that YAML does not allow fails the write where it fails a Set.
 	origin := d.addNote(d.setNote(p, "sets "+n.path.String()))
 
+	if what, ok := invalidByteIn(newText); ok {
+		return change, d.valueBug(n, origin, invalidByteError(what))
+	}
+
 	if what, ok := unprintableIn(newText); ok {
 		return change, d.valueBug(n, origin, unprintableError(what))
 	}

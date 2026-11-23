@@ -871,20 +871,26 @@ func (d *Doc) runSize() int {
 // from start, the text before a call, and holds a character that a call
 // wrote and that YAML does not allow in a text, as [printable] tells. A
 // character of the user's text that a call kept at its place or moved does
-// not count. Outside double quotes, go-yaml's encoder writes each byte of
-// a string that is not UTF-8 as it is, so the problem names the encoder
-// and the byte. It matches [ErrEngine], and it binds at the byte or the
-// character.
+// not count. The double quotes that the edit writes for a key keep a byte
+// that is not UTF-8 as it is, so the problem of such a byte names the edit
+// as its writer. The problem of another character names go-yaml's
+// encoder, which writes each character of a tag as it is. The problem
+// matches [ErrEngine], and it binds at the byte or the character.
 func (d *Doc) printableProblem(start string) error {
 	if d.cur == start {
 		return nil
 	}
 
 	for off := 0; off < len(d.cur); {
-		_, size := utf8.DecodeRuneInString(d.cur[off:])
+		r, size := utf8.DecodeRuneInString(d.cur[off:])
 
 		if what, ok := unprintableAt(d.cur, off); ok && !d.userText(off, size) {
-			return d.engineAtOffset(off, size, unprintableError(what))
+			reason := unprintableError(what)
+			if r == utf8.RuneError && size <= 1 {
+				reason = invalidByteError(what)
+			}
+
+			return d.engineAtOffset(off, size, reason)
 		}
 
 		off += size
@@ -894,12 +900,20 @@ func (d *Doc) printableProblem(start string) error {
 }
 
 // unprintableError returns the reason of a text that holds what, the words
-// that name a character or a byte that YAML does not allow in a text, as
-// [unprintableAt] names it. Outside double quotes, go-yaml's encoder
-// writes each byte of a string that is not UTF-8 as it is. It also writes
-// each character of a tag as it is.
+// that name a character that YAML does not allow in a text, as
+// [unprintableAt] names it. Go-yaml's encoder writes each character of a
+// tag as it is.
 func unprintableError(what string) error {
 	return fmt.Errorf("go-yaml's encoder writes %s as it is, and YAML does not allow that in a text", what)
+}
+
+// invalidByteError returns the reason of a text that a call wrote and that
+// holds what, the words that name a byte that is not UTF-8, as
+// [unprintableAt] names it. The encoder refuses a string that is not
+// UTF-8, so the edit writes such a byte as it is only in the double quotes
+// of [doubleQuoted].
+func invalidByteError(what string) error {
+	return fmt.Errorf("the edit writes %s and YAML does not allow that in a text", what)
 }
 
 // unprintableIn returns the words that name the first character of text

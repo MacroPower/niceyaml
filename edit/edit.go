@@ -34,7 +34,10 @@ var (
 	// than YAML does, in one of the ways that the Supported YAML section of
 	// the package documentation lists. The engine wrote that text, so the
 	// call fails with ErrEngine. The message names go-yaml in each of those
-	// cases. A call whose text go-yaml's parser refuses at a comment line
+	// cases. YAML has no escape for a byte that is not UTF-8, so a key with
+	// such a byte that a call writes for a name, as [Node.SetKey] does,
+	// keeps the byte as it is. That call fails with ErrEngine too, and the
+	// message names the byte. A call whose text go-yaml's parser refuses at a comment line
 	// right after the blank lines of a block scalar without text fails with
 	// a problem of the document instead. So does an Apply whose removal
 	// empties a block collection at the root and leaves its "{}" or "[]"
@@ -138,11 +141,13 @@ var (
 	// with a value that holds itself or that holds two keys that a decode
 	// reads as one. So does YAML of a marshaler that holds more than one
 	// document or that repeats a key, and a chain of more than 1,000
-	// marshalers. The error binds at the place of the call. The program
-	// wrote the value, so [go.jacobcolvin.com/niceyaml.IsInvalid] reports
-	// false for the error. A value that go-yaml's encoder cannot write so
-	// that go-yaml reads it back fails with [ErrEngine] instead, as
-	// [Node.Set] describes.
+	// marshalers. It fails so with a value that holds a string that is not
+	// UTF-8, as a value or as a key, and that error also matches
+	// [go.jacobcolvin.com/niceyaml/encoder.ErrEncode]. The error binds at
+	// the place of the call. The program wrote the value, so
+	// [go.jacobcolvin.com/niceyaml.IsInvalid] reports false for the error.
+	// A value that go-yaml's encoder cannot write so that go-yaml reads it
+	// back fails with [ErrEngine] instead, as [Node.Set] describes.
 	//
 	// A Set also fails so with a marshaler that returns an error, and
 	// [errors.Is] and [errors.As] find the error of the marshaler through

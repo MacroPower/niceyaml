@@ -1875,8 +1875,8 @@ func TestRegistry_Load_Unversioned(t *testing.T) {
 			},
 			files: map[string]string{"cafe.yaml": "seats: 40\n"},
 			err: stringtest.JoinLF(
-				"config/cafe.yaml:1:1: $: go-yaml's encoder writes the byte 0xff, which is not UTF-8, as it is, "+
-					"and YAML does not allow that in a text",
+				"config/cafe.yaml:1:1: $: value does not encode: string holds the byte 0xff, "+
+					"which is not UTF-8",
 				"|-- the document has no apiVersion and no kind, so cafe reads it as an unversioned Cafe",
 				"|-- move the file out of config if it is not a Cafe",
 				"|-- report this to the authors of cafe",
