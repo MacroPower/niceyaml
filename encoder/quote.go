@@ -19,7 +19,9 @@ import (
 // forbids block style there, so the quoter sets flow style on each
 // collection in a flow collection. In a flow collection, it also writes
 // an empty node as a value that go-yaml prints, because the go-yaml
-// printer writes an empty node as nothing.
+// printer writes an empty node as nothing. In any style, it writes an
+// empty node under the "!!binary" tag as an empty quoted string, which
+// go-yaml reads as empty bytes.
 type quoter struct {
 	// Collects the blocks that [quoter.unblock] replaces.
 	blocks *[]block
@@ -48,14 +50,19 @@ func (q quoter) Visit(node ast.Node) ast.Visitor {
 	case *ast.TagNode:
 		q.tagged = true
 
-		if null, ok := n.Value.(*ast.NullNode); ok && q.flow && null.Token.Type == token.ImplicitNullType &&
-			scalarTags[token.ReservedTagKeyword(n.Start.Value)] {
+		tag := token.ReservedTagKeyword(n.Start.Value)
+		if null, ok := n.Value.(*ast.NullNode); ok && null.Token.Type == token.ImplicitNullType &&
+			(q.flow && scalarTags[tag] || tag == token.BinaryTag) {
 			// The go-yaml parser rejects a tag on an empty node before
 			// the end of a flow collection. Under the tag of a scalar
 			// type, the quoter writes an empty quoted string instead.
 			// [scalarTags] names the tags where go-yaml reads that string
 			// as another value than the empty node. [quoter.emptyTag]
-			// replaces an empty node under any other tag.
+			// replaces an empty node under any other tag. Go-yaml's
+			// decoder rejects an empty node under "!!binary" in block
+			// style too. Under that tag, it reads the empty quoted string
+			// as empty bytes, the value of the empty base64 text. So the
+			// quoter writes that string in block style as well.
 			pos := *null.Token.Position
 			n.Value = ast.String(&token.Token{Type: token.DoubleQuoteType, Position: &pos})
 		}
@@ -406,8 +413,9 @@ var (
 	// node, except under "!!float", "!!bool", and "!!binary". Under
 	// "!!float", go-yaml reads the empty node as the int 0 and the string as
 	// the float 0. Go-yaml rejects an empty node under the other two tags.
-	// Under "!!binary", it reads the string as empty bytes. Under "!!bool",
-	// it rejects the string too, so [Encoder.Encode] refuses an empty node
+	// Under "!!binary", it reads the string as empty bytes, so the quoter
+	// writes that string in block style as well. Under "!!bool", it
+	// rejects the string too, so [Encoder.Encode] refuses an empty node
 	// under that tag before the quoter runs.
 	scalarTags = map[token.ReservedTagKeyword]bool{
 		token.StringTag:    true,

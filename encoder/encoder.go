@@ -525,7 +525,10 @@ func newDocEncoder(c config) *docEncoder {
 // a scalar type, such as !!str or !!int, it writes an empty quoted string
 // under the tag. Go-yaml reads an empty node under any other tag, such as
 // !!map or a custom tag, as null. So Encode drops such a tag from an
-// empty node in a flow collection.
+// empty node in a flow collection. Go-yaml rejects an empty node under
+// the !!binary tag in block style too. Encode writes an empty quoted
+// string under that tag in every style, and go-yaml reads that string
+// as empty bytes.
 //
 // Encode returns an error that matches [ErrEncode] when v does not encode
 // to YAML. A value of a type go-yaml does not encode and a marshaler that

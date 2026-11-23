@@ -89,6 +89,7 @@ func TestEncoder_Encode_quoting(t *testing.T) {
 
 	flow := encoder.WithFlow(true)
 	literalStyle := encoder.WithLiteralBlocks(true)
+	emptyBinary := yamltest.FirstDocument(t, "x: !!binary\n").AST()
 
 	tcs := map[string]struct {
 		input any
@@ -395,6 +396,43 @@ func TestEncoder_Encode_quoting(t *testing.T) {
 			decoded: map[string]map[string]any{"k": {"y": float64(0)}},
 			opts:    []encoder.Option{flow},
 			want:    stringtest.LinesLF(`{k: {y: !!float ""}}`),
+		},
+		"marshaled empty node under binary tag": {
+			input:   map[string]rawYAML{"k": "x: !!binary\n"},
+			decoded: map[string]map[string]any{"k": {"x": []byte{}}},
+			want:    stringtest.LinesLF("k:", `  x: !!binary ""`),
+		},
+		"marshaled empty node under binary tag in flow mapping": {
+			input:   map[string]rawYAML{"k": "x: !!binary\n"},
+			decoded: map[string]map[string]any{"k": {"x": []byte{}}},
+			opts:    []encoder.Option{flow},
+			want:    stringtest.LinesLF(`{k: {x: !!binary ""}}`),
+		},
+		"marshaled empty node under binary tag and anchor in sequence": {
+			input:   map[string]rawYAML{"k": "- &a !!binary\n"},
+			decoded: map[string][]any{"k": {[]byte{}}},
+			want:    stringtest.LinesLF("k:", `- &a !!binary ""`),
+		},
+		"marshaled empty node under binary tag at root": {
+			input: rawYAML("!!binary\n"),
+			// The decode target is a pointer to any, because go-yaml does
+			// not decode the tag into []byte.
+			decoded: func() *any {
+				var v any = []byte{}
+
+				return &v
+			}(),
+			want: stringtest.LinesLF(`!!binary ""`),
+		},
+		"marshaled empty key under binary tag": {
+			input:   map[string]rawYAML{"k": "? !!binary\n: c\n"},
+			decoded: map[string]map[string]string{"k": {"": "c"}},
+			want:    stringtest.LinesLF("k:", `  ? !!binary "": c`),
+		},
+		"AST with empty node under binary tag as a map value": {
+			input:   map[string]any{"k": emptyBinary},
+			decoded: map[string]map[string]any{"k": {"x": []byte{}}},
+			want:    stringtest.LinesLF("k:", `  x: !!binary ""`),
 		},
 		"marshaled empty nodes under tags of no scalar type in flow mapping": {
 			input:   map[string]rawYAML{"j": "a: !!map\n", "k": "- !!seq\n", "m": "a: &a !foo\n"},
