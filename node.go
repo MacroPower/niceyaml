@@ -225,7 +225,8 @@ func (n *Node) DocumentAST() *ast.DocumentNode {
 // ErrSyntax for a plain scalar there that holds a flow indicator, and for a
 // line of a flow collection that does not pass the indent of the block
 // node that holds the collection. It matches ErrSyntax for the name
-// of an anchor or an alias that holds a flow indicator. It matches
+// of an anchor or an alias that holds a flow indicator, and for a block
+// scalar in a flow collection. It matches
 // ErrSyntax for a key on the line below a single pair of a flow sequence
 // without a "," before it, as ErrSyntax describes. It matches [ErrLimit]
 // for a document past the depth limit or the document byte limit, and for

@@ -222,6 +222,14 @@
 // The parse of a Source refuses such a name with a syntax error at the "&"
 // of the anchor or the "*" of the alias.
 //
+// YAML allows a literal or a folded block scalar only in block context, so
+// a flow collection does not hold one. Go-yaml's parser takes one as an
+// entry of a flow sequence or as a value of a flow mapping, so
+// yaml.Unmarshal reads "[x, >\n  a\n]" as ["x", "a\n"]. The parse of a
+// Source refuses such a scalar with a syntax error at its header, the "|"
+// or the ">". A quoted scalar in a flow collection can span lines, as in
+// "[x, 'a\n  b']".
+//
 // YAML reads a line of a flow collection only when the spaces that open the
 // line pass the indent of the block node that holds the collection. Go-yaml's
 // parser does not check that indent, so yaml.Unmarshal reads "key: [a\n]" as

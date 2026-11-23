@@ -2705,6 +2705,24 @@ func TestSource_File_ErrSyntax(t *testing.T) {
 			input: stringtest.LinesLF("a: 1", "---", "b: [&c} 1]", "---", "e: 3"),
 			want:  []bool{false, true, false},
 		},
+		// YAML allows a block scalar only in block context. The go-yaml
+		// parser takes one in a flow collection, and the Source refuses it.
+		"folded scalar in a flow sequence": {
+			input: stringtest.LinesLF("[x, >", "  a", "]"),
+			want:  []bool{true},
+		},
+		"literal scalar in a flow mapping": {
+			input: stringtest.LinesLF("{k: |", "  a]", "}"),
+			want:  []bool{true},
+		},
+		"literal scalar in a flow sequence in the second document": {
+			input: stringtest.LinesLF("a: 1", "---", "b: [|-", "    -", "  ]", "---", "e: 3"),
+			want:  []bool{false, true, false},
+		},
+		"literal scalar in a block mapping": {
+			input: stringtest.LinesLF("a: |", "  [b}"),
+			want:  []bool{false},
+		},
 		// The parser takes an alias with no anchor, and a decode rejects
 		// it.
 		"alias with no anchor": {

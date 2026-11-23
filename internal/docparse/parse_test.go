@@ -636,16 +636,6 @@ func TestParse_FlowSequence(t *testing.T) {
 		"brace in a plain scalar of a block mapping": {
 			input: stringtest.LinesLF("a: b}", "c]: d"),
 		},
-		// The content of a block scalar is not a plain scalar.
-		"brace in a literal scalar of a flow sequence": {
-			input: stringtest.LinesLF("[x, |", "  a}", "]"),
-		},
-		"bracket in a folded scalar of a flow mapping": {
-			input: stringtest.LinesLF("{k: > # c", "  a,b]", "}"),
-		},
-		"dash in a literal scalar of a flow sequence": {
-			input: stringtest.LinesLF("[x, |-", "  -", "]"),
-		},
 		"a negative number": {
 			input: "[-1]\n",
 		},
@@ -800,6 +790,123 @@ func TestParse_AnchorName(t *testing.T) {
 		},
 		"brace after an anchor in a literal scalar": {
 			input: stringtest.LinesLF("a: |", "  &x} 1"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			r := docparse.Parse(tokens.Tokenize(tc.input))
+
+			if tc.at == nil {
+				require.Empty(t, r.Failures)
+
+				return
+			}
+
+			require.Len(t, r.Failures, 1)
+
+			var syntaxErr *yaml.SyntaxError
+
+			require.ErrorAs(t, r.Failures[0].Err, &syntaxErr)
+			assert.Equal(t, tc.msg, syntaxErr.Message)
+			require.NotNil(t, syntaxErr.Token)
+			assert.Equal(t, *tc.at, position.NewFromToken(syntaxErr.Token))
+		})
+	}
+}
+
+func TestParse_FlowBlockScalar(t *testing.T) {
+	t.Parallel()
+
+	const blockMsg = "a flow collection cannot hold a block scalar"
+
+	tcs := map[string]struct {
+		input string
+		// The line and column of the token that the failure binds at, or
+		// nil when the text parses.
+		at *position.Position
+		// The message of the failure, when the text does not parse.
+		msg string
+	}{
+		// Go-yaml's parser takes each of these block scalars, but YAML
+		// allows a block scalar only in block context.
+		"literal scalar in a flow sequence": {
+			input: stringtest.LinesLF("[x, |", "  a", "]"),
+			at:    new(position.New(0, 4)),
+			msg:   blockMsg,
+		},
+		"folded scalar in a flow sequence": {
+			input: stringtest.LinesLF("[x, >", "  a", "]"),
+			at:    new(position.New(0, 4)),
+			msg:   blockMsg,
+		},
+		"dash in a literal scalar of a flow sequence": {
+			input: stringtest.LinesLF("[x, |-", "  -", "]"),
+			at:    new(position.New(0, 4)),
+			msg:   blockMsg,
+		},
+		"brace in a literal scalar of a flow sequence": {
+			input: stringtest.LinesLF("[x, |", "  a}", "]"),
+			at:    new(position.New(0, 4)),
+			msg:   blockMsg,
+		},
+		"literal scalar in a value of a flow mapping": {
+			input: stringtest.LinesLF("{k: |", "  a]", "}"),
+			at:    new(position.New(0, 4)),
+			msg:   blockMsg,
+		},
+		"folded scalar with a comment in a value of a flow mapping": {
+			input: stringtest.LinesLF("{k: > # c", "  a,b]", "}"),
+			at:    new(position.New(0, 4)),
+			msg:   blockMsg,
+		},
+		"literal scalar in an explicit key of a flow mapping": {
+			input: stringtest.LinesLF("{? |", "  a", ": b}"),
+			at:    new(position.New(0, 3)),
+			msg:   blockMsg,
+		},
+		"literal scalar after a tag": {
+			input: stringtest.LinesLF("[!t |", "  a", "]"),
+			at:    new(position.New(0, 4)),
+			msg:   blockMsg,
+		},
+		"literal scalar after an anchor": {
+			input: stringtest.LinesLF("[&a |", "  a", "]"),
+			at:    new(position.New(0, 4)),
+			msg:   blockMsg,
+		},
+		"literal scalar on a line of its own": {
+			input: stringtest.LinesLF("[", "|", " a", "]"),
+			at:    new(position.New(1, 0)),
+			msg:   blockMsg,
+		},
+		"literal scalar in a nested flow sequence": {
+			input: stringtest.LinesLF("a: [[x, |", "    b", "  ]]"),
+			at:    new(position.New(0, 8)),
+			msg:   blockMsg,
+		},
+		"literal scalar in a flow sequence of the second document": {
+			input: stringtest.LinesLF("a: 1", "---", "[|", "  b", "]"),
+			at:    new(position.New(2, 1)),
+			msg:   blockMsg,
+		},
+		// The parser refuses the "[" after the first scalar, before the
+		// block scalar.
+		"literal scalar after a refused token": {
+			input: stringtest.LinesLF("[a[b, |", "  c", "]]"),
+			at:    new(position.New(0, 2)),
+			msg:   "',' or ']' must be specified",
+		},
+		"literal scalar in a block mapping": {
+			input: stringtest.LinesLF("a: |", "  [x}", "b: [c]"),
+		},
+		"folded scalar after a flow sequence": {
+			input: stringtest.LinesLF("a: [b]", "c: >", "  d"),
+		},
+		"literal scalar in a block sequence": {
+			input: stringtest.LinesLF("- |", "  {a", "- [b]"),
 		},
 	}
 

@@ -846,6 +846,28 @@ func TestNode_Set(t *testing.T) {
 				"edit_test.yamlMarshaler writes the name of an anchor or an alias that holds a flow indicator " +
 				"at 1:2 of that YAML, which YAML does not allow",
 		},
+		"YAML marshaler that writes a block scalar in a flow sequence": {
+			// Go-yaml's parser reads ["x", "a\n"], but YAML allows a block
+			// scalar only in block context, so the problem is the
+			// marshaler's.
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("b"),
+			value:  yamlMarshaler("[x, |\n  a\n]\n"),
+			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 cannot write the value of $.b: the MarshalYAML method of " +
+				"edit_test.yamlMarshaler writes a block scalar in a flow collection " +
+				"at 1:5 of that YAML, which YAML does not allow",
+		},
+		"YAML marshaler that writes a block scalar in a flow sequence that go-yaml refuses": {
+			// Go-yaml's parser refuses the text at its second line, but the
+			// block scalar already breaks YAML, so the problem is the
+			// marshaler's and not the engine's.
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("b"),
+			value:  yamlMarshaler("[x, ? >\n  a\n]\n"),
+			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 cannot write the value of $.b: the MarshalYAML method of " +
+				"edit_test.yamlMarshaler writes a block scalar in a flow collection " +
+				"at 1:7 of that YAML, which YAML does not allow",
+		},
 		"YAML marshaler that writes a flow indicator in the name of an anchor that go-yaml refuses": {
 			// Go-yaml's parser refuses the "]" after the name "x}", but the
 			// name already breaks YAML, so the problem is the marshaler's

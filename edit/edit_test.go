@@ -842,6 +842,11 @@ func TestNew_Unparsed(t *testing.T) {
 			// it.
 			text: "[a}]\n",
 		},
+		"block scalar in a flow sequence": {
+			// Go-yaml's parser reads the text as ["x", "a\n"], and the Source
+			// refuses it.
+			text: "[x, >\n  a\n]\n",
+		},
 	}
 
 	for name, tc := range tcs {

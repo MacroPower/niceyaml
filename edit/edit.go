@@ -100,7 +100,8 @@ var (
 	// collection that does not pass the indent of the block node that holds
 	// the collection, as in "x: [y\n]". So does YAML of a marshaler with
 	// the name of an anchor or an alias that holds a flow indicator, as in
-	// "[&x} 1]". So does YAML of a marshaler that holds a
+	// "[&x} 1]", or with a block scalar in a flow collection, as in
+	// "[x, |\n  a\n]". So does YAML of a marshaler that holds a
 	// key on a line that continues a plain scalar in a flow collection, as
 	// in "{x: y\n    z: w}", where the parse refuses that key. So does YAML
 	// of a marshaler with a key on the line below a single pair of a flow

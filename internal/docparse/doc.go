@@ -9,9 +9,10 @@
 // indicator as a plain scalar, as in "[-]", and it reads a plain scalar
 // in a flow collection that holds a flow indicator, as in "[a}]". It
 // reads a flow indicator into the name of an anchor or an alias, as in
-// "[&x} 1]" and "a: &x, 1". It takes a "-" that starts a line of a flow
-// collection after an explicit key, where the line does not pass the
-// indent of the block node that holds the collection, as in
+// "[&x} 1]" and "a: &x, 1". It takes a block scalar in a flow
+// collection, as in "[x, |\n  a\n]". It takes a "-" that starts a line
+// of a flow collection after an explicit key, where the line does not
+// pass the indent of the block node that holds the collection, as in
 // "key: {? A\n- b}". YAML refuses each of them. The parser reads a key
 // on the line below a single pair of a flow sequence into the pair, as in
 // "[a: b\n c: d]". YAML holds one key in
@@ -24,7 +25,8 @@
 // [Parse] avoids each of these faults. It cuts the stream into runs that
 // each parse on their own, and drops the comments that make the parser
 // reject or misread valid YAML. It fails a run with any such "-", plain
-// scalar, or name, unless the parser refuses an earlier token of the run.
+// scalar, name, or block scalar, unless the parser refuses an earlier
+// token of the run.
 // The error of the parser also wins for a "-" that starts a line right
 // below a plain scalar whenever the parser refuses the run. It fails a
 // run where the parser reads more than one key into a single pair of a

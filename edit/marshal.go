@@ -88,8 +88,9 @@ func refusal(err error, text string) string {
 // are a plain scalar there that starts with a "-" right before a flow
 // indicator and one that holds a flow indicator, and a line of a flow
 // collection that does not pass the indent of the block node that holds
-// the collection. So is the name of an anchor or an alias that holds
-// a flow indicator, because YAML does not allow any of them. The finder can
+// the collection. So are the name of an anchor or an alias that holds
+// a flow indicator and a block scalar in a flow collection, because YAML
+// does not allow any of them. The finder can
 // also refuse text that go-yaml's parser took. Such a refusal
 // is the problem of the marshaler when it binds at a key on a line that
 // continues a plain scalar in a flow collection, as [refusesCutKey] finds
@@ -125,7 +126,8 @@ func marshaledYAML(v reflect.Value, method string, doc []byte, err error) ([]ins
 		// repeated key but refuses a "-" right after an anchor or a tag on
 		// its line and a "-" or a plain scalar inside a flow collection that
 		// YAML refuses. It also refuses the name of an anchor or an alias
-		// that holds a flow indicator. Those refusals are also the problem
+		// that holds a flow indicator and a block scalar in a flow
+		// collection. Those refusals are also the problem
 		// of the marshaler.
 		enc, derr := encodedDoc(string(doc))
 		problem := refusedProblem(derr, who)
@@ -212,8 +214,9 @@ func marshaledYAML(v reflect.Value, method string, doc []byte, err error) ([]ins
 // starts an entry inside a flow collection. It also refuses a plain scalar
 // there that starts with a "-" right before a flow indicator or that holds
 // a flow indicator, and a line of a flow collection that does not pass the
-// indent of the block node that holds the collection, and the
-// name of an anchor or an alias that holds a flow indicator. YAML does
+// indent of the block node that holds the collection, the name of an
+// anchor or an alias that holds a flow indicator, and a block scalar in a
+// flow collection. YAML does
 // not allow any of them, so the refusal is the problem of the marshaler,
 // also where go-yaml's parser refuses the token.
 func refusedProblem(err error, who string) error {
@@ -237,6 +240,8 @@ func refusedProblem(err error, who string) error {
 		what = "a plain scalar that holds a flow indicator in a flow collection"
 	case docparse.NameIndicatorMessage:
 		what = "the name of an anchor or an alias that holds a flow indicator"
+	case docparse.FlowBlockScalarMessage:
+		what = "a block scalar in a flow collection"
 	case docparse.FlowIndentMessage:
 		what = "a line of a flow collection that does not pass the indent of the block node of the collection"
 	default:

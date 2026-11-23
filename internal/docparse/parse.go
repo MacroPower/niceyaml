@@ -48,7 +48,8 @@ type Result struct {
 // collection starts with a "-" right before a flow indicator, as in
 // "[-]". So does a plain scalar there that holds a flow indicator, as in
 // "[a}]". So does the name of an anchor or an alias that holds a flow
-// indicator, as in "[&x} 1]". The parser refuses the "-" after an
+// indicator, as in "[&x} 1]". So does a block scalar in a flow
+// collection, as in "[x, |\n  a\n]". The parser refuses the "-" after an
 // anchor, but it takes the others. A run with a "-" that starts a line
 // right below a plain scalar in a flow collection fails too, when the
 // parser takes the run. So does a run where the parser reads more than
@@ -378,6 +379,11 @@ const FlowScalarMessage = "a plain scalar in a flow collection cannot hold a flo
 // "[&x} 1]", which fails the run of the name.
 const NameIndicatorMessage = "the name of an anchor or an alias cannot hold a flow indicator"
 
+// FlowBlockScalarMessage is the message of the [*yaml.SyntaxError] of a
+// literal or a folded block scalar inside a flow collection, as in
+// "[x, |\n  a\n]", which fails the run of the scalar.
+const FlowBlockScalarMessage = "a flow collection cannot hold a block scalar"
+
 // FlowIndentMessage is the message of the [*yaml.SyntaxError] of a line of
 // a flow collection that does not pass the indent of the block node that
 // holds the collection. YAML requires each line of the collection to pass
@@ -479,11 +485,12 @@ func flowPairKey(pair *ast.MappingNode) *token.Token {
 
 // misreadError returns the syntax error of the first token of run that
 // the go-yaml parser can misread, or nil. Such a token is a "-", a plain
-// scalar, or an anchor or an alias. The "-" starts a block sequence where
-// YAML does not hold one, starts a plain scalar that YAML refuses, or
-// starts a line right below a plain scalar in a flow collection. The
-// plain scalar holds a flow indicator inside a flow collection. The name
-// of the anchor or the alias holds a flow indicator. It reports whether
+// scalar, an anchor or an alias, or the header of a block scalar. The "-"
+// starts a block sequence where YAML does not hold one, starts a plain
+// scalar that YAML refuses, or starts a line right below a plain scalar in
+// a flow collection. The plain scalar holds a flow indicator inside a flow
+// collection. The name of the anchor or the alias holds a flow indicator.
+// The block scalar sits inside a flow collection. It reports whether
 // the token is a "-" that starts a line right below a plain scalar.
 //
 // YAML puts a line break between the properties of a block sequence and
@@ -517,8 +524,7 @@ func flowPairKey(pair *ast.MappingNode) *token.Token {
 // of that scalar has [FlowScalarMessage], and it binds at the start of the
 // scalar. The lexer reads a "-" right before such an indicator into the
 // scalar too, as in "[-}]". The name of an anchor or an alias is not a
-// plain scalar, and neither is the content of a block scalar, as
-// [blockContent] tells.
+// plain scalar.
 //
 // YAML does not allow a flow indicator in the name of an anchor or an
 // alias, inside a flow collection or outside one. The go-yaml lexer ends
@@ -540,6 +546,12 @@ func flowPairKey(pair *ast.MappingNode) *token.Token {
 // so does the parser. The error of such a "-" has [FlowSequenceMessage],
 // and the run takes the error of the parser in its place when the parser
 // refuses the run.
+//
+// YAML allows a literal or a folded block scalar only in block context,
+// so a flow collection does not hold one. The go-yaml parser takes one as
+// an entry of a flow sequence or as a value of a flow mapping, so it reads
+// "[x, >\n  a\n]" as ["x", "a\n"]. The error of such a scalar has
+// [FlowBlockScalarMessage], and it binds at the header of the scalar.
 //
 // The run fails with this error unless the parser refuses a token before
 // the token of the error. The error of a "-" binds at the "-".
@@ -573,6 +585,11 @@ func misreadError(run token.Tokens) (*yaml.SyntaxError, bool) {
 				return &yaml.SyntaxError{Message: FlowSequenceMessage, Token: tk}, false
 			}
 
+		case token.LiteralType, token.FoldedType:
+			if depth > 0 {
+				return &yaml.SyntaxError{Message: FlowBlockScalarMessage, Token: tk}, false
+			}
+
 		case token.AnchorType, token.AliasType:
 			if i+1 < len(run) && run[i+1].Type == token.StringType &&
 				strings.ContainsAny(run[i+1].Value, flowIndicators) {
@@ -582,10 +599,6 @@ func misreadError(run token.Tokens) (*yaml.SyntaxError, bool) {
 		case token.StringType:
 			// The string is the name of the anchor or the alias.
 			if depth <= 0 || i > 0 && (run[i-1].Type == token.AnchorType || run[i-1].Type == token.AliasType) {
-				continue
-			}
-
-			if blockContent(run, i) {
 				continue
 			}
 
@@ -609,26 +622,6 @@ func misreadError(run token.Tokens) (*yaml.SyntaxError, bool) {
 // flowIndicators holds the flow indicators of YAML. A plain scalar inside
 // a flow collection does not hold any of them.
 const flowIndicators = ",[]{}"
-
-// blockContent reports whether the string at run[i] is the content of a
-// literal or a folded block scalar. The go-yaml lexer gives that content
-// a token of the string type right after the header of the block
-// scalar. The comment on the line of the header sits between the two
-// tokens.
-func blockContent(run token.Tokens, i int) bool {
-	for j := i - 1; j >= 0; j-- {
-		switch run[j].Type {
-		case token.CommentType:
-			continue
-		case token.LiteralType, token.FoldedType:
-			return true
-		default:
-			return false
-		}
-	}
-
-	return false
-}
 
 // beforeFlowIndicator reports whether a flow indicator follows the plain
 // scalar "-" at run[i] inside a flow collection. The go-yaml lexer ends

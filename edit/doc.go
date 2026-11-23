@@ -613,7 +613,8 @@
 // YAML refuses each such "-", but the parser takes it. They also include
 // one with a plain scalar in a flow collection that holds a flow
 // indicator, as in "[a}]", or with the name of an anchor or an alias
-// that holds a flow indicator, as in "[&x} 1]". YAML refuses each of
+// that holds a flow indicator, as in "[&x} 1]", or with a block scalar
+// in a flow collection, as in "[x, |\n  a\n]". YAML refuses each of
 // them, and the parser takes it. They also include one with a line of a
 // flow collection that does not pass the indent of the block node that
 // holds the collection, as in "key: [a\n]". They also include
