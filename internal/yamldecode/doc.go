@@ -72,6 +72,12 @@
 //     of that anchor. It drops the fields of a failed call of the callback
 //     of an unmarshaler, unless the unmarshaler returns the error of that
 //     call as it is.
+//   - With [StartValue], the decoder starts each value that it creates from
+//     the value that a function gives its type, where go-yaml starts it from
+//     zero. An alias takes the value of its anchor only where its place
+//     starts from the value that the place of the anchor started from. A
+//     field of an inline struct that the struct that holds it names too keeps
+//     the value that it started from, where go-yaml sets it to zero.
 //
 // The files that sync.sh does not write stand in for the parts of go-yaml
 // that the copy needs outside those files. The decode options are copies of

@@ -15018,7 +15018,8 @@ func (l *problemRepeatedLimits) UnmarshalYAML(unmarshal func(any) error) error {
 }
 
 // problemDefaulted decodes itself and refuses to start from the port that
-// its type defaults set, so only the fill of the defaults fails for it.
+// its type defaults set, so only a decode under those defaults fails for
+// it.
 type problemDefaulted struct {
 	Port int `yaml:"port"`
 }
@@ -16646,10 +16647,8 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 				"1:13: $.b.cpu: limits expected integer, got string: expected integer, got string; see the limits docs",
 			),
 		},
-		// The main decode passes, and the fill of the defaults fails. The
-		// fill returns the error without the path of its read, so it binds
-		// at the path of the value in the document.
-		"unmarshaler that the fill of the defaults fails": {
+		// The unmarshaler refuses the defaults that its value starts from.
+		"unmarshaler that refuses its defaults": {
 			decode: decodeAs[struct {
 				P problemDefaulted `yaml:"p"`
 				N int              `yaml:"n"`
@@ -17966,8 +17965,8 @@ func TestDocument_Decode_Problems_Warnings(t *testing.T) {
 	t.Parallel()
 
 	// The decoder calls the method once, and the method warns once. The
-	// fill of the defaults and the walk that spells the map keys call it
-	// again. The collector does not get the warnings of those calls.
+	// walk that spells the map keys calls it again. The collector does not
+	// get the warnings of that call.
 	deprecated := "inner.yaml: warning: a is deprecated"
 	legacy := &problemModeWarner{Mode: "legacy"}
 
@@ -18005,9 +18004,8 @@ func TestDocument_Decode_Problems_Warnings(t *testing.T) {
 			want:   deprecated,
 			err:    "1:1: $.self: a must not be negative",
 		},
-		// The decoder starts the element from zero, so the decode
-		// decodes it again from its defaults.
-		"the fill of an element from its defaults": {
+		// The decoder starts the element from its defaults.
+		"an element that starts from its defaults": {
 			target: &[]problemWarner{},
 			input:  "- {a: 1}\n",
 			opts: []niceyaml.DecodeOption{
@@ -18015,22 +18013,20 @@ func TestDocument_Decode_Problems_Warnings(t *testing.T) {
 			},
 			want: deprecated,
 		},
-		// The decoder calls the method on an element that starts from
-		// zero, and the fill calls it again on one that starts from the
-		// defaults. The element keeps the mode of the second call, and
-		// the collector keeps the warning of the first.
-		"the fill of an element whose method warns about its defaults": {
+		// The decoder calls the method once, on an element that starts
+		// from the defaults, so the warning names the mode of the
+		// defaults.
+		"an element whose method warns about its defaults": {
 			target: &[]problemModeWarner{},
 			value:  &[]problemModeWarner{{Mode: "legacy"}},
 			input:  "- {}\n",
 			opts: []niceyaml.DecodeOption{
 				niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(w *problemModeWarner) { w.Mode = "legacy" })),
 			},
-			want: `inner.yaml: warning: mode ""`,
+			want: `inner.yaml: warning: mode "legacy"`,
 		},
-		// The decoder starts the element and its field from zero, so the
-		// fill decodes the field again from its defaults.
-		"the fill of a field of an element": {
+		// The decoder starts the field of the element from its defaults.
+		"a field of an element": {
 			target: &[]problemWarned{},
 			input:  "- {self: {a: 1}, port: 1}\n",
 			opts: []niceyaml.DecodeOption{
@@ -18050,16 +18046,14 @@ func TestDocument_Decode_Problems_Warnings(t *testing.T) {
 			},
 			want: `inner.yaml: warning: mode "legacy"`,
 		},
-		// The decode starts from the map that the target holds, so the
-		// fill decodes each key again to find its entry.
-		"the fill of a map that the target holds": {
+		// The decode starts from the map that the target holds.
+		"a map that the target holds": {
 			target: &map[problemWarnerKey]int{},
 			input:  "a: 1\n",
 			want:   deprecated,
 		},
-		// The key type has defaults, so the fill decodes each key again
-		// to find its entry, although the target holds a nil map.
-		"the fill of a map whose key type has defaults": {
+		// The decoder starts each key from the defaults of its type.
+		"a map whose key type has defaults": {
 			target: new(map[problemWarnerKey]int),
 			value:  &map[problemWarnerKey]int{"a": 1},
 			input:  "a: 1\n",
@@ -18068,9 +18062,9 @@ func TestDocument_Decode_Problems_Warnings(t *testing.T) {
 			},
 			want: deprecated,
 		},
-		// The key type has a function of TypeDefaults, so the fill decodes
-		// each key again, although the function leaves the key at zero.
-		"the fill of a map whose key type has a function that sets nothing": {
+		// The function of TypeDefaults for the key type leaves the key at
+		// zero.
+		"a map whose key type has a function that sets nothing": {
 			target: new(map[problemWarnerKey]int),
 			value:  &map[problemWarnerKey]int{"a": 1},
 			input:  "a: 1\n",
@@ -18079,10 +18073,9 @@ func TestDocument_Decode_Problems_Warnings(t *testing.T) {
 			},
 			want: deprecated,
 		},
-		// The struct that holds the map inline has defaults, so the fill
-		// builds the struct again and decodes each key of its mapping.
-		// The target starts from its own value, so its port stays zero.
-		"the fill of a map that a struct with defaults holds inline": {
+		// The struct that holds the map inline has defaults, but the
+		// target starts from its own value, so its port stays zero.
+		"a map that a struct with defaults holds inline": {
 			target: &problemWarnerInline{},
 			value:  &problemWarnerInline{Extra: map[problemWarnerKey]int{"a": 1}},
 			input:  "a: 1\n",
@@ -18092,8 +18085,7 @@ func TestDocument_Decode_Problems_Warnings(t *testing.T) {
 			want: deprecated,
 		},
 		// The value below the key validates itself, so the walk decodes
-		// the key again to name its path. The target holds a nil map, so
-		// the fill does not decode the key.
+		// the key again to name its path.
 		"the key that the self-validation walk spells": {
 			target: new(map[problemWarnerKey]problemValid),
 			input:  "a: {port: 1}\n",

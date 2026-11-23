@@ -907,9 +907,9 @@ func enterCall(ctx context.Context) context.Context {
 // so a call that runs with it drops its warnings. The copy keeps the
 // deadline, the cancellation, and the other values of ctx. A step that
 // decodes a value the decoder already decoded runs that decode with it.
-// The fill of the defaults and the walk that spells the map keys are such
-// steps. The collectors of ctx thus do not get the warnings that an
-// unmarshaler hands to its context again.
+// The walk that spells the map keys is such a step. The collectors of ctx
+// thus do not get the warnings that an unmarshaler hands to its context
+// again.
 func withoutWarnings(ctx context.Context) context.Context {
 	if scopeOf(ctx) == nil {
 		return ctx

@@ -325,25 +325,6 @@ func (c keyCut) readNode(node ast.Node) ast.Node {
 	return node
 }
 
-// readView returns view, which returns a node of the document as the
-// decoder reads it, with the cut applied. For a node that the cut copied,
-// the result is the node that the decoder read in its place. A decode
-// that reads a node of the decode again thus reads what the decoder read.
-func (c keyCut) readView(view func(ast.Node) ast.Node) func(ast.Node) ast.Node {
-	if len(c.reads) == 0 {
-		return view
-	}
-
-	return func(node ast.Node) ast.Node {
-		v := view(node)
-		if read, ok := c.reads[keyOf(v)]; ok {
-			return read
-		}
-
-		return v
-	}
-}
-
 // keyField reports whether a field of t, a struct type, reads the key
 // name. The field is one of t itself, or one of a struct that t holds
 // inline, at any depth, as [yamlfield.Name] names the fields. A map that

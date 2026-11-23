@@ -1,14 +1,12 @@
 package niceyaml
 
 import (
-	"context"
 	"fmt"
 	"reflect"
 
 	"github.com/goccy/go-yaml/ast"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
-	"go.jacobcolvin.com/niceyaml/internal/decodewalk"
 	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 	"go.jacobcolvin.com/niceyaml/internal/yamldecode"
 )
@@ -53,12 +51,13 @@ import (
 // a decode returns, defaults included, belongs in [WithValueCheck] or in
 // a Validate method, which see the defaults wherever they come from.
 //
-// A decode calls fn once for each value it creates, so a map or a
-// pointer that fn sets belongs to that value alone. A place at an alias
-// can hold the value of its anchor, and the place then holds that map or
-// pointer too, as the Defaults section of the package documentation
-// describes. A panic in fn makes the decode return an error that holds a
-// [PanicError].
+// A decode calls fn for each value it creates, so a map or a pointer
+// that fn sets belongs to that value alone. A place at an alias can hold
+// the value of its anchor when it starts from the value that the place of
+// the anchor started from. The place then holds that map or pointer too,
+// as the Defaults section of the package documentation describes. A place
+// that starts from another value decodes the anchor again. A panic in fn
+// makes the decode return an error that holds a [PanicError].
 func TypeDefaults[T any](fn func(*T)) TypeRule {
 	t := reflect.TypeFor[T]()
 
@@ -204,12 +203,63 @@ func (d defaultFuncs) value(t reflect.Type) reflect.Value {
 	return v
 }
 
-// sets reports whether [TypeDefaults] gives t a function. The defaults
-// of any other type hold only the defaults of the types of its fields.
-func (d defaultFuncs) sets(t reflect.Type) bool {
-	_, ok := d[t]
+// reaches reports whether the defaults of t can hold a value other than
+// zero. They can when [TypeDefaults] gives t a function, or when t is a
+// struct and the defaults of one of its fields can, as
+// [defaultFuncs.fillFields] sets them. The known map holds the answer for
+// each type that reaches has seen.
+func (d defaultFuncs) reaches(t reflect.Type, known map[reflect.Type]bool) bool {
+	if found, ok := known[t]; ok {
+		return found
+	}
 
-	return ok
+	_, found := d[t]
+
+	if !found && t.Kind() == reflect.Struct {
+		for field := range t.Fields() {
+			if (field.IsExported() || field.Anonymous) && d.reaches(field.Type, known) {
+				found = true
+
+				break
+			}
+		}
+	}
+
+	known[t] = found
+
+	return found
+}
+
+// startOption returns the [yamldecode.StartValue] option that starts each
+// value that a decode creates from the defaults of its type. Without
+// defaults, each such value starts from zero. A panic in a
+// function of [TypeDefaults] panics again with a [*defaultsPanic], which
+// [decodeWithRecover] turns into an error at the node of the value.
+func (d defaultFuncs) startOption() yamldecode.DecodeOption {
+	known := map[reflect.Type]bool{}
+
+	return yamldecode.StartValue(func(t reflect.Type, node ast.Node) reflect.Value {
+		if !d.reaches(t, known) {
+			return reflect.Value{}
+		}
+
+		defer func() {
+			if p := recover(); p != nil {
+				panic(&defaultsPanic{typ: t, node: node, err: recovered(p)})
+			}
+		}()
+
+		return d.value(t)
+	})
+}
+
+// defaultsPanic carries a panic in the function that [TypeDefaults] gave
+// the type typ, out of the decoder that asked for the defaults of typ for
+// a value that it reads node into.
+type defaultsPanic struct {
+	typ  reflect.Type
+	node ast.Node
+	err  *PanicError
 }
 
 // fillFields sets each field of v to the defaults of the type of the
@@ -261,24 +311,21 @@ func (d defaultFuncs) start(t reflect.Type, node ast.Node) (reflect.Value, error
 	return v, err
 }
 
-// startTarget returns the pointer that a decode of node into v fills, and
-// the value that the decode starts from there. The pointer is the last of
-// the chain of pointers that v, a non-nil pointer, reaches. Along the
-// chain, startTarget sets each nil pointer to a new value, so the decode
-// fills the value at the end of the chain in place. When v held a nil
-// pointer, the start is the defaults of the type at the end. Otherwise
-// the start is a copy of the value that v reaches, because the decoder
-// overwrites that value. For a pointer type that never ends in a type
-// that is not a pointer, such as "type P *P", startTarget returns v and
-// an invalid start, and the decoder rejects the type. For a v that points
-// to a pointer to a node type of the go-yaml ast package, startTarget also
-// returns v and an invalid start. The decoder points that pointer to the
-// node of the document.
-func startTarget(v any, cfg decodeConfig, node ast.Node) (any, reflect.Value, error) {
+// startTarget returns the pointer that a decode of node into v fills. The
+// pointer is the last of the chain of pointers that v, a non-nil pointer,
+// reaches. Along the chain, startTarget sets each nil pointer to a new
+// value, so the decode fills the value at the end of the chain in place.
+// When v held a nil pointer, that value starts from the defaults of its
+// type. For a pointer type that never ends in a type that is not a
+// pointer, such as "type P *P", startTarget returns v, and the decoder
+// rejects the type. For a v that points to a pointer to a node type of
+// the go-yaml ast package, startTarget also returns v. The decoder points
+// that pointer to the node of the document.
+func startTarget(v any, cfg decodeConfig, node ast.Node) (any, error) {
 	t := reflect.TypeOf(v).Elem()
 	if unmarshaler.Base(reflect.TypeOf(v)).Kind() == reflect.Pointer ||
 		t.Kind() == reflect.Pointer && unmarshaler.IsSyntaxNode(t.Elem()) {
-		return v, reflect.Value{}, nil
+		return v, nil
 	}
 
 	created := false
@@ -294,52 +341,16 @@ func startTarget(v any, cfg decodeConfig, node ast.Node) (any, reflect.Value, er
 		target = elem
 	}
 
-	tv := target.Elem()
+	if created {
+		tv := target.Elem()
 
-	if !created {
-		start := reflect.New(tv.Type()).Elem()
-		start.Set(tv)
+		start, err := cfg.defaults.start(tv.Type(), node)
+		if err != nil {
+			return nil, err
+		}
 
-		return target.Interface(), start, nil
+		tv.Set(start)
 	}
 
-	start, err := cfg.defaults.start(tv.Type(), node)
-	if err != nil {
-		return nil, reflect.Value{}, err
-	}
-
-	tv.Set(start)
-
-	return target.Interface(), start, nil
-}
-
-// fillDefaults builds again each value that a decode of node into target
-// created, from the start of its type, as [decodewalk.Fill] describes.
-// The value that target points to started from start. The fill decodes
-// values again, as [withoutWarnings] describes. Each such decode reads
-// what the decoder read, with the cut of the known keys of the decode.
-func (n *Node) fillDefaults(
-	ctx context.Context,
-	dec *yamldecode.Decoder,
-	cfg decodeConfig,
-	node ast.Node,
-	target any,
-	start reflect.Value,
-	cut keyCut,
-) error {
-	tv := reflect.ValueOf(target).Elem()
-
-	starts := decodewalk.Starts{Of: cfg.defaults.start, Sets: cfg.defaults.sets}
-
-	rules := n.walkRules(withoutWarnings(ctx), dec, cfg.unmarshalers)
-	rules.View = cut.readView(rules.View)
-
-	filled, err := decodewalk.Fill(ctx, rules, starts, tv.Type(), node, start, tv)
-	if err != nil {
-		return err //nolint:wrapcheck // The caller places the error.
-	}
-
-	tv.Set(filled)
-
-	return nil
+	return target.Interface(), nil
 }

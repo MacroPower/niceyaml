@@ -13,11 +13,8 @@ import (
 // document of a Source of many documents with defaults. Each document is
 // a mapping whose `<<` merge key reads one anchor of 200 keys of a
 // reference document. The default sets a field whose entry the anchor
-// brings in. So the fill of the defaults looks that key up through the
-// anchor, and it keeps the value of the merge key. The reference Source
-// keeps the keys of the anchor once for every document that reads it. So
-// the heap that the decodes leave live grows with the documents alone.
-// The go-yaml decoder reads each key of the anchor for each document, and
+// brings in, and the decode keeps the value of the merge key. The go-yaml
+// decoder reads each key of the anchor for each document, and
 // the time per document stays flat as the Source grows. The metric
 // retained-B is the heap that one decode of each document of a new Source
 // leaves live while the Source lives.

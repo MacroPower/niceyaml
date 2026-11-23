@@ -1162,8 +1162,7 @@
 // an unmarshaler that holds the error of an ended context comes back as it
 // is, without a location.
 //
-// The fill of the defaults decodes values again. So does the
-// self-validation walk, which decodes map keys to spell them. Each
+// The self-validation walk decodes map keys again to spell them. Each
 // unmarshaler that such a decode runs gets a context without the
 // [Warnings] collector of the call. The collector thus gets only the
 // warnings that the unmarshalers hand to the context of the decoder step.
@@ -1187,9 +1186,9 @@
 // [Node.DecodeInto] starts from the value that the caller passes. A caller
 // fills that value with Source.Defaults, or with [Source.DefaultsInto] for a
 // type that it holds as a [reflect.Type]. A decode also creates values: each
-// element of a slice or an array, each value of a map, and the target of each
-// pointer that the document fills. Each starts from the defaults of its type,
-// which [TypeDefaults] sets:
+// element of a slice or an array, each key and value of a map, and the target
+// of each pointer that the document fills. Each starts from the defaults of
+// its type, which [TypeDefaults] sets:
 //
 //	var rules = []niceyaml.TypeRule{
 //		niceyaml.TypeDefaults(func(s *CafeSpec) {
@@ -1221,28 +1220,22 @@
 // decode returns, defaults included, belongs in [WithValueCheck] or in a
 // Validate method, which run on that value.
 //
-// A value that the decode creates fills from its defaults, as the Decoding
+// A value that the decode creates starts from its defaults, as the Decoding
 // section describes. A null element or map value holds the defaults of its
 // type, and a null sets a pointer to nil. The target of a pointer that
 // already points to a value, such as one that a function of TypeDefaults
 // sets, starts from that value. The value it pointed to stays as it was.
 //
+// A struct field that an inline tag flattens can share its key with a field
+// of the struct that holds the inline struct. The document then sets only the
+// outer field, and the inline field keeps the value that it starts from. That
+// start is its defaults, or the value that the target of [Node.DecodeInto]
+// holds.
+//
 // A value that decodes itself, through an unmarshaler method or a
 // [CustomUnmarshaler] function, starts from its defaults too. Its unmarshaler
-// decides what to keep.
-//
-// The decoder starts from zero each element, each map value, and the target of
-// each nil pointer in a field, element, or map value, and so every value
-// inside them. When such a value decodes itself and the defaults give it a
-// value other than zero, the decode calls its unmarshaler again on a value
-// that starts from the defaults. The decode keeps the value of the second
-// call, and the [Warnings] collector gets only the warnings of the first call.
-// The decode calls the unmarshaler of every other value except a map key
-// once, on the value that it starts from. It calls the unmarshaler again
-// when it decodes again a value that holds it, as it does for some values
-// that a reference document writes. The target of [Node.Decode] thus decodes
-// itself once from its defaults, and so does the value that
-// [Node.DecodeInto] allocates for a nil pointer that its target points to.
+// decides what to keep. The decode calls each unmarshaler once, on the value
+// that it starts from.
 //
 // The go-yaml decoder can give the place of an alias the value that its
 // anchor decoded to. The two places then share each map, slice, and pointer
@@ -1257,11 +1250,37 @@
 // hooks slice of the api service. A program that changes a decoded value in
 // place must not assume that no other place holds the value.
 //
-// Where the decoder gives two places one value, a decode with TypeDefaults
-// can give both places one value that it builds from the defaults. When
-// TypeDefaults gives the type of the retry target a function, the api and
-// worker services of that document share one retry target that the decode
-// builds. A place that starts from another value builds a value of its own.
+// The place of an alias takes the value of its anchor when it starts from the
+// value that the place of the anchor started from. The place then also shares
+// each map, slice, and pointer target that the defaults of the place of the
+// anchor set. A place that starts from another value decodes the anchor again
+// from its own start. Such a place can be a struct field that the function of
+// its parent sets, or one that the target of [Node.DecodeInto] holds.
+//
+// The decode compares the start of the place of the alias with a copy of the
+// start of the place of the anchor, made before it decodes the anchor. A
+// method that writes into the exported fields of its start thus leaves the
+// comparison as it was. The copy shares the unexported fields of structs. A
+// method that writes into an unexported map or pointer target of its start
+// thus can make an alias after it decode the anchor again. Two funcs count as
+// equal when they run the same code, such as two funcs from one function
+// literal. Two NaN floats count as equal too.
+//
+// Two values of one type that the decode creates, such as two elements, count
+// as places with one start. The decode does not call the function of the type
+// to compare them. The api and worker services of that document thus share
+// one retry target when TypeDefaults gives the type of the retry target a
+// function.
+//
+// Places of two types start from one value only when both start from zero.
+// A field of a map type with defaults thus decodes the anchor again at an
+// alias whose anchor sits in a field of type map[string]any.
+//
+// For example, a document holds `s: &s {q: {codes: [1]}}` and `r: *s`, and
+// it decodes into a struct whose field s comes before its field r. The
+// function of that struct type sets the name and the labels map of s.q. The
+// place r starts from zero, so the decode decodes the anchor again for r.
+// The value at r then holds neither that name nor that map.
 //
 // The api and worker services of a second document merge one anchor:
 //
@@ -1274,55 +1293,8 @@
 // their own, with TypeDefaults and without it. So do two services that are
 // aliases of that anchor, as in `services: {api: *common, worker: *common}`.
 //
-// A value that the decode builds at an alias starts from the defaults of its
-// own place. The decode can keep a value as the decoder gave it, such as an
-// interface value. It can also keep a value that starts from zero whose type
-// holds no type with a function of TypeDefaults. A value that the decode
-// keeps at an alias can hold what the place of the anchor started from.
-//
-// For example, a document holds `s: &s {q: {codes: [1]}}` and `r: *s`, and
-// it decodes into a struct whose field s comes before its field r. The
-// function of that struct type sets the name and the labels map of s.q. No
-// type inside r has a function. The value at r then starts from zero, and
-// r.q holds that name and that map.
-//
-// The fill of the defaults does not map the values inside an anchor of a
-// reference document to the document. The value at an alias to one still
-// starts from the defaults of its place. When the decoder started that value
-// from zero, the decode decodes it again from its defaults, so the
-// unmarshalers inside it run a second time. Each value that the decoder
-// creates inside the anchor keeps the value of the decoder.
-//
-// A struct field whose entry a `<<` merge key brings in from a reference
-// document keeps the value that the decoder gives it. The decoder starts such
-// a field from the value that its struct holds. When the decoder started the
-// struct from zero, the decode decodes the struct again from its defaults
-// first, so the unmarshalers inside it run a second time. The decode takes
-// such fields from the second decode. The fields whose entries the document
-// writes build from what the decoder first gave them, as they do without the
-// merge key. An unmarshaler inside such a field can run one more time. The
-// fields of an inline struct that does not decode itself follow the same rule.
-//
-// Each key of a map keeps the value that the decoder gives it. A panic in a
-// function of TypeDefaults makes the decode return an error that holds a
-// [PanicError].
-//
-// The decode reads each key of a map again to find its entry in these cases:
-//
-//   - The map starts from a map that is not nil.
-//   - The map type, the key type, the value type, or a type inside them has a
-//     function of TypeDefaults.
-//   - A struct holds the map inline, directly or through inline structs, and
-//     that struct starts from a value other than zero.
-//   - A struct holds the map inline, directly or through inline structs, and
-//     its type or a type inside it has a function of TypeDefaults.
-//
-// Each such read calls again the unmarshaler of each key that decodes itself.
-// The decode reads the keys once for a map below a value that decodes itself.
-// It also reads them once for a map behind an alias to a reference document,
-// unless that map starts from a map that is not nil. The map then decodes
-// again from that start. The [Warnings] collector gets only the warnings of
-// the decoder's call.
+// A panic in a function of TypeDefaults makes the decode return an error
+// that holds a [PanicError].
 //
 // # Validation
 //
@@ -1873,8 +1845,9 @@
 // from the defaults of its type, such as for a field that the function of
 // [TypeDefaults] for its parent sets. A validator that decodes the scoped
 // Node thus might see a default that the decode of the document does not
-// hold. Inside the anchor, each value that the decoder creates keeps the
-// value of the decoder in both decodes, as the Defaults section describes.
+// hold. Inside the anchor, each value that the decoder creates starts from
+// the defaults of its type in both decodes, as the Defaults section
+// describes.
 //
 // A [go.jacobcolvin.com/niceyaml/matcher.Content] or
 // [go.jacobcolvin.com/niceyaml/matcher.Text] matcher whose path ends

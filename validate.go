@@ -1348,10 +1348,11 @@ func (w *selfWalker) pathResolver() *paths.Resolver {
 
 // keyDecoder returns the go-yaml decoder for the keys of the walk. It
 // creates the decoder with the options of the decode when the walk first
-// decodes a key.
+// decodes a key. As in the decode, each value that the decoder creates
+// starts from the defaults of its type.
 func (w *selfWalker) keyDecoder() *yamldecode.Decoder {
 	if w.decoder == nil {
-		w.decoder = w.node.newDecoder(w.cfg, nil)
+		w.decoder = w.node.newDecoder(w.cfg, nil, w.cfg.defaults.startOption())
 	}
 
 	return w.decoder
@@ -1379,9 +1380,17 @@ func (w *selfWalker) addKeyName(key ast.MapKeyNode, t reflect.Type, names map[an
 		t = t.Elem()
 	}
 
-	decoded := reflect.New(t)
+	// The key starts from the defaults of its type, as the decoder of the
+	// decode starts each key.
+	start, err := w.cfg.defaults.start(t, node)
+	if err != nil {
+		return
+	}
 
-	err := decodeWithRecover(w.keyCtx, w.keyDecoder(), node, decoded.Interface())
+	decoded := reflect.New(t)
+	decoded.Elem().Set(start)
+
+	err = decodeWithRecover(w.keyCtx, w.keyDecoder(), node, decoded.Interface())
 	if err != nil {
 		return
 	}

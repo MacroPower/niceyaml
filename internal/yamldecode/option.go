@@ -217,3 +217,42 @@ func ReportUnknownField(fn func(err error)) DecodeOption {
 		return nil
 	}
 }
+
+// StartValue has the decoder start each value that it creates from the value
+// that start returns for its type. The decoder creates each element of a
+// slice or an array, and each key and value of a map. It also creates the
+// target of each pointer that it fills, such as an inline field behind a nil
+// pointer. The decoder passes start the node that it reads into the value.
+// For an inline field, that node is the mapping of the struct that holds the
+// field. A value that decodes itself sees that start. An invalid value
+// from start, or one of another type, means the zero value. A struct field
+// still starts from the value that the field holds, and a pointer that holds
+// a value decodes from that value. A null sets a pointer to nil and leaves
+// any other value at its start. A field of an inline struct that the struct
+// that holds it names too keeps the value that it started from, where
+// go-yaml sets it to zero.
+//
+// The decoder gives an alias the value that it decoded for the anchor when
+// the place of the alias starts from the value that the place of the anchor
+// started from. A place that starts from another value decodes the anchor
+// again from its own start. Two places of one type that do not hold a value
+// of their own, such as two elements, count as places with one start. The
+// decoder does not call start to compare them. An anchor that the decoder
+// read into an any value started from nil. Places of two types start from
+// one value only when both start from zero. An interface value takes the
+// value of the anchor as go-yaml gives it.
+//
+// The decoder compares the start of the place of the alias with a copy of
+// the start of the place of the anchor, made before it decodes the anchor.
+// The copy shares funcs, channels, and the unexported fields of structs with
+// the start. An unmarshaler that writes into an unexported map or pointer
+// target of its start thus can make an alias after it decode the anchor
+// again.
+// Two funcs count as equal when they have one code pointer, and two NaN
+// floats count as equal.
+func StartValue(start func(reflect.Type, ast.Node) reflect.Value) DecodeOption {
+	return func(d *Decoder) error {
+		d.startValue = start
+		return nil
+	}
+}

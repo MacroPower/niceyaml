@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"strings"
 	"testing"
@@ -2199,4 +2200,525 @@ func TestCollectErrorsPathAfterRecoveredPanic(t *testing.T) {
 		"2:4 $.n cannot unmarshal string into Go struct field .N of type int",
 		`3:4 $.t time: invalid duration "soon"`,
 	}, got)
+}
+
+// startPrinter is a printer whose start under [startValues] sets its port.
+type startPrinter struct {
+	Name string `yaml:"name"`
+	Port int    `yaml:"port"`
+}
+
+// startCafe holds each kind of place that the decoder creates a value for.
+type startCafe struct {
+	ByName   map[string]startPrinter `yaml:"byName"`
+	Spare    *startPrinter           `yaml:"spare"`
+	Printers []startPrinter          `yaml:"printers"`
+	Cafes    []startCafe             `yaml:"cafes"`
+	Kitchen  startPrinter            `yaml:"kitchen"`
+	Pair     [2]startPrinter         `yaml:"pair"`
+	Seats    int                     `yaml:"seats"`
+}
+
+// startKey is a map key that decodes itself from text.
+type startKey struct{ Label, Unit string }
+
+func (k *startKey) UnmarshalText(b []byte) error {
+	k.Label = string(b)
+
+	return nil
+}
+
+// startSelf decodes itself, and it records in Start the value of Got that
+// it started from.
+type startSelf struct{ Start, Got int }
+
+func (s *startSelf) UnmarshalYAML(unmarshal func(any) error) error {
+	s.Start = s.Got
+
+	return unmarshal(&s.Got)
+}
+
+// startValues gives the start of each type of the start tests. A printer,
+// a café, a key, and a value that decodes itself each have one, and the
+// kitchen printer of the café has a port of its own. The function counts
+// each call for a printer in calls when calls is not nil.
+func startValues(calls *int) func(reflect.Type, ast.Node) reflect.Value {
+	return func(t reflect.Type, _ ast.Node) reflect.Value {
+		switch t {
+		case reflect.TypeFor[startPrinter]():
+			if calls != nil {
+				*calls++
+			}
+
+			return reflect.ValueOf(startPrinter{Port: 9100})
+
+		case reflect.TypeFor[startCafe]():
+			return reflect.ValueOf(startCafe{Seats: 20, Kitchen: startPrinter{Port: 9101}})
+		case reflect.TypeFor[startKey]():
+			return reflect.ValueOf(startKey{Unit: "ml"})
+		case reflect.TypeFor[startSelf]():
+			return reflect.ValueOf(startSelf{Got: 7})
+		}
+
+		return reflect.Value{}
+	}
+}
+
+func TestStartValue(t *testing.T) {
+	t.Parallel()
+
+	const src = `
+kitchen: {name: k}
+printers: [{name: a}, {name: b, port: 1}, ~]
+byName: {x: {name: x}}
+spare: {name: s}
+pair: [{name: p}]
+cafes: [{kitchen: {name: inner}}]
+`
+
+	got := startCafe{Seats: 20, Kitchen: startPrinter{Port: 9101}}
+	require.NoError(t, yaml.UnmarshalWithOptions([]byte(src), &got, yaml.StartValue(startValues(nil))))
+
+	// Each struct field starts from the value it holds, and each value
+	// that the decoder creates starts from the start of its type. A null
+	// element holds that start. The array keeps zero in the slot that the
+	// sequence does not write.
+	assert.Equal(t, startCafe{
+		Seats:    20,
+		Kitchen:  startPrinter{Name: "k", Port: 9101},
+		Printers: []startPrinter{{Name: "a", Port: 9100}, {Name: "b", Port: 1}, {Port: 9100}},
+		ByName:   map[string]startPrinter{"x": {Name: "x", Port: 9100}},
+		Spare:    &startPrinter{Name: "s", Port: 9100},
+		Pair:     [2]startPrinter{{Name: "p", Port: 9100}, {}},
+		Cafes:    []startCafe{{Seats: 20, Kitchen: startPrinter{Name: "inner", Port: 9101}}},
+	}, got)
+
+	// Without the option, each value that the decoder creates starts from
+	// zero.
+	var plain startCafe
+
+	require.NoError(t, yaml.Unmarshal([]byte(src), &plain))
+	assert.Equal(t, startPrinter{Name: "a"}, plain.Printers[0])
+	assert.Equal(t, &startPrinter{Name: "s"}, plain.Spare)
+}
+
+func TestStartValueKeysUnmarshalersPointers(t *testing.T) {
+	t.Parallel()
+
+	var got struct {
+		Sizes map[startKey]int `yaml:"sizes"`
+		Self  []startSelf      `yaml:"self"`
+		Ptrs  []*startPrinter  `yaml:"ptrs"`
+	}
+
+	src := "sizes: {small: 1}\nself: [3]\nptrs: [~, {name: p}]\n"
+	require.NoError(t, yaml.UnmarshalWithOptions([]byte(src), &got, yaml.StartValue(startValues(nil))))
+
+	assert.Equal(t, map[startKey]int{{Label: "small", Unit: "ml"}: 1}, got.Sizes)
+	assert.Equal(t, []startSelf{{Start: 7, Got: 3}}, got.Self)
+
+	// A null sets a pointer to nil.
+	assert.Equal(t, []*startPrinter{nil, {Name: "p", Port: 9100}}, got.Ptrs)
+}
+
+// startPointerHolder decodes itself into the nil pointer P through the
+// callback of an InterfaceUnmarshaler.
+type startPointerHolder struct{ P *startPrinter }
+
+func (h *startPointerHolder) UnmarshalYAML(unmarshal func(any) error) error {
+	return unmarshal(&h.P)
+}
+
+func TestStartValueNilPointer(t *testing.T) {
+	t.Parallel()
+
+	start := yaml.StartValue(startValues(nil))
+
+	// The target of a nil pointer that the decode reaches directly, such
+	// as the root or the value of a callback, starts from the start of
+	// the type that the pointer reaches.
+	var p *startPrinter
+
+	require.NoError(t, yaml.UnmarshalWithOptions([]byte("name: s\n"), &p, start))
+	assert.Equal(t, &startPrinter{Name: "s", Port: 9100}, p)
+
+	var pp **startPrinter
+
+	require.NoError(t, yaml.UnmarshalWithOptions([]byte("name: s\n"), &pp, start))
+	require.NotNil(t, pp)
+	assert.Equal(t, &startPrinter{Name: "s", Port: 9100}, *pp)
+
+	var h startPointerHolder
+
+	require.NoError(t, yaml.UnmarshalWithOptions([]byte("name: s\n"), &h, start))
+	assert.Equal(t, &startPrinter{Name: "s", Port: 9100}, h.P)
+
+	// A pointer that reaches a value starts from that value.
+	held := &startPrinter{Port: 1}
+
+	require.NoError(t, yaml.UnmarshalWithOptions([]byte("name: s\n"), &held, start))
+	assert.Equal(t, &startPrinter{Name: "s", Port: 1}, held)
+}
+
+func TestStartValueNode(t *testing.T) {
+	t.Parallel()
+
+	var got struct {
+		Sizes map[startKey]int `yaml:"sizes"`
+		List  []startPrinter   `yaml:"list"`
+		Ptr   *startPrinter    `yaml:"ptr"`
+	}
+
+	// Each start gets the node that the decoder reads into the value.
+	starts := map[reflect.Type][]string{}
+	start := func(t reflect.Type, node ast.Node) reflect.Value {
+		pos := node.GetToken().Position
+		starts[t] = append(starts[t], fmt.Sprintf("%d:%d", pos.Line, pos.Column))
+
+		return reflect.Value{}
+	}
+
+	src := "sizes: {small: 1}\nlist: [{name: a}, {name: b}]\nptr: {name: p}\n"
+	require.NoError(t, yaml.UnmarshalWithOptions([]byte(src), &got, yaml.StartValue(start)))
+
+	assert.Equal(t, []string{"1:9"}, starts[reflect.TypeFor[startKey]()])
+	assert.Equal(t, []string{"2:8", "2:19", "3:6"}, starts[reflect.TypeFor[startPrinter]()])
+}
+
+func TestStartValueAliases(t *testing.T) {
+	t.Parallel()
+
+	// The decoder reads the fields in this order, and an alias takes the
+	// value of an anchor that the decoder read before it.
+	type places struct {
+		Head     startPrinter    `yaml:"head"`
+		Printers []startPrinter  `yaml:"printers"`
+		Ptrs     []*startPrinter `yaml:"ptrs"`
+		Any      any             `yaml:"any"`
+		Spare    *startPrinter   `yaml:"spare"`
+		Kitchen  startPrinter    `yaml:"kitchen"`
+	}
+
+	tcs := map[string]struct {
+		want  func(t *testing.T, got places)
+		input string
+		calls int
+	}{
+		// Each element starts from the start of its type, so the alias
+		// takes the value of the anchor, and the decoder does not ask for a
+		// start to compare.
+		"element at an alias to an element": {
+			input: "ptrs: [&b {name: b}, *b]\n",
+			calls: 1,
+			want: func(t *testing.T, got places) {
+				t.Helper()
+
+				require.Len(t, got.Ptrs, 2)
+				assert.Equal(t, &startPrinter{Name: "b", Port: 9100}, got.Ptrs[0])
+				assert.Same(t, got.Ptrs[0], got.Ptrs[1])
+			},
+		},
+		// The kitchen starts from another value than an element, so the
+		// decoder decodes the anchor again for it. The target of the nil
+		// pointer starts from the start of its type, as the element does.
+		"field at an alias to an element": {
+			input: "printers: [&b {name: b}]\nkitchen: *b\nspare: *b\n",
+			calls: 1,
+			want: func(t *testing.T, got places) {
+				t.Helper()
+
+				assert.Equal(t, []startPrinter{{Name: "b", Port: 9100}}, got.Printers)
+				assert.Equal(t, startPrinter{Name: "b", Port: 9101}, got.Kitchen)
+				assert.Equal(t, &startPrinter{Name: "b", Port: 9100}, got.Spare)
+			},
+		},
+		// The element starts from another value than the head, so the
+		// decoder decodes the anchor again for it, from the start that it
+		// asked for to compare.
+		"element at an alias to a field": {
+			input: "head: &k {name: k}\nprinters: [*k]\n",
+			calls: 1,
+			want: func(t *testing.T, got places) {
+				t.Helper()
+
+				assert.Equal(t, startPrinter{Name: "k", Port: 9101}, got.Head)
+				assert.Equal(t, []startPrinter{{Name: "k", Port: 9100}}, got.Printers)
+			},
+		},
+		// An interface value takes the value of the anchor as go-yaml
+		// gives it.
+		"interface value at an alias to a field": {
+			input: "head: &k {name: k}\nany: *k\n",
+			want: func(t *testing.T, got places) {
+				t.Helper()
+
+				assert.Equal(t, startPrinter{Name: "k", Port: 9101}, got.Any)
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			calls := 0
+			got := places{Head: startPrinter{Port: 9101}, Kitchen: startPrinter{Port: 9101}}
+
+			require.NoError(t, yaml.UnmarshalWithOptions([]byte(tc.input), &got, yaml.StartValue(startValues(&calls))))
+			tc.want(t, got)
+			assert.Equal(t, tc.calls, calls)
+		})
+	}
+}
+
+func TestStartValueInlineFieldNamedTwice(t *testing.T) {
+	t.Parallel()
+
+	type inner struct {
+		Name string `yaml:"name"`
+		Port int    `yaml:"port"`
+	}
+
+	type outer struct {
+		In   inner  `yaml:",inline"`
+		Name string `yaml:"name"`
+	}
+
+	none := func(reflect.Type, ast.Node) reflect.Value { return reflect.Value{} }
+
+	tcs := map[string]struct {
+		opts []yaml.DecodeOption
+		want outer
+	}{
+		// Go-yaml sets the field of the inline struct that the outer
+		// struct names too to zero.
+		"without the option": {
+			want: outer{In: inner{Port: 2}, Name: "n"},
+		},
+		"with the option": {
+			opts: []yaml.DecodeOption{yaml.StartValue(none)},
+			want: outer{In: inner{Name: "keep", Port: 2}, Name: "n"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := outer{In: inner{Name: "keep"}}
+
+			require.NoError(t, yaml.UnmarshalWithOptions([]byte("name: n\nport: 2\n"), &got, tc.opts...))
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// startBag is a map of the start tests that decodes itself. It copies
+// the entries of the mapping into the map that it starts from.
+type startBag map[string]int
+
+func (b *startBag) UnmarshalYAML(unmarshal func(any) error) error {
+	var entries map[string]int
+
+	err := unmarshal(&entries)
+	if err != nil {
+		return err
+	}
+
+	if *b == nil {
+		*b = startBag{}
+	}
+
+	maps.Copy(*b, entries)
+
+	return nil
+}
+
+func TestStartValueInlineFieldWritesIntoStart(t *testing.T) {
+	t.Parallel()
+
+	type inner struct {
+		Tags startBag `yaml:"tags"`
+		Name string   `yaml:"name"`
+	}
+
+	type outer struct {
+		In   inner    `yaml:",inline"`
+		Tags startBag `yaml:"tags"`
+	}
+
+	// The unmarshaler of the tags of the inline struct writes the entries
+	// of the document into the map of its start. The field keeps the start
+	// all the same.
+	tcs := map[string]struct {
+		start func(reflect.Type, ast.Node) reflect.Value
+		got   *outer
+		want  outer
+	}{
+		"start of the type": {
+			start: func(t reflect.Type, _ ast.Node) reflect.Value {
+				if t != reflect.TypeFor[outer]() {
+					return reflect.Value{}
+				}
+
+				return reflect.ValueOf(outer{In: inner{Tags: startBag{"d": 1}}})
+			},
+			want: outer{In: inner{Tags: startBag{"d": 1}, Name: "a"}, Tags: startBag{"k": 2}},
+		},
+		"value that the target holds": {
+			start: func(reflect.Type, ast.Node) reflect.Value { return reflect.Value{} },
+			got:   &outer{In: inner{Tags: startBag{"pre": 1}}},
+			want:  outer{In: inner{Tags: startBag{"pre": 1}, Name: "a"}, Tags: startBag{"k": 2}},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := tc.got
+
+			require.NoError(t, yaml.UnmarshalWithOptions(
+				[]byte("name: a\ntags: {k: 2}\n"), &got, yaml.StartValue(tc.start),
+			))
+			require.NotNil(t, got)
+			assert.Equal(t, tc.want, *got)
+		})
+	}
+}
+
+// startKinds holds fields of several kinds that the decoder compares when
+// it compares the start of the place of an alias with the start of the
+// place of its anchor. It does not hold a bool field.
+type startKinds struct {
+	M     map[string]int `yaml:"-"`
+	Any   any            `yaml:"-"`
+	S     []int          `yaml:"-"`
+	Codes []int          `yaml:"codes"`
+	C     complex128     `yaml:"-"`
+	Arr   [2]int         `yaml:"-"`
+	U     uint           `yaml:"-"`
+}
+
+// startKindsValue returns a [startKinds] whose fields hold values that
+// differ from zero.
+func startKindsValue() startKinds {
+	return startKinds{
+		M:   map[string]int{"k": 1},
+		Any: 1,
+		S:   []int{1},
+		C:   complex(1, 2),
+		Arr: [2]int{1, 2},
+		U:   1,
+	}
+}
+
+func TestStartValueAliasStarts(t *testing.T) {
+	t.Parallel()
+
+	// The place of the alias starts from the value that edit makes of the
+	// start of the place of the anchor. It shares the value of the anchor
+	// only when the two starts are equal.
+	tcs := map[string]struct {
+		edit   func(k *startKinds)
+		shared bool
+	}{
+		"equal starts": {
+			edit:   func(*startKinds) {},
+			shared: true,
+		},
+		"map value": {
+			edit: func(k *startKinds) { k.M = map[string]int{"k": 2} },
+		},
+		"map key": {
+			edit: func(k *startKinds) { k.M = map[string]int{"j": 1} },
+		},
+		"slice length": {
+			edit: func(k *startKinds) { k.S = []int{1, 1} },
+		},
+		"array element": {
+			edit: func(k *startKinds) { k.Arr[1] = 3 },
+		},
+		"interface value": {
+			edit: func(k *startKinds) { k.Any = 2 },
+		},
+		"interface type": {
+			edit: func(k *startKinds) { k.Any = "1" },
+		},
+		"nil interface": {
+			edit: func(k *startKinds) { k.Any = nil },
+		},
+		"uint": {
+			edit: func(k *startKinds) { k.U = 2 },
+		},
+		"complex": {
+			edit: func(k *startKinds) { k.C = complex(1, 3) },
+		},
+	}
+
+	none := func(reflect.Type, ast.Node) reflect.Value { return reflect.Value{} }
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := struct {
+				A startKinds `yaml:"a"`
+				B startKinds `yaml:"b"`
+			}{A: startKindsValue(), B: startKindsValue()}
+
+			tc.edit(&got.B)
+
+			require.NoError(t, yaml.UnmarshalWithOptions(
+				[]byte("a: &a {codes: [1]}\nb: *a\n"), &got, yaml.StartValue(none),
+			))
+			require.Equal(t, []int{1}, got.A.Codes)
+			require.Equal(t, []int{1}, got.B.Codes)
+			assert.Equal(t, tc.shared, &got.A.Codes[0] == &got.B.Codes[0])
+		})
+	}
+}
+
+// startRing is a ring of the start tests. Its start points to itself.
+type startRing struct {
+	Next *startRing `yaml:"-"`
+	Name string     `yaml:"name"`
+}
+
+// startRingValue returns a ring whose Next points to itself.
+func startRingValue() startRing {
+	r := &startRing{}
+	r.Next = r
+
+	return *r
+}
+
+func TestStartValueCyclicStart(t *testing.T) {
+	t.Parallel()
+
+	start := func(t reflect.Type, _ ast.Node) reflect.Value {
+		if t != reflect.TypeFor[startRing]() {
+			return reflect.Value{}
+		}
+
+		return reflect.ValueOf(startRingValue())
+	}
+
+	got := struct {
+		A     startRing   `yaml:"a"`
+		B     startRing   `yaml:"b"`
+		Rings []startRing `yaml:"rings"`
+	}{A: startRingValue(), B: startRingValue()}
+
+	src := "a: &a {name: a}\nb: *a\nrings: [&r {name: r}, *r]\n"
+	require.NoError(t, yaml.UnmarshalWithOptions([]byte(src), &got, yaml.StartValue(start)))
+
+	// The decoder copies the start of each anchor, and the two rings at
+	// a and b start from equal values, so b takes the value of a.
+	assert.Equal(t, "a", got.B.Name)
+	assert.Same(t, got.A.Next, got.B.Next)
+
+	require.Len(t, got.Rings, 2)
+	assert.Equal(t, "r", got.Rings[1].Name)
+	assert.Same(t, got.Rings[0].Next, got.Rings[1].Next)
 }

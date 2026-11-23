@@ -23,11 +23,9 @@ import (
 type Rules struct {
 	// Resolver binds the aliases of the document the decode reads.
 	Resolver *paths.Resolver
-	// View returns a node of the document as the decoder reads it.
-	View func(node ast.Node) ast.Node
 	// Decode decodes node into v as the decode does, with its options and
-	// its anchors. The node is one View returned, or one a walk built from
-	// such nodes.
+	// its anchors. The node is a node of the document, or one a walk built
+	// from such nodes.
 	Decode func(node ast.Node, v any) error
 	// Anchor returns the value of the anchor that alias reads, as the
 	// decoder reads it, when Resolver does not hold that anchor, such as an
@@ -1245,8 +1243,7 @@ func (w *walker) readsAsStrings(entries []*ast.MappingValueNode, ref bool) bool 
 // mapping when it decodes a struct. The decoder refuses a merge key whose
 // value it does not read as a mapping. It then neither decodes a field
 // nor rejects a key. The test decodes only the merge keys into an empty
-// struct. An unknown field there is a key of a source, not a refusal. A
-// merge key without an entry in the view of the decode counts as refused.
+// struct. An unknown field there is a key of a source, not a refusal.
 func (w *walker) mergeRefused(mapping *ast.MappingNode) bool {
 	var merges []*ast.MappingValueNode
 
@@ -1255,12 +1252,7 @@ func (w *walker) mergeRefused(mapping *ast.MappingNode) bool {
 			continue
 		}
 
-		view := w.view(entry)
-		if view == nil {
-			return true
-		}
-
-		merges = append(merges, view)
+		merges = append(merges, entry)
 	}
 
 	if len(merges) == 0 {
@@ -1277,17 +1269,6 @@ func (w *walker) mergeRefused(mapping *ast.MappingNode) bool {
 	_, unknown := err.(*yaml.UnknownFieldError) //nolint:errorlint // The decoder returns it unwrapped.
 
 	return !unknown
-}
-
-// view returns entry as the decode reads it, or nil when the view of the
-// decode does not hold an entry in its place.
-func (w *walker) view(entry *ast.MappingValueNode) *ast.MappingValueNode {
-	view, ok := w.rules.View(entry).(*ast.MappingValueNode)
-	if !ok {
-		return nil
-	}
-
-	return view
 }
 
 // referenceNull reports whether the decoder reads value, the value of an

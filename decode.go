@@ -1650,6 +1650,14 @@ func (n *Node) decodeUnbound(
 		opts = append(opts, yamldecode.ReportUnknownField(unknown.add))
 	}
 
+	// The decoder starts each value that it creates from the defaults of
+	// its type. The decode passes the option without defaults too. The
+	// option keeps the start of an inline field that the outer struct
+	// names. It has an alias decode its anchor again when its place starts
+	// from another value. A target that [Node.DecodeInto] fills
+	// needs both rules.
+	opts = append(opts, cfg.defaults.startOption())
+
 	dec := n.newDecoder(cfg, &cut, opts...)
 
 	cut = n.admitKnownKeys(ctx, n.walkRules(ctx, n.newDecoder(cfg, &cut), cfg.unmarshalers), cfg,
@@ -1658,58 +1666,35 @@ func (n *Node) decodeUnbound(
 	// For a null, the decoder sets *v to nil.
 	target := v
 
-	var start reflect.Value
-
 	if !null {
-		target, start, err = startTarget(v, cfg, node)
+		target, err = startTarget(v, cfg, node)
 		if err != nil {
 			return err
 		}
 	}
 
-	// The recover turns a panic in the go-yaml decoder, or in a value's
-	// own UnmarshalYAML, into an error that holds a PanicError.
+	// The recover turns a panic in the go-yaml decoder, in a value's own
+	// UnmarshalYAML, or in a function of TypeDefaults into an error that
+	// holds a PanicError.
 	err = decodeWithRecover(ctx, dec, n.readRoot(node, cut), target)
 
-	// The fill below decodes values again with dec, so it does not report
-	// their unknown fields a second time.
-	unknown.done = true
 	n.warnUnknownFields(ctx, unknown.found, cut.view, err)
-
-	if err != nil {
-		return n.decodeErrors(err, cut.view)
-	}
-
-	// The decoder starts each value it creates from zero, so the Node
-	// builds those values again from their defaults. The fill decodes
-	// values below node with the decoder of the decode, which holds the
-	// values of the anchors it read. Its walk reads each error without its
-	// path, as [Node.walkRules] describes, because that path starts at the
-	// value that the fill decoded.
-	if start.IsValid() {
-		err = n.fillDefaults(ctx, dec, cfg, node, target, start, cut)
-	}
 
 	return n.decodeErrors(err, cut.view)
 }
 
 // fieldReports gathers the unknown fields that the decoder of a decode
 // under [UnknownFieldsWarn] reports, as [yamldecode.ReportUnknownField]
-// hands them, until the decode ends.
+// hands them.
 type fieldReports struct {
 	// The error of each unknown field, in the order the decoder reported
 	// them.
 	found []error
-	// Whether the decode has ended, so that add drops each later field.
-	done bool
 }
 
-// add adds err, the error of one unknown field, to u until the decode
-// ends.
+// add adds err, the error of one unknown field, to u.
 func (u *fieldReports) add(err error) {
-	if !u.done {
-		u.found = append(u.found, err)
-	}
+	u.found = append(u.found, err)
 }
 
 // warnUnknownFields hands each unknown field of found, which the decoder
@@ -2140,9 +2125,10 @@ func asDecodeError(err error) error {
 }
 
 // decodeWithRecover decodes node into v with dec. It turns a panic into an
-// [*Error] at node that holds a [*PanicError]. The document is not at
-// fault for a panic, so the error matches [errPlaced] but not
-// [ErrDecode].
+// [*Error] at node that holds a [*PanicError]. For a [*defaultsPanic], the
+// error names the type whose defaults panicked, and it sits at the node of
+// the value that the decoder created. The document is not at fault for a
+// panic, so the error matches [errPlaced] but not [ErrDecode].
 func decodeWithRecover(ctx context.Context, dec *yamldecode.Decoder, node ast.Node, v any) (err error) {
 	defer func() {
 		p := recover()
@@ -2150,8 +2136,15 @@ func decodeWithRecover(ctx context.Context, dec *yamldecode.Decoder, node ast.No
 			return
 		}
 
-		err = Unchecked(panicked("decoder", recovered(p), errPlaced),
-			AtToken(astnode.StartToken(node)))
+		in, panicErr, at := "decoder", recovered(p), astnode.StartToken(node)
+		if d, ok := p.(*defaultsPanic); ok {
+			in, panicErr = fmt.Sprintf("the defaults of %s", d.typ), d.err
+			if tk := astnode.StartToken(d.node); tk != nil {
+				at = tk
+			}
+		}
+
+		err = Unchecked(panicked(in, panicErr, errPlaced), AtToken(at))
 	}()
 
 	return dec.DecodeFromNodeContext(ctx, node, v) //nolint:wrapcheck // The caller binds the error.
@@ -2664,10 +2657,6 @@ func (n *Node) DecodeIfPresent(ctx context.Context, path paths.Path, v any, opts
 // argument scope is the node as the decoder read it, without the entries
 // that the known keys of the decode cut.
 //
-// An error of [Node.fillDefaults] does not carry the path of its value.
-// The error of a value that decodes itself binds at the path of its node
-// there, as [Node.unmarshalerProblem] describes.
-//
 // When an unmarshaler returns the error of a context that ended,
 // decodeErrors returns that error alone, without the other problems.
 func (n *Node) decodeErrors(err error, scope ast.Node) error {
@@ -2756,8 +2745,8 @@ func (n *Node) decodeProblem(err error, scope ast.Node) decodeProblem {
 
 // unmarshalerProblem returns own, the error of a value that decodes
 // itself, as a problem at rel, the `@` path on which the decoder read the
-// value. Without such a path, as in an error of [Node.fillDefaults], the
-// problem binds at the path of the node of own in the document. The cause
+// value. Without such a path, the problem binds at the path of the node
+// of own in the document. The cause
 // keeps the `@` paths that the unmarshaler wrote, from the value. The
 // decoder refuses a mapping or a sequence for a type that decodes itself
 // from text alone, and the problem names the kind of that node, as
@@ -3123,7 +3112,6 @@ func sortProblems(problems []decodeProblem) {
 func (n *Node) walkRules(ctx context.Context, dec *yamldecode.Decoder, u unmarshaler.Options) decodewalk.Rules {
 	return decodewalk.Rules{
 		Resolver: n.doc.pathResolver(),
-		View:     func(node ast.Node) ast.Node { return node },
 		Decode: func(node ast.Node, v any) error {
 			return firstError(decodeWithRecover(ctx, dec, node, v))
 		},

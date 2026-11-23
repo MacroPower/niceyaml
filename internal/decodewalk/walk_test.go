@@ -59,7 +59,6 @@ func referenceRules(tb testing.TB, doc, ref *niceyaml.Node) decodewalk.Rules {
 
 	return decodewalk.Rules{
 		Resolver: doc.DocumentResolver(),
-		View:     func(node ast.Node) ast.Node { return node },
 		Decode: func(node ast.Node, v any) (err error) { //nolint:nonamedreturns // The recover sets it.
 			// An unmarshaler of a test type might panic.
 			defer func() {

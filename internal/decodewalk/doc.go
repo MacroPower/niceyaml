@@ -14,9 +14,4 @@
 //
 // The visit function of a walk decides, at each [Value], whether the
 // walk goes below it.
-//
-// The decoder starts each value it creates from the zero value of its
-// type. [Fill] reads the type, the node, and the value the decoder gave,
-// by the same rules. It then builds each value the decoder created again,
-// from a start of its own.
 package decodewalk

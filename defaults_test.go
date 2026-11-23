@@ -2,8 +2,10 @@ package niceyaml_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"net/netip"
 	"reflect"
 	"sync/atomic"
@@ -521,6 +523,84 @@ func TestNode_DecodeInto_Defaults(t *testing.T) {
 	assert.Equal(t, want, start)
 }
 
+func TestNode_DecodeInto_StartsWithoutDefaults(t *testing.T) {
+	t.Parallel()
+
+	type named struct {
+		Name string `yaml:"name"`
+		X    int    `yaml:"x"`
+	}
+
+	type box struct {
+		Inl  named  `yaml:",inline"`
+		Name string `yaml:"name"`
+	}
+
+	type plain struct {
+		Name  string `yaml:"name"`
+		Codes []int  `yaml:"codes"`
+	}
+
+	type pair struct {
+		A plain `yaml:"a"`
+		B plain `yaml:"b"`
+	}
+
+	type tagged struct {
+		Tags defaultsBag `yaml:"tags"`
+		Name string      `yaml:"name"`
+	}
+
+	type tagBox struct {
+		Inl  tagged      `yaml:",inline"`
+		Tags defaultsBag `yaml:"tags"`
+	}
+
+	// A target that the caller fills follows the rules of start values
+	// with no TypeDefaults rule at all.
+	tcs := map[string]struct {
+		start any
+		want  any
+		input string
+	}{
+		"field of a struct held inline that the box names too": {
+			input: "name: a\nx: 1\n",
+			start: &box{Inl: named{Name: "pre"}},
+			want:  &box{Inl: named{Name: "pre", X: 1}, Name: "a"},
+		},
+		// The method of the tags of the inline struct writes into the map
+		// that the target holds, and the field keeps the start all the
+		// same.
+		"field that decodes itself in a struct held inline that the box names too": {
+			input: "name: a\ntags: {k: v}\n",
+			start: &tagBox{Inl: tagged{Tags: defaultsBag{"pre": 1}}},
+			want: &tagBox{
+				Inl:  tagged{Tags: defaultsBag{"pre": 1}, Name: "a"},
+				Tags: defaultsBag{"k": "v", "calls": 1},
+			},
+		},
+		"alias whose place starts from another value": {
+			input: "a: &a {codes: [1]}\nb: *a\n",
+			start: &pair{B: plain{Name: "keep"}},
+			want: &pair{
+				A: plain{Codes: []int{1}},
+				B: plain{Name: "keep", Codes: []int{1}},
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input)
+
+			require.NoError(t, doc.DecodeInto(t.Context(), tc.start))
+			assert.Equal(t, tc.want, tc.start)
+		})
+	}
+}
+
 func TestNode_Decode_DefaultsAtAliases(t *testing.T) {
 	t.Parallel()
 
@@ -545,9 +625,9 @@ func TestNode_Decode_DefaultsAtAliases(t *testing.T) {
 	got, err := doc.Decode[pair](t.Context(), defaultsDecoding, set)
 	require.NoError(t, err)
 
-	// The decoder gives a and b one target, and so does the fill of the
-	// defaults, because the two places start from equal values. The place
-	// c starts from another value, so it builds a target of its own.
+	// The decoder gives a and b one target, because the two places start
+	// from equal values. The place c starts from another value, so the
+	// decoder decodes the anchor again for it.
 	assert.Equal(t, &defaultsPrinter{Host: "h", Port: 9100}, got.A)
 	assert.Same(t, got.A, got.B)
 	assert.Equal(t, &defaultsPrinter{Host: "h", Port: 1}, got.C)
@@ -555,7 +635,7 @@ func TestNode_Decode_DefaultsAtAliases(t *testing.T) {
 	// An interface value holds the value of its anchor.
 	assert.Equal(t, map[string]any{"k": "v"}, got.Y)
 
-	t.Run("value that keeps the start of its anchor", func(t *testing.T) {
+	t.Run("value whose place starts apart from its anchor", func(t *testing.T) {
 		t.Parallel()
 
 		type plain struct {
@@ -588,12 +668,181 @@ func TestNode_Decode_DefaultsAtAliases(t *testing.T) {
 		))
 		require.NoError(t, err)
 
-		// The value at r starts from zero, and no type inside it has a
-		// function of TypeDefaults, so it keeps the copy of the decoder. The
-		// copy holds what the place of the anchor started from, the map of
-		// labels included.
-		assert.Equal(t, plain{Labels: map[string]string{"a": "b"}, Codes: []int{1}, Name: "q"}, got.R.Q)
-		assert.Equal(t, reflect.ValueOf(got.S.Q.Labels).Pointer(), reflect.ValueOf(got.R.Q.Labels).Pointer())
+		// The place r starts from zero, and the place of the anchor does
+		// not, so the decoder decodes the anchor again for r. The value at r
+		// does not hold the name or the labels of s.
+		assert.Equal(t, plain{Codes: []int{1}}, got.R.Q)
+		assert.Equal(t, plain{Labels: map[string]string{"a": "b"}, Codes: []int{1}, Name: "q"}, got.S.Q)
+	})
+
+	// The function of defaultsBag sets a new map on each call.
+	bagDefaults := niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(b *defaultsBag) {
+		*b = defaultsBag{"d": 1}
+	}))
+
+	// Each place below starts from the defaults of the bag, and its
+	// method runs once on that start.
+	bag := defaultsBag{"d": 1, "name": "n", "calls": 1}
+
+	t.Run("value that writes into its start", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"a: &x {name: n}",
+			"b: *x",
+		))
+
+		got, err := doc.Decode[struct {
+			A defaultsBag `yaml:"a"`
+			B defaultsBag `yaml:"b"`
+		}](t.Context(), bagDefaults)
+		require.NoError(t, err)
+
+		// The method of a writes into the map that a starts from. The
+		// place b starts from a value equal to the start of a, so it
+		// shares the value of a, and the method runs once.
+		assert.Equal(t, bag, got.A)
+		assert.Equal(t, reflect.ValueOf(got.A).Pointer(), reflect.ValueOf(got.B).Pointer())
+	})
+
+	t.Run("value that writes into the slice of its start", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"a: &x n",
+			"b: *x",
+		))
+
+		got, err := doc.Decode[struct {
+			A defaultsTally `yaml:"a"`
+			B defaultsTally `yaml:"b"`
+		}](t.Context(), niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(c *defaultsTally) {
+			c.Calls = []int{0}
+		})))
+		require.NoError(t, err)
+
+		// The method of a writes into the slice that a starts from. The
+		// place b starts from a value equal to the start of a, so it
+		// shares the value of a, and the method runs once.
+		assert.Equal(t, defaultsTally{Calls: []int{1}, Name: "n"}, got.A)
+		assert.Same(t, &got.A.Calls[0], &got.B.Calls[0])
+	})
+
+	t.Run("defaults that one function sets", func(t *testing.T) {
+		t.Parallel()
+
+		type hooked struct {
+			Hook  func()  `yaml:"-"`
+			Codes []int   `yaml:"codes"`
+			Ratio float64 `yaml:"ratio"`
+		}
+
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"a: &a {codes: [1]}",
+			"b: *a",
+		))
+
+		tcs := map[string]struct {
+			fn func(*hooked)
+		}{
+			"func": {fn: func(h *hooked) { h.Hook = func() {} }},
+			"NaN":  {fn: func(h *hooked) { h.Ratio = math.NaN() }},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				got, err := doc.Decode[struct {
+					A hooked `yaml:"a"`
+					B hooked `yaml:"b"`
+				}](t.Context(), niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(tc.fn)))
+				require.NoError(t, err)
+
+				// The places a and b start from the defaults that one
+				// function sets, so b shares the value of a.
+				assert.Equal(t, []int{1}, got.A.Codes)
+				assert.Same(t, &got.A.Codes[0], &got.B.Codes[0])
+			})
+		}
+	})
+
+	t.Run("places of another type than the place of the anchor", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"x: &a {name: n}",
+			"y: *a",
+			"l: [*a]",
+		))
+
+		got, err := doc.Decode[struct {
+			X map[string]any `yaml:"x"`
+			Y defaultsBag    `yaml:"y"`
+			L []defaultsBag  `yaml:"l"`
+		}](t.Context(), bagDefaults)
+		require.NoError(t, err)
+
+		// The place x starts from zero, and the places y and l[0] start
+		// from the defaults of the bag, so each decodes the anchor again.
+		assert.Equal(t, map[string]any{"name": "n"}, got.X)
+		assert.Equal(t, bag, got.Y)
+		assert.Equal(t, []defaultsBag{bag}, got.L)
+	})
+
+	t.Run("anchor in an any value", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"x: {in: &a {name: n}}",
+			"y: *a",
+			"z: *a",
+		))
+
+		got, err := doc.Decode[struct {
+			X any         `yaml:"x"`
+			Y defaultsBag `yaml:"y"`
+			Z defaultsBag `yaml:"z"`
+		}](t.Context(), bagDefaults)
+		require.NoError(t, err)
+
+		// The decoder reads the anchor into a value inside the any value
+		// at x, and that value started from nil. Each alias thus decodes
+		// the anchor again from the defaults of the bag.
+		assert.Equal(t, map[string]any{"in": map[string]any{"name": "n"}}, got.X)
+		assert.Equal(t, bag, got.Y)
+		assert.Equal(t, bag, got.Z)
+		assert.NotEqual(t, reflect.ValueOf(got.Y).Pointer(), reflect.ValueOf(got.Z).Pointer())
+	})
+
+	t.Run("anchor read again into an any value", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"a: &outer {in: {deep: &inner {name: n}}}",
+			"y: *outer",
+			"c: *inner",
+		))
+
+		got, err := doc.Decode[struct {
+			A struct {
+				In map[string]defaultsBag `yaml:"in"`
+			} `yaml:"a"`
+			Y struct {
+				In any `yaml:"in"`
+			} `yaml:"y"`
+			C defaultsBag `yaml:"c"`
+		}](t.Context(), bagDefaults)
+		require.NoError(t, err)
+
+		// The decoder first reads inner into a bag at a.in.deep. The
+		// place y has another type than a, so y decodes outer again, and
+		// reads inner into a value inside the any value at y.in. That
+		// value started from nil, so c decodes inner again from the
+		// defaults of the bag.
+		assert.Equal(t, map[string]defaultsBag{"deep": bag}, got.A.In)
+		assert.Equal(t, map[string]any{"deep": map[string]any{"name": "n"}}, got.Y.In)
+		assert.Equal(t, bag, got.C)
 	})
 }
 
@@ -657,8 +906,7 @@ func TestNode_Decode_DefaultsShareValuesOfAnchors(t *testing.T) {
 		"merge keys": {
 			input: mergeKeys,
 		},
-		// The decoder gives each service values of its own, and so does
-		// the fill of the defaults.
+		// The decoder gives each service values of its own.
 		"merge keys with defaults": {
 			input:   mergeKeys,
 			opts:    []niceyaml.DecodeOption{rules},
@@ -697,7 +945,7 @@ func TestNode_Decode_DefaultsShareValuesOfAnchors(t *testing.T) {
 	}
 }
 
-func TestNode_Decode_DefaultsKeepStartsApart(t *testing.T) {
+func TestNode_Decode_DefaultsShareStartsOfAnchors(t *testing.T) {
 	t.Parallel()
 
 	type leaf struct {
@@ -730,9 +978,19 @@ func TestNode_Decode_DefaultsKeepStartsApart(t *testing.T) {
 		assert.NotEqual(t, reflect.ValueOf(a).Pointer(), reflect.ValueOf(b).Pointer())
 	}
 
-	// Each place starts from memory of its own that its defaults set. A
-	// value that the decode builds for one place gives that memory to no
-	// other place.
+	// The function same checks that a and b are one map.
+	same := func(t *testing.T, a, b map[string]string) {
+		t.Helper()
+
+		require.NotNil(t, a)
+		assert.Equal(t, reflect.ValueOf(a).Pointer(), reflect.ValueOf(b).Pointer())
+	}
+
+	// Each place starts from memory that its defaults set. An alias whose
+	// place starts from a value equal to the start of the place of its
+	// anchor takes the value of the anchor, with that memory. An alias that
+	// reads an anchor that no place of the type decodes gets a value of its
+	// own.
 	tcs := map[string]struct {
 		test  func(t *testing.T, doc *niceyaml.Node)
 		input string
@@ -762,12 +1020,12 @@ func TestNode_Decode_DefaultsKeepStartsApart(t *testing.T) {
 				))
 				require.NoError(t, err)
 
-				// The decoder gives the services one retry target, and so
-				// does the decode with defaults.
+				// The decoder gives the services one retry target and one
+				// map of the defaults.
 				api, worker := got.Services["api"], got.Services["worker"]
 				assert.Same(t, api.Retry, worker.Retry)
 				assert.Equal(t, &retry{Codes: []int{500}, Max: 3}, api.Retry)
-				apart(t, api.Env, worker.Env)
+				same(t, api.Env, worker.Env)
 			},
 		},
 		"aliases to an anchor whose alias the decoder reads first": {
@@ -836,7 +1094,7 @@ func TestNode_Decode_DefaultsKeepStartsApart(t *testing.T) {
 
 				assert.Equal(t, bare{Env: map[string]string{}, Image: "x", Port: 1}, got.Services["a"])
 				assert.Equal(t, got.Services["a"], got.Services["b"])
-				apart(t, got.Services["a"].Env, got.Services["b"].Env)
+				same(t, got.Services["a"].Env, got.Services["b"].Env)
 			},
 		},
 		"struct fields": {
@@ -852,8 +1110,9 @@ func TestNode_Decode_DefaultsKeepStartsApart(t *testing.T) {
 				got, err := doc.Decode[pair](t.Context(), bareDefaults)
 				require.NoError(t, err)
 
+				// Each field starts from equal defaults.
 				assert.Equal(t, "x", got.Worker.Image)
-				apart(t, got.API.Env, got.Worker.Env)
+				same(t, got.API.Env, got.Worker.Env)
 			},
 		},
 		"pointer that separate decodes share": {
@@ -903,11 +1162,11 @@ func TestNode_Decode_DefaultsKeepStartsApart(t *testing.T) {
 				require.NoError(t, err)
 				require.Len(t, got.Vals, 3)
 
-				// The decode cannot give such a value to another place, so
-				// each place builds its own.
-				assert.Equal(t, 6, calls)
+				// The function runs for the two elements of the anchor
+				// alone.
+				assert.Equal(t, 2, calls)
 				assert.Equal(t, 1, got.Vals[1].Arr[0].Max)
-				apart(t, got.Vals[0].Arr[1].Labels, got.Vals[1].Arr[1].Labels)
+				same(t, got.Vals[0].Arr[1].Labels, got.Vals[1].Arr[1].Labels)
 			},
 		},
 		// The function of the struct sets the map, so the array holds what
@@ -938,11 +1197,10 @@ func TestNode_Decode_DefaultsKeepStartsApart(t *testing.T) {
 				require.NoError(t, err)
 				require.Len(t, got.Vals, 3)
 
-				// The decode cannot give such a value to another place, so
-				// each place builds its own.
-				assert.Equal(t, 3, calls)
+				// The function runs for the anchor alone.
+				assert.Equal(t, 1, calls)
 				assert.Equal(t, "x", got.Vals[1].Name)
-				apart(t, got.Vals[0].Arr[1].Labels, got.Vals[1].Arr[1].Labels)
+				same(t, got.Vals[0].Arr[1].Labels, got.Vals[1].Arr[1].Labels)
 			},
 		},
 		"pointer in a struct in an interface value in an array": {
@@ -973,9 +1231,7 @@ func TestNode_Decode_DefaultsKeepStartsApart(t *testing.T) {
 				second, ok := got.Vals[1].Box[0].(holder)
 				require.True(t, ok)
 
-				// The decoder gives the box no pointer, so each place keeps
-				// the pointer that its own defaults set.
-				assert.NotSame(t, first.P, second.P)
+				assert.Same(t, first.P, second.P)
 				assert.Equal(t, []leaf{{}}, got.Vals[1].Kids)
 			},
 		},
@@ -1001,11 +1257,11 @@ func TestNode_Decode_DefaultsKeepStartsApart(t *testing.T) {
 
 				assert.Equal(t, "x", got.Vals[1].Name)
 				assert.Equal(t, 3, got.Vals[1].Max)
-				apart(t, got.Vals[0].hidden, got.Vals[1].hidden)
+				same(t, got.Vals[0].hidden, got.Vals[1].hidden)
 			},
 		},
 		// Each row below sets one kind of memory in a struct inside an
-		// array, where the decoder gives the struct none.
+		// array.
 		"func in an array": {
 			input: "vals: [&a {arr: [{max: 1}], name: x}, *a, *a]\n",
 			test: func(t *testing.T, doc *niceyaml.Node) {
@@ -1029,8 +1285,10 @@ func TestNode_Decode_DefaultsKeepStartsApart(t *testing.T) {
 
 				require.NotNil(t, got[0].Fn)
 				require.NotNil(t, got[1].Fn)
+				// The aliases share the func of the anchor, and so its
+				// counter.
 				assert.Equal(t, 1, got[0].Fn())
-				assert.Equal(t, 1, got[1].Fn())
+				assert.Equal(t, 2, got[1].Fn())
 				assert.Equal(t, 1, got[1].Max)
 			},
 		},
@@ -1048,7 +1306,7 @@ func TestNode_Decode_DefaultsKeepStartsApart(t *testing.T) {
 
 				require.NotNil(t, got[0].Ch)
 				require.NotNil(t, got[1].Ch)
-				assert.NotEqual(t, got[0].Ch, got[1].Ch)
+				assert.Equal(t, got[0].Ch, got[1].Ch)
 				assert.Equal(t, 1, got[1].Max)
 			},
 		},
@@ -1066,7 +1324,7 @@ func TestNode_Decode_DefaultsKeepStartsApart(t *testing.T) {
 
 				require.NotNil(t, got[0].U)
 				require.NotNil(t, got[1].U)
-				assert.NotEqual(t, got[0].U, got[1].U)
+				assert.Equal(t, got[0].U, got[1].U)
 				assert.Equal(t, 1, got[1].Max)
 			},
 		},
@@ -1154,15 +1412,15 @@ func TestNode_Decode_DefaultsAtReferenceAliases(t *testing.T) {
 func TestNode_Decode_DefaultsInsideReferenceAnchors(t *testing.T) {
 	t.Parallel()
 
-	// The decode cannot read the anchor, so each value that the decoder
-	// creates inside it keeps the value of the decoder, in a decode of the
-	// document and in a decode of the Node of the alias.
+	// Each value that the decoder creates inside the anchor starts from
+	// the defaults of its type, in a decode of the document and in a decode
+	// of the Node of the alias.
 	doc := yamltest.FirstDocument(t, "stations: *crew\n",
 		yamltest.References("crew: &crew [{host: a}]\n"))
 
 	got, err := doc.Decode[defaultsCafe](t.Context(), defaultsDecoding)
 	require.NoError(t, err)
-	assert.Equal(t, []defaultsPrinter{{Host: "a"}}, got.Stations)
+	assert.Equal(t, []defaultsPrinter{{Host: "a", Port: 9100}}, got.Stations)
 
 	at := yamltest.At(t, doc, paths.MustParse("$.stations"))
 
@@ -1199,8 +1457,7 @@ func TestNode_Decode_DefaultsReferenceMerges(t *testing.T) {
 				c.Kitchen = defaultsPrinter{Host: "k", Port: 1}
 			}),
 		},
-		// The decoder starts each element from zero, so the element decodes
-		// again from its defaults.
+		// The decoder starts each element from its defaults.
 		"element that merges a reference document": {
 			input: "stations: [{<<: *port, host: s}, {<<: *host}]\n",
 			want: defaultedCafe(func(c *defaultsCafe) {
@@ -1231,11 +1488,11 @@ func TestNode_Decode_DefaultsReferenceMerges(t *testing.T) {
 			}),
 		},
 		// The decoder reads the stations of the reference document, and
-		// the fill cannot read inside them.
+		// each element there starts from its defaults.
 		"entry before a merge key that replaces it": {
 			input: stringtest.LinesLF("stations: [{host: s}]", "<<: *crew"),
 			want: defaultedCafe(func(c *defaultsCafe) {
-				c.Stations = []defaultsPrinter{{Host: "c"}}
+				c.Stations = []defaultsPrinter{{Host: "c", Port: 9100}}
 			}),
 		},
 	}
@@ -1313,12 +1570,11 @@ func TestNode_Decode_DefaultsOfFieldsBesideReferenceMerges(t *testing.T) {
 	// The anchors that the element of the list reads.
 	const anchors = "spare: &o {codes: [1]}\nnums: &n [7]\n"
 
-	// Each struct here merges the reference document, so the fill of the
-	// defaults decodes it again. Each named field that the document writes
-	// there takes the value that the same document without the merge key
-	// gives it. Each field that the merge key brings in takes the value of
-	// the second decode, in the struct or in an inline struct. So does each
-	// field that reads the anchor of the merge key.
+	// Each struct here merges the reference document. Each named field
+	// that the document writes there takes the value that the same document
+	// without the merge key gives it. Each field that the merge key brings
+	// in starts from the value that its struct holds there, in the struct or
+	// in an inline struct.
 	tcs := map[string]struct {
 		test  func(t *testing.T, doc *niceyaml.Node)
 		input string
@@ -1371,17 +1627,13 @@ func TestNode_Decode_DefaultsOfFieldsBesideReferenceMerges(t *testing.T) {
 				require.Len(t, got.A.Q.Codes, 1)
 				require.Len(t, got.B.Q.Codes, 1)
 
-				// The decoder gives the alias the value that the anchor
-				// decoded to. The plain value starts from zero and its type
-				// holds no type with defaults, so it keeps that value.
-				assert.Equal(t, "q", got.B.Q.Name)
-				assert.Same(t, &got.A.Q.Codes[0], &got.B.Q.Codes[0])
-
-				// A decode without defaults from the same start gives the
-				// same.
-				into := pair{A: item{Q: plain{Name: "q"}}}
-				require.NoError(t, doc.DecodeInto(t.Context(), &into))
-				assert.Equal(t, into, got)
+				// The place of the alias starts from another value than the
+				// place of the anchor, so the decoder decodes the anchor
+				// again from that value.
+				assert.Equal(t, "q", got.A.Q.Name)
+				assert.Empty(t, got.B.Q.Name)
+				assert.Equal(t, "h", got.B.Host)
+				assert.NotSame(t, &got.A.Q.Codes[0], &got.B.Q.Codes[0])
 			},
 		},
 		"value that decodes itself": {
@@ -1400,11 +1652,9 @@ func TestNode_Decode_DefaultsOfFieldsBesideReferenceMerges(t *testing.T) {
 				require.NoError(t, err)
 				require.Len(t, got.S, 1)
 
-				// The decoder starts the field from zero, so its method
-				// does not count. The decode of the shelf for the defaults
-				// calls the method once. The field then decodes again from
-				// its defaults, as it does without the merge key.
-				assert.Equal(t, 2, calls)
+				// The decoder calls the method once, on a field that starts
+				// from its defaults.
+				assert.Equal(t, 1, calls)
 				assert.Equal(t, "x", got.S[0].Self.Name)
 				assert.Equal(t, 5, got.S[0].Self.Port)
 			},
@@ -1446,16 +1696,15 @@ func TestNode_Decode_DefaultsOfFieldsBesideReferenceMerges(t *testing.T) {
 				require.NoError(t, err)
 				require.Len(t, got.A, 1)
 
-				// The field reads the anchor in the second decode, after
-				// the decoder decoded the place of the anchor. It thus
-				// shares its map with that place.
-				assert.Equal(t, reflect.ValueOf(got.M).Pointer(), reflect.ValueOf(got.A[0].Base).Pointer())
+				// The decoder reads the field before the place of the
+				// anchor, so the field holds a map of its own.
+				assert.Equal(t, got.M, got.A[0].Base)
+				assert.NotEqual(t, reflect.ValueOf(got.M).Pointer(), reflect.ValueOf(got.A[0].Base).Pointer())
 				assert.Equal(t, "h", got.A[0].Host)
 			},
 		},
-		// The fill takes the map held inline behind a pointer from the
-		// second decode. The decode reads the aliases after the struct that
-		// merges the reference document, outside that field.
+		// The decode reads the aliases after the struct that merges the
+		// reference document, outside that struct.
 		"aliases after a field held inline beside a reference merge": {
 			input: "ws: [{<<: *bar, name: x}]\nx-c: &c {image: i}\nsvcs: [*c, *c]\n",
 			test: func(t *testing.T, doc *niceyaml.Node) {
@@ -1495,11 +1744,10 @@ func TestNode_Decode_DefaultsOfFieldsBesideReferenceMerges(t *testing.T) {
 					reflect.ValueOf(got.Svcs[1].Env).Pointer())
 			},
 		},
-		// The fields of the struct held inline build from the values that
-		// the decoder first gave them. The anchor holds a start inside an
-		// array, so the fill records no value for it, and each alias builds
-		// a value of its own. The function thus runs for the two elements of
-		// each item, as it does without the merge key.
+		// Each alias starts from the defaults of its type, as the anchor
+		// does, so it takes the value of the anchor. The function thus runs
+		// for the two elements of the anchor alone, as it does without the
+		// merge key.
 		"start inside an array inside a struct held inline beside a reference merge": {
 			input: "ws: [{<<: *bar, name: w, items: [&a {arr: [{max: 1}, {}], name: x}, *a, *a]}]\n",
 			test: func(t *testing.T, doc *niceyaml.Node) {
@@ -1540,15 +1788,11 @@ func TestNode_Decode_DefaultsOfFieldsBesideReferenceMerges(t *testing.T) {
 
 				assert.Equal(t, "h", got.Ws[0].Host)
 				assert.Equal(t, "x", got.Ws[0].Extra.Items[1].Name)
-				assert.Equal(t, 6, calls)
+				assert.Equal(t, 2, calls)
 			},
 		},
-		// The merge key brings in the field more, so the fill decodes the
-		// struct again. It takes the map held inline behind a pointer from
-		// that decode. There it records the value that it builds for the
-		// anchor without the walk that sorts the memory of the value. The
-		// aliases take that value, so the function runs for the two elements
-		// of the anchor alone.
+		// The aliases take the value of the anchor, so the function runs for
+		// the two elements of the anchor alone.
 		"start inside an array inside a map held inline beside a reference merge": {
 			input: "ws: [{<<: *lst, items: [&a {arr: [{max: 1}, {}], name: x}, *a, *a]}]\n",
 			test: func(t *testing.T, doc *niceyaml.Node) {
@@ -1636,12 +1880,10 @@ func TestNode_Decode_DefaultsOfInlineFieldsBesideReferenceMerges(t *testing.T) {
 		return yamltest.FirstDocument(t, input, refs)
 	}
 
-	// Each struct in the list merges the reference document, so the fill of
-	// the defaults decodes it again. Each struct that decodes itself takes
-	// the second decode there, alone or behind a pointer. Each other struct
-	// or map held inline builds each value that the document writes from the
-	// value that the decoder first gave it. So does each pointer to such a
-	// struct.
+	// Each struct in the list merges the reference document. The decoder
+	// starts each struct or map held inline from its defaults, alone or
+	// behind a pointer, and each value that it creates inside from the
+	// defaults of its type.
 	tcs := map[string]struct {
 		test func(t *testing.T)
 	}{
@@ -1704,9 +1946,8 @@ func TestNode_Decode_DefaultsOfInlineFieldsBesideReferenceMerges(t *testing.T) {
 					assert.Equal(t, "ref", got.Boxes[0].Name)
 				}
 
-				// The merge key brings in the lead, so the lead takes the
-				// second decode, which starts from the target that the
-				// function sets.
+				// The merge key brings in the lead, which starts from the
+				// target that the function sets.
 				doc = read(t, "boxes: [{<<: *lead, any: 1}]\n")
 
 				got, err := doc.Decode[boxes](t.Context(), niceyaml.OverrideTypeRules(
@@ -1723,8 +1964,7 @@ func TestNode_Decode_DefaultsOfInlineFieldsBesideReferenceMerges(t *testing.T) {
 			test: func(t *testing.T) {
 				t.Helper()
 
-				// The decoder sets the field to zero because the box names it
-				// too, and the fill keeps its start.
+				// The box names the field too, so the field keeps its start.
 				type named struct {
 					Name string `yaml:"name"`
 					Host string `yaml:"host"`
@@ -1770,10 +2010,8 @@ func TestNode_Decode_DefaultsOfInlineFieldsBesideReferenceMerges(t *testing.T) {
 			test: func(t *testing.T) {
 				t.Helper()
 
-				// The document writes the field, so the field builds from the
-				// value that the decoder first gave it. The decoder started
-				// that value from zero, so the field decodes again from its
-				// defaults, as it does without the merge key.
+				// The field starts from its defaults, as it does without the
+				// merge key.
 				type selfInl struct {
 					Self defaultsCounted `yaml:"self"`
 				}
@@ -1802,10 +2040,7 @@ func TestNode_Decode_DefaultsOfInlineFieldsBesideReferenceMerges(t *testing.T) {
 			test: func(t *testing.T) {
 				t.Helper()
 
-				// The document writes the field, so the field builds from the
-				// value that the decoder first gave it. The decoder started
-				// that value from zero, so the field decodes again from the
-				// target that the function sets.
+				// The field starts from the target that the function sets.
 				type selfInl struct {
 					Self defaultsCounted `yaml:"self"`
 				}
@@ -1870,7 +2105,9 @@ func TestNode_Decode_DefaultsOfInlineFieldsBesideReferenceMerges(t *testing.T) {
 					assert.Equal(t, "ref", got.Boxes[0].Name)
 				}
 
-				// The fill keeps the values of the two aliases apart.
+				// The decoder reads the list before the place of the anchor,
+				// so it reads the anchor again for each alias, and the two
+				// aliases hold values of their own.
 				doc = read(t, "late: &l {codes: [1]}\nboxes: [{<<: *n, lead: *l}, {<<: *n, lead: *l}]\n")
 
 				for _, opts := range [][]niceyaml.DecodeOption{nil, {hookDefaults}} {
@@ -1900,9 +2137,8 @@ func TestNode_Decode_DefaultsOfInlineFieldsBesideReferenceMerges(t *testing.T) {
 				assert.IsType(t, map[string]any{}, got.Boxes[0].Inl.Any)
 				assert.Equal(t, &hook{Codes: []int{2}, Max: 3}, got.Boxes[0].Inl.Lead)
 
-				// The merge key brings in the lead, so the lead takes the
-				// second decode, which starts from the target that the
-				// function sets.
+				// The merge key brings in the lead, which starts from the
+				// target that the function sets.
 				doc = read(t, "boxes: [{<<: *lead, any: 1}]\n")
 
 				got, err = doc.Decode[boxes](t.Context(), niceyaml.OverrideTypeRules(
@@ -1920,11 +2156,8 @@ func TestNode_Decode_DefaultsOfInlineFieldsBesideReferenceMerges(t *testing.T) {
 			test: func(t *testing.T) {
 				t.Helper()
 
-				// The method of the struct reads the whole mapping. The fill
-				// thus takes the struct from the second decode and does not
-				// decode it a third time. The first decode starts the struct
-				// from zero, so the method counts its call in the second
-				// decode alone.
+				// The method of the struct reads the whole mapping, and the
+				// decoder calls it once, on the defaults.
 				type box struct {
 					Self defaultsSelf `yaml:",inline"`
 					Num  int          `yaml:"num"`
@@ -1964,8 +2197,8 @@ func TestNode_Decode_DefaultsOfInlineFieldsBesideReferenceMerges(t *testing.T) {
 				t.Helper()
 
 				// A function of TypeDefaults of the box sets the target that
-				// the second decode starts from. The fill takes the target
-				// from that decode and does not decode it a third time.
+				// the decoder starts from, and the decoder calls the method
+				// once.
 				type box struct {
 					Self *defaultsSelf `yaml:",inline"`
 					Num  int           `yaml:"num"`
@@ -2004,11 +2237,9 @@ func TestNode_Decode_DefaultsOfInlineFieldsBesideReferenceMerges(t *testing.T) {
 			test: func(t *testing.T) {
 				t.Helper()
 
-				// The merge key brings in the field more, so the fill decodes
-				// the bag again. The decoder starts each value of the map from
-				// zero, so the value that the merge key brings in keeps that
-				// start. The value that the document writes starts from the
-				// defaults of its type.
+				// The decoder starts each value of the map from the defaults
+				// of its type, the value that the merge key brings in
+				// included.
 				type bag struct {
 					Rest map[string]hook `yaml:",inline"`
 					More hook            `yaml:"more"`
@@ -2018,10 +2249,10 @@ func TestNode_Decode_DefaultsOfInlineFieldsBesideReferenceMerges(t *testing.T) {
 
 				for _, decode := range []struct {
 					opts []niceyaml.DecodeOption
-					own  hook
+					max  int
 				}{
-					{own: hook{Codes: []int{2}}},
-					{opts: []niceyaml.DecodeOption{hookDefaults}, own: hook{Codes: []int{2}, Max: 3}},
+					{},
+					{opts: []niceyaml.DecodeOption{hookDefaults}, max: 3},
 				} {
 					got, err := doc.Decode[struct {
 						Bags []bag `yaml:"bags"`
@@ -2029,12 +2260,15 @@ func TestNode_Decode_DefaultsOfInlineFieldsBesideReferenceMerges(t *testing.T) {
 					require.NoError(t, err)
 					require.Len(t, got.Bags, 1)
 
-					assert.Equal(t, map[string]hook{"more": {Codes: []int{9}}, "own": decode.own}, got.Bags[0].Rest)
+					assert.Equal(t, map[string]hook{
+						"more": {Codes: []int{9}, Max: decode.max},
+						"own":  {Codes: []int{2}, Max: decode.max},
+					}, got.Bags[0].Rest)
 				}
 
 				// The decoder reads the list before the place of the anchor
 				// that each alias reads, so it gives each alias a value of
-				// its own. The fill keeps those values apart.
+				// its own.
 				doc = read(t, "late: &l {codes: [1]}\nbags: [{<<: *extra, own: *l, two: *l}]\n")
 
 				for _, opts := range [][]niceyaml.DecodeOption{nil, {hookDefaults}} {
@@ -2167,7 +2401,7 @@ func TestNode_Decode_DefaultsCalls(t *testing.T) {
 			},
 		},
 		"struct kids": {
-			want: 61,
+			want: 21,
 			calls: func(t *testing.T) int {
 				t.Helper()
 
@@ -2188,8 +2422,8 @@ func TestNode_Decode_DefaultsCalls(t *testing.T) {
 				return calls
 			},
 		},
-		// The decoder creates a value for each alias of n0 and n1, so the
-		// fill builds each of those values from its defaults.
+		// The decoder creates a value for each alias of n0 and n1, and
+		// each of those values starts from its defaults.
 		"anchors that the type does not read": {
 			want: 13,
 			calls: func(t *testing.T) int {
@@ -2224,8 +2458,11 @@ func TestNode_Decode_DefaultsCalls(t *testing.T) {
 				return calls
 			},
 		},
+		// Each element starts from the defaults of its type, so each alias
+		// takes the value of its anchor, although the function gives each
+		// call another value.
 		"struct kids with the merge": {
-			want: 37,
+			want: 13,
 			calls: func(t *testing.T) int {
 				t.Helper()
 
@@ -2236,7 +2473,6 @@ func TestNode_Decode_DefaultsCalls(t *testing.T) {
 					Max  int    `yaml:"max"`
 				}
 
-				// No two places start from equal values.
 				calls := 0
 
 				got, err := levels(t, 12, true).Decode[struct {
@@ -2252,11 +2488,10 @@ func TestNode_Decode_DefaultsCalls(t *testing.T) {
 				return calls
 			},
 		},
-		// The struct decodes again for the merge key, and the kids sit in
-		// a struct held inline. They build from the values that the decoder
-		// first gave them, as the kids of a named field do.
+		// The kids sit in a struct held inline, and they take the values
+		// of their anchors, as the kids of a named field do.
 		"inline kids with the merge": {
-			want: 37,
+			want: 13,
 			calls: func(t *testing.T) int {
 				t.Helper()
 
@@ -2286,10 +2521,9 @@ func TestNode_Decode_DefaultsCalls(t *testing.T) {
 			},
 		},
 		// The kids sit in a struct held inline inside another struct held
-		// inline. They build from the values that the decoder first gave them
-		// too.
+		// inline, and they take the values of their anchors too.
 		"nested inline kids with the merge": {
-			want: 37,
+			want: 13,
 			calls: func(t *testing.T) int {
 				t.Helper()
 
@@ -2341,8 +2575,10 @@ func TestNode_Decode_DefaultsCalls(t *testing.T) {
 				return calls
 			},
 		},
+		// The decoder reads the anchor of the reference document again for
+		// each alias, so each element of refs calls the method once.
 		"lists of a value that decodes itself": {
-			want: 3,
+			want: 5,
 			calls: func(t *testing.T) int {
 				t.Helper()
 
@@ -2440,9 +2676,10 @@ func TestNode_Decode_DefaultsCalls(t *testing.T) {
 
 				got := defaultsAliasList[zero](t, "{e: [{}], p: {}, leaf: [{}]}", countLeaf(&calls),
 					niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(z *zero) { z.Env = map[string]string{} })))
+				// The aliases take the value of the anchor, with the map
+				// that its defaults set.
 				require.NotNil(t, got[0].Env)
-				require.NotNil(t, got[1].Env)
-				assert.NotEqual(t, reflect.ValueOf(got[0].Env).Pointer(), reflect.ValueOf(got[1].Env).Pointer())
+				assert.Equal(t, reflect.ValueOf(got[0].Env).Pointer(), reflect.ValueOf(got[1].Env).Pointer())
 
 				return calls
 			},
@@ -2715,6 +2952,52 @@ func (l *defaultsLabels) UnmarshalYAML(_ context.Context, decode func(any) error
 	return nil
 }
 
+// defaultsBag is a bag of values that decodes itself.
+type defaultsBag map[string]any
+
+// UnmarshalYAML decodes a mapping and copies its entries into the map that
+// b holds. It makes that map first when b is nil. It then adds one to the
+// int under the key "calls", so the map counts the calls that wrote it.
+func (b *defaultsBag) UnmarshalYAML(_ context.Context, decode func(any) error) error {
+	var entries map[string]any
+
+	err := decode(&entries)
+	if err != nil {
+		return err
+	}
+
+	if *b == nil {
+		*b = defaultsBag{}
+	}
+
+	maps.Copy(*b, entries)
+
+	if calls, ok := (*b)["calls"].(int); ok {
+		(*b)["calls"] = calls + 1
+	} else {
+		(*b)["calls"] = 1
+	}
+
+	return nil
+}
+
+// defaultsTally decodes itself, and counts each call of its method in the
+// first element of Calls.
+type defaultsTally struct {
+	Calls []int
+	Name  string
+}
+
+// UnmarshalYAML decodes a name, and adds one to the first element of
+// Calls when Calls holds one.
+func (c *defaultsTally) UnmarshalYAML(_ context.Context, decode func(any) error) error {
+	if len(c.Calls) > 0 {
+		c.Calls[0]++
+	}
+
+	return decode(&c.Name)
+}
+
 // defaultsLogLevel is a level of logs that decodes itself.
 type defaultsLogLevel string
 
@@ -2793,6 +3076,89 @@ func TestNode_Decode_DefaultsOfValueThatDecodesItself(t *testing.T) {
 	assert.Equal(t, []defaultsLevel{{Name: "info", Level: 3}, {Name: "debug", Level: 3}}, got)
 }
 
+// defaultsWrapper decodes itself into the printer that Printer points to,
+// which is nil when the method starts.
+type defaultsWrapper struct {
+	Printer *defaultsPrinter
+}
+
+// UnmarshalYAML decodes a printer into the nil pointer Printer.
+func (w *defaultsWrapper) UnmarshalYAML(_ context.Context, decode func(any) error) error {
+	return decode(&w.Printer)
+}
+
+func TestNode_Decode_DefaultsOfPointerTargetInMethod(t *testing.T) {
+	t.Parallel()
+
+	doc := yamltest.FirstDocument(t, "w: {host: a}\n")
+
+	// The method decodes into a nil pointer, so the decoder creates the
+	// printer, and the printer starts from its defaults.
+	got, err := doc.Decode[struct {
+		W defaultsWrapper `yaml:"w"`
+	}](t.Context(), defaultsDecoding)
+	require.NoError(t, err)
+	assert.Equal(t, &defaultsPrinter{Host: "a", Port: 9100}, got.W.Printer)
+}
+
+// defaultsKey is a map key that decodes its name from text and keeps the
+// unit that it starts from.
+type defaultsKey struct{ Name, Unit string }
+
+func (k *defaultsKey) UnmarshalText(b []byte) error {
+	k.Name = string(b)
+
+	return nil
+}
+
+func TestNode_Decode_DefaultsOfMapKeys(t *testing.T) {
+	t.Parallel()
+
+	doc := yamltest.FirstDocument(t, "small: 1\n")
+
+	got, err := doc.Decode[map[defaultsKey]int](t.Context(),
+		niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(k *defaultsKey) { k.Unit = "ml" })))
+	require.NoError(t, err)
+	assert.Equal(t, map[defaultsKey]int{{Name: "small", Unit: "ml"}: 1}, got)
+}
+
+// defaultsPort fails Validate for a port greater than 5.
+type defaultsPort struct {
+	Port int `yaml:"port"`
+}
+
+func (p defaultsPort) Validate() error {
+	if p.Port > 5 {
+		return errors.New("port too big")
+	}
+
+	return nil
+}
+
+func TestNode_Decode_DefaultsOfMapKeysInPaths(t *testing.T) {
+	t.Parallel()
+
+	// The path of an error below a key spells the key as the document does
+	// when the key starts from its defaults.
+	doc := yamltest.FirstDocument(t, "small: {port: 9}\nbig: {port: 1}\n")
+	keys := niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(k *defaultsKey) { k.Unit = "ml" }))
+
+	_, err := doc.Decode[map[defaultsKey]defaultsPort](t.Context(), keys)
+	require.ErrorContains(t, err, "$.small: port too big")
+
+	v := map[defaultsKey]defaultsPort{{Name: "small", Unit: "ml"}: {Port: 9}}
+	err = doc.SelfValidate(t.Context(), &v, keys)
+	require.ErrorContains(t, err, "$.small: port too big")
+
+	// When the defaults of the key panic, the walk cannot decode the key,
+	// and the path spells the key as the value that the map holds.
+	boom := niceyaml.OverrideTypeRules(niceyaml.TypeDefaults(func(*defaultsKey) { panic("boom") }))
+	v = map[defaultsKey]defaultsPort{{Name: "small"}: {Port: 9}}
+	err = doc.SelfValidate(t.Context(), &v, boom)
+	require.ErrorContains(t, err, "$.'{small }': port too big")
+	require.NotErrorAs(t, err, new(*niceyaml.PanicError))
+}
+
 func TestNode_Decode_DefaultsPanic(t *testing.T) {
 	t.Parallel()
 
@@ -2819,5 +3185,18 @@ func TestNode_Decode_DefaultsPanic(t *testing.T) {
 
 		_, err := doc.Decode[defaultsPrinter](t.Context(), boom)
 		require.ErrorAs(t, err, new(*niceyaml.PanicError))
+	})
+
+	t.Run("an element", func(t *testing.T) {
+		t.Parallel()
+
+		// The decoder asks for the defaults of the element, and the error
+		// names the type of the element at the node of the element.
+		doc := yamltest.FirstDocument(t, "- {host: a}\n")
+
+		_, err := doc.Decode[[]defaultsPrinter](t.Context(), boom)
+		require.ErrorAs(t, err, new(*niceyaml.PanicError))
+		require.NotErrorIs(t, err, niceyaml.ErrDecode)
+		assert.ErrorContains(t, err, "1:3: the defaults of niceyaml_test.defaultsPrinter panicked: boom")
 	})
 }

@@ -70,6 +70,28 @@ type Decoder struct {
 	// openNulls counts the aliases that read as null because the decoder
 	// was reading their anchor.
 	openNulls int
+	// startValue, from StartValue, gives the value that each value the
+	// decoder creates starts from.
+	startValue func(reflect.Type, ast.Node) reflect.Value
+	// anchorStarts holds the value that the place of each anchor in
+	// anchorValueMap started from, under StartValue. The map does not hold
+	// an entry for an anchor that the decoder read into an any value.
+	anchorStarts map[string]placeStart
+	// freshAnchor is set for the decodeValue of an anchor whose place
+	// does not hold a value of its own, so that the place starts from the
+	// start of its type.
+	freshAnchor bool
+}
+
+// placeStart is the value that the place of an anchor started from under
+// StartValue.
+type placeStart struct {
+	// value is a copy of the start that shares no memory with the place,
+	// as copyStart makes it.
+	value reflect.Value
+	// fresh is set when the place did not hold a value of its own, so that
+	// it started from the start of the type of value.
+	fresh bool
 }
 
 // keeps reports whether the decoder keeps the value of an anchor that it
@@ -1085,6 +1107,7 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 		d.anchorNodeMap[anchorName] = n.Value
 		if d.keeps(mark) {
 			d.anchorValueMap[anchorName] = reflect.ValueOf(anchorValue)
+			d.keepStart(anchorName, placeStart{})
 			delete(d.anchorUnknown, anchorName)
 		}
 		return anchorValue, nil
@@ -1594,6 +1617,8 @@ var (
 )
 
 func (d *Decoder) decodeValue(ctx context.Context, dst reflect.Value, src ast.Node) error {
+	fresh := d.freshAnchor
+	d.freshAnchor = false
 	d.stepIn()
 	defer d.stepOut()
 	if d.isExceededMaxDepth() {
@@ -1610,6 +1635,12 @@ func (d *Decoder) decodeValue(ctx context.Context, dst reflect.Value, src ast.No
 		anchor, _ := src.(*ast.AnchorNode)
 		anchorName := d.anchorKey(anchor)
 		mark := d.openNulls
+		var start placeStart
+		if d.startValue != nil {
+			// The copy keeps the start as it was, though the decode below
+			// might change the maps and the pointer targets of the place.
+			start = placeStart{value: copyStart(d.startOf(dst.Type(), dst, src)), fresh: fresh}
+		}
 		reports, err := d.captureUnknown(true, func() error {
 			return d.decodeValue(withAnchor(ctx, anchorName), dst, anchor.Value)
 		})
@@ -1618,6 +1649,7 @@ func (d *Decoder) decodeValue(ctx context.Context, dst reflect.Value, src ast.No
 		}
 		if d.keeps(mark) {
 			d.anchorValueMap[anchorName] = dst
+			d.keepStart(anchorName, start)
 			d.keepUnknown(anchorName, len(d.path), reports)
 		}
 		return nil
@@ -1647,21 +1679,15 @@ func (d *Decoder) decodeValue(ctx context.Context, dst reflect.Value, src ast.No
 			dst.Set(n)
 			return nil
 		}
-		v := d.createDecodableValue(dst.Type())
+		// The decode starts from the value that the pointer reaches, or
+		// from the start of its type for a nil pointer.
+		v := d.startOf(dst.Type(), dst, src)
 		if v.Kind() == reflect.Ptr {
 			srcValue, err := d.nodeToValue(ctx, src)
 			if err != nil {
 				return err
 			}
 			return errors.ErrTypeMismatch(valueType, reflect.TypeOf(srcValue), src.GetToken())
-		}
-		// The decode starts from the value that the pointer reaches.
-		held := dst
-		for held.Kind() == reflect.Ptr && !held.IsNil() {
-			held = held.Elem()
-		}
-		if held.Type() == v.Type() {
-			v.Set(held)
 		}
 		if err := d.decodeValue(ctx, v, src); err != nil {
 			return err
@@ -1794,13 +1820,309 @@ func (d *Decoder) decodeValue(ctx context.Context, dst reflect.Value, src ast.No
 	return nil
 }
 
-func (d *Decoder) createDecodableValue(typ reflect.Type) reflect.Value {
+// createDecodableValue returns a new value of the type that typ reaches
+// through its pointers, for the node that the decoder reads into it. Under
+// StartValue, the value holds the start of its type.
+func (d *Decoder) createDecodableValue(typ reflect.Type, node ast.Node) reflect.Value {
 	// A type such as "type P *P" never ends in a type that is not a
 	// pointer, so the walk gives up, and the caller rejects the pointer.
+	typ = baseType(typ)
+	v := reflect.New(typ).Elem()
+	if d.startValue != nil {
+		if start := d.startValue(typ, node); start.IsValid() && start.Type().AssignableTo(typ) {
+			v.Set(start)
+		}
+	}
+	return v
+}
+
+// startOf returns a new value of the type that typ reaches through its
+// pointers, for a place of type typ that holds held and that the decoder
+// reads node into. The value holds what held reaches through its pointers,
+// as heldValue finds it. Otherwise it holds the start of the type, as
+// createDecodableValue gives it.
+func (d *Decoder) startOf(typ reflect.Type, held reflect.Value, node ast.Node) reflect.Value {
+	if v, ok := heldValue(typ, held); ok {
+		return v
+	}
+	return d.createDecodableValue(typ, node)
+}
+
+// heldValue returns a new value that holds what held reaches through its
+// pointers, as a value of the type that typ reaches through its pointers.
+// It reports false when held does not reach a value of that type, as
+// heldTarget finds it.
+func heldValue(typ reflect.Type, held reflect.Value) (reflect.Value, bool) {
+	target, ok := heldTarget(typ, held)
+	if !ok {
+		return reflect.Value{}, false
+	}
+	v := reflect.New(baseType(typ)).Elem()
+	v.Set(target)
+	return v, true
+}
+
+// heldTarget returns the value that held reaches through its pointers. It
+// reports false when that value cannot be a value of the type that typ
+// reaches through its pointers, such as when held reaches a nil pointer.
+func heldTarget(typ reflect.Type, held reflect.Value) (reflect.Value, bool) {
+	for i := 0; held.Kind() == reflect.Ptr && i < maxPointerDepth; i++ {
+		if held.IsNil() {
+			return reflect.Value{}, false
+		}
+		held = held.Elem()
+	}
+	if !held.IsValid() || !held.Type().AssignableTo(baseType(typ)) {
+		return reflect.Value{}, false
+	}
+	return held, true
+}
+
+// baseType returns the type that typ reaches through its pointers, as
+// createDecodableValue finds it.
+func baseType(typ reflect.Type) reflect.Type {
 	for i := 0; typ.Kind() == reflect.Ptr && i < maxPointerDepth; i++ {
 		typ = typ.Elem()
 	}
-	return reflect.New(typ).Elem()
+	return typ
+}
+
+// copyStart returns a copy of v that shares no map, slice, array, or
+// pointer target with v, so that a decode into v leaves the copy as it was.
+// It copies the value that an interface holds the same way. The copy shares
+// funcs, channels, and the unexported fields of structs with v. The copy of
+// a zero value is the zero value of its type.
+func copyStart(v reflect.Value) reflect.Value {
+	if v.IsZero() {
+		return reflect.Zero(v.Type())
+	}
+	return copyValue(v, map[copiedRef]reflect.Value{})
+}
+
+// copiedRef names a pointer, a map, or a slice that copyValue copied.
+type copiedRef struct {
+	typ reflect.Type
+	ptr uintptr
+	len int
+}
+
+// copyValue returns a copy of v, as copyStart describes. The copies map
+// holds the copy of each pointer, map, and slice that copyValue copied
+// before, so that a cycle copies to a cycle.
+func copyValue(v reflect.Value, copies map[copiedRef]reflect.Value) reflect.Value {
+	switch v.Kind() {
+	case reflect.Ptr, reflect.Map, reflect.Slice:
+		if v.IsNil() {
+			return v
+		}
+		ref := copiedRef{typ: v.Type(), ptr: v.Pointer()}
+		if v.Kind() == reflect.Slice {
+			ref.len = v.Len()
+		}
+		if c, ok := copies[ref]; ok {
+			return c
+		}
+		var c reflect.Value
+		switch v.Kind() {
+		case reflect.Ptr:
+			c = reflect.New(v.Type().Elem())
+			copies[ref] = c
+			c.Elem().Set(copyValue(v.Elem(), copies))
+		case reflect.Map:
+			c = reflect.MakeMapWithSize(v.Type(), v.Len())
+			copies[ref] = c
+			iter := v.MapRange()
+			for iter.Next() {
+				c.SetMapIndex(iter.Key(), copyValue(iter.Value(), copies))
+			}
+		default:
+			c = reflect.MakeSlice(v.Type(), v.Len(), v.Len())
+			copies[ref] = c
+			for i := 0; i < v.Len(); i++ {
+				c.Index(i).Set(copyValue(v.Index(i), copies))
+			}
+		}
+		return c
+	case reflect.Array:
+		c := reflect.New(v.Type()).Elem()
+		for i := 0; i < v.Len(); i++ {
+			c.Index(i).Set(copyValue(v.Index(i), copies))
+		}
+		return c
+	case reflect.Struct:
+		c := reflect.New(v.Type()).Elem()
+		c.Set(v)
+		for i := 0; i < c.NumField(); i++ {
+			if f := c.Field(i); f.CanSet() {
+				f.Set(copyValue(v.Field(i), copies))
+			}
+		}
+		return c
+	case reflect.Interface:
+		if v.IsNil() {
+			return v
+		}
+		c := reflect.New(v.Type()).Elem()
+		c.Set(copyValue(v.Elem(), copies))
+		return c
+	default:
+		return v
+	}
+}
+
+// keepStart records start as the value that the place of the anchor with
+// the key key started from, under [StartValue]. A start without a value
+// records that the decoder read the anchor into an any value.
+func (d *Decoder) keepStart(key string, start placeStart) {
+	if d.startValue == nil {
+		return
+	}
+	if !start.value.IsValid() {
+		delete(d.anchorStarts, key)
+		return
+	}
+	if d.anchorStarts == nil {
+		d.anchorStarts = map[string]placeStart{}
+	}
+	d.anchorStarts[key] = start
+}
+
+// startsApart reports whether a place of type typ that holds held starts
+// from another value than the place of the anchor with the key key did,
+// under [StartValue]. The decoder reads the alias node into the place.
+// Such a place decodes the anchor again from its own start, which
+// startsApart returns. Two places of one type that do not hold a value of
+// their own start from the start of that type, and startsApart does not
+// ask StartValue for it. A place that holds a value starts from that
+// value, and startsApart copies it only for a place that starts apart. An anchor that the decoder
+// read into an any value started from nil. Places of two types start from
+// one value only when both start from zero. An interface value takes the
+// value of the anchor as go-yaml gives it.
+func (d *Decoder) startsApart(
+	key string, typ reflect.Type, held reflect.Value, node ast.Node,
+) (reflect.Value, bool) {
+	base := baseType(typ)
+	if d.startValue == nil || base.Kind() == reflect.Interface {
+		return reflect.Value{}, false
+	}
+	anchor, recorded := d.anchorStarts[key]
+	sameType := recorded && anchor.value.Type() == base
+	start, holds := heldTarget(typ, held)
+	if !holds {
+		if sameType && anchor.fresh {
+			return reflect.Value{}, false
+		}
+		start = d.createDecodableValue(typ, node)
+	}
+	var apart bool
+	switch {
+	case !recorded:
+		apart = !start.IsZero()
+	case !sameType:
+		apart = !start.IsZero() || !anchor.value.IsZero()
+	case start.IsZero() && anchor.value.IsZero():
+		apart = false
+	default:
+		apart = !sameStart(anchor.value, start, map[comparedRefs]bool{})
+	}
+	switch {
+	case !apart:
+		return reflect.Value{}, false
+	case holds:
+		return heldValue(typ, held)
+	}
+	return start, true
+}
+
+// comparedRefs names a pair of pointers, maps, or slices of one type that
+// sameStart compares.
+type comparedRefs struct {
+	typ  reflect.Type
+	a, b uintptr
+}
+
+// sameStart reports whether a and b, two values of one type, hold equal
+// values. It follows the values as copyValue copies them, and it compares
+// unexported fields too. Two funcs are equal when both are nil or both have
+// the same code pointer. Two floats are equal when both are NaN. Starts that
+// one function of defaults sets thus compare equal. The compared map
+// holds each pair of pointers, maps, and slices that sameStart compares, so
+// that two cycles compare equal.
+func sameStart(a, b reflect.Value, compared map[comparedRefs]bool) bool {
+	switch a.Kind() {
+	case reflect.Ptr, reflect.Map, reflect.Slice:
+		if a.IsNil() || b.IsNil() {
+			return a.IsNil() == b.IsNil()
+		}
+		if a.Kind() != reflect.Ptr && a.Len() != b.Len() {
+			return false
+		}
+		refs := comparedRefs{typ: a.Type(), a: a.Pointer(), b: b.Pointer()}
+		if refs.a == refs.b || compared[refs] {
+			return true
+		}
+		compared[refs] = true
+		switch a.Kind() {
+		case reflect.Ptr:
+			return sameStart(a.Elem(), b.Elem(), compared)
+		case reflect.Map:
+			iter := a.MapRange()
+			for iter.Next() {
+				v := b.MapIndex(iter.Key())
+				if !v.IsValid() || !sameStart(iter.Value(), v, compared) {
+					return false
+				}
+			}
+			return true
+		}
+		return sameElements(a, b, compared)
+	case reflect.Array:
+		return sameElements(a, b, compared)
+	case reflect.Struct:
+		for i := 0; i < a.NumField(); i++ {
+			if !sameStart(a.Field(i), b.Field(i), compared) {
+				return false
+			}
+		}
+		return true
+	case reflect.Interface:
+		if a.IsNil() || b.IsNil() {
+			return a.IsNil() == b.IsNil()
+		}
+		return a.Elem().Type() == b.Elem().Type() && sameStart(a.Elem(), b.Elem(), compared)
+	case reflect.Func, reflect.Chan, reflect.UnsafePointer:
+		return a.Pointer() == b.Pointer()
+	case reflect.Float32, reflect.Float64:
+		return sameFloat(a.Float(), b.Float())
+	case reflect.Complex64, reflect.Complex128:
+		x, y := a.Complex(), b.Complex()
+		return sameFloat(real(x), real(y)) && sameFloat(imag(x), imag(y))
+	case reflect.Bool:
+		return a.Bool() == b.Bool()
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return a.Int() == b.Int()
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return a.Uint() == b.Uint()
+	case reflect.String:
+		return a.String() == b.String()
+	}
+	return false
+}
+
+// sameElements reports whether the arrays or slices a and b, of one type
+// and one length, hold equal elements, as sameStart compares them.
+func sameElements(a, b reflect.Value, compared map[comparedRefs]bool) bool {
+	for i := 0; i < a.Len(); i++ {
+		if !sameStart(a.Index(i), b.Index(i), compared) {
+			return false
+		}
+	}
+	return true
+}
+
+// sameFloat reports whether x and y are equal or both NaN.
+func sameFloat(x, y float64) bool {
+	return x == y || math.IsNaN(x) && math.IsNaN(y)
 }
 
 func (d *Decoder) castToAssignableValue(value reflect.Value, target reflect.Type, src ast.Node) (reflect.Value, error) {
@@ -1835,6 +2157,8 @@ func (d *Decoder) castToAssignableValue(value reflect.Value, target reflect.Type
 func (d *Decoder) createDecodedNewValue(
 	ctx context.Context, typ reflect.Type, defaultVal reflect.Value, node ast.Node,
 ) (reflect.Value, error) {
+	// The value that the place starts from, once the decoder has made it.
+	var start reflect.Value
 	if node.Type() == ast.AliasType {
 		aliasName := d.aliasKey(node.(*ast.AliasNode))
 		if _, open := getAnchorMap(ctx)[aliasName]; open {
@@ -1853,7 +2177,13 @@ func (d *Decoder) createDecodedNewValue(
 		value := d.anchorValueMap[aliasName]
 		if value.IsValid() {
 			v, err := d.castToAssignableValue(value, typ, node)
+			// A place that starts from another value than the place of
+			// the anchor decodes the anchor again from its own start.
+			var apart bool
 			if err == nil {
+				start, apart = d.startsApart(aliasName, typ, defaultVal, node)
+			}
+			if err == nil && !apart {
 				// The alias takes the value and does not read the
 				// anchor, so it reports the unknown fields of that read.
 				d.replayUnknown(aliasName)
@@ -1869,20 +2199,25 @@ func (d *Decoder) createDecodedNewValue(
 			defer func() { d.aliasDepth-- }()
 		}
 	}
-	var newValue reflect.Value
-	if node.Type() == ast.NullType {
+	// A null sets a pointer to nil, and leaves any other value at its
+	// start.
+	newValue := start
+	switch {
+	case node.Type() == ast.NullType && typ.Kind() == reflect.Ptr:
 		newValue = reflect.New(typ).Elem()
-	} else {
-		newValue = d.createDecodableValue(typ)
-	}
-	for defaultVal.Kind() == reflect.Ptr {
-		defaultVal = defaultVal.Elem()
-	}
-	if defaultVal.IsValid() && defaultVal.Type().AssignableTo(newValue.Type()) {
-		newValue.Set(defaultVal)
+	case !newValue.IsValid():
+		newValue = d.startOf(typ, defaultVal, node)
 	}
 	if node.Type() != ast.NullType {
-		if err := d.decodeValue(ctx, newValue, node); err != nil {
+		// The place of an anchor records whether it held a value of its
+		// own, as startsApart reads it.
+		if node.Type() == ast.AnchorType {
+			_, held := heldTarget(typ, defaultVal)
+			d.freshAnchor = !held
+		}
+		err := d.decodeValue(ctx, newValue, node)
+		d.freshAnchor = false
+		if err != nil {
 			return reflect.Value{}, err
 		}
 	}
@@ -1932,6 +2267,7 @@ func (d *Decoder) readAliasedAnchor(ctx context.Context, key string, node ast.No
 	}
 	if d.resolveAlias != nil && d.keeps(mark) {
 		d.anchorValueMap[key] = reflect.ValueOf(v)
+		d.keepStart(key, placeStart{})
 		delete(d.anchorUnknown, key)
 	}
 	return v, nil
@@ -2016,7 +2352,31 @@ func (d *Decoder) keyToValueNodeMap(ctx context.Context, node ast.Node, ignoreMe
 	return m, ctxs, nil
 }
 
-func (d *Decoder) setDefaultValueIfConflicted(v reflect.Value, fieldMap StructFieldMap) error {
+// namesInlineField reports whether fieldMap names a field of the inline
+// struct that typ reaches through its pointers, so that
+// setDefaultValueIfConflicted sets that field.
+func namesInlineField(typ reflect.Type, fieldMap StructFieldMap) bool {
+	typ = baseType(typ)
+	if typ.Kind() != reflect.Struct {
+		return false
+	}
+	embeddedStructFieldMap, err := structFieldMap(typ)
+	if err != nil {
+		return false
+	}
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		if isIgnoredStructField(field) {
+			continue
+		}
+		if fieldMap.isIncludedRenderName(embeddedStructFieldMap[field.Name].RenderName) {
+			return true
+		}
+	}
+	return false
+}
+
+func (d *Decoder) setDefaultValueIfConflicted(v reflect.Value, fieldMap StructFieldMap, start reflect.Value) error {
 	for v.Type().Kind() == reflect.Ptr {
 		v = v.Elem()
 	}
@@ -2039,9 +2399,15 @@ func (d *Decoder) setDefaultValueIfConflicted(v reflect.Value, fieldMap StructFi
 		}
 		// if declared same key name, set default value
 		fieldValue := v.Field(i)
-		if fieldValue.CanSet() {
-			fieldValue.Set(reflect.Zero(fieldValue.Type()))
+		if !fieldValue.CanSet() {
+			continue
 		}
+		// Under StartValue, the field keeps the value it started from.
+		if d.startValue != nil && start.IsValid() && start.Type() == typ {
+			fieldValue.Set(start.Field(i))
+			continue
+		}
+		fieldValue.Set(reflect.Zero(fieldValue.Type()))
 	}
 	return nil
 }
@@ -2237,7 +2603,16 @@ func (d *Decoder) decodeStruct(ctx context.Context, dst reflect.Value, src ast.N
 				key := &ast.StringNode{BaseNode: &ast.BaseNode{}, Value: k}
 				mapNode.Values = append(mapNode.Values, ast.MappingValue(nil, key, keyToNodeMap[k]))
 			}
-			newFieldValue, err := d.createDecodedNewValue(withEntryContexts(ctx, valueCtxs), fieldValue.Type(), fieldValue, mapNode)
+			// A field that the struct names too keeps the value that the
+			// inline field started from there. The decode might write into
+			// the maps and pointer targets of the start, so the field takes
+			// them from a copy.
+			start := d.startOf(fieldValue.Type(), fieldValue, src)
+			kept := start
+			if d.startValue != nil && namesInlineField(fieldValue.Type(), structFieldMap) {
+				kept = copyStart(start)
+			}
+			newFieldValue, err := d.createDecodedNewValue(withEntryContexts(ctx, valueCtxs), fieldValue.Type(), start, mapNode)
 			if d.disallowUnknownField {
 				if err := d.deleteStructKeys(fieldValue.Type(), unknownFields); err != nil {
 					return err
@@ -2248,7 +2623,7 @@ func (d *Decoder) decodeStruct(ctx context.Context, dst reflect.Value, src ast.N
 				d.noteField(&found, err, structType.Name(), field.Name, true)
 				continue
 			}
-			_ = d.setDefaultValueIfConflicted(newFieldValue, structFieldMap)
+			_ = d.setDefaultValueIfConflicted(newFieldValue, structFieldMap, kept)
 			fieldValue.Set(newFieldValue)
 			continue
 		}
@@ -2616,13 +2991,13 @@ func (d *Decoder) decodeMap(ctx context.Context, dst reflect.Value, src ast.Node
 			continue
 		}
 
-		k := d.createDecodableValue(keyType)
+		k := d.createDecodableValue(keyType, key)
 		if d.canDecodeByUnmarshaler(k) {
 			if err := d.decodeByUnmarshaler(ctx, k, key); err != nil {
 				return d.noted(found, d.located(d.ownError(err, key), Step{Key: keyName(key), IsKey: true}))
 			}
 		} else {
-			keyVal, err := d.below(ctx, Step{Key: keyName(key), IsKey: true}, keyType, reflect.Value{}, key)
+			keyVal, err := d.below(ctx, Step{Key: keyName(key), IsKey: true}, keyType, k, key)
 			if err != nil {
 				return d.noted(found, err)
 			}
@@ -2645,7 +3020,7 @@ func (d *Decoder) decodeMap(ctx context.Context, dst reflect.Value, src ast.Node
 		}
 		if !k.IsValid() {
 			// expect nil key
-			mapValue.SetMapIndex(d.createDecodableValue(keyType), dstValue)
+			mapValue.SetMapIndex(d.createDecodableValue(keyType, key), dstValue)
 			continue
 		}
 		if keyType.Kind() != k.Kind() {
