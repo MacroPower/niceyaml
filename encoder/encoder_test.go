@@ -581,6 +581,71 @@ func TestEncoder_Encode_quoting(t *testing.T) {
 			decoded: map[string]string{"a": "c", "z": "a"},
 			want:    stringtest.LinesLF("&x a: c", "z: *x"),
 		},
+		"marshaled alias as key": {
+			input:   map[string]rawYAML{"k": "x: &a k\n*a : c\n"},
+			decoded: map[string]map[string]string{"k": {"x": "k", "k": "c"}},
+			want:    stringtest.LinesLF("k:", "  x: &a k", "  *a : c"),
+		},
+		"marshaled alias as explicit key": {
+			input:   map[string]rawYAML{"k": "x: &a k\n? *a\n: c\n"},
+			decoded: map[string]map[string]string{"k": {"x": "k", "k": "c"}},
+			want:    stringtest.LinesLF("k:", "  x: &a k", "  *a : c"),
+		},
+		"marshaled alias as key without value": {
+			input:   map[string]rawYAML{"k": "x: &a k\n*a :\n"},
+			decoded: map[string]map[string]any{"k": {"x": "k", "k": nil}},
+			want:    stringtest.LinesLF("k:", "  x: &a k", "  *a :"),
+		},
+		"marshaled alias as key with mapping value": {
+			input:   map[string]rawYAML{"k": "x: &a k\n*a :\n  y: 1\n"},
+			decoded: map[string]map[string]any{"k": {"x": "k", "k": map[string]any{"y": uint64(1)}}},
+			want:    stringtest.LinesLF("k:", "  x: &a k", "  *a :", "    y: 1"),
+		},
+		"marshaled alias as key in flow mapping": {
+			input:   map[string]rawYAML{"k": "{x: &a k, *a : c}\n"},
+			decoded: map[string]map[string]string{"k": {"x": "k", "k": "c"}},
+			want:    stringtest.LinesLF("k: {x: &a k, *a : c}"),
+		},
+		"marshaled alias as explicit key in flow mapping": {
+			input:   map[string]rawYAML{"k": "{x: &a k, ? *a : c}\n"},
+			decoded: map[string]map[string]string{"k": {"x": "k", "k": "c"}},
+			want:    stringtest.LinesLF("k: {x: &a k, ? *a : c}"),
+		},
+		"marshaled alias as key in sequence": {
+			input:   map[string]rawYAML{"k": "- &a k\n- *a : c\n"},
+			decoded: map[string][]any{"k": {"k", map[string]any{"k": "c"}}},
+			want:    stringtest.LinesLF("k:", "- &a k", "- *a : c"),
+		},
+		"marshaled tagged alias as key": {
+			input:   map[string]rawYAML{"k": "x: &a k\n!!str *a : c\n"},
+			decoded: map[string]map[string]string{"k": {"x": "k", "k": "c"}},
+			want:    stringtest.LinesLF("k:", "  x: &a k", "  !!str *a : c"),
+		},
+		"marshaled tagged alias as explicit key": {
+			input:   map[string]rawYAML{"k": "x: &a k\n? !!str *a\n: c\n"},
+			decoded: map[string]map[string]string{"k": {"x": "k", "k": "c"}},
+			want:    stringtest.LinesLF("k:", "  x: &a k", "  !!str *a : c"),
+		},
+		"marshaled tagged alias as key in flow mapping": {
+			input:   map[string]rawYAML{"k": "{x: &a k, !!str *a : c}\n"},
+			decoded: map[string]map[string]string{"k": {"x": "k", "k": "c"}},
+			want:    stringtest.LinesLF("k: {x: &a k, !!str *a : c}"),
+		},
+		"marshaled tagged alias as explicit key in flow mapping": {
+			input:   map[string]rawYAML{"k": "{x: &a k, ? !!str *a : c}\n"},
+			decoded: map[string]map[string]string{"k": {"x": "k", "k": "c"}},
+			want:    stringtest.LinesLF("k: {x: &a k, ? !!str *a : c}"),
+		},
+		"marshaled tagged alias as key in sequence": {
+			input:   map[string]rawYAML{"k": "- &a k\n- !!str *a : c\n"},
+			decoded: map[string][]any{"k": {"k", map[string]any{"k": "c"}}},
+			want:    stringtest.LinesLF("k:", "- &a k", "- !!str *a : c"),
+		},
+		"marshaled alias as value": {
+			input:   map[string]rawYAML{"k": "x: &a k\ny: *a\n"},
+			decoded: map[string]map[string]string{"k": {"x": "k", "y": "k"}},
+			want:    stringtest.LinesLF("k:", "  x: &a k", "  y: *a"),
+		},
 		"marshaled quoted explicit key": {
 			input:   rawYAML("? \"a: b\"\n: c\n"),
 			decoded: map[string]string{"a: b": "c"},

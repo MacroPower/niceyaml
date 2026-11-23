@@ -22,7 +22,9 @@ import (
 // printer writes an empty node as nothing. In any style, it writes an
 // empty node under the "!!binary" tag as an empty quoted string, which
 // go-yaml reads as empty bytes. Outside a flow collection, it writes each
-// explicit key as an implicit key, as [quoter.implicitKey] describes.
+// explicit key as an implicit key, as [quoter.implicitKey] describes. It
+// writes a space after each alias that is a key, as [spaceAlias]
+// describes.
 type quoter struct {
 	// Collects the blocks that [quoter.unblock] replaces.
 	blocks *[]block
@@ -109,6 +111,8 @@ func (q quoter) Visit(node ast.Node) ast.Visitor {
 		if !n.IsFlowStyle {
 			n.Key = q.implicitKey(n.Key)
 		}
+
+		spaceAlias(n.Key)
 
 		col := n.Key.GetToken().Position.Column
 		if _, ok := n.Key.(*ast.MappingKeyNode); ok {
@@ -385,6 +389,52 @@ func (q quoter) implicitKey(key ast.MapKeyNode) ast.MapKeyNode {
 	}
 
 	return inner
+}
+
+// aliasName is the name of an alias that is a mapping key, as
+// [spaceAlias] describes. It prints as the name with a space after it,
+// and it keeps the token, the value, and the comment of the name.
+type aliasName struct {
+	ast.Node
+}
+
+// String implements [ast.Node].
+func (n aliasName) String() string {
+	return n.Node.String() + " "
+}
+
+// spaceAlias puts the name of the alias in key in an [aliasName], so that
+// the go-yaml printer writes a space between the alias and its ":", as in
+// "*a : c". Key holds an alias when it is one, or when it is an explicit
+// key in a flow collection with an alias after its "?". The alias can
+// have a tag on it, as in "!!str *a : c". Only a marshaler's YAML holds
+// such a key. The printer writes the ":" right after the key,
+// as in "*a: c". YAML 1.2 allows ":" in an anchor name, so go-yaml and
+// other YAML 1.2 parsers read "*a:" as the alias of "a:". They then do not
+// find the ":" of the key.
+func spaceAlias(key ast.MapKeyNode) {
+	node := ast.Node(key)
+	if explicit, ok := key.(*ast.MappingKeyNode); ok {
+		node = explicit.Value
+	}
+
+	for {
+		tag, ok := node.(*ast.TagNode)
+		if !ok {
+			break
+		}
+
+		node = tag.Value
+	}
+
+	alias, ok := node.(*ast.AliasNode)
+	if !ok || alias.Value == nil {
+		return
+	}
+
+	if _, spaced := alias.Value.(aliasName); !spaced {
+		alias.Value = aliasName{alias.Value}
+	}
 }
 
 // unanchor returns the node under the anchors on node, or node when no

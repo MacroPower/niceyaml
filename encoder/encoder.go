@@ -558,6 +558,12 @@ func newDocEncoder(c config) *docEncoder {
 // reads the empty node under such a tag as null. So Encode writes such
 // an explicit key in block style as null.
 //
+// Encode writes a space between an alias that is a key and the ":" of the
+// key, as in "*a : c", and after an alias key with a tag on it, as in
+// "!!str *a : c". A marshaler's YAML can hold such a key. YAML 1.2
+// allows ":" in the name of an anchor, so go-yaml and other YAML 1.2
+// parsers read "*a: c" as the alias of "a:", and they reject that line.
+//
 // Encode returns an error that matches [ErrEncode] when v does not encode
 // to YAML. A value of a type go-yaml does not encode and a marshaler that
 // returns an error are such values. So is a marshaler's YAML or an AST

@@ -706,9 +706,8 @@ func TestNode_Set(t *testing.T) {
 			engine: true,
 		},
 		"YAML marshaler that writes an alias key": {
-			// Go-yaml's encoder writes "*a:", which its parser reads as an
-			// alias named "a:". The anchor in the YAML of the marshaler explains
-			// that problem, so the Set fails with the anchor.
+			// The encoder writes "*a : 1", and the Set fails with the anchor
+			// in the YAML of the marshaler.
 			before: stringtest.LinesLF("a: 1", "b: 2"),
 			path:   paths.Doc().Child("b"),
 			value:  yamlMarshaler("n:\n  x: &a k\n  *a : 1\n  z: 2\n"),
@@ -725,7 +724,7 @@ func TestNode_Set(t *testing.T) {
 		"YAML marshaler that writes an alias key in a flow mapping": {
 			before: stringtest.LinesLF("a: 1", "b: 2"),
 			path:   paths.Doc().Child("b"),
-			value:  yamlMarshaler("{&k a: 1, *k : 2}"),
+			value:  yamlMarshaler("{x: &k a, *k : 2}"),
 			err:    "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 sets $.b to a value whose YAML holds the anchor &k, and cafe does not write anchors or aliases",
 		},
 		"YAML marshaler that writes a byte order mark before a key": {
