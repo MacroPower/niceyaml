@@ -515,6 +515,66 @@ func TestCheckDecodeText(t *testing.T) {
 			err:   &aliasing.ExpansionError{Limit: 1024},
 			alias: "2:17",
 		},
+		"aliases of escaped content past the document byte limit": {
+			// Inside a flow sequence, each alias writes the 60 backslashes
+			// of m as a double-quoted string of 124 bytes, so the fifth
+			// alias brings the text past 600 bytes.
+			input: stringtest.LinesLF(
+				"m: &m |",
+				"  "+strings.Repeat(`\`, 60),
+				"v: "+yamltest.FlowSequence("*m", 8),
+			),
+			opts:  []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(600)},
+			err:   &aliasing.ExpansionError{Limit: 600},
+			alias: "3:21",
+		},
+		"aliases of escaped content within the document byte limit": {
+			input: stringtest.LinesLF(
+				"m: &m |",
+				"  "+strings.Repeat(`\`, 60),
+				"v: "+yamltest.FlowSequence("*m", 4),
+			),
+			opts: []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(600)},
+		},
+		"aliases of escaped content in a block sequence within the document byte limit": {
+			// Outside a flow collection, each alias copies the 60
+			// backslashes of m as the document spells them. The flow text
+			// of 124 bytes does not count, so eight aliases stay within
+			// 700 bytes.
+			input: stringtest.LinesLF(
+				"m: &m |",
+				"  "+strings.Repeat(`\`, 60),
+				"v:",
+			) + strings.Repeat("  - *m\n", 8),
+			opts: []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(700)},
+		},
+		"aliases in a block sequence of escaped content in a flow sequence past the document byte limit": {
+			// Each *n sits in a block sequence. The *m inside n sits in a
+			// flow sequence, so each *n writes the double-quoted string of
+			// 124 bytes. The eighth *n brings the text past 1100 bytes.
+			input: stringtest.LinesLF(
+				"m: &m |",
+				"  "+strings.Repeat(`\`, 60),
+				"n: &n [*m]",
+				"v:",
+			) + strings.Repeat("  - *n\n", 8),
+			opts:  []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1100)},
+			err:   &aliasing.ExpansionError{Limit: 1100},
+			alias: "12:5",
+		},
+		"aliases in a block sequence of an anchored alias of escaped content in a flow sequence past the document byte limit": {
+			// The anchor c inside n holds *m, which n writes in flow style
+			// too. The eighth *n brings the text past 1150 bytes.
+			input: stringtest.LinesLF(
+				"m: &m |",
+				"  "+strings.Repeat(`\`, 60),
+				"n: &n [&c !t *m]",
+				"v:",
+			) + strings.Repeat("  - *n\n", 8),
+			opts:  []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1150)},
+			err:   &aliasing.ExpansionError{Limit: 1150},
+			alias: "12:5",
+		},
 		"aliases of commented content past the document byte limit": {
 			// A copy of the text of a repeats its comment at each alias, so
 			// the fourth alias brings the text past 1 KiB.

@@ -30,10 +30,12 @@
 //
 // [CheckDecodeText] refuses such a document with an [*ExpansionError] at
 // the alias that takes the text past a bound. It weighs the text of each
-// alias as a writer in block style gives it, or as a copy of the text of
-// the document gives it, whichever is longer. A niceyaml merge of layers
-// runs CheckDecodeText on each layer before it writes the merged text, so
-// the Budget bounds that text too.
+// alias in two ways and takes the longer. A writer in block style gives
+// the alias one text, and a copy of the text of the document gives it
+// another. For an alias inside a flow collection, a writer in flow style
+// gives it a third, and the check takes the longest of the three. A
+// niceyaml merge of layers runs CheckDecodeText on each layer before it
+// writes the merged text, so the Budget bounds that text too.
 //
 // Both counts read through an alias that only a reference document of the
 // decode resolves, such as one of niceyaml.WithReferences. The alias

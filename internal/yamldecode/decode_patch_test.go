@@ -1093,7 +1093,7 @@ func TestResolveAliasNull(t *testing.T) {
 
 	require.NoError(t, yaml.NewDecoder(bytes.NewReader(nil), documentOrder(body, 1)).DecodeFromNode(body, &v))
 	assert.Nil(t, v.B.K)
-	assert.Equal(t, "[ {k: null}]", v.C.s)
+	assert.Equal(t, "[{k: null}]", v.C.s)
 }
 
 func TestResolveAliasUnbound(t *testing.T) {
@@ -1156,6 +1156,10 @@ func TestResolveAliasUnmarshalerBytesOtherParse(t *testing.T) {
 			ref:  "r: &r x  \n\n",
 			want: "{a: x}",
 		},
+		"block mapping": {
+			ref:  "r: &r\n  k: 1\n  j: 2\n",
+			want: "{a: {k: 1, j: 2}}",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -1176,6 +1180,117 @@ func TestResolveAliasUnmarshalerBytesOtherParse(t *testing.T) {
 
 			require.NoError(t, yaml.NewDecoder(bytes.NewReader(nil), resolve).DecodeFromNode(body, &v))
 			assert.Equal(t, tc.want, strings.TrimSpace(v.M.s))
+		})
+	}
+}
+
+func TestUnmarshalerBytesAliasInFlow(t *testing.T) {
+	t.Parallel()
+
+	// An alias inside a flow collection writes its anchor in flow style, so
+	// the text that an unmarshaler gets reads as the value of the document.
+	tcs := map[string]struct {
+		src  string
+		want string
+	}{
+		"block mapping": {
+			src:  "m: &m\n  k: 1\n  j: 2\nv: {a: *m}\n",
+			want: "{a: {k: 1, j: 2}}",
+		},
+		"block sequence": {
+			src:  "m: &m\n  - 1\n  - 2\nv: [*m, *m]\n",
+			want: "[[1, 2], [1, 2]]",
+		},
+		"nested block collections": {
+			src:  "m: &m\n  k:\n    - a\n    - j: ~\nv: [*m]\n",
+			want: "[{k: [a, {j: ~}]}]",
+		},
+		"alias inside the anchor": {
+			src:  "x: &x\n  - 1\nm: &m\n  k: *x\nv: [*m]\n",
+			want: "[{k: [1]}]",
+		},
+		"anchor and tag inside the anchor": {
+			src:  "m: &m\n  k: &x !!str 1\n  j: !t\n    z: 1\nv: [*m]\n",
+			want: "[{k: &x !!str 1, j: !t {z: 1}}]",
+		},
+		"comment in the anchor": {
+			src:  "m: &m\n  k: 1 # c\n  j: 2\nv: [*m]\n",
+			want: "[{k: 1, j: 2}]",
+		},
+		"explicit key and merge key": {
+			src:  "m: &m\n  ? k\n  : 1\n  <<: {j: 2}\nv: [*m]\n",
+			want: "[{k: 1, <<: {j: 2}}]",
+		},
+		"literal": {
+			src:  "m: &m |\n  a\n  b\nv: [*m]\n",
+			want: `["a\nb\n"]`,
+		},
+		"folded in a block mapping": {
+			src:  "m: &m\n  k: >-\n    a\n    b\nv: [*m]\n",
+			want: `[{k: "a b"}]`,
+		},
+		"plain with a flow indicator": {
+			src:  "m: &m a,b\nv: [*m]\n",
+			want: `["a,b"]`,
+		},
+		"plain with a colon": {
+			src:  "m: &m\n  - a:b\nv: [*m]\n",
+			want: `[["a:b"]]`,
+		},
+		"plain on two lines": {
+			src:  "m: &m\n  - a\n    b\nv: [*m]\n",
+			want: `[["a b"]]`,
+		},
+		"quoted on two lines": {
+			src:  "m: &m\n  - 'a\n    b'\nv: [*m]\n",
+			want: `[["a b"]]`,
+		},
+		"quoted on one line": {
+			src:  "m: &m\n  - 'a, b'\nv: [*m]\n",
+			want: "[['a, b']]",
+		},
+		"empty value": {
+			src:  "m: &m\n  k:\nv: [*m]\n",
+			want: "[{k: null}]",
+		},
+		"bool, float, infinity, and nan": {
+			// NaN sits in a key, because a NaN value never compares equal.
+			src:  "m: &m\n  .nan: true\n  k: 1.5\n  j: -.inf\nv: [*m]\n",
+			want: "[{.nan: true, k: 1.5, j: -.inf}]",
+		},
+		"white space other than spaces and tabs": {
+			// A plain scalar keeps a no-break space and a next line in its
+			// value, but not the spaces and the tabs around it.
+			src:  "m: &m\n  k: x \t\n  j: \u0085x\n  i: !!str \u00a0y\u00a0\nv: [*m]\n",
+			want: "[{k: x, j: \u0085x, i: !!str \u00a0y\u00a0}]",
+		},
+		"comment in the flow collection": {
+			src:  "m: &m\n  k: 1 # c\nv: [*m, # d\n  2]\n",
+			want: "[{k: 1}, # d\n  2]",
+		},
+		"flow mapping with a comment": {
+			src:  "m: &m {k: 1, # c\n  j: 2}\nv: [*m]\n",
+			want: "[{k: 1, j: 2}]",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var want struct{ V any }
+
+			require.NoError(t, yaml.Unmarshal([]byte(tc.src), &want))
+
+			var got struct{ V bytesValue }
+
+			require.NoError(t, yaml.NewDecoder(bytes.NewReader(nil)).DecodeFromNode(parseBody(t, tc.src), &got))
+			assert.Equal(t, tc.want, strings.TrimSpace(got.V.s))
+
+			var reread any
+
+			require.NoError(t, yaml.Unmarshal([]byte(got.V.s), &reread))
+			assert.Equal(t, want.V, reread)
 		})
 	}
 }

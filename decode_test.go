@@ -12496,6 +12496,15 @@ func TestDocument_Decode_AliasExpansion(t *testing.T) {
 		"l:",
 	) + strings.Repeat("  - *a\n", 20)
 
+	// The aliases repeat a block scalar of 60 backslashes. Inside a flow
+	// sequence, the decoder writes each one as a double-quoted string of
+	// 124 bytes, twice as long as the text of the document.
+	escaped := stringtest.LinesLF(
+		"m: &m |",
+		"  "+strings.Repeat(`\`, 60),
+		"v: "+yamltest.FlowSequence("*m", 8),
+	)
+
 	customList := niceyaml.OverrideTypeRules(
 		niceyaml.CustomUnmarshaler(func(_ context.Context, l *aliasList, decode func(any) error) error {
 			return decode((*[]string)(l))
@@ -12566,6 +12575,42 @@ func TestDocument_Decode_AliasExpansion(t *testing.T) {
 			input:  repeated,
 			target: func() any { return new(listed) },
 			opts:   []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
+		},
+		"text unmarshaler of escaped strings in a flow sequence": {
+			// The fifth alias brings the quoted strings past 600 bytes.
+			input:  escaped,
+			target: func() any { return new(map[string]rawString) },
+			opts:   []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(600)},
+			err:    "doc.yaml:3:21: aliases repeat more than 600 bytes of text",
+		},
+		"text unmarshaler of escaped strings in a flow sequence within the document byte limit": {
+			input:  escaped,
+			target: func() any { return new(map[string]rawString) },
+			opts:   []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1024)},
+		},
+		"text unmarshaler of escaped strings in a block sequence": {
+			// Outside a flow collection, the decoder copies the block
+			// scalar, so the eight aliases write 543 bytes.
+			input: stringtest.LinesLF(
+				"m: &m |",
+				"  "+strings.Repeat(`\`, 60),
+				"v:",
+			) + strings.Repeat("  - *m\n", 8),
+			target: func() any { return new(map[string]rawString) },
+			opts:   []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(700)},
+		},
+		"text unmarshaler of escaped strings in a flow sequence in a block sequence": {
+			// Each *n writes the *m inside it as a double-quoted string, so
+			// the eighth *n brings the text past 1100 bytes.
+			input: stringtest.LinesLF(
+				"m: &m |",
+				"  "+strings.Repeat(`\`, 60),
+				"n: &n [*m]",
+				"v:",
+			) + strings.Repeat("  - *n\n", 8),
+			target: func() any { return new(map[string]rawString) },
+			opts:   []niceyaml.SourceOption{niceyaml.WithDocumentByteLimit(1100)},
+			err:    "doc.yaml:12:5: aliases repeat more than 1100 bytes of text",
 		},
 		"text unmarshaler elements": {
 			input: repeated,
@@ -20611,7 +20656,17 @@ func TestDocument_Decode_TextOfReferenceAlias(t *testing.T) {
 		"alias in a flow sequence": {
 			ref:   flow,
 			input: "v: [*m, 1]\n",
-			want:  "[ {k: 1, j: 2}, 1]\n",
+			want:  "[{k: 1, j: 2}, 1]\n",
+		},
+		"block mapping in a flow mapping": {
+			ref:   "m: &m\n  k: 1\n  j: 2\n",
+			input: "v: {a: *m}\n",
+			want:  "{a: {k: 1, j: 2}}\n",
+		},
+		"block sequence in a flow sequence": {
+			ref:   "m: &m\n  - 1\n  - 2\n",
+			input: "v: [*m, *m]\n",
+			want:  "[[1, 2], [1, 2]]\n",
 		},
 		"block mapping before a key": {
 			ref:   "m: &m\n  k: 1\n  j: 2\n",
@@ -20652,6 +20707,62 @@ func TestDocument_Decode_TextOfReferenceAlias(t *testing.T) {
 				require.NoError(t, err)
 				assert.Equal(t, tc.want, got["v"], "alias limit %t", limit)
 			}
+		})
+	}
+}
+
+func TestDocument_Decode_TextOfAliasInFlow(t *testing.T) {
+	t.Parallel()
+
+	// A type that reads text gets each alias inside a flow collection
+	// written out as its anchor in flow style. The text reads as the value
+	// that a decode of the document into any gives.
+	tcs := map[string]struct {
+		input string
+		want  rawString
+	}{
+		"block mapping in a flow mapping": {
+			input: "m: &m\n  k: 1\n  j: 2\nv: {a: *m}\n",
+			want:  "{a: {k: 1, j: 2}}\n",
+		},
+		"block sequence in a flow sequence": {
+			input: "m: &m\n  - 1\n  - 2\nv: [*m, *m]\n",
+			want:  "[[1, 2], [1, 2]]\n",
+		},
+		"literal in a flow sequence": {
+			input: "m: &m |\n  text\nv: [*m]\n",
+			want:  "[\"text\\n\"]\n",
+		},
+		"plain with a comma in a flow sequence": {
+			input: "m: &m a,b\nv: [*m]\n",
+			want:  "[\"a,b\"]\n",
+		},
+		"no-break space in a flow sequence": {
+			input: "m: &m\n  k: \u00a0x\n  j: x \nv: [*m]\n",
+			want:  "[{k: \u00a0x, j: x}]\n",
+		},
+		"block mapping in a block mapping": {
+			input: "m: &m\n  k: 1\n  j: 2\nv:\n  a: *m\n",
+			want:  "a:\n  k: 1\n  j: 2\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input)
+
+			got, err := doc.Decode[map[string]rawString](t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got["v"])
+
+			want, err := doc.Decode[map[string]any](t.Context())
+			require.NoError(t, err)
+
+			reread, err := yamltest.FirstDocument(t, string(got["v"])).Decode[any](t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, want["v"], reread)
 		})
 	}
 }

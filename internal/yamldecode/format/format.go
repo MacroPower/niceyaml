@@ -1,6 +1,7 @@
 package format
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/goccy/go-yaml/ast"
@@ -214,6 +215,9 @@ type Formatter struct {
 	budget           *int
 	// aliases counts the aliases that the formatter is writing out.
 	aliases int
+	// flow counts the flow collections that hold the node that the
+	// formatter writes.
+	flow int
 }
 
 // Origins holds the text that a [Formatter] writes for each token of the
@@ -437,6 +441,8 @@ func (f *Formatter) formatDirective(n *ast.DirectiveNode) string {
 func (f *Formatter) formatMapping(n *ast.MappingNode) string {
 	var ret string
 	if n.IsFlowStyle {
+		f.flow++
+		defer func() { f.flow-- }()
 		ret = f.origin(n.Start)
 	} else {
 		ret += f.formatCommentGroup(n.Comment)
@@ -465,6 +471,8 @@ func (f *Formatter) formatMappingKey(n *ast.MappingKeyNode) string {
 func (f *Formatter) formatSequence(n *ast.SequenceNode) string {
 	var ret string
 	if n.IsFlowStyle {
+		f.flow++
+		defer func() { f.flow-- }()
 		ret = f.origin(n.Start)
 	} else {
 		// add head comment.
@@ -512,11 +520,23 @@ func (f *Formatter) formatAlias(n *ast.AliasNode) string {
 			}
 			f.expanding[anchorName] = true
 			f.aliases++
-			formatted := f.formatNode(node)
+			var formatted string
+			if f.flow > 0 {
+				// The layout of the anchor can be one that a flow
+				// collection does not allow, such as a block mapping, so
+				// the alias writes the anchor in flow style.
+				org := f.origin(n.Start)
+				formatted = org[:len(org)-len(strings.TrimLeft(org, " \t\r\n"))] + f.formatFlow(node)
+			} else {
+				formatted = f.formatNode(node)
+			}
 			f.aliases--
 			delete(f.expanding, anchorName)
 			if f.budget != nil {
 				*f.budget -= len(formatted)
+			}
+			if f.flow > 0 {
+				return formatted
 			}
 			// If formatted text contains newline characters, indentation needs to be considered.
 			if strings.Contains(formatted, "\n") {
@@ -528,6 +548,87 @@ func (f *Formatter) formatAlias(n *ast.AliasNode) string {
 		}
 	}
 	return f.origin(n.Start) + f.formatNode(n.Value)
+}
+
+// formatFlow writes n in flow style on one line, so the text reads as the
+// value of n inside a flow collection. It writes each collection in flow
+// style and leaves out every comment. It keeps the text of each scalar that
+// reads as the same value inside a flow collection, and writes any other
+// string as a double-quoted string.
+func (f *Formatter) formatFlow(n ast.Node) string {
+	switch nn := n.(type) {
+	case *ast.NullNode:
+		if text := f.flowText(nn.Token); text != "" {
+			return text
+		}
+		return "null"
+	case *ast.BoolNode:
+		return f.flowText(nn.Token)
+	case *ast.IntegerNode:
+		return f.flowText(nn.Token)
+	case *ast.FloatNode:
+		return f.flowText(nn.Token)
+	case *ast.InfinityNode:
+		return f.flowText(nn.Token)
+	case *ast.NanNode:
+		return f.flowText(nn.Token)
+	case *ast.StringNode:
+		return f.formatFlowString(nn)
+	case *ast.LiteralNode:
+		return strconv.Quote(nn.Value.Value)
+	case *ast.MergeKeyNode:
+		return f.flowText(nn.Token)
+	case *ast.TagNode:
+		return strings.Trim(f.flowText(nn.Start)+" "+f.formatFlow(nn.Value), " \t\r\n")
+	case *ast.AnchorNode:
+		return strings.Trim(f.flowText(nn.Start)+f.flowText(getFirstToken(nn.Name))+" "+f.formatFlow(nn.Value), " \t\r\n")
+	case *ast.AliasNode:
+		return strings.Trim(f.formatAlias(nn), " \t\r\n")
+	case *ast.MappingKeyNode:
+		return f.formatFlow(nn.Value)
+	case *ast.MappingNode:
+		entries := make([]string, 0, len(nn.Values))
+		for _, value := range nn.Values {
+			entries = append(entries, f.formatFlow(value))
+		}
+		return "{" + strings.Join(entries, ", ") + "}"
+	case *ast.MappingValueNode:
+		return f.formatFlow(nn.Key) + ": " + f.formatFlow(nn.Value)
+	case *ast.SequenceNode:
+		entries := make([]string, 0, len(nn.Values))
+		for _, value := range nn.Values {
+			entries = append(entries, f.formatFlow(value))
+		}
+		return "[" + strings.Join(entries, ", ") + "]"
+	case *ast.SequenceEntryNode:
+		return f.formatFlow(nn.Value)
+	}
+	return ""
+}
+
+// flowText returns the text of tk without the spaces, the tabs, and the
+// line breaks around it. It keeps any other white space, such as a
+// no-break space, because a plain scalar keeps it in its value.
+func (f *Formatter) flowText(tk *token.Token) string {
+	return strings.Trim(f.origin(tk), " \t\r\n")
+}
+
+// formatFlowString writes n as text that reads as the same string inside a
+// flow collection. A quoted string on one line keeps its text, and so does a
+// plain string on one line without a flow indicator or a colon.
+func (f *Formatter) formatFlowString(n *ast.StringNode) string {
+	text := f.flowText(n.Token)
+	if strings.ContainsAny(text, "\r\n") {
+		return strconv.Quote(n.Value)
+	}
+	switch n.Token.Type {
+	case token.SingleQuoteType, token.DoubleQuoteType:
+		return text
+	}
+	if text == "" || strings.ContainsAny(text, ",[]{}:") {
+		return strconv.Quote(n.Value)
+	}
+	return text
 }
 
 func (f *Formatter) formatNode(n ast.Node) string {

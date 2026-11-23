@@ -2336,14 +2336,15 @@
 //	}
 //
 // The go-yaml decoder writes the node of each value that reads text out as
-// text, with each alias in full. Types that read text include those with an
-// UnmarshalText method or an UnmarshalYAML method that takes bytes, and those
-// that a function of [CustomUnmarshaler] decodes. A target reads text when
-// any type that a decode into it reaches reads text, such as one field of
-// type [netip.Addr]. [NewSourceFromLayers] writes each layer out the same
-// way. The aliases of a small document can make that text far longer and
-// deeper than the document, so the limits of the Source bound what the
-// aliases add:
+// text, with each alias in full. Inside a flow collection, it writes the anchor
+// of each alias in flow style, so the text reads as the value of the document.
+// Types that read text include those with an UnmarshalText method or an
+// UnmarshalYAML method that takes bytes, and those that a function of
+// [CustomUnmarshaler] decodes. A target reads text when any type that a decode
+// into it reaches reads text, such as one field of type [netip.Addr].
+// [NewSourceFromLayers] writes each layer out the same way. The aliases of a
+// small document can make that text far longer and deeper than the document, so
+// the limits of the Source bound what the aliases add:
 //
 //   - The text that the aliases of the document repeat stays within the
 //     document byte limit. The count weighs the text of each alias in two
@@ -2351,7 +2352,9 @@
 //     block style, with each entry and each element on a line indented to
 //     its level in the document. The other way copies the content as the
 //     document spells it, comments and spaces included, and indents each
-//     line to the line of the alias.
+//     line to the line of the alias. For an alias inside a flow collection,
+//     the count also writes the content in flow style on one line, with the
+//     escapes of each double-quoted string, and takes the longest text.
 //   - Every alias keeps the nesting of the document within the depth limit.
 //     An alias nests the levels around it and the levels that its content
 //     nests, through the aliases there.

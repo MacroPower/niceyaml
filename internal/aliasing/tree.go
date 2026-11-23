@@ -124,13 +124,22 @@ func CheckDecodeText(n Node) error {
 // byte limit and the depth limit of the source of the document. A bound
 // of zero is off.
 type Budget struct {
-	// Bytes is the most text that the aliases of the document repeat, as
-	// a writer in block style writes it. Such a writer puts each mapping
-	// entry and each sequence element on a line of its own.
-	// [CheckDecodeText] weighs each node that an alias repeats by its
-	// text: the length in bytes of a scalar, or one byte for a mapping or
-	// a sequence. It adds one byte to each node, and two bytes of
-	// indentation for each level around the node in the document.
+	// Bytes is the most text that the aliases of the document repeat.
+	// [CheckDecodeText] weighs the text of each alias in two ways and
+	// takes the longer. A writer in block style puts each mapping entry
+	// and each sequence element on a line of its own. That way weighs
+	// each node that an alias repeats by its text: the length in bytes of
+	// a scalar, or one byte for a mapping or a sequence. It adds one byte
+	// to each node, and two bytes of indentation for each level around
+	// the node in the document. A copy of the text of the document weighs
+	// that text.
+	//
+	// Inside a flow collection, the decoder writes the content of an
+	// alias in flow style on one line instead. It writes each string that
+	// reads as another value there as a double-quoted string. An alias
+	// inside a flow collection weighs that text as a third way. So does
+	// each alias inside a flow collection of the content of another
+	// alias, within the copy of that content.
 	Bytes int
 	// Depth is the most levels that the document nests with each alias
 	// written out in full. An alias nests the levels around it and the
@@ -364,7 +373,11 @@ const (
 // The budget bounds the text that the aliases repeat and the levels that
 // they add to the tree, as [Budget] describes. A bound of zero is off. The
 // level field holds the levels around the node that the counter reads in
-// the tree, outside the content of every alias. The written field holds
+// the tree, outside the content of every alias. The flows field holds
+// the flow collections around the node that the counter reads in the tree
+// in the same way. Inside the content of an alias that
+// [treeCounter.measure] reads, it holds the flow collections of that
+// content around the node that measure reads. The written field holds
 // the text that the aliases of the tree repeat so far, as the byte bound
 // weighs it.
 //
@@ -398,6 +411,7 @@ type treeCounter struct {
 	budget    Budget
 	mode      readMode
 	level     int
+	flows     int
 	written   int
 	distinct  int
 	aliased   int
@@ -610,6 +624,11 @@ func (c *treeCounter) count(node ast.Node, top bool, mode readMode) int {
 		c.level++
 	}
 
+	flows := top && isFlow(node)
+	if flows {
+		c.flows++
+	}
+
 	switch n := node.(type) {
 	case *ast.MappingNode:
 		for _, entry := range n.Values {
@@ -627,6 +646,10 @@ func (c *treeCounter) count(node ast.Node, top bool, mode readMode) int {
 
 	if opens {
 		c.level--
+	}
+
+	if flows {
+		c.flows--
 	}
 
 	return size
@@ -842,7 +865,8 @@ func (c *treeCounter) weigh(alias *ast.AliasNode, size int) {
 // spend records an [*ExpansionError] at alias, an alias of the tree, when
 // alias is the first alias that takes the tree past a bound of the budget.
 // It adds the text that alias repeats to written, as
-// [extent.text] weighs the content of alias at the level of alias. The
+// [extent.text] weighs the content of alias at the level of alias and
+// inside the flow collections around alias. The
 // written field must not pass the byte bound. The levels around alias
 // and the levels that its content nests must not pass the depth bound.
 func (c *treeCounter) spend(alias *ast.AliasNode) {
@@ -852,7 +876,7 @@ func (c *treeCounter) spend(alias *ast.AliasNode) {
 
 	content := c.aliasExtent(alias)
 
-	c.written = aliaslimit.AddCapped(c.written, content.text(c.level))
+	c.written = aliaslimit.AddCapped(c.written, content.text(c.level, c.flows > 0))
 	if c.budget.Bytes > 0 && c.written > c.budget.Bytes {
 		c.overrun = &ExpansionError{Alias: alias, Limit: c.budget.Bytes}
 
@@ -868,7 +892,9 @@ func (c *treeCounter) spend(alias *ast.AliasNode) {
 // The budget weighs the extent. A writer can give the node the text of
 // block style, with each mapping entry and each sequence element on a
 // line of its own. It can also copy the node as the document spells it,
-// with the text of each alias in place of the alias.
+// with the text of each alias in place of the alias. Inside a flow
+// collection, the decoder gives the content of an alias the text of flow
+// style on one line instead.
 type extent struct {
 	// The levels that the node nests, one for each mapping or sequence on
 	// the way from the node to its deepest value.
@@ -886,29 +912,51 @@ type extent struct {
 	levels int
 	// The length in bytes of the text of the node as the document spells
 	// it. That text holds the comments and the spaces between its tokens,
-	// and the text of each alias in it.
+	// and the text of each alias in it. An alias inside a flow collection
+	// of the node adds the longer of its spelled text and its text in
+	// flow style.
 	spelled int
 	// The lines of that text.
 	spelledLines int
+	// The length in bytes of the text of the node in flow style on one
+	// line, as [flowSize] weighs each scalar in it. That text does not
+	// hold any comments.
+	flow int
 	// Whether the node is a leaf.
 	leaf bool
 }
 
 // text returns the bytes that a writer of the node of e gives it when
 // level mappings and sequences lie around it, as [Budget] weighs them.
-// The result is the larger of the text in block style and the text as the
-// document spells it. In block style, each line weighs one byte of
-// punctuation and two bytes of indentation for each level around the
-// leaf that starts it.
-func (e *extent) text(level int) int {
+// The result is the larger of the text in block style and the text as
+// the document spells it. With inFlow set, a flow collection lies around
+// the node, and the text in flow style counts too. In block style, each
+// line weighs one byte of punctuation and two bytes of indentation for
+// each level around the leaf that starts it.
+func (e *extent) text(level int, inFlow bool) int {
 	perLine := mulCapped(e.lines, aliaslimit.AddCapped(1, mulCapped(2, level)))
 	block := aliaslimit.AddCapped(aliaslimit.AddCapped(e.units, perLine), mulCapped(2, e.levels))
+
+	if inFlow {
+		return max(block, e.spelled, e.flow)
+	}
 
 	return max(block, e.spelled)
 }
 
+// inFlow raises the spelled text of e, the extent of an alias inside a
+// flow collection, to its text in flow style. The decoder writes such an
+// alias in flow style. It does so in the copy of the content of an outer
+// alias too, so the text of that outer alias holds the flow text.
+func (e *extent) inFlow() {
+	e.spelled = max(e.spelled, e.flow)
+}
+
 // nest adds child, a key, a value, or an element one level inside the
-// mapping or the sequence of e.
+// mapping or the sequence of e. In flow style, two bytes of punctuation
+// follow child, such as the `, ` after an element or the `: ` after a
+// key. The last child of the mapping or the sequence does not have them,
+// so [treeCounter.measure] takes them off again.
 func (e *extent) nest(child extent) {
 	e.depth = max(e.depth, aliaslimit.AddCapped(child.depth, 1))
 	e.units = aliaslimit.AddCapped(e.units, child.units)
@@ -916,15 +964,19 @@ func (e *extent) nest(child extent) {
 	e.levels = aliaslimit.AddCapped(e.levels, aliaslimit.AddCapped(child.levels, child.lines))
 	e.spelled = aliaslimit.AddCapped(e.spelled, child.spelled)
 	e.spelledLines = aliaslimit.AddCapped(e.spelledLines, child.spelledLines)
+	e.flow = aliaslimit.AddCapped(e.flow, aliaslimit.AddCapped(child.flow, 2))
 }
 
 // measure returns the [extent] of node. A mapping or a sequence nests one
 // level more than the deepest key, value, or element in it. A scalar
 // starts one line and does not nest a level. An anchor, a tag, or the `?`
-// of an explicit key holds what it wraps, and a tag adds its own text. An
-// alias holds the extent of its content, as [treeCounter.aliasExtent]
-// finds it. The spelled text of node counts only the aliases in it, and
-// aliasExtent adds the text of the content that holds them.
+// of an explicit key holds what it wraps, and a tag adds its own text. In
+// flow style, an anchor adds its own text too, and a mapping or a
+// sequence adds its brackets. An alias holds the extent of its content,
+// as [treeCounter.aliasExtent] finds it. The spelled text of node counts
+// only the aliases in it, and aliasExtent adds the text of the content
+// that holds them. Inside a flow collection of node, the spelled text of
+// an alias counts as [extent.inFlow] gives it.
 func (c *treeCounter) measure(node ast.Node) extent {
 	if astnode.IsNil(node) {
 		return extent{}
@@ -932,9 +984,26 @@ func (c *treeCounter) measure(node ast.Node) extent {
 
 	switch n := node.(type) {
 	case *ast.AliasNode:
-		return c.aliasExtent(n)
+		e := c.aliasExtent(n)
+		if c.flows > 0 {
+			e.inFlow()
+		}
+
+		return e
+
 	case *ast.AnchorNode:
-		return c.anchorExtent(n)
+		e := c.anchorExtent(n)
+
+		// The anchor measures its content outside the flow collections
+		// around it, so an alias right under the anchor counts here.
+		if _, ok := astnode.Content(n.Value).(*ast.AliasNode); ok && c.flows > 0 {
+			e.inFlow()
+		}
+
+		e.flow = aliaslimit.AddCapped(e.flow, anchorSize(n))
+
+		return e
+
 	case *ast.MappingKeyNode:
 		return c.measure(n.Value)
 	case *ast.CommentGroupNode:
@@ -943,16 +1012,22 @@ func (c *treeCounter) measure(node ast.Node) extent {
 		e := c.measure(n.Value)
 		if n.Start != nil {
 			e.units = aliaslimit.AddCapped(e.units, len(n.Start.Value)+1)
+			e.flow = aliaslimit.AddCapped(e.flow, len(n.Start.Value)+1)
 		}
 
 		return e
 	}
 
 	if !isCollection(node) {
-		return extent{units: textSize(node), lines: 1, leaf: true}
+		return extent{units: textSize(node), lines: 1, leaf: true, flow: flowSize(node)}
 	}
 
-	e := extent{depth: 1, units: 2}
+	e := extent{depth: 1, units: 2, flow: 2}
+
+	flows := isFlow(node)
+	if flows {
+		c.flows++
+	}
 
 	switch n := node.(type) {
 	case *ast.MappingNode:
@@ -969,6 +1044,16 @@ func (c *treeCounter) measure(node ast.Node) extent {
 		}
 	}
 
+	if flows {
+		c.flows--
+	}
+
+	// No punctuation follows the last key, value, or element in flow
+	// style, so the two bytes that nest added after it come off.
+	if e.flow > 2 {
+		e.flow -= 2
+	}
+
 	if e.lines == 0 {
 		e.lines, e.leaf = 1, true
 	}
@@ -977,10 +1062,21 @@ func (c *treeCounter) measure(node ast.Node) extent {
 }
 
 // anchorExtent returns the [extent] of the content of anchor, as
-// [treeCounter.measure] measures it. A counter of a reference anchor
-// keeps the result in its [anchorCounts]. The measure of an anchor around
-// anchor then does not read the nodes under anchor again.
+// [treeCounter.measure] measures it outside every flow collection around
+// anchor. The extent thus does not depend on where measure reaches the
+// anchor. A flow collection cannot hold a block collection. Of the
+// aliases under anchor, only an alias right under it can lie inside a
+// flow collection around anchor and outside every flow collection of the
+// content. A counter of a
+// reference anchor keeps the result in its [anchorCounts]. The measure
+// of an anchor around anchor then does not read the nodes under anchor
+// again.
 func (c *treeCounter) anchorExtent(anchor *ast.AnchorNode) extent {
+	flows := c.flows
+	c.flows = 0
+
+	defer func() { c.flows = flows }()
+
 	if c.kept == nil {
 		return c.measure(anchor.Value)
 	}
@@ -1037,7 +1133,7 @@ func (c *treeCounter) aliasExtent(alias *ast.AliasNode) extent {
 
 // leafExtent is the [extent] of an alias that the counter takes as one
 // node, a leaf of one byte.
-var leafExtent = extent{units: 1, lines: 1, leaf: true}
+var leafExtent = extent{units: 1, lines: 1, leaf: true, flow: 1}
 
 // contentExtent returns the [extent] of what an alias reads. The alias
 // reads target, the content of an anchor of the tree, or ref, the weight
@@ -1051,9 +1147,16 @@ func (c *treeCounter) contentExtent(target ast.Node, ref *refWeight) extent {
 
 	e, ok := c.extents[target]
 	if !ok {
+		// The extent of the content holds the flow collections of the
+		// content alone, whatever lies around the alias.
+		flows := c.flows
+		c.flows = 0
+
 		c.measuring[target] = true
 		e = c.measured(target)
 		delete(c.measuring, target)
+
+		c.flows = flows
 
 		c.extents[target] = e
 	}
@@ -1195,6 +1298,71 @@ func textSize(node ast.Node) int {
 	}
 
 	return max(size, 1)
+}
+
+// flowSize returns the length in bytes of the text of node, a scalar, in
+// flow style. The text of a string reads as another value in flow style
+// when it spans lines, or when it is plain and empty or holds a flow
+// indicator or a colon. Such a string, and the content of a block scalar,
+// weigh what they weigh as double-quoted strings, escapes included. Any
+// other scalar keeps its text, and an empty null reads `null`.
+func flowSize(node ast.Node) int {
+	switch n := node.(type) {
+	case *ast.StringNode:
+		text := trimmedText(n.Token)
+		if strings.ContainsAny(text, "\r\n") {
+			return len(strconv.Quote(n.Value))
+		}
+
+		if n.Token != nil && (n.Token.Type == token.SingleQuoteType || n.Token.Type == token.DoubleQuoteType) {
+			return len(text)
+		}
+
+		if text == "" || strings.ContainsAny(text, ",[]{}:") {
+			return len(strconv.Quote(n.Value))
+		}
+
+		return len(text)
+
+	case *ast.LiteralNode:
+		if n.Value == nil {
+			return len(`""`)
+		}
+
+		return len(strconv.Quote(n.Value.Value))
+
+	case *ast.NullNode:
+		if text := trimmedText(n.Token); text != "" {
+			return len(text)
+		}
+
+		return len("null")
+	}
+
+	return len(trimmedText(node.GetToken()))
+}
+
+// trimmedText returns the text of tk as the document spells it, without
+// the spaces, the tabs, and the line breaks around it. It keeps any other
+// white space, such as a no-break space, because a plain scalar keeps it
+// in its value.
+func trimmedText(tk *token.Token) string {
+	if tk == nil {
+		return ""
+	}
+
+	return strings.Trim(tk.Origin, " \t\r\n")
+}
+
+// anchorSize returns the length in bytes of the text of anchor before its
+// content in flow style, such as the `&a ` of `&a 1`.
+func anchorSize(anchor *ast.AnchorNode) int {
+	size := len("& ")
+	if anchor.Name != nil {
+		size += len(trimmedText(anchor.Name.GetToken()))
+	}
+
+	return size
 }
 
 // holdsCollection reports whether node holds a mapping or a sequence
@@ -1347,6 +1515,19 @@ func underBinary(node ast.Node) bool {
 	}
 
 	return false
+}
+
+// isFlow reports whether node is a mapping or a sequence in flow style.
+// The decoder writes each alias inside such a collection in flow style.
+func isFlow(node ast.Node) bool {
+	switch n := node.(type) {
+	case *ast.MappingNode:
+		return n.IsFlowStyle
+	case *ast.SequenceNode:
+		return n.IsFlowStyle
+	default:
+		return false
+	}
 }
 
 // isCollection reports whether node holds a mapping or a sequence under

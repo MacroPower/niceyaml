@@ -275,6 +275,7 @@ var loopWeight = &refWeight{
 		levels:       aliaslimit.CountCap,
 		spelled:      aliaslimit.CountCap,
 		spelledLines: aliaslimit.CountCap,
+		flow:         aliaslimit.CountCap,
 	},
 	traits:  [traits]bool{true, true, true},
 	repeats: true,
@@ -518,7 +519,9 @@ func (c *treeCounter) contentWeight(read *refAnchor) *refWeight {
 		return &refWeight{sizes: ref.sizes, extent: ref.extent, traits: ref.traits, repeats: ref.repeats}
 	}
 
-	w := &refWeight{extent: c.measure(read.anchor), repeats: c.repeatsContent(content)}
+	// An alias writes out the content of the anchor, so the text of the
+	// anchor itself stays out of the extent.
+	w := &refWeight{extent: c.anchorExtent(read.anchor), repeats: c.repeatsContent(content)}
 	read.text.spell(&w.extent)
 
 	for mode := range readModes {
