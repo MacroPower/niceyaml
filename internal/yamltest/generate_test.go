@@ -64,9 +64,10 @@ func TestAliasBombs(t *testing.T) {
 			levels:   1,
 			want: stringtest.LinesLF(
 				"a: &a {z: 0}",
-				"m:",
+				"b: &b",
 				"  0x1000: x",
-				"  <<: [*a]",
+				"m:",
+				"  <<: [*b, *a]",
 			),
 		},
 		"wide merge of two members": {
@@ -74,10 +75,11 @@ func TestAliasBombs(t *testing.T) {
 			levels:   2,
 			want: stringtest.LinesLF(
 				"a: &a {z: 0}",
-				"m:",
+				"b: &b",
 				"  0x1000: x",
 				"  0x1001: x",
-				"  <<: [*a, *a]",
+				"m:",
+				"  <<: [*b, *a, *a]",
 			),
 		},
 	}
@@ -142,10 +144,11 @@ func TestWideMergeOf(t *testing.T) {
 			item: "0",
 			want: stringtest.LinesLF(
 				"a: &a {z: 0}",
-				"m:",
+				"b: &b",
 				"  0x1000: x",
 				"  0x1001: x",
-				"  <<: [0, 0]",
+				"m:",
+				"  <<: [*b, 0, 0]",
 			),
 		},
 		"tail after the items": {
@@ -153,10 +156,11 @@ func TestWideMergeOf(t *testing.T) {
 			tail: []string{"*late", "x"},
 			want: stringtest.LinesLF(
 				"a: &a {z: 0}",
-				"m:",
+				"b: &b",
 				"  0x1000: x",
 				"  0x1001: x",
-				"  <<: [*a, *a, *late, x]",
+				"m:",
+				"  <<: [*b, *a, *a, *late, x]",
 			),
 		},
 	}

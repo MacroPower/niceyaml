@@ -1,21 +1,14 @@
 package edit
 
 import (
-	"cmp"
 	"fmt"
-	"slices"
-
-	"github.com/goccy/go-yaml/ast"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/bom"
 )
 
 // misreadError is what go-yaml misreads in a text. The fix says what the
-// user can write so that go-yaml reads the text as YAML does. A problem
-// that the misread explains takes the fix as its detail, as
-// [Doc.engineProblem] gives it. The user can rewrite the text, and the
-// authors of the program cannot change go-yaml.
+// user can write so that go-yaml reads the text as YAML does.
 type misreadError struct {
 	msg, fix string
 }
@@ -25,117 +18,29 @@ func (e *misreadError) Error() string {
 	return e.msg
 }
 
-// misreadKind is a kind of YAML that go-yaml reads otherwise than YAML
-// does. [New] refuses the kinds of `<<` merge keys with [ErrMisread], as
-// the list of the Supported YAML section of the package documentation names
-// them, in the order of that list. Two instances at one place come in the
-// order of the kinds.
-type misreadKind int
-
-const (
-	// An own key written before a `<<` merge key that brings in the same
-	// key, which go-yaml's decoder lets the merge key override.
-	misreadPrecedence misreadKind = iota
-	// A key that two mappings of one `<<` merge key bring in, which
-	// go-yaml's decoder reads from the later mapping.
-	misreadOrder
-	// A byte order mark that a call moved to a place where the tokenizer of
-	// the Source drops it, or that the YAML of a Set value holds at such a
-	// place. Go-yaml reads such a mark as text.
-	misreadMark
-)
-
-// misreadFound is an instance of a misread kind in the current text, as
-// [Doc.misreads] finds it.
+// misreadFound is a byte order mark that go-yaml reads as text, as
+// [Doc.madeMark] and [Doc.valueMisread] find it.
 type misreadFound struct {
 	// What go-yaml misreads, in words that name the places of the user's
 	// text, and in words that name the edited text.
 	msg, edited string
 	// What the user can write so that go-yaml reads the text as YAML does.
 	fix string
-	// The site where the problem of the instance binds.
+	// The site where the problem of the mark binds.
 	at site
-	// The offset in the current text of the first byte of the instance.
-	start int
-	kind  misreadKind
-	// The offsets that order the instances of [misreadOrder] of one merge
-	// key: the entries of the last and the first source of the key.
-	order [2]int
-}
-
-// misreads returns each instance of a misread kind of `<<` merge keys in
-// the current text, as [Doc.precedenceMisreads] finds them, in the order of
-// the text and, at one place, in the order of the kinds.
-func (d *Doc) misreads() []misreadFound {
-	out := d.precedenceMisreads()
-
-	slices.SortStableFunc(out, func(a, b misreadFound) int {
-		return cmp.Or(cmp.Compare(a.start, b.start), cmp.Compare(a.kind, b.kind))
-	})
-
-	return out
-}
-
-// misreadRefusals returns each misread of the user's text, as
-// [Doc.misreads] finds them, as a place that [New] refuses. The problem of
-// a misread matches [ErrMisread] and binds at the site of the misread. A
-// text with a tag that converts a collection holds none, because YAML
-// refuses such a text, and New refuses it as [ConstructConvertingTag].
-func (d *Doc) misreadRefusals() []refused {
-	if d.convertsCollection() {
-		return nil
-	}
-
-	misreads := d.misreads()
-	found := make([]refused, 0, len(misreads))
-
-	for _, m := range misreads {
-		found = append(found, refused{at: m.at, problem: func() error {
-			err := d.engineMisread(&misreadError{msg: m.msg, fix: m.fix},
-				niceyaml.AtRange(m.at.at), niceyaml.AtPath(m.at.path))
-
-			return d.user.Bind(err) //nolint:wrapcheck // The binding is the problem of the document.
-		}})
-	}
-
-	return found
-}
-
-// convertsCollection reports whether a tag of the current text converts the
-// collection under it, as [Doc.tagInstance] finds it, such as !!str on a
-// mapping.
-func (d *Doc) convertsCollection() bool {
-	return slices.ContainsFunc(d.walked().kinds().tags, func(tag *ast.TagNode) bool {
-		in, ok := d.tagInstance(tag)
-
-		return ok && in.construct == ConstructConvertingTag
-	})
 }
 
 // madeMisread returns the problem of a call that named names, which ran,
-// when the current text holds an instance of a misread kind, as
-// [Doc.precedenceMisreads] and [Doc.madeMark] find them, or nil. The model
-// of the calls holds each merge key as an entry of its mapping, not the
-// entries that it brings in. So the check of the model does not see which
-// entry go-yaml's decoder reads through the merge key. The text that the
-// Apply found holds no such instance, and each call checks the text that it
-// leaves. New refuses a text with a misread of a merge key, and it takes
-// each mark that the tokenizer drops out of the text. So the call made the
-// instance.
-// The problem matches [ErrEngine], and the Apply records it.
+// when the current text holds a byte order mark that the tokenizer of the
+// Source drops, as [Doc.madeMark] finds it, or nil. New takes each mark
+// that the tokenizer drops out of the text, so the call made the mark. The
+// problem matches [ErrEngine], and the Apply records it.
 func (d *Doc) madeMisread(named string) error {
-	found := d.precedenceMisreads()
-	if m, ok := d.madeMark(); ok {
-		found = append(found, m)
-	}
-
-	if len(found) == 0 {
+	m, ok := d.madeMark()
+	if !ok {
 		return nil
 	}
 
-	m := slices.MinFunc(found, func(a, b misreadFound) int {
-		return cmp.Or(cmp.Compare(a.start, b.start), cmp.Compare(a.kind, b.kind))
-	})
 	cause := &misreadError{msg: m.edited + ", and " + d.subject() + " " + named, fix: m.fix}
 	problem := d.bindSite(m.at, func(opts ...niceyaml.ErrorOption) error { return d.engineProblem(cause, opts...) })
 	d.record(problem)
@@ -158,7 +63,7 @@ func (d *Doc) madeMark() (misreadFound, bool) {
 	at := marks[0]
 
 	return misreadFound{
-		kind: misreadMark, at: d.offsetSite(at, len(bom.Mark)), start: at, fix: markFix,
+		at: d.offsetSite(at, len(bom.Mark)), fix: markFix,
 		edited: fmt.Sprintf("go-yaml reads the byte order mark at %s as text of the document, but the tokenizer "+
 			"of the Source drops it %s", d.userAt(at), inEdited),
 	}, true
@@ -167,9 +72,7 @@ func (d *Doc) madeMark() (misreadFound, bool) {
 // valueMisread returns the first byte order mark of the current text, the
 // YAML of a Set value as [encodedDoc] reads it, that the tokenizer of the
 // Source drops, as [bom.Drop] finds it. Go-yaml reads such a mark as text
-// of the value. The finder of the value refuses a merge key, as
-// [Doc.valueInstances] finds it, so the misreads of merge keys count as no
-// instance there.
+// of the value.
 func (d *Doc) valueMisread() (misreadFound, bool) {
 	_, marks := bom.Drop(d.cur)
 	if len(marks) == 0 {
@@ -179,7 +82,6 @@ func (d *Doc) valueMisread() (misreadFound, bool) {
 	at := d.curPos(marks[0])
 
 	return misreadFound{
-		kind: misreadMark, start: marks[0],
 		msg: fmt.Sprintf("go-yaml reads the byte order mark at %s as text of the value", at.OneBased()),
 		fix: markFix,
 	}, true

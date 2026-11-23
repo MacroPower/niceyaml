@@ -563,18 +563,27 @@ func WithFS(fsys fs.FS) SourceOption {
 // [ErrSyntax].
 //
 // The option reaches the parser alone. A decode keeps the later of two
-// entries that it reads as one key, whatever the option says. A mapping
-// thus overrides a key that a `<<` merge adds:
+// entries of a mapping that it reads as one key, whatever the option says.
+// The parser compares the keys of a mapping by their text, so it accepts
+// two keys of different text that a decode reads as one. `&k name` beside
+// `*k` is such a pair, and so is 1 beside 0x1 in a map with string keys.
+// The decode keeps the later entry of each.
+//
+// A key that a `<<` merge key brings in is no duplicate. The decode reads
+// the merge in the order of YAML's merge spec. A key of the mapping
+// overrides a key that the merge adds, before or after the merge key, so
+// server and other both read port 8080:
 //
 //	defaults: &defaults {host: localhost, port: 80}
 //	server:
 //	  <<: *defaults
 //	  port: 8080
+//	other:
+//	  port: 8080
+//	  <<: *defaults
 //
-// The parser compares the keys of a mapping by their text, so it accepts
-// two keys of different text that a decode reads as one. `&k name` beside
-// `*k` is such a pair, and so is 1 beside 0x1 in a map with string keys.
-// The decode keeps the later entry of each.
+// Of two sources of one merge key, the earlier wins, so `<<: [*a, *b]`
+// takes a key that both define from a.
 //
 // A reference document of [WithReferences] parses with the option of its
 // own [Source]. A duplicate key there that its Source does not allow

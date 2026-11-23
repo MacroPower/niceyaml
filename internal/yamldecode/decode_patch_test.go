@@ -1847,14 +1847,14 @@ func TestResolveAliasMergeSequence(t *testing.T) {
 	t.Parallel()
 
 	// The entries of b merge a, which the sequence also merges. The merge
-	// of a inside b does not close a loop. Each target allows the key that
-	// both b and a bring in twice.
+	// of a inside b does not close a loop. The key that both b and a bring
+	// in comes from b, the earlier mapping of the sequence.
 	body := parseBody(t, "a: &a {x: 1}\nb: &b {<<: *a, y: 2}\nm: {<<: [*b, *a]}\n")
 	mapping, ok := body.(*ast.MappingNode)
 	require.True(t, ok)
 
 	node := mapping.Values[2].Value
-	slice := yaml.MapSlice{{Key: "x", Value: uint64(1)}, {Key: "y", Value: uint64(2)}, {Key: "x", Value: uint64(1)}}
+	slice := yaml.MapSlice{{Key: "x", Value: uint64(1)}, {Key: "y", Value: uint64(2)}}
 
 	tcs := map[string]struct {
 		target  func() any
@@ -3482,4 +3482,140 @@ func TestStartValueCyclicStart(t *testing.T) {
 	require.Len(t, got.Rings, 2)
 	assert.Equal(t, "r", got.Rings[1].Name)
 	assert.Same(t, got.Rings[0].Next, got.Rings[1].Next)
+}
+
+func TestUnmarshalMergeOrder(t *testing.T) {
+	t.Parallel()
+
+	type ab struct {
+		A int `yaml:"a"`
+		B int `yaml:"b"`
+	}
+
+	anchors := "x: &x {a: 1}\ny: &y {a: 2, b: 2}\nz: &z {<<: *y, a: 3}\nw: &w {a: 5, a: 7, b: 6}\n" +
+		"v: &v {<<: *z, b: 9}\nu: &u {<<: *w, a: 4}\n"
+
+	tcs := map[string]struct {
+		m    string
+		want ab
+		// The items of an ordered map, in order.
+		slice yaml.MapSlice
+		// Whether m merges a sequence, which go-yaml's decoder refuses in
+		// a struct.
+		sequence bool
+	}{
+		"own key before the merge key": {
+			m:     "{a: 4, <<: *y}",
+			want:  ab{A: 4, B: 2},
+			slice: yaml.MapSlice{{Key: "a", Value: uint64(4)}, {Key: "b", Value: uint64(2)}},
+		},
+		"own key after the merge key": {
+			m:     "{<<: *y, a: 4}",
+			want:  ab{A: 4, B: 2},
+			slice: yaml.MapSlice{{Key: "a", Value: uint64(4)}, {Key: "b", Value: uint64(2)}},
+		},
+		"earlier source of a sequence": {
+			m:        "{<<: [*x, *y]}",
+			want:     ab{A: 1, B: 2},
+			slice:    yaml.MapSlice{{Key: "a", Value: uint64(1)}, {Key: "b", Value: uint64(2)}},
+			sequence: true,
+		},
+		"own key of a source": {
+			m:        "{<<: [*z, *x]}",
+			want:     ab{A: 3, B: 2},
+			slice:    yaml.MapSlice{{Key: "a", Value: uint64(3)}, {Key: "b", Value: uint64(2)}},
+			sequence: true,
+		},
+		"earlier merge key": {
+			m:     "{<<: *x, <<: *y}",
+			want:  ab{A: 1, B: 2},
+			slice: yaml.MapSlice{{Key: "a", Value: uint64(1)}, {Key: "b", Value: uint64(2)}},
+		},
+		"source of a source": {
+			// The own key a of z wins over the key a of y, and the own key
+			// b of v wins over the key b of y, each at the place of the
+			// item of y.
+			m:     "{<<: *v}",
+			want:  ab{A: 3, B: 9},
+			slice: yaml.MapSlice{{Key: "a", Value: uint64(3)}, {Key: "b", Value: uint64(9)}},
+		},
+		"own key before a source of a source": {
+			m:     "{a: 4, <<: *v}",
+			want:  ab{A: 4, B: 9},
+			slice: yaml.MapSlice{{Key: "a", Value: uint64(4)}, {Key: "b", Value: uint64(9)}},
+		},
+		"later source after a source of a source": {
+			// The keys that z brings in through y win over the keys of w.
+			m:        "{<<: [*z, *w]}",
+			want:     ab{A: 3, B: 2},
+			slice:    yaml.MapSlice{{Key: "a", Value: uint64(3)}, {Key: "b", Value: uint64(2)}},
+			sequence: true,
+		},
+		"own key of a source over a source that repeats a key": {
+			// The own key a of u takes the place of the first item a of w,
+			// and the later item a of w leaves the ordered map.
+			m:     "{<<: *u}",
+			want:  ab{A: 4, B: 6},
+			slice: yaml.MapSlice{{Key: "a", Value: uint64(4)}, {Key: "b", Value: uint64(6)}},
+		},
+		"source that repeats a key": {
+			// An ordered map keeps each item of the source, and the later
+			// one wins in the other targets.
+			m:    "{<<: *w}",
+			want: ab{A: 7, B: 6},
+			slice: yaml.MapSlice{
+				{Key: "a", Value: uint64(5)}, {Key: "a", Value: uint64(7)}, {Key: "b", Value: uint64(6)},
+			},
+		},
+		"own keys over a source that repeats a key": {
+			// The own key a takes the place of the first item a, and the
+			// later item a leaves the ordered map before the own key b
+			// takes the place of the item b.
+			m:     "{<<: *w, a: 4, b: 8}",
+			want:  ab{A: 4, B: 8},
+			slice: yaml.MapSlice{{Key: "a", Value: uint64(4)}, {Key: "b", Value: uint64(8)}},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			src := []byte(anchors + "m: " + tc.m + "\n")
+			dup := yaml.AllowDuplicateMapKey()
+
+			var typed struct {
+				M ab `yaml:"m"`
+			}
+
+			if !tc.sequence {
+				require.NoError(t, yaml.UnmarshalWithOptions(src, &typed, dup))
+				assert.Equal(t, tc.want, typed.M, "struct")
+			}
+
+			var plain struct {
+				M map[string]int `yaml:"m"`
+			}
+
+			require.NoError(t, yaml.UnmarshalWithOptions(src, &plain, dup))
+			assert.Equal(t, map[string]int{"a": tc.want.A, "b": tc.want.B}, plain.M, "map")
+
+			var loose map[string]any
+
+			require.NoError(t, yaml.UnmarshalWithOptions(src, &loose, dup))
+			assert.Equal(t, map[string]any{"a": uint64(tc.want.A), "b": uint64(tc.want.B)}, loose["m"], "any")
+
+			var ordered map[string]any
+
+			require.NoError(t, yaml.UnmarshalWithOptions(src, &ordered, dup, yaml.UseOrderedMap()))
+			assert.Equal(t, tc.slice, ordered["m"], "any ordered")
+
+			var slice struct {
+				M yaml.MapSlice `yaml:"m"`
+			}
+
+			require.NoError(t, yaml.UnmarshalWithOptions(src, &slice, dup))
+			assert.Equal(t, tc.slice, slice.M, "map slice")
+		})
+	}
 }

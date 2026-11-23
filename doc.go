@@ -1035,6 +1035,13 @@
 //     "m: {<<: *b}", go-yaml reads m as {"map[null:1]": 1}, and niceyaml
 //     reads m as {null: 1}.
 //
+// A decode reads each `<<` merge key in the order of YAML's merge spec. A
+// key of the mapping wins over a key that the merge brings in, before or
+// after the merge key. An earlier source or merge key wins over a later
+// one. The decoder of goccy/go-yaml lets the later entry in the text win.
+// So in "s: &s {a: 1}" and "m: {a: 2, <<: *s}", yaml.Unmarshal reads m.a
+// as 1, and niceyaml reads m.a as 2.
+//
 // The tokenizer of niceyaml reads some constructs as YAML does, where
 // go-yaml's lexer reads them otherwise, as
 // [go.jacobcolvin.com/niceyaml/tokens.Tokenize] lists them.
@@ -1132,13 +1139,13 @@
 // `server: {<<: {port: x}}` thus gives `$.server.port`. The path does not name
 // the merge key or an index of a sequence there.
 //
-// A later entry of the key can take that path. Such an entry lies in the
-// mapping that holds the merge key, or in a later source of the same merge
+// Another entry of the key can take that path. Such an entry lies in the
+// mapping that holds the merge key, or in an earlier source of the same merge
 // key. The path then goes through the merge key instead, and through the index
 // of the source in a sequence of sources. In a decode into
 // map[string]map[string]int, `server: {<<: {port: x}, port: 1}` thus gives
-// `$.server.<<.port`, and `server: {<<: [{port: x}, {port: 1}]}` gives
-// `$.server.<<[0].port`.
+// `$.server.<<.port`, and `server: {<<: [{port: 1}, {port: x}]}` gives
+// `$.server.<<[1].port`.
 //
 // The decoder goes on past each value that it rejects, and the decode
 // reports every problem together, in the order of the source:
@@ -1838,8 +1845,9 @@
 // A `<<` merge key that reads such an alias brings in the names of the
 // mapping of its anchor. A path through a name whose entry the merge key
 // brings in returns the same error, because the value lies in the reference
-// document. A path through any other name selects the entry that the
-// document writes, before or after the merge key, or nothing, as the
+// document. A path through a name that the mapping writes selects the entry
+// of the mapping, before or after the merge key, because that entry wins
+// over the merge key. A path through any other name selects nothing, as the
 // go.jacobcolvin.com/niceyaml/paths package describes. A path also returns
 // the error when the reference document merges an anchor that no reference
 // document defines. A decode of the Node of the mapping reads the entries
@@ -1900,9 +1908,9 @@
 //
 // A `<<` merge key that reads a reference document brings in the entries of a
 // mapping there. A path through a key of the mapping that holds the merge key
-// reads those entries as the decoder reads them. The decoder reads the last
-// entry of a key, so an entry after the merge key replaces the entry of its
-// key that the merge key brings in. An error at a key that the merge key
+// reads those entries as the decoder reads them. An entry of the mapping
+// replaces the entry of its key that the merge key brings in, before or after
+// the merge key, as YAML's merge spec reads it. An error at a key that the merge key
 // brings in binds at the alias of the merge key. SourceError.Nearest then
 // reports the path of the mapping that holds the merge key, and
 // SourceError.Unresolved returns the error that wraps ErrReferenceAlias, as it
@@ -1928,13 +1936,13 @@
 // `$.base.q.port`. Its path names the place of that alias in the anchor, as
 // the Scoped Nodes section describes for an alias inside an anchor.
 //
-// A later entry of the key can take the path through the merge. Such an entry
-// lies in the mapping that holds the merge key, or in a later source of the
+// Another entry of the key can take the path through the merge. Such an entry
+// lies in the mapping that holds the merge key, or in an earlier source of the
 // same merge key. The path then goes through the merge key instead, and
 // through the index of the source in a sequence of sources. That path binds at
 // the alias. `services: {<<: {q: *img}, q: {port: 1}}` thus gives
-// `$.services.<<.q.port`, and `services: {<<: [{q: *img}, {q: {port: 1}}]}`
-// gives `$.services.<<[0].q.port`.
+// `$.services.<<.q.port`, and `services: {<<: [{q: {port: 1}}, {q: *img}]}`
+// gives `$.services.<<[1].q.port`.
 //
 // Where the path through the merge key does not bind at the alias either, the
 // error keeps the path through the merge and binds at the position of the

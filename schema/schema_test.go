@@ -1230,12 +1230,12 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 			`),
 		},
 		"merge key keeps the merged midnight date-time": {
-			// The merge key sets d after the member written before it.
+			// The mapping does not write d, so the merge key sets it.
 			schema: dateTime,
 			input: stringtest.Input(`
 				base: &base
 				  d: !!timestamp 2001-12-14T00:00:00Z
-				d: !!timestamp 2001-12-14
+				e: 1
 				<<: *base
 			`),
 		},
@@ -1280,18 +1280,18 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 			}`,
 			input: `m: {<<: {0x10: !!timestamp 2001-12-14}, "0x10": 5}`,
 		},
-		"merge sequence keeps the later source's date": {
-			// A later merge source sets d over an earlier one.
+		"merge sequence keeps the earlier source's date": {
+			// An earlier merge source sets d over a later one.
 			schema: dateInM,
 			input: stringtest.Input(`
 				b1: &b1
-				  d: !!timestamp 2001-12-14T00:00:00Z
-				b2: &b2
 				  d: !!timestamp 2001-12-14
+				b2: &b2
+				  d: !!timestamp 2001-12-14T00:00:00Z
 				m: {<<: [*b1, *b2]}
 			`),
 		},
-		"merge sequence keeps the later source's midnight date-time": {
+		"merge sequence keeps the earlier source's midnight date-time": {
 			schema: `{
 				"type": "object",
 				"properties": {
@@ -1303,9 +1303,9 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 			}`,
 			input: stringtest.Input(`
 				b1: &b1
-				  d: !!timestamp 2001-12-14
-				b2: &b2
 				  d: !!timestamp 2001-12-14T00:00:00Z
+				b2: &b2
+				  d: !!timestamp 2001-12-14
 				m: {<<: [*b1, *b2]}
 			`),
 		},
@@ -4110,27 +4110,27 @@ func TestSchema_SourcePath(t *testing.T) {
 			`),
 			want: `2:5: $.'': expected ["string", "object"], got "integer"`,
 		},
-		"merge key overrides an earlier respelled key": {
-			// The decoder applies the merge after 0x10: 1, so the member
-			// 16 holds x, and the path names the key the merge brings in.
+		"respelled key wins over a later merge key": {
+			// The key of the mapping wins over the merge, so the member 16
+			// holds x, and the path names the key of the mapping.
 			schema: integersInUser,
 			input: stringtest.Input(`
 				user:
-				  0x10: 1
-				  <<: {16: x}
+				  0x10: x
+				  <<: {16: 1}
 			`),
-			want: `3:12: $.user.16: expected "integer", got "string"`,
+			want: `2:9: $.user.0x10: expected "integer", got "string"`,
 		},
-		"merge key overrides an earlier key of the same spelling": {
-			// A path through 0x10 selects the later entry, which the
-			// merge brings in.
+		"key wins over a later merge key of the same spelling": {
+			// A path through 0x10 selects the key of the mapping, which wins
+			// over the key that the merge brings in.
 			schema: integersInUser,
 			input: stringtest.Input(`
 				user:
-				  0x10: 1
-				  <<: {0x10: x}
+				  0x10: x
+				  <<: {0x10: 1}
 			`),
-			want: `3:14: $.user.0x10: expected "integer", got "string"`,
+			want: `2:9: $.user.0x10: expected "integer", got "string"`,
 		},
 		"respelled key a merge key brings in": {
 			schema: integersInUser,
@@ -4166,12 +4166,12 @@ func TestSchema_SourcePath(t *testing.T) {
 		},
 		"merge source with a tagged alias key": {
 			// A key of the merge source may decode to any name, so the
-			// key 0x10 before the merge cannot name the member 16.
+			// key 0x10 of a later source cannot name the member 16.
 			schema: integersInM,
 			input: stringtest.Input(`
 				a: &k 16
 				b: &b {? !!str *k : x}
-				m: {0x10: 5, <<: *b}
+				m: {<<: [*b, {0x10: 5}]}
 			`),
 			want: `2:21: $.m.16: expected "integer", got "string"`,
 		},
@@ -4417,8 +4417,8 @@ func TestSchema_SourcePath_ReferenceAlias(t *testing.T) {
 	// An alias to an anchor of a reference document resolves in the decode
 	// and not in the document, so the walk cannot follow it. The path keeps
 	// the decoded name of a member below the alias. A merge key that names
-	// such an alias may set a member of any name, so the key 0x10 before
-	// it cannot name the member 16 either.
+	// such an alias may set a member of any name, so the key 0x10 of a later
+	// source of that merge key cannot name the member 16 either.
 	refs := yamltest.References(stringtest.LinesLF(
 		"base: &base {0x10: x}",
 		"other: &other {k: 1}",
@@ -4444,7 +4444,7 @@ func TestSchema_SourcePath_ReferenceAlias(t *testing.T) {
 				"type": "object",
 				"additionalProperties": {"type": "integer"}
 			}`,
-			input: stringtest.LinesLF("0x10: x", "<<: *other"),
+			input: "<<: [*other, {0x10: x}]\n",
 			want:  "$.16",
 		},
 	}
@@ -4467,7 +4467,9 @@ func TestSchema_SourcePath_ReferenceAlias(t *testing.T) {
 func TestSchema_SourcePath_HiddenKey(t *testing.T) {
 	t.Parallel()
 
-	// In each case a later entry hides the key of the member that holds x.
+	// In each case another entry hides the key of the member that holds x:
+	// a later own key, or an own key or an earlier source beside the merge
+	// key that brings in the member.
 	// The path keeps the decoded name of that member and selects nothing,
 	// and the error binds at the x. The quoted "0x10" decodes to the
 	// member 0x10, as does an alias key whose anchor holds it.
@@ -4492,7 +4494,7 @@ func TestSchema_SourcePath_HiddenKey(t *testing.T) {
 		opts   []niceyaml.SourceOption
 	}{
 		// In the cases of integersInUser, the key 0x10 sets the member 16
-		// to x. A later entry spells its key 0x10 too, and a path through
+		// to x. Another entry spells its key 0x10 too, and a path through
 		// 0x10 selects that entry, so the error binds at the x rather than
 		// at the valid 1.
 		"own key after the merge key": {
@@ -4504,41 +4506,41 @@ func TestSchema_SourcePath_HiddenKey(t *testing.T) {
 			`),
 			want: `2:14: $.user.16: expected "integer", got "string"`,
 		},
-		"merge key after the own key": {
+		"own key before the merge key": {
 			schema: integersInUser,
 			input: stringtest.Input(`
 				user:
-				  0x10: x
-				  <<: {"0x10": 1}
+				  "0x10": 1
+				  <<: {0x10: x}
 			`),
-			want: `2:9: $.user.16: expected "integer", got "string"`,
+			want: `3:14: $.user.16: expected "integer", got "string"`,
 		},
-		"later source of one merge key": {
+		"earlier source of one merge key": {
 			schema: integersInUser,
 			input: stringtest.Input(`
 				user:
-				  <<: [{0x10: x}, {"0x10": 1}]
+				  <<: [{"0x10": 1}, {0x10: x}]
 			`),
-			want: `2:15: $.user.16: expected "integer", got "string"`,
+			want: `2:28: $.user.16: expected "integer", got "string"`,
 		},
-		"later aliased source of one merge key": {
+		"earlier aliased source of one merge key": {
 			schema: integersInUser,
 			input: stringtest.Input(`
-				a: &a {0x10: x}
-				b: &b {"0x10": 1}
+				a: &a {"0x10": 1}
+				b: &b {0x10: x}
 				user:
 				  <<: [*a, *b]
 			`),
-			want: `1:14: $.user.16: expected "integer", got "string"`,
+			want: `2:14: $.user.16: expected "integer", got "string"`,
 		},
-		"later merge key": {
+		"earlier merge key": {
 			schema: integersInUser,
 			input: stringtest.Input(`
 				user:
-				  <<: {0x10: x}
 				  <<: {"0x10": 1}
+				  <<: {0x10: x}
 			`),
-			want: `2:14: $.user.16: expected "integer", got "string"`,
+			want: `3:14: $.user.16: expected "integer", got "string"`,
 			opts: []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
 		},
 		"later own key": {
@@ -4562,40 +4564,25 @@ func TestSchema_SourcePath_HiddenKey(t *testing.T) {
 			want: `3:9: $.user.16: expected "integer", got "string"`,
 		},
 		// In the cases of integersBelowUser, the x lies below the member of
-		// the hidden key. The decoded name of that member selects another
-		// entry, which holds a valid value under the spelling 0x11, so the
-		// keys below keep their decoded names too.
-		"below an own key after the merge key": {
+		// the hidden key, so the keys below keep their decoded names too.
+		"below an own key before the merge key": {
 			schema: integersBelowUser,
-			input:  stringtest.LinesLF(`user: {16: {0x11: 2}, <<: {0x10: {0x11: x}}, "0x10": 1}`),
-			want:   `1:41: $.user.16.17: expected "integer", got "string"`,
+			input:  stringtest.LinesLF(`user: {"0x10": 1, <<: {0x10: {0x11: x}}}`),
+			want:   `1:37: $.user.16.17: expected "integer", got "string"`,
 		},
-		"below a block own key after the merge key": {
+		"below a block own key before the merge key": {
 			schema: integersBelowUser,
 			input: stringtest.Input(`
 				user:
-				  16: {0x11: 2}
-				  <<: {0x10: {0x11: x}}
 				  "0x10": 1
+				  <<: {0x10: {0x11: x}}
 			`),
 			want: `3:21: $.user.16.17: expected "integer", got "string"`,
 		},
-		"below a later source of one merge key": {
+		"below an earlier source of one merge key": {
 			schema: integersBelowUser,
-			input:  stringtest.LinesLF(`user: {16: {0x11: 2}, <<: [{0x10: {0x11: x}}, {"0x10": 1}]}`),
-			want:   `1:42: $.user.16.17: expected "integer", got "string"`,
-		},
-		"below a merge key after the own key": {
-			schema: integersBelowUser,
-			input:  stringtest.LinesLF(`user: {16: {0x11: 2}, 0x10: {0x11: x}, <<: {"0x10": 1}}`),
-			want:   `1:36: $.user.16.17: expected "integer", got "string"`,
-		},
-		"below an own key spelled as its name before a merge key": {
-			// The own key decodes to 0x10, and the merged 0x10 sets the
-			// member 16, but a path through 0x10 selects the merged key.
-			schema: integersBelowUser,
-			input:  stringtest.LinesLF(`user: {"0x10": {0x11: x}, <<: {0x10: {0x11: 1}, 16: 2}}`),
-			want:   `1:23: $.user.0x10.17: expected "integer", got "string"`,
+			input:  stringtest.LinesLF(`user: {<<: [{"0x10": 1}, {0x10: {0x11: x}}]}`),
+			want:   `1:40: $.user.16.17: expected "integer", got "string"`,
 		},
 	}
 

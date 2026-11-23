@@ -120,6 +120,18 @@
 //     another exception, because it points to the node. The null leaves
 //     a value that is not a pointer or an interface at its start, as a
 //     null does.
+//   - A `<<` merge key reads its keys in the order of YAML's merge spec.
+//     A key of the mapping that holds the merge key wins over a key that
+//     the merge brings in, wherever the mapping writes it. A key of an
+//     earlier mapping of a merge sequence wins over a key of a later
+//     one, and so does a key of an earlier merge key of the mapping.
+//     Go-yaml sets the entries in the order of the text, so the later
+//     entry wins there. An ordered map holds a key that a merge brings
+//     in once, at the first place that sets it, with the value of the
+//     entry that wins. A merged mapping that repeats a key, as
+//     AllowDuplicateMapKey allows, gives an item for each of its
+//     entries. An entry of a mapping that wins over that source takes
+//     the place of the first such item and drops the others.
 //
 // The files that sync.sh does not write stand in for the parts of go-yaml
 // that the copy needs outside those files. The decode options are copies of

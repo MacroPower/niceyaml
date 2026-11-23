@@ -23,6 +23,7 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/bom"
+	"go.jacobcolvin.com/niceyaml/internal/datapath"
 	"go.jacobcolvin.com/niceyaml/internal/docparse"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/internal/mapkey"
@@ -528,7 +529,9 @@ func (d *Doc) decodeProblem(ctx context.Context) (any, error) {
 // name can read it otherwise, as [hook.DecodeChanges] tells, so only such a
 // text takes the decode alone. A text that the decoder alone refuses does
 // not count. Nor does a text that go-yaml's lexer reads otherwise than the
-// tokenizer, as [Doc.lexedAlike] tells. Other values count only when the
+// tokenizer, as [Doc.lexedAlike] tells, or a text whose `<<` merge keys
+// go-yaml's decoder alone might read otherwise, as [Doc.mergesApart]
+// tells. Other values count only when the
 // decoder alone reads start as the decode reads it, as [Doc.readsAlike]
 // tells. Where the two read start apart, the edits follow the decode. The
 // problem matches [ErrEngine] and names go-yaml's decoder. It binds at the
@@ -539,7 +542,7 @@ func (d *Doc) ownDecodeProblem(ctx context.Context, read any, start state) error
 	}
 
 	own, err := hook.OwnDecode(ctx, d.node, d.cur+d.tail)
-	if err != nil || sameReading(own, read) || !d.lexedAlike() {
+	if err != nil || sameReading(own, read) || !d.lexedAlike() || d.mergesApart() {
 		return nil //nolint:nilerr // A refusal of go-yaml's decoder alone does not count.
 	}
 
@@ -575,7 +578,9 @@ func (d *Doc) readsAlike(ctx context.Context, start state) (bool, bool) {
 // the decode of the text. A refusal counts when the decoder alone takes the
 // text that the Apply found, and other values count when it reads that text
 // alike, as [Doc.readsAlike] tells. Neither counts in a text that go-yaml's
-// lexer reads otherwise than the tokenizer, as [Doc.lexedAlike] tells.
+// lexer reads otherwise than the tokenizer, as [Doc.lexedAlike] tells, or in
+// a text whose merge keys it might read otherwise, as [Doc.mergesApart]
+// tells.
 func (d *Doc) ownApart(ctx context.Context) bool {
 	if !hook.DecodeChanges(d.node) {
 		return false
@@ -587,7 +592,7 @@ func (d *Doc) ownApart(ctx context.Context) bool {
 	}
 
 	own, err := hook.OwnDecode(ctx, d.node, d.cur+d.tail)
-	if err == nil && sameReading(own, read) || !d.lexedAlike() {
+	if err == nil && sameReading(own, read) || !d.lexedAlike() || d.mergesApart() {
 		return false
 	}
 
@@ -599,6 +604,172 @@ func (d *Doc) ownApart(ctx context.Context) bool {
 	takes, alike := d.readsAlike(ctx, start)
 
 	return takes && (err != nil || alike)
+}
+
+// mergesApart reports whether go-yaml's decoder alone might read a `<<`
+// merge key of the current text otherwise than the decode of the text. The
+// decode reads the merge keys in the order of YAML's merge spec, as
+// [mergeReader.spec] reads them. Go-yaml's decoder reads them in the order
+// of the text, as [mergeReader.text] reads them. So mergesApart reports
+// true for a mapping in which the two orders keep another entry for some
+// key, as in "{a: 2, <<: *s}" where s holds a. The two read
+// "{<<: *s, a: 2}" alike, because both keep the own entry of a. It also
+// reports true for a key that has no name. So does a merge key whose
+// sources the resolver cannot read, such as an alias of a reference
+// document. Such a merge key can bring in any key.
+func (d *Doc) mergesApart() bool {
+	r := d.node.DocumentResolver()
+	names := d.decodedKeys()
+
+	mr := mergeReader{
+		r: r,
+		name: func(key ast.Node) (string, bool) {
+			if name, ok := names(key); ok {
+				return name, true
+			}
+
+			return r.KeyName(key)
+		},
+		texts: map[ast.Node]*mergeKept{},
+		specs: map[ast.Node]*mergeKept{},
+	}
+
+	for _, mm := range d.mergeMappings() {
+		text, spec := mr.text(mm.m), mr.spec(mm.m)
+		if !text.ok || !spec.ok || !maps.Equal(text.kept, spec.kept) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// mergeReader reads which entry a decode keeps for each key of a mapping,
+// with the entries that the mapping brings in through its `<<` merge keys,
+// as [Doc.mergesApart] compares them.
+type mergeReader struct {
+	r *paths.Resolver
+	// Name returns the name of a key as a decode reads it, and reports
+	// false for a key without one.
+	name keyNamer
+	// The reads of the mappings in each order, by the content of each
+	// mapping.
+	texts, specs map[ast.Node]*mergeKept
+}
+
+// mergeKept is the entry that a decode keeps for each key of a mapping,
+// in one order. Ok is false when the read cannot tell, because a key has
+// no name or the sources of a merge key do not resolve.
+type mergeKept struct {
+	kept map[string]*ast.MappingValueNode
+	ok   bool
+}
+
+// text reads m in the order of the text, as go-yaml's decoder reads it.
+// Each entry sets its key, and each merge key sets every key that each of
+// its sources keeps, in the order of the sources. So the later entry in the
+// text wins.
+func (mr *mergeReader) text(m ast.Node) *mergeKept {
+	return mr.read(m, mr.texts, func(out *mergeKept, entries []*ast.MappingValueNode) bool {
+		for _, e := range entries {
+			if !astnode.IsMergeKey(e.Key) {
+				name, ok := mr.name(e.Key)
+				if !ok {
+					return false
+				}
+
+				out.kept[name] = e
+
+				continue
+			}
+
+			sources, err := datapath.MergeSources(mr.r, e)
+			if err != nil {
+				return false
+			}
+
+			for _, src := range sources {
+				read := mr.text(src)
+				if !read.ok {
+					return false
+				}
+
+				maps.Copy(out.kept, read.kept)
+			}
+		}
+
+		return true
+	})
+}
+
+// spec reads m in the order of YAML's merge spec, as the decode of the
+// text reads it. The own entries of m come first, from the last one back,
+// and then each merge key and each of its sources in order. The first
+// entry that sets a key wins.
+func (mr *mergeReader) spec(m ast.Node) *mergeKept {
+	return mr.read(m, mr.specs, func(out *mergeKept, entries []*ast.MappingValueNode) bool {
+		for _, e := range slices.Backward(entries) {
+			if astnode.IsMergeKey(e.Key) {
+				continue
+			}
+
+			name, ok := mr.name(e.Key)
+			if !ok {
+				return false
+			}
+
+			if _, held := out.kept[name]; !held {
+				out.kept[name] = e
+			}
+		}
+
+		for _, e := range entries {
+			if !astnode.IsMergeKey(e.Key) {
+				continue
+			}
+
+			sources, err := datapath.MergeSources(mr.r, e)
+			if err != nil {
+				return false
+			}
+
+			for _, src := range sources {
+				read := mr.spec(src)
+				if !read.ok {
+					return false
+				}
+
+				for name, kept := range read.kept {
+					if _, held := out.kept[name]; !held {
+						out.kept[name] = kept
+					}
+				}
+			}
+		}
+
+		return true
+	})
+}
+
+// read returns the read of m in reads, or reads m with fill and keeps the
+// read there. A mapping that the walk reaches again inside its own read
+// reads as one that the walk cannot tell.
+func (mr *mergeReader) read(
+	m ast.Node, reads map[ast.Node]*mergeKept,
+	fill func(out *mergeKept, entries []*ast.MappingValueNode) bool,
+) *mergeKept {
+	m = astnode.Content(m)
+	if read, ok := reads[m]; ok {
+		return read
+	}
+
+	out := &mergeKept{kept: map[string]*ast.MappingValueNode{}}
+	reads[m] = out
+
+	entries, _ := astnode.Entries(m)
+	out.ok = fill(out, entries)
+
+	return out
 }
 
 // lexedAlike reports whether go-yaml's lexer reads the current text as the
@@ -1718,7 +1889,7 @@ func (d *Doc) diffProblem(x *model, df *diff) error {
 		bound = d.bindSite(key, func(opts ...niceyaml.ErrorOption) error { return d.engineProblem(problem, opts...) })
 
 	case ok && !at.IsRoot() && (err != nil || astnode.Content(v.AST()) != astnode.Content(node)):
-		// The path selects another value, as when a later `<<` merge key
+		// The path selects another value, as when a later entry of its key
 		// hides the entry, so the problem binds at the node. So does an
 		// extra entry, at its key.
 		bound = d.bindOwn(d.engineProblem(problem, niceyaml.AtPath(at), niceyaml.AtRange(

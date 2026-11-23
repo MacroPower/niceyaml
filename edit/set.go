@@ -229,10 +229,9 @@ type payload struct {
 // [go.jacobcolvin.com/niceyaml.WithReferences] brings in the names of the
 // mapping of its anchor. A Set of a name whose entry such a merge key
 // brings in fails with a problem that matches [paths.ErrReferenceAlias], as
-// [Node.At] describes. A Set with [First], [Before], or [After] can put a
-// new entry before such a merge key. It fails the same way when the merge
-// key brings in a key that a decode reads as the name, such as 0x10 for 16,
-// or a key that does not decode.
+// [Node.At] describes. A new entry of the mapping wins over the merge key,
+// so a Set with [First], [Before], or [After] can put it before the merge
+// key.
 //
 // A Go string keeps the quotes of the scalar that it replaces, in block
 // and in flow style, even when it holds a line break. A single-quoted
@@ -2407,11 +2406,6 @@ func (d *Doc) createValue(
 		where, err = d.placeEntry(h, named, holder, holderPath, content, at)
 		if err != nil {
 			return nil, modelPlace{}, err
-		}
-
-		err = d.placeRead(content, next.Name, where)
-		if err != nil {
-			return nil, modelPlace{}, d.readFail(h, fmt.Errorf("%s sets %s, which %w", d.subject(), h.path, err))
 		}
 	}
 

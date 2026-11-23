@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
-	"maps"
 	"math"
 	"slices"
 	"strconv"
@@ -84,8 +83,8 @@ type refused struct {
 
 // newRefusal returns the problem of each place of the user's text that
 // [New] refuses, or nil. The places come in the order of the text. At one
-// site, a byte order mark comes first, then the misreads in the order of
-// [Doc.misreads], then the constructs in the order of their constants. The
+// site, a byte order mark comes first, then the constructs in the order
+// of their constants. The
 // sort is stable, so it keeps the order of the gathering for the places of
 // one site and one construct. The list stops at the first anchor or tag on
 // an empty value under which go-yaml's parse nests the lines after it, as
@@ -96,7 +95,6 @@ type refused struct {
 // [niceyaml.NewSummary] that counts them.
 func (d *Doc) newRefusal() error {
 	found := d.markRefusals()
-	found = append(found, d.misreadRefusals()...)
 
 	instances := d.find(false)
 	for i := range instances {
@@ -937,20 +935,6 @@ type keyRead [4]string
 type keyReading struct {
 	key       any
 	ok, shows bool
-}
-
-// mergeName returns the name of key, a key of the current text, under
-// which go-yaml's decoder merges its entry: the key that a decode into a
-// map gives the entry, as [Doc.decodedKeys] names it. So 0x1 and 1 name one
-// entry, and so do an alias and the key of its anchor. A key that does not
-// decode takes the name that a path reads, as [paths.Resolver.KeyName]
-// gives it.
-func (d *Doc) mergeName(key ast.Node) (string, bool) {
-	if name, ok := d.decodedKeys()(key); ok {
-		return name, true
-	}
-
-	return d.node.DocumentResolver().KeyName(key)
 }
 
 // emptyUnder reports whether node, the value under an anchor, is the null
@@ -3595,24 +3579,6 @@ func (d *Doc) mergeValueForm(value ast.Node) mergeForm {
 	return mergeForm{noun: "a merge key whose value is a scalar", fix: aliasFix}
 }
 
-// heldEntries returns the entries of srcs, the sources of a << merge key,
-// under each key, earlier sources first, as [Doc.specEntries] reads them
-// with memo.
-func (d *Doc) heldEntries(
-	srcs []ast.Node,
-	memo map[ast.Node]map[string]*ast.MappingValueNode,
-) map[string][]*ast.MappingValueNode {
-	held := make(map[string][]*ast.MappingValueNode)
-
-	for _, src := range srcs {
-		for name, se := range d.specEntries(src, memo) {
-			held[name] = append(held[name], se)
-		}
-	}
-
-	return held
-}
-
 // keptForm returns the form of e, a << merge key of the current text, as
 // [Doc.formOf] reads it, where a tag on the key, a source that holds a
 // merge key of its own, and another merge key of its mapping, as repeated
@@ -3878,10 +3844,9 @@ type mergeMapping struct {
 
 // mergeMappings returns each mapping of the current text that holds a <<
 // merge key, in the order of the text. A mapping without a merge key gives
-// no result to [Doc.keptMerges], [Doc.mergeEntries] or
-// [Doc.precedenceMisreads], so they read these mappings alone. It reads them
-// on its first call for a parse. The caller must not change the returned
-// slice.
+// no result to [Doc.keptMerges] or [Doc.mergeEntries], so they read these
+// mappings alone. It reads them on its first call for a parse. The caller
+// must not change the returned slice.
 func (d *Doc) mergeMappings() []mergeMapping {
 	t := d.parseIndex()
 	if t.merges == nil {
@@ -4468,459 +4433,6 @@ func (d *Doc) mergeReader(alias ast.Node) (*ast.MappingValueNode, bool) {
 	return e, ok && e.Value == alias && astnode.IsMergeKey(e.Key)
 }
 
-// precedenceMisreads returns each own entry of a mapping of the current
-// text that a << merge key after it overrides: a merge key whose source
-// holds its key, or reads it through merge keys of its own, after the last
-// own entry of the key. Go-yaml's decoder reads the entries of a mapping in
-// order and lets each later one override the earlier ones, so the last
-// such merge key gives the value, but the merge spec keeps the own entry.
-// The keys compare as the decoder reads them, as [Doc.mergeName] gives
-// them. The misread binds at the key of the last own entry and names that
-// merge key. It also returns each key that two sources of one merge key
-// hold, which the mapping does not write. Go-yaml's decoder lets the later
-// source override the earlier one, but the merge spec keeps the earlier
-// one. That misread binds at the merge key. The sources are the mappings of
-// the document that the merge key brings in, as [Doc.formOf] gives them.
-// A key of a reference document counts for neither kind. A path through
-// an own entry whose key such a key replaces fails instead, as
-// [Doc.referenceRead] tells.
-func (d *Doc) precedenceMisreads() []misreadFound {
-	var out []misreadFound
-
-	memo := make(map[ast.Node]map[string]*ast.MappingValueNode)
-	refs := make(map[ast.Node]bool)
-
-	type merge struct {
-		e    *ast.MappingValueNode
-		held map[string][]*ast.MappingValueNode
-		at   int
-	}
-
-	for _, mm := range d.mergeMappings() {
-		entries := mm.entries
-		owns := make(map[string]int)
-
-		var merges []merge
-
-		// Whether a merge key after the merge key j of the mapping reads a
-		// reference document, which can bring in any key again.
-		laterReference := func(j int) bool {
-			return slices.ContainsFunc(merges[j+1:], func(m merge) bool {
-				return d.mergeReadsReference(d.formOf(m.e), 0, refs)
-			})
-		}
-
-		for i, e := range entries {
-			if astnode.IsMergeKey(e.Key) {
-				// The entries of the sources of e under each key, earlier
-				// sources first, as go-yaml's resolver binds the aliases of e.
-				merges = append(merges, merge{e: e, held: d.heldEntries(d.formOf(e).sources, memo), at: i})
-			} else if name, ok := d.mergeName(e.Key); ok {
-				owns[name] = i
-			}
-		}
-
-		for i, own := range entries {
-			name, ok := d.mergeName(own.Key)
-			if !ok || astnode.IsMergeKey(own.Key) || owns[name] != i {
-				continue
-			}
-
-			other := func(se *ast.MappingValueNode) bool { return se != own }
-
-			for j, m := range slices.Backward(merges) {
-				// A mapping that merges itself brings in its own entry, which
-				// both readings keep.
-				held := m.held[name]
-				if m.at < i || !slices.ContainsFunc(held, other) {
-					continue
-				}
-
-				// Go-yaml's decoder reads the entry of the last source that
-				// brings in the key.
-				var se *ast.MappingValueNode
-
-				for _, h := range slices.Backward(held) {
-					if other(h) {
-						se = h
-
-						break
-					}
-				}
-
-				later := laterReference(j) || d.readsReferenceAfter(m.e, name, se, memo, refs)
-				if f, ok := d.precedencePart(m.e, own, later); ok {
-					out = append(out, f)
-				}
-
-				break
-			}
-		}
-
-		for j, m := range merges {
-			// Two sources that bring in one entry read alike. The keys come in
-			// the order of the entries of their last sources in the text, and
-			// keys of the same place in the order of their names.
-			var order []misreadFound
-
-			for _, name := range slices.Sorted(maps.Keys(m.held)) {
-				ses := m.held[name]
-				if _, owned := owns[name]; owned || ses[0] == ses[len(ses)-1] {
-					continue
-				}
-
-				// A later merge key that brings in the key, or a later source
-				// that a reference document decides, can be the one that
-				// go-yaml's decoder reads. A source before the first one can
-				// hold the key in a reference document, which the merge spec
-				// then keeps.
-				later := laterReference(j) || d.readsReferenceAfter(m.e, name, ses[len(ses)-1], memo, refs) ||
-					slices.ContainsFunc(merges[j+1:], func(m merge) bool { return len(m.held[name]) > 0 })
-				earlier := d.readsReferenceBefore(m.e, name, ses[0], memo, refs)
-
-				if f, ok := d.orderPart(m.e, name, ses, later, earlier, memo); ok {
-					order = append(order, f)
-				}
-			}
-
-			slices.SortStableFunc(order, func(a, b misreadFound) int {
-				return cmp.Or(cmp.Compare(a.order[0], b.order[0]), cmp.Compare(a.order[1], b.order[1]))
-			})
-
-			out = append(out, order...)
-		}
-	}
-
-	return out
-}
-
-// orderPart returns the misread of the key that two or more sources of e,
-// a << merge key of the current text, hold under held, as
-// [Doc.precedenceMisreads] finds it. The entries ses hold the key in those
-// sources, earlier sources first, as [Doc.specEntries] reads them with
-// memo. The message names the key as the path names the entry of the last
-// source. It names that source as the one that go-yaml's decoder reads,
-// unless a later source or merge key can bring in the key after it, as
-// later tells. It names the first source as the one that the merge spec
-// keeps, unless a source before it reads a reference document, as earlier
-// tells. The engine does not read a reference document, so the message
-// then names no source in its place. A source names its place by the entry
-// that holds the key or the merge key that brings it in, as
-// [Doc.sourceEntry] finds it.
-func (d *Doc) orderPart(
-	e *ast.MappingValueNode,
-	held string,
-	ses []*ast.MappingValueNode,
-	later, earlier bool,
-	memo map[ast.Node]map[string]*ast.MappingValueNode,
-) (misreadFound, bool) {
-	ks, kok := d.nodeSpan(e.Key)
-	if !kok {
-		return misreadFound{}, false
-	}
-
-	// The offset of the entry se, and where a message names its source.
-	place := func(se *ast.MappingValueNode, last bool) (int, string) {
-		s, ok := d.nodeSpan(se)
-		if !ok {
-			return ks.start, "at " + d.nodeSite(e.Key, true).at.Start.OneBased()
-		}
-
-		return s.start, "at " + d.entrySite(d.sourceEntry(e, held, se, last, memo)).at.Start.OneBased()
-	}
-
-	first, firstAt := place(ses[0], false)
-	last, lastAt := place(ses[len(ses)-1], true)
-
-	name, _ := d.node.DocumentResolver().KeyName(ses[len(ses)-1].Key)
-	at := d.nodeSite(e.Key, true)
-	mergeAt := at.at.Start.OneBased()
-
-	// No path names a mapping below a key without a name of its own, such
-	// as an alias key, so the message then names the key alone.
-	m := d.tree().parent[e]
-	path, edited := "the key "+cut(name), "the key "+cut(name)
-
-	if d.pathNames(m) {
-		path, edited = at.path.Child(name).String(), d.textPath(m).Child(name).String()
-	}
-
-	read, kept := "the source "+lastAt, "the earlier source "+firstAt
-	if later {
-		read, kept = "a source after the source "+firstAt, "that earlier source"
-	}
-
-	if earlier {
-		kept = "an earlier source"
-	}
-
-	return misreadFound{
-		kind: misreadOrder, at: at, start: ks.start, order: [2]int{last, first},
-		fix: fmt.Sprintf("write %s in one source of the merge key, or after the merge key", cut(name)),
-		msg: fmt.Sprintf("go-yaml's decoder reads %s from %s of the merge key at %s, but the merge spec keeps %s",
-			path, read, mergeAt, kept),
-		edited: fmt.Sprintf("go-yaml's decoder reads %s from a later source of a merge key %s, but the "+
-			"merge spec keeps the earlier source", edited, inEdited),
-	}, true
-}
-
-// sourceEntry returns the entry of the source of e, a << merge key of the
-// current text, that brings in se, the entry of the key name that the
-// source reads, as [Doc.specEntries] reads them with memo. That is se when
-// the source holds it, or else the merge key of the source that brings it
-// in. Of the sources that bring in se, it reads the last one with last,
-// and else the first one.
-func (d *Doc) sourceEntry(
-	e *ast.MappingValueNode,
-	name string,
-	se *ast.MappingValueNode,
-	last bool,
-	memo map[ast.Node]map[string]*ast.MappingValueNode,
-) *ast.MappingValueNode {
-	srcs := d.formOf(e).sources
-	if last {
-		srcs = slices.Clone(srcs)
-		slices.Reverse(srcs)
-	}
-
-	for _, src := range srcs {
-		if d.specEntries(src, memo)[name] != se {
-			continue
-		}
-
-		entries, _ := readEntries(astnode.Content(src))
-		if slices.Contains(entries, se) {
-			return se
-		}
-
-		for _, own := range entries {
-			if astnode.IsMergeKey(own.Key) && slices.Contains(d.heldEntries(d.formOf(own).sources, memo)[name], se) {
-				return own
-			}
-		}
-
-		break
-	}
-
-	return se
-}
-
-// readsReferenceAfter reports whether e, a << merge key of the current
-// text, can read the key name from a reference document after the source
-// that brings in se, the entry of the key that go-yaml's decoder reads from
-// the sources of the document, as [Doc.specEntries] reads them with memo.
-// An alias of a reference document after that source can bring in the key
-// again, and so can a later source that reads one, as
-// [Doc.readsReference] tells with refs.
-func (d *Doc) readsReferenceAfter(
-	e *ast.MappingValueNode,
-	name string,
-	se *ast.MappingValueNode,
-	memo map[ast.Node]map[string]*ast.MappingValueNode,
-	refs map[ast.Node]bool,
-) bool {
-	f := d.formOf(e)
-
-	for i, src := range slices.Backward(f.sources) {
-		if d.specEntries(src, memo)[name] == se {
-			return d.mergeReadsReference(f, i+1, refs)
-		}
-	}
-
-	return false
-}
-
-// readsReferenceBefore reports whether e, a << merge key of the current
-// text, reads a reference document before the source that brings in se.
-// That entry of the key name is the one that the merge spec keeps from the
-// sources of the document, as [Doc.specEntries] reads them with memo. The
-// reference
-// document can hold the key, so the merge spec can keep its entry instead.
-// That source can be an alias of a reference document or a source that
-// reads one, as [Doc.readsReference] tells with refs.
-func (d *Doc) readsReferenceBefore(
-	e *ast.MappingValueNode,
-	name string,
-	se *ast.MappingValueNode,
-	memo map[ast.Node]map[string]*ast.MappingValueNode,
-	refs map[ast.Node]bool,
-) bool {
-	f := d.formOf(e)
-
-	for i, src := range f.sources {
-		if d.specEntries(src, memo)[name] == se {
-			return f.ref != nil && f.firstRef <= i ||
-				slices.ContainsFunc(f.sources[:i], func(s ast.Node) bool { return d.readsReference(s, refs) })
-		}
-	}
-
-	return false
-}
-
-// mergeReadsReference reports whether a << merge key of the form f reads a
-// reference document at its source from or after it. It reads one through
-// an alias of one among its items, or through a source that reads one, as
-// [Doc.readsReference] tells with refs.
-func (d *Doc) mergeReadsReference(f mergeForm, from int, refs map[ast.Node]bool) bool {
-	if f.ref != nil && from <= f.beforeRef {
-		return true
-	}
-
-	return slices.ContainsFunc(f.sources[min(from, len(f.sources)):], func(s ast.Node) bool {
-		return d.readsReference(s, refs)
-	})
-}
-
-// readsReference reports whether src, a mapping of the document that a <<
-// merge key brings in, reads a reference document through a merge key of
-// its own. That merge key holds an alias of one as its value or as an item
-// of its sequence, or a source that reads one. Such a mapping
-// can bring in any key. The engine tells it from the aliases of the
-// document, without a read of the reference document. Refs holds the
-// answer for each mapping that an earlier call read, and a mapping that a
-// merge inside it brings in again reads none there.
-func (d *Doc) readsReference(src ast.Node, refs map[ast.Node]bool) bool {
-	m := astnode.Content(src)
-	if r, ok := refs[m]; ok {
-		return r
-	}
-
-	refs[m] = false
-
-	entries, _ := readEntries(m)
-
-	for _, e := range entries {
-		if astnode.IsMergeKey(e.Key) && d.mergeReadsReference(d.formOf(e), 0, refs) {
-			refs[m] = true
-
-			return true
-		}
-	}
-
-	return false
-}
-
-// specEntries returns the entries that src, a source of a << merge key,
-// reads by the merge spec under each key: its own entries, then for each
-// key that it does not write, the entries of its own merge keys, earlier
-// sources first. Memo holds the entries of each source that an earlier
-// call read, and a source that a merge inside it brings in again reads no
-// entries there.
-func (d *Doc) specEntries(
-	src ast.Node,
-	memo map[ast.Node]map[string]*ast.MappingValueNode,
-) map[string]*ast.MappingValueNode {
-	m := astnode.Content(src)
-	if out, ok := memo[m]; ok {
-		return out
-	}
-
-	out := make(map[string]*ast.MappingValueNode)
-	memo[m] = map[string]*ast.MappingValueNode{}
-
-	entries, _ := readEntries(m)
-
-	for _, e := range entries {
-		if astnode.IsMergeKey(e.Key) {
-			continue
-		}
-
-		if name, ok := d.mergeName(e.Key); ok {
-			out[name] = e
-		}
-	}
-
-	for _, e := range entries {
-		if !astnode.IsMergeKey(e.Key) {
-			continue
-		}
-
-		for _, s := range d.formOf(e).sources {
-			for name, se := range d.specEntries(s, memo) {
-				if _, ok := out[name]; !ok {
-					out[name] = se
-				}
-			}
-		}
-	}
-
-	memo[m] = out
-
-	return out
-}
-
-// pathNames reports whether a path names m, a mapping of the current text:
-// whether the path from the root that spells the keys and the indexes above
-// m, as [Doc.pathIn] gives it, selects m. No path names a mapping below a
-// key without a name of its own, such as an alias key. Nor does a path name
-// a mapping of an entry that a later entry of its key hides, because the
-// path of its key selects the later entry.
-func (d *Doc) pathNames(m ast.Node) bool {
-	rel, ok := d.pathIn(d.node.AST(), m)
-	if !ok {
-		return false
-	}
-
-	p, err := d.resolve(paths.Doc().Join(rel))
-
-	return err == nil && p.exists && astnode.Content(p.value) == astnode.Content(m)
-}
-
-// precedencePart returns the misread of own, an own entry of the current
-// text before e, a << merge key of its mapping. The sources of e hold the
-// key of own, as [Doc.precedenceMisreads] finds it. The message names e as
-// the merge key that go-yaml's decoder reads. An alias of a reference
-// document can bring in the key after the source that go-yaml's decoder
-// reads, as later tells. That alias can be a later item of the merge
-// sequence of e, or the value of a merge key after e. The engine does not
-// read a reference document, so the message then names no merge key.
-func (d *Doc) precedencePart(e, own *ast.MappingValueNode, later bool) (misreadFound, bool) {
-	ks, kok := d.nodeSpan(e.Key)
-	oks, ookay := d.nodeSpan(own.Key)
-
-	if !kok || !ookay {
-		return misreadFound{}, false
-	}
-
-	name, _ := d.node.DocumentResolver().KeyName(own.Key)
-	at := d.entrySite(own)
-
-	// No path names a mapping below a key without a name of its own, such
-	// as an alias key, or a mapping that a later entry of its key hides. The
-	// message then names the key alone, so it names no path that reads
-	// another value. A message about the edited text names the entry by its
-	// path there.
-	m := d.tree().parent[own]
-	what, edited := "the key "+cut(name), "the key "+cut(name)
-
-	if d.pathNames(m) {
-		what, edited = at.path.String(), d.textPath(m).Child(name).String()
-	}
-
-	// The merge key of the edited text keeps its place in the user's text
-	// when a call did not write it.
-	merge := "the merge key at " + d.nodeSite(e.Key, true).at.Start.OneBased()
-
-	msg := fmt.Sprintf("go-yaml's decoder reads %s from %s, but the merge spec keeps the own entry written before it",
-		what, merge)
-	if later {
-		msg = fmt.Sprintf("go-yaml's decoder reads %s from a merge key after it, but the merge spec keeps the own "+
-			"entry written before it", what)
-	}
-
-	if d.origin[ks.start] < 0 || later {
-		merge = "a merge key after it"
-	}
-
-	return misreadFound{
-		kind: misreadPrecedence, at: at, start: oks.start,
-		fix: fmt.Sprintf("write the merge key before %s, where both readings agree", cut(name)),
-		msg: msg,
-		edited: fmt.Sprintf("go-yaml's decoder reads %s from %s %s, but the merge spec keeps the own entry "+
-			"written before it", edited, merge, inEdited),
-	}, true
-}
-
 // mergeState holds the merges of a text: each kept merge, by the origin of
 // the first byte of its merge key, with the keys of its mapping and of its
 // source.
@@ -5070,10 +4582,12 @@ func (d *Doc) referenceNames() map[ast.Node]*ast.MappingValueNode {
 // the problem of the alias first when the reference document decides it,
 // as [Node.At] tells. Otherwise the call adds a name that the reference
 // document does not hold. Only a change of an own entry that the call finds
-// thus reaches this rule.
+// thus reaches this rule. A Move that reorders an own entry keeps it in its
+// mapping, and an own entry wins over each entry of a merge wherever the
+// mapping writes it, so such a Move changes no name.
 func (d *Doc) referenceChange(c reachCall, w *callWalk) (keyChange, *ast.MappingValueNode, bool) {
 	decided := d.referenceNames()
-	if len(decided) == 0 || !w.p.exists {
+	if len(decided) == 0 || !w.p.exists || c.kind == callMove && c.target.Equal(c.path) {
 		return keyChange{}, nil, false
 	}
 

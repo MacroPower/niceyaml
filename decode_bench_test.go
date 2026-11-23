@@ -549,3 +549,73 @@ func BenchmarkNode_Decode_UnknownFieldsFromReferenceMerge(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkNode_Decode_OrderedMergeOverride decodes into ordered maps a
+// mapping that merges a large anchor and then writes each key of the
+// anchor again. Each own key takes the place of the item that the merge
+// key brought in, so the time per key stays flat as the anchor grows.
+func BenchmarkNode_Decode_OrderedMergeOverride(b *testing.B) {
+	for _, count := range []int{1000, 4000, 16000} {
+		yaml := "big: &big\n" + yamltest.GenerateLines(count, "  k%d: 0") +
+			"m:\n  <<: *big\n" + yamltest.GenerateLines(count, "  k%d: 1")
+		doc := yamltest.FirstDocument(b, yaml, yamltest.NoSizeLimits()...)
+
+		b.Run(fmt.Sprintf("keys_%d", count), func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				_, err := doc.Decode[any](b.Context(), niceyaml.WithYAMLOrderedMaps(true))
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+
+			yamltest.ReportTimePer(b, count, "key")
+		})
+	}
+}
+
+// BenchmarkNode_Decode_MergeChain decodes, into maps and into ordered
+// maps, a chain of mappings in which each mapping merges the mapping
+// before it and adds a key of its own. The decoder reads each mapping
+// through every mapping before it, so the document holds
+// count*(count+1)/2 keys to read. The decoder writes each key that a merge
+// brings in once, straight into the map of the mapping that it decodes.
+// The time per key still grows with the chain, because go-yaml's decoder
+// copies the set of the anchors that it has entered at each merge key.
+func BenchmarkNode_Decode_MergeChain(b *testing.B) {
+	modes := []struct {
+		name string
+		opts []niceyaml.DecodeOption
+	}{
+		{"map", nil},
+		{"ordered", []niceyaml.DecodeOption{niceyaml.WithYAMLOrderedMaps(true)}},
+	}
+
+	for _, count := range []int{60, 120, 240} {
+		var sb strings.Builder
+
+		sb.WriteString("a0: &a0 {k0: 0}\n")
+
+		for i := 1; i < count; i++ {
+			fmt.Fprintf(&sb, "a%[1]d: &a%[1]d {<<: *a%[2]d, k%[1]d: %[1]d}\n", i, i-1)
+		}
+
+		doc := yamltest.FirstDocument(b, sb.String(), yamltest.NoSizeLimits()...)
+
+		for _, mode := range modes {
+			b.Run(fmt.Sprintf("%s_%d", mode.name, count), func(b *testing.B) {
+				b.ReportAllocs()
+
+				for b.Loop() {
+					_, err := doc.Decode[any](b.Context(), mode.opts...)
+					if err != nil {
+						b.Fatal(err)
+					}
+				}
+
+				yamltest.ReportTimePer(b, count*(count+1)/2, "key")
+			})
+		}
+	}
+}

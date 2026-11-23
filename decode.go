@@ -581,9 +581,11 @@ func (m *UnknownFieldsMode) UnmarshalText(text []byte) error {
 // A key of a reference document binds at the alias or the `<<` merge key
 // that led the decoder to the key, as the References section of the
 // package documentation describes. The decoder reads the last entry of a
-// key, and a merge key brings in the entries of its sources where it
-// stands. So neither mode reports an entry that a later entry of its key
-// replaces, such as one that a later merge key brings in.
+// key that a mapping writes itself, and that entry wins over every key that
+// a merge key brings in. Of the keys that merge keys bring in, the one of
+// the earliest merge key and of its earliest source wins. So neither mode
+// reports an entry that another entry of its key replaces, such as one
+// that a merge key brings in beside an entry of the mapping.
 //
 // A decode that a [Validator] fails does not reach the decoder, so it does
 // not report any unknown field. Neither UnknownFieldsWarn nor
@@ -918,9 +920,15 @@ func OverrideTypeRules(rules ...TypeRule) DecodeOption {
 
 // WithYAMLOrderedMaps is a [DecodeOption] that sets whether a mapping
 // that decodes into an any value becomes a [yaml.MapSlice]. A MapSlice
-// holds the entries in the order of the document. The default is false,
-// and such a mapping then becomes a map[string]any. The option carries the
-// YAML prefix because the decoded value holds a go-yaml type.
+// holds the entries in the order of the document. A key that a `<<` merge
+// key brings in appears once, at the first place that sets it, with the
+// value that wins under YAML's merge spec. An entry of the mapping after
+// the merge key takes that place. A merged mapping that repeats a key, as
+// [WithAllowDuplicateKeys] allows, gives an item for each of its entries.
+// An entry of a mapping that wins over that source takes the place of the
+// first such item and drops the others. The default is false, and such a
+// mapping then becomes a map[string]any. The option carries the YAML
+// prefix because the decoded value holds a go-yaml type.
 //
 //	data, err := doc.Decode[any](ctx, niceyaml.WithYAMLOrderedMaps(true))
 //
@@ -2272,11 +2280,13 @@ func (n *Node) MarshalYAML(ctx context.Context) (any, error) {
 
 // encodable returns v, a value that a decode read into an any under
 // [WithYAMLOrderedMaps], as the value that [Node.MarshalYAML] returns for
-// it. The decoder appends the entries of a `<<` merge key and each entry
-// of a repeated key to the [yaml.MapSlice] of their mapping, so a
-// MapSlice can hold a key more than once. In the result, each MapSlice
-// holds each key once, at the place of its first item, with the value of
-// its last item. That value is the one that a decode into a map reads.
+// it. The decoder appends each entry of a repeated key to the
+// [yaml.MapSlice] of its mapping, so a MapSlice can hold a key more than
+// once. A key that a `<<` merge key brings in appears once, unless the
+// merged mapping repeats it, as [WithYAMLOrderedMaps] describes. In the
+// result, each MapSlice holds each key once, at the place of its first
+// item, with the value of its last item. That value is the one that a
+// decode into a map reads.
 //
 // A []byte becomes a [taggedscalar.Binary], because go-yaml's encoder
 // writes a []byte as a sequence of integers. A [time.Time] becomes a

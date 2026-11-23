@@ -2,6 +2,7 @@ package edit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -47,10 +48,7 @@ import (
 //
 // A move to the path of its own entry keeps the keys of the mapping. So a
 // `<<` merge key that brings in the key of the entry does not refuse the
-// move while the entry stays after the merge key. A move that puts the
-// entry before such a merge key fails with [ErrEngine]. Go-yaml's decoder
-// then reads the entry of the merge key, as the Supported YAML section of
-// the package documentation describes.
+// move, wherever the entry goes, because the entry wins over the merge key.
 //
 // A place that does not hold a value stays as it is. A Move fails with
 // [ErrUsage] there too when its arguments alone decide the refusal, such as
@@ -109,12 +107,10 @@ import (
 //
 // A reference document of [go.jacobcolvin.com/niceyaml.WithReferences] that
 // a merge key reads decides which names the mapping of the merge key reads.
-// A Move of an entry of such a mapping fails with a problem that matches
-// [paths.ErrReferenceAlias]. So does a Move into it, by a name whose entry
-// the merge key brings in. A Move with [First], [Before], or [After] can
-// put the entry before such a merge key. It fails the same way when the
-// merge key brings in a key that a decode reads as the name, or a key that
-// does not decode.
+// A Move of an entry of such a mapping to another path fails with a
+// problem that matches [paths.ErrReferenceAlias]. So does a Move into it,
+// by a name whose entry the merge key brings in. A Move of the entry to its
+// own path passes, because it keeps the names of the mapping.
 //
 // The value keeps its text, indented for its new place, with its anchors
 // and its aliases. An empty value does not have text, so its key or its
@@ -351,13 +347,6 @@ func (n *Node) move(target paths.Path, at placement) (modelPlace, error) {
 	where, err := d.movePlace(n, th, named, at)
 	if err != nil {
 		return modelPlace{}, err
-	}
-
-	if ok && len(th.rest) > 0 && th.rest[0].Kind == paths.SelectorChild {
-		err = d.placeRead(th.content, th.rest[0].Name, where)
-		if err != nil {
-			return modelPlace{}, d.readFail(n, fmt.Errorf("%s %s, which %w", d.subject(), named, err))
-		}
 	}
 
 	// The entry leaves its mapping before the new entry goes in, so the new
@@ -1342,6 +1331,16 @@ func lastIndex(path paths.Path) bool {
 // before it changes the text.
 func (d *Doc) insertAt(h *Node, target paths.Path, pl payload, named string, where modelPlace, occupied bool) error {
 	tp, err := d.resolve(target)
+
+	// An entry that goes back into its own mapping can take a key that a
+	// merge key of the mapping reads from a reference document. While the
+	// entry is away, the path through that key stops at the alias of the
+	// reference document. The mapping of the entry holds the key then, as
+	// it holds a key that a merge key of the text brings in.
+	if err != nil && occupied && !lastIndex(target) && errors.Is(err, paths.ErrReferenceAlias) {
+		tp, err = &place{path: target, exists: true}, nil
+	}
+
 	if err != nil {
 		return d.bug(h, fmt.Errorf("%s %w", target, err))
 	}

@@ -2043,15 +2043,13 @@ func TestNode_Move_Placement(t *testing.T) {
 			want:   stringtest.LinesLF("s: &s {c: 9}", "m:", "  <<: *s", "  c: 3", "  a: 1"),
 		},
 		"own path before a merge key that also brings in the key": {
-			// Go-yaml's decoder reads the c of the merge key when the own c
-			// comes before it.
+			// The own c wins over the c of the merge key, wherever the
+			// mapping writes it.
 			before: stringtest.LinesLF("base: &b {c: 0}", "m:", "  <<: *b", "  a: 1", "  # about c", "  c: 3 # C"),
 			path:   paths.Doc().Child("m").Child("c"),
 			target: paths.Doc().Child("m").Child("c"),
 			opts:   []edit.SetOption{edit.First()},
-			err: "test.yaml:6:3: $.m.c: go-yaml's decoder reads $.m.c from the merge key at 3:3 in the " +
-				"edited text, but the merge spec keeps the own entry written before it",
-			engine: true,
+			want:   stringtest.LinesLF("base: &b {c: 0}", "m:", "  # about c", "  c: 3 # C", "  <<: *b", "  a: 1"),
 		},
 		"own path of an entry that a merge key brings in": {
 			before: stringtest.LinesLF("s: &s {c: 9}", "m:", "  <<: *s", "  a: 1"),

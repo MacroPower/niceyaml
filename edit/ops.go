@@ -2229,17 +2229,6 @@ func (d *Doc) engineProblem(err error, opts ...niceyaml.ErrorOption) error {
 	return niceyaml.Unchecked(&sentinelError{sentinel: ErrEngine, err: err}, opts...)
 }
 
-// engineMisread returns m, a misread of go-yaml in the user's text, as the
-// problem of New at the place that opts give. The problem has the message
-// of m, and its detail gives the fix of m. It matches [ErrMisread] and not
-// [ErrEngine], and the document is at fault, because the user can rewrite
-// the text as the fix says.
-func (d *Doc) engineMisread(m *misreadError, opts ...niceyaml.ErrorOption) error {
-	opts = append(opts, niceyaml.WithDetails(errors.New(m.fix)))
-
-	return niceyaml.Invalid(&sentinelError{sentinel: ErrMisread, err: m}, opts...)
-}
-
 // scalarToken returns the token of the scalar of node, or nil for a node
 // that does not hold a scalar.
 func scalarToken(node ast.Node) *token.Token {

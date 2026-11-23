@@ -810,9 +810,11 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 //
 // Check holds the node, so it spells each key in a violation's path as
 // the source does. A key the decoder respells, such as the hexadecimal
-// 0x10 for the member name 16, still names its member. Where a later key
-// in the mapping or its merge sources has the same spelling, a path
-// through that spelling selects the later key. The path then names the
+// 0x10 for the member name 16, still names its member. Where another key
+// with the same spelling wins a path lookup, a path through that spelling
+// selects that key. Such a key can be a later key of the mapping, a key of
+// the mapping beside the merge key that brings in the member, or a key of
+// an earlier merge source. The path then names the
 // member and each key below it as the decoder does. Such a path does not
 // select the member, so the violation carries the position of the value
 // beside the path and binds there.
@@ -826,8 +828,8 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // entry of that key, so the violation carries the position of the
 // mapping beside the path and binds there.
 //
-// To tell which key a spelling selects, Check reads the sources of each
-// `<<` merge key that supplies the key or stands after it. For the
+// To tell which key a spelling selects, Check reads the sources of the
+// `<<` merge keys of a mapping that does not write that spelling itself. For the
 // violations of one call, Check can read as many nodes that way as
 // [paths.ErrExcessiveMerging] allows one path selector. Past that limit,
 // Check still reports every violation. A path through such a key names
@@ -845,10 +847,12 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // cannot tell which scalar a timestamp came from, the timestamp keeps the
 // date-time spelling that [Schema.ValidateValue] gives it. A timestamp
 // behind an alias that does not resolve keeps that spelling. So does a
-// timestamp under a mapping, at any depth, where a key at or after the
-// member that leads to the timestamp has a member name that Check cannot
-// tell. Such a key might set a member of the same name. A merge key whose
-// sources do not resolve is one such key.
+// timestamp under a mapping, at any depth, where the mapping holds a key
+// whose member name Check cannot tell, and that key might set the member
+// that leads to the timestamp. A key of the mapping after that member
+// might, and so might any such key of the mapping when a `<<` merge key
+// brings in the member. A merge key whose sources do not resolve might set
+// each member that the mapping and the earlier merge keys do not set.
 //
 // # Alias Limit
 //

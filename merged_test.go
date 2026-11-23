@@ -473,22 +473,22 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 				"$.web.port":     "prod.yaml:1:27",
 			},
 		},
-		"a later merge key wins over the key before it": {
+		"a key wins over a merge key before or after it": {
 			layers: []string{stringtest.LinesLF("d: &d {a: 1}", "one: {a: 9, <<: *d}", "two: {<<: *d, a: 9}")},
 			want: stringtest.LinesLF(
 				"d:",
 				"  a: 1",
 				"one:",
-				"  a: 1",
+				"  a: 9",
 				"two:",
 				"  a: 9",
 			),
 			binds: map[string]string{
-				"$.one.a": "base.yaml:1:11",
+				"$.one.a": "base.yaml:2:10",
 				"$.two.a": "base.yaml:3:18",
 			},
 		},
-		"the sources of a merge key apply in order": {
+		"an earlier source of a merge key wins": {
 			layers: []string{
 				stringtest.LinesLF("x: &x {a: 1, b: 1}", "y: &y {a: 2, c: 2}", "m: {<<: [*x, *y, {d: 4}]}"),
 			},
@@ -500,7 +500,7 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 				"  a: 2",
 				"  c: 2",
 				"m:",
-				"  a: 2",
+				"  a: 1",
 				"  b: 1",
 				"  c: 2",
 				"  d: 4",

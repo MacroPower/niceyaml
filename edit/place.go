@@ -599,18 +599,19 @@ func (d *Doc) holdsEntry(content ast.Node, entries []*ast.MappingValueNode, entr
 	return set[entry]
 }
 
-// referenceRead returns the problem of a path through the key of entry,
-// the entry that a lookup selects in mapping. The path fails when
-// go-yaml's decoder might read that key of mapping from a reference
-// document of [niceyaml.WithReferences] instead. The lookup compares keys
-// by the text that a path names. The decoder compares them as it decodes
-// them, so 0x10 in the reference document replaces an entry 16 written
-// before the `<<` merge key that brings it in. A key of the reference document that
-// does not decode might replace the entry too. The problem is that of a
-// path through the alias of the document that reads the reference
-// document, as [Doc.aliasProblem] gives it. It is nil when the decoder
-// reads the key from the document, or when the entry has a key that does
-// not decode.
+// referenceRead returns the problem of a path through the key of entry, the
+// entry that a lookup selects in mapping. The path fails when the decoder
+// might read that key of mapping from a reference document of
+// [niceyaml.WithReferences] instead. The lookup compares keys by the text
+// that a path names. The decoder compares them as it decodes them, so 0x10
+// in a reference document that an earlier merge source reads wins over an
+// entry 16 of a later source. A key of the reference document that does not
+// decode might win over the entry too. An entry of the mapping itself wins
+// over every merge key, so a path through its key does not fail. The problem
+// is that of a path through the alias of the document that reads the
+// reference document, as [Doc.aliasProblem] gives it. It is nil when the
+// decoder reads the key from the document, or when the entry has a key that
+// does not decode.
 func (d *Doc) referenceRead(mapping ast.Node, entry *ast.MappingValueNode) error {
 	if len(d.referenceNames()) == 0 {
 		return nil
@@ -635,63 +636,13 @@ func (d *Doc) referenceRead(mapping ast.Node, entry *ast.MappingValueNode) error
 	return via //nolint:wrapcheck // The walk binds the error.
 }
 
-// placeRead returns the problem of a call that writes an entry of name in
-// the mapping content, at the place that where gives. A Set and a Move
-// create such an entry. Go-yaml's decoder lets each later entry of a key
-// replace the earlier ones. A `<<` merge key after the new entry thus
-// replaces it when the merge key brings in an entry of a key that a decode
-// reads as name. The call fails when the decoder might read that entry
-// from a reference document of [niceyaml.WithReferences], as
-// [Doc.referenceRead] tells for an entry that the text writes. The
-// problem is that of a path through the alias that reads the reference
-// document, as [Doc.aliasProblem] gives it. An entry that goes last
-// follows every merge key, so it does not fail.
-func (d *Doc) placeRead(content ast.Node, name string, where modelPlace) error {
-	entries, ok := readEntries(content)
-	if !ok || len(d.referenceNames()) == 0 {
-		return nil
-	}
-
-	var at int
-
-	switch where.kind {
-	case placeFirst:
-		at = 0
-	case placeBefore, placeAfter:
-		at = slices.Index(entries, where.entry)
-		if at < 0 {
-			return nil
-		}
-
-		if where.kind == placeAfter {
-			at++
-		}
-
-	case placeLast:
-		return nil
-	}
-
-	// A decode reads the key that the call writes as name.
-	s := referenceSearch{d: d, key: name, entered: map[ast.Node]bool{astnode.Content(content): true}}
-
-	_, via := s.entries(entries[at:], nil)
-	if via == nil {
-		return nil
-	}
-
-	if alias, ok := d.aliasProblem(via); ok {
-		return heldBy(alias)
-	}
-
-	return via //nolint:wrapcheck // The caller binds the error.
-}
-
-// referenceSearch finds the entry of a key that go-yaml's decoder reads in
-// a mapping of the current text, as [Doc.referenceRead] needs it. The
-// decoder reads the entries of a mapping in order and lets each later one
-// replace the earlier ones. A `<<` merge key brings in the entries of its
-// sources, and a later source replaces an earlier one. The search thus
-// reads the entries from the last one back.
+// referenceSearch finds the entry of a key that the decoder reads in a
+// mapping of the current text, as [Doc.referenceRead] needs it. The
+// decoder reads the merge keys in the order of YAML's merge spec. An entry
+// of a mapping wins over every merge key, and the later of two such
+// entries wins. An earlier merge key wins over a later one, and so does an
+// earlier source of one merge key. The search reads the entries in that
+// order.
 type referenceSearch struct {
 	d *Doc
 	// Each mapping that the search entered. The search enters each mapping
@@ -718,19 +669,8 @@ func (s *referenceSearch) mapping(m ast.Node, via error) (bool, error) {
 
 	s.entered[astnode.Content(m)] = true
 
-	return s.entries(entries, via)
-}
-
-// entries reports whether the decoder reads the key of the search from
-// entries, the entries of a mapping or the tail of them, as
-// [referenceSearch.mapping] reports it for a whole mapping.
-func (s *referenceSearch) entries(entries []*ast.MappingValueNode, via error) (bool, error) {
 	for _, e := range slices.Backward(entries) {
 		if astnode.IsMergeKey(e.Key) {
-			if ok, found := s.merge(e, via); ok {
-				return true, found
-			}
-
 			continue
 		}
 
@@ -744,6 +684,16 @@ func (s *referenceSearch) entries(entries []*ast.MappingValueNode, via error) (b
 		}
 	}
 
+	for _, e := range entries {
+		if !astnode.IsMergeKey(e.Key) {
+			continue
+		}
+
+		if ok, found := s.merge(e, via); ok {
+			return true, found
+		}
+	}
+
 	return false, nil
 }
 
@@ -753,7 +703,7 @@ func (s *referenceSearch) entries(entries []*ast.MappingValueNode, via error) (b
 func (s *referenceSearch) merge(e *ast.MappingValueNode, via error) (bool, error) {
 	res := s.d.node.DocumentResolver()
 
-	for _, v := range slices.Backward(astnode.MergeValues(e)) {
+	for _, v := range astnode.MergeValues(e) {
 		inside := via
 
 		var content ast.Node

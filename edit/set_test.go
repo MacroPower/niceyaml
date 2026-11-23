@@ -5385,10 +5385,6 @@ func TestNode_Set_Removals(t *testing.T) {
 func TestNode_Set_Removals_Failed(t *testing.T) {
 	t.Parallel()
 
-	// A merge key whose later source holds the key that a Set of $.b
-	// writes, which go-yaml's decoder reads otherwise than the merge spec.
-	merged := stringtest.LinesLF("a: &a {k: 1}", "b: &b {j: 2}", "m:", "  <<: [*a, *b]")
-
 	tcs := map[string]struct {
 		v      any
 		ret    error
@@ -5411,17 +5407,6 @@ func TestNode_Set_Removals_Failed(t *testing.T) {
 			text:     stringtest.LinesLF("spec:", "  seats: 4"),
 			removals: 1,
 			err:      "too late",
-		},
-		"set whose call the check after the write undoes": {
-			// The Set drops $.b.j and records it. The check after the write
-			// then finds the misread of the merge key and undoes the call.
-			// The undo drops the removal with the text of the call. The Set
-			// returns nil, and the Apply fails.
-			before: merged,
-			path:   paths.Doc().Child("b"),
-			v:      map[string]int{"k": 3},
-			text:   merged,
-			err:    "go-yaml's decoder reads $.m.k from a later source of a merge key",
 		},
 	}
 

@@ -6457,17 +6457,17 @@ func TestWithReferences(t *testing.T) {
 		}
 	})
 
-	t.Run("merge of a reference sets a key the document sets before it", func(t *testing.T) {
+	t.Run("merge of a reference does not set a key the document sets before it", func(t *testing.T) {
 		t.Parallel()
 
-		// The go-yaml decoder lets a `<<` merge key set a key the mapping
-		// holds above it.
+		// A key of the mapping wins over a key that a `<<` merge key brings
+		// in, as YAML's merge spec reads it.
 		doc := yamltest.FirstDocument(t, stringtest.LinesLF("kind: Deployment", "<<: *base"),
-			yamltest.References("base: &base {kind: Bogus}\n"))
+			yamltest.References("base: &base {kind: Bogus, replicas: 1}\n"))
 
 		got, err := doc.Decode[map[string]any](t.Context())
 		require.NoError(t, err)
-		assert.Equal(t, map[string]any{"kind": "Bogus"}, got)
+		assert.Equal(t, map[string]any{"kind": "Deployment", "replicas": uint64(1)}, got)
 	})
 
 	t.Run("last anchor of a name in the references wins", func(t *testing.T) {

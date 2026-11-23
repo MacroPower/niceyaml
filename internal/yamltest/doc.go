@@ -130,7 +130,7 @@
 //	input := yamltest.AliasLevels(7) + yamltest.AliasKey("kind", 7)
 //
 // [WideMerge] builds a mapping whose merge key lists one alias for each
-// of its keys, so a lookup of every key reads the whole list.
+// key that it merges, so a lookup of every such key reads the whole list.
 // [FlowSequence] writes the flow sequence that repeats one item, for a
 // test that lays out a document of its own.
 //

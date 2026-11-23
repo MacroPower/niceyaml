@@ -71,13 +71,7 @@
 // construct that [go.jacobcolvin.com/niceyaml/edit.New] refuses, when a
 // step returns the error of a call that refuses a construct, or when the
 // check of the text after a call refuses a construct that the call wrote. A
-// step reads and edits the document as go-yaml reads it. A document that
-// migrates fails with an error that matches
-// [go.jacobcolvin.com/niceyaml/edit.ErrMisread] when go-yaml's decoder
-// reads it otherwise than YAML does in one of the ways the Supported YAML
-// section lists. A plan then lists its file in [Plan.Blocked], as it lists
-// every file that a problem blocks. A document of the current version does
-// not migrate, so it loads with go-yaml's reading.
+// step reads and edits the document as niceyaml's decode reads it.
 //
 // A step must make the same edits for the same document. A load runs it
 // at each load of an older document, and a plan runs it again. A step
@@ -316,23 +310,23 @@
 // A type field must sit in the document itself. A path through an alias or
 // a `<<` merge key thus fails with an error that matches [ErrFieldAlias].
 // A decode reads keys such as 0x10 and 16 as one key, and it reads the
-// last entry of a key. A merge key that brings in 0x10 thus fails a
-// version field at $.16 in the same way. So does an entry 0x10 of the
-// mapping itself after the entry 16, or without one. A type field before
-// a later key that does not decode, such as "!!bool x", fails the same
-// way. So does one before a merge key that brings in such a key. The
-// decode might read that key in place of the field.
+// last entry of a key that the mapping writes itself. An entry 0x10 of the
+// mapping after the entry 16 thus fails a version field at $.16 in the
+// same way. A type field before a later key that does not decode, such as
+// "!!bool x", fails the same way, because the decode might read that key
+// in place of the field. A key that the mapping writes itself wins over
+// every key that a `<<` merge key brings in, as YAML's merge spec reads
+// it. A mapping without the entry 16 fails the same way when a merge key
+// brings in 0x10, or a key that does not decode before any merge key
+// brings in the field.
 //
-// A type field before a merge key that brings in the field from a
-// reference document fails too, because the decode reads the field from
-// that document. The load reads the keys of that document as a decode
-// reads them. So 0x10 there counts as the field 16, and a key there that
-// does not decode might count as the field. A type field before a merge
-// key whose reference document merges an anchor that no reference
-// document defines fails as well. A document that leaves out a type field
-// fails when such a merge key brings in a key such as 0x10 for 16, or a
-// key that does not decode. The error asks for the field in the document
-// itself, after the merge key.
+// A document that leaves out a type field also fails when a merge key
+// brings in the field from a reference document. The load reads the keys
+// of that document as a decode reads them. So 0x10 there counts as the
+// field 16, and a key there that does not decode might count as the
+// field. A merge key whose reference document merges an anchor that no
+// reference document defines fails such a document as well. The error
+// asks for the field in the document itself.
 //
 // A migration that writes a type field that such a merge key brings in
 // under the name of the field fails with an error that matches
@@ -436,7 +430,7 @@
 // every other problem of the check keeps its place. A mapping that holds
 // only such type fields reads as an empty mapping. The type field of the
 // document also takes with it each value of its name that a `<<` merge
-// key before it brings in. A type field that only a merge key brings in
+// key of its mapping brings in. A type field that only a merge key brings in
 // stays in the value.
 //
 // A schema might read a type field that it does not declare there, inside
@@ -463,8 +457,8 @@
 // among the options of [WithDecodeOptions] or [DecodeOptions] replaces
 // that mode, so [niceyaml.UnknownFieldsWarn] makes each such key a warning
 // of the load. A type field of the document replaces each type field of
-// its name that a `<<` merge key before it brings in, so the decode admits
-// those too. A Go type that reads the type fields, such as one that embeds
+// its name that a `<<` merge key of its mapping brings in, so the decode
+// admits those too. A Go type that reads the type fields, such as one that embeds
 // the TypeMeta of Kubernetes or a map[string]any, gets the names of the
 // current version. Each validator of [WithDecodeOptions] and
 // [DecodeOptions] sees them too. A value that decodes itself sees each

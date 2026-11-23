@@ -277,23 +277,15 @@ type flatEntry struct {
 func (r *Reader) mapping(v *Value, entries []*ast.MappingValueNode, ref bool) error {
 	v.kind, v.names = kindMapping, map[string]int{}
 
-	var order []string
+	var f flattened
 
-	kept := map[string]flatEntry{}
-
-	err := r.flatten(entries, ref, func(name string, entry flatEntry) {
-		if _, ok := kept[name]; !ok {
-			order = append(order, name)
-		}
-
-		kept[name] = entry
-	})
+	err := r.flatten(&f, entries, ref)
 	if err != nil {
 		return err
 	}
 
-	for _, name := range order {
-		entry := kept[name]
+	for _, name := range f.order {
+		entry := f.kept[name]
 
 		key, err := r.key(entry.key, entry.ref)
 		if err != nil {
@@ -312,20 +304,47 @@ func (r *Reader) mapping(v *Value, entries []*ast.MappingValueNode, ref bool) er
 	return nil
 }
 
-// flatten calls keep with each entry of entries under its key name, in
-// document order. It calls keep with the entries of each `<<` merge key
-// at the place where that key stands. The go-yaml decoder sets the
-// entries of a mapping in that order. So the last call for a name holds
-// the entry that the decoder keeps, as [paths.Resolver.Entry] finds it.
-// It returns an error for a key without a name.
-func (r *Reader) flatten(entries []*ast.MappingValueNode, ref bool, keep func(string, flatEntry)) error {
+// flattened holds the entries that a mapping keeps, as [Reader.flatten]
+// finds them: the entry of each key name, and the names in the order in
+// which the document first sets them.
+type flattened struct {
+	kept  map[string]flatEntry
+	order []string
+}
+
+// set keeps entry under name. An entry of the mapping itself replaces the
+// entry that f holds, and a merged entry goes in only where f does not
+// hold one.
+func (f *flattened) set(name string, entry flatEntry, own bool) {
+	if f.kept == nil {
+		f.kept = map[string]flatEntry{}
+	}
+
+	if _, ok := f.kept[name]; !ok {
+		f.order = append(f.order, name)
+	} else if !own {
+		return
+	}
+
+	f.kept[name] = entry
+}
+
+// flatten fills f with each entry of entries under its key name, in
+// document order, and with the entries of each `<<` merge key at the
+// place where that key stands. The decoder reads the merge keys in the
+// order of YAML's merge spec. An entry of the mapping wins over every
+// merge key, and the later of two such entries wins. An earlier merge key
+// wins over a later one, and so does an earlier source of one merge key.
+// So f holds the entry that the decoder keeps, as [paths.Resolver.Entry]
+// finds it. It returns an error for a key without a name.
+func (r *Reader) flatten(f *flattened, entries []*ast.MappingValueNode, ref bool) error {
 	for _, entry := range entries {
 		if entry == nil {
 			continue
 		}
 
 		if astnode.IsMergeKey(entry.Key) {
-			err := r.merged(entry.Value, ref, keep)
+			err := r.merged(f, entry.Value, ref)
 			if err != nil {
 				return err
 			}
@@ -338,20 +357,34 @@ func (r *Reader) flatten(entries []*ast.MappingValueNode, ref bool, keep func(st
 			return r.invalid(r.UnnamedKey, entry.Key, ref)
 		}
 
-		keep(name, flatEntry{key: entry.Key, value: entry.Value, ref: ref})
+		f.set(name, flatEntry{key: entry.Key, value: entry.Value, ref: ref}, true)
 	}
 
 	return nil
 }
 
-// merged calls keep with the entries the value of a `<<` merge key brings
-// in. The value is a mapping, or a sequence of mappings that apply in
-// order. It skips any other value, and each element of the sequence
-// that is not a mapping.
-func (r *Reader) merged(value ast.Node, ref bool, keep func(string, flatEntry)) error {
+// merged fills f with the entries the value of a `<<` merge key brings
+// in, as [Reader.flatten] describes. The value is a mapping, or a sequence
+// of mappings that apply in order. It skips any other value, and each
+// element of the sequence that is not a mapping. It reads each mapping by
+// itself, so the entries of a mapping win over those of its own merge
+// keys.
+func (r *Reader) merged(f *flattened, value ast.Node, ref bool) error {
 	source := func(content ast.Node, _ string, ref bool) error {
-		if entries, ok := astnode.Entries(content); ok {
-			return r.flatten(entries, ref, keep)
+		entries, ok := astnode.Entries(content)
+		if !ok {
+			return nil
+		}
+
+		var inner flattened
+
+		err := r.flatten(&inner, entries, ref)
+		if err != nil {
+			return err
+		}
+
+		for _, name := range inner.order {
+			f.set(name, inner.kept[name], false)
 		}
 
 		return nil

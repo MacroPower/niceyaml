@@ -2107,12 +2107,13 @@ func TestWithUnknownFields(t *testing.T) {
 				opts:     []niceyaml.DecodeOption{warn},
 				warnings: `menu.yaml:2:1: warning: $.extra~: unknown field "extra"`,
 			},
-			"a key below an entry that a merge key of a reference document replaces": {
-				// The decoder reads the fika of the reference document, so it
-				// does not read the prise.
-				input:  stringtest.LinesLF("name: Fika", "fika:", "  - prise: 35", "<<: *base"),
-				source: []niceyaml.SourceOption{yamltest.References("base: &base {fika: [{item: Te}]}\n")},
-				opts:   []niceyaml.DecodeOption{warn},
+			"a key below an entry whose key a merge key of a reference document brings in": {
+				// The fika of the mapping wins over the fika of the reference
+				// document, so the decoder reads the prise.
+				input:    stringtest.LinesLF("name: Fika", "fika:", "  - prise: 35", "<<: *base"),
+				source:   []niceyaml.SourceOption{yamltest.References("base: &base {fika: [{item: Te}]}\n")},
+				opts:     []niceyaml.DecodeOption{warn},
+				warnings: `menu.yaml:3:5: warning: $.fika[0].prise~: unknown field "prise"`,
 			},
 			"a key below an entry before a merge key that reads a reference document": {
 				// The reference document does not hold a fika, so the decoder
@@ -6382,6 +6383,75 @@ func TestWithYAMLOrderedMaps(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, map[string]int{"b": 1, "a": 2}, got)
 	})
+
+	t.Run("a merged key appears once at the first place that sets it", func(t *testing.T) {
+		t.Parallel()
+
+		merges := map[string]struct {
+			input string
+			want  yaml.MapSlice
+		}{
+			"entry after the merge key": {
+				input: "s: &s {a: 1, b: 9}\nm: {<<: *s, a: 2}\n",
+				want:  yaml.MapSlice{{Key: "a", Value: uint64(2)}, {Key: "b", Value: uint64(9)}},
+			},
+			"entry before the merge key": {
+				input: "s: &s {a: 1, b: 9}\nm: {a: 2, <<: *s}\n",
+				want:  yaml.MapSlice{{Key: "a", Value: uint64(2)}, {Key: "b", Value: uint64(9)}},
+			},
+			"merge sequence": {
+				input: "s: &s {a: 1}\nr: &r {b: 8, a: 3}\nm: {<<: [*s, *r]}\n",
+				want:  yaml.MapSlice{{Key: "a", Value: uint64(1)}, {Key: "b", Value: uint64(8)}},
+			},
+		}
+
+		for name, tc := range merges {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				got, err := yamltest.FirstDocument(t, tc.input).Decode[any](
+					t.Context(), niceyaml.WithYAMLOrderedMaps(true),
+				)
+				require.NoError(t, err)
+
+				doc, ok := got.(yaml.MapSlice)
+				require.True(t, ok)
+				assert.Equal(t, tc.want, doc.ToMap()["m"])
+			})
+		}
+	})
+
+	t.Run("a merged mapping that repeats a key gives an item per entry", func(t *testing.T) {
+		t.Parallel()
+
+		merges := map[string]struct {
+			input string
+			want  yaml.MapSlice
+		}{
+			"merge alone": {
+				input: "w: &w {a: 5, a: 7}\nm: {<<: *w}\n",
+				want:  yaml.MapSlice{{Key: "a", Value: uint64(5)}, {Key: "a", Value: uint64(7)}},
+			},
+			"own entry takes the place of the first item": {
+				input: "w: &w {a: 5, b: 6, a: 7}\nm: {<<: *w, a: 4}\n",
+				want:  yaml.MapSlice{{Key: "a", Value: uint64(4)}, {Key: "b", Value: uint64(6)}},
+			},
+		}
+
+		for name, tc := range merges {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input, niceyaml.WithAllowDuplicateKeys(true))
+				got, err := doc.Decode[any](t.Context(), niceyaml.WithYAMLOrderedMaps(true))
+				require.NoError(t, err)
+
+				root, ok := got.(yaml.MapSlice)
+				require.True(t, ok)
+				assert.Equal(t, tc.want, root.ToMap()["m"])
+			})
+		}
+	})
 }
 
 func TestNode_MarshalYAML(t *testing.T) {
@@ -6421,12 +6491,12 @@ func TestNode_MarshalYAML(t *testing.T) {
 		"key before the merge key that holds it": {
 			input: stringtest.LinesLF("base: &base {x: 1, w: 2}", "item: {x: 9, <<: *base}"),
 			path:  paths.Doc().Child("item"),
-			want:  stringtest.LinesLF("x: 1", "w: 2"),
+			want:  stringtest.LinesLF("x: 9", "w: 2"),
 		},
 		"merge key of two mappings that share a key": {
 			input: stringtest.LinesLF("a: &a {x: 1}", "b: &b {x: 2, w: 3}", "item: {<<: [*a, *b], z: 1}"),
 			path:  paths.Doc().Child("item"),
-			want:  stringtest.LinesLF("x: 2", "w: 3", "z: 1"),
+			want:  stringtest.LinesLF("x: 1", "w: 3", "z: 1"),
 		},
 		"merged key in a mapping of a sequence": {
 			input: stringtest.LinesLF("defaults: &d", "  cpu: 1", "  mem: 2", "jobs:", "  - <<: *d", "    cpu: 4"),
@@ -10284,14 +10354,14 @@ func TestDocument_Decode_MergeOverride(t *testing.T) {
 			),
 			want: server{Host: "h", Port: 2},
 		},
-		"a merge after the key overrides it": {
+		"a key before the merge overrides it": {
 			input: stringtest.LinesLF(
 				"defaults: &defaults {host: h, port: 1}",
 				"server:",
 				"  port: 2",
 				"  <<: *defaults",
 			),
-			want: server{Host: "h", Port: 1},
+			want: server{Host: "h", Port: 2},
 		},
 		"a key overrides a mapping the merge key holds": {
 			input: stringtest.LinesLF(
@@ -17768,48 +17838,65 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 				"2:15: $.timeout.port: expected integer, got string",
 			),
 		},
-		// The decoder reads the port that the merge key brings in from the
-		// reference document, and not the port of the mapping.
+		// The decoder reads the port of the mapping, which wins over the
+		// port that the merge key brings in from the reference document.
 		"entry before a merge key that reads a reference document": {
 			decode: decodeAs[problemServer](),
 			input:  stringtest.LinesLF("name: [a]", "port: x", "<<: *b"),
-			want:   "1:1: $.name: expected string, got sequence",
+			want: stringtest.JoinLF(
+				"2 problems",
+				"1:1: $.name: expected string, got sequence",
+				"2:7: $.port: expected integer, got string",
+			),
 		},
-		// The decoder reads the name of the reference document, so it
-		// rejects the port alone.
-		"entry that a merge key of a reference document replaces": {
+		// The decoder reads the port that the merge key brings in from the
+		// reference document, because the mapping does not write a port.
+		"entry that only a merge key of a reference document brings in": {
 			decode: decodeAs[problemServer](),
-			input:  stringtest.LinesLF("name: [a]", "port: x", "<<: *named"),
-			want:   "2:7: $.port: expected integer, got string",
+			input:  stringtest.LinesLF("name: a", "<<: *defaults"),
+			want:   "2:5: $.port: expected integer, got string",
 		},
-		// The inline map takes the name too, as an integer.
+		// The inline map takes the name too, as an integer, and the x of
+		// the mapping wins over the x of the reference document.
 		"member of an inline map before a merge key that reads a reference document": {
 			decode: decodeAs[countsInline](),
 			input:  stringtest.LinesLF("name: [a]", "x: y", "<<: *counts"),
 			want: stringtest.JoinLF(
-				"2 problems",
+				"3 problems",
 				"1:1: $.name: expected string, got sequence",
 				"1:1: $.name: expected integer, got sequence",
+				"2:4: $.x: expected integer, got string",
 			),
 		},
-		// The decoder reads the spec of the reference document, so it does
-		// not read the unknown field of the spec of the mapping.
+		// The decoder reads the spec of the mapping, which wins over the
+		// spec of the reference document.
 		"unknown field below an entry before a merge key that reads a reference document": {
 			decode: decodeAs[kindSpec](strict),
 			input:  stringtest.LinesLF("kind: [1]", "spec: {a: 1, bogus: 2}", "<<: *spec"),
-			want:   "1:1: $.kind: expected string, got sequence",
+			want: stringtest.JoinLF(
+				"2 problems",
+				"1:1: $.kind: expected string, got sequence",
+				`2:14: $.spec.bogus~: unknown field "bogus"`,
+			),
 		},
-		// The decoder reads the extra of the merge key, not the extra of
-		// the mapping, so the key counts once, at the alias.
-		"unknown field that a merge key of a reference document replaces": {
+		// The decoder reads the extra of the mapping, not the extra of the
+		// merge key, so the key counts once, at the key of the mapping.
+		"unknown field that a merge key of a reference document brings in too": {
 			decode: decodeAs[problemServer](strict),
 			input:  stringtest.LinesLF("extra: 1", "<<: *extra"),
-			want:   `2:5: $.extra~: unknown field "extra"`,
+			want:   `1:1: $.extra~: unknown field "extra"`,
 		},
-		"unknown field of a nested mapping that a merge key of a reference document replaces": {
+		"unknown field of a nested mapping that a merge key of a reference document brings in too": {
 			decode: decodeAs[problemConfig](strict),
 			input:  stringtest.LinesLF("servers:", "  - extra: 1", "    <<: *extra"),
-			want:   `3:9: $.servers[0].extra~: unknown field "extra"`,
+			want:   `2:5: $.servers[0].extra~: unknown field "extra"`,
+		},
+		// The mapping does not write the key, so the key counts at the
+		// alias of the merge key.
+		"unknown field that only a merge key of a reference document brings in": {
+			decode: decodeAs[problemServer](strict),
+			input:  stringtest.LinesLF("name: a", "<<: *extra"),
+			want:   `2:5: $.extra~: unknown field "extra"`,
 		},
 		// The reference document holds the key below another key, so the
 		// decoder reads the extra of the mapping.
@@ -17826,7 +17913,7 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 		// its merge key.
 		"unknown field that merge keys of two mappings bring in": {
 			decode: decodeAs[problemConfig](strict),
-			input:  stringtest.LinesLF("servers:", "  - extra: 1", "    <<: *extra", "  - extra: 1", "    <<: *extra"),
+			input:  stringtest.LinesLF("servers:", "  - name: a", "    <<: *extra", "  - name: b", "    <<: *extra"),
 			want: stringtest.JoinLF(
 				"2 unknown fields",
 				`3:9: $.servers[0].extra~: unknown field "extra"`,
@@ -17850,7 +17937,11 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 				"    port: x",
 				"    <<: *b",
 			),
-			want: "2:5: $.servers[0].name: expected string, got sequence",
+			want: stringtest.JoinLF(
+				"2 problems",
+				"2:5: $.servers[0].name: expected string, got sequence",
+				"3:11: $.servers[0].port: expected integer, got string",
+			),
 		},
 		"scoped decode": {
 			decode: decodeAs[problemServer](),
@@ -18017,12 +18108,12 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 		}
 	})
 
-	t.Run("warning for an unknown field that a merge key of a reference document replaces", func(t *testing.T) {
+	t.Run("warning for an unknown field that only a merge key of a reference document brings in", func(t *testing.T) {
 		t.Parallel()
 
-		// The decoder reads the extra of the merge key, not the extra of
-		// the mapping, so the warning binds at the alias.
-		doc := yamltest.FirstDocument(t, stringtest.LinesLF("extra: 1", "<<: *extra"), yamltest.References(references))
+		// The mapping does not write the extra, so the decoder reads the
+		// extra of the merge key, and the warning binds at the alias.
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF("name: a", "<<: *extra"), yamltest.References(references))
 		warnings := niceyaml.NewWarnings()
 
 		_, err := doc.Decode[problemServer](warnings.Context(t.Context()),
@@ -18068,10 +18159,18 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 			want  string
 		}{
 			"keys that a merge key brings in": {
-				input: stringtest.LinesLF("extra: 1", "<<: *other"),
+				input: stringtest.LinesLF("name: a", "<<: *other"),
 				want: stringtest.JoinLF(
 					"2 unknown fields",
 					`2:5: $.extra~: unknown field "extra"`,
+					`2:5: $.other~: unknown field "other"`,
+				),
+			},
+			"key of the document that a merge key brings in too": {
+				input: stringtest.LinesLF("extra: 1", "<<: *other"),
+				want: stringtest.JoinLF(
+					"2 unknown fields",
+					`1:1: $.extra~: unknown field "extra"`,
 					`2:5: $.other~: unknown field "other"`,
 				),
 			},
@@ -18159,9 +18258,8 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 				),
 				want: "2:51: $.services.r.port: expected integer, got string",
 			},
-			// The decoder reads the entries of the elements as the entries of
-			// one mapping. It reports the entry of the first element and the
-			// merge key of the second.
+			// The decoder reads each element by itself. It reports the entry
+			// of the first element and the merge key of the second.
 			"merge key of a later element of a sequence": {
 				decode: decodeAs[map[string]map[string]problemServer](),
 				input:  stringtest.LinesLF("x:", "  <<: [{b: *defaults}, {<<: *pair}]"),
@@ -18237,18 +18335,19 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 				near:  paths.Doc().Child("services"),
 				alias: "*pair",
 			},
-			// A later entry of the key takes the path through the merge, so
-			// the path goes through the merge key, which selects the alias.
+			// An entry of the mapping or of an earlier element takes the path
+			// through the merge, so the path goes through the merge key,
+			// which selects the alias.
 			"mapping that the document writes before an entry of the key": {
 				input: stringtest.LinesLF("services:", "  <<: {q: *defaults}", "  q: {port: 1}"),
 				want:  "2:11: $.services.<<.q.port: expected integer, got string",
 				near:  paths.Doc().Child("services", "<<", "q"),
 				alias: "*defaults",
 			},
-			"sequence element before an element with the key": {
-				input: stringtest.LinesLF("services:", "  <<: [{q: *defaults}, {q: {port: 1}}]"),
-				want:  "2:12: $.services.<<[0].q.port: expected integer, got string",
-				near:  paths.Doc().Child("services", "<<").Index(0).Child("q"),
+			"sequence element after an element with the key": {
+				input: stringtest.LinesLF("services:", "  <<: [{q: {port: 1}}, {q: *defaults}]"),
+				want:  "2:28: $.services.<<[1].q.port: expected integer, got string",
+				near:  paths.Doc().Child("services", "<<").Index(1).Child("q"),
 				alias: "*defaults",
 			},
 			"sequence element beside an alias of a reference document before an entry of the key": {
@@ -20692,22 +20791,37 @@ func TestDocument_Decode_Rejection_MergeSources(t *testing.T) {
 			input: stringtest.LinesLF("base: &b {port: bad}", "x:", "  <<: *b"),
 			want:  "1:17: $.x.port: expected integer, got string",
 		},
-		// A later entry of the key takes the path through the merge, so the
-		// path goes through the merge key.
+		// An entry of the mapping or of an earlier element takes the path
+		// through the merge, so the path goes through the merge key.
 		"mapping before an entry of the key": {
 			decode: decodeAs[counts](),
 			input:  stringtest.LinesLF("x:", "  <<: {b: bad}", "  b: 2"),
 			want:   "2:11: $.x.<<.b: expected integer, got string",
 		},
+		"mapping after an entry of the key": {
+			decode: decodeAs[counts](),
+			input:  stringtest.LinesLF("x:", "  b: 2", "  <<: {b: bad}"),
+			want:   "3:11: $.x.<<.b: expected integer, got string",
+		},
 		"element before an element with the key": {
 			decode: decodeAs[counts](),
 			input:  stringtest.LinesLF("x:", "  <<: [{b: bad}, {b: 2}]"),
-			want:   "2:12: $.x.<<[0].b: expected integer, got string",
+			want:   "2:12: $.x.b: expected integer, got string",
+		},
+		"element after an element with the key": {
+			decode: decodeAs[counts](),
+			input:  stringtest.LinesLF("x:", "  <<: [{b: 2}, {b: bad}]"),
+			want:   "2:20: $.x.<<[1].b: expected integer, got string",
 		},
 		"element before an alias of a reference document with the key": {
 			decode: decodeAs[counts](),
 			input:  stringtest.LinesLF("x:", "  <<: [{a: bad}, *refmap]"),
-			want:   "2:12: $.x.<<[0].a: expected integer, got string",
+			want:   "2:12: $.x.a: expected integer, got string",
+		},
+		"element after an alias of a reference document with the key": {
+			decode: decodeAs[counts](),
+			input:  stringtest.LinesLF("x:", "  <<: [*refmap, {a: bad}]"),
+			want:   "2:21: $.x.<<[1].a: expected integer, got string",
 		},
 	}
 

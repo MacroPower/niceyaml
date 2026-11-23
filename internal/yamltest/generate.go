@@ -84,28 +84,30 @@ func MergeLevels(levels int) string {
 	return sb.String()
 }
 
-// WideMerge creates YAML content whose mapping m holds members keys, each
-// spelled in hexadecimal and mapped to the value x. After those keys, m
-// holds a merge key that lists as many aliases to the mapping a. To tell
-// which entry the spelling of one of those keys selects, a lookup reads
+// WideMerge creates YAML content whose mapping b holds members keys, each
+// spelled in hexadecimal and mapped to the value x. The mapping m holds a
+// merge key that lists an alias to b and then as many aliases to the
+// mapping a. The mapping m does not write those keys itself, so to tell
+// which entry the spelling of one of them selects in m, a lookup reads
 // that whole list.
 func WideMerge(members int) string {
 	return WideMergeOf(members, "*a")
 }
 
 // WideMergeOf creates the YAML content of [WideMerge] with another merge
-// list. The merge key of m lists item members times and then each element
-// of tail, as [FlowSequence] writes them.
+// list. The merge key of m lists the alias to b, then item members times,
+// and then each element of tail, as [FlowSequence] writes them.
 func WideMergeOf(members int, item string, tail ...string) string {
 	var sb strings.Builder
 
-	sb.WriteString("a: &a {z: 0}\nm:\n")
+	sb.WriteString("a: &a {z: 0}\nb: &b\n")
 
 	for i := range members {
 		fmt.Fprintf(&sb, "  %#x: x\n", 0x1000+i)
 	}
 
-	sb.WriteString("  <<: " + FlowSequence(item, members, tail...) + "\n")
+	list := append(slices.Repeat([]string{item}, members), tail...)
+	sb.WriteString("m:\n  <<: " + FlowSequence("*b", 1, list...) + "\n")
 
 	return sb.String()
 }

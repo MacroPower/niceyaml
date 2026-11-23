@@ -884,6 +884,53 @@ func TestNode_Update(t *testing.T) {
 	}
 }
 
+func TestNode_Update_Removals_Failed(t *testing.T) {
+	t.Parallel()
+
+	// A byte order mark at the start of the key b, which the tokenizer of
+	// the Source drops in the text that an Update of $ writes.
+	const bom = "\xef\xbb\xbf"
+
+	tcs := map[string]struct {
+		v      any
+		before string
+		path   paths.Path
+		err    string
+	}{
+		"update whose call the check after the write undoes": {
+			// The Update drops $.a and records it. The check after the
+			// write then finds the byte order mark that go-yaml reads as
+			// text and undoes the call. The undo drops the removal with the
+			// text of the call. The Update returns nil, and the Apply fails.
+			before: stringtest.LinesLF("a: 1", bom+"b: 2"),
+			path:   paths.Doc(),
+			v:      map[string]int{bom + "b": 2},
+			err:    "go-yaml reads the byte order mark at 2:1 as text of the document",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d := newDoc(t, tc.before)
+
+			err := applyAt(t, d, tc.path, func(ctx context.Context, n *edit.Node) error {
+				err := n.Update(ctx, tc.v)
+				require.NoError(t, err)
+				assert.Equal(t, tc.before, d.Text())
+				assert.Empty(t, d.Removals())
+
+				return nil
+			})
+			require.ErrorIs(t, err, edit.ErrEngine)
+			require.ErrorContains(t, err, tc.err)
+			assert.Equal(t, tc.before, d.Text())
+			assert.Empty(t, d.Removals())
+		})
+	}
+}
+
 // TestNode_Update_Scaling checks that the bytes that an Update allocates
 // grow linearly with the number of entries that it changes or removes. The
 // Update writes all the scalars into the text in one pass, and it removes

@@ -1429,15 +1429,15 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				want:    "2:38: $.t.'2024-01-01T00:00:00+05:30'.price: negative price",
 			},
 			// Where a key of the mapping and a merged key decode to the same
-			// value, the later entry holds the value the decode keeps, and
-			// the error reports its text.
+			// value, the key of the mapping holds the value the decode keeps,
+			// and the error reports its text.
 			"merge after a key of the mapping": {
 				input: stringtest.LinesLF(
-					"b: &b {0x10: {price: -1}}",
-					"m: {16: {price: 1}, <<: *b}",
+					"b: &b {0x10: {price: 1}}",
+					"m: {16: {price: -1}, <<: *b}",
 				),
 				targets: []any{new(merged)},
-				want:    "1:22: $.m.0x10.price: negative price",
+				want:    "2:17: $.m.16.price: negative price",
 			},
 			"key of the mapping after a merge": {
 				input: stringtest.LinesLF(
@@ -1449,11 +1449,11 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			},
 			"merge after a key of the mapping with the same spelling": {
 				input: stringtest.LinesLF(
-					"b: &b {16: {price: -1}}",
-					"m: {16: {price: 1}, <<: *b}",
+					"b: &b {16: {price: 1}}",
+					"m: {16: {price: -1}, <<: *b}",
 				),
 				targets: []any{new(merged)},
-				want:    "1:20: $.m.16.price: negative price",
+				want:    "2:17: $.m.16.price: negative price",
 			},
 			"key of the mapping with the same spelling after a merge": {
 				input: stringtest.LinesLF(
@@ -1465,20 +1465,26 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			},
 			"merge source repeated after a source that merges it": {
 				input: stringtest.LinesLF(
-					"a: &a {16: {price: -1}}",
-					"b: &b {<<: *a, 0x10: {price: 1}}",
+					"a: &a {16: {price: 1}}",
+					"b: &b {<<: *a, 0x10: {price: -1}}",
 					"m: {<<: [*b, *a]}",
 				),
 				targets: []any{new(merged)},
-				want:    "1:20: $.m.16.price: negative price",
+				want:    "2:30: $.m.0x10.price: negative price",
+			},
+			"key of the mapping before the merge": {
+				input:      "m: {0x10: {price: -1}, <<: *r}\n",
+				targets:    []any{new(merged)},
+				references: "r: &r {16: {price: 1}}\n",
+				want:       "1:19: $.m.0x10.price: negative price",
 			},
 			// The merge of an anchor of WithReferences sets the key, so the
 			// error binds at the alias of the merge.
-			"key of the mapping before the merge": {
-				input:      "m: {0x10: {price: 1}, <<: *r}\n",
+			"key that only the merge sets": {
+				input:      "m: {<<: *r}\n",
 				targets:    []any{new(merged)},
 				references: "r: &r {16: {price: -1}}\n",
-				want:       "1:27: $.m.16.price: negative price",
+				want:       "1:9: $.m.16.price: negative price",
 			},
 			"key of the mapping after the merge": {
 				input:      "m: {<<: *r, 0x10: {price: -1}}\n",
@@ -1487,16 +1493,16 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				want:       "1:27: $.m.0x10.price: negative price",
 			},
 			"merge inside a source": {
-				input:      stringtest.LinesLF("s: &s {<<: *r}", "m: {0x10: {price: 1}, <<: *s}"),
+				input:      stringtest.LinesLF("s: &s {<<: *r}", "m: {<<: *s}"),
 				targets:    []any{new(merged)},
 				references: "r: &r {16: {price: -1}}\n",
 				want:       "1:12: $.m.16.price: negative price",
 			},
 			"resolvable merge after the merge": {
-				input:      stringtest.LinesLF("b: &b {0x10: {price: -1}}", "m: {<<: *r, <<: *b}"),
+				input:      stringtest.LinesLF("b: &b {0x10: {price: 1}}", "m: {<<: *r, <<: *b}"),
 				targets:    []any{new(merged)},
-				references: "r: &r {16: {price: 1}}\n",
-				want:       "1:22: $.m.0x10.price: negative price",
+				references: "r: &r {16: {price: -1}}\n",
+				want:       "2:9: $.m.16.price: negative price",
 			},
 		}
 

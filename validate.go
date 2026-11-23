@@ -1330,10 +1330,10 @@ func (w *selfWalker) keyNames(node ast.Node, t reflect.Type) map[any]string {
 		return names
 	}
 
-	// The decoder sets each entry in document order, and a merge sets
-	// the keys of its sources where it stands, so a later entry wins
-	// whether it is a key of the mapping or a merge.
-	for entry := range datapath.MembersBackward(w.pathResolver(), mapping) {
+	// Members yields first the entry of each key whose value the decode
+	// keeps, as the merge spec orders the keys of a mapping and of its
+	// merge keys.
+	for entry := range datapath.Members(w.pathResolver(), mapping) {
 		w.addKeyName(entry.Key, t, names)
 	}
 

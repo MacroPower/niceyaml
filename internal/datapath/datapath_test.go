@@ -5,7 +5,6 @@ import (
 	"iter"
 	"math"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +19,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/datapath"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/internal/mapkey"
+	"go.jacobcolvin.com/niceyaml/internal/yamldecode"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -507,8 +507,18 @@ func TestIndex_MemberNode(t *testing.T) {
 		"member by its decoded name":     {input: "0x10: x\n", name: "16", want: "x"},
 		"last of two keys with one name": {input: stringtest.LinesLF("16: a", "0x10: b"), name: "16", want: "b"},
 		"member of a merge source":       {input: "<<: {0x10: x}\n", name: "16", want: "x"},
-		"source spelling":                {input: "0x10: x\n", name: "0x10", want: "<nil>"},
-		"sequence":                       {input: "- x\n", name: "0", want: "<nil>"},
+		"own key before a merge key": {
+			input: stringtest.LinesLF("16: own", "<<: {0x10: merged}"),
+			name:  "16",
+			want:  "own",
+		},
+		"earlier source of a merge key": {
+			input: "<<: [{0x10: a}, {16: b}]\n",
+			name:  "16",
+			want:  "a",
+		},
+		"source spelling": {input: "0x10: x\n", name: "0x10", want: "<nil>"},
+		"sequence":        {input: "- x\n", name: "0", want: "<nil>"},
 	}
 
 	for name, tc := range tcs {
@@ -732,9 +742,16 @@ func TestIndex(t *testing.T) {
 			name:  "x",
 			want:  true,
 		},
-		"SelectsOther merge key that does not resolve": {
+		"SelectsOther spelling of a key with another name before a merge key that does not resolve": {
 			query: (*datapath.Index).SelectsOther,
 			input: stringtest.LinesLF("m:", "  3.10: a", "  <<: *missing"),
+			steps: []any{"m"},
+			name:  "3.10",
+			want:  true,
+		},
+		"SelectsOther merge key that does not resolve": {
+			query: (*datapath.Index).SelectsOther,
+			input: stringtest.LinesLF("m:", "  a: 1", "  <<: *missing"),
 			steps: []any{"m"},
 			name:  "3.10",
 		},
@@ -1110,6 +1127,7 @@ func TestMembers(t *testing.T) {
 
 	input := stringtest.LinesLF(
 		"b: &b {x: 1, y: 2}",
+		"c: &c {y: 3, w: 4}",
 		"m: &m",
 		"  a: 1",
 		"  <<: *b",
@@ -1120,35 +1138,29 @@ func TestMembers(t *testing.T) {
 		"  z: 3",
 		"s:",
 		"  <<: [*b, *b]",
+		"q:",
+		"  <<: [*b, *c]",
 	)
 
 	tcs := map[string]struct {
-		name     string
-		merges   bool
-		forward  []string
-		backward []string
+		name string
+		want []string
 	}{
-		"merges where the key stands": {
-			name:     "m",
-			merges:   true,
-			forward:  []string{"a", "x", "y", "z"},
-			backward: []string{"z", "y", "x", "a"},
-		},
-		"no merges": {
-			name:    "m",
-			forward: []string{"a", "z"},
+		"entries of each mapping from the last one back": {
+			name: "m",
+			want: []string{"z", "a", "y", "x"},
 		},
 		"unresolved merge": {
-			name:     "u",
-			merges:   true,
-			forward:  []string{"a", "z"},
-			backward: []string{"z"},
+			name: "u",
+			want: []string{"z", "a"},
 		},
 		"each mapping once": {
-			name:     "s",
-			merges:   true,
-			forward:  []string{"x", "y"},
-			backward: []string{"y", "x"},
+			name: "s",
+			want: []string{"y", "x"},
+		},
+		"earlier source first": {
+			name: "q",
+			want: []string{"y", "x", "w", "y"},
 		},
 	}
 
@@ -1158,11 +1170,7 @@ func TestMembers(t *testing.T) {
 
 			r, m := mappingAt(t, input, tc.name)
 
-			assert.Equal(t, tc.forward, keys(datapath.Members(r, m, tc.merges)))
-
-			if tc.merges {
-				assert.Equal(t, tc.backward, keys(datapath.MembersBackward(r, m)))
-			}
+			assert.Equal(t, tc.want, keys(datapath.Members(r, m)))
 		})
 	}
 
@@ -1171,11 +1179,7 @@ func TestMembers(t *testing.T) {
 
 		r, m := mappingAt(t, input, "m")
 
-		for range datapath.Members(r, m, true) {
-			break
-		}
-
-		for range datapath.MembersBackward(r, m) {
+		for range datapath.Members(r, m) {
 			break
 		}
 	})
@@ -1184,19 +1188,15 @@ func TestMembers(t *testing.T) {
 func TestMembers_Decode(t *testing.T) {
 	t.Parallel()
 
-	// Members with merges and MembersBackward copy the order in which
-	// go-yaml's decoder sets the entries of a mapping with `<<` merge keys.
-	// Each case compares the copies with go-yaml's own ordered decode of
-	// $.m, which lists each entry that the decoder sets, in that order.
-	// Each entry holds a value of its own, so the value of an entry names
-	// the entry.
+	// Members copies the order in which the decode of niceyaml weighs the
+	// entries of a mapping with `<<` merge keys. Each case compares the
+	// first entry that Members yields for each key with the ordered decode
+	// of $.m, which keeps the value of the entry that wins. Each entry
+	// holds a value of its own, so the value of an entry names the entry.
 	tcs := map[string]struct {
 		input string
 		ref   string
-		// The first letters of the values of the entries that a merge key
-		// that reads a reference document brings in. Members skips them.
-		unread string
-		dup    bool
+		dup   bool
 	}{
 		"alias between entries": {
 			input: stringtest.LinesLF("a: &a {x: a1, y: a2}", "m:", "  y: m1", "  <<: *a", "  z: m2"),
@@ -1226,7 +1226,7 @@ func TestMembers_Decode(t *testing.T) {
 		},
 		"repeated merge keys": {
 			input: stringtest.LinesLF(
-				"a: &a {x: a1, y: a2}", "b: &b {y: b1}", "m:", "  <<: *a", "  y: m1", "  <<: *b",
+				"a: &a {x: a1, y: a2}", "b: &b {y: b1, w: b2}", "m:", "  <<: *a", "  z: m1", "  <<: *b",
 			),
 			dup: true,
 		},
@@ -1241,24 +1241,19 @@ func TestMembers_Decode(t *testing.T) {
 			),
 		},
 		"reference document": {
-			input:  stringtest.LinesLF("m:", "  <<: *r", "  y: m1"),
-			ref:    "r: &r {x: r1, y: r2}\n",
-			unread: "r",
+			input: stringtest.LinesLF("m:", "  <<: *r", "  y: m1"),
+			ref:   "r: &r {x: r1, y: r2}\n",
 		},
 		"reference document in a sequence": {
-			// The merge key reads a reference document, so Members skips a
-			// too, which the same key brings in.
-			input:  stringtest.LinesLF("a: &a {x: a1, w: a2}", "m:", "  <<: [*r, *a]", "  y: m1"),
-			ref:    "r: &r {x: r1, y: r2}\n",
-			unread: "ra",
+			input: stringtest.LinesLF("a: &a {x: a1, w: a2}", "m:", "  <<: [*a, *r]", "  y: m1"),
+			ref:   "r: &r {x: r1, y: r2}\n",
 		},
 		"reference document beside another merge key": {
 			input: stringtest.LinesLF(
 				"a: &a {x: a1, w: a2}", "m:", "  <<: *a", "  y: m1", "  <<: *r",
 			),
-			ref:    "r: &r {x: r1, y: r2}\n",
-			unread: "r",
-			dup:    true,
+			ref: "r: &r {x: r1, y: r2}\n",
+			dup: true,
 		},
 	}
 
@@ -1267,15 +1262,11 @@ func TestMembers_Decode(t *testing.T) {
 			t.Parallel()
 
 			opts := []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(tc.dup)}
-			decodeOpts := []yaml.DecodeOption{yaml.UseOrderedMap()}
+			decodeOpts := []yamldecode.DecodeOption{yamldecode.UseOrderedMap(), yamldecode.AllowDuplicateMapKey()}
 
 			if tc.ref != "" {
 				opts = append(opts, niceyaml.WithReferences(niceyaml.NewSourceFromString(tc.ref)))
-				decodeOpts = append(decodeOpts, yaml.ReferenceReaders(strings.NewReader(tc.ref)))
-			}
-
-			if tc.dup {
-				decodeOpts = append(decodeOpts, yaml.AllowDuplicateMapKey())
+				decodeOpts = append(decodeOpts, yamldecode.ReferenceReaders(strings.NewReader(tc.ref)))
 			}
 
 			r := yamltest.FirstDocument(t, tc.input, opts...).DocumentResolver()
@@ -1288,7 +1279,7 @@ func TestMembers_Decode(t *testing.T) {
 
 			var doc yaml.MapSlice
 
-			require.NoError(t, yaml.UnmarshalWithOptions([]byte(tc.input), &doc, decodeOpts...))
+			require.NoError(t, yamldecode.UnmarshalWithOptions([]byte(tc.input), &doc, decodeOpts...))
 
 			var sets []string
 
@@ -1303,30 +1294,12 @@ func TestMembers_Decode(t *testing.T) {
 				}
 			}
 
-			forward := memberSets(t, r, datapath.Members(r, mapping, true))
-			backward := memberSets(t, r, datapath.MembersBackward(r, mapping))
+			want := kept(sets)
+			got := first(memberSets(t, r, datapath.Members(r, mapping)))
 
-			// The resolver does not read a reference document, so Members
-			// skips each merge key that reads one.
-			own := slices.DeleteFunc(slices.Clone(sets), func(s string) bool {
-				_, value, _ := strings.Cut(s, "=")
-
-				return value != "" && strings.ContainsRune(tc.unread, rune(value[0]))
-			})
-
-			// Members yields each entry that the decoder sets, in the order of
-			// the first set of each key.
-			assert.ElementsMatch(t, distinct(own), distinct(forward))
-			assert.Equal(t, firstNames(own), firstNames(forward))
-
-			// MembersBackward yields first the entry whose value the decode
-			// keeps for each key. It ends at a merge key that reads a reference
-			// document, before an entry that the decode might not keep.
-			want := kept(slices.All(sets))
-			got := kept(slices.Backward(backward))
-
+			// Members ends at a merge key that reads a reference document,
+			// before an entry that the decode might not keep.
 			if tc.ref == "" {
-				assert.ElementsMatch(t, distinct(sets), distinct(backward))
 				assert.Equal(t, want, got)
 			}
 
@@ -1354,28 +1327,14 @@ func memberSets(tb testing.TB, r *paths.Resolver, seq iter.Seq[*ast.MappingValue
 	return out
 }
 
-// distinct returns the strings of sets without repeats, in their order.
-func distinct(sets []string) []string {
-	var out []string
+// first returns the value of the first set of each name in sets.
+func first(sets []string) map[string]string {
+	out := make(map[string]string)
 
 	for _, s := range sets {
-		if !slices.Contains(out, s) {
-			out = append(out, s)
-		}
-	}
-
-	return out
-}
-
-// firstNames returns the name of each "name=value" of sets, in the order
-// of its first set.
-func firstNames(sets []string) []string {
-	var out []string
-
-	for _, s := range sets {
-		name, _, _ := strings.Cut(s, "=")
-		if !slices.Contains(out, name) {
-			out = append(out, name)
+		name, value, _ := strings.Cut(s, "=")
+		if _, ok := out[name]; !ok {
+			out[name] = value
 		}
 	}
 
@@ -1384,7 +1343,7 @@ func firstNames(sets []string) []string {
 
 // kept returns the value of the last set of each name in sets, as a decode
 // keeps it.
-func kept(sets iter.Seq2[int, string]) map[string]string {
+func kept(sets []string) map[string]string {
 	out := make(map[string]string)
 
 	for _, s := range sets {

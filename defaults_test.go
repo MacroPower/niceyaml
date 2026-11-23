@@ -1487,10 +1487,18 @@ func TestNode_Decode_DefaultsReferenceMerges(t *testing.T) {
 				c.Seats = 2
 			}),
 		},
+		// The entry of the mapping wins over the stations of the reference
+		// document.
+		"entry before a merge key that holds its key": {
+			input: stringtest.LinesLF("stations: [{host: s}]", "<<: *crew"),
+			want: defaultedCafe(func(c *defaultsCafe) {
+				c.Stations = []defaultsPrinter{{Host: "s", Port: 9100}}
+			}),
+		},
 		// The decoder reads the stations of the reference document, and
 		// each element there starts from its defaults.
-		"entry before a merge key that replaces it": {
-			input: stringtest.LinesLF("stations: [{host: s}]", "<<: *crew"),
+		"merge key that brings in an entry": {
+			input: "<<: *crew\n",
 			want: defaultedCafe(func(c *defaultsCafe) {
 				c.Stations = []defaultsPrinter{{Host: "c", Port: 9100}}
 			}),

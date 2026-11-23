@@ -124,9 +124,9 @@
 // thus selects nothing below it, on the collection itself or on an alias
 // of one, as in `!!str *k`. A `<<` merge key reads its mappings through
 // every tag. A mapping key lookup sees the entries a `<<` merge key brings
-// in. Where the mapping and a merge both define a key, the
-// later entry in document order wins, as it does when the decoder fills a
-// map.
+// in. Where the mapping and a merge both define a key, the entry of the
+// mapping wins, wherever the mapping writes it, as YAML's merge spec reads
+// it and as the decoder fills a map.
 //
 // A caller that walks the document itself reads the node that selectors
 // apply to with [Resolver.Content]. It returns a mapping or a sequence
@@ -148,17 +148,15 @@
 // later entry, whose value the decoder keeps, and a `..name` selector
 // lists only that entry. A mapping can hold several `<<` keys the same
 // way. The decoder merges all of them and a key lookup sees the entries of
-// each, but `..name` visits only the inline mapping of the last one.
+// each, but `..name` visits only the inline mapping of the last one. Of
+// the entries that several `<<` keys bring in for one key, the one of the
+// earliest `<<` key wins.
 //
-// When `<<` lists several sources, the later source wins, as it does in
-// the goccy/go-yaml decoder. YAML 1.1 gives the earlier source precedence
-// instead. A token found through an alias or merge key sits where the
-// anchor defines it. That place holds the offending text.
-//
-// The decoder also keeps the later entry when it fills a struct. When a
-// `<<` after an entry of a mapping brings in the same key, a path through
-// that key selects the merged entry. A `..name` selector thus skips the
-// entry of the mapping.
+// When `<<` lists several sources, the earlier source wins, as YAML's
+// merge spec reads it and as the decoder of niceyaml reads it. The decoder
+// of goccy/go-yaml takes the later source instead. A token found through an
+// alias or merge key sits where the anchor defines it. That place holds the
+// offending text.
 //
 // A mapping can also hold a merge key next to a real key with the text
 // `<<`, such as an alias key whose anchor holds that text. The decoder
@@ -247,26 +245,27 @@
 // keys bring in, through WithReferenceAnchors. A path through a key of the
 // mapping that holds the merge key has one of three outcomes:
 //
-//   - The mapping of the reference document holds the key, and its entry
-//     wins. The path returns an error that wraps ErrReferenceAlias, which
-//     carries the alias of the merge key, because the value lies in the
-//     reference document.
-//   - The mapping of the reference document does not hold the key, and the
-//     document writes an entry of it. The path selects that entry, whether
-//     it comes before or after the merge key.
+//   - The mapping does not hold the key, the mapping of the reference
+//     document holds it, and no earlier merge source holds it. The path
+//     returns an error that wraps ErrReferenceAlias, which carries the
+//     alias of the merge key, because the value lies in the reference
+//     document.
+//   - The document writes an entry of the key in the mapping. The path
+//     selects that entry, whether it comes before or after the merge key,
+//     and whether or not the mapping of the reference document holds the
+//     key.
 //   - Neither holds the key. The path does not select anything, and the
 //     error wraps ErrNotFound.
 //
 // A path also returns an error that wraps ErrReferenceAlias when the
-// Resolver cannot read the keys of the reference document, such as when
-// its mapping merges an alias that no reference document defines. A `.*`
-// selector on the mapping returns that error when it would list an entry
-// of the reference document. So does a `..name` or `..*` selector at an
-// entry that an entry of the reference document hides. At the last merge
-// key of a mapping, a real `<<` key that the reference document brings in
-// wins over the merge key. A `..name` or `..*` selector then returns the
-// error when it lists the merge key, or when it reaches an entry or an
-// element in the value of the merge key.
+// Resolver cannot read the keys of the reference document, such as when its
+// mapping merges an alias that no reference document defines. A `.*`
+// selector on the mapping returns that error when it would list an entry of
+// the reference document. At the last merge key of a mapping, a real `<<`
+// key that the reference document brings in wins over the merge key. A
+// `..name` or `..*` selector then returns the error when it lists the merge
+// key, or when it reaches an entry or an element in the value of the merge
+// key.
 //
 // A `.*` selector selects every entry of a mapping, as `[*]` selects every
 // element of a sequence. One path thus reaches each job of a workflow or
@@ -316,11 +315,11 @@
 // A key lookup reads the mappings that `<<` merge keys bring in until it
 // finds the key. A lookup on a chain of merges can thus read the whole
 // chain. It reads a list of merge sources again for each mapping that
-// merges that list through an alias. A `..name` selector looks up each
-// key that a later merge key might override. It also looks up `<<` at the
-// last merge key of each mapping it walks, to learn whether a merge brings
-// in a real `<<` key. That lookup reads the whole merge chain behind the
-// mapping, whatever name the selector searches for.
+// merges that list through an alias. A lookup of a key that the mapping
+// writes itself does not read the merge keys. A `..name` selector looks up
+// `<<` at the last merge key of each mapping it walks, to learn whether a
+// merge brings in a real `<<` key. That lookup reads the whole merge chain
+// behind the mapping, whatever name the selector searches for.
 //
 // A `.name` after a `[*]` looks up its key in each element, and a `.*`
 // looks up each key of its mapping and of the mappings it merges. Each of

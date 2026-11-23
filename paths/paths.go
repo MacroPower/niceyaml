@@ -102,10 +102,9 @@ var (
 	// reaches many mappings that merge one sequence through an alias reads
 	// that sequence once for each of them.
 	//
-	// Some selectors look up many keys. A `..name` selector looks up each
-	// key that a later merge key might override. It also looks up `<<` at
-	// the last merge key of each mapping it walks, to learn whether a merge
-	// brings in a real `<<` key. That lookup reads the whole merge chain
+	// Some selectors look up many keys. A `..name` selector looks up `<<`
+	// at the last merge key of each mapping it walks, to learn whether a
+	// merge brings in a real `<<` key. That lookup reads the whole merge chain
 	// behind the mapping, whatever name the selector searches for. A
 	// `.name` after a `[*]` looks up its key in each element, and a `.*`
 	// looks up each key of its mapping and of the mappings it merges. Each

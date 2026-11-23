@@ -485,14 +485,7 @@ func (d *Doc) guardValues() {
 		switch {
 		case err == nil && p.exists:
 			start, _ := d.startOf(p)
-			// A reference document can decide the path where the text writes
-			// the value. The asked path then keeps reaching it.
-			own, ok := d.ownPath(path, p)
-			if !ok {
-				own = path
-			}
-
-			g.node, g.at = d.newNode(own), d.origin[start]
+			g.node, g.at = d.newNode(d.ownPath(path, p)), d.origin[start]
 
 		case decided && errors.Is(err, paths.ErrReferenceAlias):
 			holder := d.ownerPath(alias.node)
@@ -565,13 +558,9 @@ func (d *Doc) guardPlace(g *guard) (*place, bool) {
 // a path, and neither does a value that another entry of its name hides.
 // A mapping that the text writes at a `<<` merge key does not have one
 // either. Its path is the path of the mapping of the merge key.
-//
-// The function reports whether [Doc.resolve] reaches the place at the path
-// that it returns. It reports false when a reference document decides a
-// name of that path, as [Doc.written] describes.
-func (d *Doc) ownPath(path paths.Path, p *place) (paths.Path, bool) {
+func (d *Doc) ownPath(path paths.Path, p *place) paths.Path {
 	if !p.shared {
-		return path, true
+		return path
 	}
 
 	if !p.exists {
@@ -579,77 +568,33 @@ func (d *Doc) ownPath(path paths.Path, p *place) (paths.Path, bool) {
 		// that the text holds, which is the container of the place.
 		held, ok := d.pathTo(p.container)
 		if !ok {
-			return path, true
+			return path
 		}
 
-		q, decided, err := d.written(held)
+		q, err := d.resolve(held)
 		if err != nil || !q.exists {
-			return path, true
+			return path
 		}
 
 		content, _, err := d.readValue(q.value)
 		if err != nil || content != p.container {
-			return path, true
+			return path
 		}
 
-		return held.Append(slices.Collect(path.Selectors())[p.found:]...), !decided
+		return held.Append(slices.Collect(path.Selectors())[p.found:]...)
 	}
 
 	own, ok := d.pathTo(p.value)
 	if !ok {
-		return path, true
+		return path
 	}
 
-	q, decided, err := d.written(own)
+	q, err := d.resolve(own)
 	if err != nil || !q.exists || q.entry != p.entry || q.seq != p.seq || q.index != p.index {
-		return path, true
+		return path
 	}
 
-	return own, !decided
-}
-
-// written returns the place at own, a path that [Doc.pathTo] gives, as the
-// text writes it. [Doc.resolve] gives that place unless a reference
-// document of [niceyaml.WithReferences] decides a name of own. A `<<` merge
-// key that reads such a document decides a name whose entry it brings in
-// from that document, as a decode reads the keys there. It decides every
-// name of its mapping when the engine cannot read that document. Resolve
-// fails at such a name. The mapping can still write an entry of that name,
-// so written reads the last such entry there, and it reports true. It
-// returns the error of resolve when the mapping does not write the name.
-func (d *Doc) written(own paths.Path) (*place, bool, error) {
-	var (
-		sels = slices.Collect(own.Selectors())
-		// The entry that the text writes for each selector of own that a
-		// reference document decides.
-		read []hiddenEntry
-	)
-
-	for {
-		var (
-			holder ast.Node
-			depth  int
-		)
-
-		q, err := d.walk(own, read, func(p *place, cur ast.Node) bool {
-			holder, depth = cur, p.found
-
-			return true
-		})
-		if !errors.Is(err, paths.ErrReferenceAlias) || depth >= len(sels) {
-			return q, len(read) > 0, err
-		}
-
-		// The walk stopped at the selector after the value of holder. An
-		// alias of a reference document in that value stops it too, and
-		// such a value does not hold an entry.
-		e := d.entryOf(holder, sels[depth].Name)
-		if e == nil || (len(read) > 0 && read[len(read)-1].depth > depth) {
-			return nil, false, err
-		}
-
-		read = append(read, hiddenEntry{at: d.entryPlace(e), depth: depth + 1})
-	}
+	return own
 }
 
 // pathTo returns the path of the names and the indexes of the entries and
@@ -966,13 +911,6 @@ func (n *Node) Path() paths.Path {
 // equals Path, though each alias of the anchor reads an edit there. Own
 // does not list those aliases.
 //
-// A reference document of [niceyaml.WithReferences] can decide a name of the
-// own path. A `<<` merge key that reads the document then brings in that
-// name, as [Node.At] describes. Own still returns the path of the names and
-// the indexes that the text writes, and an edit through the node changes the
-// text there. At fails at that own path with a problem that matches
-// [paths.ErrReferenceAlias], and so does a Move to a target below it.
-//
 // Some places have no own path, and Own returns Path for them. An entry
 // that a later entry of its key hides is such a place, in a Source of
 // [niceyaml.WithAllowDuplicateKeys]. The node on the last entry of that key
@@ -1013,9 +951,7 @@ func (n *Node) Own() paths.Path {
 		return n.path
 	}
 
-	own, _ := n.d.ownPath(n.path, p)
-
-	return own
+	return n.d.ownPath(n.path, p)
 }
 
 // Key returns the name of the entry that the path spells, as
@@ -1512,12 +1448,9 @@ func (d *Doc) view(n *Node, p *place) (*niceyaml.Node, error) {
 // The path selects the place that [paths.Resolver] selects, except that it
 // never selects a `<<` merge key itself. The name `<<` selects only a real
 // key with that text. A name selects the last entry whose key has that
-// text. When a `<<` merge key after that entry brings in a key of the same
-// text, the merge key wins, as go-yaml's decoder reads the mapping. The
-// merge spec keeps the entry there, so [New] refuses such a document when
-// the merge key reads a mapping of the document, as the package
-// documentation describes. When the merge key reads a reference document,
-// a path through the entry fails instead.
+// text. The entry wins over a key of the same text that a `<<` merge key
+// brings in, before or after the entry, as YAML's merge spec reads the
+// mapping.
 //
 // Each method of the node that edits or decodes fails with [ErrUsage] on a
 // path that selects more than one value or holds a `~`. Each such method

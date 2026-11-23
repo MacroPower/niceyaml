@@ -15,10 +15,31 @@ import (
 // documentation lists it. A detail says what the user can write instead.
 // An error that matches ErrUnsupported holds an [*UnsupportedError], and it
 // never matches [ErrEngine]. The error of [New] holds a problem for each
-// instance that New refuses, so it can match [ErrMisread] too, and
-// [errors.As] finds the first UnsupportedError in the text. A program reads
-// the kind of each problem from the Err field of each row that
-// [niceyaml.Problems] yields.
+// instance that New refuses, and [errors.As] finds the first
+// UnsupportedError in the text. A program reads the kind of each problem
+// from the Err field of each row that [niceyaml.Problems] yields.
+//
+// The user can fix the text, so [niceyaml.IsInvalid] reports true for the
+// error. It reports false for a refusal that the program decides, such as
+// one that matches [ErrUsage], [ErrValue], or [ErrProtected]. A program can
+// write the paths and the values of its calls itself. Its server then
+// classifies the errors of the package with IsInvalid alone:
+//
+//	switch {
+//	case err == nil:
+//	case niceyaml.IsInvalid(err):
+//		status = 422 // the user rewrites the text as the detail says
+//	default:
+//		status = 500 // a bug in the program or the engine, among other faults
+//	}
+//
+// A server that passes a path or a value of the request to a call lets
+// the request decide more refusals. Such a server tests for ErrUsage,
+// ErrValue, and ErrProtected before the default case. It also tests for
+// an [*UnsupportedError] whose InValue field is true, which a value of
+// the request with an anchor or a tag fails with. A typed key of the
+// request that a [Node.SetKey] writes fails that way too when a decode
+// reads it as another value, as 1.0 reads as 1.
 var ErrUnsupported = errors.New("the engine does not edit this YAML")
 
 // Construct names a YAML construct that the engine does not edit, as the

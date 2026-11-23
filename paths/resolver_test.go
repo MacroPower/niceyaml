@@ -17,6 +17,7 @@ import (
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/yamldecode"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -1736,8 +1737,8 @@ func TestResolver_KeyName(t *testing.T) {
 			"base: &k n",
 		)},
 		"key a later merge key brings in": {
-			// The merge comes after the entry, so the selector selects
-			// the value the merge brings in.
+			// The key of the mapping wins over the merge, so the selector
+			// selects the value of the mapping.
 			input: stringtest.LinesLF(
 				"m:",
 				"  k: own",
@@ -1745,7 +1746,7 @@ func TestResolver_KeyName(t *testing.T) {
 			),
 			want:  "k",
 			ok:    true,
-			value: "merged",
+			value: "own",
 		},
 	}
 
@@ -1829,18 +1830,18 @@ func TestResolver_Entry(t *testing.T) {
 		"merge key after the own key": {
 			input: "m: {x: 1, <<: {x: 2}}\n",
 			name:  "x",
-			want:  "2",
+			want:  "1",
 		},
-		"later source of one merge key": {
+		"earlier source of one merge key": {
 			input: "m: {<<: [{x: 1}, {x: 2}]}\n",
 			name:  "x",
-			want:  "2",
+			want:  "1",
 		},
-		"later merge key": {
+		"earlier merge key": {
 			input: "m: {<<: {x: 1}, <<: {x: 2}}\n",
 			name:  "x",
 			opts:  []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
-			want:  "2",
+			want:  "1",
 		},
 		"alias key": {
 			input: stringtest.LinesLF(
@@ -2029,14 +2030,14 @@ func TestWithAliasLimit(t *testing.T) {
 		},
 		"merge reads under the default": {
 			input: yamltest.WideMerge(2000),
-			path:  "$..nope",
+			path:  "$.m.*",
 			err:   paths.ErrExcessiveMerging,
 		},
 		"merge reads with the limit off": {
 			input: yamltest.WideMerge(2000),
-			path:  "$..nope",
+			path:  "$.m.*",
 			opts:  []paths.ResolverOption{paths.WithAliasLimit(false)},
-			want:  0,
+			want:  2001,
 		},
 	}
 
@@ -2113,12 +2114,10 @@ func TestWithAliasLimit(t *testing.T) {
 
 		// A resolver without a document reads no alias, so the merge list
 		// of m holds inline mappings.
-		doc := documentOf(t, yamltest.WideMergeOf(2000, "{z: 0}"), yamltest.NoSizeLimits()...)
+		doc := documentOf(t, "m:\n  <<: "+yamltest.FlowSequence("{z: 0}", 2000)+"\n", yamltest.NoSizeLimits()...)
 
 		m, err := paths.NewResolver(doc).Node(paths.MustParse("$.m"))
 		require.NoError(t, err)
-
-		path := paths.MustParse("@..nope")
 
 		for name, tc := range map[string]struct {
 			err  error
@@ -2128,21 +2127,15 @@ func TestWithAliasLimit(t *testing.T) {
 			"limit off": {opts: []paths.ResolverOption{paths.WithAliasLimit(false)}},
 		} {
 			r := paths.NewResolver(nil, tc.opts...)
-
-			_, err := r.MatchesFrom(m, path)
-			if tc.err == nil {
-				require.NoError(t, err, name)
-			} else {
-				require.ErrorIs(t, err, tc.err, name)
-			}
-
 			finder := r.EntryFinder()
 
+			// No mapping of the list holds these keys, so each lookup reads
+			// the whole merge list and finds no entry.
 			var last error
 
 			for i := range 2000 {
 				_, err := finder.Entry(m, fmt.Sprintf("%#x", 0x1000+i))
-				if err != nil {
+				if err != nil && !errors.Is(err, paths.ErrNotFound) {
 					last = err
 				}
 			}
@@ -2945,13 +2938,13 @@ func TestResolver_Token_Anchors(t *testing.T) {
 		"merged key resolves to the anchor":                   {path: "$.merged.a", want: "1@2:6"},
 		"merged key target resolves to the anchor key":        {path: "$.merged.a~", want: "a@2:3"},
 		"own key after merge wins":                            {path: "$.merged.b", want: "20@13:6"},
-		"merge after own key wins":                            {path: "$.late.b", want: "2@3:6"},
-		"merge after own key wins at the key":                 {path: "$.late.b~", want: "b@3:3"},
+		"own key before merge wins":                           {path: "$.late.b", want: "30@23:6"},
+		"own key before merge wins at the key":                {path: "$.late.b~", want: "b@23:3"},
 		"own key before merge without that key":               {path: "$.late.c", want: "31@24:6"},
 		"own key next to merge":                               {path: "$.merged.c", want: "3@14:6"},
 		"merge sequence first source":                         {path: "$.multi.a", want: "1@2:6"},
 		"merge sequence second source":                        {path: "$.multi.x", want: "10@4:14"},
-		"merge sequence later source wins":                    {path: "$.multi.b", want: "200@4:21"},
+		"merge sequence earlier source wins":                  {path: "$.multi.b", want: "2@3:6"},
 		"merge of a merged mapping":                           {path: "$.chain.a", want: "1@2:6"},
 		"merge of a merged mapping own key":                   {path: "$.chain.d", want: "4@19:6"},
 		"merge key entry itself is addressable":               {path: "$.merged.<<~", want: "<<@12:3"},
@@ -3822,6 +3815,12 @@ func TestWithReferenceAnchors(t *testing.T) {
 				path:  "$..port",
 				want:  []string{"$.m.a.port=1", "$.m.c.port=2"},
 			},
+			"entry before a merge key whose reference holds its key": {
+				// The entry of the mapping wins over the reference.
+				input: stringtest.LinesLF("port: [1]", "<<: *shared"),
+				path:  "$..*",
+				want:  []string{"$.port=[1]", "$.port[0]=1"},
+			},
 			"mapping written in the sequence of a merge key that reads a reference": {
 				// The reference does not hold a real `<<` key, so a path
 				// through `<<` selects the merge key.
@@ -3876,31 +3875,6 @@ func TestWithReferenceAnchors(t *testing.T) {
 				input: stringtest.LinesLF("<<: *broken", "b: 1"),
 				path:  "$.*",
 				want:  "resolve $.*: alias reads a reference document: *broken",
-			},
-			"name below an entry before a merge key that reads a reference": {
-				// The reference brings in port, which then wins over the
-				// entry of the mapping, so $.port selects an entry of the
-				// reference.
-				input: stringtest.LinesLF("port:", "  port: 1", "<<: *shared"),
-				path:  "$..port",
-				want:  "resolve $..port: alias reads a reference document: *shared",
-			},
-			"every value with an entry before a merge key that reads a reference": {
-				input: stringtest.LinesLF("port: [1]", "<<: *shared"),
-				path:  "$..*",
-				want:  "resolve $..*: alias reads a reference document: *shared",
-			},
-			"entry of a nested mapping before a merge key that reads a reference": {
-				input: stringtest.LinesLF("m:", "  port: {port: 1}", "  <<: *shared", "  c: {port: 2}"),
-				path:  "$..port",
-				want:  "resolve $..port: alias reads a reference document: *shared",
-			},
-			"scalar entry before a merge key that reads a reference": {
-				// The walk looks below each entry that it visits, so it fails
-				// at the entry before the merge key whatever that entry holds.
-				input: "m: {port: 1, <<: *shared, c: 2}\n",
-				path:  "$..c",
-				want:  "resolve $..c: alias reads a reference document: *shared",
 			},
 			"mapping written in the sequence of a merge key that reads a reference": {
 				// The reference brings in a real `<<` key, which a path
@@ -3961,8 +3935,13 @@ func TestWithReferenceAnchors(t *testing.T) {
 				input: stringtest.LinesLF("server:", "  <<: *shared"),
 				path:  "$.server.tls.cert",
 			},
-			"key that the reference brings in": {
+			"key before the merge key that the reference brings in too": {
 				input: stringtest.LinesLF("server:", "  port: 2", "  <<: *shared"),
+				path:  "$.server.port",
+				want:  "2",
+			},
+			"key that the reference brings in": {
+				input: stringtest.LinesLF("server:", "  name: web", "  <<: *shared"),
 				path:  "$.server.port",
 				err:   "resolve $.server.port: alias reads a reference document: *shared",
 			},
@@ -3972,7 +3951,7 @@ func TestWithReferenceAnchors(t *testing.T) {
 				err:   "resolve $.server.port.x: alias reads a reference document: *shared",
 			},
 			"key that a merge key inside the reference brings in": {
-				input: stringtest.LinesLF("server:", "  port: 2", "  <<: *base"),
+				input: stringtest.LinesLF("server:", "  name: web", "  <<: *base"),
 				path:  "$.server.port",
 				err:   "resolve $.server.port: alias reads a reference document: *base",
 			},
@@ -3981,10 +3960,15 @@ func TestWithReferenceAnchors(t *testing.T) {
 				path:  "$.server.name",
 				want:  "web",
 			},
-			"reference that merges an alias that no reference defines": {
+			"key of the mapping beside a reference that merges an alias that no reference defines": {
 				input: stringtest.LinesLF("server:", "  name: web", "  <<: *broken"),
 				path:  "$.server.name",
-				err:   "resolve $.server.name: alias reads a reference document: *broken",
+				want:  "web",
+			},
+			"reference that merges an alias that no reference defines": {
+				input: stringtest.LinesLF("server:", "  name: web", "  <<: *broken"),
+				path:  "$.server.port",
+				err:   "resolve $.server.port: alias reads a reference document: *broken",
 			},
 			"merge keys of the reference that lead back to each other": {
 				input: stringtest.LinesLF("server:", "  name: web", "  <<: *ca"),
@@ -3992,14 +3976,19 @@ func TestWithReferenceAnchors(t *testing.T) {
 				want:  "web",
 			},
 			"key that a merge key of the reference leads to": {
-				input: stringtest.LinesLF("server:", "  b: 3", "  <<: *ca"),
+				input: stringtest.LinesLF("server:", "  name: web", "  <<: *ca"),
 				path:  "$.server.b",
 				err:   "resolve $.server.b: alias reads a reference document: *ca",
 			},
 			"source of the document after a source of the reference": {
 				input: stringtest.LinesLF("server:", "  <<: [*shared, {port: 2, tls: on}]"),
 				path:  "$.server.port",
-				want:  "2",
+				err:   "resolve $.server.port: alias reads a reference document: *shared",
+			},
+			"key that only a source of the document after the reference holds": {
+				input: stringtest.LinesLF("server:", "  <<: [*shared, {port: 2, tls: on}]"),
+				path:  "$.server.tls",
+				want:  "on",
 			},
 			"source of the reference after a source of the document": {
 				input: stringtest.LinesLF("server:", "  <<: [{port: 2, tls: on}, *shared]"),
@@ -4914,14 +4903,20 @@ func TestResolver_Matches_MergeLookups(t *testing.T) {
 		return mergeChain(n) + "l: " + yamltest.FlowSequence(fmt.Sprintf("*b%d", n-1), n) + "\n"
 	}
 
-	// The document of aliasWideMerge holds the mapping x, which merges n
-	// aliases to the mapping a, and the key l, which lists n aliases to x.
-	aliasWideMerge := func(n int) string {
+	// The document of aliasWideMergeOf holds the mapping x, which merges n
+	// times item and then each element of tail, and the key l, which lists
+	// n aliases to x. The document of aliasWideMerge merges n aliases to
+	// the mapping a.
+	aliasWideMergeOf := func(n int, item string, tail ...string) string {
 		return stringtest.LinesLF(
 			"a: &a {z: 0}",
-			"x: &x {<<: "+yamltest.FlowSequence("*a", n)+"}",
+			"x: &x {<<: "+yamltest.FlowSequence(item, n, tail...)+"}",
 			"l: "+yamltest.FlowSequence("*x", n),
 		)
+	}
+
+	aliasWideMerge := func(n int) string {
+		return aliasWideMergeOf(n, "*a")
 	}
 
 	// The document of sharedMerge holds the sequence s of n aliases to the
@@ -4956,29 +4951,16 @@ func TestResolver_Matches_MergeLookups(t *testing.T) {
 			path:  "$.l[*].nope",
 			err:   paths.ErrExcessiveMerging,
 		},
+		// The mapping m writes no key, so the walk looks up only `<<` at its
+		// merge key, which reads the list once.
 		"recursive key over a merge of many aliases": {
 			input: yamltest.WideMerge(2000),
 			path:  "$..nope",
-			err:   paths.ErrExcessiveMerging,
+			want:  0,
 		},
-		"recursive key over a merge of many scalars": {
-			input: yamltest.WideMergeOf(2000, "0"),
-			path:  "$..nope",
-			err:   paths.ErrExcessiveMerging,
-		},
-		"recursive key over a merge of many aliases and a missing one": {
-			input: yamltest.WideMergeOf(2000, "*a", "*missing"),
-			path:  "$..nope",
-			err:   paths.ErrExcessiveMerging,
-		},
-		"recursive key over a merge of many aliases and a later anchor": {
-			input: yamltest.WideMergeOf(2000, "*a", "*late") + "late: &late {y: 1}\n",
-			path:  "$..nope",
-			err:   paths.ErrExcessiveMerging,
-		},
-		"recursive key over a merge of many scalars and a missing alias": {
-			input: yamltest.WideMergeOf(2000, "0", "*missing"),
-			path:  "$..nope",
+		"child key of each alias to a merge of many scalars": {
+			input: aliasWideMergeOf(2000, "0"),
+			path:  "$.l[*].nope",
 			err:   paths.ErrExcessiveMerging,
 		},
 		"child key of each alias to a wide merge": {
@@ -5016,10 +4998,12 @@ func TestResolver_Matches_MergeLookups(t *testing.T) {
 			path:  "$..*",
 			err:   paths.ErrExcessiveMerging,
 		},
+		// The walk lists the keys of b where b writes them, and it does not
+		// look them up in m.
 		"every node over a merge of many aliases": {
 			input: yamltest.WideMerge(2000),
 			path:  "$..*",
-			err:   paths.ErrExcessiveMerging,
+			want:  2004,
 		},
 		"every node over a short merge chain": {
 			input: mergeChain(10),
@@ -5029,7 +5013,7 @@ func TestResolver_Matches_MergeLookups(t *testing.T) {
 		"every node over a merge of a few aliases": {
 			input: yamltest.WideMerge(10),
 			path:  "$..*",
-			want:  13,
+			want:  14,
 		},
 		// The lookups of this walk read as many nodes under merge keys as
 		// those of a `..name` walk do.
@@ -5071,12 +5055,12 @@ func TestResolver_Matches_MergeLookups(t *testing.T) {
 		"recursive key over a merge of a few aliases and a missing one": {
 			input: yamltest.WideMergeOf(10, "*a", "*missing"),
 			path:  "$..0x1005",
-			want:  0,
+			want:  1,
 		},
 		"recursive key over a merge that lists a missing alias first": {
 			input: missingFirst(10),
 			path:  "$..0x1005",
-			want:  0,
+			want:  1,
 		},
 		"recursive key over a wide merge that lists a missing alias first": {
 			input: missingFirst(2000),
@@ -5116,9 +5100,10 @@ func TestResolver_Node_NestedMergeLists(t *testing.T) {
 
 	// The mapping c merges a list of three sources. The middle one, b,
 	// merges a list of its own, and the last source of that list merges a
-	// longer list. A lookup in c searches each list from its last source
-	// back, so it searches the longest list before the earlier sources of
-	// the two shorter ones.
+	// longer list. A lookup in c searches each list from its first source
+	// on, so it searches the earlier sources of the two shorter lists
+	// before the longest list, and the longest list before the last source
+	// of c.
 	doc := documentOf(t, stringtest.Input(`
 		a: &a {k: A}
 		b: &b
@@ -5289,17 +5274,15 @@ func TestResolver_Node_TwoMergeKeys(t *testing.T) {
 	t.Parallel()
 
 	// A mapping may hold two merge keys when the parser allows duplicates.
-	// The decoder sets each entry in document order. It thus takes the
-	// value of the later merge key, and a key of the mapping between the
-	// two wins over the earlier merge key and loses to the later one when
-	// that one brings in the same key. The path selects what the decoder
-	// takes.
+	// The decoder reads them in the order of the merge spec. It thus takes
+	// the value of the earlier merge key, and a key of the mapping wins over
+	// both. The path selects what the decoder takes.
 	tcs := map[string]struct {
 		input string
 		want  string
 		found []string
 	}{
-		"later merge key wins over the earlier one": {
+		"earlier merge key wins over the later one": {
 			input: stringtest.LinesLF(
 				"p: &p {k: P}",
 				"q: &q {k: Q}",
@@ -5307,7 +5290,7 @@ func TestResolver_Node_TwoMergeKeys(t *testing.T) {
 				"  <<: *p",
 				"  <<: *q",
 			),
-			want: "Q",
+			want: "P",
 		},
 		"own key wins over an earlier merge key": {
 			input: stringtest.LinesLF(
@@ -5321,7 +5304,7 @@ func TestResolver_Node_TwoMergeKeys(t *testing.T) {
 			want:  "own",
 			found: []string{"$.t.k"},
 		},
-		"later merge key wins over the own key": {
+		"own key wins over a later merge key": {
 			input: stringtest.LinesLF(
 				"p: &p {k: P}",
 				"q: &q {k: Q}",
@@ -5330,7 +5313,8 @@ func TestResolver_Node_TwoMergeKeys(t *testing.T) {
 				"  k: own",
 				"  <<: *q",
 			),
-			want: "Q",
+			want:  "own",
+			found: []string{"$.t.k"},
 		},
 	}
 
@@ -5344,7 +5328,7 @@ func TestResolver_Node_TwoMergeKeys(t *testing.T) {
 				T map[string]string `yaml:"t"`
 			}
 
-			err := yaml.UnmarshalWithOptions([]byte(tc.input), &decoded, yaml.AllowDuplicateMapKey())
+			err := yamldecode.UnmarshalWithOptions([]byte(tc.input), &decoded, yamldecode.AllowDuplicateMapKey())
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, decoded.T["k"])
 
@@ -5384,21 +5368,31 @@ func TestResolver_Matches_InlineMergeSource(t *testing.T) {
 
 	// A `..name` selector walks a mapping written under `<<` as any other
 	// value and skips an alias there, even when the decoder takes the
-	// entry from a later source or from the mapping's own key. It skips a
-	// key of the mapping that a later merge brings in again, and the path
-	// of each match selects that match's node.
+	// entry from an earlier source or from the mapping's own key. It lists
+	// a key of the mapping that a merge brings in again, because the key of
+	// the mapping wins, and the path of each match selects that match's
+	// node.
 	tcs := map[string]struct {
 		input string
 		want  []string
 		value string
 	}{
-		"later alias source overrides": {
+		"earlier inline source wins over an alias source": {
 			input: stringtest.LinesLF(
 				"base: &b {name: y}",
 				"m:",
 				"  <<: [{name: x}, *b]",
 			),
 			want:  []string{"$.m.<<[0].name"},
+			value: "x",
+		},
+		"earlier alias source wins over an inline source": {
+			input: stringtest.LinesLF(
+				"base: &b {name: y}",
+				"m:",
+				"  <<: [*b, {name: x}]",
+			),
+			want:  []string{"$.m.<<[1].name"},
 			value: "y",
 		},
 		"own key overrides": {
@@ -5410,24 +5404,24 @@ func TestResolver_Matches_InlineMergeSource(t *testing.T) {
 			want:  []string{"$.m.<<.name", "$.m.name"},
 			value: "z",
 		},
-		"later merge overrides an own key": {
+		"own key wins over a later merge": {
 			input: stringtest.LinesLF(
 				"m:",
 				"  name: z",
 				"  <<: {name: x}",
 			),
-			want:  []string{"$.m.<<.name"},
-			value: "x",
+			want:  []string{"$.m.name", "$.m.<<.name"},
+			value: "z",
 		},
-		"later alias merge overrides an own key": {
+		"own key wins over a later alias merge": {
 			input: stringtest.LinesLF(
 				"base: &b {name: y}",
 				"m:",
 				"  name: z",
 				"  <<: *b",
 			),
-			want:  nil,
-			value: "y",
+			want:  []string{"$.m.name"},
+			value: "z",
 		},
 		"alias source alone": {
 			input: stringtest.LinesLF(
@@ -5569,7 +5563,7 @@ func TestResolver_MergeBringsInLiteralMergeName(t *testing.T) {
 				Top map[string]any `yaml:"top"`
 			}
 
-			err := yaml.UnmarshalWithOptions([]byte(tc.input), &decoded, yaml.AllowDuplicateMapKey())
+			err := yamldecode.UnmarshalWithOptions([]byte(tc.input), &decoded, yamldecode.AllowDuplicateMapKey())
 			require.NoError(t, err)
 			require.Equal(t, "real", decoded.Top["<<"])
 
@@ -6294,10 +6288,10 @@ func TestResolver_Matches(t *testing.T) {
 				"  <<: *base",
 			),
 			path: "$.jobs.*",
-			want: []string{"$.jobs.test=c", "$.jobs.lint=a", "$.jobs.build=old"},
+			want: []string{"$.jobs.build=b", "$.jobs.test=c", "$.jobs.lint=a"},
 			opts: dups,
 		},
-		"later source of a merge list wins": {
+		"earlier source of a merge list wins": {
 			input: stringtest.LinesLF(
 				"a: &a {x: 1, y: 1}",
 				"b: &b {y: 2, z: 2}",
@@ -6306,7 +6300,7 @@ func TestResolver_Matches(t *testing.T) {
 				"  w: 0",
 			),
 			path: "$.m.*",
-			want: []string{"$.m.x=1", "$.m.y=2", "$.m.z=2", "$.m.w=0"},
+			want: []string{"$.m.x=1", "$.m.y=1", "$.m.z=2", "$.m.w=0"},
 		},
 		"merge of a mapping that merges another": {
 			input: stringtest.LinesLF(
@@ -6348,10 +6342,10 @@ func TestResolver_Matches(t *testing.T) {
 				"  <<: *b",
 			),
 			path: "$.m.*",
-			want: []string{"$.m.x=1", "$.m.k=0", "$.m.y=2"},
+			want: []string{"$.m.x=1", "$.m.y=1", "$.m.k=0"},
 			opts: dups,
 		},
-		"one source under two merge keys counts at the later": {
+		"one source under two merge keys counts at the earlier": {
 			input: stringtest.LinesLF(
 				"a: &a {x: 1}",
 				"m:",
@@ -6360,7 +6354,7 @@ func TestResolver_Matches(t *testing.T) {
 				"  <<: *a",
 			),
 			path: "$.m.*",
-			want: []string{"$.m.k=0", "$.m.x=1"},
+			want: []string{"$.m.x=1", "$.m.k=0"},
 			opts: dups,
 		},
 		"merge that leads back to its own mapping": {
@@ -6603,10 +6597,10 @@ func TestResolver_Matches(t *testing.T) {
 			path:  "$.m.'<<'..*",
 			want:  []string{"$.m.<<[0].k=1"},
 		},
-		"entry that a later merge key overrides": {
+		"entry before a merge key that brings in its key": {
 			input: stringtest.LinesLF("base: &b {k: 1}", "m: {k: 0, <<: *b}"),
 			path:  "$..*",
-			want:  []string{"$.base={k: 1}", "$.base.k=1", "$.m={k: 0, <<: *b}"},
+			want:  []string{"$.base={k: 1}", "$.base.k=1", "$.m={k: 0, <<: *b}", "$.m.k=0"},
 		},
 		"real key with the text of a merge key": {
 			input: stringtest.LinesLF("x: &m '<<'", "m: {<<: {k: 1}, *m : 2}"),

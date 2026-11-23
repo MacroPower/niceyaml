@@ -302,6 +302,228 @@ func (it *entryIter) Next() bool {
 	return true
 }
 
+// mergeParts returns the mappings that value, the value of a merge key,
+// brings in, in order, each with the context for the reads of its entries,
+// as mapEntries gives them. The caller passes the context that enterMerge
+// returns for value. YAML's merge spec reads a key of the mapping that
+// holds the merge key over a key that the merge brings in, and a key of an
+// earlier mapping of the merge over one of a later mapping. So the
+// callers take a key from each mapping only where neither the mapping that
+// holds the merge key nor an earlier merged mapping sets that key.
+func (d *Decoder) mergeParts(ctx context.Context, value ast.Node) ([]entryPart, error) {
+	it, err := d.mapEntries(ctx, value, true)
+	if err != nil {
+		return nil, err
+	}
+	return it.parts, nil
+}
+
+// mergeToMapValue sets in m each key that value, the value of a merge key,
+// brings in, as mergeParts describes. It numbers each mapping of the merge
+// in fill, and it sets the entries of that mapping under its number.
+func (d *Decoder) mergeToMapValue(ctx context.Context, value ast.Node, m map[string]interface{}, fill *mapFill) error {
+	ctx, err := d.enterMerge(ctx, value)
+	if err != nil {
+		return err
+	}
+	parts, err := d.mergeParts(ctx, value)
+	if err != nil {
+		return err
+	}
+	for _, part := range parts {
+		num := fill.newPart()
+		iter := part.node.MapRange()
+		for iter.Next() {
+			if err := d.setToMapValue(part.ctx, iter.KeyValue(), m, fill, num); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// mapFill tracks which mapping set each key of a map that one mapping
+// fills, so that the decoder writes the entries of every merged mapping
+// straight into the map. The decoder numbers the mappings of the merge
+// keys in the order that it starts to read them, and the mapping itself
+// takes 0. While the decoder reads a mapping, every mapping with a higher
+// number that set a key is one that it reached through the merge keys of
+// that mapping, and every one with a lower number wins over it, as
+// mergeParts describes.
+type mapFill struct {
+	// from holds, for each key that a merged mapping set, the number of
+	// the mapping that set it last.
+	from map[string]int
+	// parts holds the number of the last merged mapping.
+	parts int
+}
+
+// newPart numbers the next merged mapping.
+func (f *mapFill) newPart() int {
+	if f.from == nil {
+		f.from = map[string]int{}
+	}
+	f.parts++
+	return f.parts
+}
+
+// takes reports whether the entry with key of the mapping that num
+// numbers sets the key in m, and records the mapping that sets it. A key
+// in m that from does not hold comes from the mapping itself.
+func (f *mapFill) takes(m map[string]interface{}, key string, num int) bool {
+	if num == 0 {
+		return true
+	}
+	if from, ok := f.from[key]; ok {
+		if from < num {
+			return false
+		}
+	} else if _, ok := m[key]; ok {
+		return false
+	}
+	f.from[key] = num
+	return true
+}
+
+// mergeToOrderedMapValue appends to m each item that value, the value of a
+// merge key, brings in, as mergeParts describes. It numbers each mapping
+// of the merge in merged, and it sets the entries of that mapping under
+// its number.
+func (d *Decoder) mergeToOrderedMapValue(ctx context.Context, value ast.Node, m *MapSlice, merged *mergedItems) error {
+	ctx, err := d.enterMerge(ctx, value)
+	if err != nil {
+		return err
+	}
+	parts, err := d.mergeParts(ctx, value)
+	if err != nil {
+		return err
+	}
+	for _, part := range parts {
+		num := merged.newPart(*m)
+		iter := part.node.MapRange()
+		for iter.Next() {
+			if err := d.setToOrderedMapValue(part.ctx, iter.KeyValue(), m, merged, num); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// mergedItems tracks the keys of a MapSlice that the entries of one
+// mapping fill, so that each item costs constant time. It numbers the
+// merged mappings as [mapFill] does.
+type mergedItems struct {
+	// keys holds, after the first merged mapping, each comparable key of
+	// the MapSlice.
+	keys map[interface{}]mergedKey
+	// parts holds the number of the last merged mapping.
+	parts int
+}
+
+// mergedKey is a key of the MapSlice that [mergedItems] tracks.
+type mergedKey struct {
+	// at holds the indexes of the items with the key in the MapSlice, in
+	// order, when a merged mapping set the key and no item of the mapping
+	// itself replaced it. A merged mapping that repeats a key gives more
+	// than one index. It is nil for a key of the mapping itself.
+	at []int
+	// from holds the number of the mapping that set the key last.
+	from int
+}
+
+// newPart numbers the next merged mapping. The first call records the
+// keys of m, the items that the mapping itself set so far.
+func (r *mergedItems) newPart(m MapSlice) int {
+	if r.keys == nil {
+		r.keys = make(map[interface{}]mergedKey, len(m))
+		for _, item := range m {
+			if isComparable(item.Key) {
+				r.keys[item.Key] = mergedKey{}
+			}
+		}
+	}
+	r.parts++
+	return r.parts
+}
+
+// appendMerged sets in m each item of items, the entries of the next
+// merged mapping, as set does.
+func (r *mergedItems) appendMerged(m *MapSlice, items MapSlice) {
+	num := r.newPart(*m)
+	for _, item := range items {
+		r.set(m, item, num)
+	}
+}
+
+// set sets item, an entry of the mapping that num numbers, in m. An item of
+// m with the same key that a mapping with a higher number set takes the
+// value of item in its place, and m drops each later item with that key.
+// A key that the same mapping set gets another item, and a key that a
+// mapping with a lower number set keeps its item.
+func (r *mergedItems) set(m *MapSlice, item MapItem, num int) {
+	if r.keys == nil || !isComparable(item.Key) {
+		*m = append(*m, item)
+		return
+	}
+	k, ok := r.keys[item.Key]
+	switch {
+	case !ok || k.from == num:
+		if num > 0 {
+			k.at = append(k.at, len(*m))
+		}
+		k.from = num
+		r.keys[item.Key] = k
+		*m = append(*m, item)
+	case k.from > num:
+		r.replace(m, item, k.at, num)
+	}
+}
+
+// replace sets item, an entry of the mapping that num numbers, in place of
+// the first item of m at the indexes at, which a merged mapping set, and
+// drops the items at each later index.
+func (r *mergedItems) replace(m *MapSlice, item MapItem, at []int, num int) {
+	(*m)[at[0]] = item
+	k := mergedKey{from: num}
+	if num > 0 {
+		k.at = at[:1]
+	}
+	r.keys[item.Key] = k
+	if len(at) == 1 {
+		return
+	}
+	// The merged mapping repeated the key. The later items leave m, and
+	// the items after them take new indexes.
+	drop := make(map[int]bool, len(at)-1)
+	for _, i := range at[1:] {
+		drop[i] = true
+	}
+	kept := (*m)[:0]
+	for i, v := range *m {
+		if !drop[i] {
+			kept = append(kept, v)
+		}
+	}
+	*m = kept
+	for _, k := range r.keys {
+		for j, i := range k.at {
+			shift := 0
+			for _, x := range at[1:] {
+				if x < i {
+					shift++
+				}
+			}
+			k.at[j] = i - shift
+		}
+	}
+}
+
+// isComparable reports whether key can be a key of a Go map.
+func isComparable(key interface{}) bool {
+	return key == nil || reflect.TypeOf(key).Comparable()
+}
+
 // MissingAnchorError is the error of an alias under a merge key, or at a
 // mapping or a sequence of a typed target, that the decoder holds no anchor
 // for. Its message is upstream's.
@@ -779,7 +1001,10 @@ func (d *Decoder) mapKeyNodeToString(ctx context.Context, node ast.MapKeyNode) (
 	return fmt.Sprint(key), nil
 }
 
-func (d *Decoder) setToMapValue(ctx context.Context, node ast.Node, m map[string]interface{}) error {
+// setToMapValue sets the entries of node in m. Node belongs to the mapping
+// that num numbers in fill, and the entries set only the keys that
+// [mapFill.takes] gives them.
+func (d *Decoder) setToMapValue(ctx context.Context, node ast.Node, m map[string]interface{}, fill *mapFill, num int) error {
 	d.stepIn()
 	defer d.stepOut()
 	if d.isExceededMaxDepth() {
@@ -790,18 +1015,8 @@ func (d *Decoder) setToMapValue(ctx context.Context, node ast.Node, m map[string
 	switch n := node.(type) {
 	case *ast.MappingValueNode:
 		if n.Key.IsMergeKey() {
-			ctx, err := d.enterMerge(ctx, n.Value)
-			if err != nil {
+			if err := d.mergeToMapValue(ctx, n.Value, m, fill); err != nil {
 				return err
-			}
-			iter, err := d.mapEntries(ctx, n.Value, true)
-			if err != nil {
-				return err
-			}
-			for iter.Next() {
-				if err := d.setToMapValue(iter.ctx, iter.KeyValue(), m); err != nil {
-					return err
-				}
 			}
 		} else {
 			key, err := d.mapKeyNodeToString(ctx, n.Key)
@@ -812,11 +1027,13 @@ func (d *Decoder) setToMapValue(ctx context.Context, node ast.Node, m map[string
 			if err != nil {
 				return err
 			}
-			m[key] = v
+			if fill.takes(m, key, num) {
+				m[key] = v
+			}
 		}
 	case *ast.MappingNode:
 		for _, value := range n.Values {
-			if err := d.setToMapValue(ctx, value, m); err != nil {
+			if err := d.setToMapValue(ctx, value, m, fill, num); err != nil {
 				return err
 			}
 		}
@@ -827,7 +1044,10 @@ func (d *Decoder) setToMapValue(ctx context.Context, node ast.Node, m map[string
 	return nil
 }
 
-func (d *Decoder) setToOrderedMapValue(ctx context.Context, node ast.Node, m *MapSlice) error {
+// setToOrderedMapValue sets the entries of node in m. Node belongs to the
+// mapping that num numbers in merged, and the entries set their items as
+// [mergedItems.set] does.
+func (d *Decoder) setToOrderedMapValue(ctx context.Context, node ast.Node, m *MapSlice, merged *mergedItems, num int) error {
 	d.stepIn()
 	defer d.stepOut()
 	if d.isExceededMaxDepth() {
@@ -838,18 +1058,8 @@ func (d *Decoder) setToOrderedMapValue(ctx context.Context, node ast.Node, m *Ma
 	switch n := node.(type) {
 	case *ast.MappingValueNode:
 		if n.Key.IsMergeKey() {
-			ctx, err := d.enterMerge(ctx, n.Value)
-			if err != nil {
+			if err := d.mergeToOrderedMapValue(ctx, n.Value, m, merged); err != nil {
 				return err
-			}
-			iter, err := d.mapEntries(ctx, n.Value, true)
-			if err != nil {
-				return err
-			}
-			for iter.Next() {
-				if err := d.setToOrderedMapValue(iter.ctx, iter.KeyValue(), m); err != nil {
-					return err
-				}
 			}
 		} else {
 			key, err := d.mapKeyNodeToString(ctx, n.Key)
@@ -860,11 +1070,11 @@ func (d *Decoder) setToOrderedMapValue(ctx context.Context, node ast.Node, m *Ma
 			if err != nil {
 				return err
 			}
-			*m = append(*m, MapItem{Key: key, Value: value})
+			merged.set(m, MapItem{Key: key, Value: value}, num)
 		}
 	case *ast.MappingNode:
 		for _, value := range n.Values {
-			if err := d.setToOrderedMapValue(ctx, value, m); err != nil {
+			if err := d.setToOrderedMapValue(ctx, value, m, merged, num); err != nil {
 				return err
 			}
 		}
@@ -1159,28 +1369,16 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 		return d.nodeToValue(ctx, n.Value)
 	case *ast.MappingValueNode:
 		if n.Key.IsMergeKey() {
-			ctx, err := d.enterMerge(ctx, n.Value)
-			if err != nil {
-				return nil, err
-			}
-			iter, err := d.mapEntries(ctx, n.Value, true)
-			if err != nil {
-				return nil, err
-			}
 			if d.useOrderedMap {
 				m := MapSlice{}
-				for iter.Next() {
-					if err := d.setToOrderedMapValue(iter.ctx, iter.KeyValue(), &m); err != nil {
-						return nil, err
-					}
+				if err := d.mergeToOrderedMapValue(ctx, n.Value, &m, &mergedItems{}); err != nil {
+					return nil, err
 				}
 				return m, nil
 			}
 			m := make(map[string]any)
-			for iter.Next() {
-				if err := d.setToMapValue(iter.ctx, iter.KeyValue(), m); err != nil {
-					return nil, err
-				}
+			if err := d.mergeToMapValue(ctx, n.Value, m, &mapFill{}); err != nil {
+				return nil, err
 			}
 			return m, nil
 		}
@@ -1203,16 +1401,18 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 	case *ast.MappingNode:
 		if d.useOrderedMap {
 			m := make(MapSlice, 0, len(n.Values))
+			merged := &mergedItems{}
 			for _, value := range n.Values {
-				if err := d.setToOrderedMapValue(ctx, value, &m); err != nil {
+				if err := d.setToOrderedMapValue(ctx, value, &m, merged, 0); err != nil {
 					return nil, err
 				}
 			}
 			return m, nil
 		}
 		m := make(map[string]interface{}, len(n.Values))
+		fill := &mapFill{}
 		for _, value := range n.Values {
-			if err := d.setToMapValue(ctx, value, m); err != nil {
+			if err := d.setToMapValue(ctx, value, m, fill, 0); err != nil {
 				return nil, err
 			}
 		}
@@ -2407,11 +2607,17 @@ func (d *Decoder) keyToNodeMap(ctx context.Context, node ast.Node, ignoreMergeKe
 			if err != nil {
 				return nil, err
 			}
+			// A key of the mapping and a key of an earlier merge key
+			// win over a key that this merge key brings in, as
+			// mergeParts describes. A key of the mapping after the merge
+			// key replaces the merged key.
 			for k, v := range mergeMap {
 				if err := d.validateDuplicateKey(keyMap, k, v); err != nil {
 					return nil, err
 				}
-				keyToNodeMap[k] = v
+				if _, ok := keyToNodeMap[k]; !ok {
+					keyToNodeMap[k] = v
+				}
 			}
 		} else {
 			keyVal, err := d.nodeToValue(ctx, keyNode)
@@ -3018,6 +3224,7 @@ func (d *Decoder) decodeMapSlice(ctx context.Context, dst *MapSlice, src ast.Nod
 	}
 	mapSlice := MapSlice{}
 	keyMap := map[string]struct{}{}
+	merged := &mergedItems{}
 	for mapIter.Next() {
 		ctx := mapIter.ctx
 		key := mapIter.Key()
@@ -3027,15 +3234,21 @@ func (d *Decoder) decodeMapSlice(ctx context.Context, dst *MapSlice, src ast.Nod
 			if err != nil {
 				return err
 			}
-			var m MapSlice
-			if err := d.decodeMapSlice(mergeCtx, &m, value); err != nil {
+			parts, err := d.mergeParts(mergeCtx, value)
+			if err != nil {
 				return err
 			}
-			for _, v := range m {
-				if err := d.validateDuplicateKey(keyMap, v.Key, value); err != nil {
+			for _, part := range parts {
+				var m MapSlice
+				if err := d.decodeMapSlice(part.ctx, &m, part.node.(ast.Node)); err != nil {
 					return err
 				}
-				mapSlice = append(mapSlice, v)
+				for _, v := range m {
+					if err := d.validateDuplicateKey(keyMap, v.Key, value); err != nil {
+						return err
+					}
+				}
+				merged.appendMerged(&mapSlice, m)
 			}
 			continue
 		}
@@ -3050,7 +3263,7 @@ func (d *Decoder) decodeMapSlice(ctx context.Context, dst *MapSlice, src ast.Nod
 		if err != nil {
 			return err
 		}
-		mapSlice = append(mapSlice, MapItem{Key: k, Value: v})
+		merged.set(&mapSlice, MapItem{Key: k, Value: v}, 0)
 	}
 	*dst = mapSlice
 	return nil
@@ -3082,15 +3295,38 @@ func (d *Decoder) decodeMap(ctx context.Context, dst reflect.Value, src ast.Node
 			if err != nil {
 				return d.noted(found, err)
 			}
-			if err := d.decodeMap(mergeCtx, dst, value); err != nil {
+			parts, err := d.mergeParts(mergeCtx, value)
+			if err != nil {
 				return d.noted(found, err)
 			}
-			iter := dst.MapRange()
-			for iter.Next() {
-				if err := d.validateDuplicateKey(keyMap, iter.Key(), value); err != nil {
-					return d.noted(found, err)
+			// A key of the mapping and a key of an earlier mapping of the
+			// merge win, as mergeParts describes. A key of the mapping
+			// after the merge key replaces the merged key. With
+			// CollectErrors, the decoder reads every mapping of the merge
+			// before it stops at their errors.
+			failed := false
+			for _, part := range parts {
+				m := reflect.New(mapType).Elem()
+				if err := d.decodeMap(part.ctx, m, part.node.(ast.Node)); err != nil {
+					if !d.collectErrors {
+						return d.noted(found, err)
+					}
+					d.note(&found, err)
+					failed = true
+					continue
 				}
-				mapValue.SetMapIndex(iter.Key(), iter.Value())
+				iter := m.MapRange()
+				for iter.Next() {
+					if err := d.validateDuplicateKey(keyMap, iter.Key(), value); err != nil {
+						return d.noted(found, err)
+					}
+					if !mapValue.MapIndex(iter.Key()).IsValid() {
+						mapValue.SetMapIndex(iter.Key(), iter.Value())
+					}
+				}
+			}
+			if failed {
+				return d.noted(found, nil)
 			}
 			continue
 		}

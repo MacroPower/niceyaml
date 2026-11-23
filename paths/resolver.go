@@ -551,7 +551,8 @@ func (r *Resolver) matchesOf(p Path, found []match, absolute bool) ([]Match, err
 // `<<` merge key brings in at the place of that merge key. It lists the
 // entries of one merge key in the order its sources first name them.
 // Among entries that share a key, it lists the one that a path through
-// that key selects, so a later entry or a later merge wins. It leaves out
+// that key selects, so an entry of the mapping, a later entry of the
+// mapping, an earlier merge key, or an earlier source wins. It leaves out
 // a merge key, whose value is a source of entries. It also leaves out an
 // entry whose key does not have a name, as [Resolver.KeyName] reports it.
 // Like `[*]` on a node that is not a sequence, it does not select anything
@@ -570,16 +571,16 @@ func (r *Resolver) matchesOf(p Path, found []match, absolute bool) ([]Match, err
 //
 // The `..name` selector walks a mapping written inline under a `<<` key as
 // it walks any other value. It lists the entries of that mapping under the
-// `<<` selector, even when a later source or a key of the mapping itself
-// overrides them. A path through `<<` can select a real key with the text
+// `<<` selector, even when an earlier source or a key of the mapping
+// itself overrides them. A path through `<<` can select a real key with the text
 // `<<`. The `..name` selector then skips the merge key and its inline
 // mapping, because no path through `<<` reaches them. That real key can
 // belong to the mapping that holds the merge key, or a merge can bring it
 // in.
 //
-// The `..name` selector skips an entry that a later entry with the same
-// key shadows, whether the later entry belongs to its mapping or comes
-// from a later `<<` merge key. It also skips an entry whose key does not
+// The `..name` selector skips an entry that a later entry of its mapping
+// with the same key shadows. A `<<` merge key does not shadow an entry of
+// the mapping that holds it. It also skips an entry whose key does not
 // have a name, as [Resolver.KeyName] reports it, and everything below that
 // entry, because no path names them. An alias key that reads no anchor
 // does not have a name, and neither does one whose anchor holds a
@@ -625,11 +626,8 @@ func (r *Resolver) matchesOf(p Path, found []match, absolute bool) ([]Match, err
 // and of the mappings it merges, so an alias that one of them names counts
 // as on the path. A `..*` selector lists every value below the node it
 // starts from, so an alias it lists also counts as on the path, unless the
-// alias reads a reference document. A `..name` or `..*` selector looks up
-// the key of each entry that a `<<` merge key after it might override. An
-// alias of a reference document whose mapping holds that key thus counts as
-// on the path too. The error is an [*AliasError] that carries the alias, as
-// [Resolver.Node] returns one.
+// alias reads a reference document. The error is an [*AliasError] that
+// carries the alias, as [Resolver.Node] returns one.
 //
 // Wraps [ErrExcessiveAliasing] when aliases lead a selector to far more
 // nodes than the document holds. Wraps [ErrExcessiveMerging] when the key
@@ -711,13 +709,13 @@ func (r *Resolver) Content(node ast.Node) (ast.Node, error) {
 // KeyName returns the text a child selector matches key by, where key is
 // the key node of a mapping entry. [Path.Child] with that text selects
 // the value of that entry, unless a later entry in the mapping repeats
-// the key or a later `<<` merge key brings it in. A string key gives its
-// unquoted text, a block scalar key gives its content, and any other
-// scalar key gives its source text, such as 0x10 for an int. An alias
-// key, tagged or not, gives the text of the content of its anchor. That
-// anchor can lie in a reference document of [WithReferenceAnchors], as it
-// does for the decoder. The `?` of an explicit key and the anchors and
-// tags on key do not change its text.
+// the key. A `<<` merge key does not override an entry of the mapping. A
+// string key gives its unquoted text, a block scalar key gives its
+// content, and any other scalar key gives its source text, such as 0x10
+// for an int. An alias key, tagged or not, gives the text of the content
+// of its anchor. That anchor can lie in a reference document of
+// [WithReferenceAnchors], as it does for the decoder. The `?` of an
+// explicit key and the anchors and tags on key do not change its text.
 //
 // The bool result is false for a key that does not have text a selector
 // can match. Such a key is nil, a sequence, a mapping, or an alias key
@@ -751,13 +749,13 @@ func (r *Resolver) Entry(node ast.Node, name string) (*ast.MappingValueNode, err
 
 // EntryFinder finds entries in the mappings of one document, as
 // [Resolver.Entry] does, and weighs the reads of all its lookups together
-// against the limit behind [ErrExcessiveMerging]. A lookup of a key with
-// a `<<` merge key after it reads the sources of that merge key. Looking
-// up each key of such a mapping thus reads those sources once for each
-// key. A caller that looks up many entries should use one EntryFinder for
-// them. Those reads then stop at the limit rather than grow with the
-// square of the size of the document. An EntryFinder is not safe for
-// concurrent use.
+// against the limit behind [ErrExcessiveMerging]. A lookup of a key that a
+// mapping with a `<<` merge key does not write itself reads the sources of
+// that merge key. Looking up each key that such a mapping merges thus reads
+// those sources once for each key. A caller that looks up many entries
+// should use one EntryFinder for them. Those reads then stop at the limit
+// rather than grow with the square of the size of the document. An
+// EntryFinder is not safe for concurrent use.
 //
 // Create instances with [Resolver.EntryFinder].
 type EntryFinder struct {
@@ -779,7 +777,7 @@ func (r *Resolver) EntryFinder() *EntryFinder {
 // takes the reads of the EntryFinder past the limit. It also returns that
 // error for every later lookup that reads a merge key. A later lookup
 // that does not read a merge key still returns its entry, such as a
-// lookup of a key without a merge key after it.
+// lookup of a key that the mapping writes itself.
 func (f *EntryFinder) Entry(node ast.Node, name string) (*ast.MappingValueNode, error) {
 	content, err := f.resolver.selectable(node)
 	if err != nil {
@@ -838,10 +836,10 @@ func (r *Resolver) Anchor(alias *ast.AliasNode) (*ast.AnchorNode, error) {
 }
 
 // MergeSources returns the mappings the `<<` merge keys of the mapping at
-// node bring in, in the order the decoder applies them. The merge keys go
-// in document order, and the sources of one merge key go in sequence
-// order. A later source thus wins over an earlier one for a key both
-// define. MergeSources looks through the anchors, tags, and aliases on
+// node bring in, in the order of their precedence in a decode. The merge
+// keys go in document order, and the sources of one merge key go in
+// sequence order. An earlier source thus wins over a later one for a key
+// both define. MergeSources looks through the anchors, tags, and aliases on
 // node, on each merge value, and on each element of a sequence of
 // sources.
 //

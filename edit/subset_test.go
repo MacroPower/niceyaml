@@ -661,8 +661,7 @@ func TestNew_Unsupported(t *testing.T) {
 				"anchor that it reads, such as *x",
 		},
 		"mapping that merges itself after an own key": {
-			// Control: the source of the merge key holds the own entry p
-			// itself, which both readings keep, so the text holds no misread.
+			// The merge key reads the mapping that holds it.
 			before:    stringtest.LinesLF("k0: &a", "  p: 1", "  <<: *a"),
 			construct: edit.ConstructRecursiveAlias,
 			related:   []string{"$.k0"},
@@ -1440,7 +1439,6 @@ func TestNew_ByteOrderMark(t *testing.T) {
 
 			require.Error(t, err)
 			require.NotErrorIs(t, err, edit.ErrEngine)
-			require.NotErrorIs(t, err, edit.ErrMisread)
 			assert.True(t, niceyaml.IsInvalid(err))
 			assert.Contains(t, niceyaml.FormatError(err), tc.err)
 			assert.Contains(t, niceyaml.FormatError(err), "`-- remove the byte order mark")
@@ -2228,8 +2226,7 @@ func TestDoc_Apply_Unsupported(t *testing.T) {
 			want:   stringtest.LinesLF("m:", "  <<: {a: 1}", "  b: 5"),
 		},
 		"set of a new key of a source of a merge sequence under a tag, before which an own key holds the key": {
-			// Go-yaml's decoder merges the sequence under the tag, so the Set
-			// would make a precedence misread.
+			// Go-yaml's decoder merges the sequence under the tag.
 			before:    stringtest.LinesLF("s: &s {a: 1}", "m:", "  x: 2", "  <<: !!seq [*s]"),
 			fn:        set("$.s.x", 1),
 			construct: edit.ConstructMergeForm,
@@ -2254,7 +2251,6 @@ func TestDoc_Apply_Unsupported(t *testing.T) {
 			),
 		},
 		"set of a key of the later source of a merge sequence under a tag": {
-			// The Set would make an order misread.
 			before:    stringtest.LinesLF("s: &s {a: 1}", "t: &t {b: 1}", "m:", "  <<: !!seq [*s, *t]"),
 			fn:        set("$.t.a", 2),
 			construct: edit.ConstructMergeForm,

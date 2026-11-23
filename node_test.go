@@ -1171,7 +1171,7 @@ func TestNode_PathAt(t *testing.T) {
 				"5:13 -",
 			),
 		},
-		"entry a later merge key overrides": {
+		"entry before a merge key that brings in its key": {
 			input: stringtest.JoinLF(
 				"base: &b",
 				"  k: 1",
@@ -1190,7 +1190,9 @@ func TestNode_PathAt(t *testing.T) {
 				"2:0 $.m~",
 				"2:1 $.m",
 				"2:2 -",
-				"3:0 -",
+				"3:0 $.m.k~",
+				"3:3 $.m.k",
+				"3:6 -",
 				"4:0 $.m.<<~",
 				"4:4 $.m.<<",
 				"4:8 -",
@@ -8835,20 +8837,15 @@ func TestNode_Nodes(t *testing.T) {
 		assert.Equal(t, map[string]any{"item": "Kaffe", "price": uint64(35)}, got)
 	})
 
-	t.Run("a descent fails at an entry that a merge of a reference decides", func(t *testing.T) {
+	t.Run("a descent lists an entry beside a merge of a reference", func(t *testing.T) {
 		t.Parallel()
 
 		// The merge key of web brings in environment from the reference,
-		// which then wins over the entry that web writes before it. The
-		// descent fails at the alias, as a path through web.environment
-		// does. The merge key of api does not bring in environment, so api
-		// writes its own. The last text writes the merge key first, a
-		// control in which web writes its own environment.
+		// but the entry that web writes wins over it, before or after the
+		// merge key. The merge key of api does not bring in environment.
 		tcs := map[string]struct {
 			input string
-			// The paths of the nodes, or the error.
-			want []string
-			err  string
+			want  []string
 		}{
 			"entry before a merge key that brings in its key": {
 				input: stringtest.LinesLF(
@@ -8859,7 +8856,7 @@ func TestNode_Nodes(t *testing.T) {
 					"  db:",
 					"    environment: {A: 2}",
 				),
-				err: "compose.yaml:4:9: $.services.web.<<: resolve $..environment: alias reads a reference document: *base",
+				want: []string{"$.services.web.environment", "$.services.db.environment"},
 			},
 			"entry before a merge key that does not bring in its key": {
 				input: stringtest.LinesLF(
@@ -8896,13 +8893,6 @@ func TestNode_Nodes(t *testing.T) {
 					)))
 
 				nodes, err := doc.Nodes(paths.Current().Recursive("environment"))
-				if tc.err != "" {
-					require.ErrorIs(t, err, paths.ErrReferenceAlias)
-					require.EqualError(t, err, tc.err)
-
-					return
-				}
-
 				require.NoError(t, err)
 
 				got := make([]string, 0, len(nodes))
@@ -9011,7 +9001,7 @@ func TestNode_Nodes(t *testing.T) {
 			},
 			"many merge sources": {
 				input: yamltest.WideMerge(2000),
-				path:  "$..nope",
+				path:  "$.m.*",
 				err:   paths.ErrExcessiveMerging,
 			},
 		}
@@ -9059,14 +9049,14 @@ func TestNode_Nodes(t *testing.T) {
 			},
 			"many merge sources": {
 				input: yamltest.WideMerge(2000),
-				path:  "$..nope",
-				want:  0,
+				path:  "$.m.*",
+				want:  2001,
 			},
 			"many merge sources with references": {
 				input: yamltest.WideMerge(2000),
-				path:  "$..nope",
+				path:  "$.m.*",
 				refs:  "base: &base {port: 80}\n",
-				want:  0,
+				want:  2001,
 			},
 		}
 

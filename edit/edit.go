@@ -23,78 +23,31 @@ import (
 
 var (
 	// ErrEngine indicates an edit that the engine cannot write so that the
-	// text reads as the calls ask. It marks a bug in the engine, and it
-	// also marks go-yaml behavior that the engine cannot write around.
-	// Go-yaml's parser can refuse the edited text without its comments,
-	// misread it, or panic on it. Go-yaml's decoder can refuse
-	// it. Go-yaml's encoder can write text that go-yaml's decoder reads as
-	// another value. It can also write a character that YAML does not allow
-	// in a text, or both "\n" and "\r\n" line breaks for YAML of one kind.
-	// A call can also write a text that go-yaml's decoder reads otherwise
-	// than YAML does, in one of the ways that the Supported YAML section of
-	// the package documentation lists. The engine wrote that text, so the
+	// text reads as the calls ask. It marks a bug in the engine, and it also
+	// marks go-yaml behavior that the engine cannot write around. Go-yaml's
+	// parser can refuse the edited text without its comments, misread it, or
+	// panic on it. Go-yaml's decoder can refuse it. Go-yaml's encoder can
+	// write text that go-yaml's decoder reads as another value. It can also
+	// write a character that YAML does not allow in a text, or both "\n" and
+	// "\r\n" line breaks for YAML of one kind. A call can also move a byte
+	// order mark to a place where the tokenizer of the Source drops it, and
+	// go-yaml reads such a mark as text. The engine wrote that text, so the
 	// call fails with ErrEngine. The message names go-yaml in each of those
 	// cases. YAML has no escape for a byte that is not UTF-8, so a key with
-	// such a byte that a call writes for a name, as [Node.SetKey] does,
-	// keeps the byte as it is. That call fails with ErrEngine too, and the
-	// message names the byte. A call whose text go-yaml's parser refuses at a comment line
-	// right after the blank lines of a block scalar without text fails with
-	// a problem of the document instead. So does an Apply whose removal
-	// empties a block collection at the root and leaves its "{}" or "[]"
-	// above a comment line, which go-yaml's parser refuses. ErrEngine also
-	// indicates new text that differs from the model of the calls of an
-	// Apply, as the Transactions section of the package documentation
-	// describes. It also indicates a call that the model cannot take. The
-	// error binds where the user's text holds the value that differs, or at
-	// the place of the call, as the Errors section of the package
-	// documentation describes.
-	// An error that matches ErrEngine never matches [ErrUnsupported] or
-	// [ErrMisread].
+	// such a byte that a call writes for a name, as [Node.SetKey] does, keeps
+	// the byte as it is. That call fails with ErrEngine too, and the message
+	// names the byte. A call whose text go-yaml's parser refuses at a comment
+	// line right after the blank lines of a block scalar without text fails
+	// with a problem of the document instead. So does an Apply whose removal
+	// empties a block collection at the root and leaves its "{}" or "[]" above
+	// a comment line, which go-yaml's parser refuses. ErrEngine also indicates
+	// new text that differs from the model of the calls of an Apply, as the
+	// Transactions section of the package documentation describes. It also
+	// indicates a call that the model cannot take. The error binds where the
+	// user's text holds the value that differs, or at the place of the call,
+	// as the Errors section of the package documentation describes. An error
+	// that matches ErrEngine never matches [ErrUnsupported].
 	ErrEngine = errors.New("the engine cannot write this edit")
-
-	// ErrMisread indicates a document of valid YAML that go-yaml's decoder
-	// reads otherwise than YAML does, in one of the ways that the Supported
-	// YAML section of the package documentation lists. Only [New] fails with
-	// an error that matches ErrMisread. The problem names go-yaml and what
-	// it reads, and its detail says what the user can write so that go-yaml
-	// reads the text as YAML does. A text that go-yaml's parser refuses
-	// fails New with the error of the parse, as the Source gives it. That
-	// error does not match ErrMisread.
-	//
-	// The error of New holds a problem for each instance that New refuses,
-	// so one error can match both ErrMisread and [ErrUnsupported]. A program
-	// reads the kind of each problem from the Err field of each row that
-	// [go.jacobcolvin.com/niceyaml.Problems] yields.
-	//
-	// The user can fix the text, so [go.jacobcolvin.com/niceyaml.IsInvalid]
-	// reports true for the error. It reports true for a document that holds
-	// YAML outside the subset that the engine edits too. It reports false
-	// for a refusal that the program decides, such as one that matches
-	// [ErrUsage], [ErrValue], or [ErrProtected]. A program can write the
-	// paths and the values of its calls itself. Its server then classifies
-	// the errors of the package with IsInvalid alone:
-	//
-	//	switch {
-	//	case err == nil:
-	//	case niceyaml.IsInvalid(err):
-	//		status = 422 // the user rewrites the text as the detail says
-	//	default:
-	//		status = 500 // a bug in the program or the engine, among other faults
-	//	}
-	//
-	// A server that passes a path or a value of the request to a call lets
-	// the request decide more refusals. Such a server tests for ErrUsage,
-	// ErrValue, and ErrProtected before the default case. It also tests for
-	// an [*UnsupportedError] whose InValue field is true, which a value of
-	// the request with an anchor or a tag fails with. A typed key of the
-	// request that a [Node.SetKey] writes fails that way too when a decode
-	// reads it as another value, as 1.0 reads as 1.
-	//
-	// A call that writes such a text fails with an error that matches
-	// [ErrEngine] and not ErrMisread, because the engine wrote that text. So
-	// does go-yaml's encoder, and go-yaml's parser or decoder when it refuses
-	// the text that the engine wrote.
-	ErrMisread = errors.New("go-yaml misreads the document")
 
 	// ErrUsage indicates a call with an argument that the package does not
 	// take, whatever the document holds. [New] fails so with a nil Node, a
@@ -282,7 +235,7 @@ func (e *sentinelError) Is(target error) bool {
 
 	if e.sentinel == ErrValue {
 		switch target {
-		case ErrEngine, ErrMisread, ErrUnsupported, ErrUsage, ErrProtected, ErrNested, ErrEnded, ErrDisplaced:
+		case ErrEngine, ErrUnsupported, ErrUsage, ErrProtected, ErrNested, ErrEnded, ErrDisplaced:
 			return false
 		}
 	}
@@ -755,12 +708,11 @@ type Removal struct {
 // that selects the root, as [paths.Doc] does in [niceyaml.Node.At], gives
 // the root itself, so New takes that Node. So does a
 // [niceyaml.Node.NodeAt] that finds the root. New reads the document as
-// go-yaml reads it. It refuses some documents that go-yaml's decoder
-// reads otherwise than YAML does, with a problem that matches
-// [ErrMisread]. The Supported YAML section of the package
-// documentation lists them. It also refuses a document that holds YAML
-// outside the subset that the engine edits, as that section lists it, with
-// a problem that matches [ErrUnsupported]. The error of New holds a
+// the decode of niceyaml reads it, so it reads each `<<` merge key in the
+// order of YAML's merge spec. It refuses a document that holds YAML outside the
+// subset that the engine edits, as the Supported YAML section of the
+// package documentation lists it, with a problem that matches
+// [ErrUnsupported]. The error of New holds a
 // problem for each instance that it refuses. The problems stop at the
 // first anchor or tag on an empty value under which go-yaml's parser nests
 // the lines after it, as that section describes.
@@ -1048,15 +1000,13 @@ func headerEnd(src *niceyaml.Source, line int) int {
 // text must hold the values of a model of the calls, and each alias must
 // read the value that the model holds at its place. Otherwise the call
 // fails with [ErrEngine] at the first difference. A call also fails with
-// ErrEngine when it leaves a text that [New] refuses with [ErrMisread] for
-// its `<<` merge keys. So does a call that moves a byte order mark to a
-// place where the tokenizer of the Source drops it, as the package
-// documentation describes. A call that writes YAML that the engine does
-// not edit fails with [ErrUnsupported], as the Supported YAML section of
-// the package documentation lists it. A Set of a new key after a block
-// scalar that ends the text without a line break is one such call. The
-// lines that it adds change the string of the scalar. A read never fails
-// so.
+// ErrEngine when it moves a byte order mark to a place where the tokenizer
+// of the Source drops it, as the package documentation describes. A call
+// that writes YAML that the engine does not edit fails with
+// [ErrUnsupported], as the Supported YAML section of the package
+// documentation lists it. A Set of a new key after a block scalar that ends
+// the text without a line break is one such call. The lines that it adds
+// change the string of the scalar. A read never fails so.
 //
 // The method of such a call returns nil and leaves the Doc as it found it.
 // So the reads and the calls after it find the text before it. The Apply

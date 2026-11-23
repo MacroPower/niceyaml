@@ -262,8 +262,6 @@ func TestNew_Refusals(t *testing.T) {
 		// The construct of the first [*edit.UnsupportedError] of the error,
 		// or zero for an error that holds none.
 		construct edit.Construct
-		// Whether a problem matches edit.ErrMisread.
-		misread bool
 	}{
 		"one anchor defined twice": {
 			text:      stringtest.LinesLF("a: &x 1", "b: &x 2", "e: 1"),
@@ -279,27 +277,13 @@ func TestNew_Refusals(t *testing.T) {
 			},
 			construct: edit.ConstructReusedAnchor,
 		},
-		"misread before a construct": {
-			text:    stringtest.LinesLF("s: &s {a: 1}", "m: {a: 2, <<: *s}", "b: !t *s"),
-			summary: "this program does not edit this document, for 2 reasons",
+		"merge key after an own key beside a construct": {
+			// New takes the merge key, and refuses only the construct.
+			text: stringtest.LinesLF("s: &s {a: 1}", "m: {a: 2, <<: *s}", "b: !t *s"),
 			want: []string{
-				"2:5 go-yaml's decoder reads $.m.a from the merge key at 2:11, but the merge spec keeps the own " +
-					"entry written before it",
 				"3:4 this program does not edit a document with a tag or an anchor on an alias, such as !t *s",
 			},
 			construct: edit.ConstructAliasProperties,
-			misread:   true,
-		},
-		"construct before a misread": {
-			text:    stringtest.LinesLF("b: !t *s", "s: &s {a: 1}", "m: {a: 2, <<: *s}"),
-			summary: "this program does not edit this document, for 2 reasons",
-			want: []string{
-				"1:4 this program does not edit a document with a tag or an anchor on an alias, such as !t *s",
-				"3:5 go-yaml's decoder reads $.m.a from the merge key at 3:11, but the merge spec keeps the own " +
-					"entry written before it",
-			},
-			construct: edit.ConstructAliasProperties,
-			misread:   true,
 		},
 		"two constructs at one token": {
 			// At one site, the constructs come in the order of their
@@ -320,37 +304,6 @@ func TestNew_Refusals(t *testing.T) {
 				"2:1 this program does not edit a document with a tag or an anchor on a mapping key, such as &x",
 			},
 			construct: edit.ConstructKeyProperties,
-		},
-		"misread and a construct at one site": {
-			text:    stringtest.LinesLF("s: &s {a: 1}", "m: {!t a: 2, <<: *s}"),
-			summary: "this program does not edit this document, for 2 reasons",
-			want: []string{
-				"2:5 go-yaml's decoder reads $.m.a from the merge key at 2:14, but the merge spec keeps the own " +
-					"entry written before it",
-				"2:5 this program does not edit a document with a tag or an anchor on a mapping key, such as !t",
-			},
-			construct: edit.ConstructKeyProperties,
-			misread:   true,
-		},
-		"mark, misread, and construct at one site": {
-			text:    stringtest.LinesLF("---", "\ufeff!t a: 2", "<<: {a: 1}"),
-			summary: "this program does not edit this document, for 3 reasons",
-			want: []string{
-				"2:1 a byte order mark at 2:1 inside the document, where YAML does not allow it",
-				"2:1 go-yaml's decoder reads $.a from the merge key at 3:1, but the merge spec keeps the own " +
-					"entry written before it",
-				"2:1 this program does not edit a document with a tag or an anchor on a mapping key, such as !t",
-			},
-			construct: edit.ConstructKeyProperties,
-			misread:   true,
-		},
-		"misread and a tag that converts a collection": {
-			// YAML refuses the text, so New leaves out the misread at 2:5.
-			text: stringtest.LinesLF("s: &s {a: 1}", "m: {a: 2, <<: *s}", "a: !!str &x {b: 1}"),
-			want: []string{
-				"3:4 this program does not edit a document with a tag that converts a collection, such as !!str",
-			},
-			construct: edit.ConstructConvertingTag,
 		},
 		"two marks inside the document": {
 			text:    stringtest.LinesLF("---", "\ufeff", "\ufeff", "b: 1"),
@@ -451,18 +404,6 @@ func TestNew_Refusals(t *testing.T) {
 			},
 			construct: edit.ConstructAnchoredEmpty,
 		},
-		"misread and a tag of another kind": {
-			// Only a tag that converts a collection leaves out the misreads.
-			text:    stringtest.LinesLF("s: &s {a: 1}", "m: {a: 2, <<: *s}", "b: !!set {q: null}"),
-			summary: "this program does not edit this document, for 2 reasons",
-			want: []string{
-				"2:5 go-yaml's decoder reads $.m.a from the merge key at 2:11, but the merge spec keeps the own " +
-					"entry written before it",
-				"3:4 this program does not edit a document with the tag !!set",
-			},
-			construct: edit.ConstructTagKind,
-			misread:   true,
-		},
 	}
 
 	for name, tc := range tcs {
@@ -475,7 +416,6 @@ func TestNew_Refusals(t *testing.T) {
 			require.Error(t, err)
 			assert.True(t, niceyaml.IsInvalid(err))
 			require.NotErrorIs(t, err, edit.ErrEngine)
-			assert.Equal(t, tc.misread, errors.Is(err, edit.ErrMisread))
 
 			var unsupported *edit.UnsupportedError
 
@@ -499,9 +439,6 @@ func TestNew_Refusals(t *testing.T) {
 				errs = append(errs, p.Err)
 
 				assert.True(t, p.IsInvalid())
-				// A row matches one sentinel at most. The row of a byte order
-				// mark matches neither.
-				assert.False(t, errors.Is(p.Err, edit.ErrMisread) && errors.Is(p.Err, edit.ErrUnsupported))
 			}
 
 			assert.Equal(t, tc.want, got)
@@ -1676,7 +1613,7 @@ func TestDoc_Apply(t *testing.T) {
 		"set through a merge key of a reference document in an item after the removal of an earlier item": {
 			// The problem binds at the alias, under the path of the item that
 			// holds the merge entry in the user's text.
-			before: stringtest.LinesLF("z0: 0", "l:", "  - 0", "  - x: 1", "    <<: *r"),
+			before: stringtest.LinesLF("z0: 0", "l:", "  - 0", "  - y: 1", "    <<: *r"),
 			ref:    "r: &r {x: 9}\n",
 			path:   paths.Doc(),
 			fn:     both(at(paths.MustParse("$.l[0]"), remove), at(paths.MustParse("$.l[0].x"), set(2))),
@@ -1684,22 +1621,22 @@ func TestDoc_Apply(t *testing.T) {
 			errIs:  paths.ErrReferenceAlias,
 		},
 		"set through a merge key of a reference document after a move of its mapping into a sequence": {
-			before: stringtest.LinesLF("z0: 0", "m:", "  x: 1", "  <<: *r", "l:", "  - 0"),
+			before: stringtest.LinesLF("z0: 0", "m:", "  y: 1", "  <<: *r", "l:", "  - 0"),
 			ref:    "r: &r {x: 9}\n",
 			path:   paths.Doc(),
 			fn:     both(at(paths.Doc().Child("m"), move("$.l[1]")), at(paths.MustParse("$.l[1].x"), set(2))),
 			err:    "test.yaml:4:7: $.m: the edit sets $.l[1].x, which goes through <<: *r at 4:3",
 			errIs:  paths.ErrReferenceAlias,
 		},
-		"set of an own entry through a mapping that merges a mapping whose merge key reads a reference document": {
+		"set of an entry through a mapping that merges a mapping whose merge key reads a reference document": {
 			// The alias of the reference document lies in the merge entry of
 			// $.b.d, so the problem binds under that path, not under the path
 			// of the mapping whose lookup reads it.
 			before: stringtest.LinesLF("b:", "  d: &n2 {<<: *r, k1: 1}", "q:", "  a: 1", "  <<: *n2"),
 			ref:    "r: &r {a: 9, z: 9}\n",
 			path:   paths.Doc(),
-			fn:     at(paths.MustParse("$.q.a"), set(2)),
-			err:    "test.yaml:2:15: $.b.d: the edit sets $.q.a, which goes through <<: *r at 2:11",
+			fn:     at(paths.MustParse("$.q.z"), set(2)),
+			err:    "test.yaml:2:15: $.b.d: the edit sets $.q.z, which goes through <<: *r at 2:11",
 			errIs:  paths.ErrReferenceAlias,
 		},
 		"set through a node below a created key that a removal took away, after the removal of an earlier item": {
@@ -2886,7 +2823,7 @@ func TestDoc_Apply(t *testing.T) {
 			fn:   func(_ context.Context, n *edit.Node) error { return n.SetKey("close") },
 			err:  `test.yaml:5:3: $.spec.closes: the edit renames $.spec.closes to "close", but <<: *summer at 4:3 also brings in closes, so $.spec still reads closes`,
 		},
-		"rename in a merge source that hides an entry of the mapping": {
+		"rename in a merge source to the key of an own entry of the mapping": {
 			before: stringtest.LinesLF(
 				"summer: &summer",
 				`  shuts: "21:00"`,
@@ -2894,13 +2831,17 @@ func TestDoc_Apply(t *testing.T) {
 				`  closes: "19:00"`,
 				"  <<: *summer",
 			),
-			path:   paths.MustParse("$.summer.shuts"),
-			fn:     func(_ context.Context, n *edit.Node) error { return n.SetKey("closes") },
-			err:    "test.yaml:4:3: $.spec.closes: go-yaml's decoder reads $.spec.closes from the merge key at 5:3 in the edited text, but the merge spec keeps the own entry written before it, and the edit renames $.summer.shuts to \"closes\"",
-			engine: true,
+			path: paths.MustParse("$.summer.shuts"),
+			fn:   func(_ context.Context, n *edit.Node) error { return n.SetKey("closes") },
+			want: stringtest.LinesLF(
+				"summer: &summer",
+				"  closes: \"21:00\"",
+				"spec:",
+				"  closes: \"19:00\"",
+				"  <<: *summer",
+			),
 		},
-		"rename in a merge source that hides an entry of a moved mapping": {
-			// The message names the entry by its path in the edited text (fix19 B7).
+		"rename in a merge source to the key of an own entry of a moved mapping": {
 			before: stringtest.LinesLF(
 				"summer: &summer",
 				`  shuts: "21:00"`,
@@ -2908,13 +2849,17 @@ func TestDoc_Apply(t *testing.T) {
 				`  closes: "19:00"`,
 				"  <<: *summer",
 			),
-			path:   paths.Doc(),
-			fn:     both(at(spec, move("$.z")), at(paths.MustParse("$.summer.shuts"), rename("closes"))),
-			err:    "test.yaml:4:3: $.spec.closes: go-yaml's decoder reads $.z.closes from the merge key at 5:3 in the edited text, but the merge spec keeps the own entry written before it, and the edit renames $.summer.shuts to \"closes\"",
-			engine: true,
+			path: paths.Doc(),
+			fn:   both(at(spec, move("$.z")), at(paths.MustParse("$.summer.shuts"), rename("closes"))),
+			want: stringtest.LinesLF(
+				"summer: &summer",
+				"  closes: \"21:00\"",
+				"z:",
+				"  closes: \"19:00\"",
+				"  <<: *summer",
+			),
 		},
-		"rename in a merge source that hides an entry of a mapping moved in its sequence": {
-			// The message names the entry by its path in the edited text (fix19 B7).
+		"rename in a merge source to the key of an own entry of a mapping moved in its sequence": {
 			before: stringtest.LinesLF(
 				"summer: &summer",
 				"  shuts: 21",
@@ -2928,11 +2873,16 @@ func TestDoc_Apply(t *testing.T) {
 				at(paths.MustParse("$.k[0]"), move("$.k[2]")),
 				at(paths.MustParse("$.summer.shuts"), rename("closes")),
 			),
-			err:    "test.yaml:4:5: $.k[0].closes: go-yaml's decoder reads $.k[1].closes from the merge key at 5:5 in the edited text, but the merge spec keeps the own entry written before it, and the edit renames $.summer.shuts to \"closes\"",
-			engine: true,
+			want: stringtest.LinesLF(
+				"summer: &summer",
+				"  closes: 21",
+				"k:",
+				"  - 0",
+				"  - closes: 19",
+				"    <<: *summer",
+			),
 		},
-		"rename in a merge source that hides an entry of a mapping moved into a block sequence": {
-			// The message names the entry by its path in the edited text (fix19 B7).
+		"rename in a merge source to the key of an own entry of a mapping moved into a block sequence": {
 			before: stringtest.LinesLF(
 				"summer: &summer",
 				"  shuts: 21",
@@ -2942,13 +2892,18 @@ func TestDoc_Apply(t *testing.T) {
 				"l:",
 				"  - 0",
 			),
-			path:   paths.Doc(),
-			fn:     both(at(spec, move("$.l[1]")), at(paths.MustParse("$.summer.shuts"), rename("closes"))),
-			err:    "test.yaml:4:3: $.spec.closes: go-yaml's decoder reads $.l[1].closes from the merge key at 5:3 in the edited text, but the merge spec keeps the own entry written before it, and the edit renames $.summer.shuts to \"closes\"",
-			engine: true,
+			path: paths.Doc(),
+			fn:   both(at(spec, move("$.l[1]")), at(paths.MustParse("$.summer.shuts"), rename("closes"))),
+			want: stringtest.LinesLF(
+				"summer: &summer",
+				"  closes: 21",
+				"l:",
+				"  - 0",
+				"  - closes: 19",
+				"    <<: *summer",
+			),
 		},
-		"rename in a merge source that hides a key that starts with a dash in a mapping moved into a block sequence": {
-			// The message names the entry by its path in the edited text (fix19 B7).
+		"rename in a merge source to an own key that starts with a dash in a mapping moved into a block sequence": {
 			before: stringtest.LinesLF(
 				"summer: &summer",
 				"  shuts: 21",
@@ -2958,13 +2913,18 @@ func TestDoc_Apply(t *testing.T) {
 				"l:",
 				"  - 0",
 			),
-			path:   paths.Doc(),
-			fn:     both(at(spec, move("$.l[1]")), at(paths.MustParse("$.summer.shuts"), rename("-closes"))),
-			err:    "test.yaml:4:3: $.spec.-closes: go-yaml's decoder reads $.l[1].-closes from the merge key at 5:3 in the edited text, but the merge spec keeps the own entry written before it, and the edit renames $.summer.shuts to \"-closes\"",
-			engine: true,
+			path: paths.Doc(),
+			fn:   both(at(spec, move("$.l[1]")), at(paths.MustParse("$.summer.shuts"), rename("-closes"))),
+			want: stringtest.LinesLF(
+				"summer: &summer",
+				"  -closes: 21",
+				"l:",
+				"  - 0",
+				"  - -closes: 19",
+				"    <<: *summer",
+			),
 		},
-		"rename in a merge source that hides a key that starts with a dash in a mapping moved in its sequence": {
-			// The message names the entry by its path in the edited text (fix19 B7).
+		"rename in a merge source to an own key that starts with a dash in a mapping moved in its sequence": {
 			before: stringtest.LinesLF(
 				"summer: &summer",
 				"  shuts: 21",
@@ -2978,8 +2938,14 @@ func TestDoc_Apply(t *testing.T) {
 				at(paths.MustParse("$.k[0]"), move("$.k[2]")),
 				at(paths.MustParse("$.summer.shuts"), rename("-closes")),
 			),
-			err:    "test.yaml:4:5: $.k[0].-closes: go-yaml's decoder reads $.k[1].-closes from the merge key at 5:5 in the edited text, but the merge spec keeps the own entry written before it, and the edit renames $.summer.shuts to \"-closes\"",
-			engine: true,
+			want: stringtest.LinesLF(
+				"summer: &summer",
+				"  -closes: 21",
+				"k:",
+				"  - 0",
+				"  - -closes: 19",
+				"    <<: *summer",
+			),
 		},
 		"rename in a merge source of a mapping that starts with its merge key, moved into a block sequence": {
 			before: stringtest.LinesLF(
@@ -3052,24 +3018,21 @@ func TestDoc_Apply(t *testing.T) {
 			before: stringtest.LinesLF("d: &d {j: 1}", "m:", "  a:", "    s: *d", "  <<: *d"),
 			path:   paths.Doc(),
 			fn:     at(paths.MustParse("$.m.a.s.a"), set("q")),
-			err:    "test.yaml:3:3: $.m.a: go-yaml's decoder reads $.m.a from the merge key at 5:3 in the edited text, but the merge spec keeps the own entry written before it, and the edit sets $.m.a.s.a",
-			engine: true,
+			want:   stringtest.LinesLF("d: &d {j: 1, a: q}", "m:", "  a:", "    s: *d", "  <<: *d"),
 		},
 		"new key through the anchor that a later merge key of a mapping brings in": {
 			before: stringtest.LinesLF("d: &d {j: 1}", "m:", "  a:", "    s: *d", "  <<: *d"),
 			path:   paths.Doc(),
 			fn:     at(paths.MustParse("$.d.a"), set("q")),
-			err:    "test.yaml:3:3: $.m.a: go-yaml's decoder reads $.m.a from the merge key at 5:3 in the edited text, but the merge spec keeps the own entry written before it, and the edit sets $.d.a",
-			engine: true,
+			want:   stringtest.LinesLF("d: &d {j: 1, a: q}", "m:", "  a:", "    s: *d", "  <<: *d"),
 		},
 		"new key of an anchored entry that a later merge key of its mapping brings in": {
 			before: stringtest.LinesLF("r1:", "  a: &x1 {c: q}", "  <<: *x1"),
 			path:   paths.Doc(),
 			fn:     at(paths.MustParse("$.r1.a.a"), set("z")),
-			err:    "test.yaml:2:3: $.r1.a: go-yaml's decoder reads $.r1.a from the merge key at 3:3 in the edited text, but the merge spec keeps the own entry written before it, and the edit sets $.r1.a.a",
-			engine: true,
+			want:   stringtest.LinesLF("r1:", "  a: &x1 {c: q, a: z}", "  <<: *x1"),
 		},
-		"new key through an alias that a later merge key brings in over the alias, then a rename of the key": {
+		"new key through an alias that a later merge key brings in too, then a rename of the key": {
 			// The message names the entry by its path in the edited text (fix19 B7).
 			before: stringtest.LinesLF("x: &x {b: q}", "r1: *x", "<<: *x"),
 			path:   paths.Doc(),
@@ -3078,10 +3041,9 @@ func TestDoc_Apply(t *testing.T) {
 				at(paths.MustParse("$.z.z"), set(5)),
 				at(paths.Doc().Child("z"), rename("n")),
 			),
-			err:    "2:1: $.r1: go-yaml's decoder reads $.z from the merge key at 3:1 in the edited text, but the merge spec keeps the own entry written before it, and the edit sets $.z.z",
-			engine: true,
+			err: `test.yaml:2:1: $.r1: the edit renames $.z to "n", but <<: *x at 3:1 also brings in z, so $ still reads z`,
 		},
-		"new key of an anchored entry that a later merge key brings in over the entry, then a removal of the key": {
+		"new key of an anchored entry that a later merge key brings in too, then a removal of the key": {
 			// The message names the entry by its path in the edited text (fix19 B7).
 			before: stringtest.LinesLF("r0: &x0", "  c: 1", "<<: *x0"),
 			path:   paths.Doc(),
@@ -3090,10 +3052,9 @@ func TestDoc_Apply(t *testing.T) {
 				at(paths.MustParse("$.z.z"), set("y\n z\n")),
 				at(paths.Doc().Child("z"), remove),
 			),
-			err:    "1:1: $.r0: go-yaml's decoder reads $.z from the merge key at 3:1 in the edited text, but the merge spec keeps the own entry written before it, and the edit sets $.z.z",
-			engine: true,
+			err: "test.yaml:1:1: $.r0: the edit removes $.z, but <<: *x0 at 3:1 also brings in z, so $ still reads z",
 		},
-		"new key through a renamed alias that a later merge key brings in over the alias, with a value that go-yaml's encoder misreads": {
+		"new key through a renamed alias that a later merge key brings in too, with a value that go-yaml's encoder misreads": {
 			// The call creates the place, so the problem binds at the nearest value above it that the user
 			// wrote, under its path (fix19 G1-1): at the alias, as an error at the value of the renamed key
 			// binds (fix20 B2), with the path of the place in the anchored mapping in the detail (fix19 F6).
@@ -3107,7 +3068,7 @@ func TestDoc_Apply(t *testing.T) {
 				"\n|-- report this to the authors of cafe\n`-- the edit sets $.z.z",
 			engine: true,
 		},
-		"new key that a later merge key brings in over the entry of an earlier set, then a rename of the key": {
+		"new key that a later merge key brings in too after an earlier set, then a rename of the key": {
 			before: stringtest.LinesLF("r0: &x0", "  <<: &x1 {}", "<<: [*x0, *x1]"),
 			path:   paths.Doc(),
 			fn: both(
@@ -3118,7 +3079,7 @@ func TestDoc_Apply(t *testing.T) {
 			),
 			err: `test.yaml:3:1: $: the edit renames $.r0 to "n", which changes the keys of a merge through a merge key that merges a sequence of aliases, and cafe does not change the keys of such a merge`,
 		},
-		"new key that a later merge key brings in over the entry of an earlier set, then a removal of the key": {
+		"new key that a later merge key brings in too after an earlier set, then a removal of the key": {
 			before: stringtest.LinesLF("r0: &x0", "  <<: &x1 {}", "<<: [*x0, *x1]"),
 			path:   paths.Doc(),
 			fn: both(
@@ -3338,7 +3299,7 @@ func TestDoc_Apply(t *testing.T) {
 			},
 			err: "test.yaml:3:5: $: the edit moves $.r0 to $.z, after which the merge key at 3:1 of $ comes before the anchor that it reads, and cafe does not write a copy of a value at its alias",
 		},
-		"value below an entry that a rename in a merged mapping hides, then a removal of the merged entry": {
+		"value below an entry that a rename in a merged mapping brings in too, then a removal of the merged entry": {
 			before: stringtest.LinesLF("n: &x", "  c: 1", "<<: *x"),
 			path:   paths.Doc(),
 			fn: both(
@@ -3346,10 +3307,9 @@ func TestDoc_Apply(t *testing.T) {
 				at(paths.MustParse("$.n.c"), rename("n")),
 				at(paths.Doc().Child("n"), remove),
 			),
-			err:    `1:1: $.n: go-yaml's decoder reads $.n from the merge key at 3:1 in the edited text, but the merge spec keeps the own entry written before it, and the edit renames $.n.c to "n"`,
-			engine: true,
+			err: "test.yaml:1:1: $.n: the edit removes $.n, but <<: *x at 3:1 also brings in n, so $ still reads n",
 		},
-		"value below an entry that a rename in a merged mapping hides, then a rename of the merged entry": {
+		"value below an entry that a rename in a merged mapping brings in too, then a rename of the merged entry": {
 			before: stringtest.LinesLF("n: &x", "  c: 1", "<<: *x"),
 			path:   paths.Doc(),
 			fn: both(
@@ -3357,10 +3317,9 @@ func TestDoc_Apply(t *testing.T) {
 				at(paths.MustParse("$.n.c"), rename("n")),
 				at(paths.Doc().Child("n"), rename("c")),
 			),
-			err:    `1:1: $.n: go-yaml's decoder reads $.n from the merge key at 3:1 in the edited text, but the merge spec keeps the own entry written before it, and the edit renames $.n.c to "n"`,
-			engine: true,
+			err: `test.yaml:1:1: $.n: the edit renames $.n to "c", but <<: *x at 3:1 also brings in n, so $ still reads n`,
 		},
-		"node on an entry that a rename in a merged mapping hides, then a set of the node": {
+		"node on an entry that a rename in a merged mapping brings in too, then a set of the node": {
 			before: stringtest.LinesLF("n: &x", "  c: 1", "<<: *x"),
 			path:   paths.Doc().Child("n"),
 			fn: func(ctx context.Context, n *edit.Node) error {
@@ -3371,8 +3330,8 @@ func TestDoc_Apply(t *testing.T) {
 
 				return n.Set(ctx, 3)
 			},
-			err:    `1:1: $.n: go-yaml's decoder reads $.n from the merge key at 3:1 in the edited text, but the merge spec keeps the own entry written before it, and the edit renames $.n.c to "n"`,
-			engine: true,
+			err: "test.yaml:3:1: $: the edit sets $.n, which leaves <<: *x at 3:1 reading a value other than a mapping, " +
+				"and cafe does not merge a value other than a mapping",
 		},
 		"document that its own decode rejects": {
 			before: mergeLists(9),
@@ -3515,8 +3474,7 @@ func TestDoc_Apply(t *testing.T) {
 				at(paths.MustParse("$.s.k"), set(5)),
 				at(paths.MustParse("$.s.k"), remove),
 			),
-			err:    "3:3: $.m.k: go-yaml's decoder reads $.m.k from the merge key at 4:3 in the edited text, but the merge spec keeps the own entry written before it, and the edit sets $.s.k",
-			engine: true,
+			want: stringtest.LinesLF("s: &s {}", "m:", "  k:", "    a:", "      a: v", "  <<: *s"),
 		},
 		"set of a value whose keys repeat a name through a moved alias of a merge source, before a removal of the alias": {
 			before: stringtest.JoinCRLF("<<: &x0 {}", "# c", "r1: *x0", ""),
@@ -4797,16 +4755,14 @@ func TestDoc_Apply(t *testing.T) {
 				want: stringtest.LinesLF("extra:", "  <<: *deep", "  cost: 3"),
 			},
 			"reads an own key before a merge key of the alias": {
-				// The merge key brings in the key of the own entry, which then
-				// wins over it, so the path selects an entry of the reference
-				// document.
+				// The merge key brings in the key of the own entry, but the own
+				// entry wins over it, so the path selects the own entry.
 				before: stringtest.LinesLF("extra:", "  price: 9", "  <<: *kaffe"),
 				path:   paths.Doc(),
 				fn: both(
-					at(paths.MustParse("$.extra.price"), refusedRead),
-					at(paths.MustParse("$.extra.price"), reads(text, "")),
+					at(paths.MustParse("$.extra.price"), reads(text, "9")),
 					at(paths.MustParse("$.extra"), decodes(map[string]any{
-						"item": "Kaffe", "price": uint64(35),
+						"item": "Kaffe", "price": uint64(9),
 					})),
 				),
 				want: stringtest.LinesLF("extra:", "  price: 9", "  <<: *kaffe"),
@@ -4815,16 +4771,14 @@ func TestDoc_Apply(t *testing.T) {
 				before: stringtest.LinesLF("extra:", "  price: 9", "  <<: *kaffe"),
 				path:   paths.Doc(),
 				fn:     at(paths.MustParse("$.extra.price"), set(10)),
-				err: "test.yaml:3:7: $.extra: cafe.jacobcolvin.com/v1 sets $.extra.price, " +
-					"which goes through <<: *kaffe at 3:3, a merge key that reads the reference document ref.yaml, so that document decides which names $.extra reads",
+				want:   stringtest.LinesLF("extra:", "  price: 10", "  <<: *kaffe"),
 			},
 			"Apply at an own key before a merge key of the alias": {
 				before: stringtest.LinesLF("extra:", "  price: 9", "  <<: *kaffe"),
 				path:   paths.MustParse("$.extra.price"),
 				fn:     set(10),
-				err: "test.yaml:3:7: $.extra: cafe.jacobcolvin.com/v1 reads $.extra.price, " +
-					"which goes through <<: *kaffe at 3:3, a merge key that reads the reference document ref.yaml, so that document decides which names $.extra reads",
-				calls: []string{},
+				want:   stringtest.LinesLF("extra:", "  price: 10", "  <<: *kaffe"),
+				calls:  []string{"$.extra.price"},
 			},
 			"set of an own key before a merge key of the alias that lacks it": {
 				// The merge key does not bring in size, so the path selects the
@@ -4848,24 +4802,20 @@ func TestDoc_Apply(t *testing.T) {
 					"decides which names $.extra reads",
 			},
 			"Apply of a descent below an own key before a merge key of the alias": {
-				// The merge key brings in price, so the descent fails at the
-				// alias, as a path through price does.
+				// The merge key brings in price, but the own entry wins over it,
+				// so the descent reaches x.
 				before: stringtest.LinesLF("m:", "  price: {x: 1}", "  <<: *kaffe"),
 				path:   paths.MustParse("$..x"),
 				fn:     set(5),
-				err: "test.yaml:3:7: $.m: cafe.jacobcolvin.com/v1 reads $..x, which goes through <<: *kaffe at 3:3, " +
-					"a merge key that reads the reference document ref.yaml, so that document decides which names " +
-					"$.m reads",
-				calls: []string{},
+				want:   stringtest.LinesLF("m:", "  price: {x: 5}", "  <<: *kaffe"),
+				calls:  []string{"$.m.price.x"},
 			},
 			"Apply of every node with an own key before a merge key of the alias": {
 				before: stringtest.LinesLF("m:", "  price: {x: 1}", "  <<: *kaffe"),
 				path:   paths.MustParse("$..*"),
 				fn:     reads(exists, true),
-				err: "test.yaml:3:7: $.m: cafe.jacobcolvin.com/v1 reads $..*, which goes through <<: *kaffe at 3:3, " +
-					"a merge key that reads the reference document ref.yaml, so that document decides which names " +
-					"$.m reads",
-				calls: []string{},
+				want:   stringtest.LinesLF("m:", "  price: {x: 1}", "  <<: *kaffe"),
+				calls:  []string{"$.m", "$.m.price", "$.m.price.x"},
 			},
 			"Apply of a descent through services, one of which merges the alias": {
 				before: stringtest.LinesLF(
@@ -4878,9 +4828,15 @@ func TestDoc_Apply(t *testing.T) {
 				),
 				path: paths.MustParse("$..environment"),
 				fn:   at(paths.Current().Child("A"), set(3)),
-				err: "test.yaml:4:9: $.services.web: cafe.jacobcolvin.com/v1 reads $..environment, " +
-					"which goes through <<: *env at 4:5, a merge key that reads the reference document ref.yaml, so that document decides which names $.services.web reads",
-				calls: []string{},
+				want: stringtest.LinesLF(
+					"services:",
+					"  web:",
+					"    environment: {A: 3}",
+					"    <<: *env",
+					"  db:",
+					"    environment: {A: 3}",
+				),
+				calls: []string{"$.services.web.environment", "$.services.db.environment"},
 			},
 			"Apply of a descent below an own key after a merge key of the alias": {
 				// A control: the entry after the merge key wins over every entry
@@ -4892,16 +4848,13 @@ func TestDoc_Apply(t *testing.T) {
 				calls:  []string{"$.m.own.x"},
 			},
 			"Apply of a descent that passes a merge key of the alias that decides nothing": {
-				// The merge key of the root comes before c, so only the merge
-				// key of c decides an entry that the descent selects, and the
-				// problem binds there, as niceyaml's Node.Nodes binds it.
+				// The own entry item of c wins over the entry of the merge key
+				// of c, so the descent reaches it.
 				before: stringtest.LinesLF("<<: *codes", "c:", "  item: 1", "  <<: *kaffe"),
 				path:   paths.MustParse("$..item"),
 				fn:     set(5),
-				err: "test.yaml:4:7: $.c: cafe.jacobcolvin.com/v1 reads $..item, which goes through <<: *kaffe at 4:3, " +
-					"a merge key that reads the reference document ref.yaml, so that document decides which names " +
-					"$.c reads",
-				calls: []string{},
+				want:   stringtest.LinesLF("<<: *codes", "c:", "  item: 5", "  <<: *kaffe"),
+				calls:  []string{"$.c.item"},
 			},
 			"Apply of each item, where the merge key of a later item decides": {
 				before: "s: [{<<: *codes, item: 1}, {<<: *kaffe}]\n",
@@ -13364,6 +13317,380 @@ func TestDoc_Apply_duplicateKeys(t *testing.T) {
 		bound = d.Node().Bind(located.With(niceyaml.AtPath(paths.Doc().Child("o"))))
 		assert.Contains(t, niceyaml.FormatError(bound), want)
 	})
+}
+
+func TestNew_MergeOrder(t *testing.T) {
+	t.Parallel()
+
+	// Each text holds `<<` merge keys whose order go-yaml's decoder reads
+	// otherwise than YAML's merge spec. New takes the text, and a read of
+	// the root returns what niceyaml's decode of the whole document holds,
+	// which follows the merge spec. A text that also holds a construct
+	// outside the subset fails New with ErrUnsupported alone.
+	tcs := map[string]struct {
+		text string
+		// The texts of the reference documents of the Source.
+		refs []string
+		// Whether the Source allows duplicate keys.
+		dup bool
+	}{
+		"own key before a merge key, then a merge key of a mapping that merges a reference document": {
+			text: stringtest.LinesLF("x: &x {a: 2}", "y: &y {<<: *r}", "m:", "  a: 1", "  <<: *x", "  <<: *y"),
+			refs: []string{"r: &r {a: 9, k: 1}\n"},
+			dup:  true,
+		},
+		"key that two mappings bring in, before a mapping that merges a reference document": {
+			text: stringtest.LinesLF("x: &x {a: 1}", "y: &y {a: 2}", "z: &z {<<: *r}", "m:", "  <<: [*x, *y, *z]"),
+			refs: []string{"r: &r {a: 9, k: 1}\n"},
+		},
+		"key that two mappings bring in, before a later merge key of a mapping that merges a reference document": {
+			text: stringtest.LinesLF("x: &x {a: 1}", "y: &y {a: 2}", "z: &z {<<: *r}", "m:", "  <<: [*x, *y]",
+				"  <<: *z"),
+			refs: []string{"r: &r {a: 9, k: 1}\n"},
+			dup:  true,
+		},
+		"key that two mappings bring in, before a later merge key that brings it in too": {
+			text: stringtest.LinesLF("x: &x {a: 1}", "y: &y {a: 2}", "z: &z {a: 3}", "m:", "  <<: [*x, *y]",
+				"  <<: *z"),
+			dup: true,
+		},
+		"key that two mappings bring in, before a later merge key without it": {
+			text: stringtest.LinesLF("x: &x {a: 1}", "y: &y {a: 2}", "z: &z {b: 3}", "m:", "  <<: [*x, *y]",
+				"  <<: *z"),
+			dup: true,
+		},
+		"key that two mappings bring in after an alias of a reference document": {
+			text: stringtest.LinesLF("l: &l {a: 1}", "l2: &l2 {a: 2}", "m:", "  <<: [*r, *l, *l2]"),
+			refs: []string{"r: &r {a: 9, z: 9}\n"},
+		},
+		"key that two mappings bring in after a mapping that merges a reference document": {
+			text: stringtest.LinesLF("z: &z {<<: *r}", "l: &l {a: 1}", "l2: &l2 {a: 2}", "m:", "  <<: [*z, *l, *l2]"),
+			refs: []string{"r: &r {a: 9}\n"},
+		},
+		"key that two mappings bring in, with an alias of a reference document between them": {
+			text: stringtest.LinesLF("l: &l {a: 1}", "l2: &l2 {a: 2}", "m:", "  <<: [*l, *r, *l2]"),
+			refs: []string{"r: &r {a: 9}\n"},
+		},
+		"key that two mappings bring in under an alias key": {
+			text: stringtest.LinesLF("s: &s {a: 1}", "t: &t {a: 2}", "m: &m {z: 1}", "!!str *m :", "  b:",
+				"    <<: [*s, *t]"),
+		},
+		"own key before a merge key under an alias key": {
+			text: stringtest.LinesLF("s: &s {a: 1}", "m: &m {z: 1}", "*m :", "  b:", "    a: 0", "    <<: *s"),
+		},
+		"own key before a merge key whose alias reads a sequence of mappings": {
+			text: stringtest.LinesLF("l: &l", "  - a: 1", "m:", "  a: 0", "  <<: *l"),
+		},
+		"key that two mappings of a sequence that an alias of a merge key reads bring in": {
+			text: stringtest.LinesLF("l: &l [{a: 1}, {a: 2}]", "m:", "  <<: *l"),
+		},
+		"own key of another text before a merge key that brings in the key": {
+			text: stringtest.LinesLF("s: &s {1: x}", "m:", "  0x1: y", "  <<: *s"),
+		},
+		"own null key before a merge key that brings in a null key": {
+			text: stringtest.LinesLF("s: &s {~: x}", "m:", "  null: y", "  <<: *s"),
+		},
+		"own key before a merge key whose source writes an alias of the key": {
+			text: stringtest.LinesLF("&k True: 1", "<<: {*k : 2}"),
+		},
+		"own key before a merge key whose source holds a key of the same text that reads apart": {
+			text: stringtest.LinesLF("m:", `  "~": y`, "  <<: *s"),
+			refs: []string{"s: &s {~: x}\n"},
+		},
+		"own key before a merge key and again after it": {
+			text: stringtest.LinesLF("s: &s {a: 1}", "m:", "  a: 2", "  <<: *s", "  a: 3"),
+			dup:  true,
+		},
+		"own key before two merge keys that bring in the key": {
+			text: stringtest.LinesLF("s: &s {a: 1}", "t: &t {a: 5}", "m:", "  a: 2", "  <<: *s", "  <<: *t"),
+			dup:  true,
+		},
+		"own key written twice before a merge key that brings in the key": {
+			text: stringtest.LinesLF("s: &s {a: 1}", "m:", "  a: 2", "  a: 3", "  <<: *s"),
+			dup:  true,
+		},
+		"own key before a merge key that brings in the key": {
+			text: stringtest.LinesLF("s: &s {a: 1}", "m: {a: 2, <<: *s}"),
+		},
+		"own key after a merge key that brings in the key": {
+			text: stringtest.LinesLF("s: &s {a: 1}", "m: {<<: *s, a: 2}"),
+		},
+		"key that two sources of a merge key bring in": {
+			text: stringtest.LinesLF("a: &a {k: 1}", "b: &b {k: 2}", "m:", "  <<: [*a, *b]"),
+		},
+		"key that two sources of a merge key bring in, which the mapping writes after it": {
+			text: stringtest.LinesLF("a: &a {k: 1}", "b: &b {k: 2}", "m:", "  <<: [*a, *b]", "  k: 3"),
+		},
+		"own key before a merge key that brings in the own key of another mapping": {
+			text: stringtest.LinesLF("k0: &a", "  p: 1", "  <<: *a", "k1:", "  p: 2", "  <<: *a"),
+		},
+		"keys that two sources of a merge key bring in, in the order of the later source": {
+			text: stringtest.LinesLF("a: &a {k: 1, j: 1}", "b: &b {j: 2, k: 2}", "m:", "  <<: [*a, *b]"),
+		},
+		"own key before a merge key whose mapping has a tag": {
+			text: "m: {a: 2, <<: !!map {a: 1}}\n",
+		},
+		"own key before a merge key whose sequence of aliases has a tag": {
+			text: stringtest.LinesLF("s: &s {a: 1}", "m: {a: 2, <<: !!seq [*s]}"),
+		},
+		"key that two sources of a merge key bring in, one of them under a tag": {
+			text: stringtest.LinesLF("a: &a {x: 1}", "b: &b {<<: !!map {x: 2}}", "m: {<<: [*a, *b]}"),
+		},
+		"key that a later source of a merge key brings in through a merge key of its own": {
+			text: stringtest.LinesLF(
+				"x: &x {a: 1}", "y: &y {a: 2}", "v: &v {a: 3}", "z: &z {<<: *v}", "m:", "  <<: [*x, *y, *z]",
+			),
+		},
+		"key that the first source of a merge key brings in through a merge key of its own": {
+			text: stringtest.LinesLF("v: &v {a: 3}", "z: &z {<<: *v}", "y: &y {a: 2}", "m:", "  <<: [*z, *y]"),
+		},
+		"own key before a merge key of an anchor that a later anchor reuses": {
+			text: stringtest.LinesLF("r0: &x0", "  <<: &x0 {c: x}", "r1:", "  c: 1", "  <<: *x0"),
+		},
+		"own key before a merge key of an anchor that the mapping of the anchor defines again": {
+			text: stringtest.LinesLF("b: &k0 {c: 1, b: &k0 ~}", "<<: *k0"),
+		},
+		"key that two sources of a merge key bring in, one an alias of an anchor that a later anchor reuses": {
+			text: stringtest.LinesLF("r0: &x0", "  <<: &x0 {c: x}", "r1:", "  <<: [*x0, {c: 1}]"),
+		},
+		"own key before a merge key after a byte order mark at the start of the file": {
+			text: stringtest.LinesLF("\ufeffa: 2", "<<: {a: 1}"),
+		},
+		"own keys before merge keys on two lines": {
+			text: stringtest.LinesLF("s: &s {k: 1}", "m: {k: 2, <<: *s}", "n: {k: 3, <<: *s}"),
+		},
+		"own key before a merge key after a construct of the subset": {
+			text: stringtest.LinesLF("a: &a [*a]", "s: &s {k: 1}", "m: {k: 2, <<: *s}"),
+		},
+		"own key before a merge key of a mapping that a later entry of its key hides": {
+			text: stringtest.LinesLF("s: &s {a: 2}", "k: {a: 1, <<: *s}", "k: {b: 1}"),
+			dup:  true,
+		},
+		"own key before a merge key of a mapping written in place of a merge source": {
+			text: stringtest.LinesLF("s: &s {a: 2}", "m:", "  <<: {a: 1, <<: *s}"),
+		},
+		"key that two mappings bring in, in a mapping that a later entry of its key hides": {
+			text: stringtest.LinesLF("s: &s {a: 2}", "t: &t {a: 3}", "k: {<<: [*s, *t]}", "k: {b: 1}"),
+			dup:  true,
+		},
+		"own key before a merge key of the later entry of a key": {
+			text: stringtest.LinesLF("s: &s {a: 2}", "k: {b: 1}", "k: {a: 1, <<: *s}"),
+			dup:  true,
+		},
+		"key that two sources of a merge key bring in, before an alias of a reference document": {
+			text: stringtest.LinesLF("l1: &l1 {a: 1}", "l2: &l2 {a: 2}", "m:", "  <<: [*l1, *l2, *r]"),
+			refs: []string{"r: &r {b: 2, a: 3}\n"},
+		},
+		"key that two sources of a merge key bring in, before an alias of a reference document without the key": {
+			text: stringtest.LinesLF("l1: &l1 {a: 1}", "l2: &l2 {a: 2}", "m:", "  <<: [*l1, *l2, *r]"),
+			refs: []string{"r: &r {b: 2}\n"},
+		},
+		"key that two sources of a tagged merge sequence bring in, before an alias of a reference document": {
+			text: stringtest.LinesLF("l1: &l1 {a: 1}", "l2: &l2 {a: 2}", "m:", "  <<: !!seq [*l1, *l2, *r]"),
+			refs: []string{"r: &r {b: 2, a: 3}\n"},
+		},
+		"key that two sources of a merge key bring in, before a merge key of a reference document": {
+			text: stringtest.LinesLF("l1: &l1 {a: 1}", "l2: &l2 {a: 2}", "m:", "  <<: [*l1, *l2]", "  <<: *r"),
+			refs: []string{"r: &r {b: 2, a: 3}\n"},
+			dup:  true,
+		},
+		"key that two sources of a merge key bring in, after an alias of a reference document": {
+			text: stringtest.LinesLF("l1: &l1 {a: 1}", "l2: &l2 {a: 2}", "m:", "  <<: [*l1, *r, *l2]"),
+			refs: []string{"r: &r {b: 2, a: 3}\n"},
+		},
+		"own key before a merge key, before a merge key of an alias of a reference document": {
+			text: stringtest.LinesLF("l: &l {a: 2}", "m:", "  a: 1", "  <<: *l", "  <<: *r"),
+			refs: []string{"r: &r {b: 2, a: 3}\n"},
+			dup:  true,
+		},
+		"own key before a merge key whose sequence ends with an alias of a reference document": {
+			text: stringtest.LinesLF("l: &l {a: 2}", "m:", "  a: 1", "  <<: [*l, *r]"),
+			refs: []string{"r: &r {b: 2, a: 3}\n"},
+		},
+		"own key before a merge key whose sequence ends with an alias of a reference document without the key": {
+			text: stringtest.LinesLF("l: &l {a: 2}", "m:", "  a: 1", "  <<: [*l, *r]"),
+			refs: []string{"r: &r {b: 2}\n"},
+		},
+		"own key before a merge key whose sequence starts with an alias of a reference document": {
+			text: stringtest.LinesLF("l: &l {a: 2}", "m:", "  a: 1", "  <<: [*r, *l]"),
+			refs: []string{"r: &r {b: 2, a: 3}\n"},
+		},
+		"own key before a merge key, after a merge key of an alias of a reference document": {
+			text: stringtest.LinesLF("l: &l {a: 2}", "m:", "  a: 1", "  <<: *r", "  <<: *l"),
+			refs: []string{"r: &r {b: 2, a: 3}\n"},
+			dup:  true,
+		},
+		"own key before a merge key of an alias of a reference document": {
+			text: stringtest.LinesLF("m:", "  a: 2", "  <<: *r"),
+			refs: []string{"r: &r {a: 1}\n"},
+		},
+		"key that two sources of a merge key bring in, one of them from a reference document": {
+			text: stringtest.LinesLF("s: &s {x: 2}", "m:", "  <<: [*r, *s]"),
+			refs: []string{"r: &r {x: 1}\n"},
+		},
+		"alias of a mapping that a reference document merges with an own key first": {
+			text: "m: *s\n",
+			refs: []string{"t: &t {a: 1}\ns: &s {a: 2, <<: *t}\n"},
+		},
+		"merge key of a reference document of another one that it reads": {
+			text: "a: *s\n",
+			refs: []string{"s: &s {p: 2, <<: *t}\n", "t: &t {p: 1}\n"},
+		},
+		"byte order mark of a reference document that an alias reads": {
+			text: "m: *r\n",
+			refs: []string{"\ufeffr: &r 1\n"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var opts []niceyaml.SourceOption
+
+			if tc.dup {
+				opts = append(opts, niceyaml.WithAllowDuplicateKeys(true))
+			}
+
+			doc := misreadSource(t, tc.text, tc.refs, opts...)
+
+			d, err := edit.New(doc, edit.WithAppName("cafe"))
+			if err != nil {
+				require.ErrorIs(t, err, edit.ErrUnsupported)
+				require.NotErrorIs(t, err, edit.ErrEngine)
+				assert.NotContains(t, niceyaml.FormatError(err), "merge spec")
+
+				return
+			}
+
+			// The text of the Doc leaves out a byte order mark at the start
+			// of the file.
+			assert.Equal(t, strings.TrimPrefix(tc.text, "\ufeff"), d.Text())
+
+			whole, err := doc.Decode[any](t.Context())
+			require.NoError(t, err)
+
+			err = d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, root *edit.Node) error {
+				got, err := root.Decode[any](ctx)
+				require.NoError(t, err)
+				assert.Equal(t, whole, got)
+
+				return nil
+			})
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestDoc_Apply_MergeOrder(t *testing.T) {
+	t.Parallel()
+
+	set := func(path string, v any) edit.Func {
+		return func(ctx context.Context, root *edit.Node) error {
+			return root.At(paths.MustParse(path)).Set(ctx, v)
+		}
+	}
+
+	// Each call writes a text with `<<` merge keys. The engine reads them in
+	// the order of YAML's merge spec, so the call passes, and $.m reads what
+	// niceyaml's decode of the edited text holds. Go-yaml's decoder reads
+	// the merge keys of each text otherwise, unless the case says that it
+	// reads them alike.
+	tcs := map[string]struct {
+		fn     edit.Func
+		before string
+		refs   string
+		after  string
+		want   map[string]any
+	}{
+		"new key in a merge source that an own key before the merge key holds": {
+			before: stringtest.LinesLF("s: &s {a: 1}", "m:", "  c: 2", "  <<: *s"),
+			fn:     set("$.s.c", 3),
+			after:  stringtest.LinesLF("s: &s {a: 1, c: 3}", "m:", "  c: 2", "  <<: *s"),
+			want:   map[string]any{"a": uint64(1), "c": uint64(2)},
+		},
+		"rename in a merge source to a key that an own key before the merge key holds": {
+			before: stringtest.LinesLF("s: &s {a: 1}", "m:", "  c: 2", "  <<: *s"),
+			fn: func(_ context.Context, root *edit.Node) error {
+				return root.At(paths.MustParse("$.s.a")).SetKey("c")
+			},
+			after: stringtest.LinesLF("s: &s {c: 1}", "m:", "  c: 2", "  <<: *s"),
+			want:  map[string]any{"c": uint64(2)},
+		},
+		"set of a source of a merge sequence to a mapping that holds a key of another source": {
+			before: stringtest.LinesLF("a: &a {k: 1}", "b: &b {j: 2}", "m:", "  <<: [*a, *b]"),
+			fn:     set("$.b", map[string]int{"k": 3}),
+			after:  stringtest.LinesLF("a: &a {k: 1}", "b: &b {k: 3}", "m:", "  <<: [*a, *b]"),
+			want:   map[string]any{"k": uint64(1)},
+		},
+		// The alias of a reference document makes the engine compare the
+		// edited text with go-yaml's reading, which differs at the merge key.
+		"new key in a merge source that an own key before the merge key holds, beside a reference alias": {
+			before: stringtest.LinesLF("s: &s {b: 1}", "m: {a: 5, <<: *s, q: *base}"),
+			refs:   "base: &base {x: 1}\n",
+			fn:     set("$.s.a", 3),
+			after:  stringtest.LinesLF("s: &s {b: 1, a: 3}", "m: {a: 5, <<: *s, q: *base}"),
+			want: map[string]any{
+				"a": uint64(5), "b": uint64(1), "q": map[string]any{"x": uint64(1)},
+			},
+		},
+		// Go-yaml's decoder and the merge spec both keep the own entry of a
+		// key after the merge key, so the engine compares the edited text
+		// with go-yaml's reading, and the two agree.
+		"new key in a merge source that an own key after the merge key holds, beside a reference alias": {
+			before: stringtest.LinesLF("s: &s {b: 1}", "m: {<<: *s, a: 5, q: *base}"),
+			refs:   "base: &base {x: 1}\n",
+			fn:     set("$.s.a", 3),
+			after:  stringtest.LinesLF("s: &s {b: 1, a: 3}", "m: {<<: *s, a: 5, q: *base}"),
+			want: map[string]any{
+				"a": uint64(5), "b": uint64(1), "q": map[string]any{"x": uint64(1)},
+			},
+		},
+		"value in the later of two sources of a merge sequence that both hold a key the mapping writes after it, beside a reference alias": {
+			before: stringtest.LinesLF("a: &a {k: 1}", "b: &b {j: 2, k: 3}", "m: {<<: [*a, *b], k: 4, q: *base}"),
+			refs:   "base: &base {x: 1}\n",
+			fn:     set("$.b.j", 5),
+			after: stringtest.LinesLF(
+				"a: &a {k: 1}", "b: &b {j: 5, k: 3}", "m: {<<: [*a, *b], k: 4, q: *base}",
+			),
+			want: map[string]any{
+				"k": uint64(4), "j": uint64(5), "q": map[string]any{"x": uint64(1)},
+			},
+		},
+		"set of a source of a merge sequence to a mapping that holds a key of another source, beside a reference alias": {
+			before: stringtest.LinesLF("a: &a {k: 1}", "b: &b {j: 2}", "m: {<<: [*a, *b], q: *base}"),
+			refs:   "base: &base {x: 1}\n",
+			fn:     set("$.b", map[string]int{"k": 3}),
+			after:  stringtest.LinesLF("a: &a {k: 1}", "b: &b {k: 3}", "m: {<<: [*a, *b], q: *base}"),
+			want:   map[string]any{"k": uint64(1), "q": map[string]any{"x": uint64(1)}},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var opts []niceyaml.SourceOption
+
+			if tc.refs != "" {
+				opts = append(opts, niceyaml.WithReferences(niceyaml.NewSourceFromString(tc.refs)))
+			}
+
+			d := newDoc(t, tc.before, opts...)
+
+			require.NoError(t, d.Apply(t.Context(), paths.Doc(), tc.fn))
+			assert.Equal(t, tc.after, d.Text())
+
+			err := d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, root *edit.Node) error {
+				got, err := root.At(paths.MustParse("$.m")).Decode[map[string]any](ctx)
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got)
+
+				return nil
+			})
+			require.NoError(t, err)
+		})
+	}
 }
 
 func TestWithProtected(t *testing.T) {

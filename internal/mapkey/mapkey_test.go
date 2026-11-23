@@ -124,7 +124,7 @@ func TestKeys_Key(t *testing.T) {
 		},
 		"alias of a mapping that merges": {
 			input: "b: &b {p: 1, q: 2}\na: &k {q: 3, <<: *b}\n*k : 1\n",
-			want:  []string{"b", "p", "q", "a", "q", "map[p:1 q:2]"},
+			want:  []string{"b", "p", "q", "a", "q", "map[p:1 q:3]"},
 		},
 		"alias inside its anchor": {
 			input: "b: &b {*b : 1}\n", want: []string{"b", "null"},

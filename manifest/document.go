@@ -242,7 +242,7 @@ func (d *docState) routeDoc(ctx context.Context) bool {
 		return false
 	}
 
-	rt.versionTxt = readTypeField(doc, cfg.versionField, cfg.fieldPaths())
+	rt.versionTxt = readTypeField(doc, cfg.versionField)
 	if rt.versionTxt.err != nil {
 		d.fail(rt.versionTxt.err)
 
@@ -250,7 +250,7 @@ func (d *docState) routeDoc(ctx context.Context) bool {
 	}
 
 	if !cfg.versionOnly {
-		rt.kindTxt = readTypeField(doc, cfg.kindField, cfg.fieldPaths())
+		rt.kindTxt = readTypeField(doc, cfg.kindField)
 		if rt.kindTxt.err != nil {
 			d.fail(rt.kindTxt.err)
 
@@ -557,7 +557,7 @@ func (d *docState) checkLayers() error {
 		var writers []writer
 
 		for _, n := range layers {
-			if r := readTypeField(n, p, reg.cfg.fieldPaths()); r.found {
+			if r := readTypeField(n, p); r.found {
 				writers = append(writers, writer{node: n, read: r})
 			}
 		}
@@ -675,7 +675,7 @@ func (d *docState) checkSchema(ctx context.Context, v *versionEntry, detail erro
 	unsure := false
 
 	for _, p := range fields.unsure {
-		if v.cfg.unversioned && !readField(d.work, p, nil).found {
+		if v.cfg.unversioned && !readField(d.work, p).found {
 			continue
 		}
 
@@ -694,7 +694,7 @@ func (d *docState) checkSchema(ctx context.Context, v *versionEntry, detail erro
 	hide := make([]paths.Path, 0, len(fields.hidden))
 
 	for _, p := range fields.hidden {
-		if readField(d.work, p, nil).found {
+		if readField(d.work, p).found {
 			hide = append(hide, p)
 		}
 	}
@@ -774,7 +774,7 @@ func (d *docState) readName(ctx context.Context) {
 		return
 	}
 
-	d.nameRead = readField(d.work, kc.nameField, append(d.l.reg.cfg.fieldPaths(), kc.nameField))
+	d.nameRead = readField(d.work, kc.nameField)
 	if d.nameRead.err != nil || !d.nameRead.found {
 		return
 	}

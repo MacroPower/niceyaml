@@ -90,12 +90,13 @@ var (
 
 	// ErrFieldAlias indicates a type field or a name whose path passes
 	// through an alias or a `<<` merge key. It also indicates such a path
-	// through a key that a later merge key from a reference document might
-	// replace. A path through a key whose place a decode reads from another
+	// through a key that a merge key might bring in from a reference
+	// document. A path through a key whose place a decode reads from another
 	// key of its mapping matches it too, such as 0x10 for 16. So does a path
 	// through a key before a later key that does not decode, such as
 	// "!!bool x", because the decode might read the later key in its place.
-	// A later merge key that brings in such a key counts too.
+	// A merge key that brings in such a key counts too when the mapping does
+	// not write the key itself.
 	ErrFieldAlias = errors.New("field comes from an alias")
 
 	// ErrMixedLayers indicates the layers of a merged document that write

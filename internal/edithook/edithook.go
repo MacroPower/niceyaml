@@ -54,10 +54,8 @@ var (
 	// paths.ErrReferenceAlias or edit.ErrEngine either.
 	//
 	// A write that reaches YAML that the engine does not edit fails with
-	// edit.ErrUnsupported, as edit.Node.Set fails there. A write that makes
-	// a `<<` merge key that go-yaml's decoder reads otherwise than the merge
-	// spec fails with edit.ErrEngine, as a Set that makes one does. Every
-	// other error of SetField shows a bug in the engine. A write that fails
-	// leaves the document as it found it.
+	// edit.ErrUnsupported, as edit.Node.Set fails there. Every other error
+	// of SetField shows a bug in the engine. A write that fails leaves the
+	// document as it found it.
 	SetField func(ctx context.Context, d any, label string, path paths.Path, text string) error
 )

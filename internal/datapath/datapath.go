@@ -2,8 +2,9 @@
 // document the data decoded from.
 //
 // A decode names a mapping member by the value of its key. The key 0x10
-// sets the member 16, and a later key or a `<<` merge key can set the
-// same member again. A path selects a key by its source text instead. A
+// sets the member 16, and a later key can set the same member again. A
+// key of the mapping also wins over a key 16 that a `<<` merge key brings
+// in. A path selects a key by its source text instead. A
 // path built from the names of decoded data therefore might not select an
 // entry, or might select the entry of another member.
 //
@@ -24,9 +25,9 @@
 //
 // A walk in the other direction starts from the decoded data and pairs it
 // with its document. Such a walk reads the node each value decodes from
-// with [Read]. It reads the entries a decode sets with [Members] and
-// [MembersBackward]. A walk of a decoded map names each of its keys as the
-// document spells it, with [KeyOf] and [MapGroups].
+// with [Read]. It reads the entries a decode keeps with [Members]. A walk
+// of a decoded map names each of its keys as the document spells it, with
+// [KeyOf] and [MapGroups].
 //
 // [MemberName] copies the rule by which go-yaml's decoder names a key. It
 // names a key that a decode read as a Go value, such as the key of a
@@ -36,10 +37,13 @@
 // decoder reads as another value. The float 2e+06 gets a node that reads
 // as 0, and a [time.Time] gets a string.
 //
-// [Members] with merges and [MembersBackward] copy the order in which the
-// decoder sets the entries of a mapping with `<<` merge keys. The decoder
-// gives the values that it sets, but not the entries of the document that
-// set them. The tests check each copy against the decoder.
+// [Members] and the member tables of an [Index] copy the order in which a
+// decode weighs the entries of a mapping with `<<` merge keys, which is the
+// order of YAML's merge spec. An entry of the mapping wins over every
+// merge key, and the later of two such entries wins. An earlier merge key
+// wins over a later one, and so does an earlier source of one merge key.
+// The decoder gives the values that it keeps, but not the entries of the
+// document that set them. The tests check each copy against the decoder.
 package datapath
 
 import (
@@ -181,11 +185,12 @@ func NewIndex(r *paths.Resolver, keys *mapkey.Keys) *Index {
 //
 // Member writes a spelling only where a path selector with that spelling
 // selects the entry that sets the member, as the finder of the index
-// reports. A path selector can pick a later entry with the same spelling
-// instead. That entry can be a later key of the mapping, a later merge
-// key, or a later source of one merge key. The name then keeps its decoded
-// form, and that form might not select an entry, or might select another
-// entry.
+// reports. A path selector compares the text of keys and a decode compares
+// their values, so a path selector can pick another entry with the same
+// spelling instead. That entry can be a later key of the mapping, a key of
+// the mapping beside the merge key that brings in the member, or a key of
+// an earlier merge source. The name then keeps its decoded form, and that
+// form might not select an entry, or might select another entry.
 //
 // Where the name that Member writes does not select the entry of its
 // member, every step below keeps its decoded name too. A spelled key below
@@ -195,9 +200,9 @@ func NewIndex(r *paths.Resolver, keys *mapkey.Keys) *Index {
 // location, and [Target.Token] locates an error there. A member that
 // Member does not find leaves the Target with a nil Node.
 //
-// The finder reads the sources of each merge key that brings in a key or
-// stands after it. Steps through one index share the limit of one
-// [paths.EntryFinder] on those reads. Past that limit, the finder does
+// The finder reads the sources of the merge keys for each spelling that
+// the mapping itself does not hold. Steps through one index share the
+// limit of one [paths.EntryFinder] on those reads. Past that limit, the finder does
 // not report an entry for such a key, so its name and every name below
 // keep their decoded forms.
 func (idx *Index) Member(t Target, name string) Target {
@@ -374,86 +379,32 @@ func MergeSources(r *paths.Resolver, entry *ast.MappingValueNode) ([]*ast.Mappin
 	return r.MergeSources(&ast.MappingNode{Values: []*ast.MappingValueNode{entry}})
 }
 
-// Members returns the entries of mapping in document order. It skips each
-// entry without a key and each entry with a `<<` merge key. With merges
-// set, it also yields the entries of the mappings those merge keys bring
-// in, each where its merge key stands. That order copies the order in
-// which go-yaml's decoder sets the entries, as the package documentation
-// describes. It skips each merge key whose sources do not resolve, such as
-// one that reads a reference document, with every source of that key. It
-// reads each mapping one time, so a merge key that brings in a mapping the
-// walk already read does not yield more entries.
-func Members(r *paths.Resolver, mapping *ast.MappingNode, merges bool) iter.Seq[*ast.MappingValueNode] {
+// Members returns the entries of mapping and of the mappings its `<<`
+// merge keys bring in, in the order of their precedence in a decode, as
+// the package documentation describes. The first entry it yields for a key
+// is therefore the one the decode keeps. It skips each entry without a key
+// and each entry with a merge key.
+//
+// It yields the entries of mapping first, from the last one back, because
+// an entry of the mapping wins over every merge key and the later of two
+// entries wins. It then yields the entries of each merge key in document
+// order, and of its sources in order, each source in the order of its own
+// precedence. An earlier merge key and an earlier source win.
+//
+// A merge key whose sources do not resolve might set any key that the
+// entries before it in that order do not set, so the walk ends there. It
+// reads each mapping one time, at the first place the walk reaches it. A
+// merge key that brings in a mapping the walk already read therefore does
+// not yield more entries.
+func Members(r *paths.Resolver, mapping *ast.MappingNode) iter.Seq[*ast.MappingValueNode] {
 	return func(yield func(*ast.MappingValueNode) bool) {
-		members(r, mapping, merges, map[*ast.MappingNode]bool{}, yield)
+		members(r, mapping, map[*ast.MappingNode]bool{}, yield)
 	}
 }
 
 // members yields the entries [Members] yields for mapping, and reports
-// false when yield stopped the walk.
+// false when the walk ended.
 func members(
-	r *paths.Resolver, mapping *ast.MappingNode, merges bool, seen map[*ast.MappingNode]bool,
-	yield func(*ast.MappingValueNode) bool,
-) bool {
-	if seen[mapping] {
-		return true
-	}
-
-	seen[mapping] = true
-
-	for _, entry := range mapping.Values {
-		if entry == nil || entry.Key == nil {
-			continue
-		}
-
-		if !astnode.IsMergeKey(entry.Key) {
-			if !yield(entry) {
-				return false
-			}
-
-			continue
-		}
-
-		if !merges {
-			continue
-		}
-
-		sources, err := MergeSources(r, entry)
-		if err != nil {
-			continue
-		}
-
-		for _, src := range sources {
-			if !members(r, src, merges, seen, yield) {
-				return false
-			}
-		}
-	}
-
-	return true
-}
-
-// MembersBackward returns the entries of mapping and of the mappings its
-// `<<` merge keys bring in. It yields them in reverse of the order the
-// decoder sets them, which it copies from go-yaml's decoder, as the
-// package documentation describes. The first entry it yields for a key is
-// therefore the one the decode keeps. It skips each entry without a key
-// and each entry with a merge key.
-//
-// A merge key whose sources do not resolve might set any key, so the walk
-// ends there. It does not yield an earlier entry, of mapping or of a
-// mapping that merges it. It reads each mapping one time, at the last
-// place the decoder reads it. A merge key that brings in a mapping the
-// walk already read therefore does not yield more entries.
-func MembersBackward(r *paths.Resolver, mapping *ast.MappingNode) iter.Seq[*ast.MappingValueNode] {
-	return func(yield func(*ast.MappingValueNode) bool) {
-		membersBackward(r, mapping, map[*ast.MappingNode]bool{}, yield)
-	}
-}
-
-// membersBackward yields the entries [MembersBackward] yields for
-// mapping, and reports false when the walk ended.
-func membersBackward(
 	r *paths.Resolver, mapping *ast.MappingNode, seen map[*ast.MappingNode]bool,
 	yield func(*ast.MappingValueNode) bool,
 ) bool {
@@ -464,15 +415,13 @@ func membersBackward(
 	seen[mapping] = true
 
 	for _, entry := range slices.Backward(mapping.Values) {
-		if entry == nil || entry.Key == nil {
-			continue
+		if entry != nil && entry.Key != nil && !astnode.IsMergeKey(entry.Key) && !yield(entry) {
+			return false
 		}
+	}
 
-		if !astnode.IsMergeKey(entry.Key) {
-			if !yield(entry) {
-				return false
-			}
-
+	for _, entry := range mapping.Values {
+		if entry == nil || entry.Key == nil || !astnode.IsMergeKey(entry.Key) {
 			continue
 		}
 
@@ -481,8 +430,8 @@ func membersBackward(
 			return false
 		}
 
-		for _, src := range slices.Backward(sources) {
-			if !membersBackward(r, src, seen, yield) {
+		for _, src := range sources {
+			if !members(r, src, seen, yield) {
 				return false
 			}
 		}
@@ -603,20 +552,22 @@ type memberNode struct {
 }
 
 // memberNodes returns the members of the mapping node holds, by the name
-// a decode gives each key, or an empty table for any other node. A decode
-// sets the members in order, so where several members decode to one
-// name, the table holds the last one. The decode keeps the value of that
-// last member.
+// a decode gives each key, or an empty table for any other node. Where
+// several entries of the mapping decode to one name, the table holds the
+// last one, whose value the decode keeps.
 //
-// A merge key sets each member its sources define, and the table holds
-// the member a source gives that name. A merge key whose sources do not
-// resolve, or lead back to the mapping, might set a member of any name.
-// The table therefore omits every member before that merge key.
+// An entry of the mapping wins over every merge key. A merge key sets each
+// member its sources define that the mapping and the earlier merge keys do
+// not set, and the table holds the member the earliest source gives that
+// name. A merge key whose sources do not resolve, or lead back to the
+// mapping, might set a member of any such name. The table therefore omits
+// every member of the later merge keys.
 //
 // A key without a name might set a member of any name. Such keys include
 // an alias key that does not resolve, and a typed-nil key that a tree
-// built by hand might hold. The table omits every member before such a
-// key rather than hold a member that the key might replace.
+// built by hand might hold. The table omits every entry before such a key,
+// and every member that a merge key sets, rather than hold a member that
+// the key might replace.
 func (idx *Index) memberNodes(node ast.Node) memberTable {
 	node = astnode.Content(node)
 
@@ -632,17 +583,7 @@ func (idx *Index) memberNodes(node ast.Node) memberTable {
 
 	for _, member := range slices.Backward(members) {
 		// A tree built by hand may hold a nil member, which sets nothing.
-		if member == nil {
-			continue
-		}
-
-		if astnode.IsMergeKey(member.Key) {
-			if !idx.addMerged(table.members, member) {
-				table.complete = false
-
-				break
-			}
-
+		if member == nil || astnode.IsMergeKey(member.Key) {
 			continue
 		}
 
@@ -655,6 +596,16 @@ func (idx *Index) memberNodes(node ast.Node) memberTable {
 
 		if _, seen := table.members[name]; !seen {
 			table.members[name] = memberNode{entry: member, value: member.Value}
+		}
+	}
+
+	for _, member := range members {
+		if !table.complete {
+			break
+		}
+
+		if member != nil && astnode.IsMergeKey(member.Key) && !idx.addMerged(table.members, member) {
+			table.complete = false
 		}
 	}
 
@@ -675,17 +626,18 @@ func (idx *Index) keyName(key ast.MapKeyNode) (string, bool) {
 }
 
 // addMerged adds to found each member that the sources of the merge key
-// of member define, for each name that found does not hold. A later
-// source takes precedence over an earlier one, as it does in a decode. It
+// of member define, for each name that found does not hold. An earlier
+// source takes precedence over a later one, as it does in a decode. It
 // reports false when the sources do not resolve, or when the table of one
-// of them is not complete.
+// of them is not complete. The members of the sources before such a source
+// stay in found.
 func (idx *Index) addMerged(found map[string]memberNode, member *ast.MappingValueNode) bool {
 	sources, err := MergeSources(idx.resolver, member)
 	if err != nil {
 		return false
 	}
 
-	for _, src := range slices.Backward(sources) {
+	for _, src := range sources {
 		table := idx.memberNodes(src)
 		if !table.complete {
 			return false

@@ -11076,10 +11076,12 @@ func TestSourceError_Nearest(t *testing.T) {
 				want: "app.yaml:1:9: $.server: bad",
 				rng:  star,
 			},
+			// The key of the mapping wins over every merge key, so its path
+			// does not read the alias.
 			"key above a merge of an alias": {
-				err:    niceyaml.NewError("bad", niceyaml.AtPath(paths.Doc().Child("merged", "kind"))),
-				want:   "app.yaml: $.merged.kind: bad",
-				reason: paths.ErrAlias,
+				err:  niceyaml.NewError("bad", niceyaml.AtPath(paths.Doc().Child("merged", "kind"))),
+				want: "app.yaml:10:9: $.merged.kind: bad",
+				rng:  yamltest.LineRange(9, 8, 18),
 			},
 			"key a merge of an alias may set": {
 				err:    niceyaml.NewError("bad", niceyaml.AtPath(paths.Doc().Child("merged", "replicas"))),
@@ -14374,7 +14376,7 @@ func TestIsInvalid(t *testing.T) {
 			// The merge keys of the document make the lookups of the path
 			// read far more nodes than the document holds.
 			err: errOf(yamltest.FirstDocument(t, yamltest.WideMerge(2000)).
-				Nodes(paths.MustParse("$..nope"))),
+				Nodes(paths.MustParse("$.m.*"))),
 			is:   paths.ErrExcessiveMerging,
 			want: true,
 		},

@@ -1146,10 +1146,10 @@ func (d *Doc) failApply(problem error) {
 // The problem of an alias whose value the call changed fails the call. So
 // does a change that the model cannot make, which shows a call that the
 // model does not describe. So do a character that YAML does not allow, as
-// [Doc.printableProblem] describes, and a `<<` merge key that go-yaml's
-// decoder reads otherwise than the merge spec, as [Doc.madeMisread]
-// describes. A call that fails leaves the Doc as it found it, as
-// [Doc.undoCall] describes.
+// [Doc.printableProblem] describes, and a byte order mark that the call
+// moved to a place where the tokenizer of the Source drops it, as
+// [Doc.madeMisread] describes. A call that fails leaves the Doc as it
+// found it, as [Doc.undoCall] describes.
 //
 //nolint:contextcheck // The decode of a text whose alias reads another value reads no state that a context carries.
 func (d *Doc) endModel(c *modelCall, err error, change func() bool) (problem error) {
@@ -1338,7 +1338,7 @@ func (d *Doc) displaced(n *Node) bool {
 // [Doc.slotPlace] finds it, by the place of its key, as a node on an entry
 // that a later entry of its key hides selects it. An earlier edit can give
 // the name of the entry to another entry that its mapping reads in place of
-// it, as a rename of a key that a later `<<` merge key brings in does. The
+// it, as a rename of another key of the mapping to that name does. The
 // node then keeps reading and editing its own entry. It reports false, and
 // leaves n as it is, when the path through that place does not select the
 // entry.

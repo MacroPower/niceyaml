@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
 
+	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/pathindex"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
@@ -87,8 +88,9 @@ func TestIndex_PathAt(t *testing.T) {
 func TestIndex_PathAt_Unselected(t *testing.T) {
 	t.Parallel()
 
-	// A merge after the first entry overrides it, so no path selects it.
-	doc := yamltest.FirstDocument(t, stringtest.LinesLF("base: &b {k: 1}", "m: {k: 2, <<: *b}"))
+	// A later entry of the key overrides the first, so no path selects it.
+	doc := yamltest.FirstDocument(t, stringtest.LinesLF("base: 1", "m: {k: 2, k: 3}"),
+		niceyaml.WithAllowDuplicateKeys(true))
 	idx := pathindex.New(doc.AST())
 
 	_, ok := idx.PathAt(doc.DocumentResolver(), find(t, doc.Tokens(), "2").Position.Offset)

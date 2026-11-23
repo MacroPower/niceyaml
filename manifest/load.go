@@ -409,7 +409,7 @@ func (l *loader) writesTypeField(doc *niceyaml.Node) bool {
 		return false
 	}
 
-	v := readTypeField(doc, l.reg.cfg.versionField, l.reg.cfg.fieldPaths())
+	v := readTypeField(doc, l.reg.cfg.versionField)
 	if v.found || v.err != nil {
 		return true
 	}
@@ -418,7 +418,7 @@ func (l *loader) writesTypeField(doc *niceyaml.Node) bool {
 		return false
 	}
 
-	k := readTypeField(doc, l.reg.cfg.kindField, l.reg.cfg.fieldPaths())
+	k := readTypeField(doc, l.reg.cfg.kindField)
 
 	return k.found || k.err != nil
 }

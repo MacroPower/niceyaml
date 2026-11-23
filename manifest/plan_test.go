@@ -913,12 +913,10 @@ func TestRegistry_PlanMigration_Misread(t *testing.T) {
 		errIs error
 	}{
 		"own key before a merge key that brings in the key": {
-			// Control: go-yaml's decoder reads the merged entry, so the
-			// migration of the document fails at New.
+			// The engine reads the merge key in the order of the merge spec,
+			// which keeps the own entry, so the document migrates.
 			text: stringtest.LinesLF("a:", "  b: 1", "s: &s {x: 1}", "m:", "  x: 2", "  <<: *s"),
-			err: "config/config.yaml:5:3: $.m.x: go-yaml's decoder reads $.m.x from the merge key at 6:3, but the " +
-				"merge spec keeps the own entry written before it",
-			errIs: edit.ErrMisread,
+			want: stringtest.LinesLF("a:", "  version: v1", "  b: 1", "s: &s {x: 1}", "m:", "  x: 2", "  <<: *s"),
 		},
 		"tag alone on an empty value before a line at the column of its key": {
 			// Go-yaml reads "x: 1" as part of the empty value of !t, but YAML

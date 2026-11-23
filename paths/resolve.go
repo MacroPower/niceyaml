@@ -227,12 +227,6 @@ func (r *resolver) mappingKeys(mapping *ast.MappingNode) *mappingKeys {
 	return keys
 }
 
-// mergeAfter reports whether a `<<` merge key comes after the entry at
-// index i.
-func (k *mappingKeys) mergeAfter(i int) bool {
-	return len(k.merges) > 0 && k.merges[len(k.merges)-1] > i
-}
-
 // newResolver creates a new [*resolver] for doc. The first call of its
 // binding function reads doc with [bindAliases].
 func newResolver(doc *ast.DocumentNode) *resolver {
@@ -1667,12 +1661,12 @@ func (r *resolver) mergedNames(
 }
 
 // lookup finds the entry for name in mapping. It looks through the `<<`
-// merge keys of mapping as well as its own entries. The later entry in
-// document order wins, whether it is an entry of the mapping itself or a
-// merge key whose sources hold that key. A later merge source also wins
-// over an earlier one. The goccy/go-yaml decoder keeps the value of that
-// entry. It sets the entries of a mapping in order, and it sets the keys
-// of the merge sources where the merge key stands.
+// merge keys of mapping as well as its own entries, in the order of YAML's
+// merge spec. An entry of the mapping itself wins over every merge key,
+// wherever the mapping writes it, and the later of two such entries wins.
+// Of the entries that the merge keys bring in, the one of the earliest
+// merge key wins, and of one merge key, the one of the earliest source
+// wins. The decoder keeps the value of that entry.
 //
 // The seen set guards against merge cycles through aliases, so one lookup
 // reads each mapping at most one time. It still reads the whole value of
@@ -1719,8 +1713,8 @@ func (r *resolver) lookup(
 	own, hasOwn := keys.names[name]
 	realKey := hasOwn && !astnode.IsMergeKey(mapping.Values[own].Key)
 
-	// A real key of the mapping with no merge key after it wins outright.
-	if realKey && !keys.mergeAfter(own) {
+	// A real key of the mapping wins over every merge key.
+	if realKey {
 		return mapping.Values[own], own, true, nil
 	}
 
@@ -1730,15 +1724,9 @@ func (r *resolver) lookup(
 
 	seen[mapping] = true
 
-	// A later merge key wins over an earlier one, as a later source in one
-	// merge key does, so lookup reads the merge keys from the last one back.
-	// It stops at a real key of the mapping, which wins over every merge
-	// key before it.
-	for _, i := range slices.Backward(keys.merges) {
-		if realKey && i < own {
-			break
-		}
-
+	// An earlier merge key wins over a later one, as an earlier source in
+	// one merge key does, so lookup reads the merge keys in order.
+	for _, i := range keys.merges {
 		top := len(reads.sources)
 
 		found, ok, err := r.lookupMerge(mapping.Values[i].Value, name, seen, reads, via)
@@ -1764,8 +1752,8 @@ func (r *resolver) lookup(
 // lookupMerge finds the entry for name that the sources of one `<<` merge
 // key bring in. The value argument is the value of that merge key.
 // LookupMerge pushes the sources onto the stack of reads and leaves them
-// there for [resolver.lookup] to pop. A later source wins over an earlier
-// one, so lookupMerge searches them from the last one back. It adds to the
+// there for [resolver.lookup] to pop. An earlier source wins over a later
+// one, so lookupMerge searches them in order. It adds to the
 // count of reads and returns [ErrExcessiveMerging] as lookup describes.
 // It reads the sources of a reference document and returns the error of
 // the alias that reads one, as lookup describes. The via argument is that
@@ -1796,8 +1784,8 @@ func (r *resolver) lookupMerge(
 
 	// A lookup in one source pushes its own sources and may move the stack
 	// to a larger array, so the loop reads each source from the stack of
-	// reads rather than from sources.
-	for i := len(sources) - 1; i >= top; i-- {
+	// reads rather than from sources. Each such lookup pops what it pushed.
+	for i := top; i < len(sources); i++ {
 		src := reads.sources[i]
 		if seen[src.mapping] {
 			continue
@@ -1825,20 +1813,20 @@ func (r *resolver) lookupMerge(
 
 // overridden reports whether a path through name in mapping selects an
 // entry other than the one at index i, the last entry of mapping with that
-// name. A `<<` key after that entry can win over it, as [resolver.lookup]
-// describes. When the entry at i is the last merge key, a real `<<` key
-// that one of the merge sources holds wins over it too. When those merge
-// keys do not resolve, a path through name does not select any entry, so
-// overridden also reports true. Its lookup adds to the count of reads as
+// name. A real key of the mapping wins over every merge key, as
+// [resolver.lookup] describes, so only the last merge key can lose. A real
+// `<<` key that one of the merge sources holds wins over it. When the
+// merge keys do not resolve, a path through name does not select any
+// entry, so overridden also reports true. Its lookup adds to the count of reads as
 // [resolver.lookup] describes. Overridden returns the [ErrExcessiveMerging]
 // that lookup returns. It also returns the error of lookup at an alias that
 // reads a reference document. A path through name then selects an entry of
 // that document, or lookup cannot read the document.
 func (r *resolver) overridden(
-	mapping *ast.MappingNode, keys *mappingKeys, name string, i int, reads *lookupReads,
+	mapping *ast.MappingNode, name string, i int, reads *lookupReads,
 ) (bool, error) {
 	entry := mapping.Values[i]
-	if !keys.mergeAfter(i) && !astnode.IsMergeKey(entry.Key) {
+	if !astnode.IsMergeKey(entry.Key) {
 		return false, nil
 	}
 
@@ -2106,25 +2094,21 @@ type recursiveWalk struct {
 // the last one, even though the decoder merges them all. A mapping can
 // hold a real key whose text is `<<` next to a merge key, or a merge
 // source can bring in such a key. A path through `<<` then selects the
-// real key, so descend skips the merge key. When a later `<<` key brings
-// in the key of an entry, a path through that key selects the merged
-// entry, so descend skips the entry of the mapping itself. A path selects
-// an entry only when its key has a name. Descend thus also skips an entry
-// whose key does not have a name, and everything below that entry.
+// real key, so descend skips the merge key. A path selects an entry only
+// when its key has a name. Descend thus also skips an entry whose key does
+// not have a name, and everything below that entry.
 //
-// To find the entries that a `<<` key overrides, descend looks up the key
-// of each entry that has a `<<` key after it, and of the last merge key
-// itself. Each lookup reads the values of the merge keys it searches and
-// the mappings they bring in. Returns [ErrExcessiveMerging] when the
-// lookups of the walk read past the limit that [resolver.excessiveMerging]
-// applies.
+// To find whether a real `<<` key wins over the last merge key, descend
+// looks up `<<` at that merge key. The lookup reads the values of the
+// merge keys it searches and the mappings they bring in. Returns
+// [ErrExcessiveMerging] when the lookups of the walk read past the limit
+// that [resolver.excessiveMerging] applies.
 //
-// A lookup can find that a merge key brings in the key from a reference
-// document, or it can fail to read such a document, as [resolver.lookup]
-// describes. Descend then returns the error of the alias that reads the
-// document, which wraps [ErrReferenceAlias], as a path through the key
-// does. For the last merge key, that error means only that a path through
-// `<<` does not select the merge key. The walk fails at that merge key
+// The lookup can find that a merge key brings in a real `<<` key from a
+// reference document, or it can fail to read such a document, as
+// [resolver.lookup] describes. Its error then wraps [ErrReferenceAlias],
+// and it means only that a path through `<<` does not select the merge
+// key. The walk fails at that merge key
 // when it lists it, and at the first entry or listed element that it would
 // visit in the value of the merge key. It does not fail at the value of
 // the merge key otherwise, because an alias there brings in nothing that
@@ -2158,7 +2142,7 @@ func (w *recursiveWalk) descend(node ast.Node, sources bool) error {
 				return w.undecided
 			}
 
-			overridden, err := w.resolver.overridden(n, keys, key, i, &w.reads)
+			overridden, err := w.resolver.overridden(n, key, i, &w.reads)
 
 			undecided := error(nil)
 

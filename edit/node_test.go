@@ -1560,9 +1560,9 @@ func TestNode_Own_Reference(t *testing.T) {
 	ref := niceyaml.NewSourceFromString("r: &r {x: 1, k: 2, j: 3}\n", niceyaml.WithName("ref.yaml"))
 
 	// The mapping of x writes the entry k before its merge key of the
-	// reference document, so that document decides the path $.x.k. The
-	// entry c is an alias of the anchored mapping of k, and the mapping of d
-	// merges it.
+	// reference document. The own entry wins, so the path $.x.k selects it.
+	// The entry c is an alias of the anchored mapping of k, and the mapping
+	// of d merges it.
 	before := stringtest.LinesLF(
 		"x:",
 		"  k: &m",
@@ -1573,12 +1573,12 @@ func TestNode_Own_Reference(t *testing.T) {
 		"d: {<<: *m}",
 	)
 
-	// The mapping of x writes the entry k after its merge key, so the
-	// reference document does not decide the path $.x.k.
+	// The mapping of x writes the entry k after its merge key, and the own
+	// entry wins there too.
 	after := stringtest.LinesLF("x:", "  <<: *r", "  k: &m", "    a: 1", "c: *m")
 
-	// The reference document decides the path $.top.x, two steps above the
-	// anchored mapping.
+	// The mapping of top writes the entry x before its merge key of the
+	// reference document, two steps above the anchored mapping.
 	above := stringtest.LinesLF("top:", "  x:", "    k: &m {a: 1}", "  <<: *r", "c: *m")
 
 	// The last entry of k hides the first one, which holds the anchored
@@ -1593,32 +1593,33 @@ func TestNode_Own_Reference(t *testing.T) {
 
 	// The anchored mapping in the sequence of the merge key writes the name
 	// k, which the reference document holds too. The alias of that document
-	// comes last, so its entry k wins, and that document decides the path
+	// comes first, so its entry k wins, and that document decides the path
 	// $.x.k.
-	listedHeld := stringtest.LinesLF("x: {<<: [&m {a: 1, k: {b: 2}}, *r]}", "c: *m")
+	listedHeld := stringtest.LinesLF("x: {<<: [*r, &m {a: 1, k: {b: 2}}]}", "c: *m")
 
-	// The anchored mapping comes after the alias of the reference document,
+	// The anchored mapping comes before the alias of the reference document,
 	// so its entry k wins, and the path $.x.k selects that entry.
-	listedLast := stringtest.LinesLF("x: {<<: [*r, &m {k: {b: 2}}]}", "c: *m")
+	listedLast := stringtest.LinesLF("x: {<<: [&m {k: {b: 2}}, *r]}", "c: *m")
 
 	// The mapping of x and the mapping of top both write an entry before
-	// their merge key of the reference document, so that document decides
-	// the paths $.top.x and $.top.x.k.
+	// their merge key of the reference document, and each own entry wins.
 	twice := stringtest.LinesLF("top:", "  x:", "    k: &m {a: 1}", "    <<: *r", "  <<: *r", "c: *m")
 
 	// The mapping of x writes the entry k in a mapping in the sequence of its
-	// merge key, so it writes no entry of the name k itself.
-	listedEntry := stringtest.LinesLF("x: {<<: [{k: &m {a: 1}}, *r]}", "c: *m")
+	// merge key, after the alias of the reference document. So the entry k
+	// of that document wins, and that document decides the path $.x.k.
+	listedEntry := stringtest.LinesLF("x: {<<: [*r, {k: &m {a: 1}}]}", "c: *m")
 
 	// The entry k holds an anchored sequence.
-	listedItems := stringtest.LinesLF("x: {<<: [{k: &m [1, 2]}, *r]}", "c: *m")
+	listedItems := stringtest.LinesLF("x: {<<: [*r, {k: &m [1, 2]}]}", "c: *m")
 
-	// The reference document decides the path $.top.x, and the mapping of x
-	// writes no entry of the name k itself.
-	aboveListed := stringtest.LinesLF("top: {x: {<<: [{k: &m {a: 1}}, *r]}, <<: *r}", "c: *m")
+	// The mapping of top merges the reference document, and the mapping of
+	// x merges it before a mapping that writes the entry k.
+	aboveListed := stringtest.LinesLF("top: {x: {<<: [*r, {k: &m {a: 1}}]}, <<: *r}", "c: *m")
 
 	// The mapping of j writes the anchored mapping in place at its merge
-	// key, and the reference document decides the path $.x.j.
+	// key, and the mapping of x writes j before its merge key of the
+	// reference document.
 	written := stringtest.LinesLF("x: {j: {<<: &m {a: 1}}, <<: *r}", "c: *m")
 
 	tcs := map[string]struct {
@@ -1631,28 +1632,28 @@ func TestNode_Own_Reference(t *testing.T) {
 		decided bool
 	}{
 		"entry below an alias": {
-			before: before, path: "$.c.a", want: "$.x.k.a", decided: true,
+			before: before, path: "$.c.a", want: "$.x.k.a",
 		},
 		"entry that a merge key brings in": {
-			before: before, path: "$.d.a", want: "$.x.k.a", decided: true,
+			before: before, path: "$.d.a", want: "$.x.k.a",
 		},
 		"item below an alias": {
-			before: before, path: "$.c.l[0]", want: "$.x.k.l[0]", decided: true,
+			before: before, path: "$.c.l[0]", want: "$.x.k.l[0]",
 		},
 		"entry of an item below an alias": {
-			before: before, path: "$.c.l[1].z", want: "$.x.k.l[1].z", decided: true,
+			before: before, path: "$.c.l[1].z", want: "$.x.k.l[1].z",
 		},
 		"place without a value below an alias": {
-			before: before, path: "$.c.q", want: "$.x.k.q", decided: true,
+			before: before, path: "$.c.q", want: "$.x.k.q",
 		},
 		"place without a value two steps below an alias": {
-			before: before, path: "$.c.q.r", want: "$.x.k.q.r", decided: true,
+			before: before, path: "$.c.q.r", want: "$.x.k.q.r",
 		},
 		"item past the end of a sequence below an alias": {
-			before: before, path: "$.c.l[5]", want: "$.x.k.l[5]", decided: true,
+			before: before, path: "$.c.l[5]", want: "$.x.k.l[5]",
 		},
 		"place without a value in an item below an alias": {
-			before: before, path: "$.c.l[1].q", want: "$.x.k.l[1].q", decided: true,
+			before: before, path: "$.c.l[1].q", want: "$.x.k.l[1].q",
 		},
 		"place without a value in the mapping with the merge key": {
 			before: before, path: "$.d.q", want: "$.d.q",
@@ -1664,11 +1665,11 @@ func TestNode_Own_Reference(t *testing.T) {
 		"place without a value below an alias of an anchor after the merge key": {
 			before: after, path: "$.c.q", want: "$.x.k.q",
 		},
-		"entry below an alias of an anchor two steps below the decided mapping": {
-			before: above, path: "$.c.a", want: "$.top.x.k.a", decided: true,
+		"entry below an alias of an anchor two steps below an own entry before a merge key": {
+			before: above, path: "$.c.a", want: "$.top.x.k.a",
 		},
-		"place without a value below an alias of an anchor two steps below the decided mapping": {
-			before: above, path: "$.c.q", want: "$.top.x.k.q", decided: true,
+		"place without a value below an alias of an anchor two steps below an own entry before a merge key": {
+			before: above, path: "$.c.q", want: "$.top.x.k.q",
 		},
 		"entry below an alias of the anchor of an entry that a later entry of its key hides": {
 			before: hidden, path: "$.c.a", want: "$.c.a", dup: true,
@@ -1698,11 +1699,11 @@ func TestNode_Own_Reference(t *testing.T) {
 		"entry below an entry of an anchored mapping after the reference document in a merge key of a sequence": {
 			before: listedLast, path: "$.c.k.b", want: "$.x.k.b",
 		},
-		"entry below an alias of an anchor below two decided mappings": {
-			before: twice, path: "$.c.a", want: "$.top.x.k.a", decided: true,
+		"entry below an alias of an anchor below two own entries before merge keys": {
+			before: twice, path: "$.c.a", want: "$.top.x.k.a",
 		},
-		"place without a value below an alias of an anchor below two decided mappings": {
-			before: twice, path: "$.c.q", want: "$.top.x.k.q", decided: true,
+		"place without a value below an alias of an anchor below two own entries before merge keys": {
+			before: twice, path: "$.c.q", want: "$.top.x.k.q",
 		},
 		"entry below an alias of an anchor in a mapping in a merge key of a sequence": {
 			before: listedEntry, path: "$.c.a", want: "$.c.a",
@@ -1719,21 +1720,25 @@ func TestNode_Own_Reference(t *testing.T) {
 		"item past the end below an alias of an anchor in a mapping in a merge key of a sequence": {
 			before: listedItems, path: "$.c[2]", want: "$.c[2]",
 		},
-		"entry below an alias of an anchor in a merge key of a sequence, below a decided mapping": {
-			before: aboveListed, path: "$.c.a", want: "$.c.a",
+		"entry below an alias of an anchor in a merge key of a sequence, below a mapping that merges the reference document": {
+			before: aboveListed,
+			path:   "$.c.a",
+			want:   "$.c.a",
 		},
-		"place without a value below an alias of an anchor in a merge key of a sequence, below a decided mapping": {
-			before: aboveListed, path: "$.c.q", want: "$.c.q",
+		"place without a value below an alias of an anchor in a merge key of a sequence, below a mapping that merges the reference document": {
+			before: aboveListed,
+			path:   "$.c.q",
+			want:   "$.c.q",
 		},
 		"entry of an anchored mapping written at a merge key, below an alias": {
-			before: written, path: "$.c.a", want: "$.x.j.a", decided: true,
+			before: written, path: "$.c.a", want: "$.x.j.a",
 		},
 		"place without a value in an anchored mapping written at a merge key, below an alias": {
 			before: written, path: "$.c.q", want: "$.c.q",
 		},
 		"path through the name that the reference document decides": {
 			// The node cannot read its place, so it gives its path.
-			before: before, path: "$.x.k.a", want: "$.x.k.a", decided: true,
+			before: listedHeld, path: "$.x.k.b", want: "$.x.k.b", decided: true,
 		},
 	}
 
@@ -1770,22 +1775,6 @@ func TestNode_Own_Shared(t *testing.T) {
 		"  b: {<<: *d, script: test}",
 		"  c: {retries: 2, image: busybox}",
 	)
-
-	// The mapping of x-defaults writes the anchored mapping before its
-	// merge key of the reference document, so that document decides the
-	// path $.x-defaults.base.
-	decided := stringtest.LinesLF(
-		"x-defaults:",
-		"  base: &d {retries: 1, image: alpine}",
-		"  <<: *r",
-		"jobs:",
-		"  a: {<<: *d, script: build}",
-		"  b: {<<: *d, script: test}",
-		"  c: {retries: 2, image: busybox}",
-	)
-
-	// The mapping of the reference document holds the name base.
-	ref := niceyaml.NewSourceFromString("r: &r {x: 1, base: 2}\n", niceyaml.WithName("ref.yaml"))
 
 	// Once returns a Func that runs fn on the node at rel below each node
 	// that it gets, one time for each own path.
@@ -1838,8 +1827,8 @@ func TestNode_Own_Shared(t *testing.T) {
 	tcs := map[string]struct {
 		fn     edit.Func
 		before string
-		// The text after the Apply, or the error of the Apply.
-		want, err string
+		// The text after the Apply.
+		want string
 	}{
 		"set that reads the value runs one time for each anchored value": {
 			before: before,
@@ -1874,54 +1863,17 @@ func TestNode_Own_Shared(t *testing.T) {
 				"  c: {retries: 5, image: busybox}",
 			),
 		},
-		"set that reads the value runs one time for an anchored value at a path that a reference document decides": {
-			before: decided,
-			fn:     once(paths.Current().Child("retries"), tenfold),
-			want: stringtest.LinesLF(
-				"x-defaults:",
-				"  base: &d {retries: 10, image: alpine}",
-				"  <<: *r",
-				"jobs:",
-				"  a: {<<: *d, script: build}",
-				"  b: {<<: *d, script: test}",
-				"  c: {retries: 20, image: busybox}",
-			),
-		},
-		"set of only the entries that the mapping writes itself, with an anchored value at a path that a reference document decides": {
-			before: decided,
-			fn:     unshared,
-			want: stringtest.LinesLF(
-				"x-defaults:",
-				"  base: &d {retries: 1, image: alpine}",
-				"  <<: *r",
-				"jobs:",
-				"  a: {<<: *d, script: build}",
-				"  b: {<<: *d, script: test}",
-				"  c: {retries: 5, image: busybox}",
-			),
-		},
-		"move to the parent of an own path that a reference document decides": {
-			before: decided,
-			fn:     once(paths.Current().Child("image"), toImg),
-			err: `the edit moves "image" to $.x-defaults.base.img, which goes through <<: *r at 3:3, ` +
-				"a merge key that reads the reference document ref.yaml",
-		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			d := newDoc(t, tc.before, niceyaml.WithReferences(ref))
+			d := newDoc(t, tc.before)
 
 			err := d.Apply(t.Context(), paths.MustParse("$.jobs.*"), tc.fn)
 
-			requireEdit(t, d, err, tc.err, tc.want)
-
-			if tc.err != "" {
-				require.ErrorIs(t, err, paths.ErrReferenceAlias)
-				assert.Equal(t, tc.before, d.Text())
-			}
+			requireEdit(t, d, err, "", tc.want)
 		})
 	}
 }
@@ -3138,22 +3090,20 @@ func TestNode_At(t *testing.T) {
 			err    string
 		}{
 			"new key first that the reference document writes as another key": {
-				// The new entry goes before the merge key, which brings in
-				// 0x10. A decode reads 0x10 as 16, so it replaces the new entry.
+				// The merge key brings in 0x10, which a decode reads as 16. The
+				// new entry wins over it, wherever the mapping writes it.
 				before: stringtest.LinesLF("spec:", "  cost: 3", "  <<: *b"),
 				ref:    "base: &b {0x10: 9}\n",
 				path:   spec.Child("16"),
 				opts:   []edit.SetOption{edit.First()},
-				err: "test.yaml:3:7: $.spec: cafe.jacobcolvin.com/v1 sets $.spec.16, " +
-					"which goes through <<: *b at 3:3, a merge key that reads a reference document, so that document decides which names $.spec reads",
+				want:   stringtest.LinesLF("spec:", "  \"16\": 5", "  cost: 3", "  <<: *b"),
 			},
 			"new key before an entry that the reference document writes as another key": {
 				before: stringtest.LinesLF("spec:", "  cost: 3", "  <<: *b"),
 				ref:    "base: &b {0x10: 9}\n",
 				path:   spec.Child("16"),
 				opts:   []edit.SetOption{edit.Before("cost")},
-				err: "test.yaml:3:7: $.spec: cafe.jacobcolvin.com/v1 sets $.spec.16, " +
-					"which goes through <<: *b at 3:3, a merge key that reads a reference document, so that document decides which names $.spec reads",
+				want:   stringtest.LinesLF("spec:", "  \"16\": 5", "  cost: 3", "  <<: *b"),
 			},
 			"new key after an entry before the merge key that the reference document writes as another key": {
 				// The new entry goes after cost, so before the merge key, which
@@ -3162,8 +3112,7 @@ func TestNode_At(t *testing.T) {
 				ref:    "base: &b {0x10: 9}\n",
 				path:   spec.Child("16"),
 				opts:   []edit.SetOption{edit.After("cost")},
-				err: "test.yaml:3:7: $.spec: cafe.jacobcolvin.com/v1 sets $.spec.16, " +
-					"which goes through <<: *b at 3:3, a merge key that reads a reference document, so that document decides which names $.spec reads",
+				want:   stringtest.LinesLF("spec:", "  cost: 3", "  \"16\": 5", "  <<: *b"),
 			},
 			"new key after an entry after the merge key that the reference document writes as another key": {
 				before: stringtest.LinesLF("spec:", "  <<: *b", "  x: 3"),
@@ -3178,28 +3127,40 @@ func TestNode_At(t *testing.T) {
 				path:   paths.Doc().Child("16"),
 				move:   spec.Child("16"),
 				opts:   []edit.SetOption{edit.After("cost")},
-				err: "test.yaml:3:7: $.spec: cafe.jacobcolvin.com/v1 moves $.16 to $.spec.16, " +
-					"which goes through <<: *b at 3:3, a merge key that reads a reference document, so that document decides which names $.spec reads",
+				want:   stringtest.LinesLF("spec:", "  cost: 3", "  \"16\": 1", "  <<: *b"),
 			},
 			"reorder of an entry to before the merge key": {
-				// A decode reads 0x10 as 16, so 0x10 replaces the entry at its
-				// new place. A reorder of an own entry fails whatever the
-				// reference document holds.
+				// A decode reads 0x10 as 16, but the own entry wins over it at
+				// its new place too.
 				before: stringtest.LinesLF("spec:", "  cost: 3", "  <<: *b", "  16: 1"),
 				ref:    "base: &b {0x10: 9}\n",
 				path:   spec.Child("16"),
 				move:   spec.Child("16"),
 				opts:   []edit.SetOption{edit.After("cost")},
-				err: "test.yaml:4:3: $.spec.16: cafe.jacobcolvin.com/v1 moves $.spec.16 to $.spec.16, " +
-					"but <<: *b at 3:3 reads a reference document, which decides which names $.spec reads",
+				want:   stringtest.LinesLF("spec:", "  cost: 3", "  16: 1", "  <<: *b"),
 			},
-			"new key first with a reference key that does not decode": {
-				before: stringtest.LinesLF("spec:", "  cost: 3", "  <<: *b"),
-				ref:    "base: &b {? !!bool x : 9}\n",
-				path:   spec.Child("16"),
+			"reorder of an entry that the reference document holds to before the merge key": {
+				// While the entry is away, the merge key brings in cost. The
+				// entry goes back in and wins over the merge key.
+				before: stringtest.LinesLF("spec:", "  <<: *b", "  cost: 3"),
+				path:   spec.Child("cost"),
+				move:   spec.Child("cost"),
 				opts:   []edit.SetOption{edit.First()},
-				err: "test.yaml:3:7: $.spec: cafe.jacobcolvin.com/v1 sets $.spec.16, " +
-					"which goes through <<: *b at 3:3, a merge key that reads a reference document, so that document decides which names $.spec reads",
+				want:   stringtest.LinesLF("spec:", "  cost: 3", "  <<: *b"),
+			},
+			"reorder of an entry that the reference document holds to after the merge key": {
+				before: stringtest.LinesLF("spec:", "  cost: 3", "  <<: *b", "  x: 1"),
+				path:   spec.Child("cost"),
+				move:   spec.Child("cost"),
+				opts:   []edit.SetOption{edit.After("x")},
+				want:   stringtest.LinesLF("spec:", "  <<: *b", "  x: 1", "  cost: 3"),
+			},
+			"reorder of an entry that the reference document holds within entries before the merge key": {
+				before: stringtest.LinesLF("spec:", "  x: 1", "  cost: 3", "  <<: *b"),
+				path:   spec.Child("cost"),
+				move:   spec.Child("cost"),
+				opts:   []edit.SetOption{edit.First()},
+				want:   stringtest.LinesLF("spec:", "  cost: 3", "  x: 1", "  <<: *b"),
 			},
 			"new key last that the reference document writes as another key": {
 				before: stringtest.LinesLF("spec:", "  cost: 3", "  <<: *b"),
@@ -3227,29 +3188,25 @@ func TestNode_At(t *testing.T) {
 				path:   paths.Doc().Child("16"),
 				move:   spec.Child("16"),
 				opts:   []edit.SetOption{edit.First()},
-				err: "test.yaml:3:7: $.spec: cafe.jacobcolvin.com/v1 moves $.16 to $.spec.16, " +
-					"which goes through <<: *b at 3:3, a merge key that reads a reference document, so that document decides which names $.spec reads",
+				want:   stringtest.LinesLF("spec:", "  \"16\": 1", "  cost: 3", "  <<: *b"),
 			},
 			"key before a merge of a reference anchor that merges another": {
 				before: stringtest.LinesLF("spec: {16: 3, <<: *b}"),
 				ref:    stringtest.LinesLF("i: &i {0x10: 9}", "base: &b {<<: *i}"),
 				path:   spec.Child("16"),
-				err: "test.yaml:1:19: $.spec: cafe.jacobcolvin.com/v1 sets $.spec.16, " +
-					"which goes through <<: *b at 1:15, a merge key that reads a reference document, so that document decides which names $.spec reads",
+				want:   stringtest.LinesLF("spec: {16: 5, <<: *b}"),
 			},
 			"key before a merge of a reference anchor that merges a sequence": {
 				before: stringtest.LinesLF("spec: {16: 3, <<: *b}"),
 				ref:    stringtest.LinesLF("i: &i {0x10: 9}", "j: &j {z: 1}", "base: &b {<<: [*i, *j]}"),
 				path:   spec.Child("16"),
-				err: "test.yaml:1:19: $.spec: cafe.jacobcolvin.com/v1 sets $.spec.16, " +
-					"which goes through <<: *b at 1:15, a merge key that reads a reference document, so that document decides which names $.spec reads",
+				want:   stringtest.LinesLF("spec: {16: 5, <<: *b}"),
 			},
 			"key before a merge of a local anchor that merges a reference document": {
 				before: stringtest.LinesLF("l: &l {<<: *b}", "spec: {16: 3, <<: *l}"),
 				ref:    "base: &b {0x10: 9}\n",
 				path:   spec.Child("16"),
-				err: "test.yaml:1:12: $.l: cafe.jacobcolvin.com/v1 sets $.spec.16, " +
-					"which goes through <<: *b at 1:8, a merge key that reads a reference document, so that document decides which names $.l reads",
+				want:   stringtest.LinesLF("l: &l {<<: *b}", "spec: {16: 5, <<: *l}"),
 			},
 			"key that the merge key brings in": {
 				before: stringtest.LinesLF("spec:", "  <<: *b", "  cost: 3"),
@@ -3263,12 +3220,10 @@ func TestNode_At(t *testing.T) {
 				want:   stringtest.LinesLF("spec:", "  <<: *b", "  cost: 3", "  tls: 5"),
 			},
 			"key before the merge key": {
-				// The merge key brings in cost, which then wins over the own
-				// entry, so the path selects an entry of the reference document.
+				// The merge key brings in cost, but the own entry wins over it.
 				before: stringtest.LinesLF("spec:", "  cost: 3", "  <<: *b"),
 				path:   spec.Child("cost"),
-				err: "test.yaml:3:7: $.spec: cafe.jacobcolvin.com/v1 sets $.spec.cost, " +
-					"which goes through <<: *b at 3:3, a merge key that reads a reference document, so that document decides which names $.spec reads",
+				want:   stringtest.LinesLF("spec:", "  cost: 5", "  <<: *b"),
 			},
 			"key before the merge key that the reference document lacks": {
 				before: stringtest.LinesLF("spec:", "  seats: 3", "  <<: *b"),
@@ -3281,23 +3236,12 @@ func TestNode_At(t *testing.T) {
 				want:   stringtest.LinesLF("spec:", "  <<: *b", "  cost: 5"),
 			},
 			"key before the merge key that the reference document writes as another key": {
-				// A decode reads 0x10 as 16, so the entry of the reference
-				// document wins over the own entry, though the text of its key
-				// differs.
+				// A decode reads 0x10 as 16, but the own entry wins over the
+				// entry of the reference document.
 				before: stringtest.LinesLF("spec:", "  16: 3", "  <<: *b"),
 				ref:    "base: &b {0x10: 9}\n",
 				path:   spec.Child("16"),
-				err: "test.yaml:3:7: $.spec: cafe.jacobcolvin.com/v1 sets $.spec.16, " +
-					"which goes through <<: *b at 3:3, a merge key that reads a reference document, so that document decides which names $.spec reads",
-			},
-			"key before the merge key with a reference key that does not decode": {
-				// A decode cannot read the key !!bool x, so it might read it as
-				// 16.
-				before: stringtest.LinesLF("spec:", "  16: 3", "  <<: *b"),
-				ref:    "base: &b {? !!bool x : 9}\n",
-				path:   spec.Child("16"),
-				err: "test.yaml:3:7: $.spec: cafe.jacobcolvin.com/v1 sets $.spec.16, " +
-					"which goes through <<: *b at 3:3, a merge key that reads a reference document, so that document decides which names $.spec reads",
+				want:   stringtest.LinesLF("spec:", "  16: 5", "  <<: *b"),
 			},
 			"key after the merge key that the reference document writes as another key": {
 				before: stringtest.LinesLF("spec:", "  <<: *b", "  16: 3"),
