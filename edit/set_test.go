@@ -884,6 +884,41 @@ func TestNode_Set(t *testing.T) {
 				"edit_test.yamlMarshaler writes YAML that YAML does not allow: ',' or ']' must be specified " +
 				"at 2:2 of that YAML",
 		},
+		// Go-yaml's parser reads each of these texts as [{a: ..., c: d}].
+		// YAML holds one key in a single pair of a flow sequence, so the
+		// problem is the marshaler's.
+		"YAML marshaler that writes a key below a quoted value of a single pair in a flow sequence": {
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("b"),
+			value:  yamlMarshaler(stringtest.LinesLF("[a: 'b'", " c: d]")),
+			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 cannot write the value of $.b: the MarshalYAML method of " +
+				"edit_test.yamlMarshaler writes YAML that YAML does not allow: ',' or ']' must be specified " +
+				"at 2:2 of that YAML",
+		},
+		"YAML marshaler that writes a key below a flow sequence value of a single pair in a flow sequence": {
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("b"),
+			value:  yamlMarshaler(stringtest.LinesLF("[a: [x]", " c: d]")),
+			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 cannot write the value of $.b: the MarshalYAML method of " +
+				"edit_test.yamlMarshaler writes YAML that YAML does not allow: ',' or ']' must be specified " +
+				"at 2:2 of that YAML",
+		},
+		"YAML marshaler that writes a key below a key without a value of a single pair in a flow sequence": {
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("b"),
+			value:  yamlMarshaler(stringtest.LinesLF("[a:", " c: d]")),
+			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 cannot write the value of $.b: the MarshalYAML method of " +
+				"edit_test.yamlMarshaler writes YAML that YAML does not allow: ',' or ']' must be specified " +
+				"at 2:2 of that YAML",
+		},
+		"YAML marshaler that writes a key indented below a key without a value of a single pair in a flow sequence": {
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("b"),
+			value:  yamlMarshaler(stringtest.LinesLF("[a:", "  c: d]")),
+			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 cannot write the value of $.b: the MarshalYAML method of " +
+				"edit_test.yamlMarshaler writes YAML that YAML does not allow: ',' or ']' must be specified " +
+				"at 2:3 of that YAML",
+		},
 		"YAML marshaler that writes a key on a line that continues a value of a flow mapping with a comment": {
 			// The comment does not cause the refusal, so the problem is still
 			// the marshaler's.

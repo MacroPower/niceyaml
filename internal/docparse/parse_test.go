@@ -8,6 +8,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/parser"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -698,6 +699,201 @@ func TestParse_FlowSequence(t *testing.T) {
 			assert.Equal(t, tc.msg, syntaxErr.Message)
 			require.NotNil(t, syntaxErr.Token)
 			assert.Equal(t, *tc.at, position.NewFromToken(syntaxErr.Token))
+		})
+	}
+}
+
+func TestParse_FlowPair(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		// The message of the failure, or empty for
+		// [docparse.FlowPairMessage].
+		msg string
+		// The line and column of the token that the failure binds at, or
+		// nil when the text parses.
+		at *position.Position
+	}{
+		"key below a value": {
+			input: stringtest.LinesLF("[a: b", " c: d]"),
+			at:    new(position.New(1, 1)),
+		},
+		"key below a value before another entry": {
+			input: stringtest.LinesLF("[a: b", " c: d, e]"),
+			at:    new(position.New(1, 1)),
+		},
+		"two keys below a value": {
+			input: stringtest.LinesLF("[a: b", " c: d", " e: f]"),
+			at:    new(position.New(1, 1)),
+		},
+		"key below a quoted value": {
+			input: stringtest.LinesLF("[a: 'b'", " c: d]"),
+			at:    new(position.New(1, 1)),
+		},
+		"key below a flow sequence value": {
+			input: stringtest.LinesLF("[a: [b]", " c: d]"),
+			at:    new(position.New(1, 1)),
+		},
+		"key below a key without a value": {
+			input: stringtest.LinesLF("[a:", " c: d]"),
+			at:    new(position.New(1, 1)),
+		},
+		"key indented below a key without a value": {
+			input: stringtest.LinesLF("[a:", "  c: d]"),
+			at:    new(position.New(1, 2)),
+		},
+		"keys indented below a key without a value": {
+			input: stringtest.LinesLF("[a:", "  c: d", "  e: f]"),
+			at:    new(position.New(1, 2)),
+		},
+		"key indented below a key without a value and a key below it": {
+			input: stringtest.LinesLF("[a:", "  c: d", " e: f]"),
+			at:    new(position.New(1, 2)),
+		},
+		"key indented below an explicit key without a value": {
+			input: stringtest.LinesLF("[? a :", "  c: d]"),
+			at:    new(position.New(1, 2)),
+		},
+		"key indented below a key without a value in a block sequence": {
+			input: stringtest.LinesLF("k:", "  - [a:", "      c: d]"),
+			at:    new(position.New(2, 6)),
+		},
+		"key below a comment": {
+			input: stringtest.LinesLF("[a: b", " # c", " c: d]"),
+			at:    new(position.New(2, 1)),
+		},
+		"key below an anchored pair": {
+			input: stringtest.LinesLF("[&x a: b", " c: d]"),
+			at:    new(position.New(1, 1)),
+		},
+		"explicit key below a value": {
+			input: stringtest.LinesLF("[a: b", " ? c : d]"),
+			at:    new(position.New(1, 1)),
+		},
+		"key below the value of an explicit key": {
+			input: stringtest.LinesLF("[? a : b", " c: d]"),
+			at:    new(position.New(1, 1)),
+		},
+		"key below a value in a block sequence": {
+			input: stringtest.LinesLF("- [a: b", "  c: d]"),
+			at:    new(position.New(1, 2)),
+		},
+		"key below a value in a flow mapping": {
+			input: stringtest.LinesLF("{x: [a: b", " c: d]}"),
+			at:    new(position.New(1, 1)),
+		},
+		// The run fails with its first error in file order.
+		"key below a value of a nested pair": {
+			input: stringtest.LinesLF("[a: [x: y", "     z: w]", " c: d]"),
+			at:    new(position.New(1, 5)),
+		},
+		"misread before a key below a value": {
+			input: stringtest.LinesLF("k: [{? A", "- b}, a: x", "      c: d]"),
+			msg:   docparse.FlowIndentMessage,
+			at:    new(position.New(1, 0)),
+		},
+		"key below a value before a misread": {
+			input: stringtest.LinesLF("[a: b", " c: d, x}]"),
+			at:    new(position.New(1, 1)),
+		},
+		"pair below a pair with a comma": {
+			input: stringtest.LinesLF("[a: b,", " c: d]"),
+		},
+		"value on two lines": {
+			input: stringtest.LinesLF("[a: b", " c]"),
+		},
+		"flow mapping on two lines": {
+			input: stringtest.LinesLF("[{a: b,", " c: d}]"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			r := docparse.Parse(tokens.Tokenize(tc.input))
+
+			if tc.at == nil {
+				require.Empty(t, r.Failures)
+
+				return
+			}
+
+			require.Len(t, r.Failures, 1)
+
+			var syntaxErr *yaml.SyntaxError
+
+			msg := tc.msg
+			if msg == "" {
+				msg = docparse.FlowPairMessage
+			}
+
+			require.ErrorAs(t, r.Failures[0].Err, &syntaxErr)
+			assert.Equal(t, msg, syntaxErr.Message)
+			require.NotNil(t, syntaxErr.Token)
+			assert.Equal(t, *tc.at, position.NewFromToken(syntaxErr.Token))
+		})
+	}
+}
+
+func TestFlowPairKeys(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		// The line and column of each key that the function returns.
+		want []position.Position
+	}{
+		"key below a value": {
+			input: stringtest.LinesLF("[a: b", " c: d]"),
+			want:  []position.Position{position.New(1, 1)},
+		},
+		"explicit key below a value": {
+			input: stringtest.LinesLF("[a: b", " ? c : d]"),
+			want:  []position.Position{position.New(1, 1)},
+		},
+		"key indented below a key without a value": {
+			input: stringtest.LinesLF("[a:", "  c: d]"),
+			want:  []position.Position{position.New(1, 2)},
+		},
+		"key indented below an explicit key without a value": {
+			input: stringtest.LinesLF("[? a :", "  c: d]"),
+			want:  []position.Position{position.New(1, 2)},
+		},
+		"key indented below a key without a value and a key below it": {
+			input: stringtest.LinesLF("[a:", "  c: d", " e: f]"),
+			want:  []position.Position{position.New(1, 2)},
+		},
+		"keys below values in two flow sequences": {
+			input: stringtest.LinesLF("[a: b", " c: d, [e: f", "        g: h]]"),
+			want:  []position.Position{position.New(1, 1), position.New(2, 8)},
+		},
+		"pair below a pair with a comma": {
+			input: stringtest.LinesLF("[a: b,", " c: d]"),
+		},
+		"flow mapping on two lines": {
+			input: stringtest.LinesLF("[{a: b,", " c: d}]"),
+		},
+		"block mapping": {
+			input: stringtest.LinesLF("a: b", "c: d"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			f, err := parser.ParseBytes([]byte(tc.input), 0)
+			require.NoError(t, err)
+
+			var got []position.Position
+
+			for _, tk := range docparse.FlowPairKeys(f) {
+				got = append(got, position.NewFromToken(tk))
+			}
+
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }

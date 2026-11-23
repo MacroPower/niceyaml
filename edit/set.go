@@ -341,7 +341,10 @@ type payload struct {
 // "x: {? Y\n- z}". So does a key on a line that continues a plain scalar
 // in a flow collection, as in "{x: y\n    z: w}" and "[x\n y: z]", where
 // the parse refuses that key. YAML ends the scalar at the ":" of such a
-// key, so the entries lack a ",". The problem names the path of the Set
+// key, so the entries lack a ",". So does a key on the line below a single
+// pair of a flow sequence, as in "[a: 'b'\n c: d]", which go-yaml's parser
+// reads into the pair. YAML holds one key in such a pair, so the entries
+// lack a "," there too. The problem names the path of the Set
 // and the marshaler, and it matches ErrValue. Every other problem of the
 // text is go-yaml's, and it fails the Set with ErrEngine at its place.
 // Go-yaml's parser can refuse the text without its comments, or refuse a

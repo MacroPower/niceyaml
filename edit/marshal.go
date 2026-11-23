@@ -88,10 +88,12 @@ func refusal(err error, text string) string {
 // are a plain scalar there that starts with a "-" right before a flow
 // indicator and one that holds a flow indicator, and a "-" at a line of a
 // flow collection that does not pass the indent of the block node that
-// holds the collection, because YAML does not allow any of them. So is
-// text that the finder refuses after go-yaml's parser took it, where the
-// refusal binds at a key on a line that continues a plain scalar in a
-// flow collection, as [refusesCutKey] finds it. Each other problem is
+// holds the collection, because YAML does not allow any of them. The
+// finder can also refuse text that go-yaml's parser took. Such a refusal
+// is the problem of the marshaler when it binds at a key on a line that
+// continues a plain scalar in a flow collection, as [refusesCutKey] finds
+// it. So is one of a key that go-yaml's parser reads into a single pair of
+// a flow sequence, as [refusesFlowPair] finds it. Each other problem is
 // go-yaml's, and it matches errEncoder. One of them is a "-" that
 // continues a plain scalar in a flow collection, which the parser
 // refuses. Go-yaml's encoder writes a directive alone for text with one
@@ -176,12 +178,14 @@ func marshaledYAML(v reflect.Value, method string, doc []byte, err error) ([]ins
 		}
 
 		// The tokenizer cuts a plain scalar of a flow collection at a line
-		// that holds a key where YAML refuses the scalar as that key. A
-		// refusal there is the problem of the marshaler. Go-yaml's parser
-		// took the text without its comments, so another refusal of a text
-		// that holds a comment is go-yaml's, and so is each other refusal.
+		// that holds a key where YAML refuses the scalar as that key. The
+		// finder also refuses a key that go-yaml's parser reads into a
+		// single pair of a flow sequence. A refusal of either is the
+		// problem of the marshaler. Go-yaml's parser took the text without
+		// its comments, so another refusal of a text that holds a comment
+		// is go-yaml's, and so is each other refusal.
 		switch {
-		case refusesCutKey(doc, err):
+		case refusesCutKey(doc, err) || refusesFlowPair(file, err):
 			return nil, fmt.Errorf("%s writes YAML that YAML does not allow: %s", who, refusal(err, "that YAML"))
 		case holdsComment(doc):
 			return nil, goyamlProblem("go-yaml's parser refuses the YAML that %s writes, with its comments: %s",
@@ -293,6 +297,17 @@ func refusesCutKey(doc []byte, err error) bool {
 	}
 
 	return false
+}
+
+// refusesFlowPair reports whether err, the refusal of the finder of a
+// text, is the refusal of a key that go-yaml's parser reads into a single
+// pair of a flow sequence. File is go-yaml's parse of the text. YAML holds
+// one key in such a pair, as in "[a: b\n c: d]", but go-yaml's parser
+// takes the text.
+func refusesFlowPair(file *ast.File, err error) bool {
+	syntax, ok := errors.AsType[*yaml.SyntaxError](err)
+
+	return ok && syntax.Message == docparse.FlowPairMessage && len(docparse.FlowPairKeys(file)) > 0
 }
 
 // plainToken reports whether tk is the token of a plain scalar.

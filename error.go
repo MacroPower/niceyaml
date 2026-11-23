@@ -228,10 +228,12 @@ var (
 	// before a flow indicator, as in "[-]", and a plain scalar there that
 	// holds a flow indicator, as in "[a}]". So does a "-" at a line of a
 	// flow collection that does not pass the indent of the block node that
-	// holds the collection, as in "key: {? A\n- B}". The parser takes each
-	// such token, but YAML refuses it, so the parse of a Source fails the
-	// document with a syntax error at the token. That error matches
-	// ErrSyntax, as the errors of the parser do.
+	// holds the collection, as in "key: {? A\n- B}". So does a key on the
+	// line below a single pair of a flow sequence without a "," before it,
+	// as in "[a: b\n c: d]", which the parser reads into the pair. The
+	// parser takes each such token, but YAML refuses it, so the parse of a
+	// Source fails the document with a syntax error at the token. That
+	// error matches ErrSyntax, as the errors of the parser do.
 	//
 	// A document past the depth limit of [WithDepthLimit] or the byte limit
 	// of [WithDocumentByteLimit] does not parse either. Neither does the one

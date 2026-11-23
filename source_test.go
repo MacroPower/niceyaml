@@ -2442,6 +2442,45 @@ func TestSource_File_ErrSyntax(t *testing.T) {
 			input: stringtest.LinesLF("[a: b", "\tc", " d: e]"),
 			want:  []bool{true},
 		},
+		// A single pair in a flow sequence holds one key, so a comma must
+		// come before the key below it. The go-yaml parser reads a key at
+		// the column of the first key into the pair.
+		"key below a value of a single pair in a flow sequence": {
+			input: stringtest.LinesLF("[a: b", " c: d]"),
+			want:  []bool{true},
+		},
+		"key below a value of a single pair before another entry": {
+			input: stringtest.LinesLF("[a: b", " c: d, e]"),
+			want:  []bool{true},
+		},
+		"key below a key without a value of a single pair": {
+			input: stringtest.LinesLF("[a:", " c: d]"),
+			want:  []bool{true},
+		},
+		"key indented below a key without a value of a single pair": {
+			input: stringtest.LinesLF("[a:", "  c: d]"),
+			want:  []bool{true},
+		},
+		"key indented below an explicit key without a value of a single pair": {
+			input: stringtest.LinesLF("[? a :", "  c: d]"),
+			want:  []bool{true},
+		},
+		"explicit key below a value of a single pair": {
+			input: stringtest.LinesLF("[a: b", " ? c : d]"),
+			want:  []bool{true},
+		},
+		"key below a single pair in the second document": {
+			input: stringtest.LinesLF("[a: b]", "---", "[a: b", " c: d]"),
+			want:  []bool{false, true},
+		},
+		"single pair below a single pair with a comma": {
+			input: stringtest.LinesLF("[a: b,", " c: d]"),
+			want:  []bool{false},
+		},
+		"value on two lines of a single pair": {
+			input: stringtest.LinesLF("[a: b", " c]"),
+			want:  []bool{false},
+		},
 		"key right of the key of a value in a flow mapping": {
 			input: stringtest.LinesLF("{a: b", "    c: d}"),
 			want:  []bool{true},

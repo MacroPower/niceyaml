@@ -49,14 +49,16 @@ type Result struct {
 // "[-]". So does a plain scalar there that holds a flow indicator, as in
 // "[a}]". The parser refuses the "-" after an anchor, but it takes the
 // others. A run with a "-" that starts a line right below a plain scalar
-// in a flow collection fails too, when the parser takes the run.
+// in a flow collection fails too, when the parser takes the run. So does
+// a run where the parser reads more than one key into a single pair of a
+// flow sequence, as in "[a: b\n c: d]".
 type Failure struct {
 	// Err is the error of the run, or nil after a panic. It is the error
-	// that the parser returned, the [*SizeError] of a run past the byte
-	// limit, the [*DepthError] of a run past the depth limit, the
-	// [*yaml.SyntaxError] that [misreadError] returns, or the error that
-	// the caller handed [Fail]. The error of [misreadError] also takes the
-	// place of a panic.
+	// that the parser returned, or the error that the caller handed
+	// [Fail]. A run past the byte limit has a [*SizeError], and a run past
+	// the depth limit has a [*DepthError]. Err can also be the
+	// [*yaml.SyntaxError] that [misreadError] or [flowPairError] returns.
+	// The error of [misreadError] also takes the place of a panic.
 	Err error
 	// Panic is the value the parser panicked with, or nil.
 	Panic any
@@ -172,6 +174,7 @@ func parse(tks token.Tokens, limits Limits, mode parser.Mode, opts []parser.Opti
 		}
 
 		f, failure := parseRun(NullFlowPairs(dropStrandedComments(run)), mode, opts)
+		parsed := failure == nil
 
 		// The run fails with its first error in file order. The error of
 		// the parser thus wins when it binds before the token of the misread.
@@ -185,6 +188,17 @@ func parse(tks token.Tokens, limits Limits, mode parser.Mode, opts []parser.Opti
 		case yields && failure != nil && failure.Err != nil:
 		default:
 			failure = &Failure{Err: entryErr}
+		}
+
+		// The error of a key that the parser reads into a single pair of a
+		// flow sequence comes from a run that the parser took. It wins over
+		// the error of a misread only when it binds before the token of the
+		// misread.
+		if parsed {
+			pairErr := flowPairError(f, index)
+			if pairErr != nil && (entryErr == nil || index[pairErr.Token] < index[entryErr.Token]) {
+				failure = &Failure{Err: pairErr}
+			}
 		}
 
 		if failure == nil {
@@ -362,6 +376,97 @@ const FlowScalarMessage = "a plain scalar in a flow collection cannot hold a flo
 // pass the indent of the block node that holds the collection, which
 // YAML requires of each line of the collection.
 const FlowIndentMessage = "a line of a flow collection must be indented past the block node that holds it"
+
+// FlowPairMessage is the message of the [*yaml.SyntaxError] of a key that
+// follows a single pair in a flow sequence without a "," between them, as
+// in "[a: b\n c: d]". It matches the message of the go-yaml parser for
+// another entry that follows an entry without a ",".
+const FlowPairMessage = "',' or ']' must be specified"
+
+// flowPairError returns the syntax error of the first key in file order
+// that the go-yaml parser reads into a single pair of a flow sequence of
+// f, or nil. Index gives the order of the tokens. The error has
+// [FlowPairMessage], and it binds at the first key that [FlowPairKeys]
+// returns.
+func flowPairError(f *ast.File, index map[*token.Token]int) *yaml.SyntaxError {
+	var (
+		first *token.Token
+		at    int
+	)
+
+	for _, tk := range FlowPairKeys(f) {
+		if i, ok := index[tk]; ok && (first == nil || i < at) {
+			first, at = tk, i
+		}
+	}
+
+	if first == nil {
+		return nil
+	}
+
+	return &yaml.SyntaxError{Message: FlowPairMessage, Token: first}
+}
+
+// FlowPairKeys returns the first token of each key in f that the go-yaml
+// parser reads into a single pair of a flow sequence after the one key of
+// the pair. YAML refuses each such key. FlowPairKeys gives the first such
+// key of each pair, and the token of an explicit key is its "?".
+//
+// A single pair in a flow sequence holds one key and its value. So
+// "[a: b, c: d]" holds [{a: b}, {c: d}]. YAML ignores the indent of a line in a
+// flow collection past the indent of the block node that holds the collection,
+// and it ends the plain value of a pair at the ":" of a key on the next line.
+// So a "," must come before that key. The go-yaml parser reads the pair as a
+// block mapping. It takes each key at the column of the first key as another
+// key of that mapping, so it reads "[a: b\n c: d]" as [{a: b, c: d}]. It reads
+// a key that is indented past the first key, below a key without a value, as a
+// block mapping in the value of the pair. So it reads "[a:\n  c: d]" as
+// [{a: {c: d}}]. Each mapping in a flow sequence that is not in flow style is
+// such a pair.
+func FlowPairKeys(f *ast.File) []*token.Token {
+	var keys []*token.Token
+
+	for _, doc := range f.Docs {
+		astnode.Inspect(doc, func(node ast.Node) bool {
+			seq, ok := node.(*ast.SequenceNode)
+			if !ok || !seq.IsFlowStyle {
+				return true
+			}
+
+			for _, value := range seq.Values {
+				pair, ok := astnode.Content(value).(*ast.MappingNode)
+				if !ok || pair.IsFlowStyle || len(pair.Values) == 0 {
+					continue
+				}
+
+				if key := flowPairKey(pair); key != nil {
+					keys = append(keys, key)
+				}
+			}
+
+			return true
+		})
+	}
+
+	return keys
+}
+
+// flowPairKey returns the first token of the first key that the go-yaml
+// parser reads into pair after its one key, or nil. Pair is a single pair
+// of a flow sequence. Such a key is the first key of a block mapping in
+// the value of the pair, or the second key of pair.
+func flowPairKey(pair *ast.MappingNode) *token.Token {
+	nested, ok := astnode.Content(pair.Values[0].Value).(*ast.MappingNode)
+	if ok && !nested.IsFlowStyle && len(nested.Values) > 0 {
+		return astnode.StartToken(nested.Values[0].Key)
+	}
+
+	if len(pair.Values) > 1 {
+		return astnode.StartToken(pair.Values[1].Key)
+	}
+
+	return nil
+}
 
 // misreadError returns the syntax error of the first token of run that
 // the go-yaml parser can misread, or nil. Such a token is a "-" or a plain

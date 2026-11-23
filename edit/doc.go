@@ -623,7 +623,10 @@
 // indicator, as in "[a}]", which YAML refuses and the parser takes. They
 // also include one with a "-" at a line of a flow collection after an
 // explicit key, where the line does not pass the indent of the block node
-// that holds the collection, as in "key: {? A\n- b}". A reference document
+// that holds the collection, as in "key: {? A\n- b}". They also include
+// one with a key on the line below a single pair of a flow sequence
+// without a "," before it, as in "[a: b\n c: d]", which YAML refuses and
+// the parser reads into the pair. A reference document
 // of [go.jacobcolvin.com/niceyaml.WithReferences] that does not parse
 // fails New the same way, because each decode of the document fails with
 // that error. A reference document in which go-yaml's parser nests a line

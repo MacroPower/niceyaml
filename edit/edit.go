@@ -147,8 +147,11 @@ var (
 	// a flow collection that does not pass the indent of the block node
 	// that holds the collection. So does YAML of a marshaler that holds a
 	// key on a line that continues a plain scalar in a flow collection, as
-	// in "{x: y\n    z: w}", where the parse refuses that key. So does a
-	// chain of more than 1,000 marshalers. It fails so with a value that
+	// in "{x: y\n    z: w}", where the parse refuses that key. So does YAML
+	// of a marshaler with a key on the line below a single pair of a flow
+	// sequence and without a "," before the key, as in "[a: b\n c: d]",
+	// which go-yaml's parser reads into the pair. So does a chain of more
+	// than 1,000 marshalers. It fails so with a value that
 	// holds a string that is not UTF-8, as a value or as a key, and that
 	// error also matches
 	// [go.jacobcolvin.com/niceyaml/encoder.ErrEncode]. The error binds at

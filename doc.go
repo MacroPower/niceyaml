@@ -229,6 +229,15 @@
 // "[? A: ]". The parse of a Source reads each as [{A: null}], as the parser
 // reads "{? A}" as {A: null}.
 //
+// A mapping of one pair in a flow sequence holds one key, so a "," comes before
+// the key of the next pair. YAML requires each line of a flow collection to
+// pass the indent of the block node that holds the collection, and it ignores
+// any indent past that. But go-yaml's parser reads a key on a line below into
+// the pair. So yaml.Unmarshal reads "[a: b\n c: d]" as [{a: b, c: d}], and it
+// reads "[a:\n  c: d]" as [{a: {c: d}}]. The parse of a Source refuses each
+// text with a syntax error at the key below, at any indent. The text
+// "[a: b,\n c: d]" holds two pairs, as in [{a: b}, {c: d}].
+//
 // A "---" header that directly follows an anchor without a value parses
 // together with the document above it. A syntax error in either document thus
 // fails both, and both return that one error. The two documents also share
