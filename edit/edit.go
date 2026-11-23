@@ -143,10 +143,10 @@ var (
 	// anchor or a tag on its line, a "-" that starts an entry inside a flow
 	// collection, or a "-" there right before a flow indicator, as in "[-]".
 	// So does YAML of a marshaler with a plain scalar in a flow collection
-	// that holds a flow indicator, as in "[a}]", or with a "-" at a line of
-	// a flow collection that does not pass the indent of the block node
-	// that holds the collection. So does YAML of a marshaler with the name
-	// of an anchor or an alias that holds a flow indicator, as in
+	// that holds a flow indicator, as in "[a}]", or with a line of a flow
+	// collection that does not pass the indent of the block node that holds
+	// the collection, as in "x: [y\n]". So does YAML of a marshaler with
+	// the name of an anchor or an alias that holds a flow indicator, as in
 	// "[&x} 1]". So does YAML of a marshaler that holds a
 	// key on a line that continues a plain scalar in a flow collection, as
 	// in "{x: y\n    z: w}", where the parse refuses that key. So does YAML

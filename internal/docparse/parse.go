@@ -182,8 +182,8 @@ func parse(tks token.Tokens, limits Limits, mode parser.Mode, opts []parser.Opti
 		// The run fails with its first error in file order. The error of
 		// the parser thus wins when it binds before the token of the misread.
 		// Any error of the parser wins over the error of a "-" right below
-		// a plain scalar, because that error names the indent of the line,
-		// and the parser names the token that it refuses there.
+		// a plain scalar, because the parser names the token that it
+		// refuses on the line of the key there.
 		entryErr, yields := misreadError(run)
 
 		switch {
@@ -378,11 +378,12 @@ const FlowScalarMessage = "a plain scalar in a flow collection cannot hold a flo
 // "[&x} 1]", which fails the run of the name.
 const NameIndicatorMessage = "the name of an anchor or an alias cannot hold a flow indicator"
 
-// FlowIndentMessage is the message of the [*yaml.SyntaxError] of a "-"
-// that starts a line right below a plain scalar in a flow collection,
-// where the go-yaml parser takes the run. The line of such a "-" does not
-// pass the indent of the block node that holds the collection, which
-// YAML requires of each line of the collection.
+// FlowIndentMessage is the message of the [*yaml.SyntaxError] of a line of
+// a flow collection that does not pass the indent of the block node that
+// holds the collection. YAML requires each line of the collection to pass
+// that indent. [tokens.Tokenize] reports the first character of such a
+// line as an invalid token with this message, or the quoted scalar that
+// spans the line.
 const FlowIndentMessage = "a line of a flow collection must be indented past the block node that holds it"
 
 // FlowPairMessage is the message of the [*yaml.SyntaxError] of a key that
@@ -531,15 +532,14 @@ func flowPairKey(pair *ast.MappingNode) *token.Token {
 // A "-" that starts a line right below a plain scalar in a flow
 // collection continues that scalar when the line passes the indent of the
 // block node that holds the collection. [tokens.Tokenize] then reads the
-// "-" into the scalar. The tokenizer gives the "-" a token of its own at a
-// line that does not pass that indent, as in "key: [a\n- c]". It also
-// gives the "-" a token at a line that holds the key of a ":" where YAML
-// refuses a scalar on more than one line as a key, as in "{a: b\n - c: d}".
-// YAML refuses both texts, and so does the parser. The parser takes a "-"
-// at a line that does not pass the indent after an explicit key, so it
-// reads "key: {? A\n- b}" as {key: {A: [b]}}. The error of such a "-" has
-// [FlowIndentMessage], and the run takes the error of the parser in its
-// place when the parser refuses the run.
+// "-" into the scalar. The tokenizer reports a "-" at a line that does not
+// pass that indent as an invalid token, as in "key: [a\n- c]". So the
+// "-" gets a token of its own below a plain scalar only at a line that
+// holds the key of a ":", as in "{a: b\n - c: d}", because YAML refuses a
+// scalar on more than one line as such a key. YAML refuses the text, and
+// so does the parser. The error of such a "-" has [FlowSequenceMessage],
+// and the run takes the error of the parser in its place when the parser
+// refuses the run.
 //
 // The run fails with this error unless the parser refuses a token before
 // the token of the error. The error of a "-" binds at the "-".
@@ -566,7 +566,7 @@ func misreadError(run token.Tokens) (*yaml.SyntaxError, bool) {
 			}
 
 			if depth > 0 && belowPlain(run, i) {
-				return &yaml.SyntaxError{Message: FlowIndentMessage, Token: tk}, true
+				return &yaml.SyntaxError{Message: FlowSequenceMessage, Token: tk}, true
 			}
 
 			if depth > 0 {
@@ -595,10 +595,6 @@ func misreadError(run token.Tokens) (*yaml.SyntaxError, bool) {
 
 			if tk.Value != "-" || !beforeFlowIndicator(run, i) {
 				continue
-			}
-
-			if belowPlain(run, i) {
-				return &yaml.SyntaxError{Message: FlowIndentMessage, Token: tk}, true
 			}
 
 			return &yaml.SyntaxError{Message: FlowIndicatorMessage, Token: tk}, false
@@ -1106,9 +1102,8 @@ func NullFlowPairs(tks token.Tokens) token.Tokens {
 // pair, right after the key or after its ":". PairEnd returns -1 for any
 // other pair, such as one that holds a value, one whose key does not hold
 // a node, as in "[? ]", one whose key holds two scalars, as in
-// "- [? A\n- B]" at the indent of the block sequence that holds the
-// collection, or one whose key has a tag on a line above its node, as in
-// "[? !T\n A]".
+// "[? \"A\" B]", or one whose key has a tag on a line above its node, as
+// in "[? !T\n A]".
 func pairEnd(tks token.Tokens, key int) int {
 	j := nextBody(tks, key)
 

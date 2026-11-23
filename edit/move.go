@@ -135,9 +135,10 @@ import (
 // fault for the problem.
 //
 // In a flow collection, the value takes flow style and drops the comments
-// of the entry and of the value. Each string there, as a key or a value,
-// takes the text that go-yaml's flow encoder writes for it, unless the
-// user quoted it on one line. Such a string keeps its quotes. So x:y and
+// of the entry and of the value. A value of several lines goes on one line
+// there. Each string there, as a key or a value, takes the text that
+// go-yaml's flow encoder writes for it, unless the user quoted it on one
+// line. Such a string keeps its quotes. So x:y and
 // the YAML 1.1 words y, n, yes, and no take double quotes. A scalar of
 // several lines, and a block scalar that the engine wrote, can come out
 // plain. Each other scalar, such as 0x10, keeps its text, and an empty
@@ -758,20 +759,30 @@ func (d *Doc) extract(p *place) payload {
 
 	// The bytes that the flow text adds take the origin of the first byte
 	// of the value.
-	pl.flow = d.flowRun(p.value, originOf(d.keptRun(vs, ve)))
-
-	// An item of a flow sequence has no "-". The bracket that opens a
-	// collection there, past its anchors and its tags, thus stands for the
-	// key or the "-" that held the value, as the "-" of a block item does.
-	switch {
-	case pl.holder == nil:
-	case isCollection(p.value):
-		pl.flow.origins[d.propsWidth(p.value)] = *pl.holder
-	default:
-		pl.flow = d.heldRun(pl.flow, p.value, *pl.holder)
-	}
+	pl.flow = d.heldFlow(p.value, originOf(d.keptRun(vs, ve)), pl.holder)
 
 	return pl
+}
+
+// heldFlow returns value, a value of the current text, in flow style, as
+// [Doc.flowRun] writes it with origin. With holder set, the text stands
+// for the key or the "-" that held the value. An item of a flow sequence
+// has no "-". The bracket that opens a collection there, past its anchors
+// and its tags, thus stands for the key or the "-" that held the value, as
+// the "-" of a block item does. The first byte of any other value does so,
+// as [Doc.heldRun] gives it.
+func (d *Doc) heldFlow(value ast.Node, origin int, holder *int) run {
+	r := d.flowRun(value, origin)
+
+	switch {
+	case holder == nil:
+	case isCollection(value):
+		r.origins[d.propsWidth(value)] = *holder
+	default:
+		r = d.heldRun(r, value, *holder)
+	}
+
+	return r
 }
 
 // propsWidth returns the number of bytes of the anchors and the tags of
@@ -820,6 +831,14 @@ func (d *Doc) emptyFlow(p *place, start int, holder *int) run {
 // collection, with its comment as a payload. The text of p starts at
 // start, and the value is the bytes [vs, ve). The holder of pl is the
 // origin of the key or the "-" that a move writes for the value, or nil.
+//
+// YAML reads each line of a flow collection past the indent of the block
+// node that holds the outermost flow collection around it, which
+// [Doc.flowBase] gives. Each line of a value after its first line keeps
+// its indent past that block node. So at the new place, the line passes
+// the indent of the block node there by as many spaces. The flow text of
+// such a value goes on one line, as [Doc.flowRun] writes it, as for a
+// value of a block node.
 func (d *Doc) flowPayload(p *place, pl payload, start, vs, ve int) payload {
 	r := d.keptRun(vs, ve)
 
@@ -829,11 +848,39 @@ func (d *Doc) flowPayload(p *place, pl payload, start, vs, ve int) payload {
 
 	pl.inline, pl.flow = &r, r
 
-	// An empty value has no text, so nothing follows its key or its "-"
-	// at a block place. Its flow text is null, as for an empty value of
-	// a block collection.
-	if ve <= vs {
+	switch first, last := d.lineOf(vs), d.lineOf(max(vs, ve-1)); {
+	case ve <= vs:
+		// An empty value has no text, so nothing follows its key or its "-"
+		// at a block place. Its flow text is null, as for an empty value of
+		// a block collection.
 		pl.inline, pl.flow = nil, d.emptyFlow(p, start, pl.holder)
+
+	case last > first:
+		base := d.flowBase(p.value)
+		cut := d.trimEnd(vs, d.lineEnd(first))
+		inline := run{text: r.text[:cut-vs], origins: r.origins[:cut-vs]}
+		pl.inline, pl.lines = &inline, nil
+
+		for l := first + 1; l <= last; l++ {
+			indent := d.indentOf(l)
+			from, to := d.lineStart(l)+indent, d.lineEnd(l)
+
+			if l == last {
+				to = ve
+			}
+
+			if from >= to {
+				pl.lines = append(pl.lines, line{})
+
+				continue
+			}
+
+			// A comment line can start left of the block node.
+			text := run{text: r.text[from-vs : to-vs], origins: r.origins[from-vs : to-vs]}
+			pl.lines = append(pl.lines, line{text: text, indent: max(0, indent-base)})
+		}
+
+		pl.flow = d.heldFlow(p.value, originOf(r), pl.holder)
 	}
 
 	// The comment that the removal of the entry or the item takes goes
@@ -842,6 +889,53 @@ func (d *Doc) flowPayload(p *place, pl payload, start, vs, ve int) payload {
 	pl.comment = d.flowComment(p, start, ve)
 
 	return pl
+}
+
+// flowBase returns the indent of the block node that holds the outermost
+// flow collection around node, a value of the current text that lies in a
+// flow collection. That indent is the column of the key or the "-" of that
+// block node. It is -1 when the flow collection is the root node of its
+// document.
+func (d *Doc) flowBase(node ast.Node) int {
+	t := d.tree()
+	outer := node
+
+	for n, ok := t.parent[node]; ok; n, ok = t.parent[n] {
+		if isFlow(n) {
+			outer = n
+		}
+	}
+
+	child := outer
+
+	for {
+		n, ok := t.parent[child]
+		if !ok {
+			return -1
+		}
+
+		var start int
+
+		switch x := n.(type) {
+		case *ast.TagNode, *ast.AnchorNode:
+			child = n
+
+			continue
+
+		case *ast.MappingValueNode:
+			start, ok = d.startOf(&place{entry: x, value: x.Value})
+		case *ast.SequenceNode:
+			start, ok = d.startOf(&place{seq: x, index: t.item[child], value: child})
+		default:
+			return -1
+		}
+
+		if !ok {
+			return -1
+		}
+
+		return d.column(start)
+	}
 }
 
 // heldRun returns r, the flow text of value, with a first byte whose note

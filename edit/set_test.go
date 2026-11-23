@@ -997,7 +997,15 @@ func TestNode_Set(t *testing.T) {
 			path:   paths.Doc().Child("b"),
 			value:  yamlMarshaler(stringtest.LinesLF("x: {? y", "- z}")),
 			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 cannot write the value of $.b: the MarshalYAML method of " +
-				`edit_test.yamlMarshaler writes a "-" at a line of a flow collection that does not pass the indent ` +
+				"edit_test.yamlMarshaler writes a line of a flow collection that does not pass the indent " +
+				"of the block node of the collection at 2:1 of that YAML, which YAML does not allow",
+		},
+		"YAML marshaler that writes the end of a flow sequence at the indent of its key": {
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("b"),
+			value:  yamlMarshaler(stringtest.LinesLF("x: [y", "]")),
+			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 cannot write the value of $.b: the MarshalYAML method of " +
+				"edit_test.yamlMarshaler writes a line of a flow collection that does not pass the indent " +
 				"of the block node of the collection at 2:1 of that YAML, which YAML does not allow",
 		},
 		"YAML marshaler that writes a tab that opens a line of a flow mapping": {
@@ -1869,7 +1877,7 @@ func TestNode_Set(t *testing.T) {
 			err:    "test.yaml:1:8: $.f[1].a: cafe.jacobcolvin.com/v1 sets $.f[1].b, which reaches a pair without braces in a flow sequence, and cafe does not edit inside such a pair",
 		},
 		"new mapping in a mapping item of a flow sequence without braces": {
-			before: stringtest.LinesLF("f: [", "  a: 1,", "  2", "]"),
+			before: stringtest.LinesLF("f: [", "  a: 1,", "  2", " ]"),
 			path:   paths.MustParse("$.f[0].b.c"),
 			value:  2,
 			err:    "test.yaml:2:3: $.f[0].a: cafe.jacobcolvin.com/v1 sets $.f[0].b.c, which reaches a pair without braces in a flow sequence, and cafe does not edit inside such a pair",
@@ -1896,7 +1904,7 @@ func TestNode_Set(t *testing.T) {
 		},
 		"new key of an anchored mapping with comments that an alias item of a flow sequence reads": {
 			before: stringtest.LinesLF(
-				"d: &d # d", "  a: # c", "  b: 1 # b", "s: [", "  0, # zero", "  *d, # alias", "]",
+				"d: &d # d", "  a: # c", "  b: 1 # b", "s: [", "  0, # zero", "  *d, # alias", " ]",
 			),
 			path:  paths.MustParse("$.s[1].z"),
 			value: 2,
@@ -2205,7 +2213,7 @@ func TestNode_Set(t *testing.T) {
 			want:   stringtest.LinesLF("m: {b: 1, a: 3}"),
 		},
 		"empty value of a flow mapping of several lines before a comma and a comment": {
-			before: stringtest.LinesLF("m: {", "  a: , # c", "  b: 1", "}"),
+			before: stringtest.LinesLF("m: {", "  a: , # c", "  b: 1", " }"),
 			path:   paths.MustParse("$.m.a"),
 			value:  3,
 			err:    "test.yaml:1:4: $.m: cafe.jacobcolvin.com/v1 sets $.m.a, which reaches a flow collection with a comment inside it, and cafe does not edit inside such a collection",
@@ -2363,7 +2371,7 @@ func TestNode_Set(t *testing.T) {
 			want:   stringtest.LinesLF("{", "  price: 65,", "  size: M, currency: SEK,", "}"),
 		},
 		"new key in a flow mapping with a comment after its last entry": {
-			before: stringtest.LinesLF("spec: {price: 65, # kr", "}"),
+			before: stringtest.LinesLF("spec: {price: 65, # kr", " }"),
 			path:   spec.Child("currency"),
 			value:  "SEK",
 			err:    "test.yaml:1:7: $.spec: cafe.jacobcolvin.com/v1 sets $.spec.currency, which reaches a flow collection with a comment inside it, and cafe does not edit inside such a collection",
@@ -2375,7 +2383,7 @@ func TestNode_Set(t *testing.T) {
 			want:   stringtest.LinesLF("spec:", "  tags: [a, b, c,]"),
 		},
 		"item past the last of a flow sequence with a comment after its last item": {
-			before: stringtest.LinesLF("spec:", "  tags: [a # last", "  ]"),
+			before: stringtest.LinesLF("spec:", "  tags: [a # last", "   ]"),
 			path:   spec.Child("tags").Index(1),
 			value:  "b",
 			err:    "test.yaml:2:9: $.spec.tags: cafe.jacobcolvin.com/v1 sets $.spec.tags[1], which reaches a flow collection with a comment inside it, and cafe does not edit inside such a collection",
@@ -2509,25 +2517,25 @@ func TestNode_Set(t *testing.T) {
 		"below a null in a flow mapping with a comment inside it": {
 			// The call reaches the flow mapping before it fills the null, so
 			// the zone of the mapping refuses it.
-			before: stringtest.LinesLF("a: {", "  b: ~, # c", "  d: 1", "}"),
+			before: stringtest.LinesLF("a: {", "  b: ~, # c", "  d: 1", " }"),
 			path:   paths.MustParse("$.a.b.k"),
 			value:  1,
 			err:    "test.yaml:1:4: $.a: cafe.jacobcolvin.com/v1 sets $.a.b.k, which reaches a flow collection with a comment inside it, and cafe does not edit inside such a collection",
 		},
 		"item of a null in a flow mapping with a comment inside it": {
-			before: stringtest.LinesLF("a: {", "  b: ~, # c", "  d: 1", "}"),
+			before: stringtest.LinesLF("a: {", "  b: ~, # c", "  d: 1", " }"),
 			path:   paths.MustParse("$.a.b[0]"),
 			value:  1,
 			err:    "test.yaml:1:4: $.a: cafe.jacobcolvin.com/v1 sets $.a.b[0], which reaches a flow collection with a comment inside it, and cafe does not edit inside such a collection",
 		},
 		"below a null item of a flow sequence with a comment inside it": {
-			before: stringtest.LinesLF("a: [", "  ~, # c", "  1", "]"),
+			before: stringtest.LinesLF("a: [", "  ~, # c", "  1", " ]"),
 			path:   paths.MustParse("$.a[0].k"),
 			value:  1,
 			err:    "test.yaml:1:4: $.a: cafe.jacobcolvin.com/v1 sets $.a[0].k, which reaches a flow collection with a comment inside it, and cafe does not edit inside such a collection",
 		},
 		"item of a null item of a flow sequence with a comment inside it": {
-			before: stringtest.LinesLF("a: [", "  ~, # c", "  1", "]"),
+			before: stringtest.LinesLF("a: [", "  ~, # c", "  1", " ]"),
 			path:   paths.MustParse("$.a[0][0]"),
 			value:  1,
 			err:    "test.yaml:1:4: $.a: cafe.jacobcolvin.com/v1 sets $.a[0][0], which reaches a flow collection with a comment inside it, and cafe does not edit inside such a collection",
@@ -5543,7 +5551,7 @@ func TestNode_Insert(t *testing.T) {
 			want:   stringtest.LinesLF("s:", "  # c", "  - z", "b: 1"),
 		},
 		"item of an empty flow sequence with a line break inside": {
-			before: stringtest.LinesLF("s: [", "]", "b: 1"),
+			before: stringtest.LinesLF("s: [", " ]", "b: 1"),
 			path:   paths.Doc().Child("s").Index(0),
 			value:  "z",
 			want:   stringtest.LinesLF("s:", "  - z", "b: 1"),
@@ -5603,7 +5611,7 @@ func TestNode_Insert(t *testing.T) {
 			want:   stringtest.LinesLF("s:", "  - z", "a: 1"),
 		},
 		"item of a null in a flow mapping with a comment inside it": {
-			before: stringtest.LinesLF("a: {", "  b: ~, # c", "  d: 1", "}"),
+			before: stringtest.LinesLF("a: {", "  b: ~, # c", "  d: 1", " }"),
 			path:   paths.MustParse("$.a.b[0]"),
 			value:  1,
 			err:    "test.yaml:1:4: $.a: cafe.jacobcolvin.com/v1 inserts $.a.b[0], which reaches a flow collection with a comment inside it, and cafe does not edit inside such a collection",

@@ -7696,12 +7696,12 @@ func TestFormatError_ExcerptsOff_Documents(t *testing.T) {
 		"a flow sequence left open": {
 			input: openList,
 			fail:  documents,
-			want:  "secrets.yaml:3:1: ',' or ']' must be specified",
+			want:  "secrets.yaml:3:1: a line of a flow collection must be indented past the block node that holds it",
 		},
 		"a flow sequence left open on the secret": {
 			input: stringtest.LinesLF("password: [hunter2, 2", "port: 1"),
 			fail:  file,
-			want:  "secrets.yaml:2:1: ',' or ']' must be specified",
+			want:  "secrets.yaml:2:1: a line of a flow collection must be indented past the block node that holds it",
 		},
 		// The parser reports the tab at the value before it, which is the
 		// secret.
@@ -7718,7 +7718,7 @@ func TestFormatError_ExcerptsOff_Documents(t *testing.T) {
 		"a decode of a document that did not parse": {
 			input: openList,
 			fail:  decode,
-			want:  "secrets.yaml:3:1: ',' or ']' must be specified",
+			want:  "secrets.yaml:3:1: a line of a flow collection must be indented past the block node that holds it",
 		},
 		// The reason is the syntax error, which names its position.
 		"a path bound in a document that did not parse": {
@@ -7730,7 +7730,7 @@ func TestFormatError_ExcerptsOff_Documents(t *testing.T) {
 				"secrets.yaml: $.password: too short",
 				"",
 				"no excerpt: path needs a document to resolve in: $.password: "+
-					"secrets.yaml:3:1: ',' or ']' must be specified",
+					"secrets.yaml:3:1: a line of a flow collection must be indented past the block node that holds it",
 			),
 		},
 		"a value of the wrong type": {

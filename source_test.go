@@ -2432,6 +2432,80 @@ func TestSource_File_ErrSyntax(t *testing.T) {
 			input: "{a: b c:d, e: 12:30}\n",
 			want:  []bool{false},
 		},
+		// YAML reads each line of a flow collection past the indent of the
+		// block node that holds the collection.
+		"end of a flow sequence at the indent of its key": {
+			input: stringtest.LinesLF("key: [a", "]"),
+			want:  []bool{true},
+		},
+		"end of a flow mapping at the indent of its key": {
+			input: stringtest.LinesLF("key: {a: b", "}"),
+			want:  []bool{true},
+		},
+		"end of a flow sequence after a trailing comma at the indent of its key": {
+			input: stringtest.LinesLF("key: [a,", "]"),
+			want:  []bool{true},
+		},
+		"colon at the indent of the key of a flow mapping": {
+			input: stringtest.LinesLF("key: {? a", ":}"),
+			want:  []bool{true},
+		},
+		"entries after commas at the indent of the key of a flow sequence": {
+			input: stringtest.LinesLF("flow: [a,", "b,", "c]"),
+			want:  []bool{true},
+		},
+		"end of a flow sequence after a tab at the indent of its key": {
+			input: stringtest.LinesLF("key: [a,", "\t]"),
+			want:  []bool{true},
+		},
+		"end of a flow sequence at the indent of a nested key": {
+			input: stringtest.LinesLF("a:", "  key: [b", "  ]"),
+			want:  []bool{true},
+		},
+		"end of a flow sequence at the indent of its sequence entry": {
+			input: stringtest.LinesLF("- [a", "]"),
+			want:  []bool{true},
+		},
+		"end of a flow sequence at the indent of its key above another document": {
+			input: stringtest.LinesLF("key: [a", "]", "---", "b: c"),
+			want:  []bool{true, false},
+		},
+		"end of a flow sequence past the indent of its key": {
+			input: stringtest.LinesLF("key: [a", " ]"),
+			want:  []bool{false},
+		},
+		"end of a flow sequence past the indent of a nested key": {
+			input: stringtest.LinesLF("a:", "  key: [b", "   ]"),
+			want:  []bool{false},
+		},
+		"end of a flow sequence on the line below its key": {
+			input: stringtest.LinesLF("key:", "  [a", " ]"),
+			want:  []bool{false},
+		},
+		"end of a root flow sequence at the start of a line": {
+			input: stringtest.LinesLF("[a", "]"),
+			want:  []bool{false},
+		},
+		"comment line at the indent of the key of a flow sequence": {
+			input: stringtest.LinesLF("key: [a,", "# c", " b]"),
+			want:  []bool{false},
+		},
+		"double-quoted item with a line at the indent of the key of a flow sequence": {
+			input: stringtest.LinesLF(`key: ["a`, `b", d]`),
+			want:  []bool{true},
+		},
+		"single-quoted key with a line at the indent of the key of a flow mapping": {
+			input: stringtest.LinesLF(`key: {'a`, `b': c}`),
+			want:  []bool{true},
+		},
+		"double-quoted item with a line past the indent of the key of a flow sequence": {
+			input: stringtest.LinesLF(`key: ["a`, ` b"`, ` , d]`),
+			want:  []bool{false},
+		},
+		"double-quoted item of a root flow sequence with a line at the start": {
+			input: stringtest.LinesLF(`["a`, `b"]`),
+			want:  []bool{false},
+		},
 		// YAML ends the value at the ":" of the key below it, so a comma
 		// must come between the two entries.
 		"key on the line below a value in a flow mapping": {

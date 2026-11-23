@@ -3756,7 +3756,7 @@ func TestNode_Append(t *testing.T) {
 			want:   "# c\n- b\n",
 		},
 		"null in a flow mapping with a comment inside it": {
-			before: stringtest.LinesLF("a: {", "  b: ~, # c", "  d: 1", "}"),
+			before: stringtest.LinesLF("a: {", "  b: ~, # c", "  d: 1", " }"),
 			path:   paths.MustParse("$.a.b"),
 			value:  1,
 			err:    "test.yaml:1:4: $.a: cafe.jacobcolvin.com/v1 inserts $.a.b[0], which reaches a flow collection with a comment inside it, and cafe does not edit inside such a collection",

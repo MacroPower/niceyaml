@@ -337,9 +337,9 @@ type payload struct {
 // indicator, as in "[-]", and a plain scalar there that holds a flow
 // indicator, as in "[a}]", and the name of an anchor or an alias that
 // holds a flow indicator, as in "[&x} 1]", because YAML does not allow
-// any of them. So does a "-" that starts a line of a flow collection,
-// where the line does not pass the indent of the block node that holds
-// the collection, as in "x: {? Y\n- z}". So does a key on a line that
+// any of them. So does a line of a flow collection that does not pass the
+// indent of the block node that holds the collection, as in "x: [y\n]".
+// So does a key on a line that
 // continues a plain scalar in a flow collection, as in "{x: y\n    z: w}"
 // and "[x\n y: z]", where
 // the parse refuses that key. YAML ends the scalar at the ":" of such a

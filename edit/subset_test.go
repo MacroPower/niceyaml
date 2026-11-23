@@ -1244,7 +1244,7 @@ func TestNew_Unsupported(t *testing.T) {
 			),
 		},
 		"only item of a flow sequence on lines that end with a lone carriage return": {
-			before:    "g: [\r\r\n  0\r\r\n]\r\r\nk: [5]\r\n",
+			before:    "g: [\r\r\n  0\r\r\n ]\r\r\nk: [5]\r\n",
 			construct: edit.ConstructLineBreaks,
 			err: stringtest.JoinLF(
 				"test.yaml:1:5: $: this program does not edit a text with a \"\\r\" alone as a line break",

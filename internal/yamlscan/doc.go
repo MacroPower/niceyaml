@@ -59,13 +59,12 @@
 //     "-" indicator. It reads a "-" there as a sequence entry. It reads a "-"
 //     that starts a line right of that indicator as a folded block scalar,
 //     which takes the rest of the text. So go-yaml refuses "{a: b\n - c}" and
-//     "{a: b\n    - c}", and the copy reads both as {a: "b - c"}. At a line
-//     that does not pass the indent, as in "key: [a\n- c]", the copy cuts the
-//     scalar as go-yaml does. YAML drops the indent of each folded line, tabs
-//     included, and so does the copy. Go-yaml reads a tab that opens the line
-//     into the scalar. Where YAML refuses the scalar as the key of a ":" on a
-//     folded line, the copy cuts the scalar at the start of that line. It
-//     reads a "-" or "?" that opens the line as an indicator. So the parser
+//     "{a: b\n    - c}", and the copy reads both as {a: "b - c"}. YAML drops
+//     the indent of each folded line, tabs included, and so does the copy.
+//     Go-yaml reads a tab that opens the line into the scalar. Where YAML
+//     refuses the scalar as the key of a ":" on a folded line, the copy cuts
+//     the scalar at the start of that line. It reads a "-" or "?" that opens
+//     the line as an indicator. So the parser
 //     refuses "{a: b\n c: d}" and "{a: b\n    c: d}" as YAML does. Go-yaml
 //     reads the second of those as {a: "b c: d"}. A ":" that a character
 //     other than a blank or a flow indicator follows stays in a value or in
@@ -85,6 +84,18 @@
 //     mapping that spans lines, as go-yaml reads it in a key on one line.
 //     So the copy reads "{a\n b:c}" as {"a b": c}, as go-yaml reads
 //     "{a b:c}".
+//   - YAML reads a line of a flow collection only when the spaces that
+//     open the line pass the indent of the block node that holds the
+//     collection. Go-yaml does not check that indent inside a flow
+//     collection, so its parser reads "key: [a\n]" as {key: [a]}. The copy
+//     reports the first character of such a line as an invalid token, so
+//     the decode of "key: [a\n]" and of "flow: [a,\nb]" fails. It reports a
+//     quoted scalar with such a line as one invalid token, as for
+//     "key: ["a\nb"]". A "]" or "}" there still closes its collection. A
+//     comment line can start at any column, and so can each line of a flow
+//     collection that is the root node of its document. The check skips a
+//     "---" or "..." marker, which ends the document, so a collection that
+//     is still open at the marker fails as one that is never closed.
 //   - Inside a flow mapping, a ":" that a blank or a flow indicator
 //     follows ends the plain value of a key on one line, as YAML ends it.
 //     Go-yaml keeps each ":" of that value in the scalar, so it reads

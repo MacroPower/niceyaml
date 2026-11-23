@@ -86,9 +86,9 @@ func refusal(err error, text string) string {
 // a mapping that repeats a key, a "-" right after an anchor or a tag on
 // its line, and a "-" that starts an entry inside a flow collection. So
 // are a plain scalar there that starts with a "-" right before a flow
-// indicator and one that holds a flow indicator, and a "-" at a line of a
-// flow collection that does not pass the indent of the block node that
-// holds the collection. So is the name of an anchor or an alias that holds
+// indicator and one that holds a flow indicator, and a line of a flow
+// collection that does not pass the indent of the block node that holds
+// the collection. So is the name of an anchor or an alias that holds
 // a flow indicator, because YAML does not allow any of them. The finder can
 // also refuse text that go-yaml's parser took. Such a refusal
 // is the problem of the marshaler when it binds at a key on a line that
@@ -211,8 +211,8 @@ func marshaledYAML(v reflect.Value, method string, doc []byte, err error) ([]ins
 // refuses a "-" right after an anchor or a tag on its line and a "-" that
 // starts an entry inside a flow collection. It also refuses a plain scalar
 // there that starts with a "-" right before a flow indicator or that holds
-// a flow indicator, and a "-" at a line of a flow collection that does not
-// pass the indent of the block node that holds the collection, and the
+// a flow indicator, and a line of a flow collection that does not pass the
+// indent of the block node that holds the collection, and the
 // name of an anchor or an alias that holds a flow indicator. YAML does
 // not allow any of them, so the refusal is the problem of the marshaler,
 // also where go-yaml's parser refuses the token.
@@ -238,7 +238,7 @@ func refusedProblem(err error, who string) error {
 	case docparse.NameIndicatorMessage:
 		what = "the name of an anchor or an alias that holds a flow indicator"
 	case docparse.FlowIndentMessage:
-		what = `a "-" at a line of a flow collection that does not pass the indent of the block node of the collection`
+		what = "a line of a flow collection that does not pass the indent of the block node of the collection"
 	default:
 		return nil
 	}

@@ -9348,7 +9348,7 @@ func TestDoc_Locate_Moved(t *testing.T) {
 			removal: `$.f[2] "cafe.jacobcolvin.com/v1" "" key="" item=true 0:10-0:16`,
 		},
 		"sequence item of a flow sequence of several lines moved into a flow mapping": {
-			before:  stringtest.LinesLF("f: [", "  0,", "  [1]", "]", "k: {z: 0}"),
+			before:  stringtest.LinesLF("f: [", "  0,", "  [1]", " ]", "k: {z: 0}"),
 			applies: [][]step{{{from: paths.MustParse("$.f"), to: paths.MustParse("$.k.np")}}},
 			at:      paths.MustParse("$.k.np[1]"),
 			want:    "test.yaml:3:3: $.k.np[1]: bad",

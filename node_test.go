@@ -4131,7 +4131,7 @@ func TestDocument_At_Extent(t *testing.T) {
 				"a: [",
 				"  1,",
 				"  2,",
-				"]",
+				" ]",
 				"b: 3",
 			),
 			path:   paths.Current().Child("a"),

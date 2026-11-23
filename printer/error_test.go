@@ -1066,7 +1066,7 @@ func TestPrinter_PrintError_ExcerptsOff(t *testing.T) {
 		},
 		"a document that did not parse prints no line": {
 			err:  syntaxErr,
-			want: "secrets.yaml:3:1: ',' or ']' must be specified",
+			want: "secrets.yaml:3:1: a line of a flow collection must be indented past the block node that holds it",
 		},
 		// The reason names the path and no text of the source.
 		"a location that does not resolve keeps its reason": {

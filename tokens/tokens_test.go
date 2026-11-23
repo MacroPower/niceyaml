@@ -1052,7 +1052,7 @@ var (
 			"a: [",
 			"  1,",
 			"  2",
-			"]",
+			" ]",
 		),
 		"sequences": stringtest.LinesLF(
 			"- a",

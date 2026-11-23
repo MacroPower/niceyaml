@@ -622,10 +622,9 @@
 // one with a plain scalar in a flow collection that holds a flow
 // indicator, as in "[a}]", or with the name of an anchor or an alias
 // that holds a flow indicator, as in "[&x} 1]". YAML refuses each of
-// them, and the parser takes it. They also include one with a "-" at a
-// line of a flow collection after an
-// explicit key, where the line does not pass the indent of the block node
-// that holds the collection, as in "key: {? A\n- b}". They also include
+// them, and the parser takes it. They also include one with a line of a
+// flow collection that does not pass the indent of the block node that
+// holds the collection, as in "key: [a\n]". They also include
 // one with a key on the line below a single pair of a flow sequence
 // without a "," before it, as in "[a: b\n c: d]", which YAML refuses and
 // the parser reads into the pair. A reference document

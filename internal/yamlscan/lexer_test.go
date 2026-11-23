@@ -1104,6 +1104,8 @@ func TestTokenize_Patches(t *testing.T) {
 				{token.MappingEndType, "}\n"},
 			},
 		},
+		// The line of the key does not pass the indent of the key of the
+		// flow sequence, so its first rune is invalid.
 		"key below an item of an open flow sequence": {
 			input: "a: [1\nb: 2\n",
 			want: []tok{
@@ -1111,7 +1113,7 @@ func TestTokenize_Patches(t *testing.T) {
 				{token.MappingValueType, ":"},
 				{token.SequenceStartType, " ["},
 				{token.IntegerType, "1\n"},
-				{token.StringType, "b"},
+				{token.InvalidType, "b"},
 				{token.MappingValueType, ":"},
 				{token.IntegerType, " 2\n"},
 			},
@@ -1230,8 +1232,9 @@ func TestTokenize_Patches(t *testing.T) {
 				{token.SequenceEndType, "]\n"},
 			},
 		},
-		// YAML folds a line of a flow collection only when the line is
-		// indented past the block node that holds the collection.
+		// YAML reads a line of a flow collection only when the line is
+		// indented past the block node that holds the collection. The copy
+		// reports the first rune of any other line as invalid.
 		"dash line at the indent of the key of a flow sequence": {
 			input: "key: [a\n- c]\n",
 			want: []tok{
@@ -1239,8 +1242,225 @@ func TestTokenize_Patches(t *testing.T) {
 				{token.MappingValueType, ":"},
 				{token.SequenceStartType, " ["},
 				{token.StringType, "a\n"},
-				{token.SequenceEntryType, "-"},
+				{token.InvalidType, "-"},
 				{token.StringType, " c"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
+		// A "]" or "}" at the indent still closes its collection, so the
+		// text after it scans outside the collection.
+		"end of a flow sequence at the indent of its key": {
+			input: "key: [a\n]\nb: c\n",
+			want: []tok{
+				{token.StringType, "key"},
+				{token.MappingValueType, ":"},
+				{token.SequenceStartType, " ["},
+				{token.StringType, "a\n"},
+				{token.InvalidType, "]"},
+				{token.StringType, "\nb"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " c\n"},
+			},
+		},
+		"end of a flow mapping at the indent of its key": {
+			input: "key: {a: b\n}\nc: d\n",
+			want: []tok{
+				{token.StringType, "key"},
+				{token.MappingValueType, ":"},
+				{token.MappingStartType, " {"},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " b\n"},
+				{token.InvalidType, "}"},
+				{token.StringType, "\nc"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " d\n"},
+			},
+		},
+		// A "---" or "..." marker ends the document, so the check skips
+		// it, and the parser fails the collection as one that is never
+		// closed.
+		"document header in an open flow sequence": {
+			input: "key: [a\n---\nb: c\n",
+			want: []tok{
+				{token.StringType, "key"},
+				{token.MappingValueType, ":"},
+				{token.SequenceStartType, " ["},
+				{token.StringType, "a\n"},
+				{token.DocumentHeaderType, "---"},
+				{token.StringType, "\nb"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " c\n"},
+			},
+		},
+		"document end in an open flow sequence": {
+			input: "key: [a\n...\n",
+			want: []tok{
+				{token.StringType, "key"},
+				{token.MappingValueType, ":"},
+				{token.SequenceStartType, " ["},
+				{token.StringType, "a\n"},
+				{token.DocumentEndType, "...\n"},
+			},
+		},
+		"colon line at the indent of the key of a flow mapping": {
+			input: "key: {? a\n:}\n",
+			want: []tok{
+				{token.StringType, "key"},
+				{token.MappingValueType, ":"},
+				{token.MappingStartType, " {"},
+				{token.MappingKeyType, "?"},
+				{token.StringType, " a\n"},
+				{token.InvalidType, ":"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		"entry after a comma at the indent of the key of a flow sequence": {
+			input: "flow: [a,\nb]\n",
+			want: []tok{
+				{token.StringType, "flow"},
+				{token.MappingValueType, ":"},
+				{token.SequenceStartType, " ["},
+				{token.StringType, "a"},
+				{token.CollectEntryType, ","},
+				{token.InvalidType, "\nb"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
+		// A tab does not count toward the indent of a line.
+		"end of a flow sequence after a tab at the indent of its key": {
+			input: "key: [a,\n\t]\n",
+			want: []tok{
+				{token.StringType, "key"},
+				{token.MappingValueType, ":"},
+				{token.SequenceStartType, " ["},
+				{token.StringType, "a"},
+				{token.CollectEntryType, ","},
+				{token.InvalidType, "\n\t]\n"},
+			},
+		},
+		// A comment line is not text of the collection, so it can start
+		// at any column.
+		"comment line at the indent of the key of a flow sequence": {
+			input: "key: [a,\n# c\n b]\n",
+			want: []tok{
+				{token.StringType, "key"},
+				{token.MappingValueType, ":"},
+				{token.SequenceStartType, " ["},
+				{token.StringType, "a"},
+				{token.CollectEntryType, ","},
+				{token.CommentType, "\n# c\n"},
+				{token.StringType, " b"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
+		// The root node of a document holds its lines at any indent.
+		"end of a root flow sequence at the start of a line": {
+			input: "[a\n]\n",
+			want: []tok{
+				{token.SequenceStartType, "["},
+				{token.StringType, "a\n"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
+		"end of a flow sequence past the indent of its key": {
+			input: "key: [a\n ]\n",
+			want: []tok{
+				{token.StringType, "key"},
+				{token.MappingValueType, ":"},
+				{token.SequenceStartType, " ["},
+				{token.StringType, "a\n "},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
+		// A quoted scalar with a line at the indent is invalid as a whole.
+		// The rune after its closing quote does not open its line, so it
+		// scans as it does after a quoted scalar on one line.
+		"double-quoted item with a line at the indent of the key of a flow sequence": {
+			input: "key: [\"a\nb\", d]\n",
+			want: []tok{
+				{token.StringType, "key"},
+				{token.MappingValueType, ":"},
+				{token.SequenceStartType, " ["},
+				{token.InvalidType, "\"a\nb\""},
+				{token.CollectEntryType, ","},
+				{token.StringType, " d"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
+		"double-quoted key with a line at the indent of the key of a flow mapping": {
+			input: "key: {\"a\nb\": c}\n",
+			want: []tok{
+				{token.StringType, "key"},
+				{token.MappingValueType, ":"},
+				{token.MappingStartType, " {"},
+				{token.InvalidType, "\"a\nb\""},
+				{token.MappingValueType, ":"},
+				{token.StringType, " c"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		"single-quoted item that closes at the indent of the key of a flow sequence": {
+			input: "key: ['a\n']\n",
+			want: []tok{
+				{token.StringType, "key"},
+				{token.MappingValueType, ":"},
+				{token.SequenceStartType, " ["},
+				{token.InvalidType, "'a\n'"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
+		"single-quoted item with escaped quotes on a line at the indent of the key of a flow sequence": {
+			input: "key: ['a\n''''']\n",
+			want: []tok{
+				{token.StringType, "key"},
+				{token.MappingValueType, ":"},
+				{token.SequenceStartType, " ["},
+				{token.InvalidType, "'a\n'''''"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
+		"single-quoted item with escaped quotes on a line past the indent of the key of a flow sequence": {
+			input: "key: ['a\n ''''']\n",
+			want: []tok{
+				{token.StringType, "key"},
+				{token.MappingValueType, ":"},
+				{token.SequenceStartType, " ["},
+				{token.SingleQuoteType, "'a\n '''''"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
+		// The line after an escaped line break is a line of the scalar too.
+		"double-quoted item with an escaped line break before a line at the indent of the key of a flow sequence": {
+			input: "key: [\"a\\\nb\"]\n",
+			want: []tok{
+				{token.StringType, "key"},
+				{token.MappingValueType, ":"},
+				{token.SequenceStartType, " ["},
+				{token.InvalidType, "\"a\\\nb\""},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
+		"double-quoted item with a line past the indent of the key of a flow sequence": {
+			input: "key: [\"a\n b\", d]\n",
+			want: []tok{
+				{token.StringType, "key"},
+				{token.MappingValueType, ":"},
+				{token.SequenceStartType, " ["},
+				{token.DoubleQuoteType, "\"a\n b\""},
+				{token.CollectEntryType, ","},
+				{token.StringType, " d"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
+		// A blank line of a quoted scalar does not hold text.
+		"double-quoted item with a blank line at the indent of the key of a flow sequence": {
+			input: "key: [\"a\n\n b\"]\n",
+			want: []tok{
+				{token.StringType, "key"},
+				{token.MappingValueType, ":"},
+				{token.SequenceStartType, " ["},
+				{token.DoubleQuoteType, "\"a\n\n b\""},
 				{token.SequenceEndType, "]\n"},
 			},
 		},
@@ -1259,7 +1479,7 @@ func TestTokenize_Patches(t *testing.T) {
 			},
 		},
 		// The indent of the block node is the column of the anchor of the
-		// key, so a line at that column ends the value.
+		// key, so a line at that column is invalid.
 		"dash line at the indent of an anchored key of a nested flow mapping": {
 			input: "x:\n  &k key: {a: b\n  - c}\n",
 			want: []tok{
@@ -1273,7 +1493,7 @@ func TestTokenize_Patches(t *testing.T) {
 				{token.StringType, "a"},
 				{token.MappingValueType, ":"},
 				{token.StringType, " b\n  "},
-				{token.SequenceEntryType, "-"},
+				{token.InvalidType, "-"},
 				{token.StringType, " c"},
 				{token.MappingEndType, "}\n"},
 			},

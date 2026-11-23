@@ -81,7 +81,7 @@ func TestParse(t *testing.T) {
 			want:  []string{"%YAML 1.2", stringtest.JoinLF("---", "a: 1")},
 		},
 		"a comment before a ',' of a flow sequence drops": {
-			input: stringtest.LinesLF("a: [1", "# c", ", 2]"),
+			input: stringtest.LinesLF("a: [1", "# c", " , 2]"),
 			want:  []string{"a: [1, 2]"},
 		},
 		"a comment before the '}' of a flow mapping drops": {
@@ -263,10 +263,12 @@ func TestParse_TagSequence(t *testing.T) {
 			at:    new(position.New(0, 3)),
 			msg:   "block sequence entries are not allowed in this context",
 		},
+		// The line of the tag does not pass the indent of the key of the
+		// flow sequence.
 		"in an open flow sequence above a tag": {
 			input: stringtest.LinesLF("a: [1", "b: !t - 1"),
 			at:    new(position.New(1, 0)),
-			msg:   "',' or ']' must be specified",
+			msg:   docparse.FlowIndentMessage,
 		},
 		"after a tag above an anchor": {
 			input: stringtest.LinesLF("a: !t - 1", "b: &x - 1"),
@@ -448,14 +450,15 @@ func TestParse_FlowSequence(t *testing.T) {
 		"on the line below an explicit key of a flow sequence": {
 			input: stringtest.LinesLF("[? a", " - b]"),
 		},
-		// The tokenizer cuts the "-" out of the scalar at a line that does
-		// not pass the indent of the block node of the collection, and at a
-		// line that holds a key. The run keeps the error of the parser.
+		// The tokenizer refuses a line that does not pass the indent of the
+		// block node of the collection.
 		"at the indent of the key of a flow sequence": {
 			input: stringtest.LinesLF("key: [a", "- c]"),
 			at:    new(position.New(1, 0)),
-			msg:   "',' or ']' must be specified",
+			msg:   indentMsg,
 		},
+		// The tokenizer cuts the "-" out of the scalar at a line that holds
+		// a key. The run keeps the error of the parser.
 		"on a key line below a value of a flow mapping": {
 			input: stringtest.LinesLF("{a: b", " - c: d}"),
 			at:    new(position.New(1, 1)),
@@ -474,7 +477,7 @@ func TestParse_FlowSequence(t *testing.T) {
 			msg:   indentMsg,
 		},
 		"at the indent of the entry of a flow sequence after an explicit key": {
-			input: stringtest.LinesLF("- [", "? 1", "-]"),
+			input: stringtest.LinesLF("- [", " ? 1", "-]"),
 			at:    new(position.New(2, 0)),
 			msg:   indentMsg,
 		},
@@ -1176,7 +1179,7 @@ func TestNullFlowPairs(t *testing.T) {
 			input: "[? ]\n",
 		},
 		"not after a key that holds two nodes": {
-			input: stringtest.LinesLF("- [", "? 1", "-]"),
+			input: "[? \"a\" b]\n",
 		},
 		"not after a key with a tag above its node": {
 			input: stringtest.LinesLF("[? !t", " a: ]"),
@@ -1466,12 +1469,12 @@ func TestParse_PanicFlowSequence(t *testing.T) {
 	assert.Equal(t, position.New(1, 4), position.NewFromToken(syntaxErr.Token))
 }
 
-func TestParse_PanicFlowIndent(t *testing.T) {
+func TestParse_PanicFlowKeyDash(t *testing.T) {
 	t.Parallel()
 
 	// The go-yaml parser dereferences the position of this token, above
-	// the "-" at the indent of the key of the flow mapping.
-	tks := tokens.Tokenize(stringtest.LinesLF("a: 1", "b: {? a", "- c}"))
+	// the "-" on the line of a key below a value of the flow mapping.
+	tks := tokens.Tokenize(stringtest.LinesLF("a: 1", "b: {x: y", "  - c: d}"))
 	tks[2].Position = nil
 
 	r := docparse.Parse(tks)
@@ -1486,9 +1489,9 @@ func TestParse_PanicFlowIndent(t *testing.T) {
 	var syntaxErr *yaml.SyntaxError
 
 	require.ErrorAs(t, f.Err, &syntaxErr)
-	assert.Equal(t, docparse.FlowIndentMessage, syntaxErr.Message)
+	assert.Equal(t, docparse.FlowSequenceMessage, syntaxErr.Message)
 	require.NotNil(t, syntaxErr.Token)
-	assert.Equal(t, position.New(2, 0), position.NewFromToken(syntaxErr.Token))
+	assert.Equal(t, position.New(2, 2), position.NewFromToken(syntaxErr.Token))
 }
 
 func TestFail(t *testing.T) {

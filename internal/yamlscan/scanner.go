@@ -241,6 +241,8 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (*token.Token, error) {
 	value := []rune{}
 	isFirstLineChar := false
 	isNewLine := false
+	misindented := false // niceyaml: a line of the scalar is left of the flow indent.
+	checkLine := false   // niceyaml: the next text of the line is its first.
 
 	for idx := startIndex; idx < size; idx++ {
 		if !isNewLine {
@@ -250,6 +252,14 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (*token.Token, error) {
 		}
 		c := src[idx]
 		ctx.addOriginBuf(c)
+		// niceyaml: check each line once, at its first text. A check of each
+		// rune would walk back to the line start for every "''" escape.
+		if checkLine && c != ' ' && c != '\t' && !s.isNewLineChar(c) {
+			checkLine = false
+			if !misindented && s.quoteLeftOfFlowIndent(src, idx) {
+				misindented = true
+			}
+		}
 		if s.isNewLineChar(c) {
 			notSpaceIdx := -1
 			for i := len(value) - 1; i >= 0; i-- {
@@ -268,6 +278,7 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (*token.Token, error) {
 				value = append(value, ' ')
 			}
 			isFirstLineChar = true
+			checkLine = true
 			isNewLine = true
 			s.progressLine(ctx)
 			if idx+1 < size {
@@ -303,6 +314,9 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (*token.Token, error) {
 			continue
 		}
 		s.progressColumn(ctx, 1)
+		if misindented {
+			return nil, s.misindentedQuote(ctx, srcpos)
+		}
 		return token.SingleQuote(string(value), string(ctx.obuf), srcpos), nil
 	}
 	s.progressColumn(ctx, 1)
@@ -341,6 +355,8 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 	value := []rune{}
 	isFirstLineChar := false
 	isNewLine := false
+	misindented := false // niceyaml: a line of the scalar is left of the flow indent.
+	checkLine := false   // niceyaml: the next text of the line is its first.
 
 	for idx := startIndex; idx < size; idx++ {
 		if !isNewLine {
@@ -350,6 +366,14 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 		}
 		c := src[idx]
 		ctx.addOriginBuf(c)
+		// niceyaml: check each line once, at its first text, as the
+		// single-quoted scan does.
+		if checkLine && c != ' ' && c != '\t' && !s.isNewLineChar(c) {
+			checkLine = false
+			if !misindented && s.quoteLeftOfFlowIndent(src, idx) {
+				misindented = true
+			}
+		}
 		if s.isNewLineChar(c) {
 			notSpaceIdx := -1
 			for i := len(value) - 1; i >= 0; i-- {
@@ -368,6 +392,7 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 				value = append(value, ' ')
 			}
 			isFirstLineChar = true
+			checkLine = true
 			isNewLine = true
 			s.progressLine(ctx)
 			if idx+1 < size {
@@ -549,6 +574,7 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 				ctx.addOriginRunes(src[idx+1 : idx+progress+1]) // niceyaml: keep the code of the escape.
 			case '\n':
 				isFirstLineChar = true
+				checkLine = true
 				isNewLine = true
 				ctx.addOriginBuf(nextChar)
 				s.progressColumn(ctx, 1)
@@ -557,6 +583,7 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 				continue
 			case '\r':
 				isFirstLineChar = true
+				checkLine = true
 				isNewLine = true
 				ctx.addOriginBuf(nextChar)
 				s.progressLine(ctx)
@@ -615,6 +642,9 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 			continue
 		}
 		s.progressColumn(ctx, 1)
+		if misindented {
+			return nil, s.misindentedQuote(ctx, srcpos)
+		}
 		return token.DoubleQuote(string(value), string(ctx.obuf), srcpos), nil
 	}
 	s.progressColumn(ctx, 1)
@@ -1476,6 +1506,101 @@ func (s *Scanner) continuesFlowPlain(ctx *Context) bool {
 		ctx.lineSpaces() > s.flowIndent
 }
 
+// misindentedQuote returns the error of a quoted scalar at pos that the
+// scan read through its closing quote. A line of the scalar inside a flow
+// collection does not pass the indent of the block node that holds the
+// collection. The invalid token holds the whole scalar. The next scan
+// starts right after the scalar, so the rune there does not open its line.
+// niceyaml: upstream does not have this method.
+func (s *Scanner) misindentedQuote(ctx *Context, pos *token.Position) error {
+	s.isFirstCharAtLine = false
+	return ErrInvalidToken(token.Invalid(flowIndentMessage, string(ctx.obuf), pos))
+}
+
+// flowIndentMessage is the message of the invalid token of a line of a
+// flow collection that does not pass the indent of the block node that
+// holds the collection. niceyaml: upstream does not have this constant.
+const flowIndentMessage = "a line of a flow collection must be indented past the block node that holds it"
+
+// leftOfFlowIndent reports whether the line that the scan opens at c
+// stands inside a flow collection and does not pass the indent of the
+// block node that holds the collection. YAML reads each line of the
+// collection past that indent. So it refuses such a line, whichever token
+// opens it. Upstream does not check that indent, so it reads "key: [a\n]"
+// as {key: [a]}. A comment line and a blank line are not text of the
+// collection. A "---" or "..." marker ends the document, so the check
+// skips it, and the collection fails as one that is never closed. A tab
+// ends the spaces of the indent, because YAML does not indent with a tab.
+// The rune after a quoted scalar that spans lines does not open its line,
+// so the check skips it. [Scanner.quoteLeftOfFlowIndent] checks the lines
+// of such a scalar. niceyaml: upstream does not have this method.
+func (s *Scanner) leftOfFlowIndent(ctx *Context, c rune) bool {
+	if !s.isFlowMode() || c == '#' || ctx.lineSpaces() > s.flowIndent || !ctx.opensLine() {
+		return false
+	}
+	return !s.atDocumentMarker(ctx)
+}
+
+// quoteLeftOfFlowIndent reports whether the rune of src at idx is text on
+// a line of a quoted scalar in a flow collection, and the line does not
+// pass the flow indent. The flow indent is the indent of the block node
+// that holds the collection. YAML reads each line of a quoted scalar there
+// past that indent. A space, a tab, and a line break are not text of the line.
+// niceyaml: upstream does not have this method.
+func (s *Scanner) quoteLeftOfFlowIndent(src []rune, idx int) bool {
+	if !s.isFlowMode() || src[idx] == ' ' || src[idx] == '\t' || s.isNewLineChar(src[idx]) {
+		return false
+	}
+	head := idx
+	for head > 0 && !s.isNewLineChar(src[head-1]) {
+		head--
+	}
+	spaces := 0
+	for src[head+spaces] == ' ' {
+		spaces++
+	}
+	return spaces <= s.flowIndent
+}
+
+// atDocumentMarker reports whether the scan stands at a "---" or "..."
+// marker at the start of a line. niceyaml: upstream does not have this
+// method.
+func (s *Scanner) atDocumentMarker(ctx *Context) bool {
+	if s.column != 1 {
+		return false
+	}
+	if ctx.repeatNum('-') != 3 && ctx.repeatNum('.') != 3 {
+		return false
+	}
+	if ctx.size > ctx.idx+3 {
+		c := ctx.src[ctx.idx+3]
+		return c == ' ' || c == '\t' || c == '\n' || c == '\r'
+	}
+	return true
+}
+
+// scanFlowIndent reports the rune c as an invalid token. The rune opens a
+// line of a flow collection that does not pass the indent of the block
+// node that holds the collection. A "]" or "}" there still closes its
+// collection, as it does past the indent. So the scan reads the text after
+// it outside the collection. niceyaml: upstream does not have this
+// method.
+func (s *Scanner) scanFlowIndent(ctx *Context, c rune) error {
+	s.addBufferedTokenIfExists(ctx)
+	invalidTk := token.Invalid(flowIndentMessage, string(ctx.obuf)+string(c), s.pos())
+	switch {
+	case c == ']' && s.startedFlowSequenceNum > 0:
+		s.startedFlowSequenceNum--
+		s.popFlow()
+	case c == '}' && s.startedFlowMapNum > 0:
+		s.startedFlowMapNum--
+		s.popFlow()
+	}
+	s.progressColumn(ctx, 1)
+	ctx.clear()
+	return ErrInvalidToken(invalidTk)
+}
+
 // pushFlow adds a flow collection of the type typ to the flows of the
 // scan. For the outermost flow collection, it also sets the indent that
 // the lines of the collection must pass. niceyaml: upstream does not have
@@ -1898,6 +2023,11 @@ func (s *Scanner) scan(ctx *Context) error {
 			if tk := ctx.lastToken(); tk != nil && tk.Type == token.TagType {
 				ctx.tagClosed = true
 			}
+		}
+		// niceyaml: a line of a flow collection that does not pass the
+		// indent of the block node that holds the collection is invalid.
+		if lineStart && !s.isFirstCharAtLine && s.leftOfFlowIndent(ctx, c) {
+			return s.scanFlowIndent(ctx, c)
 		}
 		if ctx.isMultiLine() {
 			if s.isChangedToIndentStateDown() {

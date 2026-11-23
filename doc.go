@@ -222,14 +222,15 @@
 // The parse of a Source refuses such a name with a syntax error at the "&"
 // of the anchor or the "*" of the alias.
 //
-// Inside a flow collection, YAML folds a line into the plain scalar on the
-// line above only when the spaces that open the line pass the indent of the
-// block node that holds the collection. Go-yaml's parser reads a "-" at a
-// line that does not pass that indent after an explicit key as a sequence
-// entry, so yaml.Unmarshal reads "key: {? A\n- B}" as {key: {A: [B]}}. The
-// parse of a Source refuses that "-" with a syntax error at the "-". Where
-// the parser refuses such a "-", the document fails with the error of the
-// parser.
+// YAML reads a line of a flow collection only when the spaces that open the
+// line pass the indent of the block node that holds the collection. Go-yaml's
+// parser does not check that indent, so yaml.Unmarshal reads "key: [a\n]" as
+// {key: [a]}. It reads a "-" at such a line after an explicit key as a
+// sequence entry, so it reads "key: {? A\n- B}" as {key: {A: [B]}}. The
+// parse of a Source refuses such a line with a syntax error at the first
+// character of the line. Where the line continues a quoted scalar, the error
+// points at the scalar. A comment line is not part of the collection, so it
+// can start at any column.
 //
 // YAML reads an explicit key in a flow sequence as a mapping of one pair,
 // and a key without a value holds null. Go-yaml's parser refuses that key
@@ -2518,8 +2519,8 @@
 // do the errors for a "-" right after a tag on its line, for a "-" that starts
 // an entry inside a flow collection, and for a "-" there right before a flow
 // indicator. So do the error for a plain scalar there that holds a flow
-// indicator and the error for a "-" at a line of a flow collection that does
-// not pass the indent of the block node that holds the collection. So does
+// indicator and the error for a line of a flow collection that does not
+// pass the indent of the block node that holds the collection. So does
 // the error for the name of an anchor or an alias that holds a flow
 // indicator. The parser takes each such token. The error for YAML that
 // parsed but does not decode matches [ErrDecode]. The errors for a value of

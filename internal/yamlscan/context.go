@@ -166,6 +166,19 @@ func (c *Context) lineSpaces() int {
 	return min(c.lineLead, c.idx-c.lineHead)
 }
 
+// opensLine reports whether only spaces and tabs come before the scan on
+// its line. A rune right after a quoted scalar that spans lines does not
+// open its line. niceyaml: upstream does not have this method.
+func (c *Context) opensLine() bool {
+	c.lineSpaces()
+	for i := c.lineHead; i < c.idx; i++ {
+		if r := c.src[i]; r != ' ' && r != '\t' {
+			return false
+		}
+	}
+	return true
+}
+
 // cutIndicator drops the indicator that opens the buffer and the origin
 // buffer. It also drops the blanks after the indicator from the buffer,
 // and the origin buffer keeps them. niceyaml: upstream does not have this

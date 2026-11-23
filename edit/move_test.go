@@ -520,99 +520,157 @@ func TestNode_Move(t *testing.T) {
 			want:   stringtest.LinesLF("l:", "  - # dc", "    - |", "      text"),
 		},
 		"first item of a flow sequence that writes each item on its own line to a new key": {
-			before: stringtest.LinesLF("f: [", "  0,", "  1", "]"),
+			before: stringtest.LinesLF("f: [", "  0,", "  1", " ]"),
 			moves:  [][2]paths.Path{{paths.MustParse("$.f[0]"), paths.Doc().Child("q")}},
-			want:   stringtest.LinesLF("f: [", "  1", "]", "q: 0"),
+			want:   stringtest.LinesLF("f: [", "  1", " ]", "q: 0"),
 		},
 		"only item of a flow sequence on its own line to a new key": {
-			before: stringtest.LinesLF("f: [", "  1", "]"),
+			before: stringtest.LinesLF("f: [", "  1", " ]"),
 			moves:  [][2]paths.Path{{paths.MustParse("$.f[0]"), paths.Doc().Child("q")}},
-			want:   stringtest.LinesLF("f: [", "]", "q: 1"),
+			want:   stringtest.LinesLF("f: [", " ]", "q: 1"),
 		},
 		"first entry of a flow mapping that writes each entry on its own line to a new key": {
-			before: stringtest.LinesLF("g: {", "  a: 1,", "  b: 2", "}"),
+			before: stringtest.LinesLF("g: {", "  a: 1,", "  b: 2", " }"),
 			moves:  [][2]paths.Path{{paths.MustParse("$.g.a"), paths.Doc().Child("q")}},
-			want:   stringtest.LinesLF("g: {", "  b: 2", "}", "q: 1"),
+			want:   stringtest.LinesLF("g: {", "  b: 2", " }", "q: 1"),
 		},
 		"only entry of a flow mapping on its own line to a new key": {
-			before: stringtest.LinesLF("g: {", "  a: 1", "}"),
+			before: stringtest.LinesLF("g: {", "  a: 1", " }"),
 			moves:  [][2]paths.Path{{paths.MustParse("$.g.a"), paths.Doc().Child("q")}},
-			want:   stringtest.LinesLF("g: {", "}", "q: 1"),
+			want:   stringtest.LinesLF("g: {", " }", "q: 1"),
+		},
+		// YAML reads each line of a flow collection past the indent of its
+		// block node. So each line of the value keeps its indent past the
+		// block node of the outermost flow collection.
+		"flow sequence of two lines in a flow mapping to a new key of a nested mapping": {
+			before: stringtest.LinesLF("c: {a: [x,", " y]}", "d:", "  k: 1"),
+			moves:  [][2]paths.Path{{paths.MustParse("$.c.a"), paths.MustParse("$.d.e")}},
+			want:   stringtest.LinesLF("c: {}", "d:", "  k: 1", "  e: [x,", "   y]"),
+		},
+		// An anchor or a tag on the outermost flow collection does not
+		// change the block node that holds it.
+		"flow sequence of two lines in an anchored flow mapping to a new key of a nested mapping": {
+			before: stringtest.LinesLF("c: &a {a: [x,", " y]}", "d:", "  k: 1"),
+			moves:  [][2]paths.Path{{paths.MustParse("$.c.a"), paths.MustParse("$.d.e")}},
+			want:   stringtest.LinesLF("c: &a {}", "d:", "  k: 1", "  e: [x,", "   y]"),
+		},
+		"flow sequence of two lines in a tagged flow mapping to a new key of a nested mapping": {
+			before: stringtest.LinesLF("c: !!map {a: [x,", " y]}", "d:", "  k: 1"),
+			moves:  [][2]paths.Path{{paths.MustParse("$.c.a"), paths.MustParse("$.d.e")}},
+			want:   stringtest.LinesLF("c: !!map {}", "d:", "  k: 1", "  e: [x,", "   y]"),
+		},
+		// A line of the value that holds only spaces stays empty.
+		"flow sequence with a line of spaces in a flow mapping to a new key": {
+			before: stringtest.LinesLF("c: {a: [x,", "   ", " y]}", "d: 1"),
+			moves:  [][2]paths.Path{{paths.MustParse("$.c.a"), paths.Doc().Child("e")}},
+			want:   stringtest.LinesLF("c: {}", "d: 1", "e: [x,", "", " y]"),
+		},
+		"flow sequence of two lines in a flow sequence to a new nested key": {
+			before: stringtest.LinesLF("c: [[x,", " y]]"),
+			moves:  [][2]paths.Path{{paths.MustParse("$.c[0]"), paths.MustParse("$.q.r")}},
+			want:   stringtest.LinesLF("c: []", "q:", "  r: [x,", "   y]"),
+		},
+		"flow sequence of two lines in a flow mapping to a new item of a nested sequence": {
+			before: stringtest.LinesLF("c: {a: [x,", " y]}", "l:", "  - 1"),
+			moves:  [][2]paths.Path{{paths.MustParse("$.c.a"), paths.MustParse("$.l[1]")}},
+			want:   stringtest.LinesLF("c: {}", "l:", "  - 1", "  - [x,", "   y]"),
+		},
+		"flow sequence of two lines in a nested flow mapping to a new key of the root": {
+			before: stringtest.LinesLF("x:", "  c: {a: [x,", "   y]}"),
+			moves:  [][2]paths.Path{{paths.MustParse("$.x.c.a"), paths.Doc().Child("r")}},
+			want:   stringtest.LinesLF("x:", "  c: {}", "r: [x,", " y]"),
+		},
+		"double-quoted scalar of two lines in a flow mapping to a new key of a nested mapping": {
+			before: stringtest.LinesLF(`c: {a: "x`, ` y"}`, "d:", "  k: 1"),
+			moves:  [][2]paths.Path{{paths.MustParse("$.c.a"), paths.MustParse("$.d.e")}},
+			want:   stringtest.LinesLF("c: {}", "d:", "  k: 1", `  e: "x`, `   y"`),
+		},
+		"plain scalar of two lines in a flow mapping to a new key of a nested mapping": {
+			before: stringtest.LinesLF("c: {a: x", " y}", "d:", "  k: 1"),
+			moves:  [][2]paths.Path{{paths.MustParse("$.c.a"), paths.MustParse("$.d.e")}},
+			want:   stringtest.LinesLF("c: {}", "d:", "  k: 1", "  e: x", "   y"),
+		},
+		// A flow collection of several lines goes on one line in a flow
+		// collection, as flow style writes it.
+		"flow sequence of two lines in a flow mapping to a nested flow sequence": {
+			before: stringtest.LinesLF("c: {a: [x,", " y]}", "d:", "  k: [1]"),
+			moves:  [][2]paths.Path{{paths.MustParse("$.c.a"), paths.MustParse("$.d.k[1]")}},
+			want:   stringtest.LinesLF("c: {}", "d:", `  k: [1, [x, "y"]]`),
 		},
 		"item of a flow sequence that ends its line after another item to a new key": {
-			before: stringtest.LinesLF("f: [", "  0, 1,", "  2", "]"),
+			before: stringtest.LinesLF("f: [", "  0, 1,", "  2", " ]"),
 			moves:  [][2]paths.Path{{paths.MustParse("$.f[1]"), paths.Doc().Child("q")}},
-			want:   stringtest.LinesLF("f: [", "  0,", "  2", "]", "q: 1"),
+			want:   stringtest.LinesLF("f: [", "  0,", "  2", " ]", "q: 1"),
 		},
 		"entry of a flow mapping that ends its line after another entry to a new key": {
-			before: stringtest.LinesLF("g: {", "  a: 1, b: 2,", "  c: 3", "}"),
+			before: stringtest.LinesLF("g: {", "  a: 1, b: 2,", "  c: 3", " }"),
 			moves:  [][2]paths.Path{{paths.MustParse("$.g.b"), paths.Doc().Child("q")}},
-			want:   stringtest.LinesLF("g: {", "  a: 1,", "  c: 3", "}", "q: 2"),
+			want:   stringtest.LinesLF("g: {", "  a: 1,", "  c: 3", " }", "q: 2"),
 		},
 		"last item of a flow sequence with a comment on its line to a new key": {
-			before: stringtest.LinesLF("f: [", "  0,", "  1 # one", "]"),
+			before: stringtest.LinesLF("f: [", "  0,", "  1 # one", " ]"),
 			moves:  [][2]paths.Path{{paths.MustParse("$.f[1]"), paths.Doc().Child("q")}},
 			err:    "test.yaml:1:4: $.f: cafe.jacobcolvin.com/v1 moves $.f[1] to $.q, which reaches a flow collection with a comment inside it, and cafe does not edit inside such a collection",
 		},
 		"first item of a flow sequence with a comment on its line to a new key": {
-			before: stringtest.LinesLF("f: [", "  0, # zero", "  1", "]"),
+			before: stringtest.LinesLF("f: [", "  0, # zero", "  1", " ]"),
 			moves:  [][2]paths.Path{{paths.MustParse("$.f[0]"), paths.Doc().Child("q")}},
 			err:    "test.yaml:1:4: $.f: cafe.jacobcolvin.com/v1 moves $.f[0] to $.q, which reaches a flow collection with a comment inside it, and cafe does not edit inside such a collection",
 		},
 		"last item of a flow sequence with a comment on its line, after an item with a comment, to a new key": {
-			before: stringtest.LinesLF("f: [", "  0, # zero", "  1 # one", "]"),
+			before: stringtest.LinesLF("f: [", "  0, # zero", "  1 # one", " ]"),
 			moves:  [][2]paths.Path{{paths.MustParse("$.f[1]"), paths.Doc().Child("q")}},
 			err:    "test.yaml:1:4: $.f: cafe.jacobcolvin.com/v1 moves $.f[1] to $.q, which reaches a flow collection with a comment inside it, and cafe does not edit inside such a collection",
 		},
 		"last item of a flow sequence after an item with a comment right after its comma, to a new key": {
-			before: stringtest.LinesLF("f: [", "  0,# zero", "  1", "]"),
+			before: stringtest.LinesLF("f: [", "  0,# zero", "  1", " ]"),
 			moves:  [][2]paths.Path{{paths.MustParse("$.f[1]"), paths.Doc().Child("q")}},
-			want:   stringtest.LinesLF("f: [", "  0 # zero", "]", "q: 1"),
+			want:   stringtest.LinesLF("f: [", "  0 # zero", " ]", "q: 1"),
 			value:  map[string]any{"f": []any{uint64(0)}, "q": uint64(1)},
 		},
 		"last entry of a flow mapping after an entry with a comment right after its comma, to a new key": {
-			before: stringtest.LinesLF("g: {", "  a: abc,# one", "  b: 2", "}"),
+			before: stringtest.LinesLF("g: {", "  a: abc,# one", "  b: 2", " }"),
 			moves:  [][2]paths.Path{{paths.MustParse("$.g.b"), paths.Doc().Child("q")}},
-			want:   stringtest.LinesLF("g: {", "  a: abc # one", "}", "q: 2"),
+			want:   stringtest.LinesLF("g: {", "  a: abc # one", " }", "q: 2"),
 			value:  map[string]any{"g": map[string]any{"a": "abc"}, "q": uint64(2)},
 		},
 		"last item of a flow sequence after a comma that starts its line, with a trailing comma and a comment, to a new key": {
-			before: stringtest.LinesLF("f: [", "  0", "  , 1, # one", "]"),
+			before: stringtest.LinesLF("f: [", "  0", "  , 1, # one", " ]"),
 			moves:  [][2]paths.Path{{paths.MustParse("$.f[1]"), paths.Doc().Child("q")}},
 			err:    "test.yaml:1:4: $.f: cafe.jacobcolvin.com/v1 moves $.f[1] to $.q, which reaches a flow collection with a comment inside it, and cafe does not edit inside such a collection",
 		},
 		"middle entry of a flow mapping after a comma that starts its line, with a comma and a comment after it, to a new key": {
-			before: stringtest.LinesLF("g: {", "  a: 1", "  , b: 2, # bee", "  c: 3", "}"),
+			before: stringtest.LinesLF("g: {", "  a: 1", "  , b: 2, # bee", "  c: 3", " }"),
 			moves:  [][2]paths.Path{{paths.MustParse("$.g.b"), paths.Doc().Child("q")}},
 			err:    "test.yaml:1:4: $.g: cafe.jacobcolvin.com/v1 moves $.g.b to $.q, which reaches a flow collection with a comment inside it, and cafe does not edit inside such a collection",
 		},
 		"item of a flow sequence with a comment before its comma to a new key": {
-			before: stringtest.LinesLF("f: [", "  0,", "  1 # one", "  , 2", "]"),
+			before: stringtest.LinesLF("f: [", "  0,", "  1 # one", "  , 2", " ]"),
 			moves:  [][2]paths.Path{{paths.MustParse("$.f[1]"), paths.Doc().Child("q")}},
 			err:    "test.yaml:1:4: $.f: cafe.jacobcolvin.com/v1 moves $.f[1] to $.q, which reaches a flow collection with a comment inside it, and cafe does not edit inside such a collection",
 		},
 		"last item of a flow sequence with a comment on its line past the last item of a block sequence": {
-			before: stringtest.LinesLF("f: [", "  0,", "  1 # one", "]", "l:", "  - 9"),
+			before: stringtest.LinesLF("f: [", "  0,", "  1 # one", " ]", "l:", "  - 9"),
 			moves:  [][2]paths.Path{{paths.MustParse("$.f[1]"), paths.MustParse("$.l[1]")}},
 			err:    "test.yaml:1:4: $.f: cafe.jacobcolvin.com/v1 moves $.f[1] to $.l[1], which reaches a flow collection with a comment inside it, and cafe does not edit inside such a collection",
 		},
 		"last item of a flow sequence with a comment on its line to a new key below a mapping": {
-			before: stringtest.LinesLF("f: [", "  0,", "  1 # one", "]", "m:", "  k: 0"),
+			before: stringtest.LinesLF("f: [", "  0,", "  1 # one", " ]", "m:", "  k: 0"),
 			moves:  [][2]paths.Path{{paths.MustParse("$.f[1]"), paths.MustParse("$.m.q.r")}},
 			err:    "test.yaml:1:4: $.f: cafe.jacobcolvin.com/v1 moves $.f[1] to $.m.q.r, which reaches a flow collection with a comment inside it, and cafe does not edit inside such a collection",
 		},
 		"last item of a flow sequence with a comment on its line into a flow sequence": {
-			before: stringtest.LinesLF("f: [", "  0,", "  1 # one", "]", "g: [9]"),
+			before: stringtest.LinesLF("f: [", "  0,", "  1 # one", " ]", "g: [9]"),
 			moves:  [][2]paths.Path{{paths.MustParse("$.f[1]"), paths.MustParse("$.g[1]")}},
 			err:    "test.yaml:1:4: $.f: cafe.jacobcolvin.com/v1 moves $.f[1] to $.g[1], which reaches a flow collection with a comment inside it, and cafe does not edit inside such a collection",
 		},
 		"item of a flow sequence with a comment on a line that another item keeps, to a new key": {
-			before: stringtest.LinesLF("f: [", "  0, 1 # c", "]"),
+			before: stringtest.LinesLF("f: [", "  0, 1 # c", " ]"),
 			moves:  [][2]paths.Path{{paths.MustParse("$.f[1]"), paths.Doc().Child("q")}},
 			err:    "test.yaml:1:4: $.f: cafe.jacobcolvin.com/v1 moves $.f[1] to $.q, which reaches a flow collection with a comment inside it, and cafe does not edit inside such a collection",
 		},
 		"last entry of a flow mapping with a comment on its line to a new key": {
-			before: stringtest.LinesLF("g: {", "  a: 1,", "  b: 2 # bee", "}"),
+			before: stringtest.LinesLF("g: {", "  a: 1,", "  b: 2 # bee", " }"),
 			moves:  [][2]paths.Path{{paths.MustParse("$.g.b"), paths.Doc().Child("q")}},
 			err:    "test.yaml:1:4: $.g: cafe.jacobcolvin.com/v1 moves $.g.b to $.q, which reaches a flow collection with a comment inside it, and cafe does not edit inside such a collection",
 		},
@@ -688,7 +746,7 @@ func TestNode_Move(t *testing.T) {
 			want:   stringtest.LinesLF("f: [{}, 1]", "q:"),
 		},
 		"empty entry of a flow mapping with a comment to a new key": {
-			before: stringtest.LinesLF("f: {", "  a: 1,", "  b: # bee", "}"),
+			before: stringtest.LinesLF("f: {", "  a: 1,", "  b: # bee", " }"),
 			moves:  [][2]paths.Path{{paths.MustParse("$.f.b"), paths.Doc().Child("q")}},
 			err:    "test.yaml:1:4: $.f: cafe.jacobcolvin.com/v1 moves $.f.b to $.q, which reaches a flow collection with a comment inside it, and cafe does not edit inside such a collection",
 		},
@@ -703,7 +761,7 @@ func TestNode_Move(t *testing.T) {
 			want:   stringtest.LinesLF("f: {a: 1}", "l:", "  - 0", "  -"),
 		},
 		"empty entry of a flow mapping with a comment past the last item of a block sequence": {
-			before: stringtest.LinesLF("f: {", "  a: 1,", "  b: # bee", "}", "l:", "  - 0"),
+			before: stringtest.LinesLF("f: {", "  a: 1,", "  b: # bee", " }", "l:", "  - 0"),
 			moves:  [][2]paths.Path{{paths.MustParse("$.f.b"), paths.MustParse("$.l[1]")}},
 			err:    "test.yaml:1:4: $.f: cafe.jacobcolvin.com/v1 moves $.f.b to $.l[1], which reaches a flow collection with a comment inside it, and cafe does not edit inside such a collection",
 		},
