@@ -8,7 +8,6 @@ import (
 	"slices"
 	"sort"
 	"strconv"
-	"strings"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -68,8 +67,8 @@ type document struct {
 	// first call. Nodes do not edit the tree, so the resolver binds the
 	// aliases once.
 	resolver func() *paths.Resolver
-	// Returns the tree the go-yaml decoder reads for the document, and
-	// builds it on the first call.
+	// Returns the tree that binds the aliases of the document for the
+	// go-yaml decoder, and builds it on the first call.
 	tree func() *decodetree.Tree
 	// Returns the index that finds the node of root at a position, and
 	// builds it on the first call of PathAt.
@@ -86,9 +85,6 @@ type document struct {
 	// which the extent of a Node searches.
 	positioned token.Tokens
 	index      int
-	// The index of root in the Docs of the file that the Source parsed. It
-	// can differ from index, because preamble nodes fold into documents.
-	fileIndex int
 	// The number of tokens at the start of tokens before the content.
 	preamble int
 }
@@ -1467,8 +1463,9 @@ func (n *Node) bindOwn(err error) error {
 }
 
 // holdsToken reports whether tk is a token of the parse of the source or
-// of the parse the [decodetree.Tree] reads. It compares pointers, so a
-// token from another parse, such as one in UnmarshalYAML, never matches.
+// of a node of the document, as [decodetree.Tree.Holds] tells. It compares
+// pointers, so a token from another parse, such as one in UnmarshalYAML,
+// never matches.
 func (n *Node) holdsToken(tk *token.Token) bool {
 	if tk == nil {
 		return false
@@ -1487,99 +1484,37 @@ func (s *Source) holdsToken(tk *token.Token) bool {
 
 // newDecodeTree creates the [*decodetree.Tree] of the document.
 func (d *document) newDecodeTree() *decodetree.Tree {
-	src := d.node.source
+	var body ast.Node
 
-	return decodetree.New(d.root.Body, d.state.Facts(), decodetree.Options{
-		Reparse: func() (ast.Node, map[*token.Token]int) {
-			r := src.decodeParse.get(src.reparse)
-			if d.fileIndex < 0 || d.fileIndex >= len(r.File.Docs) {
-				return nil, nil
-			}
+	if d.root != nil {
+		body = d.root.Body
+	}
 
-			return r.File.Docs[d.fileIndex].Body, r.Index
-		},
-		Texts: func() []string {
-			return spellingTexts(d.tokens)
-		},
-		ReferenceSpellings: src.referenceSpellings,
-		References:         len(src.references) > 0,
-	})
+	return decodetree.New(body, d.state.Facts())
+}
+
+// resolveAlias returns the node that the go-yaml decoder reads for alias,
+// as [yamldecode.ResolveAlias] takes it. An alias that the
+// [decodetree.Tree] of the document binds reads what the tree returns.
+// Any other alias reads the anchor of its name in the reference documents,
+// as [Source.referenceAlias] finds it.
+func (d *document) resolveAlias(alias *ast.AliasNode) (ast.Node, bool) {
+	if d.root != nil {
+		if node, ok := d.tree().Resolve(alias); ok {
+			return node, node != nil
+		}
+	}
+
+	return d.node.source.referenceAlias(alias)
 }
 
 // rejectionText returns the message and the sentinel that
-// [rejection.Classify] gives err. It spells each anchor name in the
-// message as the document does. It also escapes each control character,
+// [rejection.Classify] gives err. It escapes each control character,
 // because the decoder copies document text into messages.
 func (d *document) rejectionText(err yaml.Error) (string, error) {
 	msg, label := rejection.Classify(err)
 
-	return escape.Control(d.tree().RestoreNames(msg)), rejectionLabel(label)
-}
-
-// restoreError returns err with each anchor name the [decodetree.Tree]
-// gave spelled as the document spells it. It leaves an [*Error] or a
-// [*SourceError] alone, because the binding writes their messages.
-func (d *document) restoreError(err error) error {
-	var (
-		located *Error
-		bound   *SourceError
-	)
-
-	if errors.As(err, &located) || errors.As(err, &bound) {
-		return err
-	}
-
-	tree := d.tree()
-
-	msg := err.Error()
-	if tree.RestoreNames(msg) == msg {
-		return err
-	}
-
-	return &namedError{err: err, tree: tree}
-}
-
-// namedError is an error whose message spells each anchor name that a
-// [decodetree.Tree] gave as the document spells it. It unwraps to the
-// error it holds. The binding reads a go-yaml error below it and spells
-// the names in the message of the result again.
-type namedError struct {
-	err  error
-	tree *decodetree.Tree
-}
-
-func (e *namedError) Error() string {
-	return e.tree.RestoreNames(e.err.Error())
-}
-
-// Unwrap returns the error e holds.
-func (e *namedError) Unwrap() error {
-	return e.err
-}
-
-// spellingTexts returns the texts that a new anchor name must not spell.
-// They are the joined text of tks and the value of each token that holds
-// " [". A value differs from its text where a scalar holds an escape or a
-// fold.
-func spellingTexts(tks token.Tokens) []string {
-	var (
-		text   strings.Builder
-		values []string
-	)
-
-	for _, tk := range tks {
-		if tk == nil {
-			continue
-		}
-
-		text.WriteString(tk.Origin)
-
-		if strings.Contains(tk.Value, " [") {
-			values = append(values, tk.Value)
-		}
-	}
-
-	return append(values, text.String())
+	return escape.Control(msg), rejectionLabel(label)
 }
 
 // PathAt returns the `$` path of the innermost node of the document at
@@ -1692,15 +1627,15 @@ func (n *Node) PathAt(pos position.Position) (paths.Path, bool) {
 // a node outside the document report false too.
 //
 // PathOf finds the node by the offset of its token and by its type. It
-// thus finds a node of a second parse of the same text, such as the one
-// that a decode might read. It cannot tell a node of another text apart.
+// thus finds a node of another parse of the same text. It cannot tell a
+// node of another text apart.
 // Such a node gets the path of whatever node lies at its offset in the
 // document.
 //
 // In one case two nodes of a parse share a type and a position. An entry
 // with a "?" key that holds a null, as `? !!null` writes one, leaves out
 // its value, and another entry follows it. PathOf tells the two nulls
-// apart for a node of the document. For a node of a second parse, the
+// apart for a node of the document. For a node of another parse, the
 // null of the key gets the path of its entry, and not the path that ends
 // in `~`.
 func (n *Node) PathOf(node ast.Node) (paths.Path, bool) {

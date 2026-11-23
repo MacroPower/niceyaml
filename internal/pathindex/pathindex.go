@@ -350,7 +350,7 @@ func (x *Index) OwnerPath(r *paths.Resolver, tk *token.Token) (paths.Path, bool,
 
 // NodePath returns the path of node and true when that path selects node.
 // The node is one of the document, or one of another parse of the same
-// text, such as the second parse of the decoder. NodePath finds the node
+// text. NodePath finds the node
 // by the offset of its token, as [Index.OwnerPath] does, and tells apart
 // the nodes that share that offset by their types. A block mapping has
 // the token of its first entry, [*ast.MappingValueNode]. That token is

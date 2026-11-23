@@ -63,11 +63,10 @@ func (n *Node) knownKeys(cfg decodeConfig) map[position.Position]bool {
 	return keys
 }
 
-// admitKnownKeys cuts out of view each entry of a known key of cfg that
+// admitKnownKeys cuts out of node each entry of a known key of cfg that
 // [Node.cutKeys] finds for a decode of node into a value of type t. The
-// view is the node that the decoder reads for node, and rules are those
-// of the decode. The decoder still fills the field of each known key that
-// t declares.
+// rules are those of the decode. The decoder still fills the field of each
+// known key that t declares.
 //
 // The decoder reads the last entry of a key in a mapping. The entry of
 // such a key thus hides each entry of its key that a `<<` merge key
@@ -79,17 +78,17 @@ func (n *Node) admitKnownKeys(
 	rules decodewalk.Rules,
 	cfg decodeConfig,
 	t reflect.Type,
-	node, view ast.Node,
+	node ast.Node,
 ) keyCut {
 	drop := n.cutKeys(ctx, rules, cfg, t, node)
 	if len(drop) == 0 {
-		return keyCut{view: view, read: view}
+		return keyCut{view: node, read: node}
 	}
 
-	c := &keyCutter{n: n, keys: drop, reads: map[cutKey]ast.Node{}, view: view, anchors: map[cutKey]bool{}}
-	trimmed, read, _ := c.cut(view)
+	c := &keyCutter{n: n, keys: drop, reads: map[cutKey]ast.Node{}, view: node, anchors: map[cutKey]bool{}}
+	trimmed, read, _ := c.cut(node)
 
-	return keyCut{view: trimmed, read: read, reads: c.reads, anchors: c.primed}
+	return keyCut{view: trimmed, read: read, reads: c.reads}
 }
 
 // cutKeys returns the position of each known key of cfg that a decode of
@@ -132,10 +131,11 @@ func (n *Node) cutKeys(
 // keeps every key that it reads. A map or an interface keeps every key
 // that it reads. A value that the decoder rejects whole keeps each key
 // below it, such as a mapping where a slice reads a sequence. A struct
-// leaves out each other key that it reads. A value that decodes itself,
-// as [unmarshaler.Options.Whole] reports for u, does not keep any key
-// below it. Its unmarshaler thus reads a known key only when another
-// read keeps the key.
+// leaves out each other key that it reads. A node type of the go-yaml ast
+// package keeps every key below it, so it takes the node of the document.
+// Any other value that decodes itself, as [unmarshaler.Options.Whole]
+// reports for u, does not keep any key below it. Its unmarshaler thus
+// reads a known key only when another read keeps the key.
 //
 // The walk follows each alias and each `<<` merge key, as
 // [decodewalk.Walk] describes. It thus finds a key in an anchored mapping
@@ -159,6 +159,14 @@ func (n *Node) keptKeys(
 	}
 
 	decodewalk.Walk(ctx, rules, t, node, astnode.Parent{}, func(v *decodewalk.Value) decodewalk.Action {
+		// A node type of the go-yaml ast package takes the node of the
+		// document whole, so the decode must not cut a key below it.
+		if unmarshaler.IsSyntaxNode(v.Type) {
+			keepAll(res, v.Node, keep, scanned)
+
+			return decodewalk.Skip
+		}
+
 		if _, whole := u.Whole(v.Type); whole {
 			return decodewalk.Skip
 		}
@@ -270,10 +278,10 @@ func keepAll(r *paths.Resolver, node ast.Node, keep func(*ast.MappingValueNode),
 	}
 }
 
-// keyCut is the view of a decode without the entries of the known keys
+// keyCut is the node of a decode without the entries of the known keys
 // that the decode leaves out, as [Node.admitKnownKeys] returns it.
 type keyCut struct {
-	// The view without those entries. An error of the decoder binds
+	// The node without those entries. An error of the decoder binds
 	// against it, because it holds each alias of the document that the
 	// decode reads.
 	view ast.Node
@@ -284,14 +292,10 @@ type keyCut struct {
 	// or the anchor that holds the mapping. Read keeps each other alias, as
 	// [keyCutter.cutAlias] describes.
 	read ast.Node
-	// The node of read that stands for each node of view that the cut
-	// copied, by its [cutKey].
+	// The node of read that stands for each node that the cut copied, by
+	// its [cutKey]. The content of an anchor outside view that holds such
+	// an entry maps to the content that the decoder reads for the anchor.
 	reads map[cutKey]ast.Node
-	// A copy of each anchor outside view that holds such an entry, with
-	// the content that the decoder reads for the anchor. The decode
-	// registers the copies, in order, before it reads read. Each copy comes
-	// after the copies of the anchors that its content reads.
-	anchors []*ast.AnchorNode
 }
 
 // cutKey names a node of the view of a decode. Each copy of a node that
@@ -307,6 +311,18 @@ type cutKey struct {
 // keyOf returns the [cutKey] of node.
 func keyOf(node ast.Node) cutKey {
 	return cutKey{typ: reflect.TypeOf(node), tk: astnode.Token(node)}
+}
+
+// readNode returns the node that the decoder reads for node, a node of the
+// document. For a node that the cut copied, that is the copy without the
+// cut entries. An alias thus reads the content of its anchor as the cut
+// leaves it, whether the anchor lies inside the view or outside it.
+func (c keyCut) readNode(node ast.Node) ast.Node {
+	if read, ok := c.reads[keyOf(node)]; ok {
+		return read
+	}
+
+	return node
 }
 
 // readView returns view, which returns a node of the document as the
@@ -386,11 +402,8 @@ type keyCutter struct {
 	// The anchor contents that [keyCutter.readOf] is cutting, by their
 	// [cutKey], so a loop of merge keys ends.
 	cutting map[cutKey]bool
-	// The view that the cut reads.
+	// The node that the cut reads.
 	view ast.Node
-	// The copies of the anchors outside the view that hold the cut
-	// content, as [keyCut] describes.
-	primed []*ast.AnchorNode
 }
 
 // readOf returns content, the content of an anchor of the document, as
@@ -510,13 +523,10 @@ func (c *keyCutter) cutNode(node ast.Node) (ast.Node, ast.Node, bool) {
 // anchor. The cost of the decode follows the written
 // size of the document, not the size of its aliases expanded.
 //
-// The decoder reads the anchor of an alias as it last registered the
-// anchor. It registers each anchor inside the view again from the read
-// view, without the cut entries. [Node.prime] registered each anchor
-// outside the view as the document writes it. So where the cut leaves an
-// entry out of such an anchor, cutAlias keeps a copy of the anchor with
-// the cut content. The decode registers that copy before it reads the
-// read view.
+// The decoder reads the content of the anchor of an alias as
+// [keyCut.readNode] returns it. The read view holds the cut content of
+// each anchor inside the view. So where the cut leaves an entry out of an
+// anchor outside the view, cutAlias cuts the content of that anchor too.
 func (c *keyCutter) cutAlias(alias *ast.AliasNode) {
 	anchor, ok := c.n.doc.tree().Anchor(alias)
 	if !ok || c.inView(anchor) {
@@ -530,16 +540,7 @@ func (c *keyCutter) cutAlias(alias *ast.AliasNode) {
 
 	c.anchors[key] = true
 
-	// The cut of the content first cuts each anchor that the content reads
-	// through an alias. The list thus holds each anchor after them.
-	_, read, changed := c.cut(anchor.Value)
-	if !changed {
-		return
-	}
-
-	primed := *anchor
-	primed.Value = read
-	c.primed = append(c.primed, &primed)
+	c.cut(anchor.Value)
 }
 
 // inView reports whether anchor lies inside the view of the cut.
@@ -638,8 +639,7 @@ func (c *keyCutter) cutBelow(entry *ast.MappingValueNode) (*ast.MappingValueNode
 // it. The copy thus also leaves out each entry that the cut removed there.
 // A copy takes the place of the alias or the anchor that holds its
 // mapping. The decoder then reads the copy. Each other alias of that
-// anchor reads the mapping itself, because the decode reads the view
-// without the cut first.
+// anchor reads the content of the anchor as [keyCut.readNode] returns it.
 //
 // The ref argument reports whether value belongs to a reference document.
 // The open set holds the mappings that the calls above read, so a loop of
@@ -790,9 +790,7 @@ func (c *keyCutter) hideEntry(
 // For an alias of the document that the document's resolver does not
 // bind, the decoder reads the anchor of a reference document. Every other
 // alias of the document reads the anchor that the resolver binds it to,
-// or none. Such an alias does not spell the name of an anchor of a
-// reference document. The decode tree renames each anchor of the document
-// when the Source has reference documents.
+// or none.
 func (c *keyCutter) target(alias *ast.AliasNode, ref bool) (ast.Node, bool, bool) {
 	if !ref {
 		if anchor, ok := c.n.doc.tree().Anchor(alias); ok {
@@ -805,7 +803,7 @@ func (c *keyCutter) target(alias *ast.AliasNode, ref bool) (ast.Node, bool, bool
 		return nil, false, false
 	}
 
-	anchor, ok := c.n.source.referenceAnchors().View(name)
+	anchor, ok := c.n.source.referenceAnchors().Anchor(name)
 	if !ok {
 		return nil, false, false
 	}

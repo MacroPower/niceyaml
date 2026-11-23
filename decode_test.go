@@ -193,14 +193,14 @@ func TestDecode_GoYAMLErrorReachable(t *testing.T) {
 		}
 	})
 
-	// The decode tree renames an anchor name that two anchors share, and
-	// the message spells the name as the document does. The excerpt that
-	// go-yaml draws stays out of the message.
-	renamed := map[string]struct {
+	// Two anchors share a name, and the message spells the name as the
+	// document does. The excerpt that go-yaml draws stays out of the
+	// message.
+	reused := map[string]struct {
 		decode func(*testing.T, *niceyaml.Node) error
 		want   string
 	}{
-		"hook error that wraps a go-yaml error at a renamed alias": {
+		"hook error that wraps a go-yaml error at an alias of a reused name": {
 			decode: func(t *testing.T, n *niceyaml.Node) error {
 				t.Helper()
 
@@ -212,7 +212,7 @@ func TestDecode_GoYAMLErrorReachable(t *testing.T) {
 			},
 			want: `s.yaml:5:6: $.b.j: b: could not find alias "x"`,
 		},
-		"hook error that locates a go-yaml error at a renamed alias": {
+		"hook error that locates a go-yaml error at an alias of a reused name": {
 			decode: func(t *testing.T, n *niceyaml.Node) error {
 				t.Helper()
 
@@ -226,7 +226,7 @@ func TestDecode_GoYAMLErrorReachable(t *testing.T) {
 		},
 	}
 
-	for name, tc := range renamed {
+	for name, tc := range reused {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
@@ -3045,9 +3045,9 @@ func TestWithAllowedFields(t *testing.T) {
 		assert.Equal(t, nested{A: 1}, got.Top[8][8][8][8][8][8][8][8])
 	})
 
-	// A scoped decode registers the anchors outside its node with the cut
-	// content. An anchor that the node reads only through another anchor
-	// thus loses the key too.
+	// An alias reads the content of its anchor as the cut leaves it. So an
+	// anchor outside the node, which the node reads only through another
+	// anchor, loses the key too.
 	t.Run("a scoped decode reads nested anchors outside its node", func(t *testing.T) {
 		t.Parallel()
 
@@ -7178,7 +7178,7 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 			path  paths.Path
 			want  any
 		}{
-			"alias beside text spelled like a renamed anchor": {
+			"alias beside text spelled like a name with a count in brackets": {
 				input: stringtest.LinesLF(
 					"a: &x 1",
 					"b: &x 2",
@@ -7420,15 +7420,6 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 				),
 				err: `2:14: $.b: cannot convert "nope" to boolean`,
 			},
-			"anchor inside a failing anchor": {
-				input: stringtest.LinesLF(
-					"q: &i 0",
-					"o: &o {bad: !!bool nope, i: &i 1}",
-					"c:",
-					"  d: *i",
-				),
-				err: `2:20: $.o.bad: cannot convert "nope" to boolean`,
-			},
 			"anchor with an alias to nothing": {
 				input: stringtest.LinesLF(
 					"a: &x 1",
@@ -7456,7 +7447,27 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 		}
 	})
 
-	t.Run("quoted name spelled like a renamed anchor", func(t *testing.T) {
+	t.Run("failure in an anchor around the anchor the node reads", func(t *testing.T) {
+		t.Parallel()
+
+		// The decode of c reads the anchor i alone, and not the anchor o
+		// around it.
+		dd := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"q: &i 0",
+			"o: &o {bad: !!bool nope, i: &i 1}",
+			"c:",
+			"  d: *i",
+		))
+
+		_, err := dd.Decode[any](t.Context())
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+
+		got, err := yamltest.At(t, dd, paths.Current().Child("c")).Decode[any](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"d": uint64(1)}, got)
+	})
+
+	t.Run("quoted name spelled like a name with a count in brackets", func(t *testing.T) {
 		t.Parallel()
 
 		tcs := map[string]struct {
@@ -7513,7 +7524,7 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 		}
 	})
 
-	t.Run("text spelled like a renamed anchor", func(t *testing.T) {
+	t.Run("text spelled like a name with a count in brackets", func(t *testing.T) {
 		t.Parallel()
 
 		type config struct {
@@ -7523,9 +7534,9 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 			D time.Duration      `yaml:"d"`
 		}
 
-		// The two anchors named x get new names, and each message quotes
-		// the text as the document spells it. The error of a value that
-		// decodes itself keeps that text at the path of the value.
+		// Two anchors share the name x, and each message quotes the text
+		// as the document spells it. The error of a value that decodes
+		// itself keeps that text at the path of the value.
 		tcs := map[string]struct {
 			input string
 			err   string
@@ -7641,20 +7652,13 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 		assert.Contains(t, got.T.text, "&x 2")
 	})
 
-	// The new name of a renamed anchor skips each count the document or a
-	// reference document spells. An UnmarshalYAML method gets the node of
-	// the decoder, which spells that name.
-	t.Run("unmarshaler node spells an alias to a renamed anchor with its new name", func(t *testing.T) {
+	t.Run("unmarshaler gets the node of the document", func(t *testing.T) {
 		t.Parallel()
 
 		type wrapper struct {
 			C *nodeText `yaml:"c"`
 			D *nodeText `yaml:"d"`
 		}
-
-		// The one anchor named x gets a new name when the source has a
-		// reference document.
-		one := "a: &x 1\nc: [*x]\n"
 
 		tcs := map[string]struct {
 			input      string
@@ -7663,13 +7667,13 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 			want  string
 			wantD string
 		}{
-			"nothing spelled": {
+			"reused anchor name": {
 				input: stringtest.LinesLF(
 					"a: &x 1",
 					"b: &x 2",
 					"c: [*x]",
 				),
-				want: "[*x [2]]",
+				want: "[*x]",
 			},
 			"anchor the node defines again": {
 				input: stringtest.LinesLF(
@@ -7678,62 +7682,13 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 					"c: [*x, 3]",
 					"d: {p: &x 4, q: *x}",
 				),
-				want:  "[*x [2], 3]",
-				wantD: "{p: &x 4, q: *x [3]}",
+				want:  "[*x, 3]",
+				wantD: "{p: &x 4, q: *x}",
 			},
-			"several counts spelled": {
-				input: stringtest.LinesLF(
-					`a: &"x [1]" 1`,
-					"b: &x 2 # x [2]",
-					"d: a x [3] b",
-					"e: &x 4",
-					"c: [*x]",
-				),
-				want: "[*x [5]]",
-			},
-			"name and count in separate values": {
-				input: stringtest.LinesLF(
-					"a: &x 1",
-					"b: &x 2",
-					`d: "z [x"`,
-					`e: " [2] z"`,
-					"c: [*x]",
-				),
-				want: "[*x [2]]",
-			},
-			"nothing spelled in a reference document": {
-				input:      one,
+			"source with a reference document": {
+				input:      "a: &x 1\nc: [*x]\n",
 				references: []string{"r: 1\n"},
-				want:       "[*x [1]]",
-			},
-			"count of another name in a reference document": {
-				input:      one,
-				references: []string{"r: y [1]\n"},
-				want:       "[*x [1]]",
-			},
-			"key of a reference document": {
-				input:      one,
-				references: []string{stringtest.LinesLF(`"x [1]": 1`)},
-				want:       "[*x [2]]",
-			},
-			"escaped value of a reference document": {
-				input:      one,
-				references: []string{stringtest.LinesLF(`r: "x\x20[1]"`)},
-				want:       "[*x [2]]",
-			},
-			"tag before a flow sequence of a reference document": {
-				input:      one,
-				references: []string{"r: !x [1]\n"},
-				want:       "[*x [2]]",
-			},
-			"second document of a reference": {
-				input: one,
-				references: []string{stringtest.LinesLF(
-					"r: x [1]",
-					"---",
-					"r: x [2] # x [3]",
-				)},
-				want: "[*x [4]]",
+				want:       "[*x]",
 			},
 		}
 
@@ -7747,16 +7702,18 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 				require.NoError(t, err)
 				require.NotNil(t, got.C)
 				assert.Equal(t, tc.want, got.C.text)
+				assert.Same(t, yamltest.At(t, dd, paths.Current().Child("c")).AST(), got.C.node)
 
 				if tc.wantD != "" {
 					require.NotNil(t, got.D)
 					assert.Equal(t, tc.wantD, got.D.text)
+					assert.Same(t, yamltest.At(t, dd, paths.Current().Child("d")).AST(), got.D.node)
 				}
 			})
 		}
 	})
 
-	t.Run("text of a reference document spelled like a renamed anchor", func(t *testing.T) {
+	t.Run("text of a reference document spelled like a name with a count in brackets", func(t *testing.T) {
 		t.Parallel()
 
 		type config struct {
@@ -7766,8 +7723,7 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 			X int `yaml:"x"`
 		}
 
-		// The anchor named x gets a new name, and the message quotes the
-		// key as the reference document spells it.
+		// The message quotes the key as the reference document spells it.
 		ref := yamltest.References(stringtest.LinesLF(`r: &r {"x [1]": 2}`))
 		dd := yamltest.FirstDocument(t, "x: &x 9\nv: *r\n", ref)
 
@@ -7784,9 +7740,9 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 			S map[string]any `yaml:"s"`
 		}
 
-		// The alias inside its own anchor makes each document write a null
-		// into the tokens of the second parse, which the go-yaml formatter
-		// reads for rawText in every other document.
+		// Each document reads the alias inside its own anchor as null. The
+		// documents share the tokens of one parse, which the go-yaml
+		// formatter reads for rawText.
 		docs := yamltest.Documents(t, niceyaml.NewSourceFromString(yamltest.GenerateLines(8, stringtest.JoinLF(
 			"---",
 			"a: &x %d",
@@ -7968,6 +7924,95 @@ func TestDocument_Decode_SyntaxNodes(t *testing.T) {
 		assert.Same(t, yamltest.At(t, doc, paths.MustParse("$.env")).AST(), got.With)
 	})
 
+	// A field that reads the anchor first does not leave a copy of the node
+	// for the aliases after it.
+	t.Run("nodes at aliases of an anchor that a field read", func(t *testing.T) {
+		t.Parallel()
+
+		type fields struct {
+			A *ast.MappingNode            `yaml:"a"`
+			B *ast.MappingNode            `yaml:"b"`
+			L []*ast.MappingNode          `yaml:"l"`
+			M map[string]*ast.MappingNode `yaml:"m"`
+		}
+
+		for name, opts := range map[string][]niceyaml.DecodeOption{
+			"plain": nil,
+			"admitted key": {
+				niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject),
+				niceyaml.WithAllowedFields(paths.MustParse("$.a.z")),
+			},
+		} {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+					"a: &x {k: 1, z: 2}",
+					"b: *x",
+					"l: [&y {k: 3}, *y]",
+					"m: {c: *x, d: *y}",
+				))
+
+				got, err := doc.Decode[fields](t.Context(), opts...)
+				require.NoError(t, err)
+
+				x := yamltest.At(t, doc, paths.MustParse("$.a")).AST()
+				y := yamltest.At(t, doc, paths.MustParse("$.l[0]")).AST()
+
+				assert.Same(t, x, got.A)
+				assert.Same(t, x, got.B)
+				require.Len(t, got.L, 2)
+				assert.Same(t, y, got.L[0])
+				assert.Same(t, y, got.L[1])
+				assert.Same(t, x, got.M["c"])
+				assert.Same(t, y, got.M["d"])
+			})
+		}
+	})
+
+	// A pointer to the type of a node under a tag points to that node.
+	t.Run("nodes under a tag", func(t *testing.T) {
+		t.Parallel()
+
+		type fields struct {
+			T *ast.MappingNode `yaml:"t"`
+			U *ast.MappingNode `yaml:"u"`
+			V *ast.MappingNode `yaml:"v"`
+		}
+
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"t: !!map {k: 1}",
+			"u: &x !!map {k: 2}",
+			"v: *x",
+		))
+
+		got, err := doc.Decode[fields](t.Context())
+		require.NoError(t, err)
+
+		mappingAt := func(path string) ast.Node {
+			t.Helper()
+
+			node := yamltest.At(t, doc, paths.MustParse(path)).AST()
+			for {
+				switch n := node.(type) {
+				case *ast.TagNode:
+					node = n.Value
+				case *ast.AnchorNode:
+					node = n.Value
+				default:
+					require.IsType(t, &ast.MappingNode{}, node, path)
+
+					return node
+				}
+			}
+		}
+
+		assert.Same(t, mappingAt("$.t"), got.T)
+		assert.Same(t, mappingAt("$.u"), got.U)
+		assert.Same(t, mappingAt("$.u"), got.V)
+		assert.Equal(t, "{k: 2}", got.V.String())
+	})
+
 	t.Run("node of a scoped decode", func(t *testing.T) {
 		t.Parallel()
 
@@ -7984,7 +8029,7 @@ func TestDocument_Decode_SyntaxNodes(t *testing.T) {
 		assert.Same(t, yamltest.At(t, doc, path).AST(), got)
 	})
 
-	t.Run("unmarshaler keeps the node of the decoder", func(t *testing.T) {
+	t.Run("unmarshaler gets the node of the document", func(t *testing.T) {
 		t.Parallel()
 
 		type wrapper struct {
@@ -7999,12 +8044,63 @@ func TestDocument_Decode_SyntaxNodes(t *testing.T) {
 
 		got, err := doc.Decode[wrapper](t.Context())
 		require.NoError(t, err)
-		assert.Equal(t, "[*x [2]]", got.C.text)
-		assert.NotSame(t, yamltest.At(t, doc, paths.MustParse("$.c")).AST(), got.C.node)
+		assert.Equal(t, "[*x]", got.C.text)
+		assert.Same(t, yamltest.At(t, doc, paths.MustParse("$.c")).AST(), got.C.node)
+	})
+
+	// A node type keeps every admitted key below it, so the decode does not
+	// cut the key out of the node. A struct that reads the same anchor
+	// then reports the key it does not declare, as it does beside a map.
+	t.Run("node with an admitted key", func(t *testing.T) {
+		t.Parallel()
+
+		type shared struct {
+			S struct {
+				A int `yaml:"a"`
+			} `yaml:"s"`
+			Map *ast.MappingNode `yaml:"map"`
+		}
+
+		admit := []niceyaml.DecodeOption{
+			niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject),
+			niceyaml.WithAllowedFields(paths.MustParse("$.map.x"), paths.MustParse("$.s.x")),
+		}
+
+		doc := yamltest.FirstDocument(t, "map: {a: 1, x: 2}\n")
+
+		got, err := doc.Decode[job](t.Context(), admit...)
+		require.NoError(t, err)
+		assert.Equal(t, "{a: 1, x: 2}", got.Map.String())
+		assert.Same(t, yamltest.At(t, doc, paths.MustParse("$.map")).AST(), got.Map)
+
+		doc = yamltest.FirstDocument(t, "d: &d {a: 1, x: 2}\nmap: *d\ns: *d\n")
+
+		_, err = doc.Decode[shared](t.Context(), append(admit, niceyaml.WithAllowedFields(paths.MustParse("$.d")))...)
+		require.EqualError(t, err, `1:14: $.s.x~: unknown field "x"`)
+	})
+
+	// An unmarshaler does not keep an admitted key below it, so it gets a
+	// copy of its node without the key.
+	t.Run("unmarshaler with an admitted key", func(t *testing.T) {
+		t.Parallel()
+
+		type wrapper struct {
+			M nodeText `yaml:"m"`
+		}
+
+		doc := yamltest.FirstDocument(t, "m: {a: 1, x: 2}\n")
+
+		got, err := doc.Decode[wrapper](t.Context(),
+			niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject),
+			niceyaml.WithAllowedFields(paths.MustParse("$.m.x")))
+		require.NoError(t, err)
+		assert.Equal(t, "{a: 1}", got.M.text)
+		assert.NotSame(t, yamltest.At(t, doc, paths.MustParse("$.m")).AST(), got.M.node)
 	})
 
 	// The decoder sets a node held by value to a copy that shares its
-	// slices with the tree it reads. The swap must not write below it.
+	// slices with the document. A later decode reads the document as it
+	// was.
 	t.Run("node held by value", func(t *testing.T) {
 		t.Parallel()
 
@@ -8265,13 +8361,6 @@ func TestDocument_Decode_AliasErrors(t *testing.T) {
 			input: "A: !!str &k2 [*k1, 4]\n",
 			err:   `1:15: $.A[0]: could not find alias "k1"`,
 		},
-		"merge alias of an anchor that the decoder does not read": {
-			// The decoder reads the mapping under !!null as null, so it misses
-			// the anchor inside it, and its error names the alias by name.
-			input: stringtest.LinesLF("c: !!null &k1 {B: &k0 {}}", "<<: *k0", "a: 1", "<<: *k0"),
-			opts:  []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
-			err:   "4:5: decoder rejected the value: cannot find anchor by alias name k0",
-		},
 	}
 
 	for name, tc := range tcs {
@@ -8285,6 +8374,24 @@ func TestDocument_Decode_AliasErrors(t *testing.T) {
 			require.ErrorIs(t, err, niceyaml.ErrDecode)
 		})
 	}
+
+	t.Run("merge alias of an anchor that the decoder does not read", func(t *testing.T) {
+		t.Parallel()
+
+		// The decoder reads the mapping under !!null as null, so it does not
+		// read the anchor inside it. The alias reads that anchor all the
+		// same, as the document binds it. Go-yaml's parser leaves out the
+		// line after the flow mapping.
+		dd := yamltest.FirstDocument(
+			t,
+			stringtest.LinesLF("c: !!null &k1 {B: &k0 {x: 1}}", "<<: *k0", "a: 1", "<<: *k0"),
+			niceyaml.WithAllowDuplicateKeys(true),
+		)
+
+		got, err := dd.Decode[any](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"a": uint64(1), "c": nil, "x": uint64(1)}, got)
+	})
 }
 
 func TestDocument_Decode_Misnest(t *testing.T) {
@@ -11047,6 +11154,36 @@ func TestErrDecode(t *testing.T) {
 		}
 	})
 
+	t.Run("merge loop in a reference document", func(t *testing.T) {
+		t.Parallel()
+
+		// The anchor of the reference document merges itself, alone or in a
+		// sequence. The decode binds the rejection at the alias of the
+		// document that reads the reference. The alias limit refuses such a
+		// loop first, so the Source turns the limit off.
+		refs := map[string]string{
+			"alias":    "b: &b {<<: *b, y: 2}\n",
+			"sequence": "b: &b {<<: [*b], y: 2}\n",
+		}
+
+		for name, ref := range refs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(
+					t,
+					"m: {<<: *b}\n",
+					yamltest.References(ref),
+					niceyaml.WithAliasLimit(false),
+				)
+
+				_, err := doc.Decode[map[string]any](t.Context())
+				require.EqualError(t, err, "1:9: decoder rejected the value: cannot find anchor by alias name b")
+				require.ErrorIs(t, err, niceyaml.ErrDecode)
+			})
+		}
+	})
+
 	t.Run("unmarshaler error matches and keeps its chain", func(t *testing.T) {
 		t.Parallel()
 
@@ -12801,8 +12938,7 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 				`3:3: $.yyy~: unknown field "yyy"`,
 			),
 		},
-		// The document reads a second parse, whose tokens the decoder
-		// reports.
+		// The decoder reports the tokens of the document.
 		"document that reuses an anchor name": {
 			decode: decodeAs[struct {
 				X int         `yaml:"x"`
@@ -15740,9 +15876,8 @@ func TestDocument_Decode_Problems(t *testing.T) {
 			// The decoder picks the unknown field and the inline map value
 			// it reports in no fixed order, so several decodes show that
 			// the report does not depend on its pick. Every second decode
-			// reads a source with a reference document. The decoder then
-			// reads each anchor of the document under a new name, and the
-			// report stays the same.
+			// reads a source with a reference document, and the report
+			// stays the same.
 			for i := range 20 {
 				var srcOpts []niceyaml.SourceOption
 
@@ -18157,7 +18292,7 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 			input: "top: *nope\n",
 			want:  `1:6: $.top: could not find alias "nope"`,
 		},
-		"value under renamed anchors": {
+		"value beside a reused anchor name": {
 			input: stringtest.LinesLF(
 				"a: &x 1",
 				"b: &x 2",
@@ -18910,11 +19045,45 @@ func TestDocument_Decode_Rejection_Scoped(t *testing.T) {
 		})
 	}
 
-	// The decoder rejects the anchor that the merge key names as a whole,
-	// and the decode cannot tie the rejection to the use. The error keeps
-	// the path where the document writes the value, outside the scope.
+	// The decoder rejects the anchor that the merge key names, and the
+	// decode cannot tie the rejection to the use. The error keeps the path
+	// where the document writes the value, outside the scope.
 	t.Run("rejection the decode cannot tie to a use", func(t *testing.T) {
 		t.Parallel()
+
+		type merged struct {
+			B int `yaml:"b"`
+		}
+
+		doc := yamltest.FirstDocumentWithPath(t, stringtest.LinesLF(
+			"defs: &d [1]",
+			"v:",
+			"  <<: *d",
+			"  b: 1",
+		), "s.yaml")
+
+		scoped := yamltest.At(t, doc, paths.MustParse("$.v"))
+
+		_, err := scoped.Decode[merged](t.Context())
+		require.EqualError(t, err, "s.yaml:1:11: $.defs[0]: expected mapping, got integer")
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+
+		srcErr := yamltest.RequireSourceError(t, err)
+		assert.Same(t, scoped, yamltest.BoundNode(t, srcErr))
+	})
+
+	// An inline field that reads the anchor of a `<<` merge key reads an
+	// anchor outside the scope as the decode of the whole document reads
+	// it. A map takes the entries of the anchor. A struct rejects the
+	// value that the decoder reads for the anchor, as the decode of the
+	// whole document rejects it.
+	t.Run("inline alias field reads an anchor outside the scope", func(t *testing.T) {
+		t.Parallel()
+
+		type mapped struct {
+			Base map[string]any `yaml:",inline,alias"`
+			B    int            `yaml:"b"`
+		}
 
 		type aliased struct {
 			*StrictBase `yaml:",inline,alias"`
@@ -18927,13 +19096,23 @@ func TestDocument_Decode_Rejection_Scoped(t *testing.T) {
 			"  a: 1",
 			"v:",
 			"  <<: *d",
-			"  b: 1",
+			"  b: 2",
 		), "s.yaml")
 
 		scoped := yamltest.At(t, doc, paths.MustParse("$.v"))
 
-		_, err := scoped.Decode[aliased](t.Context())
-		require.EqualError(t, err, "s.yaml:1:1: $.defs: expected mapping, got value of another type")
+		got, err := scoped.Decode[mapped](t.Context())
+		require.NoError(t, err)
+
+		whole, err := doc.Decode[struct {
+			V mapped `yaml:"v"`
+		}](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, mapped{Base: map[string]any{"a": uint64(1)}, B: 2}, got)
+		assert.Equal(t, whole.V, got)
+
+		_, err = scoped.Decode[aliased](t.Context())
+		require.EqualError(t, err, "s.yaml:1:1: $.defs: expected mapping, got mapping of another type")
 		require.ErrorIs(t, err, niceyaml.ErrDecode)
 
 		srcErr := yamltest.RequireSourceError(t, err)
@@ -19319,6 +19498,97 @@ func TestNode_Decode_SelfAliasInReferenceAnchor(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tc.pick(t, whole), got)
 		})
+	}
+}
+
+func TestDocument_Decode_AliasLoopAcrossReferenceAnchors(t *testing.T) {
+	t.Parallel()
+
+	// The anchors b and c of the reference document alias each other. Each
+	// alias of the document reads its anchor with the alias inside that
+	// closes the loop as null, whichever alias the decode reads first. The
+	// alias limit refuses such a loop, so the Source turns the limit off.
+	ref := yamltest.References("b: &b {k: *c, y: 2}\nc: &c {k: *b, y: 3}\n")
+
+	type entry struct {
+		K *entry `yaml:"k"`
+		Y int    `yaml:"y"`
+	}
+
+	type pair struct {
+		B entry `yaml:"b"`
+		C entry `yaml:"c"`
+	}
+
+	wantAny := map[string]any{
+		"b": map[string]any{"k": map[string]any{"k": nil, "y": uint64(3)}, "y": uint64(2)},
+		"c": map[string]any{"k": map[string]any{"k": nil, "y": uint64(2)}, "y": uint64(3)},
+	}
+	wantTyped := pair{
+		B: entry{K: &entry{Y: 3}, Y: 2},
+		C: entry{K: &entry{Y: 2}, Y: 3},
+	}
+
+	inputs := map[string]string{
+		"b first": "b: *b\nc: *c\n",
+		"c first": "c: *c\nb: *b\n",
+	}
+
+	for name, input := range inputs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, input, ref, niceyaml.WithAliasLimit(false))
+
+			gotAny, err := doc.Decode[map[string]any](t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, wantAny, gotAny)
+
+			gotTyped, err := doc.Decode[pair](t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, wantTyped, gotTyped)
+		})
+	}
+}
+
+func TestDocument_Decode_AliasInsideMergedReferenceAnchor(t *testing.T) {
+	t.Parallel()
+
+	// The anchor b of the reference document holds an alias to itself, and
+	// the anchor s is a sequence of an alias to b. The alias inside b reads
+	// as null where the document merges b, alone, in a sequence, or through
+	// s, and where it reads b through an alias. The alias limit refuses
+	// such a loop, so the Source turns the limit off.
+	ref := yamltest.References("b: &b {x: *b, y: 1}\ns: &s [*b]\n")
+	doc := yamltest.FirstDocument(t, "m: {<<: *b}\nn: {<<: [*b]}\np: *b\nq: {<<: *s}\n", ref,
+		niceyaml.WithAliasLimit(false))
+
+	entries := map[string]any{"x": nil, "y": uint64(1)}
+
+	gotAny, err := doc.Decode[map[string]any](t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"m": entries, "n": entries, "p": entries, "q": entries}, gotAny)
+
+	type entry struct {
+		X any `yaml:"x"`
+		Y int `yaml:"y"`
+	}
+
+	type target struct {
+		M entry          `yaml:"m"`
+		N map[string]any `yaml:"n"`
+		P entry          `yaml:"p"`
+		Q map[string]any `yaml:"q"`
+	}
+
+	gotTyped, err := doc.Decode[target](t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, target{M: entry{Y: 1}, N: entries, P: entry{Y: 1}, Q: entries}, gotTyped)
+
+	for _, key := range []string{"n", "q"} {
+		gotScoped, err := doc.DecodeAt[map[string]any](t.Context(), paths.Current().Child(key))
+		require.NoError(t, err)
+		assert.Equal(t, entries, gotScoped, key)
 	}
 }
 

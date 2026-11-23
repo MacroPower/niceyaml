@@ -1325,7 +1325,7 @@ func (w *selfWalker) keyNames(node ast.Node, t reflect.Type) map[any]string {
 
 	w.keyTexts[id] = names
 
-	mapping, ok := astnode.Content(w.valueNode(node, false)).(*ast.MappingNode)
+	mapping, ok := astnode.Content(w.valueNode(node)).(*ast.MappingNode)
 	if !ok {
 		return names
 	}
@@ -1351,7 +1351,7 @@ func (w *selfWalker) pathResolver() *paths.Resolver {
 // decodes a key.
 func (w *selfWalker) keyDecoder() *yamldecode.Decoder {
 	if w.decoder == nil {
-		w.decoder = w.node.newDecoder(w.cfg)
+		w.decoder = w.node.newDecoder(w.cfg, nil)
 	}
 
 	return w.decoder
@@ -1367,7 +1367,7 @@ func (w *selfWalker) addKeyName(key ast.MapKeyNode, t reflect.Type, names map[an
 		return
 	}
 
-	node := w.valueNode(key, true)
+	node := w.valueNode(key)
 	if node == nil {
 		return
 	}
@@ -1397,10 +1397,9 @@ func (w *selfWalker) addKeyName(key ast.MapKeyNode, t reflect.Type, names map[an
 }
 
 // valueNode returns the node that node decodes from, past each `?` and anchor
-// and through each alias, which the key decoder cannot follow. Each tag stays
-// around it. With parsed set, the nodes come from the tree the decode reads,
-// but the decode hands UnmarshalYAML a key with a `?`, anchor, or alias whole.
-func (w *selfWalker) valueNode(node ast.Node, parsed bool) ast.Node {
+// and through each alias. Each tag stays around it. The decode hands
+// UnmarshalYAML a key with a `?`, anchor, or alias whole.
+func (w *selfWalker) valueNode(node ast.Node) ast.Node {
 	var (
 		tags     []*ast.TagNode
 		followed = map[*ast.AliasNode]bool{}
@@ -1431,20 +1430,8 @@ func (w *selfWalker) valueNode(node ast.Node, parsed bool) ast.Node {
 			node = content
 
 		default:
-			view := func(n ast.Node) ast.Node { return n }
-			if parsed {
-				view = w.node.doc.tree().Parsed
-			}
-
-			node = view(node)
-
 			for _, tag := range slices.Backward(tags) {
-				tagView, ok := view(tag).(*ast.TagNode)
-				if !ok {
-					tagView = tag
-				}
-
-				tagged := *tagView
+				tagged := *tag
 				tagged.Value = node
 				node = &tagged
 			}

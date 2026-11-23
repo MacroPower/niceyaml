@@ -719,3 +719,695 @@ func TestDecodeFromNodeAliasWithComment(t *testing.T) {
 	require.NoError(t, yaml.NewDecoder(bytes.NewReader(nil)).DecodeFromNode(body, &v))
 	assert.Equal(t, map[string]any{"a": uint64(1), "b": uint64(1)}, v)
 }
+
+// binder binds each alias to the last anchor of its name that starts
+// before the alias, as the resolver of the paths package binds it. It binds
+// each alias on a line of nulls to a null that holds the token of the alias.
+type binder struct {
+	last  map[string]ast.Node
+	bound map[*ast.AliasNode]ast.Node
+	nulls map[int]bool
+}
+
+func (b *binder) Visit(n ast.Node) ast.Visitor {
+	switch n := n.(type) {
+	case *ast.AnchorNode:
+		b.last[n.Name.GetToken().Value] = n.Value
+
+	case *ast.AliasNode:
+		if b.nulls[n.Start.Position.Line] {
+			b.bound[n] = ast.Null(n.Start)
+		} else if node, ok := b.last[n.Value.GetToken().Value]; ok {
+			b.bound[n] = node
+		}
+	}
+
+	return b
+}
+
+// documentOrder returns a [yaml.ResolveAlias] option that binds the aliases
+// of root as [binder] binds them, with each alias on a line of nulls bound
+// to a null.
+func documentOrder(root ast.Node, nulls ...int) yaml.DecodeOption {
+	b := &binder{last: map[string]ast.Node{}, bound: map[*ast.AliasNode]ast.Node{}, nulls: map[int]bool{}}
+	for _, line := range nulls {
+		b.nulls[line] = true
+	}
+
+	ast.Walk(b, root)
+
+	return yaml.ResolveAlias(func(alias *ast.AliasNode) (ast.Node, bool) {
+		node, ok := b.bound[alias]
+
+		return node, ok
+	})
+}
+
+func TestResolveAliasReusedAnchorName(t *testing.T) {
+	t.Parallel()
+
+	const src = "a: &x 1\nb: *x\nc: &x 2\nd: *x\n"
+
+	type target struct{ D, C, B, A int }
+
+	// Go-yaml reads the fields in the order of the struct, so B reads the
+	// second anchor.
+	var stock target
+
+	require.NoError(t, up.Unmarshal([]byte(src), &stock))
+	assert.Equal(t, 2, stock.B)
+
+	body := parseBody(t, src)
+
+	var v target
+
+	require.NoError(t, yaml.NewDecoder(bytes.NewReader(nil), documentOrder(body)).DecodeFromNode(body, &v))
+	assert.Equal(t, target{D: 2, C: 2, B: 1, A: 1}, v)
+}
+
+func TestResolveAliasDocumentOrder(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		src  string
+		want string
+	}{
+		"anchor on a merge value": {
+			src:  "m: {<<: &x {p: 1}}\nb: *x\nc: &x 2\n",
+			want: "map[b:map[p:1] c:2 m:map[p:1]]",
+		},
+		"alias inside a merged mapping": {
+			src:  "k1: &k 1\nb: &b {v: *k}\nk2: &k 2\nm: {<<: *b}\n",
+			want: "map[b:map[v:1] k1:1 k2:2 m:map[v:1]]",
+		},
+		"inner anchor of the outer name": {
+			src:  "r1: &x0 {z1: [&x0 d, *x0]}\n",
+			want: "map[r1:map[z1:[d d]]]",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			body := parseBody(t, tc.src)
+
+			var v any
+
+			require.NoError(t, yaml.NewDecoder(bytes.NewReader(nil), documentOrder(body)).DecodeFromNode(body, &v))
+			assert.Equal(t, tc.want, fmt.Sprint(v))
+		})
+	}
+}
+
+func TestResolveAliasBelowDocument(t *testing.T) {
+	t.Parallel()
+
+	body := parseBody(t, "base: &b {port: 1, tags: [x]}\nsvc: {<<: *b, name: n}\nlist: [*b]\n")
+	mapping, ok := body.(*ast.MappingNode)
+	require.True(t, ok)
+
+	type svc struct {
+		Name string
+		Tags []string
+		Port int
+	}
+
+	var s svc
+
+	dec := yaml.NewDecoder(bytes.NewReader(nil), documentOrder(body))
+	require.NoError(t, dec.DecodeFromNode(mapping.Values[1].Value, &s))
+	assert.Equal(t, svc{Port: 1, Name: "n", Tags: []string{"x"}}, s)
+
+	var l []svc
+
+	dec = yaml.NewDecoder(bytes.NewReader(nil), documentOrder(body))
+	require.NoError(t, dec.DecodeFromNode(mapping.Values[2].Value, &l))
+	assert.Equal(t, []svc{{Port: 1, Tags: []string{"x"}}}, l)
+
+	// Without the resolver, the decoder has not read the anchor.
+	err := yaml.NewDecoder(bytes.NewReader(nil)).DecodeFromNode(mapping.Values[2].Value, &l)
+	require.ErrorContains(t, err, `could not find alias "b"`)
+}
+
+func TestResolveAliasUnmarshalerBytes(t *testing.T) {
+	t.Parallel()
+
+	const src = "a: &x 1\nb: [*x]\nc: &x 2\n"
+
+	// Go-yaml writes out the last anchor of the name.
+	var stock struct{ B bytesValue }
+
+	require.NoError(t, up.Unmarshal([]byte(src), &stock))
+	assert.Contains(t, stock.B.s, "2")
+
+	body := parseBody(t, src)
+
+	var v struct{ B bytesValue }
+
+	require.NoError(t, yaml.NewDecoder(bytes.NewReader(nil), documentOrder(body)).DecodeFromNode(body, &v))
+	assert.Contains(t, v.B.s, "1")
+	assert.NotContains(t, v.B.s, "2")
+}
+
+func TestResolveAliasNull(t *testing.T) {
+	t.Parallel()
+
+	// A merge key copies the entry of the alias inside the anchor, and the
+	// decoder reads the copy after it has read the anchor. The resolver
+	// binds that alias to a null.
+	const src = "a: &x {k: *x}\nb: {<<: *x}\nc: [*x]\n"
+
+	body := parseBody(t, src)
+
+	var v struct {
+		B struct{ K any }
+		C bytesValue
+	}
+
+	require.NoError(t, yaml.NewDecoder(bytes.NewReader(nil), documentOrder(body, 1)).DecodeFromNode(body, &v))
+	assert.Nil(t, v.B.K)
+	assert.Equal(t, "[ {k: null}]", v.C.s)
+}
+
+func TestResolveAliasUnbound(t *testing.T) {
+	t.Parallel()
+
+	body := parseBody(t, "a: &x {p: 1}\nm: {<<: *y}\n")
+
+	var v any
+
+	err := yaml.NewDecoder(bytes.NewReader(nil), documentOrder(body)).DecodeFromNode(body, &v)
+
+	var missing *yaml.MissingAnchorError
+
+	require.ErrorAs(t, err, &missing)
+	assert.Equal(t, "y", missing.Alias.Value.GetToken().Value)
+}
+
+func TestResolveAliasUnreadAnchor(t *testing.T) {
+	t.Parallel()
+
+	// The resolver binds the alias to an anchor of another parse, which
+	// the decoder has not read. The alias inside that anchor reads as null.
+	ref := parseBody(t, "r: &r {a: *r}\n")
+	refMapping, ok := ref.(*ast.MappingNode)
+	require.True(t, ok)
+
+	anchor, ok := refMapping.Values[0].Value.(*ast.AnchorNode)
+	require.True(t, ok)
+
+	resolve := yaml.ResolveAlias(func(*ast.AliasNode) (ast.Node, bool) { return anchor.Value, true })
+	body := parseBody(t, "m: *r\n")
+	want := map[string]any{"m": map[string]any{"a": nil}}
+
+	var typed map[string]any
+
+	require.NoError(t, yaml.NewDecoder(bytes.NewReader(nil), resolve).DecodeFromNode(body, &typed))
+	assert.Equal(t, want, typed)
+
+	var untyped any
+
+	require.NoError(t, yaml.NewDecoder(bytes.NewReader(nil), resolve).DecodeFromNode(body, &untyped))
+	assert.Equal(t, want, untyped)
+}
+
+func TestDecodeFromNodePointerToNodeType(t *testing.T) {
+	t.Parallel()
+
+	// Go-yaml sets a pointer to a node type to a copy of the node. The
+	// field A reads x first, so the decoder keeps a value of x before the
+	// alias of b reads it. The fields T, U and V read a mapping under a tag.
+	body := parseBody(t, "m: {k: 1}\na: &x [1]\nb: *x\nc: &y {k: 2}\nl: [&z {k: 3}, *z]\n"+
+		"t: !!map {k: 4}\nu: &w !!map {k: 5}\nv: *w\n")
+	mapping, ok := body.(*ast.MappingNode)
+	require.True(t, ok)
+
+	x, ok := mapping.Values[1].Value.(*ast.AnchorNode)
+	require.True(t, ok)
+
+	y, ok := mapping.Values[3].Value.(*ast.AnchorNode)
+	require.True(t, ok)
+
+	l, ok := mapping.Values[4].Value.(*ast.SequenceNode)
+	require.True(t, ok)
+
+	z, ok := l.Values[0].(*ast.AnchorNode)
+	require.True(t, ok)
+
+	tagged, ok := mapping.Values[5].Value.(*ast.TagNode)
+	require.True(t, ok)
+
+	wAnchor, ok := mapping.Values[6].Value.(*ast.AnchorNode)
+	require.True(t, ok)
+
+	wTagged, ok := wAnchor.Value.(*ast.TagNode)
+	require.True(t, ok)
+
+	var v struct {
+		M *ast.MappingNode
+		A *ast.SequenceNode
+		B *ast.SequenceNode
+		C *ast.MappingNode
+		T *ast.MappingNode
+		U *ast.MappingNode
+		V *ast.MappingNode
+		L []*ast.MappingNode
+	}
+
+	require.NoError(t, yaml.NewDecoder(bytes.NewReader(nil)).DecodeFromNode(body, &v))
+	assert.Same(t, mapping.Values[0].Value, v.M)
+	assert.Same(t, x.Value, v.A)
+	assert.Same(t, x.Value, v.B)
+	assert.Same(t, y.Value, v.C)
+	require.Len(t, v.L, 2)
+	assert.Same(t, z.Value, v.L[0])
+	assert.Same(t, z.Value, v.L[1])
+	assert.Same(t, tagged.Value, v.T)
+	assert.Same(t, wTagged.Value, v.U)
+	assert.Same(t, wTagged.Value, v.V)
+
+	var w map[string]*ast.MappingNode
+
+	require.NoError(t, yaml.NewDecoder(bytes.NewReader(nil)).DecodeFromNode(parseBody(t, "a: &x {k: 1}\nb: *x\n"), &w))
+	assert.Same(t, w["a"], w["b"])
+
+	var m *ast.MappingNode
+
+	require.NoError(t, yaml.NewDecoder(bytes.NewReader(nil)).DecodeFromNode(mapping.Values[0].Value, &m))
+	assert.Same(t, mapping.Values[0].Value, m)
+}
+
+func TestResolveAliasMergeLoop(t *testing.T) {
+	t.Parallel()
+
+	// The resolver binds each alias of b to the anchor b of another parse,
+	// which merges itself. The document merges b alone or in a sequence.
+	sources := map[string]string{
+		"alias":    "b: &b {<<: *b, y: 2}\n",
+		"sequence": "b: &b {<<: [*b], y: 2}\n",
+	}
+
+	docs := map[string]string{
+		"alias":    "m: {<<: *b}\n",
+		"sequence": "m: {<<: [*b]}\n",
+	}
+
+	targets := map[string]func() any{
+		"any":       func() any { return new(any) },
+		"map":       func() any { return new(map[string]map[string]int) },
+		"struct":    func() any { return new(struct{ M struct{ Y int } }) },
+		"map slice": func() any { return new(yaml.MapSlice) },
+	}
+
+	for srcName, src := range sources {
+		ref := parseBody(t, src)
+		refMapping, ok := ref.(*ast.MappingNode)
+		require.True(t, ok)
+
+		anchor, ok := refMapping.Values[0].Value.(*ast.AnchorNode)
+		require.True(t, ok)
+
+		anchored, ok := anchor.Value.(*ast.MappingNode)
+		require.True(t, ok)
+
+		merged := anchored.Values[0].Value
+		if seq, ok := merged.(*ast.SequenceNode); ok {
+			merged = seq.Values[0]
+		}
+
+		inner, ok := merged.(*ast.AliasNode)
+		require.True(t, ok)
+
+		resolve := yaml.ResolveAlias(func(*ast.AliasNode) (ast.Node, bool) { return anchor.Value, true })
+
+		for docName, doc := range docs {
+			body := parseBody(t, doc)
+
+			for targetName, target := range targets {
+				for _, ordered := range []bool{false, true} {
+					name := fmt.Sprintf("%s/%s/%s/ordered=%t", srcName, docName, targetName, ordered)
+					t.Run(name, func(t *testing.T) {
+						t.Parallel()
+
+						opts := []yaml.DecodeOption{resolve}
+						if ordered {
+							opts = append(opts, yaml.UseOrderedMap())
+						}
+
+						err := yaml.NewDecoder(bytes.NewReader(nil), opts...).DecodeFromNode(body, target())
+
+						var missing *yaml.MissingAnchorError
+
+						require.ErrorAs(t, err, &missing)
+						assert.Same(t, inner, missing.Alias)
+					})
+				}
+			}
+		}
+	}
+}
+
+func TestResolveAliasMergeSequence(t *testing.T) {
+	t.Parallel()
+
+	// The entries of b merge a, which the sequence also merges. The merge
+	// of a inside b does not close a loop. Each target allows the key that
+	// both b and a bring in twice.
+	body := parseBody(t, "a: &a {x: 1}\nb: &b {<<: *a, y: 2}\nm: {<<: [*b, *a]}\n")
+	mapping, ok := body.(*ast.MappingNode)
+	require.True(t, ok)
+
+	node := mapping.Values[2].Value
+	slice := yaml.MapSlice{{Key: "x", Value: uint64(1)}, {Key: "y", Value: uint64(2)}, {Key: "x", Value: uint64(1)}}
+
+	tcs := map[string]struct {
+		target  func() any
+		want    any
+		ordered bool
+	}{
+		"any": {
+			target: func() any { return new(any) },
+			want:   map[string]any{"x": uint64(1), "y": uint64(2)},
+		},
+		"any ordered": {
+			target:  func() any { return new(any) },
+			want:    slice,
+			ordered: true,
+		},
+		"map": {
+			target: func() any { return new(map[string]int) },
+			want:   map[string]int{"x": 1, "y": 2},
+		},
+		"map slice": {
+			target: func() any { return new(yaml.MapSlice) },
+			want:   slice,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			opts := []yaml.DecodeOption{documentOrder(body), yaml.AllowDuplicateMapKey()}
+			if tc.ordered {
+				opts = append(opts, yaml.UseOrderedMap())
+			}
+
+			got := tc.target()
+
+			require.NoError(t, yaml.NewDecoder(bytes.NewReader(nil), opts...).DecodeFromNode(node, got))
+			assert.Equal(t, tc.want, reflect.ValueOf(got).Elem().Interface())
+		})
+	}
+}
+
+func TestResolveAliasInsideMergedAnchor(t *testing.T) {
+	t.Parallel()
+
+	// The resolver binds each alias to the anchor of its name in another
+	// parse, where b holds an alias to itself and s is a sequence of an
+	// alias to b. The document merges b alone, in a sequence, or through
+	// s, and the alias inside b reads as null in each.
+	ref := parseBody(t, "b: &b {x: *b, y: 1}\ns: &s [*b]\n")
+	refMapping, ok := ref.(*ast.MappingNode)
+	require.True(t, ok)
+
+	anchors := map[string]ast.Node{}
+
+	for _, value := range refMapping.Values {
+		anchor, ok := value.Value.(*ast.AnchorNode)
+		require.True(t, ok)
+
+		anchors[anchor.Name.GetToken().Value] = anchor.Value
+	}
+
+	resolve := yaml.ResolveAlias(func(alias *ast.AliasNode) (ast.Node, bool) {
+		node, ok := anchors[alias.Value.GetToken().Value]
+		return node, ok
+	})
+
+	docs := map[string]string{
+		"alias":             "m: {<<: *b}\n",
+		"sequence":          "m: {<<: [*b]}\n",
+		"alias to sequence": "m: {<<: *s}\n",
+	}
+
+	type Entry struct {
+		X any
+		Y int
+	}
+
+	type inlineEntry struct {
+		Entry `yaml:",inline"`
+	}
+
+	type inlineMap struct {
+		R map[string]any `yaml:",inline"`
+	}
+
+	entries := yaml.MapSlice{{Key: "x", Value: nil}, {Key: "y", Value: uint64(1)}}
+
+	tcs := map[string]struct {
+		target  func() any
+		want    any
+		ordered bool
+		// Whether the target is a struct, where go-yaml refuses a sequence
+		// under a merge key.
+		structTarget bool
+	}{
+		"any": {
+			target: func() any { return new(any) },
+			want:   map[string]any{"m": map[string]any{"x": nil, "y": uint64(1)}},
+		},
+		"any ordered": {
+			target:  func() any { return new(any) },
+			want:    yaml.MapSlice{{Key: "m", Value: entries}},
+			ordered: true,
+		},
+		"map": {
+			target: func() any { return new(map[string]map[string]any) },
+			want:   map[string]map[string]any{"m": {"x": nil, "y": uint64(1)}},
+		},
+		"map slice": {
+			target: func() any { return new(map[string]yaml.MapSlice) },
+			want:   map[string]yaml.MapSlice{"m": entries},
+		},
+		"struct": {
+			target:       func() any { return new(map[string]Entry) },
+			want:         map[string]Entry{"m": {Y: 1}},
+			structTarget: true,
+		},
+		"inline struct": {
+			target:       func() any { return new(map[string]inlineEntry) },
+			want:         map[string]inlineEntry{"m": {Entry{Y: 1}}},
+			structTarget: true,
+		},
+		"inline map": {
+			target:       func() any { return new(map[string]inlineMap) },
+			want:         map[string]inlineMap{"m": {R: map[string]any{"x": nil, "y": uint64(1)}}},
+			structTarget: true,
+		},
+	}
+
+	for docName, doc := range docs {
+		body := parseBody(t, doc)
+
+		for name, tc := range tcs {
+			t.Run(docName+"/"+name, func(t *testing.T) {
+				t.Parallel()
+
+				opts := []yaml.DecodeOption{resolve}
+				if tc.ordered {
+					opts = append(opts, yaml.UseOrderedMap())
+				}
+
+				got := tc.target()
+
+				err := yaml.NewDecoder(bytes.NewReader(nil), opts...).DecodeFromNode(body, got)
+				if docName != "alias" && tc.structTarget {
+					require.ErrorContains(t, err, "sequence was used where mapping is expected")
+
+					return
+				}
+
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, reflect.ValueOf(got).Elem().Interface())
+			})
+		}
+	}
+}
+
+func TestResolveAliasLoopAcrossAnchors(t *testing.T) {
+	t.Parallel()
+
+	// The anchors b and c of another parse alias each other. An alias reads
+	// its anchor with the alias inside that closes the loop as null. Each
+	// alias of the document reads the same value whichever alias the decode
+	// reads first.
+	ref := parseBody(t, "b: &b {k: *c, y: 2}\nc: &c {k: *b, y: 3}\n")
+	refMapping, ok := ref.(*ast.MappingNode)
+	require.True(t, ok)
+
+	anchors := map[string]ast.Node{}
+
+	for _, value := range refMapping.Values {
+		anchor, ok := value.Value.(*ast.AnchorNode)
+		require.True(t, ok)
+
+		anchors[anchor.Name.GetToken().Value] = anchor.Value
+	}
+
+	resolve := yaml.ResolveAlias(func(alias *ast.AliasNode) (ast.Node, bool) {
+		node, ok := anchors[alias.Value.GetToken().Value]
+		return node, ok
+	})
+
+	type entry struct {
+		K *entry
+		Y int
+	}
+
+	wantAny := map[string]any{
+		"b": map[string]any{"k": map[string]any{"k": nil, "y": uint64(3)}, "y": uint64(2)},
+		"c": map[string]any{"k": map[string]any{"k": nil, "y": uint64(2)}, "y": uint64(3)},
+	}
+	wantTyped := struct{ B, C entry }{
+		B: entry{K: &entry{Y: 3}, Y: 2},
+		C: entry{K: &entry{Y: 2}, Y: 3},
+	}
+
+	sources := map[string]string{
+		"b first": "b: *b\nc: *c\n",
+		"c first": "c: *c\nb: *b\n",
+	}
+
+	for name, src := range sources {
+		body := parseBody(t, src)
+
+		t.Run(name+"/any", func(t *testing.T) {
+			t.Parallel()
+
+			var got any
+
+			require.NoError(t, yaml.NewDecoder(bytes.NewReader(nil), resolve).DecodeFromNode(body, &got))
+			assert.Equal(t, wantAny, got)
+		})
+
+		t.Run(name+"/typed", func(t *testing.T) {
+			t.Parallel()
+
+			var got struct{ B, C entry }
+
+			require.NoError(t, yaml.NewDecoder(bytes.NewReader(nil), resolve).DecodeFromNode(body, &got))
+			assert.Equal(t, wantTyped, got)
+		})
+	}
+}
+
+func TestResolveAliasBelowDocumentReadsAnchorOnce(t *testing.T) {
+	t.Parallel()
+
+	// Each anchor holds two aliases of the anchor before it, so the value
+	// of the last anchor doubles at each step. The decode of the node at t
+	// reads every anchor through an alias.
+	const depth = 24
+
+	var src strings.Builder
+
+	src.WriteString("a0: &a0 x\n")
+
+	for i := 1; i <= depth; i++ {
+		fmt.Fprintf(&src, "a%d: &a%d [*a%d, *a%d]\n", i, i, i-1, i-1)
+	}
+
+	fmt.Fprintf(&src, "t: {v: *a%d}\n", depth)
+
+	body := parseBody(t, src.String())
+	mapping, ok := body.(*ast.MappingNode)
+	require.True(t, ok)
+
+	node := mapping.Values[depth+1].Value
+
+	targets := map[string]func() any{
+		"any":    func() any { return new(any) },
+		"struct": func() any { return new(struct{ V []any }) },
+	}
+
+	for name, target := range targets {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			// The decoder keeps the value of each anchor that an alias
+			// reads, so it binds each alias of the document once. A decode
+			// that read the anchor at every alias would bind 2^depth
+			// aliases.
+			b := &binder{last: map[string]ast.Node{}, bound: map[*ast.AliasNode]ast.Node{}, nulls: map[int]bool{}}
+			ast.Walk(b, body)
+
+			binds := 0
+			resolve := yaml.ResolveAlias(func(alias *ast.AliasNode) (ast.Node, bool) {
+				binds++
+				n, ok := b.bound[alias]
+
+				return n, ok
+			})
+
+			v := target()
+
+			require.NoError(t, yaml.NewDecoder(bytes.NewReader(nil), resolve).DecodeFromNode(node, v))
+			assert.LessOrEqual(t, binds, 4*(2*depth+1))
+
+			got := reflect.ValueOf(v).Elem()
+
+			var leaf reflect.Value
+
+			if got.Kind() == reflect.Struct {
+				leaf = got.Field(0)
+			} else {
+				leaf = got.Elem().MapIndex(reflect.ValueOf("v"))
+			}
+
+			for range depth {
+				if leaf.Kind() == reflect.Interface {
+					leaf = leaf.Elem()
+				}
+
+				require.Equal(t, 2, leaf.Len())
+
+				leaf = leaf.Index(1)
+			}
+
+			assert.Equal(t, "x", fmt.Sprint(leaf.Interface()))
+		})
+	}
+}
+
+func TestResolveAliasInlineAliasBelowDocument(t *testing.T) {
+	t.Parallel()
+
+	// The resolver binds the merge alias to an anchor outside the node,
+	// which the decoder has not read. The inline field reads that anchor
+	// as the decode of the whole document reads it.
+	body := parseBody(t, "defs: &d {a: 1}\nv: {<<: *d, b: 2}\n")
+	mapping, ok := body.(*ast.MappingNode)
+	require.True(t, ok)
+
+	type aliased struct {
+		Base map[string]any `yaml:",inline,alias"`
+		B    int
+	}
+
+	var scoped aliased
+
+	require.NoError(
+		t,
+		yaml.NewDecoder(bytes.NewReader(nil), documentOrder(body)).DecodeFromNode(mapping.Values[1].Value, &scoped),
+	)
+
+	var whole struct{ V aliased }
+
+	require.NoError(t, yaml.NewDecoder(bytes.NewReader(nil), documentOrder(body)).DecodeFromNode(body, &whole))
+	assert.Equal(t, aliased{Base: map[string]any{"a": uint64(1)}, B: 2}, scoped)
+	assert.Equal(t, whole.V, scoped)
+}

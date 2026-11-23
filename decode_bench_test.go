@@ -281,9 +281,8 @@ func BenchmarkNode_DecodeRejectedStream(b *testing.B) {
 
 // benchFreshDecode runs a benchmark under name that parses input anew in
 // each iteration and decodes each of its documents into a T. A document
-// builds its decode tree once, so only a new parse measures that work in
-// every iteration. It reports the time per unit, of which input holds
-// count.
+// binds its aliases once, so only a new parse measures that work in every
+// iteration. It reports the time per unit, of which input holds count.
 func benchFreshDecode[T any](b *testing.B, name, input string, count int, unit string) {
 	b.Helper()
 
@@ -304,9 +303,8 @@ func benchFreshDecode[T any](b *testing.B, name, input string, count int, unit s
 }
 
 // BenchmarkNode_DecodeReusedAnchorStream decodes every document of a
-// stream whose documents each reuse an anchor name, so each document
-// decodes from a tree with renamed anchors. The time per document stays
-// flat as the stream grows.
+// stream whose documents each reuse an anchor name. The time per document
+// stays flat as the stream grows.
 func BenchmarkNode_DecodeReusedAnchorStream(b *testing.B) {
 	for _, count := range []int{500, 2000} {
 		input := strings.Repeat(stringtest.LinesLF("---", "a: &x 1", "b: &x 2", "c: *x"), count)
@@ -486,33 +484,6 @@ func BenchmarkNode_Decode_RejectionInRepeatedReferenceAnchor(b *testing.B) {
 				reportRetained(b, newDoc, decode)
 			})
 		}
-	}
-}
-
-// BenchmarkNode_DecodeBracketedAnchorNames decodes sequences whose quoted
-// anchor names hold a count in brackets, like the new names the decode
-// tree gives reused anchors. The tries sequences spell "x [1]" through
-// "x [N]", so the two anchors named x skip N counts. The wide sequences
-// reuse N such names, each twice. The decode finds where the document
-// spells each name in one lookup rather than checking every name against
-// every count, so the time per name grows little with N.
-func BenchmarkNode_DecodeBracketedAnchorNames(b *testing.B) {
-	for _, count := range []int{2000, 8000} {
-		var tries strings.Builder
-
-		for i := range count {
-			fmt.Fprintf(&tries, `- &"x [%d]" %d`+"\n", i+1, i)
-		}
-
-		tries.WriteString(stringtest.LinesLF("- &x 1", "- &x 2"))
-
-		benchFreshDecode[[]any](b, fmt.Sprintf("tries_%d", count), tries.String(), count, "name")
-	}
-
-	for _, count := range []int{2000, 8000} {
-		wide := yamltest.GenerateLines(count, stringtest.JoinLF(`- &"n%[1]d [1]" 1`, `- &"n%[1]d [1]" 2`))
-
-		benchFreshDecode[[]any](b, fmt.Sprintf("wide_%d", count), wide, count, "name")
 	}
 }
 

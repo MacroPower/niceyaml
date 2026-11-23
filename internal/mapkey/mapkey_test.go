@@ -430,6 +430,8 @@ func TestKeys_KeyOf(t *testing.T) {
 		key  string
 		ref  string
 		want string
+		// Whether KeyOf reports false, for a key that does not decode.
+		undecoded bool
 	}{
 		"mapping": {key: "{p: 2, q: 3}", want: "map[p:2 q:3]"},
 		"merge":   {key: "{<<: {p: 1, q: 2}, q: 5}", want: "map[p:1 q:5]"},
@@ -441,6 +443,12 @@ func TestKeys_KeyOf(t *testing.T) {
 		},
 		"alias of a reference document": {
 			key: "{a: *r}", ref: "s: &r 0x10\n", want: "map[a:16]",
+		},
+		"anchor inside before a reference anchor of its name": {
+			key: "[&r 1, *r]", ref: "s: &r 0x10\n", want: "[1 1]",
+		},
+		"alias before an anchor inside of its name": {
+			key: "[*r, &r 1]", ref: "s: &r 0x10\n", undecoded: true,
 		},
 		"scalar": {key: "b", want: "b"},
 	}
@@ -456,9 +464,16 @@ func TestKeys_KeyOf(t *testing.T) {
 			require.NoError(t, err)
 
 			got, ok := r.KeyOf(file.Docs[0].Body)
+			assert.Nil(t, r.Panic())
+
+			if tc.undecoded {
+				assert.False(t, ok)
+
+				return
+			}
+
 			require.True(t, ok)
 			assert.Equal(t, tc.want, got)
-			assert.Nil(t, r.Panic())
 		})
 	}
 }

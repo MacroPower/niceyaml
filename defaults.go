@@ -270,9 +270,14 @@ func (d defaultFuncs) start(t reflect.Type, node ast.Node) (reflect.Value, error
 // the start is a copy of the value that v reaches, because the decoder
 // overwrites that value. For a pointer type that never ends in a type
 // that is not a pointer, such as "type P *P", startTarget returns v and
-// an invalid start, and the decoder rejects the type.
+// an invalid start, and the decoder rejects the type. For a v that points
+// to a pointer to a node type of the go-yaml ast package, startTarget also
+// returns v and an invalid start. The decoder points that pointer to the
+// node of the document.
 func startTarget(v any, cfg decodeConfig, node ast.Node) (any, reflect.Value, error) {
-	if unmarshaler.Base(reflect.TypeOf(v)).Kind() == reflect.Pointer {
+	t := reflect.TypeOf(v).Elem()
+	if unmarshaler.Base(reflect.TypeOf(v)).Kind() == reflect.Pointer ||
+		t.Kind() == reflect.Pointer && unmarshaler.IsSyntaxNode(t.Elem()) {
 		return v, reflect.Value{}, nil
 	}
 

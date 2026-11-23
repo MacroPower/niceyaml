@@ -6124,32 +6124,30 @@ func TestWithReferences(t *testing.T) {
 		}
 	})
 
-	t.Run("anchor inside an anchor a decode reads registers its name again", func(t *testing.T) {
+	t.Run("last anchor of a name wins at every read", func(t *testing.T) {
 		t.Parallel()
 
-		// The References section of the package documentation describes
-		// this exception to the rule that the last anchor of a name wins.
-		// A merge of layers follows the rule.
+		// A decode that reads an anchor of the reference documents reads
+		// each alias after it by the rule as well, even where the anchor
+		// holds an anchor of the name of the alias. A typed decode, a
+		// decode into an any value, and a merge of layers read alike.
 		tcs := map[string]struct {
 			ref     string
 			input   string
 			untyped map[string]any
 			typed   map[string][]int
-			layered map[string]any
 		}{
 			"alias read after the outer anchor": {
 				ref:     stringtest.LinesLF("base: &base [&x 1, *x]", "z: &x 9"),
 				input:   stringtest.LinesLF("a: *base", "b: [*x]"),
-				untyped: map[string]any{"a": []any{uint64(1), uint64(1)}, "b": []any{uint64(1)}},
-				typed:   map[string][]int{"a": {1, 1}, "b": {1}},
-				layered: map[string]any{"a": []any{uint64(1), uint64(9)}, "b": []any{uint64(9)}},
+				untyped: map[string]any{"a": []any{uint64(1), uint64(9)}, "b": []any{uint64(9)}},
+				typed:   map[string][]int{"a": {1, 9}, "b": {9}},
 			},
 			"typed decode of an anchor read before the outer anchor": {
 				ref:     stringtest.LinesLF("outer: &outer [&x 1]", "y: &x 2", "list: &list [*x]"),
 				input:   stringtest.LinesLF("l: *list", "o: *outer"),
 				untyped: map[string]any{"l": []any{uint64(2)}, "o": []any{uint64(1)}},
-				typed:   map[string][]int{"l": {1}, "o": {1}},
-				layered: map[string]any{"l": []any{uint64(2)}, "o": []any{uint64(1)}},
+				typed:   map[string][]int{"l": {2}, "o": {1}},
 			},
 		}
 
@@ -6173,7 +6171,7 @@ func TestWithReferences(t *testing.T) {
 
 				layered, err := yamltest.Document(t, merged).Decode[map[string]any](t.Context())
 				require.NoError(t, err)
-				assert.Equal(t, tc.layered, layered)
+				assert.Equal(t, tc.untyped, layered)
 			})
 		}
 	})

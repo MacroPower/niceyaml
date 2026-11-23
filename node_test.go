@@ -2234,8 +2234,7 @@ func TestNode_PathOf_MergeSources(t *testing.T) {
 func TestNode_PathOf_DecodedNode(t *testing.T) {
 	t.Parallel()
 
-	// Two anchors with one name make the decoder read a second parse of
-	// the text.
+	// Two anchors share one name.
 	doc := yamltest.FirstDocument(t, stringtest.LinesLF(
 		"a: &n 1",
 		"b: &n 2",
@@ -2277,10 +2276,9 @@ func TestNode_PathOf_DecodedNode(t *testing.T) {
 		assert.Equal(t, want, got)
 		assert.Same(t, node.AST(), byField.Steps[i].With, "step %d", i)
 
-		// A value that decodes itself keeps the node of the second parse,
-		// which has the same path.
+		// A value that decodes itself gets the node of the document too.
 		kept := bySelf.Steps[i].With.node
-		assert.NotSame(t, node.AST(), kept, "step %d", i)
+		assert.Same(t, node.AST(), kept, "step %d", i)
 
 		got, ok = doc.PathOf(kept)
 		require.True(t, ok, "step %d", i)
@@ -4775,8 +4773,7 @@ func TestDocument_Err(t *testing.T) {
 	t.Parallel()
 
 	// The second document does not parse, and the documents around it do.
-	// The first one reuses an anchor name and the third holds a !!int tag,
-	// so each decodes from the second parse of the source.
+	// The first one reuses an anchor name and the third holds a !!int tag.
 	input := stringtest.LinesLF(
 		"a: &x 1",
 		"b: &x 2",

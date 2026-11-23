@@ -28,7 +28,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/taggedscalar"
 	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 	"go.jacobcolvin.com/niceyaml/internal/yamldecode"
-	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 )
@@ -697,9 +696,11 @@ func WithAllowedFieldPrefixes(prefixes ...string) DecodeOption {
 // merge key in that mapping does not admit the key of its anchor.
 //
 // A read keeps an admitted key when a field of a struct, a map, or an
-// interface takes the key. The decoder fills each field that takes it.
-// When one read of a key keeps it, each read of the key that does not
-// keep it reports an unknown field. In the document shown, a type of
+// interface takes the key. The decoder fills each field that takes it. A
+// value of a node type of the go-yaml ast package keeps every key below
+// it, so it gets the node of the document. When one read of a key keeps
+// it, each read of the key that does not keep it reports an unknown
+// field. In the document shown, a type of
 // base with a type field thus has the decode report `$.nested.type~`
 // when the type of nested does not have one.
 //
@@ -715,7 +716,8 @@ func WithAllowedFieldPrefixes(prefixes ...string) DecodeOption {
 // The decode leaves out each admitted key that no read keeps. A value
 // that decodes itself, such as one with an UnmarshalYAML method, does not
 // keep an admitted key below it. Its unmarshaler thus sees the key only
-// when another read keeps it. An admitted key that the decode leaves out
+// when another read keeps it, and it gets a copy of its node without the
+// key. An admitted key that the decode leaves out
 // also hides each entry of its name that a `<<` merge key before it
 // brings in. The decode leaves those entries out too. A [Validator] of
 // the decode still sees each key.
@@ -1090,238 +1092,11 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig) error {
 		return err
 	}
 
-	n.ownNodes(v)
-
 	if cfg.skipSelfValidation {
 		return nil
 	}
 
 	return n.selfValidate(ctx, v, cfg)
-}
-
-// isNodeType reports whether the go-yaml decoder sets a value of type t to
-// the node it decodes.
-func isNodeType(t reflect.Type) bool {
-	return t == astNodeType || unmarshaler.IsSyntaxNode(t)
-}
-
-// reachesNodes reports whether a decode into a value of type t can set a
-// node of the syntax tree in the value, outside the types that decode
-// themselves.
-func reachesNodes(t reflect.Type) bool {
-	return holdsNodes.Get(t, func(t reflect.Type) bool {
-		return yamlfield.Reaches(t, func(t reflect.Type) (bool, bool) {
-			return isNodeType(t), unmarshaler.DecodesItself(t)
-		})
-	})
-}
-
-// ownNodes puts the node of the document in place of each node of the
-// decoder's tree in v, the target of a decode of n. The decoder reads a
-// tree that can rename anchors and copy nodes, as [decodetree.Tree]
-// describes. It sets each [ast.Node] in v to a node of that tree. The
-// swap reads the fields, elements, and entries that the decoder fills. It
-// does not read below a type that decodes itself, so a node that such a
-// type keeps stays the decoder's. A node of a reference document stays
-// too, because the document does not hold it. A v whose type reaches no
-// node costs nothing.
-func (n *Node) ownNodes(v any) {
-	rv := reflect.ValueOf(v)
-	if !reachesNodes(rv.Type().Elem()) {
-		return
-	}
-
-	s := nodeSwapper{tree: n.doc.tree(), seen: map[uintptr]map[reflect.Type]bool{}}
-	s.walk(rv.Elem())
-}
-
-// nodeSwapper puts the nodes of the document in place of the nodes of a
-// [decodetree.Tree] in a decoded value, as [Node.ownNodes] describes.
-type nodeSwapper struct {
-	// The tree the decoder read.
-	tree *decodetree.Tree
-	// The types read at each address the walk followed a pointer to, so a
-	// value that points to itself ends the walk.
-	seen map[uintptr]map[reflect.Type]bool
-}
-
-// walk swaps the nodes in v, a value that the walk can set. It reports
-// whether it set a node.
-func (s nodeSwapper) walk(v reflect.Value) bool {
-	t := v.Type()
-	if !reachesNodes(t) {
-		return false
-	}
-
-	if t == astNodeType || t.Kind() == reflect.Pointer && unmarshaler.IsSyntaxNode(t.Elem()) {
-		return !v.IsNil() && s.swap(v)
-	}
-
-	// The decoder sets a node held by value to a copy of its own node. The
-	// copy shares the slices of that node, so the walk sets the whole value
-	// and never writes below it.
-	if unmarshaler.IsSyntaxNode(t) {
-		return s.swapValue(v)
-	}
-
-	changed := false
-
-	switch v.Kind() {
-	case reflect.Pointer:
-		if !v.IsNil() && s.enter(v) {
-			changed = s.walk(v.Elem())
-		}
-
-	case reflect.Slice, reflect.Array:
-		if v.Kind() == reflect.Slice && (v.IsNil() || !s.enter(v)) {
-			return false
-		}
-
-		for i := range v.Len() {
-			changed = s.walk(v.Index(i)) || changed
-		}
-
-	case reflect.Map:
-		changed = s.walkMap(v)
-
-	case reflect.Struct:
-		for i, field := range slices.Collect(t.Fields()) {
-			if _, _, skip := yamlfield.Name(field); skip {
-				continue
-			}
-
-			if f := v.Field(i); f.CanSet() {
-				changed = s.walk(f) || changed
-			}
-		}
-
-	default:
-	}
-
-	return changed
-}
-
-// enter reports whether the walk reads v, a pointer or a slice, for the
-// first time as a value of its type.
-func (s nodeSwapper) enter(v reflect.Value) bool {
-	addr := v.Pointer()
-
-	types := s.seen[addr]
-	if types == nil {
-		types = map[reflect.Type]bool{}
-		s.seen[addr] = types
-	}
-
-	if types[v.Type()] {
-		return false
-	}
-
-	types[v.Type()] = true
-
-	return true
-}
-
-// walkMap swaps the nodes in the keys and the values of v, a map, and
-// reports whether it set a node. A map does not hand out its entries to
-// set, so the walk swaps the nodes in a copy of each entry. When it
-// changes an entry, it clears v and adds every entry back. A key that does
-// not equal itself, such as a NaN, thus keeps one entry for each entry
-// the map held.
-func (s nodeSwapper) walkMap(v reflect.Value) bool {
-	if v.IsNil() || !s.enter(v) {
-		return false
-	}
-
-	t := v.Type()
-	keys, values := reachesNodes(t.Key()), reachesNodes(t.Elem())
-
-	type entry struct{ key, value reflect.Value }
-
-	entries := make([]entry, 0, v.Len())
-
-	for iter := v.MapRange(); iter.Next(); {
-		entries = append(entries, entry{key: iter.Key(), value: iter.Value()})
-	}
-
-	changed := false
-
-	for i, e := range entries {
-		key := reflect.New(t.Key()).Elem()
-		key.Set(e.key)
-
-		value := reflect.New(t.Elem()).Elem()
-		value.Set(e.value)
-
-		keyChanged := keys && s.walk(key)
-		valueChanged := values && s.walk(value)
-
-		if keyChanged || valueChanged {
-			entries[i] = entry{key: key, value: value}
-			changed = true
-		}
-	}
-
-	if !changed {
-		return false
-	}
-
-	v.Clear()
-
-	for _, e := range entries {
-		v.SetMapIndex(e.key, e.value)
-	}
-
-	return true
-}
-
-// swap sets v, an [ast.Node] or a pointer to a node type, to the node of
-// the document that the node in v stands for, and reports whether that
-// node differs from the node in v. It leaves v as it is when the document
-// does not hold such a node, or holds one of another type.
-func (s nodeSwapper) swap(v reflect.Value) bool {
-	node, ok := reflect.TypeAssert[ast.Node](v)
-	if !ok {
-		return false
-	}
-
-	original, ok := s.tree.Original(node)
-	if !ok || original == node {
-		return false
-	}
-
-	o := reflect.ValueOf(original)
-	if !o.Type().AssignableTo(v.Type()) {
-		return false
-	}
-
-	v.Set(o)
-
-	return true
-}
-
-// swapValue sets v, a node type of the go-yaml ast package held by value,
-// to a copy of the node of the document that v stands for. It reports
-// whether it set v, and it leaves v as it is when the document does not hold
-// such a node, or holds one of another type.
-func (s nodeSwapper) swapValue(v reflect.Value) bool {
-	node, ok := reflect.TypeAssert[ast.Node](v.Addr())
-	if !ok {
-		return false
-	}
-
-	original, ok := s.tree.Original(node)
-	if !ok || original == node {
-		return false
-	}
-
-	o := reflect.ValueOf(original)
-	if o.Type() != v.Addr().Type() {
-		return false
-	}
-
-	v.Set(o.Elem())
-
-	return true
 }
 
 // warnUnknownFields hands each unknown field of a decode of n into a value
@@ -1518,13 +1293,29 @@ func checkTarget(v any, sentinel error, needPointer bool) error {
 }
 
 // newDecoder returns a go-yaml decoder for a decode of n with cfg. It
-// applies the options of the source, then those of cfg.
-func (n *Node) newDecoder(cfg decodeConfig) *yamldecode.Decoder {
+// applies the options of the source, then those of cfg. The decoder binds
+// each alias as the document does, through [document.resolveAlias]. Where
+// cut is not nil, an alias reads the content of its anchor as cut leaves
+// it, as [keyCut.readNode] returns it, when the decoder reads the alias.
+func (n *Node) newDecoder(cfg decodeConfig, cut *keyCut) *yamldecode.Decoder {
 	decode := func(ctx context.Context, text []byte, dst any) error {
 		return n.decodeValue(ctx, text, dst, cfg)
 	}
 
-	opts := slices.Concat(n.source.decodeOptions(), cfg.unmarshalers.YAMLOptions(decode))
+	resolve := func(alias *ast.AliasNode) (ast.Node, bool) {
+		node, ok := n.doc.resolveAlias(alias)
+		if ok && cut != nil {
+			node = cut.readNode(node)
+		}
+
+		return node, ok
+	}
+
+	opts := slices.Concat(
+		n.source.decodeOptions(),
+		[]yamldecode.DecodeOption{yamldecode.ResolveAlias(resolve)},
+		cfg.unmarshalers.YAMLOptions(decode),
+	)
 
 	if cfg.unknownFields == UnknownFieldsReject {
 		opts = append(opts, yamldecode.DisallowUnknownField())
@@ -1849,40 +1640,14 @@ func (n *Node) decodeUnbound(
 		return nil
 	}
 
-	dec := n.newDecoder(cfg)
+	// The decoder reads each alias as the cut leaves its anchor, so it
+	// reads the cut that admitKnownKeys returns.
+	var cut keyCut
 
-	view, err := n.prime(ctx, dec, node)
-	if err != nil {
-		return n.decodeRejection(err)
-	}
+	dec := n.newDecoder(cfg, &cut)
 
-	cut := n.admitKnownKeys(ctx, n.walkRules(ctx, dec, cfg.unmarshalers), cfg, reflect.TypeOf(v).Elem(), node, view)
-
-	// The view that the decoder reads leaves out entries and the anchors in
-	// them. Its copies of the mappings that merge keys bring in do not hold
-	// the anchors of those mappings either. The decoder reads the view
-	// without the cut first, so it registers every anchor of the node in
-	// document order. Each alias then reads its anchor as the document
-	// writes it. The decode that follows reports any error of the view.
-	if cut.read != view {
-		var sink any
-
-		_ = decodeWithRecover(ctx, dec, view, &sink) //nolint:errcheck // The decode of the cut reports it.
-	}
-
-	// The decoder registers each anchor outside node again with the cut
-	// content, so its aliases read the anchor without the cut entries. The
-	// read view does the same for the anchors inside node.
-	for _, anchor := range cut.anchors {
-		var sink any
-
-		err = decodeWithRecover(ctx, dec, anchor, &sink)
-		if err != nil {
-			return n.decodeRejection(n.rejection(err, anchor, firstRead))
-		}
-	}
-
-	view = cut.view
+	cut = n.admitKnownKeys(ctx, n.walkRules(ctx, dec, cfg.unmarshalers), cfg, reflect.TypeOf(v).Elem(), node)
+	view := cut.view
 
 	// For a null, the decoder sets *v to nil.
 	target := v
@@ -1929,7 +1694,7 @@ func (n *Node) decodeUnbound(
 }
 
 // rootReference returns the anchor of a reference document that alias
-// reads, as [reftable.Table.View] gives it. Such an alias is one that the
+// reads, as [reftable.Table.Anchor] gives it. Such an alias is one that the
 // resolver of the document does not bind to an anchor of the document. It
 // reports false for any other alias.
 func (n *Node) rootReference(alias *ast.AliasNode) (ast.Node, bool) {
@@ -1943,7 +1708,7 @@ func (n *Node) rootReference(alias *ast.AliasNode) (ast.Node, bool) {
 		return nil, false
 	}
 
-	anchor, ok := n.source.referenceAnchors().View(name)
+	anchor, ok := n.source.referenceAnchors().Anchor(name)
 	if !ok {
 		return nil, false
 	}
@@ -1969,24 +1734,20 @@ func (n *Node) rejection(err error, scope ast.Node, order readOrder) error {
 
 	tree := n.doc.tree()
 
-	var (
-		at    *token.Token
-		cause error
-	)
+	var at *token.Token
 
 	if errors.Is(err, yaml.ErrExceededMaxDepth) {
-		at, cause = astnode.StartToken(scope), n.doc.restoreError(err)
-	} else if tk, msg, ok := tree.UnresolvedMerge(scope, err); ok {
-		// The decoder's failure for an alias inside its own anchor names
-		// the null it merges in its place, which the source does not hold,
-		// so the message is the one a decode of the whole document gives.
-		at, cause = tk, &markedError{err: err, msg: msg}
+		at = astnode.StartToken(scope)
 	} else if missing, isMissing := errors.AsType[*yamldecode.MissingAnchorError](err); isMissing {
-		// The alias that the decoder does not find an anchor for lies in a
-		// reference document, so the rejection binds at the alias of the
-		// document that led the decoder to it.
-		if alias, found := n.referenceRead(tree.ReferenceAliases(scope), missing.Alias.Start, order); found {
-			at, cause = alias.Token, err
+		// The decoder does not find an anchor for an alias under a merge key
+		// that the document does not bind, or that lies inside the anchor it
+		// names. The rejection binds at that alias. An alias of a reference
+		// document binds at the alias of the document that led the decoder
+		// to it.
+		if n.holdsToken(missing.Alias.Start) {
+			at = missing.Alias.Start
+		} else if alias, found := n.referenceRead(tree.ReferenceAliases(scope), missing.Alias.Start, order); found {
+			at = alias.Token
 		}
 	}
 
@@ -2008,7 +1769,7 @@ func (n *Node) rejection(err error, scope ast.Node, order readOrder) error {
 		return err
 	}
 
-	rejected := markDecode(fmt.Errorf("decoder rejected the value: %w", cause), errPlaced)
+	rejected := markDecode(fmt.Errorf("decoder rejected the value: %w", err), errPlaced)
 
 	return Invalid(rejected, AtToken(at))
 }
@@ -2034,12 +1795,6 @@ func (n *Node) referenceRejection(err yaml.Error, alias *decodetree.ReferenceAli
 // document order. It reports false when it cannot tell.
 type readOrder func(aliases []decodetree.ReferenceAlias) (decodetree.ReferenceAlias, bool)
 
-// firstRead is the [readOrder] of a decode into an interface, which reads
-// each value in document order.
-func firstRead(aliases []decodetree.ReferenceAlias) (decodetree.ReferenceAlias, bool) {
-	return aliases[0], true
-}
-
 // referenceRead returns the alias among refs, the aliases of a reference
 // document that a decode reads, that led the decoder to tk, a token of a
 // reference document. The anchor of that alias reaches tk, as
@@ -2063,7 +1818,7 @@ func (n *Node) referenceRead(
 	for _, ref := range refs {
 		found, ok := reaches[ref.Name]
 		if !ok {
-			anchor, held := table.View(ref.Name)
+			anchor, held := table.Anchor(ref.Name)
 			found = held && len(places.Paths(anchor)) > 0
 			reaches[ref.Name] = found
 		}
@@ -2107,7 +1862,7 @@ func (n *Node) referenceLocation(alias decodetree.ReferenceAlias, tk *token.Toke
 
 	table := n.source.referenceAnchors()
 
-	anchor, ok := table.View(alias.Name)
+	anchor, ok := table.Anchor(alias.Name)
 	if !ok {
 		return []ErrorOption{at}
 	}
@@ -2170,20 +1925,10 @@ func (n *Node) readOrder(ctx context.Context, cfg decodeConfig, t reflect.Type, 
 	}
 }
 
-var (
-	// The mark of an error of a decode that [decodeWithRecover] or
-	// [Node.rejection] placed in the source, so [Node.locateDecodeError]
-	// does not look for the value that reported it.
-	errPlaced = errors.New("placed")
-
-	// The [ast.Node] interface, which the go-yaml decoder sets to the
-	// node it decodes.
-	astNodeType = reflect.TypeFor[ast.Node]()
-
-	// Whether a decode into each type reaches a node of the syntax tree,
-	// as [reachesNodes] reports.
-	holdsNodes unmarshaler.TypeCache[bool]
-)
+// The mark of an error of a decode that [decodeWithRecover] or
+// [Node.rejection] placed in the source, so [Node.locateDecodeError]
+// does not look for the value that reported it.
+var errPlaced = errors.New("placed")
 
 // markDecode returns err as an error of a decode. The result matches
 // [ErrDecode], [errInvalid], and each mark that is not nil, such as the
@@ -2224,13 +1969,7 @@ func asDecodeError(err error) error {
 // [*Error] at node that holds a [*PanicError]. The document is not at
 // fault for a panic, so the error matches [errPlaced] but not
 // [ErrDecode].
-func decodeWithRecover(ctx context.Context, dec *yamldecode.Decoder, node ast.Node, v any) error {
-	return decodeAtWithRecover(ctx, dec, node, v, node)
-}
-
-// decodeAtWithRecover is [decodeWithRecover] with the error of a panic at
-// the first token of at, a node of the document, rather than of node.
-func decodeAtWithRecover(ctx context.Context, dec *yamldecode.Decoder, node ast.Node, v any, at ast.Node) (err error) {
+func decodeWithRecover(ctx context.Context, dec *yamldecode.Decoder, node ast.Node, v any) (err error) {
 	defer func() {
 		p := recover()
 		if p == nil {
@@ -2238,7 +1977,7 @@ func decodeAtWithRecover(ctx context.Context, dec *yamldecode.Decoder, node ast.
 		}
 
 		err = Unchecked(panicked("decoder", recovered(p), errPlaced),
-			AtToken(astnode.StartToken(at)))
+			AtToken(astnode.StartToken(node)))
 	}()
 
 	return dec.DecodeFromNodeContext(ctx, node, v) //nolint:wrapcheck // The caller binds the error.
@@ -2261,7 +2000,8 @@ func decodeAtWithRecover(ctx context.Context, dec *yamldecode.Decoder, node ast.
 // place, and at an alias it is the content of the anchor. The node is
 // part of the tree that [Source.File] returns, so a caller must not
 // modify it. The Decoding section of the package documentation names the
-// nodes that a decode hands out from a tree of its own.
+// nodes that are not the document's, such as the nodes inside reference
+// documents.
 func (n *Node) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, error) {
 	var zero T
 
@@ -2602,70 +2342,6 @@ func (n *Node) YAMLComments(ctx context.Context) (yaml.CommentMap, error) {
 	}
 
 	return commentMap(node, read), nil
-}
-
-// prime returns the view of node in the [decodetree.Tree] and has dec read
-// the anchors outside node that its aliases need. The decoder knows only
-// the anchors it has decoded. Those it needs are the anchors of the
-// reference documents that the aliases reach and, for a node below the
-// body, the anchors of the document before node. It stops at the first
-// anchor that fails.
-func (n *Node) prime(ctx context.Context, dec *yamldecode.Decoder, node ast.Node) (ast.Node, error) {
-	tree := n.doc.tree()
-	view := tree.View(node)
-
-	var anchors []*ast.AnchorNode
-
-	if node != n.doc.root.Body {
-		anchors = tree.Prime(view)
-	}
-
-	// An anchor of the document can read a reference document, but no
-	// anchor of a reference document reads the document. The anchors of
-	// the reference documents thus go first. They include those that the
-	// anchors of the document before node reach, because the decoder reads
-	// those anchors too.
-	if refs := n.source.referenceAnchors(); refs != nil {
-		names := tree.ReferenceNames(view)
-		for _, anchor := range anchors {
-			names = append(names, tree.ReferenceNames(anchor)...)
-		}
-
-		for _, anchor := range refs.Prime(names) {
-			err := ctx.Err()
-			if err != nil {
-				return view, err //nolint:wrapcheck // The context names the reason, and the Node binds it.
-			}
-
-			// No token of a reference document lies in the document, so the
-			// error binds at view, where an error of the decode of view
-			// binds.
-			var sink any
-
-			err = decodeAtWithRecover(ctx, dec, anchor, &sink, view)
-			if err != nil {
-				return view, n.rejection(err, view, firstRead)
-			}
-		}
-	}
-
-	for _, anchor := range anchors {
-		// Without an anchor it needs, the decode of the node would fail
-		// in its stead.
-		err := ctx.Err()
-		if err != nil {
-			return view, err //nolint:wrapcheck // The context names the reason, and the Node binds it.
-		}
-
-		var sink any
-
-		err = decodeWithRecover(ctx, dec, anchor, &sink)
-		if err != nil {
-			return view, n.rejection(err, anchor, firstRead)
-		}
-	}
-
-	return view, nil
 }
 
 // DecodeAt validates and decodes the node path selects into a new T. It
@@ -3023,7 +2699,7 @@ func (n *Node) mergedPosition(rejectionErr error) (position.Position, bool) {
 func (n *Node) decodeRejection(err error) error {
 	yamlErr, ok := err.(yaml.Error) //nolint:errorlint // A wrapped error is the unmarshaler's own.
 	if !ok || !n.holdsToken(yamlErr.GetToken()) {
-		return asDecodeError(n.doc.restoreError(err))
+		return asDecodeError(err)
 	}
 
 	return n.tokenRejection(yamlErr)
@@ -3157,7 +2833,7 @@ type problemCollector struct {
 // warning, as [withoutWarnings] describes.
 func newProblemCollector(ctx context.Context, n *Node, cfg decodeConfig) *problemCollector {
 	ctx = withoutWarnings(ctx)
-	dec := n.newDecoder(cfg)
+	dec := n.newDecoder(cfg, nil)
 
 	c := &problemCollector{
 		ctx:      ctx,
@@ -3178,33 +2854,16 @@ func newProblemCollector(ctx context.Context, n *Node, cfg decodeConfig) *proble
 func (n *Node) walkRules(ctx context.Context, dec *yamldecode.Decoder, u unmarshaler.Options) decodewalk.Rules {
 	return decodewalk.Rules{
 		Resolver: n.doc.pathResolver(),
-		View:     n.doc.tree().View,
+		View:     func(node ast.Node) ast.Node { return node },
 		Decode: func(node ast.Node, v any) error {
 			return decodeWithRecover(ctx, dec, node, v)
 		},
 		Unmarshalers:   u,
-		Anchor:         n.referenceAnchor,
+		Anchor:         n.source.referenceAlias,
 		AnchorKeys:     n.referenceAnchorKeys,
 		PastAliasLimit: n.doc.pastAliasLimit,
 		Keys:           &n.source.mergeKeys,
 	}
-}
-
-// referenceAnchor returns the value of the anchor of a reference document
-// that alias reads, as the decoder reads it. It reports false when the
-// reference documents do not define an anchor of the name of alias.
-func (n *Node) referenceAnchor(alias *ast.AliasNode) (ast.Node, bool) {
-	name, ok := astnode.Name(alias.Value)
-	if !ok {
-		return nil, false
-	}
-
-	anchor, ok := n.source.referenceAnchors().View(name)
-	if !ok {
-		return nil, false
-	}
-
-	return anchor.Value, true
 }
 
 // referenceAnchorKeys returns the keys of the merge sources under the
@@ -3259,17 +2918,12 @@ func (c *problemCollector) collectUnknown(t reflect.Type, node ast.Node) {
 }
 
 // register has the decoder of the pass read node into an interface once,
-// after [Node.prime], so it holds each anchor as the decode held it. The
-// go-yaml decoder assigns an alias the value it holds for the anchor.
+// so it holds each anchor as the decode held it. The go-yaml decoder
+// assigns an alias the value it holds for the anchor.
 func (c *problemCollector) register(node ast.Node) {
-	view, err := c.node.prime(c.ctx, c.decoder, node)
-	if err != nil {
-		return
-	}
-
 	var sink any
 
-	_ = decodeWithRecover(c.ctx, c.decoder, view, &sink) //nolint:errcheck // The decode returned this rejection.
+	_ = decodeWithRecover(c.ctx, c.decoder, node, &sink) //nolint:errcheck // The decode returned this rejection.
 }
 
 // add keeps problem, unless the collector holds one at the same position
@@ -3691,7 +3345,7 @@ func (c *problemCollector) leaf(v *decodewalk.Value) {
 	// to an UnmarshalText method, and returns the error of that parse as
 	// it is.
 	case astnode.IsScalar(content) && (v.Type == unmarshaler.DurationType || c.cfg.unmarshalers.FromText(v.Type)):
-		cause = asDecodeError(c.node.doc.restoreError(err))
+		cause = asDecodeError(err)
 
 	default:
 		return
@@ -3934,7 +3588,7 @@ func (n *Node) locateDecodeError(
 
 	// The locator decodes values again, as [withoutWarnings] describes.
 	ctx = withoutWarnings(ctx)
-	dec := n.newDecoder(cfg)
+	dec := n.newDecoder(cfg, nil)
 	l := &errorLocator{
 		ctx:      ctx,
 		node:     n,
@@ -3973,7 +3627,7 @@ func (n *Node) locateDecodeError(
 	}
 
 	if cause == nil {
-		cause = asDecodeError(n.doc.restoreError(err))
+		cause = asDecodeError(err)
 	}
 
 	return Rebase(cause, path)
@@ -4084,9 +3738,6 @@ type errorLocator struct {
 	// that location, or the zero anchor when the error does not name a
 	// place.
 	anchor anchor
-	// Whether the walk reads the value of an anchor of a reference
-	// document, whose anchors the decoder has read already.
-	reference bool
 }
 
 // result returns the path of the value the walk found, under the value it
@@ -4189,7 +3840,7 @@ func (l *errorLocator) inside(v *decodewalk.Value) *errorLocator {
 
 	value := v.Merged
 	if value == nil {
-		value, ok = l.node.referenceAnchor(alias)
+		value, ok = l.node.source.referenceAlias(alias)
 		if !ok {
 			return nil
 		}
@@ -4210,7 +3861,6 @@ func (l *errorLocator) inside(v *decodewalk.Value) *errorLocator {
 		places:       l.places,
 		unmarshalers: l.unmarshalers,
 		anchor:       l.anchor,
-		reference:    true,
 	}
 
 	rules := decodewalk.Rules{
@@ -4220,7 +3870,7 @@ func (l *errorLocator) inside(v *decodewalk.Value) *errorLocator {
 			return decodeWithRecover(l.ctx, l.decoder, node, v)
 		},
 		Unmarshalers: l.unmarshalers,
-		Anchor:       l.node.referenceAnchor,
+		Anchor:       l.node.source.referenceAlias,
 		AnchorKeys:   l.node.referenceAnchorKeys,
 	}
 
@@ -4254,28 +3904,9 @@ func (l *errorLocator) reproduces(node ast.Node, v any) bool {
 		return false
 	}
 
-	view, ok := l.view(node)
-	if !ok {
-		return false
-	}
-
-	err := decodeWithRecover(l.ctx, l.decoder, view, v)
+	err := decodeWithRecover(l.ctx, l.decoder, node, v)
 
 	return err != nil && l.same(err)
-}
-
-// view returns node as the decoder reads it, after the decoder has read
-// the anchors that node needs, as [Node.prime] describes. A node of a
-// reference document is a node as the decoder reads it already, and the
-// decoder has read its anchors. It reports false when an anchor fails.
-func (l *errorLocator) view(node ast.Node) (ast.Node, bool) {
-	if l.reference {
-		return node, true
-	}
-
-	view, err := l.node.prime(l.ctx, l.decoder, node)
-
-	return view, err == nil
 }
 
 // reproducesAt reports whether a decode of v, a value below the root at
@@ -4289,10 +3920,7 @@ func (l *errorLocator) reproducesAt(v *decodewalk.Value) bool {
 		return false
 	}
 
-	view, ok := l.view(v.Node)
-	if !ok {
-		return false
-	}
+	view := v.Node
 
 	// A field whose entry a merge key brings in reads the value of that
 	// entry, which the alias stands for.

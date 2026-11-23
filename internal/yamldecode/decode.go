@@ -54,6 +54,196 @@ type Decoder struct {
 	bounded              bool
 	stopped              error
 	origins              format.Origins
+	resolveAlias         func(*ast.AliasNode) (ast.Node, bool)
+	// openNulls counts the aliases that read as null because the decoder
+	// was reading their anchor.
+	openNulls int
+}
+
+// keeps reports whether the decoder keeps the value of an anchor that it
+// read since openNulls held mark. With a resolver from [ResolveAlias], it
+// keeps the value only when no alias in the read read as null because its
+// anchor was open. Such a null depends on the anchors open around the read,
+// so a read from another place can give another value. Without a resolver,
+// the decoder keeps the value of each anchor that it reads, as go-yaml
+// does.
+func (d *Decoder) keeps(mark int) bool {
+	return d.resolveAlias == nil || d.openNulls == mark
+}
+
+// anchorKey returns the key under which the decoder holds the anchor n: its
+// name, or with a resolver from [ResolveAlias] the identity of its value.
+func (d *Decoder) anchorKey(n *ast.AnchorNode) string {
+	if d.resolveAlias == nil {
+		return n.Name.GetToken().Value
+	}
+	return fmt.Sprintf("%p", n.Value)
+}
+
+// aliasKey returns the key of the anchor that alias reads. Without a
+// resolver, that is the name of the alias, the value of its name token. The
+// text of the name node also holds a comment that follows the name. With a
+// resolver, it is the key of the node that the resolver binds the alias to,
+// and aliasKey registers that node. A decode of a node below the document
+// thus does not need an earlier pass over the anchors outside the node.
+func (d *Decoder) aliasKey(alias *ast.AliasNode) string {
+	if d.resolveAlias == nil {
+		return alias.Value.GetToken().Value
+	}
+	node, ok := d.resolveAlias(alias)
+	if !ok || node == nil {
+		return "\x00unbound"
+	}
+	key := fmt.Sprintf("%p", node)
+	if _, exists := d.anchorNodeMap[key]; !exists {
+		d.anchorNodeMap[key] = node
+	}
+	return key
+}
+
+// enterMerge returns ctx for the reads of the entries that node, the value
+// of a merge key or an element of a sequence under a merge key, brings in.
+// For an alias, the decoder reads those entries inside the anchor of the
+// alias. A merge of an alias inside the anchor that it reads closes a loop.
+// Such a merge fails with a MissingAnchorError, as it does where the decoder
+// reads the anchor itself.
+func (d *Decoder) enterMerge(ctx context.Context, node ast.Node) (context.Context, error) {
+	for {
+		switch n := node.(type) {
+		case *ast.TagNode:
+			node = n.Value
+			continue
+		case *ast.AnchorNode:
+			node = n.Value
+			continue
+		}
+		break
+	}
+	open := getAnchorMap(ctx)
+	if alias, ok := node.(*ast.AliasNode); ok {
+		key := d.aliasKey(alias)
+		if _, ok := open[key]; ok {
+			return ctx, &MissingAnchorError{Alias: alias}
+		}
+		return withAnchor(ctx, key), nil
+	}
+	return ctx, nil
+}
+
+// mapEntries returns an iterator over the entries that a read of node goes
+// through, in order, as getMapNode returns them. Under a merge key, a
+// sequence brings in the entries of each of its elements, and the decoder
+// reads the entries of an element inside the anchor of that element alone.
+// An alias under a merge key that reads a sequence brings in the elements
+// of that sequence the same way. So an alias inside the anchor that it
+// reads reads as null in a sequence too, and a merge of it fails. The
+// decoder reads the entries of any other node with ctx.
+func (d *Decoder) mapEntries(ctx context.Context, node ast.Node, isMerge bool) (*entryIter, error) {
+	if isMerge {
+		d.stepIn()
+		defer d.stepOut()
+		if d.isExceededMaxDepth() {
+			return nil, ErrExceededMaxDepth
+		}
+		switch n := node.(type) {
+		case *ast.TagNode:
+			return d.mapEntries(ctx, n.Value, isMerge)
+		case *ast.AnchorNode:
+			d.anchorNodeMap[d.anchorKey(n)] = n.Value
+			return d.mapEntries(ctx, n.Value, isMerge)
+		case *ast.AliasNode:
+			// The caller opened the anchor of the alias. A sequence that
+			// the alias reads brings in its elements as a sequence under
+			// the merge key does.
+			anchor := d.anchorNodeMap[d.aliasKey(n)]
+			if anchor == nil {
+				return nil, &MissingAnchorError{Alias: n}
+			}
+			content := anchor
+		unwrap:
+			for {
+				switch c := content.(type) {
+				case *ast.TagNode:
+					content = c.Value
+				case *ast.AnchorNode:
+					content = c.Value
+				default:
+					break unwrap
+				}
+			}
+			if _, ok := content.(*ast.SequenceNode); ok {
+				return d.mapEntries(ctx, anchor, isMerge)
+			}
+		case *ast.SequenceNode:
+			it := &entryIter{parts: make([]entryPart, len(n.Values))}
+			for i, value := range n.Values {
+				valueCtx, err := d.enterMerge(ctx, value)
+				if err != nil {
+					return nil, err
+				}
+				it.parts[i].ctx = valueCtx
+			}
+			for i, value := range n.Values {
+				mapNode, err := d.getMapNode(value, false)
+				if err != nil {
+					return nil, err
+				}
+				it.parts[i].node = mapNode
+			}
+			return it, nil
+		}
+	}
+	mapNode, err := d.getMapNode(node, isMerge)
+	if err != nil {
+		return nil, err
+	}
+	return &entryIter{parts: []entryPart{{ctx: ctx, node: mapNode}}}, nil
+}
+
+type ctxEntryKey struct{}
+
+// withEntryContexts returns ctx with ctxs, the context for the read of each
+// value node of a mapping that decodeStruct builds for an inline field.
+func withEntryContexts(ctx context.Context, ctxs map[ast.Node]context.Context) context.Context {
+	return context.WithValue(ctx, ctxEntryKey{}, ctxs)
+}
+
+// entryContext returns the context for the read of node, the value of an
+// entry: the one that withEntryContexts holds for node, or ctx.
+func entryContext(ctx context.Context, node ast.Node) context.Context {
+	ctxs, _ := ctx.Value(ctxEntryKey{}).(map[ast.Node]context.Context)
+	if c, ok := ctxs[node]; ok {
+		return c
+	}
+	return ctx
+}
+
+// entryPart is a mapping whose entries a read goes through, with the
+// context for the reads of those entries.
+type entryPart struct {
+	ctx  context.Context
+	node ast.MapNode
+}
+
+// entryIter iterates over the entries of its parts in order. Its ctx is the
+// context for the reads of the current entry.
+type entryIter struct {
+	*ast.MapNodeIter
+	ctx   context.Context
+	parts []entryPart
+}
+
+// Next advances the iterator to the next entry and reports whether there
+// is one.
+func (it *entryIter) Next() bool {
+	for it.MapNodeIter == nil || !it.MapNodeIter.Next() {
+		if len(it.parts) == 0 {
+			return false
+		}
+		it.ctx, it.MapNodeIter = it.parts[0].ctx, it.parts[0].node.MapRange()
+		it.parts = it.parts[1:]
+	}
+	return true
 }
 
 // MissingAnchorError is the error of an alias under a merge key, or at a
@@ -233,13 +423,16 @@ func (d *Decoder) setToMapValue(ctx context.Context, node ast.Node, m map[string
 	switch n := node.(type) {
 	case *ast.MappingValueNode:
 		if n.Key.IsMergeKey() {
-			value, err := d.getMapNode(n.Value, true)
+			ctx, err := d.enterMerge(ctx, n.Value)
 			if err != nil {
 				return err
 			}
-			iter := value.MapRange()
+			iter, err := d.mapEntries(ctx, n.Value, true)
+			if err != nil {
+				return err
+			}
 			for iter.Next() {
-				if err := d.setToMapValue(ctx, iter.KeyValue(), m); err != nil {
+				if err := d.setToMapValue(iter.ctx, iter.KeyValue(), m); err != nil {
 					return err
 				}
 			}
@@ -261,7 +454,7 @@ func (d *Decoder) setToMapValue(ctx context.Context, node ast.Node, m map[string
 			}
 		}
 	case *ast.AnchorNode:
-		anchorName := n.Name.GetToken().Value
+		anchorName := d.anchorKey(n)
 		d.anchorNodeMap[anchorName] = n.Value
 	}
 	return nil
@@ -278,13 +471,16 @@ func (d *Decoder) setToOrderedMapValue(ctx context.Context, node ast.Node, m *Ma
 	switch n := node.(type) {
 	case *ast.MappingValueNode:
 		if n.Key.IsMergeKey() {
-			value, err := d.getMapNode(n.Value, true)
+			ctx, err := d.enterMerge(ctx, n.Value)
 			if err != nil {
 				return err
 			}
-			iter := value.MapRange()
+			iter, err := d.mapEntries(ctx, n.Value, true)
+			if err != nil {
+				return err
+			}
 			for iter.Next() {
-				if err := d.setToOrderedMapValue(ctx, iter.KeyValue(), m); err != nil {
+				if err := d.setToOrderedMapValue(iter.ctx, iter.KeyValue(), m); err != nil {
 					return err
 				}
 			}
@@ -554,24 +750,26 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 			return d.nodeToValue(ctx, n.Value)
 		}
 	case *ast.AnchorNode:
-		anchorName := n.Name.GetToken().Value
+		anchorName := d.anchorKey(n)
 
 		// To handle the case where alias is processed recursively, the result of alias can be set to nil in advance.
 		d.anchorNodeMap[anchorName] = nil
+		mark := d.openNulls
 		anchorValue, err := d.nodeToValue(withAnchor(ctx, anchorName), n.Value)
 		if err != nil {
 			delete(d.anchorNodeMap, anchorName)
 			return nil, err
 		}
 		d.anchorNodeMap[anchorName] = n.Value
-		d.anchorValueMap[anchorName] = reflect.ValueOf(anchorValue)
+		if d.keeps(mark) {
+			d.anchorValueMap[anchorName] = reflect.ValueOf(anchorValue)
+		}
 		return anchorValue, nil
 	case *ast.AliasNode:
-		// The name is the value of its token. The text of the node also
-		// holds a comment that follows the name.
-		text := n.Value.GetToken().Value
+		text := d.aliasKey(n)
 		if _, exists := getAnchorMap(ctx)[text]; exists {
 			// self recursion.
+			d.openNulls++
 			return nil, nil
 		}
 		if v, exists := d.anchorValueMap[text]; exists {
@@ -581,26 +779,29 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 			return v.Interface(), nil
 		}
 		if node, exists := d.anchorNodeMap[text]; exists {
-			d.aliasDepth++
-			defer func() { d.aliasDepth-- }()
-			return d.nodeToValue(ctx, node)
+			// A resolver can bind an alias to an anchor that the decoder has
+			// not read.
+			return d.readAliasedAnchor(ctx, text, node)
 		}
-		return nil, errors.ErrSyntax(fmt.Sprintf("could not find alias %q", text), n.Value.GetToken())
+		return nil, errors.ErrSyntax(fmt.Sprintf("could not find alias %q", n.Value.GetToken().Value), n.Value.GetToken())
 	case *ast.LiteralNode:
 		return n.Value.GetValue(), nil
 	case *ast.MappingKeyNode:
 		return d.nodeToValue(ctx, n.Value)
 	case *ast.MappingValueNode:
 		if n.Key.IsMergeKey() {
-			value, err := d.getMapNode(n.Value, true)
+			ctx, err := d.enterMerge(ctx, n.Value)
 			if err != nil {
 				return nil, err
 			}
-			iter := value.MapRange()
+			iter, err := d.mapEntries(ctx, n.Value, true)
+			if err != nil {
+				return nil, err
+			}
 			if d.useOrderedMap {
 				m := MapSlice{}
 				for iter.Next() {
-					if err := d.setToOrderedMapValue(ctx, iter.KeyValue(), &m); err != nil {
+					if err := d.setToOrderedMapValue(iter.ctx, iter.KeyValue(), &m); err != nil {
 						return nil, err
 					}
 				}
@@ -608,7 +809,7 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 			}
 			m := make(map[string]any)
 			for iter.Next() {
-				if err := d.setToMapValue(ctx, iter.KeyValue(), m); err != nil {
+				if err := d.setToMapValue(iter.ctx, iter.KeyValue(), m); err != nil {
 					return nil, err
 				}
 			}
@@ -672,12 +873,11 @@ func (d *Decoder) getMapNode(node ast.Node, isMerge bool) (ast.MapNode, error) {
 	case ast.MapNode:
 		return n, nil
 	case *ast.AnchorNode:
-		anchorName := n.Name.GetToken().Value
+		anchorName := d.anchorKey(n)
 		d.anchorNodeMap[anchorName] = n.Value
 		return d.getMapNode(n.Value, isMerge)
 	case *ast.AliasNode:
-		aliasName := n.Value.GetToken().Value
-		node := d.anchorNodeMap[aliasName]
+		node := d.anchorNodeMap[d.aliasKey(n)]
 		if node == nil {
 			return nil, &MissingAnchorError{Alias: n}
 		}
@@ -719,8 +919,7 @@ func (d *Decoder) getArrayNode(node ast.Node) (ast.ArrayNode, error) {
 		return d.getArrayNode(anchor.Value)
 	}
 	if alias, ok := node.(*ast.AliasNode); ok {
-		aliasName := alias.Value.GetToken().Value
-		node := d.anchorNodeMap[aliasName]
+		node := d.anchorNodeMap[d.aliasKey(alias)]
 		if node == nil {
 			return nil, &MissingAnchorError{Alias: alias}
 		}
@@ -837,7 +1036,7 @@ func (d *Decoder) textBudget() *int {
 }
 
 func (d *Decoder) unmarshalableDocument(ctx context.Context, node ast.Node) ([]byte, error) {
-	doc := format.FormatNodeWithResolvedAlias(node, d.anchorNodeMap, getAnchorMap(ctx), d.textBudget(), &d.origins)
+	doc := format.FormatNodeWithResolvedAlias(node, d.anchorNodeMap, getAnchorMap(ctx), d.aliasKey, d.textBudget(), &d.origins)
 	if d.bounded && d.aliasBytesLeft < 0 {
 		return nil, ErrAliasBudget
 	}
@@ -845,7 +1044,7 @@ func (d *Decoder) unmarshalableDocument(ctx context.Context, node ast.Node) ([]b
 }
 
 func (d *Decoder) unmarshalableText(ctx context.Context, node ast.Node) ([]byte, bool) {
-	doc := format.FormatNodeWithResolvedAlias(node, d.anchorNodeMap, getAnchorMap(ctx), d.textBudget(), &d.origins)
+	doc := format.FormatNodeWithResolvedAlias(node, d.anchorNodeMap, getAnchorMap(ctx), d.aliasKey, d.textBudget(), &d.origins)
 	var v string
 	if err := Unmarshal([]byte(doc), &v); err != nil {
 		return nil, false
@@ -1051,11 +1250,14 @@ func (d *Decoder) decodeValue(ctx context.Context, dst reflect.Value, src ast.No
 
 	if src.Type() == ast.AnchorType {
 		anchor, _ := src.(*ast.AnchorNode)
-		anchorName := anchor.Name.GetToken().Value
+		anchorName := d.anchorKey(anchor)
+		mark := d.openNulls
 		if err := d.decodeValue(withAnchor(ctx, anchorName), dst, anchor.Value); err != nil {
 			return err
 		}
-		d.anchorValueMap[anchorName] = dst
+		if d.keeps(mark) {
+			d.anchorValueMap[anchorName] = dst
+		}
 		return nil
 	}
 	if d.canDecodeByUnmarshaler(dst) {
@@ -1070,13 +1272,17 @@ func (d *Decoder) decodeValue(ctx context.Context, dst reflect.Value, src ast.No
 		// An alias to a null is a null too.
 		content := src
 		if alias, ok := src.(*ast.AliasNode); ok {
-			if node := d.anchorNodeMap[alias.Value.GetToken().Value]; node != nil {
+			if node := d.anchorNodeMap[d.aliasKey(alias)]; node != nil {
 				content = node
 			}
 		}
 		if content.Type() == ast.NullType {
 			// set nil value to pointer
 			dst.Set(reflect.Zero(valueType))
+			return nil
+		}
+		if n, ok := pointedNode(valueType, content); ok {
+			dst.Set(n)
 			return nil
 		}
 		v := d.createDecodableValue(dst.Type())
@@ -1268,11 +1474,19 @@ func (d *Decoder) createDecodedNewValue(
 	ctx context.Context, typ reflect.Type, defaultVal reflect.Value, node ast.Node,
 ) (reflect.Value, error) {
 	if node.Type() == ast.AliasType {
-		aliasName := node.(*ast.AliasNode).Value.GetToken().Value
+		aliasName := d.aliasKey(node.(*ast.AliasNode))
 		if _, open := getAnchorMap(ctx)[aliasName]; open {
 			// An alias inside the anchor it names reads as null, as
 			// nodeToValue reads it.
+			d.openNulls++
 			return d.createDecodedNewValue(ctx, typ, defaultVal, ast.Null(token.New("null", "null", node.GetToken().Position)))
+		}
+		if anchor := d.anchorNodeMap[aliasName]; anchor != nil {
+			// A pointer to the type of the anchor's node points to the
+			// node itself, not to the value that the decoder keeps.
+			if n, ok := pointedNode(typ, anchor); ok {
+				return n, nil
+			}
 		}
 		value := d.anchorValueMap[aliasName]
 		if value.IsValid() {
@@ -1307,10 +1521,62 @@ func (d *Decoder) createDecodedNewValue(
 			return reflect.Value{}, err
 		}
 	}
+	if n, ok := pointedNode(typ, node); ok {
+		return n, nil
+	}
 	return d.castToAssignableValue(newValue, typ, node)
 }
 
-func (d *Decoder) keyToNodeMap(ctx context.Context, node ast.Node, ignoreMergeKey bool, getKeyOrValueNode func(*ast.MapNodeIter) ast.Node) (map[string]ast.Node, error) {
+// pointedNode returns node, or the value of the anchors and tags around
+// node, when typ is a pointer to the type of that node. A pointer to the
+// type of the node points to the node itself.
+func pointedNode(typ reflect.Type, node ast.Node) (reflect.Value, bool) {
+	for {
+		if reflect.TypeOf(node) == typ {
+			return reflect.ValueOf(node), true
+		}
+		switch n := node.(type) {
+		case *ast.AnchorNode:
+			node = n.Value
+		case *ast.TagNode:
+			node = n.Value
+		default:
+			return reflect.Value{}, false
+		}
+	}
+}
+
+// readAliasedAnchor reads node, the content of the anchor with the key key
+// that an alias reads, as nodeToValue reads the alias. The alias reads its
+// anchor, so an alias inside reads as null.
+//
+// With a resolver from [ResolveAlias], the key names one node. The decoder
+// keeps the value under the rule of [Decoder.keeps], as it keeps the value
+// of an anchor that it reads. Each later alias of the anchor takes the
+// value and does not read the anchor again. A decode of a node below the
+// document thus reads each anchor outside the node once, as it reads each
+// anchor inside the node. Without a resolver, the key is a name that a later
+// anchor can take, so the decoder keeps nothing.
+func (d *Decoder) readAliasedAnchor(ctx context.Context, key string, node ast.Node) (any, error) {
+	d.aliasDepth++
+	defer func() { d.aliasDepth-- }()
+	mark := d.openNulls
+	v, err := d.nodeToValue(withAnchor(ctx, key), node)
+	if err != nil {
+		return nil, err
+	}
+	if d.resolveAlias != nil && d.keeps(mark) {
+		d.anchorValueMap[key] = reflect.ValueOf(v)
+	}
+	return v, nil
+}
+
+// keyToNodeMap returns the key or the value node of each entry of node by
+// its key. When ctxs is not nil, it records there the context for the read
+// of each node that it returns. The decoder reads the entries that a merge
+// key brings in inside the anchor of the merge, and the entries of a
+// mapping built for an inline field as entryContext gives them.
+func (d *Decoder) keyToNodeMap(ctx context.Context, node ast.Node, ignoreMergeKey bool, getKeyOrValueNode func(*ast.MapNodeIter) ast.Node, ctxs map[ast.Node]context.Context) (map[string]ast.Node, error) {
 	d.stepIn()
 	defer d.stepOut()
 	if d.isExceededMaxDepth() {
@@ -1330,7 +1596,11 @@ func (d *Decoder) keyToNodeMap(ctx context.Context, node ast.Node, ignoreMergeKe
 			if ignoreMergeKey {
 				continue
 			}
-			mergeMap, err := d.keyToNodeMap(ctx, mapIter.Value(), ignoreMergeKey, getKeyOrValueNode)
+			mergeCtx, err := d.enterMerge(ctx, mapIter.Value())
+			if err != nil {
+				return nil, err
+			}
+			mergeMap, err := d.keyToNodeMap(mergeCtx, mapIter.Value(), ignoreMergeKey, getKeyOrValueNode, ctxs)
 			if err != nil {
 				return nil, err
 			}
@@ -1353,25 +1623,31 @@ func (d *Decoder) keyToNodeMap(ctx context.Context, node ast.Node, ignoreMergeKe
 				return nil, err
 			}
 			keyToNodeMap[key] = getKeyOrValueNode(mapIter)
+			if ctxs != nil {
+				ctxs[keyToNodeMap[key]] = entryContext(ctx, keyToNodeMap[key])
+			}
 		}
 	}
 	return keyToNodeMap, nil
 }
 
 func (d *Decoder) keyToKeyNodeMap(ctx context.Context, node ast.Node, ignoreMergeKey bool) (map[string]ast.Node, error) {
-	m, err := d.keyToNodeMap(ctx, node, ignoreMergeKey, func(nodeMap *ast.MapNodeIter) ast.Node { return nodeMap.Key() })
+	m, err := d.keyToNodeMap(ctx, node, ignoreMergeKey, func(nodeMap *ast.MapNodeIter) ast.Node { return nodeMap.Key() }, nil)
 	if err != nil {
 		return nil, err
 	}
 	return m, nil
 }
 
-func (d *Decoder) keyToValueNodeMap(ctx context.Context, node ast.Node, ignoreMergeKey bool) (map[string]ast.Node, error) {
-	m, err := d.keyToNodeMap(ctx, node, ignoreMergeKey, func(nodeMap *ast.MapNodeIter) ast.Node { return nodeMap.Value() })
+// keyToValueNodeMap also returns the context for the read of each value
+// node, as keyToNodeMap records it.
+func (d *Decoder) keyToValueNodeMap(ctx context.Context, node ast.Node, ignoreMergeKey bool) (map[string]ast.Node, map[ast.Node]context.Context, error) {
+	ctxs := map[ast.Node]context.Context{}
+	m, err := d.keyToNodeMap(ctx, node, ignoreMergeKey, func(nodeMap *ast.MapNodeIter) ast.Node { return nodeMap.Value() }, ctxs)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return m, nil
+	return m, ctxs, nil
 }
 
 func (d *Decoder) setDefaultValueIfConflicted(v reflect.Value, fieldMap StructFieldMap) error {
@@ -1490,7 +1766,7 @@ func (d *Decoder) getMergeAliasName(src ast.Node) string {
 		key := mapIter.Key()
 		value := mapIter.Value()
 		if key.IsMergeKey() && value.Type() == ast.AliasType {
-			return value.(*ast.AliasNode).Value.GetToken().Value
+			return d.aliasKey(value.(*ast.AliasNode))
 		}
 	}
 	return ""
@@ -1523,7 +1799,7 @@ func (d *Decoder) decodeStruct(ctx context.Context, dst reflect.Value, src ast.N
 		return err
 	}
 	ignoreMergeKey := structFieldMap.hasMergeProperty()
-	keyToNodeMap, err := d.keyToValueNodeMap(ctx, src, ignoreMergeKey)
+	keyToNodeMap, valueCtxs, err := d.keyToValueNodeMap(ctx, src, ignoreMergeKey)
 	if err != nil {
 		return err
 	}
@@ -1549,6 +1825,18 @@ func (d *Decoder) decodeStruct(ctx context.Context, dst reflect.Value, src ast.N
 			if structField.IsAutoAlias {
 				if aliasName != "" {
 					newFieldValue := d.anchorValueMap[aliasName]
+					if node := d.anchorNodeMap[aliasName]; !newFieldValue.IsValid() && node != nil && d.resolveAlias != nil {
+						// The resolver can bind the alias to an anchor that
+						// the decoder has not read, such as one outside the
+						// node of the decode. The field takes the anchor as
+						// nodeToValue reads it, as it does after the decoder
+						// reads the anchor itself.
+						v, err := d.readAliasedAnchor(ctx, aliasName, node)
+						if err != nil {
+							return err
+						}
+						newFieldValue = reflect.ValueOf(v)
+					}
 					if newFieldValue.IsValid() {
 						value, err := d.castToAssignableValue(newFieldValue, fieldValue.Type(), d.anchorNodeMap[aliasName])
 						if err != nil {
@@ -1572,7 +1860,7 @@ func (d *Decoder) decodeStruct(ctx context.Context, dst reflect.Value, src ast.N
 				key := &ast.StringNode{BaseNode: &ast.BaseNode{}, Value: k}
 				mapNode.Values = append(mapNode.Values, ast.MappingValue(nil, key, v))
 			}
-			newFieldValue, err := d.createDecodedNewValue(ctx, fieldValue.Type(), fieldValue, mapNode)
+			newFieldValue, err := d.createDecodedNewValue(withEntryContexts(ctx, valueCtxs), fieldValue.Type(), fieldValue, mapNode)
 			if d.disallowUnknownField {
 				if err := d.deleteStructKeys(fieldValue.Type(), unknownFields); err != nil {
 					return err
@@ -1613,7 +1901,11 @@ func (d *Decoder) decodeStruct(ctx context.Context, dst reflect.Value, src ast.N
 			fieldValue.Set(reflect.Zero(fieldValue.Type()))
 			continue
 		}
-		newFieldValue, err := d.createDecodedNewValue(ctx, fieldValue.Type(), fieldValue, v)
+		fieldCtx := ctx
+		if c, ok := valueCtxs[v]; ok {
+			fieldCtx = c
+		}
+		newFieldValue, err := d.createDecodedNewValue(fieldCtx, fieldValue.Type(), fieldValue, v)
 		if err != nil {
 			if foundErr != nil {
 				continue
@@ -1811,18 +2103,22 @@ func (d *Decoder) decodeMapItem(ctx context.Context, dst *MapItem, src ast.Node)
 		return ErrExceededMaxDepth
 	}
 
-	mapNode, err := d.getMapNode(src, isMerge(ctx))
+	mapIter, err := d.mapEntries(ctx, src, isMerge(ctx))
 	if err != nil {
 		return err
 	}
-	mapIter := mapNode.MapRange()
 	if !mapIter.Next() {
 		return nil
 	}
+	ctx = mapIter.ctx
 	key := mapIter.Key()
 	value := mapIter.Value()
 	if key.IsMergeKey() {
-		if err := d.decodeMapItem(withMerge(ctx), dst, value); err != nil {
+		mergeCtx, err := d.enterMerge(withMerge(ctx), value)
+		if err != nil {
+			return err
+		}
+		if err := d.decodeMapItem(mergeCtx, dst, value); err != nil {
 			return err
 		}
 		return nil
@@ -1860,19 +2156,23 @@ func (d *Decoder) decodeMapSlice(ctx context.Context, dst *MapSlice, src ast.Nod
 		return ErrExceededMaxDepth
 	}
 
-	mapNode, err := d.getMapNode(src, isMerge(ctx))
+	mapIter, err := d.mapEntries(ctx, src, isMerge(ctx))
 	if err != nil {
 		return err
 	}
 	mapSlice := MapSlice{}
-	mapIter := mapNode.MapRange()
 	keyMap := map[string]struct{}{}
 	for mapIter.Next() {
+		ctx := mapIter.ctx
 		key := mapIter.Key()
 		value := mapIter.Value()
 		if key.IsMergeKey() {
+			mergeCtx, err := d.enterMerge(withMerge(ctx), value)
+			if err != nil {
+				return err
+			}
 			var m MapSlice
-			if err := d.decodeMapSlice(withMerge(ctx), &m, value); err != nil {
+			if err := d.decodeMapSlice(mergeCtx, &m, value); err != nil {
 				return err
 			}
 			for _, v := range m {
@@ -1907,7 +2207,7 @@ func (d *Decoder) decodeMap(ctx context.Context, dst reflect.Value, src ast.Node
 		return ErrExceededMaxDepth
 	}
 
-	mapNode, err := d.getMapNode(src, isMerge(ctx))
+	mapIter, err := d.mapEntries(ctx, src, isMerge(ctx))
 	if err != nil {
 		return err
 	}
@@ -1915,14 +2215,18 @@ func (d *Decoder) decodeMap(ctx context.Context, dst reflect.Value, src ast.Node
 	mapValue := reflect.MakeMap(mapType)
 	keyType := mapValue.Type().Key()
 	valueType := mapValue.Type().Elem()
-	mapIter := mapNode.MapRange()
 	keyMap := map[string]struct{}{}
 	var foundErr error
 	for mapIter.Next() {
 		key := mapIter.Key()
 		value := mapIter.Value()
+		ctx := entryContext(mapIter.ctx, value)
 		if key.IsMergeKey() {
-			if err := d.decodeMap(withMerge(ctx), dst, value); err != nil {
+			mergeCtx, err := d.enterMerge(withMerge(ctx), value)
+			if err != nil {
+				return err
+			}
+			if err := d.decodeMap(mergeCtx, dst, value); err != nil {
 				return err
 			}
 			iter := dst.MapRange()

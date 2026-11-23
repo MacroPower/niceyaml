@@ -76,11 +76,7 @@ func init() {
 		node, _ := n.(*Node) //nolint:errcheck // The hook takes a *Node.
 		d := node.doc
 
-		// A tree changes its document only where decodetree.Changes reports
-		// that it can, so a document without such a change does not build
-		// the tree.
-		return decodetree.Changes(d.state.Facts(), len(d.node.source.references) > 0) &&
-			d.tree().Changed()
+		return decodetree.Changes(d.state.Facts(), len(d.node.source.references) > 0)
 	}
 	hook.AtData = func(shown paths.Path, names []string, key bool) any {
 		d := newDataNames(names, key)

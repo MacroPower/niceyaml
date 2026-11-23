@@ -58,12 +58,10 @@ import (
 //
 // A loop counts when it closes through any anchor that the function lists
 // for a name. With `&o {x: &x [*y]}`, `&y [*x]`, and a last `&x 1`, the
-// loop closes only through the anchor x inside o. A decode that reads o
-// registers that anchor, and its read of an alias *y might then not end.
-// A decode that does not read o reads `&x 1` for the name and ends. The
-// weights depend on the reference documents alone, so they hold one
-// verdict for both decodes. The document of each decode is past the
-// limit.
+// loop closes only through the anchor x inside o. An alias of x reads
+// `&x 1`, so a decode ends. The weights take the largest measure among the
+// anchors that the function lists, so a document whose aliases reach the
+// name is past the limit all the same.
 //
 // The weights depend on the reference documents alone, so every document
 // that reads those documents shares them, and a ReferenceWeights weighs
@@ -103,9 +101,8 @@ type ReferenceWeights struct {
 // documents whose anchors the function anchors finds. The function
 // returns the anchors that an alias of name can read, or nil when the
 // reference documents do not define the name. The first of them is the
-// anchor that the decoder reads before it decodes a document whose aliases
-// reach the name. The function must return the same anchors for a name
-// at every call.
+// anchor that an alias of the name reads. The function must return the
+// same anchors for a name at every call.
 func NewReferenceWeights(anchors func(name string) []*ast.AnchorNode) *ReferenceWeights {
 	return &ReferenceWeights{
 		anchors: anchors,

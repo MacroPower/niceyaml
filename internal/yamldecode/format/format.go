@@ -12,6 +12,10 @@ import (
 // n. An alias to one of them, or to an anchor that the formatter is writing
 // out, reads as null, as the decoder reads it.
 //
+// The function key returns the key of anchorNodeMap and of open for the
+// anchor that an alias reads. An alias that key binds to a null node that
+// holds the token of the alias reads as null.
+//
 // The count budget, when it is not nil, holds the bytes that the formatter
 // may still write for aliases. The formatter takes the text of each alias
 // off the count, and writes no further alias once the count is below zero.
@@ -19,13 +23,14 @@ import (
 // The formatter reads every token of the parse of n once and keeps what it
 // read in origins, when origins is not nil. A caller that formats many nodes
 // of one parse hands in the same Origins each time.
-func FormatNodeWithResolvedAlias(n ast.Node, anchorNodeMap map[string]ast.Node, open map[string]struct{}, budget *int, origins *Origins) string {
+func FormatNodeWithResolvedAlias(n ast.Node, anchorNodeMap map[string]ast.Node, open map[string]struct{}, key func(*ast.AliasNode) string, budget *int, origins *Origins) string {
 	tk := getFirstToken(n)
 	if tk == nil {
 		return ""
 	}
 	formatter := origins.formatter(tk, hasComment(n))
 	formatter.anchorNodeMap = anchorNodeMap
+	formatter.aliasKey = key
 	formatter.budget = budget
 	formatter.expanding = make(map[string]bool, len(open))
 	for name := range open {
@@ -205,6 +210,7 @@ type Formatter struct {
 	tokenToOriginMap map[*token.Token]string
 	anchorNodeMap    map[string]ast.Node
 	expanding        map[string]bool
+	aliasKey         func(*ast.AliasNode) string
 	budget           *int
 }
 
@@ -451,8 +457,12 @@ func (f *Formatter) formatAnchor(n *ast.AnchorNode) string {
 
 func (f *Formatter) formatAlias(n *ast.AliasNode) string {
 	if f.anchorNodeMap != nil {
-		anchorName := n.Value.GetToken().Value
+		anchorName := f.aliasKey(n)
 		node := f.anchorNodeMap[anchorName]
+		if null, ok := node.(*ast.NullNode); ok && null.Token == n.Start {
+			org := f.origin(n.Start)
+			return org[:len(org)-len(strings.TrimLeft(org, " \t\r\n"))] + "null"
+		}
 		if node != nil && f.expanding[anchorName] {
 			org := f.origin(n.Start)
 			return org[:len(org)-len(strings.TrimLeft(org, " \t\r\n"))] + "null"

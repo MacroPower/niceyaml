@@ -26,10 +26,6 @@ type Document struct {
 	Positioned token.Tokens
 	// Span holds the lines the document covers.
 	Span position.Span
-	// FileIndex is the index of Root in the Docs of the file. It might
-	// differ from the index of the document, because preamble nodes fold
-	// into documents.
-	FileIndex int
 	// Preamble is the number of tokens at the start of Tokens before the
 	// content.
 	Preamble int
@@ -100,7 +96,7 @@ func foldPreambles(
 
 		docs = append(
 			docs,
-			&Document{Root: node, FileIndex: i, Tokens: slices.Concat(pending, groups[i]), Failure: failure},
+			&Document{Root: node, Tokens: slices.Concat(pending, groups[i]), Failure: failure},
 		)
 		pending = nil
 	}
@@ -111,7 +107,7 @@ func foldPreambles(
 		last.Tokens = append(last.Tokens, pending...)
 
 	case len(docs) == 0 && len(nodes) > 0:
-		docs = append(docs, &Document{Root: nodes[0], FileIndex: 0, Tokens: pending, Failure: -1})
+		docs = append(docs, &Document{Root: nodes[0], Tokens: pending, Failure: -1})
 	}
 
 	return docs

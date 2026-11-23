@@ -8,6 +8,8 @@ import (
 	"context"
 	"io"
 	"reflect"
+
+	"github.com/goccy/go-yaml/ast"
 )
 
 // DecodeOption functional option type for Decoder
@@ -151,6 +153,29 @@ func CommentToMap(cm CommentMap) DecodeOption {
 func AliasBudget(nodes, textBytes int) DecodeOption {
 	return func(d *Decoder) error {
 		d.bounded, d.aliasNodesLeft, d.aliasBytesLeft = true, nodes, textBytes
+		return nil
+	}
+}
+
+// ResolveAlias has the decoder ask resolve for the node that each alias
+// reads, in place of the last anchor of the alias's name that the decoder
+// read. The function returns the value of the anchor that the alias reads,
+// or false for an alias without one. An alias that resolve binds to a null
+// node that holds the token of the alias reads as null, in a target and in
+// the text that the decoder hands an unmarshaler.
+//
+// The decoder then holds each anchor by its value node and not by its name.
+// So two anchors of one name stay apart, and the decoder reads an anchor
+// outside the node that it decodes without an earlier pass over that
+// anchor. It keeps the value of an anchor that an alias reads into an any
+// value, as it keeps the value of an anchor that it reads. Each later alias
+// of the anchor takes that value. The decoder does not keep the value
+// of a read in which an alias inside its open anchor read as null, because
+// that null depends on where the read starts. An inline field with the alias
+// option reads the anchor of its merge key in the same way.
+func ResolveAlias(resolve func(alias *ast.AliasNode) (ast.Node, bool)) DecodeOption {
+	return func(d *Decoder) error {
+		d.resolveAlias = resolve
 		return nil
 	}
 }

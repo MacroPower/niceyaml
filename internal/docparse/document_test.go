@@ -19,8 +19,10 @@ func TestResult_Documents(t *testing.T) {
 
 	type doc struct {
 		// The text of the tokens of the document.
-		text      string
-		span      position.Span
+		text string
+		span position.Span
+		// The index of the root of the document in the Docs of the file,
+		// which preamble nodes that fold into documents can shift.
 		fileIndex int
 		preamble  int
 		failure   int
@@ -111,10 +113,9 @@ func TestResult_Documents(t *testing.T) {
 
 				assert.Equal(t, want.text, yamltest.DumpTokenOrigins(d.Tokens), "text of document %d", i)
 				assert.Equal(t, want.span, d.Span, "span of document %d", i)
-				assert.Equal(t, want.fileIndex, d.FileIndex, "file index of document %d", i)
 				assert.Equal(t, want.preamble, d.Preamble, "preamble of document %d", i)
 				assert.Equal(t, want.failure, d.Failure, "failure of document %d", i)
-				assert.Same(t, r.File.Docs[d.FileIndex], d.Root, "root of document %d", i)
+				assert.Same(t, r.File.Docs[want.fileIndex], d.Root, "root of document %d", i)
 				assert.Len(t, d.Positioned, len(d.Tokens), "every token of document %d has a position", i)
 			}
 		})

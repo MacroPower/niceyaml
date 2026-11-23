@@ -1,0 +1,59 @@
+--- a/decode.go
++++ b/decode.go
+@@ -1281,6 +1281,10 @@
+ 			dst.Set(reflect.Zero(valueType))
+ 			return nil
+ 		}
++		if n, ok := pointedNode(valueType, content); ok {
++			dst.Set(n)
++			return nil
++		}
+ 		v := d.createDecodableValue(dst.Type())
+ 		if v.Kind() == reflect.Ptr {
+ 			srcValue, err := d.nodeToValue(ctx, src)
+@@ -1477,6 +1481,13 @@
+ 			d.openNulls++
+ 			return d.createDecodedNewValue(ctx, typ, defaultVal, ast.Null(token.New("null", "null", node.GetToken().Position)))
+ 		}
++		if anchor := d.anchorNodeMap[aliasName]; anchor != nil {
++			// A pointer to the type of the anchor's node points to the
++			// node itself, not to the value that the decoder keeps.
++			if n, ok := pointedNode(typ, anchor); ok {
++				return n, nil
++			}
++		}
+ 		value := d.anchorValueMap[aliasName]
+ 		if value.IsValid() {
+ 			v, err := d.castToAssignableValue(value, typ, node)
+@@ -1510,9 +1521,31 @@
+ 			return reflect.Value{}, err
+ 		}
+ 	}
++	if n, ok := pointedNode(typ, node); ok {
++		return n, nil
++	}
+ 	return d.castToAssignableValue(newValue, typ, node)
+ }
+ 
++// pointedNode returns node, or the value of the anchors and tags around
++// node, when typ is a pointer to the type of that node. A pointer to the
++// type of the node points to the node itself.
++func pointedNode(typ reflect.Type, node ast.Node) (reflect.Value, bool) {
++	for {
++		if reflect.TypeOf(node) == typ {
++			return reflect.ValueOf(node), true
++		}
++		switch n := node.(type) {
++		case *ast.AnchorNode:
++			node = n.Value
++		case *ast.TagNode:
++			node = n.Value
++		default:
++			return reflect.Value{}, false
++		}
++	}
++}
++
+ // readAliasedAnchor reads node, the content of the anchor with the key key
+ // that an alias reads, as nodeToValue reads the alias. The alias reads its
+ // anchor, so an alias inside reads as null.

@@ -295,8 +295,8 @@ func (d *Doc) decodeProblem(ctx context.Context) (any, error) {
 // yaml.Unmarshal decodes the text, reads other values than read, the decode
 // of the current text. That decode binds each alias as the resolver binds
 // it, and go-yaml's decoder binds some aliases of reused anchor names
-// otherwise. The two read one tree alike unless the decode reads a tree
-// that differs from the text, as [hook.DecodeChanges] tells, so only such a
+// otherwise. The two read a text alike unless go-yaml's own binding by
+// name can read it otherwise, as [hook.DecodeChanges] tells, so only such a
 // text takes the decode alone. A text that the decoder alone refuses does
 // not count. Other values count only when the decoder alone reads start as
 // the decode reads it, as [Doc.readsAlike] tells. Where the two read start

@@ -358,8 +358,9 @@ func TestReferenceWeights(t *testing.T) {
 			want:  "1:5: " + ratio,
 		},
 		"anchor inside another anchor before the last of its name": {
-			// A decode that reads o registers the inner anchor again, so
-			// an alias can read it, and the count takes the larger.
+			// An alias of d reads the last anchor of the name, but the
+			// count weighs each anchor of the name inside an anchor that a
+			// decode reads, so it takes the larger.
 			refs:  []string{"o: &o {" + strings.TrimSuffix(wide, "\n") + "}\ne: &d x\n"},
 			input: "v: " + yamltest.FlowSequence("*d", 500) + "\n",
 			want:  "1:5: " + ratio,
@@ -451,10 +452,10 @@ func TestReferenceWeights(t *testing.T) {
 			want: "1:4: " + ratio,
 		},
 		"loop of names through an anchor inside another anchor": {
-			// A decode that reads o registers the anchor x inside it, and
-			// can then follow the loop from y. The count cannot tell
-			// whether a decode reads o, so every document that reaches the
-			// loop is past the limit.
+			// The count weighs the anchor x inside o as an anchor that an
+			// alias of x can read, and it follows the loop from y through
+			// that anchor. The count cannot tell whether a decode reads o,
+			// so every document that reaches the loop is past the limit.
 			refs:  []string{hiddenLoop},
 			input: "v: *y\n",
 			want:  "1:4: " + ratio,
@@ -682,8 +683,10 @@ func TestReferenceWeights(t *testing.T) {
 			oneFile: true,
 		},
 		"text of an alias to a deeper anchor inside another before the last of its name": {
-			// A decode that reads o registers the anchor x inside it, so
-			// the depth limit bounds the deeper of the anchors x.
+			// An alias of x reads the last anchor of the name, but the
+			// count weighs each anchor of the name inside an anchor that a
+			// decode reads, so the depth limit bounds the deeper of the
+			// anchors x.
 			refs:  []string{"o: &o {x: &x " + deep + "}\nx: &x 1\n"},
 			input: "v: *x\n",
 			opts:  []niceyaml.SourceOption{niceyaml.WithDepthLimit(5)},

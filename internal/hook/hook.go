@@ -141,11 +141,12 @@ var (
 	// *niceyaml.PanicError.
 	OwnDecode func(ctx context.Context, n any, text string) (any, error)
 
-	// DecodeChanges reports whether a decode of the document of n, a
-	// *niceyaml.Node, reads a tree that differs from the document, as for a
-	// document that gives two anchors one name. The decode reads any other
-	// document from its own tree. Go-yaml's comment-free parse of the text,
-	// which yaml.Unmarshal reads, can still read such a document apart.
+	// DecodeChanges reports whether go-yaml's decoder alone can read the
+	// document of n, a *niceyaml.Node, otherwise than a decode of n. That
+	// decoder binds each alias by its name, so it can read a document that
+	// gives two anchors one name otherwise. Go-yaml's comment-free parse of
+	// the text, which yaml.Unmarshal reads, can still read any other
+	// document apart.
 	DecodeChanges func(n any) bool
 
 	// SitePath returns the path of the node of the document of n, a

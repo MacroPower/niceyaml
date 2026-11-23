@@ -10,31 +10,28 @@
 // An alias in a key reads the anchor that
 // [go.jacobcolvin.com/niceyaml/paths.Resolver] binds it to. The decode of
 // niceyaml reads each alias that way, through the decode tree of the
-// document. That tree gives each anchor that shares its name a name of its
-// own. An alias inside the value of the anchor that it reads reads null. The
-// binding of an alias does not depend on where a decode reads the key. So a
-// key that a `<<` merge key brings in reads the anchors that it reads at its
-// own place. The decoder of go-yaml binds some reused anchor names
-// otherwise, as the documentation of the paths package describes. In
-// "b: &b {*b : 1}" and "m: {<<: *b}", niceyaml names the key of m "null",
-// and go-yaml names it "map[null:1]".
+// document. An alias inside the value of the anchor that it reads reads
+// null. The binding of an alias does not depend on where a decode reads
+// the key. So a key that a `<<` merge key brings in reads the anchors that
+// it reads at its own place. The decoder of go-yaml binds some reused
+// anchor names otherwise, as the documentation of the paths package
+// describes. In "b: &b {*b : 1}" and "m: {<<: *b}", niceyaml names the key
+// of m "null", and go-yaml names it "map[null:1]".
 //
-// A [Keys] hands each key that holds an alias to the go-yaml decoder in
-// the form that niceyaml's decode reads it, after the anchors that the
-// decode reads before the key. A [Viewer] gives that form and those
-// anchors. A key of a reference document, which a `<<` merge key brings
-// in, reads the anchors of the reference documents alone, as the decode
-// reads the anchor that holds it. A key that a program writes from decoded
-// values holds no alias of the document, and [Keys.KeyOf] names it. A
-// panic of the decoder on a key makes the key one that does not decode,
-// and [Keys.Panic] gives that panic.
+// A [Keys] has the go-yaml decoder ask a [Resolver] for the node that each
+// alias of a key reads, as niceyaml's decode does. A key of a reference
+// document, which a `<<` merge key brings in, reads the anchors of the
+// reference documents alone, as the decode reads the anchor that holds it.
+// A key that a program writes from decoded values holds no alias of the
+// document, and [Keys.KeyOf] names it. A panic of the decoder on a key
+// makes the key one that does not decode, and [Keys.Panic] gives that
+// panic.
 package mapkey
 
 import (
 	"bytes"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/goccy/go-yaml/ast"
@@ -44,20 +41,10 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/yamldecode"
 )
 
-// Viewer returns node, a node that a decode of a document reads, as
-// niceyaml's decode of the document reads it, with the anchors that the
-// decoder reads before node, in order. Those are the anchors of the
-// reference documents first and then the anchors of the document that the
-// aliases of node need. Viewer reports false for a node outside the
-// document, such as a node of a reference document, and returns no
-// anchors for it.
-type Viewer func(node ast.Node) (ast.Node, []ast.Node, bool)
-
-// Primer returns the anchors of the reference documents that a decoder
-// reads, in order, before it decodes a node whose aliases read names, as
-// the Source of the document primes a decode. It returns nil when the
-// document does not read reference documents.
-type Primer func(names []string) []ast.Node
+// Resolver returns the node that alias reads, as
+// [yamldecode.ResolveAlias] takes it. It reports false for an alias that
+// does not read a node.
+type Resolver func(alias *ast.AliasNode) (ast.Node, bool)
 
 // Keys names the keys of one parse of a document. It keeps the decode of
 // each key that it reads, so a parse decodes each key once. A Keys is not
@@ -65,11 +52,11 @@ type Primer func(names []string) []ast.Node
 //
 // Create instances with [NewKeys].
 type Keys struct {
-	// The body of the document, the view of its nodes, and the reference
-	// anchors of its Source.
-	body ast.Node
-	view Viewer
-	refs Primer
+	// The body of the document, the resolver of its aliases, and the
+	// resolver of the aliases to the reference documents of its Source.
+	body    ast.Node
+	resolve Resolver
+	refs    Resolver
 	// The decodes of the scalar keys that hold no alias, which [Keys.Share]
 	// can give other Keys too.
 	plain *Plain
@@ -163,17 +150,18 @@ func decoded(k string, err error) result {
 }
 
 // NewKeys creates a new [*Keys] for body, the body of a document. The
-// argument view gives the nodes of the document as niceyaml's decode reads
-// them, and refs gives the anchors of the reference documents. With a nil
-// view, a key that holds an alias does not decode. A nil refs reads no
-// reference documents.
-func NewKeys(body ast.Node, view Viewer, refs Primer) *Keys {
+// argument resolve binds the aliases that a decode of the document reads,
+// as niceyaml's decode binds them. The argument refs binds an alias by its
+// name to an anchor of the reference documents. With a nil resolve, a key
+// that holds an alias does not decode. A nil refs does not read any
+// reference document.
+func NewKeys(body ast.Node, resolve, refs Resolver) *Keys {
 	return &Keys{
-		body:  body,
-		view:  view,
-		refs:  refs,
-		plain: NewPlain(),
-		nodes: make(map[ast.Node]result),
+		body:    body,
+		resolve: resolve,
+		refs:    refs,
+		plain:   NewPlain(),
+		nodes:   make(map[ast.Node]result),
 	}
 }
 
@@ -203,9 +191,8 @@ func (r *Keys) Body() ast.Node {
 // Key returns the key that a decode into a map gives an entry whose key
 // node is key, a node that a decode of the document reads. That node can
 // lie in a reference document, whose aliases read the anchors of the
-// reference documents alone, as [Keys.KeyOf] reads them. Key reports false
-// for a key that does not decode, such as an alias that does not find an
-// anchor.
+// reference documents alone. Key reports false for a key that does not
+// decode, such as an alias that does not find an anchor.
 func (r *Keys) Key(key ast.Node) (string, bool) {
 	got := r.key(key)
 	r.panic = got.panic
@@ -227,7 +214,7 @@ func (r *Keys) key(key ast.Node) result {
 		return got
 	}
 
-	got := r.viewedKey(key)
+	got := r.resolvedKey(key)
 	r.nodes[key] = got
 
 	return got
@@ -251,12 +238,7 @@ func (r *Keys) keyOf(node ast.Node) result {
 		return result{}
 	}
 
-	dec, err := r.outside(node)
-	if err != nil {
-		return decoded("", err)
-	}
-
-	return decoded(decodeKey(dec, node))
+	return decoded(decodeKey(r.outside(node), node))
 }
 
 // ValueOf returns what a decode into any reads for node, a node outside
@@ -265,38 +247,60 @@ func (r *Keys) keyOf(node ast.Node) result {
 // returns the error of a decode that fails, and a panic of the decoder
 // comes back as an [*astnode.PanicError].
 func (r *Keys) ValueOf(node ast.Node) (any, error) {
-	dec, err := r.outside(node)
-	if err != nil {
-		return nil, err
-	}
-
 	var v any
 
-	err = astnode.DecodeNode(dec, node, &v)
+	err := astnode.DecodeNode(r.outside(node), node, &v)
 
 	return v, err //nolint:wrapcheck // The caller names the node.
 }
 
-// outside returns a decoder for node, a node outside the document, that
-// holds the anchors of the reference documents that the aliases of node
-// read. An alias of an anchor inside node reads that anchor.
-func (r *Keys) outside(node ast.Node) (*yamldecode.Decoder, error) {
-	dec := yamldecode.NewDecoder(&bytes.Buffer{})
+// outside returns a decoder for node, a node outside the document. An
+// alias of the name of an anchor inside node reads the last such anchor
+// before the alias in the text. Any other alias reads the anchor of its
+// name in the reference documents.
+func (r *Keys) outside(node ast.Node) *yamldecode.Decoder {
 	if r.refs == nil {
-		return dec, nil
+		return yamldecode.NewDecoder(&bytes.Buffer{})
 	}
 
-	own := anchorNames(node)
+	own := map[string]bool{}
 
-	var names []string
+	for _, name := range anchorNames(node) {
+		own[name] = true
+	}
 
-	for _, name := range aliasNames(node) {
-		if !slices.Contains(own, name) {
-			names = append(names, name)
+	last := map[string]ast.Node{}
+	bound := map[*ast.AliasNode]ast.Node{}
+
+	astnode.Inspect(node, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.AnchorNode:
+			if name, ok := astnode.Name(n.Name); ok {
+				last[name] = n.Value
+			}
+
+		case *ast.AliasNode:
+			if name, ok := astnode.Name(n.Value); ok && last[name] != nil {
+				bound[n] = last[name]
+			}
 		}
+
+		return true
+	})
+
+	resolve := func(alias *ast.AliasNode) (ast.Node, bool) {
+		if value, ok := bound[alias]; ok {
+			return value, true
+		}
+
+		if name, ok := astnode.Name(alias.Value); ok && own[name] {
+			return nil, false
+		}
+
+		return r.refs(alias)
 	}
 
-	return dec, primed(dec, r.refs(names))
+	return yamldecode.NewDecoder(&bytes.Buffer{}, yamldecode.ResolveAlias(resolve))
 }
 
 // plainKey returns the key of key, a key without an alias, which reads no
@@ -321,42 +325,16 @@ func (r *Keys) plainKey(key ast.Node) result {
 	return got
 }
 
-// viewedKey decodes key, a key that holds an alias, as niceyaml's decode
-// reads it: the view of the key, after the anchors that the decode reads
-// before it.
-func (r *Keys) viewedKey(key ast.Node) result {
-	if r.view == nil {
+// resolvedKey decodes key, a key that holds an alias, as niceyaml's decode
+// reads it, with each alias bound by the resolver of r.
+func (r *Keys) resolvedKey(key ast.Node) result {
+	if r.resolve == nil {
 		return result{}
 	}
 
-	view, anchors, inside := r.view(key)
-	if !inside {
-		return r.keyOf(view)
-	}
+	dec := yamldecode.NewDecoder(&bytes.Buffer{}, yamldecode.ResolveAlias(r.resolve))
 
-	dec := yamldecode.NewDecoder(&bytes.Buffer{})
-
-	err := primed(dec, anchors)
-	if err != nil {
-		return decoded("", err)
-	}
-
-	return decoded(decodeKey(dec, view))
-}
-
-// primed decodes each of nodes with dec, in order, so that dec holds their
-// anchors. It returns the error of the first node that does not decode.
-func primed(dec *yamldecode.Decoder, nodes []ast.Node) error {
-	for _, n := range nodes {
-		var sink any
-
-		err := astnode.DecodeNode(dec, n, &sink)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return decoded(decodeKey(dec, key))
 }
 
 // StringOf returns the string that go-yaml's decoder reads from node into
@@ -480,24 +458,6 @@ func HoldsAlias(node ast.Node) bool {
 			return false
 		}
 	}
-}
-
-// aliasNames returns the names that the aliases under node read, each
-// once, in the order of the text.
-func aliasNames(node ast.Node) []string {
-	var names []string
-
-	astnode.Inspect(node, func(n ast.Node) bool {
-		if alias, ok := n.(*ast.AliasNode); ok {
-			if name, ok := astnode.Name(alias.Value); ok && !slices.Contains(names, name) {
-				names = append(names, name)
-			}
-		}
-
-		return true
-	})
-
-	return names
 }
 
 // anchorNames returns the names of the anchors under node.

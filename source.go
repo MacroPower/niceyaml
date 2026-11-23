@@ -20,8 +20,8 @@ import (
 
 	"go.jacobcolvin.com/niceyaml/escape"
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
+	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/bom"
-	"go.jacobcolvin.com/niceyaml/internal/decodetree"
 	"go.jacobcolvin.com/niceyaml/internal/decodewalk"
 	"go.jacobcolvin.com/niceyaml/internal/docparse"
 	"go.jacobcolvin.com/niceyaml/internal/filepaths"
@@ -82,9 +82,6 @@ type Source struct {
 	lines line.Lines
 	// The parse of the tokens, made on the first call that needs it.
 	parsed lazy[*parsedFile]
-	// The second parse of the tokens, for the decoder, as reparse
-	// describes.
-	decodeParse lazy[*docparse.Result]
 	// The index that maps a position to an offset in input, built on the
 	// first call of [Source.Offset].
 	offsets lazy[bom.Index]
@@ -96,13 +93,6 @@ type Source struct {
 	// The anchors a Source that reads this one through WithReferences
 	// finds in it, as exportedAnchors builds them.
 	exported lazy[*reftable.Table]
-	// The counts in brackets that the text of the Source spells. A new
-	// anchor name in a Source that reads this one must not spell any of
-	// them.
-	spellings lazy[*decodetree.Spellings]
-	// The spellings of the reference documents, as referenceSpellings
-	// collects them.
-	refSpellings lazy[[]*decodetree.Spellings]
 	// The keys of the merge sources of the documents that the lookups
 	// beside the `<<` merge keys of reference documents read, for every
 	// document. The lookups read each source once, whatever the number of
@@ -1169,6 +1159,19 @@ func (s *Source) referenceValue(name string) (ast.Node, bool) {
 	return anchor.Value, true
 }
 
+// referenceAlias returns the value of the anchor that alias reads in the
+// reference documents of the Source, the anchor of the name of alias, as
+// [Source.referenceValue] finds it. It reports false when alias does not
+// have a name or the reference documents do not define one.
+func (s *Source) referenceAlias(alias *ast.AliasNode) (ast.Node, bool) {
+	name, ok := astnode.Name(alias.Value)
+	if !ok {
+		return nil, false
+	}
+
+	return s.referenceValue(name)
+}
+
 // referenceName returns the name of the reference Source whose anchor of
 // name the reference documents of s define, as [Source.referenceValue]
 // finds it. A reference Source that reads the anchor through its own
@@ -1237,37 +1240,6 @@ func (s *Source) exportedAnchors() *reftable.Table {
 		}
 
 		return reftable.New(bodies, s.referenceAnchors())
-	})
-}
-
-// referenceSpellings returns the [decodetree.Spellings] of the reference
-// documents, those of each reference Source included, each once.
-func (s *Source) referenceSpellings() []*decodetree.Spellings {
-	return s.refSpellings.get(func() []*decodetree.Spellings {
-		var all []*decodetree.Spellings
-
-		// Two reference Sources can read the same Source, and the list
-		// holds its Spellings once.
-		seen := map[*decodetree.Spellings]bool{}
-
-		for _, ref := range s.references {
-			for _, sp := range slices.Concat(ref.referenceSpellings(), []*decodetree.Spellings{ref.ownSpellings()}) {
-				if !seen[sp] {
-					seen[sp] = true
-					all = append(all, sp)
-				}
-			}
-		}
-
-		return all
-	})
-}
-
-// ownSpellings returns the [decodetree.Spellings] of the text of the
-// Source, which the first call builds.
-func (s *Source) ownSpellings() *decodetree.Spellings {
-	return s.spellings.get(func() *decodetree.Spellings {
-		return decodetree.NewSpellings(spellingTexts(s.Tokens()))
 	})
 }
 
@@ -2326,27 +2298,6 @@ func markSyntax(err error) *markedError {
 	return &markedError{err: err, marks: []error{ErrSyntax, errInvalid}}
 }
 
-// reparse parses the tokens again for the decoder, which edits the tree it
-// reads, so the tree [Source.File] returns stays as parsed. Both parses
-// give each token and document the same index. It writes the null of each
-// enclosed alias of every document, because the go-yaml formatter reads
-// every document.
-func (s *Source) reparse() *docparse.Result {
-	r := s.parseTokens(s.Tokens())
-
-	first := s.parsed.get(s.parse).result.Index
-
-	for _, doc := range s.documents() {
-		for alias := range doc.doc.state.Facts().Enclosed {
-			if i, ok := first[alias.Start]; ok {
-				decodetree.WriteNull(r.Tokens[i])
-			}
-		}
-	}
-
-	return r
-}
-
 // Bind binds err to the [Source] and to the document that each location
 // in err falls in. A caller that holds the source thus binds without
 // picking a document. In every other way Bind is [Node.Bind], which
@@ -2416,7 +2367,6 @@ func newDocuments(src *Source, docs []docparse.Document, errs []error) []*Node {
 			tokens:     parsed.Tokens,
 			positioned: parsed.Positioned,
 			index:      i,
-			fileIndex:  parsed.FileIndex,
 			preamble:   parsed.Preamble,
 		}
 

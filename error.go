@@ -2755,8 +2755,7 @@ func placesText(msg, old string) bool {
 // stand-in keeps that copy whole. The heading prints any other copy of
 // the text of a go-yaml error in a join below a wrapper. A wrapper whose
 // message holds such a copy becomes a stand-in too, and readYAML reports
-// it as read. A wrapper that spells the anchor names of a decode tree
-// spells them in the read text.
+// it as read.
 func (b binder) readYAML(err error) (error, bool) {
 	var texts []yamlText
 
@@ -2832,18 +2831,6 @@ func (b binder) readYAMLText(err error, texts *[]yamlText) (error, bool) {
 		c.err = read
 
 		return &c, true
-
-	case *namedError:
-		// The message of x spells the anchor names of the whole text of
-		// the error below. A go-yaml error below thus does not write its
-		// text into that message unchanged, and the stand-in of a wrapper
-		// cannot replace it. The result spells the names of the read text.
-		read, ok := b.readYAMLText(x.err, texts)
-		if !ok {
-			return err, false
-		}
-
-		return &namedError{err: read, tree: x.tree}, true
 
 	case yaml.Error:
 		if nilness.IsNil(x) {
@@ -3038,14 +3025,9 @@ func (b binder) readJoinText(branches []error, texts *[]yamlText) {
 // any error without one does. A token of a parse that UnmarshalYAML ran
 // is such a token.
 func (b binder) yamlProblem(err yaml.Error) error {
-	opts, doc, ok := b.yamlLocation(err.GetToken())
+	opts, ok := b.yamlLocation(err.GetToken())
 
-	text := err.GetMessage()
-	if doc != nil {
-		text = doc.tree().RestoreNames(text)
-	}
-
-	msg := yamlMessage(err, escape.Control(text))
+	msg := yamlMessage(err, escape.Control(err.GetMessage()))
 	if !ok {
 		return msg
 	}
@@ -3053,34 +3035,33 @@ func (b binder) yamlProblem(err yaml.Error) error {
 	return wrapUndeclared(msg, opts...)
 }
 
-// yamlLocation returns the options that locate an error at tk and the
-// document that holds tk, and reports false when b does not hold tk. A
-// binder with a node reads the path from that node. A binder that routes
-// reads it from the document that holds tk, and adds the position of the
-// node of tk. The error then binds in that document even in a source of
-// several documents. The document is nil when b holds tk but finds no
-// document at its line.
-func (b binder) yamlLocation(tk *token.Token) ([]ErrorOption, *document, bool) {
+// yamlLocation returns the options that locate an error at tk, and reports
+// false when b does not hold tk. A binder with a node reads the path from
+// that node. A binder that routes reads it from the document that holds
+// tk, and adds the position of the node of tk. The error then binds in that
+// document even in a source of several documents. A binder that finds no
+// document at the line of tk locates the error at tk alone.
+func (b binder) yamlLocation(tk *token.Token) ([]ErrorOption, bool) {
 	if b.node != nil {
 		if !b.node.holdsToken(tk) {
-			return nil, nil, false
+			return nil, false
 		}
 
-		return b.node.rejectionLocation(tk), b.node.doc, true
+		return b.node.rejectionLocation(tk), true
 	}
 
 	if !b.src.holdsToken(tk) || tk.Position == nil {
-		return nil, nil, false
+		return nil, false
 	}
 
 	node := b.nodeAt(position.NewFromToken(tk).Line)
 	if node == nil {
-		return []ErrorOption{AtToken(tk)}, nil, true
+		return []ErrorOption{AtToken(tk)}, true
 	}
 
 	opts := append([]ErrorOption{AtToken(node.doc.pathIndex().OwnerToken(tk))}, node.rejectionLocation(tk)...)
 
-	return opts, node.doc, true
+	return opts, true
 }
 
 // isBound reports whether err is a [*SourceError] or wraps one without an

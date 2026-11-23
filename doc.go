@@ -909,22 +909,21 @@
 // A field, an element, or a map entry of type [ast.Node], or of a pointer to
 // a node type of the go-yaml ast package, gets a node of the document. The
 // node is the one that [Node.AST] returns for its place, and at an alias it
-// is the content of the anchor. It prints the text of the document, and
-// [Node.DocumentResolver] resolves paths from it. The go-yaml decoder reads a
-// tree of its own, which gives some anchors new names. The decode then puts
-// the node of the document in place of each node of that tree. A value of a
-// node type that is not a pointer, such as [ast.MappingNode], gets a copy of
-// the node of the document. The copy prints the text of the document, but it is not
-// the node that [Node.AST] returns.
+// is the content of the anchor. The node prints the text of the document,
+// and [Node.DocumentResolver] resolves paths from it. A pointer to a node
+// type gets the node under a tag when the tag holds a node of that type. A
+// value of a node type that is not a pointer, such as [ast.MappingNode], gets
+// a copy of the node of the document. The copy prints the text of the
+// document, but it is not the node that [Node.AST] returns.
 //
-// The decode does not reach a node that the decoder hands an UnmarshalYAML
-// method, or a node inside a type that decodes itself. A node inside an
-// anchor of a reference document from [WithReferences] stays the decoder's
-// node too. Such a node spells an alias to a renamed anchor with a count in
-// brackets, such as `*x [2]`, which is not valid YAML. The resolver of the
-// document does not know the node. A caller can decode a value from such a
-// node and read the positions of its tokens, but should not write its text
-// out as YAML.
+// The node that the decoder hands an UnmarshalYAML method is a node of the
+// document too, and so is each node inside a type that decodes itself. A
+// decode with [WithAllowedFields] under [UnknownFieldsReject] or
+// [UnknownFieldsWarn] is the exception. Such a method gets a copy of its
+// node without the admitted keys that the decode leaves out, as
+// [WithAllowedFields] describes. A node inside an anchor of a reference
+// document from [WithReferences] is a node of that reference document,
+// which the resolver of the document does not know.
 //
 // A [DecodeOption] sets how one decode runs, and it applies only to the call
 // that gets it. A setting that describes the documents, such as
@@ -1655,7 +1654,7 @@
 // one with an UnmarshalText method, gets that text with each alias written
 // out. The decoder does not check the context during that write, so a
 // deadline does not stop it. A decode also checks the context before the
-// decoder starts and between the anchors that the decode registers.
+// decoder starts.
 //
 // An ended context stops each step that loops:
 //
@@ -1749,19 +1748,8 @@
 // It reads the last anchor of its name by the same rule, even one after it or
 // in a later reference document.
 //
-// An anchor inside another anchor breaks the rule when a later anchor shares
-// its name. A decode that reads the outer anchor registers the inner one
-// again. An alias that the decode reads after the outer anchor might then
-// read the inner anchor, but [NewSourceFromLayers] reads the last. A typed
-// decode and a decode into an any value, which is the decode that a schema
-// runs, might also read different anchors. Each anchor of the reference
-// documents should thus have a name of its own.
-//
-// A decode reads an outer anchor only when the rule picks it for its name,
-// or when the outer anchor lies inside another anchor that the decode
-// reads. An anchor inside an outer anchor that a later anchor overrides
-// thus keeps to the rule, unless the outer anchor lies inside another
-// anchor that the decode reads.
+// A typed decode, a decode into an any value, and [NewSourceFromLayers] read
+// each alias by the same rule.
 //
 // A decode reads the anchors of the reference documents that its aliases
 // reach, and every anchor that an alias inside those anchors reaches. Its
@@ -2256,8 +2244,9 @@
 //	upload.yaml:1:5: aliases expand the document past the alias limit
 //
 // The reference documents can define one anchor name more than once. The
-// count then takes the largest anchor that a decode can read for the name,
-// as the References section describes those anchors. A document whose
+// count then weighs the anchor of the name that the rule of the References
+// section picks. It also weighs each anchor of the name inside another
+// anchor that a decode reads, and it takes the largest. A document whose
 // decode reads a smaller anchor of the name can thus fail, even with one
 // alias. One file that defines the same anchors counts the anchor that its
 // decode reads, so that file can pass. Give each reference anchor a name
@@ -2272,11 +2261,9 @@
 // document. One file that defines the anchor reads the alias as null in
 // every decode, so that file can pass.
 //
-// A loop counts when it closes through any anchor that a decode can read
-// for a name. An anchor inside another anchor that a decode reads is such an
-// anchor even when a later anchor shares its name, as the References section
-// describes. A decode reads that inner anchor only after it reads the outer
-// anchor, but the count refuses every document whose aliases reach the loop.
+// A loop counts when it closes through any of those anchors of a name. An
+// alias of the name reads the last anchor of the name, but the count refuses
+// every document whose aliases reach the loop.
 //
 // [WithAliasLimit] on the Source that reads the reference documents decides
 // whether the count runs. The option on a reference Source does not change

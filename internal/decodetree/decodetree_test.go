@@ -1,7 +1,6 @@
 package decodetree_test
 
 import (
-	"errors"
 	"slices"
 	"testing"
 
@@ -15,39 +14,18 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/decodetree"
-	"go.jacobcolvin.com/niceyaml/internal/docparse"
-	"go.jacobcolvin.com/niceyaml/internal/yamldecode"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
 
 // newTree returns the tree of the one document of input, with the
-// document. Its second parse holds a null in the token of each alias the
-// facts hold as enclosed, as the Source writes it.
-func newTree(tb testing.TB, input string) (*decodetree.Tree, *niceyaml.Node) {
+// document and its facts.
+func newTree(tb testing.TB, input string) (*decodetree.Tree, *niceyaml.Node, *aliasing.Facts) {
 	tb.Helper()
 
-	src := niceyaml.NewSourceFromString(input)
-	doc := yamltest.Document(tb, src)
+	doc := yamltest.Document(tb, niceyaml.NewSourceFromString(input))
 	facts := aliasing.NewFacts(doc.AST(), doc.DocumentResolver())
 
-	reparse := func() (ast.Node, map[*token.Token]int) {
-		r := docparse.Parse(src.Tokens())
-
-		for alias := range facts.Enclosed {
-			for _, tk := range r.Tokens {
-				if tk.Type == token.AliasType && tk.Position.Offset == alias.Start.Position.Offset {
-					decodetree.WriteNull(tk)
-				}
-			}
-		}
-
-		return r.File.Docs[0].Body, r.Index
-	}
-
-	return decodetree.New(doc.AST(), facts, decodetree.Options{
-		Reparse: reparse,
-		Texts:   func() []string { return []string{input} },
-	}), doc
+	return decodetree.New(doc.AST(), facts), doc, facts
 }
 
 // at returns the node of doc that steps reach from its root, a key for
@@ -80,62 +58,23 @@ func at(tb testing.TB, doc *niceyaml.Node, steps ...any) ast.Node {
 	return node
 }
 
-func TestNew(t *testing.T) {
-	t.Parallel()
+// aliasAt returns the alias of doc that steps reach, as [at] finds it.
+func aliasAt(tb testing.TB, doc *niceyaml.Node, steps ...any) *ast.AliasNode {
+	tb.Helper()
 
-	tcs := map[string]struct {
-		input string
-		steps []any
-		// The text of the view of the node at steps, and whether the tree
-		// reads a second parse.
-		want   string
-		parsed bool
-	}{
-		"an alias with a comment": {
-			input: stringtest.LinesLF("a: &x 1", "b: *x # note"),
-			steps: []any{"b"},
-			want:  "*x # note",
-		},
-		"reused anchor names": {
-			input:  stringtest.LinesLF("a: &x 1", "b: *x", "c: &x 2", "d: *x"),
-			steps:  []any{"d"},
-			want:   "*x [2]",
-			parsed: true,
-		},
-		"an alias inside its anchor": {
-			input:  "a: &x [1, *x]\n",
-			steps:  []any{"a", 1},
-			want:   "null",
-			parsed: true,
-		},
-		"an integer tag": {
-			input: "a: !!int 1\n",
-			steps: []any{"a"},
-			want:  "!!int 1",
-		},
-	}
+	alias, ok := at(tb, doc, steps...).(*ast.AliasNode)
+	require.True(tb, ok, "not an alias")
 
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			tree, doc := newTree(t, tc.input)
-			node := at(t, doc, tc.steps...)
-
-			view := tree.View(node)
-			assert.Equal(t, tc.want, view.String())
-			assert.Equal(t, tc.parsed, tree.Parsed(node) != node)
-			assert.True(t, tree.Holds(view.GetToken()))
-		})
-	}
+	return alias
 }
 
 func TestChanges(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		input string
-		want  bool
+		input      string
+		want       bool
+		references bool
 	}{
 		"a text without anchors": {
 			input: stringtest.LinesLF("a: 1", "b: [2]"),
@@ -147,9 +86,18 @@ func TestChanges(t *testing.T) {
 			input: stringtest.LinesLF("a: &x 1", "b: *x", "c: &x 2", "d: *x"),
 			want:  true,
 		},
+		"an alias before an anchor of its name": {
+			input: stringtest.LinesLF("a: *x", "b: &x 1"),
+			want:  true,
+		},
 		"an alias inside its anchor": {
 			input: "a: &x [1, *x]\n",
 			want:  true,
+		},
+		"an anchor with reference documents": {
+			input:      "a: &x 1\n",
+			references: true,
+			want:       true,
 		},
 		"an integer tag": {
 			input: "a: !!int 1\n",
@@ -160,89 +108,51 @@ func TestChanges(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tree, doc := newTree(t, tc.input)
-			facts := aliasing.NewFacts(doc.AST(), doc.DocumentResolver())
-
-			got := decodetree.Changes(facts, false)
-			assert.Equal(t, tc.want, got)
-			assert.Equal(t, tree.Changed(), got)
+			_, _, facts := newTree(t, tc.input)
+			assert.Equal(t, tc.want, decodetree.Changes(facts, tc.references))
 		})
 	}
 }
 
-func TestTree_Holds(t *testing.T) {
-	t.Parallel()
-
-	tree, doc := newTree(t, stringtest.LinesLF("a: 1", "b:"))
-
-	// The parser makes a null for the value of b, which no lexer token
-	// stands for.
-	null := at(t, doc, "b")
-	assert.True(t, tree.Holds(null.GetToken()))
-	assert.False(t, tree.Holds(token.New("a", "a", &token.Position{})))
-}
-
-func TestTree_RestoreNames(t *testing.T) {
-	t.Parallel()
-
-	tree, _ := newTree(t, stringtest.LinesLF("a: &x 1", "b: &x 2"))
-	assert.Equal(t, "anchor x and x", tree.RestoreNames("anchor x [1] and x [2]"))
-
-	plain, _ := newTree(t, "a: &x 1\n")
-	assert.Equal(t, "anchor x [1]", plain.RestoreNames("anchor x [1]"))
-
-	var none *decodetree.Tree
-
-	assert.Equal(t, "anchor x [1]", none.RestoreNames("anchor x [1]"))
-}
-
-func TestTree_NewNames(t *testing.T) {
-	t.Parallel()
-
-	// The document spells "x [1]", so the first anchor named x skips it.
-	tree, doc := newTree(t, stringtest.LinesLF(`k: "x [1]"`, "a: &x 1", "b: &x 2", "c: *x"))
-	assert.Equal(t, "*x [3]", tree.View(at(t, doc, "c")).String())
-}
-
-func TestTree_Prime(t *testing.T) {
-	t.Parallel()
-
-	tree, doc := newTree(t, stringtest.LinesLF("a: &x 1", "b: &y {c: *x}", "z: &z 3", "d: [*y]"))
-
-	var names []string
-
-	for _, anchor := range tree.Prime(tree.View(at(t, doc, "d"))) {
-		names = append(names, anchor.Name.String())
-	}
-
-	// The anchor z registers nothing the node reads.
-	assert.Equal(t, []string{"x", "y"}, names)
-	assert.Empty(t, tree.Prime(tree.View(at(t, doc, "z"))))
-}
-
-func TestTree_UnresolvedMerge(t *testing.T) {
+func TestTree_Resolve(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
 		input string
 		steps []any
-		// The line of the alias that the merge key reads, counted from 0,
-		// and the message.
-		line int
-		want string
+		// The text of the node that the decoder reads for the alias at
+		// steps, and whether the tree binds the alias.
+		want  string
+		bound bool
+		// Whether the node is a null that holds the token of the alias.
+		null bool
 	}{
-		"alias without an anchor": {
-			input: stringtest.LinesLF("a: 1", "b: {<<: *missing}"),
-			steps: []any{"b", "<<"},
-			line:  1,
-			want:  "cannot find anchor by alias name missing",
+		"alias of an anchor before it": {
+			input: stringtest.LinesLF("a: &x {b: 1}", "c: *x"),
+			steps: []any{"c"},
+			want:  "{b: 1}",
+			bound: true,
 		},
-		"alias of a renamed anchor": {
-			// The message spells the name of the document.
-			input: stringtest.LinesLF("a: &x {c: 1}", "b: &x {c: 2}", "d: {<<: *x}"),
-			steps: []any{"d", "<<"},
-			line:  2,
-			want:  "cannot find anchor by alias name x",
+		"alias of a reused anchor name": {
+			input: stringtest.LinesLF("a: &x 1", "b: *x", "c: &x 2", "d: *x"),
+			steps: []any{"b"},
+			want:  "1",
+			bound: true,
+		},
+		"alias inside its anchor": {
+			input: "a: &x [1, *x]\n",
+			steps: []any{"a", 1},
+			bound: true,
+			null:  true,
+		},
+		"merge alias inside its anchor": {
+			input: "a: &x {<<: *x}\n",
+			steps: []any{"a", "<<"},
+			bound: true,
+		},
+		"alias without an anchor": {
+			input: "a: *r\n",
+			steps: []any{"a"},
 		},
 	}
 
@@ -250,77 +160,37 @@ func TestTree_UnresolvedMerge(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tree, doc := newTree(t, tc.input)
-			scope := tree.View(at(t, doc, tc.steps[0]))
+			tree, doc, _ := newTree(t, tc.input)
+			alias := aliasAt(t, doc, tc.steps...)
 
-			alias, ok := tree.View(at(t, doc, tc.steps...)).(*ast.AliasNode)
-			require.True(t, ok, "not an alias")
+			got, bound := tree.Resolve(alias)
+			require.Equal(t, tc.bound, bound)
 
-			tk, msg, ok := tree.UnresolvedMerge(scope, &yamldecode.MissingAnchorError{Alias: alias})
-			require.True(t, ok)
-			assert.Equal(t, tc.want, msg)
-			assert.Equal(t, tc.line, tk.Position.Line-1)
+			switch {
+			case tc.null:
+				null, ok := got.(*ast.NullNode)
+				require.True(t, ok, "not a null: %T", got)
+				assert.Same(t, alias.Start, null.Token)
 
-			// The message alone does not name the alias.
-			_, _, ok = tree.UnresolvedMerge(scope, errors.New(tc.want))
-			assert.False(t, ok)
+			case tc.want == "":
+				assert.Nil(t, got)
+
+			default:
+				require.NotNil(t, got)
+				assert.Equal(t, tc.want, got.String())
+			}
 		})
 	}
 
-	t.Run("alias outside the scope", func(t *testing.T) {
+	t.Run("alias outside the document", func(t *testing.T) {
 		t.Parallel()
 
-		tree, doc := newTree(t, stringtest.LinesLF("a: {<<: *missing}", "b: 1"))
+		tree, _, _ := newTree(t, "a: &x 1\n")
+		_, other, _ := newTree(t, stringtest.LinesLF("a: &x 1", "b: *x"))
 
-		alias, ok := tree.View(at(t, doc, "a", "<<")).(*ast.AliasNode)
-		require.True(t, ok, "not an alias")
-
-		_, _, ok = tree.UnresolvedMerge(tree.View(at(t, doc, "b")), &yamldecode.MissingAnchorError{Alias: alias})
-		assert.False(t, ok)
+		_, bound := tree.Resolve(aliasAt(t, other, "b"))
+		assert.False(t, bound)
 	})
-}
-
-func TestTree_ReferenceAliases(t *testing.T) {
-	t.Parallel()
-
-	tree, doc := newTree(t, stringtest.LinesLF("a: *r1", "b: &x {c: *r2}", "d: *x", "e: {<<: *r3}"))
-
-	var got []string
-
-	for _, alias := range tree.ReferenceAliases(tree.View(at(t, doc, "d"))) {
-		got = append(got, alias.Token.Next.Value)
-	}
-
-	// The alias d reads the anchor x, which holds r2.
-	assert.Equal(t, []string{"r2"}, got)
-
-	all := tree.ReferenceAliases(tree.View(doc.AST()))
-	require.Len(t, all, 3)
-
-	// A merge key merges r3 alone.
-	assert.Equal(t, []decodetree.ReferenceAlias{
-		{Token: all[0].Token, Name: "r1"},
-		{Token: all[1].Token, Name: "r2"},
-		{Token: all[2].Token, Name: "r3", Merge: true},
-	}, all)
-}
-
-func TestWriteNull(t *testing.T) {
-	t.Parallel()
-
-	tks := niceyaml.NewSourceFromString("a: *x\n").Tokens()
-
-	i := slices.IndexFunc(tks, func(tk *token.Token) bool { return tk.Type == token.AliasType })
-	require.GreaterOrEqual(t, i, 0, "no alias token")
-
-	alias := tks[i]
-	prev, next := alias.Prev, alias.Next
-
-	decodetree.WriteNull(alias)
-	assert.Equal(t, token.NullType, alias.Type)
-	assert.Equal(t, " null", alias.Origin)
-	assert.Same(t, prev, alias.Prev)
-	assert.Same(t, next, alias.Next)
 }
 
 func TestTree_Anchor(t *testing.T) {
@@ -329,23 +199,19 @@ func TestTree_Anchor(t *testing.T) {
 	tcs := map[string]struct {
 		input string
 		steps []any
-		// The text of the anchor of the tree that the alias at steps
-		// reads, and the name that the tree gives it. An empty text means
-		// that the alias reads none.
-		want, name string
+		// The text of the anchor that the alias at steps reads. An empty
+		// text means that the alias reads none.
+		want string
 	}{
 		"alias of an anchor before it": {
 			input: stringtest.LinesLF("a: &x {b: 1}", "c: *x"),
 			steps: []any{"c"},
 			want:  "&x {b: 1}",
-			name:  "x",
 		},
-		"alias of a renamed anchor": {
-			// The text of the anchor spells the name of the document.
+		"alias of a reused anchor name": {
 			input: stringtest.LinesLF("a: &x 1", "b: *x", "c: &x 2", "d: *x"),
 			steps: []any{"d"},
 			want:  "&x 2",
-			name:  "x [2]",
 		},
 		"alias without an anchor": {
 			input: "a: *r\n",
@@ -361,12 +227,9 @@ func TestTree_Anchor(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tree, doc := newTree(t, tc.input)
+			tree, doc, _ := newTree(t, tc.input)
 
-			alias, ok := tree.View(at(t, doc, tc.steps...)).(*ast.AliasNode)
-			require.True(t, ok, "not an alias")
-
-			got, ok := tree.Anchor(alias)
+			got, ok := tree.Anchor(aliasAt(t, doc, tc.steps...))
 			if tc.want == "" {
 				assert.False(t, ok)
 
@@ -375,78 +238,43 @@ func TestTree_Anchor(t *testing.T) {
 
 			require.True(t, ok)
 			assert.Equal(t, tc.want, got.String())
-
-			name, ok := astnode.Name(got.Name)
-			require.True(t, ok)
-			assert.Equal(t, tc.name, name)
-			assert.True(t, tree.Holds(got.GetToken()))
 		})
 	}
 }
 
-func TestTree_Original(t *testing.T) {
+func TestTree_Holds(t *testing.T) {
 	t.Parallel()
 
-	tcs := map[string]struct {
-		input string
-		steps []any
-		// The text of the node of the tree that stands for the node at
-		// steps.
-		view string
-	}{
-		"alias in a copy": {
-			input: stringtest.LinesLF("a: &x 1", "c: {d: *x}"),
-			steps: []any{"c"},
-			view:  "{d: *x}",
-		},
-		"alias to a renamed anchor": {
-			input: stringtest.LinesLF("a: &x 1", "b: &x 2", "c: [*x]"),
-			steps: []any{"c"},
-			view:  "[*x [2]]",
-		},
-		"node beside a renamed anchor": {
-			input: stringtest.LinesLF("a: &x 1", "b: &x 2", "c: {d: 3}"),
-			steps: []any{"c"},
-			view:  "{d: 3}",
-		},
-		"integer tag": {
-			input: "c: !!int 7\n",
-			steps: []any{"c"},
-			view:  "!!int 7",
-		},
-		"alias inside its anchor": {
-			input: "a: &x {b: *x}\n",
-			steps: []any{"a", "b"},
-			view:  "null",
-		},
+	tree, doc, _ := newTree(t, stringtest.LinesLF("a: 1", "b:"))
+
+	// The parser makes a null for the value of b, which no lexer token
+	// stands for.
+	null := at(t, doc, "b")
+	assert.True(t, tree.Holds(null.GetToken()))
+	assert.False(t, tree.Holds(token.New("a", "a", &token.Position{})))
+}
+
+func TestTree_ReferenceAliases(t *testing.T) {
+	t.Parallel()
+
+	tree, doc, _ := newTree(t, stringtest.LinesLF("a: *r1", "b: &x {c: *r2}", "d: *x", "e: {<<: *r3}"))
+
+	var got []string
+
+	for _, alias := range tree.ReferenceAliases(at(t, doc, "d")) {
+		got = append(got, alias.Token.Next.Value)
 	}
 
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
+	// The alias d reads the anchor x, which holds r2.
+	assert.Equal(t, []string{"r2"}, got)
 
-			tree, doc := newTree(t, tc.input)
-			node := at(t, doc, tc.steps...)
+	all := tree.ReferenceAliases(doc.AST())
+	require.Len(t, all, 3)
 
-			view := tree.View(node)
-			assert.Equal(t, tc.view, view.String())
-
-			got, ok := tree.Original(view)
-			require.True(t, ok)
-			assert.Same(t, node, got)
-		})
-	}
-
-	t.Run("node the document does not hold", func(t *testing.T) {
-		t.Parallel()
-
-		tree, _ := newTree(t, "a: 1\n")
-		_, other := newTree(t, "a: 1\n")
-
-		_, ok := tree.Original(at(t, other, "a"))
-		assert.False(t, ok)
-
-		_, ok = tree.Original(nil)
-		assert.False(t, ok)
-	})
+	// A merge key merges r3 alone.
+	assert.Equal(t, []decodetree.ReferenceAlias{
+		{Token: all[0].Token, Name: "r1"},
+		{Token: all[1].Token, Name: "r2"},
+		{Token: all[2].Token, Name: "r3", Merge: true},
+	}, all)
 }

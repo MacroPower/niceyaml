@@ -2,7 +2,6 @@ package reftable
 
 import (
 	"slices"
-	"sync"
 
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
@@ -21,17 +20,12 @@ import (
 // the alias that reads it. An anchor inside another anchor comes after
 // it in the text. In a document, the rule decides each alias that does
 // not follow an anchor of its name. It also decides every alias inside a
-// reference document.
+// reference document, wherever a decode reads it.
 //
-// A decode departs from the rule in one case. When the decoder reads an
-// anchor, it registers each anchor inside it again. An alias that it
-// reads after the outer anchor then finds the inner one, even when the
-// table holds a later anchor of that name. The decoder reads only the
-// anchors that the table holds and the anchors inside those. So no
-// decode reads an anchor that lies only inside anchors that later
-// anchors of their names hide. [Table.Anchors] lists the anchors that an
-// alias of a name can read under either rule, and [Table.Weights] weighs
-// the alias by the largest of them.
+// [Table.Anchors] lists the anchor that the rule picks for a name, and
+// each anchor of the name inside another anchor that a decode reads.
+// [Table.Weights] weighs an alias by the largest of them, an upper
+// estimate of what the alias repeats.
 //
 // The go-yaml decoder reads the trees of a table and does not write to
 // them, so the decodes of many goroutines share them. The table also keeps
@@ -62,9 +56,6 @@ type Table struct {
 type entry struct {
 	// The anchor, a node of a reference document.
 	anchor *ast.AnchorNode
-	// Returns the names the aliases under the anchor read, each once, in
-	// document order, found on the first call.
-	reads func() []string
 	// The keys of the table whose documents hold the anchor.
 	keys *decodewalk.Keys
 }
@@ -130,11 +121,7 @@ func isNil(t *Table) bool {
 
 // newEntry creates a new [*entry] of t for anchor.
 func (t *Table) newEntry(anchor *ast.AnchorNode) *entry {
-	return &entry{
-		anchor: anchor,
-		reads:  sync.OnceValue(func() []string { return aliasNames(anchor.Value) }),
-		keys:   &t.keys,
-	}
+	return &entry{anchor: anchor, keys: &t.keys}
 }
 
 // Anchor returns the anchor the table holds for name, and reports false
@@ -148,13 +135,12 @@ func (t *Table) Anchor(name string) (*ast.AnchorNode, bool) {
 	return e.anchor, true
 }
 
-// Anchors returns the anchors that an alias of name can read, or nil
-// when the table does not hold an anchor for name. The first is the
-// anchor that the table holds for name, as [Table.Anchor] returns it. The
-// rest are the anchors of that name that lie inside another anchor that
-// a decode can read, in the documents of the table and of the tables that
-// it reads. A decode that reads the outer anchor registers such an anchor
-// again, so an alias that it reads later can find that anchor.
+// Anchors returns the anchors that the alias limit weighs for an alias of
+// name, or nil when the table does not hold an anchor for name. The first
+// is the anchor that the table holds for name, as [Table.Anchor] returns
+// it, which the alias reads. The rest are the anchors of that name that
+// lie inside another anchor that a decode can read, in the documents of
+// the table and of the tables that it reads.
 //
 // A decode reads each anchor that the table holds for a name, and every
 // anchor inside such an anchor. Anchors leaves out an anchor that lies
@@ -230,18 +216,6 @@ func (t *Table) Weights() *aliasing.ReferenceWeights {
 	return t.weights
 }
 
-// View returns the anchor the table holds for name, the node that the
-// decoder reads and that [Table.Prime] returns for that anchor. View
-// reports false when the table does not hold an anchor for name.
-func (t *Table) View(name string) (*ast.AnchorNode, bool) {
-	e := t.entry(name)
-	if e == nil {
-		return nil, false
-	}
-
-	return e.anchor, true
-}
-
 // Keys returns the [decodewalk.Keys] that keep the keys of the merge
 // sources under the anchor that the table holds for name, as
 // [decodewalk.Rules.AnchorKeys] describes. The anchors of the documents
@@ -281,8 +255,8 @@ const maxPlaces = 2
 //
 // The counts read an anchor without the anchors that the path to it goes
 // through. They match the paths when the anchors do not form a loop. The
-// decoder rejects an alias that closes a loop of anchors, other than an
-// alias inside its own anchor, which the lookups skip.
+// decoder reads an alias inside an anchor that it is reading as null, and
+// the lookups skip such an alias.
 //
 // Create instances with [Table.Places].
 type Places struct {
@@ -323,7 +297,7 @@ func (t *Table) Places(tk *token.Token) *Places {
 // Paths returns the `@` path from node to each of the first two places in
 // the reference documents where the go-yaml decoder can report the token
 // of p, in document order. The argument node is a node of the reference
-// documents as the decoder reads it, such as an anchor that [Table.View]
+// documents as the decoder reads it, such as an anchor that [Table.Anchor]
 // returns. A place is a node that has the token as its own token, or an
 // entry whose key has the token as its token. The decoder reports an
 // unknown field at such a key, so the path to a key ends in the `~`
@@ -333,8 +307,8 @@ func (t *Table) Places(tk *token.Token) *Places {
 // The paths read the documents as the decoder does. An alias reads the
 // anchor that the table holds for its name. The entries that a `<<` merge
 // key brings in read as entries of the mapping that holds the merge key,
-// at every depth of merge keys. The decoder reads an alias inside an
-// anchor of its name as null, so Paths does not follow such an alias,
+// at every depth of merge keys. The decoder reads an alias inside the
+// anchor that it reads as null, so Paths does not follow such an alias,
 // and a loop of anchors ends. It does not return a path through a key
 // that does not have text a selector can match, as
 // [paths.Resolver.KeyName] spells keys.
@@ -360,7 +334,7 @@ func (p *Places) MergePaths(node ast.Node) []paths.Path {
 // walk returns a new [*placeWalk] of p. With collect set, the walk keeps
 // the path to each place. Without it, the walk only counts the places.
 func (p *Places) walk(collect bool) *placeWalk {
-	return &placeWalk{p: p, open: map[string]bool{}, collect: collect}
+	return &placeWalk{p: p, open: map[*ast.AnchorNode]bool{}, collect: collect}
 }
 
 // count returns the count of the places of the token of p under anchor,
@@ -394,8 +368,8 @@ func (p *Places) count(name string, anchor *ast.AnchorNode, merge bool) int {
 // placeWalk holds the state of one walk of [Places].
 type placeWalk struct {
 	p *Places
-	// The names of the anchors that the path the walk reads goes through.
-	open map[string]bool
+	// The anchors that the path the walk reads goes through.
+	open map[*ast.AnchorNode]bool
 	// The paths to the places, in document order, when collect is set.
 	found []paths.Path
 	// The count of the places that the walk has found.
@@ -552,12 +526,12 @@ func (w *placeWalk) merged(value ast.Node, at paths.Path) {
 // the anchor without reading it.
 func (w *placeWalk) through(alias *ast.AliasNode, merge bool, at paths.Path) {
 	name, ok := astnode.Name(alias.Value)
-	if !ok || w.open[name] {
+	if !ok {
 		return
 	}
 
-	anchor, ok := w.p.table.View(name)
-	if !ok {
+	anchor, ok := w.p.table.Anchor(name)
+	if !ok || w.open[anchor] {
 		return
 	}
 
@@ -576,10 +550,9 @@ func (w *placeWalk) through(alias *ast.AliasNode, merge bool, at paths.Path) {
 // inside calls read with the value of anchor, with the path the walk
 // reads going through anchor.
 func (w *placeWalk) inside(anchor *ast.AnchorNode, read func(ast.Node)) {
-	name, ok := astnode.Name(anchor.Name)
-	if ok && !w.open[name] {
-		w.open[name] = true
-		defer delete(w.open, name)
+	if !w.open[anchor] {
+		w.open[anchor] = true
+		defer delete(w.open, anchor)
 	}
 
 	read(anchor.Value)
@@ -588,7 +561,7 @@ func (w *placeWalk) inside(anchor *ast.AnchorNode, read func(ast.Node)) {
 // keyName returns the text that a child selector matches key by, as
 // [paths.Resolver.KeyName] gives it. An alias key reads the anchor that
 // the table holds for its name, unless the path the walk reads goes
-// through an anchor of that name.
+// through that anchor.
 func (w *placeWalk) keyName(key ast.Node) (string, bool) {
 	alias, ok := astnode.Content(key).(*ast.AliasNode)
 	if !ok {
@@ -596,12 +569,12 @@ func (w *placeWalk) keyName(key ast.Node) (string, bool) {
 	}
 
 	name, ok := astnode.Name(alias.Value)
-	if !ok || w.open[name] {
+	if !ok {
 		return "", false
 	}
 
-	anchor, ok := w.p.table.View(name)
-	if !ok {
+	anchor, ok := w.p.table.Anchor(name)
+	if !ok || w.open[anchor] {
 		return "", false
 	}
 
@@ -625,94 +598,4 @@ func (t *Table) entry(name string) *entry {
 	}
 
 	return nil
-}
-
-// Prime returns the anchors that a go-yaml decoder reads, in order,
-// before it decodes a node whose aliases read names. Each of those
-// aliases then finds the anchor the table holds for its name. The list
-// also holds every anchor that an alias inside a listed anchor reaches.
-// It holds each anchor once, after the anchors that anchor reaches, so
-// the aliases inside each find their anchors the same way.
-//
-// In a loop of anchors that reach each other, the anchor of the loop
-// that names reach first comes last. The decoder reads an alias inside
-// the anchor it refers to as null. It rejects any other alias that
-// closes a loop, because the anchor that alias names comes later in the
-// list.
-//
-// Each anchor comes back as [Table.View] gives it. Prime skips each name
-// that the table does not hold an anchor for.
-func (t *Table) Prime(names []string) []ast.Node {
-	if t == nil || len(names) == 0 {
-		return nil
-	}
-
-	var (
-		order []ast.Node
-		seen  = map[*entry]bool{}
-		// The entries the walk is inside, each with the index of its next
-		// read, innermost last.
-		stack []frame
-	)
-
-	push := func(name string) {
-		e := t.entry(name)
-		if e != nil && !seen[e] {
-			seen[e] = true
-			stack = append(stack, frame{entry: e})
-		}
-	}
-
-	for _, name := range names {
-		push(name)
-
-		for len(stack) > 0 {
-			top := len(stack) - 1
-			reads := stack[top].entry.reads()
-
-			if next := stack[top].next; next < len(reads) {
-				stack[top].next++
-				push(reads[next])
-
-				continue
-			}
-
-			order = append(order, stack[top].entry.anchor)
-			stack = stack[:top]
-		}
-	}
-
-	return order
-}
-
-// frame is an entry on the stack of [Table.Prime], with the index of the
-// next name it reads.
-type frame struct {
-	entry *entry
-	// The index of the next name among the reads of entry.
-	next int
-}
-
-// aliasNames returns the names the aliases under node read, each once, in
-// document order.
-func aliasNames(node ast.Node) []string {
-	var names []string
-
-	seen := map[string]bool{}
-
-	astnode.Inspect(node, func(n ast.Node) bool {
-		alias, ok := n.(*ast.AliasNode)
-		if !ok {
-			return true
-		}
-
-		if name, ok := astnode.Name(alias.Value); ok && !seen[name] {
-			seen[name] = true
-			names = append(names, name)
-		}
-
-		return true
-	})
-
-	return names
 }

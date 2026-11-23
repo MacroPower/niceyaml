@@ -33,17 +33,6 @@ func newTable(tb testing.TB, inputs []string, refs ...*reftable.Table) *reftable
 	return reftable.New(bodies, refs...)
 }
 
-// anchorText returns the text of node, which must be an anchor, such as
-// "&x 1".
-func anchorText(tb testing.TB, node ast.Node) string {
-	tb.Helper()
-
-	anchor, ok := node.(*ast.AnchorNode)
-	require.True(tb, ok, "not an anchor: %T", node)
-
-	return anchor.String()
-}
-
 func TestTable_Anchor(t *testing.T) {
 	t.Parallel()
 
@@ -179,8 +168,8 @@ func TestTable_Anchors(t *testing.T) {
 			want:  []string{"&x 1"},
 		},
 		"anchor inside another anchor that a later anchor hides": {
-			// No decode reads the first anchor o, so none registers the
-			// anchor x inside it.
+			// No decode reads the first anchor o, so Anchors leaves out
+			// the anchor x inside it.
 			table: newTable(t, []string{stringtest.LinesLF("o: &o {a: &x 1}", "b: &o 2", "c: &x 3")}),
 			name:  "x",
 			want:  []string{"&x 3"},
@@ -256,120 +245,6 @@ func TestTable_Weights(t *testing.T) {
 	assert.Nil(t, none.Weights())
 }
 
-func TestTable_View(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		table *reftable.Table
-		name  string
-		// The text of the anchor the table holds for name, or empty for
-		// none.
-		want string
-	}{
-		"anchor of a document": {
-			table: newTable(t, []string{"a: &x 1\n"}),
-			name:  "x",
-			want:  "&x 1",
-		},
-		"anchor of a table it reads": {
-			table: reftable.New(nil, newTable(t, []string{"a: &x 1\n"})),
-			name:  "x",
-			want:  "&x 1",
-		},
-		"name of no anchor": {
-			table: newTable(t, []string{"a: &x 1\n"}),
-			name:  "y",
-		},
-		"nil table": {
-			name: "x",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			got, ok := tc.table.View(tc.name)
-			if tc.want == "" {
-				assert.False(t, ok)
-
-				return
-			}
-
-			require.True(t, ok)
-			assert.Equal(t, tc.want, got.String())
-		})
-	}
-
-	t.Run("view that Prime returns", func(t *testing.T) {
-		t.Parallel()
-
-		// The view is the anchor of the document, which the decoder reads.
-		table := newTable(t, []string{stringtest.LinesLF("x: &x 1", "a: &a [*x # note", "]")})
-
-		got, ok := table.View("a")
-		require.True(t, ok)
-
-		primed := table.Prime([]string{"a"})
-		require.Len(t, primed, 2)
-		assert.Same(t, primed[1], got)
-
-		raw, ok := table.Anchor("a")
-		require.True(t, ok)
-		assert.Same(t, raw, got)
-	})
-
-	t.Run("anchor inside another", func(t *testing.T) {
-		t.Parallel()
-
-		// The view of the inner anchor is the node that the view of the
-		// outer one holds.
-		tcs := map[string]struct {
-			input string
-			// Whether the first view the table gives is that of the inner
-			// anchor.
-			innerFirst bool
-		}{
-			"without aliases": {
-				input: "a: &x {k: 1, <<: &y {j: 1}}\n",
-			},
-			"with an alias in each anchor": {
-				input: stringtest.LinesLF("z: &z 1", "a: &x {k: *z, <<: &y {j: *z}}"),
-			},
-			"inner anchor first": {
-				input:      stringtest.LinesLF("z: &z 1", "a: &x {k: *z, <<: &y {j: *z}}"),
-				innerFirst: true,
-			},
-			"two levels deep": {
-				input: stringtest.LinesLF("z: &z 1", "a: &w {<<: &x {k: *z, <<: &y {j: *z}}}"),
-			},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				table := newTable(t, []string{tc.input})
-
-				if tc.innerFirst {
-					_, ok := table.View("y")
-					require.True(t, ok)
-				}
-
-				outer, ok := table.View("x")
-				require.True(t, ok)
-
-				inner, ok := table.View("y")
-				require.True(t, ok)
-
-				entries, ok := astnode.Entries(outer.Value)
-				require.True(t, ok)
-				assert.Same(t, inner, entries[len(entries)-1].Value)
-			})
-		}
-	})
-}
-
 func TestTable_Keys(t *testing.T) {
 	t.Parallel()
 
@@ -433,78 +308,6 @@ func TestTable_Keys(t *testing.T) {
 		outer := newTable(t, []string{"d: &w 3\n"}, table)
 		assert.Same(t, got, outer.Keys("x"))
 		assert.NotSame(t, got, outer.Keys("w"))
-	})
-}
-
-func TestTable_Prime(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		input string
-		names []string
-		// The text of each anchor Prime returns, in order.
-		want []string
-	}{
-		"anchor with no alias": {
-			input: stringtest.LinesLF("a: &a 1", "b: &b 2"),
-			names: []string{"b"},
-			want:  []string{"&b 2"},
-		},
-		"anchor after the anchors it reaches": {
-			input: stringtest.LinesLF("list: &list [*x, *y]", "x: &x 1", "y: &y [*x]"),
-			names: []string{"list"},
-			want:  []string{"&x 1", "&y [*x]", "&list [*x, *y]"},
-		},
-		"anchor two names reach comes once": {
-			input: stringtest.LinesLF("x: &x 1", "a: &a [*x]", "b: &b [*x]"),
-			names: []string{"a", "b", "a"},
-			want:  []string{"&x 1", "&a [*x]", "&b [*x]"},
-		},
-		"last anchor of a name": {
-			input: stringtest.LinesLF("x: &x 1", "list: &list [*x]", "y: &x 2"),
-			names: []string{"list"},
-			want:  []string{"&x 2", "&list [*x]"},
-		},
-		"alias inside its own anchor": {
-			input: "a: &a [1, *a]\n",
-			names: []string{"a"},
-			want:  []string{"&a [1, *a]"},
-		},
-		"loop of anchors": {
-			input: stringtest.LinesLF("a: &a [*b]", "b: &b [*a]"),
-			names: []string{"a"},
-			want:  []string{"&b [*a]", "&a [*b]"},
-		},
-		"alias to no anchor": {
-			input: "a: &a [*missing]\n",
-			names: []string{"a", "other"},
-			want:  []string{"&a [*missing]"},
-		},
-		"no name": {
-			input: "a: &a 1\n",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			var got []string
-
-			for _, node := range newTable(t, []string{tc.input}).Prime(tc.names) {
-				got = append(got, anchorText(t, node))
-			}
-
-			assert.Equal(t, tc.want, got)
-		})
-	}
-
-	t.Run("nil table", func(t *testing.T) {
-		t.Parallel()
-
-		var table *reftable.Table
-
-		assert.Empty(t, table.Prime([]string{"x"}))
 	})
 }
 
@@ -603,6 +406,13 @@ func TestPlaces_Paths(t *testing.T) {
 			from:  "x", in: "x", token: "bad",
 			want: []string{"@.b"},
 		},
+		// The alias reads the last anchor of its name, not the anchor of its
+		// name that holds it.
+		"alias inside an anchor of its name that a later anchor hides": {
+			input: stringtest.LinesLF("o: &o {i: &x {a: *x}}", "z: &x {b: bad}"),
+			from:  "o", in: "x", token: "bad",
+			want: []string{"@.i.a.b"},
+		},
 		"token outside the anchor": {
 			input: stringtest.LinesLF("y: &y bad", "x: &x {a: 1}"),
 			from:  "x", in: "y", token: "bad",
@@ -615,7 +425,7 @@ func TestPlaces_Paths(t *testing.T) {
 
 			table := newTable(t, []string{tc.input})
 
-			from, ok := table.View(tc.from)
+			from, ok := table.Anchor(tc.from)
 			require.True(t, ok, "no anchor %s", tc.from)
 
 			tk := anchorToken(t, table, tc.in, tc.token)
@@ -689,7 +499,7 @@ func TestPlaces_MergePaths(t *testing.T) {
 
 			table := newTable(t, []string{tc.input})
 
-			from, ok := table.View(tc.from)
+			from, ok := table.Anchor(tc.from)
 			require.True(t, ok, "no anchor %s", tc.from)
 
 			tk := anchorToken(t, table, tc.in, tc.token)
@@ -721,7 +531,7 @@ func pathTexts(ps []paths.Path) []string {
 func anchorToken(tb testing.TB, table *reftable.Table, name, text string) *token.Token {
 	tb.Helper()
 
-	in, ok := table.View(name)
+	in, ok := table.Anchor(name)
 	require.True(tb, ok, "no anchor %s", name)
 
 	var tk *token.Token
