@@ -478,17 +478,16 @@ func TestReferenceWeights(t *testing.T) {
 			input: "v: *d\n",
 		},
 		"loop of an anchor and an anchor inside it read at the inner": {
-			// The decoder reads a before b for this document, and the read
-			// of a registers b. A decode into any thus ends, and a decode
-			// into a recursive Go type might not end. The weights hold one
-			// verdict for the loop.
+			// A decode into any reads a through the alias *a under b, and
+			// it takes the alias *b under a as null, so it ends. The
+			// weights hold one verdict for the loop.
 			refs:  []string{nestedLoop},
 			input: "v: *b\n",
 			want:  "1:4: " + ratio,
 		},
 		"loop of an anchor and an anchor inside it read at the outer": {
-			// The decoder reads b before a for this document, and rejects
-			// the alias *a under b.
+			// A decode into any takes the alias *a under b as null, so it
+			// ends. The weights hold one verdict for the loop.
 			refs:  []string{nestedLoop},
 			input: "v: *a\n",
 			want:  "1:4: " + ratio,

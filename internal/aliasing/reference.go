@@ -50,14 +50,14 @@ import (
 // not end. The weights hold one verdict for the loop, so a document that
 // reaches it is past the limit for every reader.
 //
-// What a decode does at a loop of more names depends on where the
-// anchors of the loop lie. The decoder rejects the alias that closes a
-// loop of anchors that lie apart, as x and y do. With
-// `&a {b: &b [*a], c: *b}`, the anchor b of the loop lies inside the
-// anchor a. The decoder rejects a document whose aliases reach that loop
-// first at a. A decode into any ends for a document whose aliases reach
-// the loop first at b. A decode of that document into a recursive Go
-// type might not end.
+// A decode into any also ends at a loop of more names. It takes an alias
+// as null where it is still reading the anchor of the alias. With x and
+// y, a decode of an alias to x takes the alias *x inside y as null. With
+// `&a {b: &b {k: *a}, c: *b}`, the anchor b of the loop lies inside the
+// anchor a. A decode of an alias to a takes the alias *a under b as
+// null. A decode of an alias to b reads a through the alias *a under b,
+// and it takes the alias *b under a as null. The weights hold one
+// verdict for each of these loops too.
 //
 // The weights depend on the reference documents alone, so every document
 // that reads those documents shares them, and a ReferenceWeights weighs

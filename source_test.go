@@ -8541,6 +8541,60 @@ func TestWithAliasLimit_ReferenceLoop(t *testing.T) {
 		}, got)
 	})
 
+	t.Run("loop of more names without the limit", func(t *testing.T) {
+		t.Parallel()
+
+		// A decode into any takes an alias as null where it is still
+		// reading the anchor of the alias, so it ends at each loop.
+		const (
+			apart  = "x: &x [*y]\ny: &y [*x]\n"
+			nested = "a: &a {b: &b {k: *a}, c: *b}\n"
+		)
+
+		tcs := map[string]struct {
+			want  any
+			refs  string
+			input string
+		}{
+			"anchors apart": {
+				refs:  apart,
+				input: "v: *x\n",
+				want:  map[string]any{"v": []any{[]any{nil}}},
+			},
+			"anchor inside another read at the outer": {
+				refs:  nested,
+				input: "v: *a\n",
+				want: map[string]any{"v": map[string]any{
+					"b": map[string]any{"k": nil},
+					"c": map[string]any{"k": nil},
+				}},
+			},
+			"anchor inside another read at the inner": {
+				refs:  nested,
+				input: "v: *b\n",
+				want: map[string]any{"v": map[string]any{
+					"k": map[string]any{
+						"b": map[string]any{"k": nil},
+						"c": nil,
+					},
+				}},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input,
+					yamltest.References(tc.refs), niceyaml.WithAliasLimit(false))
+
+				got, err := doc.Decode[any](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got)
+			})
+		}
+	})
+
 	t.Run("the same anchor inside the document", func(t *testing.T) {
 		t.Parallel()
 
