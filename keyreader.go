@@ -4,7 +4,6 @@ import (
 	"github.com/goccy/go-yaml/ast"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
-	"go.jacobcolvin.com/niceyaml/internal/decodetree"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/internal/mapkey"
 )
@@ -47,15 +46,14 @@ func (n *Node) keyReader() *mapkey.Keys {
 // aliases need come next. The body reads no anchor of the document before
 // it. A document that did not parse has no tree, so its nodes read no
 // anchor. A node whose token the parse of the document does not hold lies in
-// a reference document, so decodeView returns the [decodetree.DecodeView] of
-// the node and reports false.
+// a reference document, so decodeView returns the node and reports false.
 func (n *Node) decodeView(node ast.Node) (ast.Node, []ast.Node, bool) {
 	if n.doc.root == nil {
 		return node, nil, true
 	}
 
 	if !n.holdsToken(astnode.Token(node)) {
-		return decodetree.DecodeView(node), nil, false
+		return node, nil, false
 	}
 
 	tree := n.doc.tree()

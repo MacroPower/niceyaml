@@ -61,8 +61,7 @@ func referenceRules(tb testing.TB, doc, ref *niceyaml.Node, opts ...yamldecode.D
 		Resolver: doc.DocumentResolver(),
 		View:     func(node ast.Node) ast.Node { return node },
 		Decode: func(node ast.Node, v any) (err error) { //nolint:nonamedreturns // The recover sets it.
-			// The decoder panics on some nodes, as on an inline map under a
-			// decoder that rejects unknown fields.
+			// An unmarshaler of a test type might panic.
 			defer func() {
 				if p := recover(); p != nil {
 					err = fmt.Errorf("panic: %v", p)

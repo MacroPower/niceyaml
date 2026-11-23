@@ -103,8 +103,23 @@ func TestBase(t *testing.T) {
 	t.Parallel()
 
 	assert.Equal(t, reflect.TypeFor[int](), unmarshaler.Base(reflect.TypeFor[**int]()))
+	assert.Equal(t, reflect.TypeFor[int](), unmarshaler.Base(reflect.TypeFor[***int]()))
 	assert.Equal(t, reflect.TypeFor[[]*int](), unmarshaler.Base(reflect.TypeFor[[]*int]()))
+
+	// A pointer type that never ends in a type that is not a pointer gives
+	// a pointer type of its chain.
+	assert.Equal(t, reflect.TypeFor[selfPointer](), unmarshaler.Base(reflect.TypeFor[selfPointer]()))
+	assert.Equal(t, reflect.Pointer, unmarshaler.Base(reflect.TypeFor[pointerA]()).Kind())
+	assert.Equal(t, reflect.Pointer, unmarshaler.Base(reflect.TypeFor[*pointerB]()).Kind())
 }
+
+// selfPointer and the pair of pointerA and pointerB are pointer types that
+// never end in a type that is not a pointer.
+type (
+	selfPointer *selfPointer
+	pointerA    *pointerB
+	pointerB    *pointerA
+)
 
 func TestDecodesItself(t *testing.T) {
 	t.Parallel()

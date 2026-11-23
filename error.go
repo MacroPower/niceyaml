@@ -5989,6 +5989,13 @@ func panicked(in string, p *PanicError, marks ...error) *markedError {
 	}
 }
 
+// recovered returns the [*PanicError] of p, a value that recover returned.
+// The deferred function that called recover calls recovered, so the stack
+// that the PanicError holds is the stack of the goroutine at the panic.
+func recovered(p any) *PanicError {
+	return &PanicError{Value: p, Stack: debug.Stack()}
+}
+
 // guard runs fn, a hook of a call, and returns what fn returns. A panic in
 // fn comes back as the error that [panicked] gives it under in, the name of
 // the hook, as in "validator panicked: boom". That error comes inside
@@ -5996,7 +6003,7 @@ func panicked(in string, p *PanicError, marks ...error) *markedError {
 func guard(in string, fn func() error) (err error) {
 	defer func() {
 		if v := recover(); v != nil {
-			err = Unchecked(panicked(in, &PanicError{Value: v, Stack: debug.Stack()}))
+			err = Unchecked(panicked(in, recovered(v)))
 		}
 	}()
 

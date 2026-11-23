@@ -92,13 +92,27 @@ func (c *TypeCache[V]) Get(t reflect.Type, compute func(reflect.Type) V) V {
 }
 
 // Base returns the type t points to through every pointer on it, because
-// the decoder decodes a pointer as the value it points to.
+// the decoder decodes a pointer as the value it points to. A pointer type
+// such as "type P *P" never ends in a type that is not a pointer, and Base
+// returns a pointer type of that chain for it.
 func Base(t reflect.Type) reflect.Type {
-	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
+	// The walk moves fast two steps for each step of slow, so fast meets
+	// slow when the chain of pointers loops.
+	slow, fast := t, t
+
+	for fast.Kind() == reflect.Pointer {
+		fast = fast.Elem()
+		if fast.Kind() != reflect.Pointer {
+			break
+		}
+
+		fast, slow = fast.Elem(), slow.Elem()
+		if fast == slow {
+			break
+		}
 	}
 
-	return t
+	return fast
 }
 
 // DecodesItself reports whether go-yaml decodes a value of type t whole,

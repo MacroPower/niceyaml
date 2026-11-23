@@ -3067,10 +3067,9 @@ func TestNode_Scalar(t *testing.T) {
 			ok:    true,
 		},
 		"int tag on an alias of a sequence": {
-			// A decode reads an int, which Scalar prints.
+			// The decode fails.
 			input: stringtest.LinesLF("k: &k [x, y]", "a: !!int *k"),
-			want:  "0",
-			ok:    true,
+			ok:    false,
 		},
 		"bool tag on an alias of a sequence": {
 			// The decode fails.

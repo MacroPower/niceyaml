@@ -1,0 +1,135 @@
+--- a/decode.go
++++ b/decode.go
+@@ -724,13 +724,13 @@
+ 	return nil
+ }
+ 
+-func (d *Decoder) unmarshalableDocument(node ast.Node) ([]byte, error) {
+-	doc := format.FormatNodeWithResolvedAlias(node, d.anchorNodeMap)
++func (d *Decoder) unmarshalableDocument(ctx context.Context, node ast.Node) ([]byte, error) {
++	doc := format.FormatNodeWithResolvedAlias(node, d.anchorNodeMap, getAnchorMap(ctx))
+ 	return []byte(doc), nil
+ }
+ 
+-func (d *Decoder) unmarshalableText(node ast.Node) ([]byte, bool) {
+-	doc := format.FormatNodeWithResolvedAlias(node, d.anchorNodeMap)
++func (d *Decoder) unmarshalableText(ctx context.Context, node ast.Node) ([]byte, bool) {
++	doc := format.FormatNodeWithResolvedAlias(node, d.anchorNodeMap, getAnchorMap(ctx))
+ 	var v string
+ 	if err := Unmarshal([]byte(doc), &v); err != nil {
+ 		return nil, false
+@@ -794,7 +794,7 @@
+ func (d *Decoder) decodeByUnmarshaler(ctx context.Context, dst reflect.Value, src ast.Node) error {
+ 	ptrValue := dst.Addr()
+ 	if unmarshaler, exists := d.unmarshalerFromCustomUnmarshalerMap(ptrValue.Type()); exists {
+-		b, err := d.unmarshalableDocument(src)
++		b, err := d.unmarshalableDocument(ctx, src)
+ 		if err != nil {
+ 			return err
+ 		}
+@@ -806,7 +806,7 @@
+ 	iface := ptrValue.Interface()
+ 
+ 	if unmarshaler, ok := iface.(BytesUnmarshalerContext); ok {
+-		b, err := d.unmarshalableDocument(src)
++		b, err := d.unmarshalableDocument(ctx, src)
+ 		if err != nil {
+ 			return err
+ 		}
+@@ -817,7 +817,7 @@
+ 	}
+ 
+ 	if unmarshaler, ok := iface.(BytesUnmarshaler); ok {
+-		b, err := d.unmarshalableDocument(src)
++		b, err := d.unmarshalableDocument(ctx, src)
+ 		if err != nil {
+ 			return err
+ 		}
+@@ -884,7 +884,7 @@
+ 	}
+ 
+ 	if unmarshaler, isText := iface.(encoding.TextUnmarshaler); isText {
+-		b, ok := d.unmarshalableText(src)
++		b, ok := d.unmarshalableText(ctx, src)
+ 		if ok {
+ 			if err := unmarshaler.UnmarshalText(b); err != nil {
+ 				return err
+@@ -895,7 +895,7 @@
+ 
+ 	if d.useJSONUnmarshaler {
+ 		if unmarshaler, ok := iface.(jsonUnmarshaler); ok {
+-			b, err := d.unmarshalableDocument(src)
++			b, err := d.unmarshalableDocument(ctx, src)
+ 			if err != nil {
+ 				return err
+ 			}
+@@ -1126,6 +1126,11 @@
+ ) (reflect.Value, error) {
+ 	if node.Type() == ast.AliasType {
+ 		aliasName := node.(*ast.AliasNode).Value.GetToken().Value
++		if _, open := getAnchorMap(ctx)[aliasName]; open {
++			// An alias inside the anchor it names reads as null, as
++			// nodeToValue reads it.
++			return d.createDecodedNewValue(ctx, typ, defaultVal, ast.Null(token.New("null", "null", node.GetToken().Position)))
++		}
+ 		value := d.anchorValueMap[aliasName]
+ 		if value.IsValid() {
+ 			v, err := d.castToAssignableValue(value, typ, node)
+@@ -1135,7 +1140,9 @@
+ 		}
+ 		anchor, exists := d.anchorNodeMap[aliasName]
+ 		if exists {
++			// The alias reads its anchor, so an alias inside reads as null.
+ 			node = anchor
++			ctx = withAnchor(ctx, aliasName)
+ 		}
+ 	}
+ 	var newValue reflect.Value
+--- a/format/format.go
++++ b/format/format.go
+@@ -7,13 +7,21 @@
+ 	"github.com/goccy/go-yaml/token"
+ )
+ 
+-func FormatNodeWithResolvedAlias(n ast.Node, anchorNodeMap map[string]ast.Node) string {
++// FormatNodeWithResolvedAlias formats n with each alias written out as the
++// content of its anchor. The names in open are the anchors whose values hold
++// n. An alias to one of them, or to an anchor that the formatter is writing
++// out, reads as null, as the decoder reads it.
++func FormatNodeWithResolvedAlias(n ast.Node, anchorNodeMap map[string]ast.Node, open map[string]struct{}) string {
+ 	tk := getFirstToken(n)
+ 	if tk == nil {
+ 		return ""
+ 	}
+ 	formatter := newFormatter(tk, hasComment(n))
+ 	formatter.anchorNodeMap = anchorNodeMap
++	formatter.expanding = make(map[string]bool, len(open))
++	for name := range open {
++		formatter.expanding[name] = true
++	}
+ 	return formatter.format(n)
+ }
+ 
+@@ -187,6 +195,7 @@
+ 	existsComment    bool
+ 	tokenToOriginMap map[*token.Token]string
+ 	anchorNodeMap    map[string]ast.Node
++	expanding        map[string]bool
+ }
+ 
+ func newFormatter(tk *token.Token, existsComment bool) *Formatter {
+@@ -406,8 +415,14 @@
+ 	if f.anchorNodeMap != nil {
+ 		anchorName := n.Value.GetToken().Value
+ 		node := f.anchorNodeMap[anchorName]
++		if node != nil && f.expanding[anchorName] {
++			org := f.origin(n.Start)
++			return org[:len(org)-len(strings.TrimLeft(org, " \t\r\n"))] + "null"
++		}
+ 		if node != nil {
++			f.expanding[anchorName] = true
+ 			formatted := f.formatNode(node)
++			delete(f.expanding, anchorName)
+ 			// If formatted text contains newline characters, indentation needs to be considered.
+ 			if strings.Contains(formatted, "\n") {
+ 				// If the first character is not a newline, the first line should be output without indentation.

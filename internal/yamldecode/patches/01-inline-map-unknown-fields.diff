@@ -1,0 +1,30 @@
+--- a/decode.go
++++ b/decode.go
+@@ -667,6 +667,15 @@
+ 	if structType.Kind() == reflect.Ptr {
+ 		structType = structType.Elem()
+ 	}
++	if structType.Kind() == reflect.Map || structType.Kind() == reflect.Interface {
++		// An inline map or interface takes every key, so no
++		// unknown field remains.
++		clear(unknownFields)
++		return nil
++	}
++	if structType.Kind() != reflect.Struct {
++		return nil
++	}
+ 	structFieldMap, err := structFieldMap(structType)
+ 	if err != nil {
+ 		return err
+@@ -683,6 +692,11 @@
+ 			continue
+ 		}
+ 
++		if structField.IsInline && structField.IsAutoAlias {
++			// An inline field with the alias option reads the anchor of
++			// a merge key, not the keys of the mapping.
++			continue
++		}
+ 		if structField.IsInline {
+ 			_ = d.deleteStructKeys(field.Type, unknownFields)
+ 		} else {

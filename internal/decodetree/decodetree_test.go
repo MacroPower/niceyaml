@@ -16,6 +16,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/decodetree"
 	"go.jacobcolvin.com/niceyaml/internal/docparse"
+	"go.jacobcolvin.com/niceyaml/internal/yamldecode"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
 
@@ -93,7 +94,7 @@ func TestNew(t *testing.T) {
 		"an alias with a comment": {
 			input: stringtest.LinesLF("a: &x 1", "b: *x # note"),
 			steps: []any{"b"},
-			want:  "*x",
+			want:  "*x # note",
 		},
 		"reused anchor names": {
 			input:  stringtest.LinesLF("a: &x 1", "b: *x", "c: &x 2", "d: *x"),
@@ -108,10 +109,9 @@ func TestNew(t *testing.T) {
 			parsed: true,
 		},
 		"an integer tag": {
-			input:  "a: !!int 1\n",
-			steps:  []any{"a"},
-			want:   "!<tag:yaml.org,2002:int> 1",
-			parsed: true,
+			input: "a: !!int 1\n",
+			steps: []any{"a"},
+			want:  "!!int 1",
 		},
 	}
 
@@ -153,7 +153,6 @@ func TestChanges(t *testing.T) {
 		},
 		"an integer tag": {
 			input: "a: !!int 1\n",
-			want:  true,
 		},
 	}
 
@@ -164,7 +163,7 @@ func TestChanges(t *testing.T) {
 			tree, doc := newTree(t, tc.input)
 			facts := aliasing.NewFacts(doc.AST(), doc.DocumentResolver())
 
-			got := decodetree.Changes(doc.AST(), facts, false)
+			got := decodetree.Changes(facts, false)
 			assert.Equal(t, tc.want, got)
 			assert.Equal(t, tree.Changed(), got)
 		})
@@ -224,16 +223,61 @@ func TestTree_Prime(t *testing.T) {
 func TestTree_UnresolvedMerge(t *testing.T) {
 	t.Parallel()
 
-	tree, doc := newTree(t, stringtest.LinesLF("a: 1", "b: {<<: *missing}"))
-	scope := tree.View(at(t, doc, "b"))
+	tcs := map[string]struct {
+		input string
+		steps []any
+		// The line of the alias that the merge key reads, counted from 0,
+		// and the message.
+		line int
+		want string
+	}{
+		"alias without an anchor": {
+			input: stringtest.LinesLF("a: 1", "b: {<<: *missing}"),
+			steps: []any{"b", "<<"},
+			line:  1,
+			want:  "cannot find anchor by alias name missing",
+		},
+		"alias of a renamed anchor": {
+			// The message spells the name of the document.
+			input: stringtest.LinesLF("a: &x {c: 1}", "b: &x {c: 2}", "d: {<<: *x}"),
+			steps: []any{"d", "<<"},
+			line:  2,
+			want:  "cannot find anchor by alias name x",
+		},
+	}
 
-	tk, msg, ok := tree.UnresolvedMerge(scope, errors.New("cannot find anchor by alias name missing"))
-	require.True(t, ok)
-	assert.Equal(t, "cannot find anchor by alias name missing", msg)
-	assert.Equal(t, 1, tk.Position.Line-1)
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	_, _, ok = tree.UnresolvedMerge(scope, errors.New("other"))
-	assert.False(t, ok)
+			tree, doc := newTree(t, tc.input)
+			scope := tree.View(at(t, doc, tc.steps[0]))
+
+			alias, ok := tree.View(at(t, doc, tc.steps...)).(*ast.AliasNode)
+			require.True(t, ok, "not an alias")
+
+			tk, msg, ok := tree.UnresolvedMerge(scope, &yamldecode.MissingAnchorError{Alias: alias})
+			require.True(t, ok)
+			assert.Equal(t, tc.want, msg)
+			assert.Equal(t, tc.line, tk.Position.Line-1)
+
+			// The message alone does not name the alias.
+			_, _, ok = tree.UnresolvedMerge(scope, errors.New(tc.want))
+			assert.False(t, ok)
+		})
+	}
+
+	t.Run("alias outside the scope", func(t *testing.T) {
+		t.Parallel()
+
+		tree, doc := newTree(t, stringtest.LinesLF("a: {<<: *missing}", "b: 1"))
+
+		alias, ok := tree.View(at(t, doc, "a", "<<")).(*ast.AliasNode)
+		require.True(t, ok, "not an alias")
+
+		_, _, ok = tree.UnresolvedMerge(tree.View(at(t, doc, "b")), &yamldecode.MissingAnchorError{Alias: alias})
+		assert.False(t, ok)
+	})
 }
 
 func TestTree_ReferenceAliases(t *testing.T) {
@@ -368,7 +412,7 @@ func TestTree_Original(t *testing.T) {
 		"integer tag": {
 			input: "c: !!int 7\n",
 			steps: []any{"c"},
-			view:  "!<tag:yaml.org,2002:int> 7",
+			view:  "!!int 7",
 		},
 		"alias inside its anchor": {
 			input: "a: &x {b: *x}\n",

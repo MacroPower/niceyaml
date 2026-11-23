@@ -1,0 +1,18 @@
+--- a/decode.go
++++ b/decode.go
+@@ -1053,7 +1053,14 @@
+ 	valueType := dst.Type()
+ 	switch valueType.Kind() {
+ 	case reflect.Ptr:
+-		if src.Type() == ast.NullType {
++		// An alias to a null is a null too.
++		content := src
++		if alias, ok := src.(*ast.AliasNode); ok {
++			if node := d.anchorNodeMap[alias.Value.GetToken().Value]; node != nil {
++				content = node
++			}
++		}
++		if content.Type() == ast.NullType {
+ 			// set nil value to pointer
+ 			dst.Set(reflect.Zero(valueType))
+ 			return nil

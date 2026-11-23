@@ -159,10 +159,7 @@ func BenchmarkNode_Decode_ProblemsMap(b *testing.B) {
 // decodes itself from text. In the first layout the decoder rejects the
 // port of the last server alone, so the search decodes every tier again
 // and finds nothing more. In the second the tier of each server names no
-// tier, so the search reports as many problems as the list holds. The
-// go-yaml decoder reads every token of the file to hand one value its
-// text, so the time per server grows with the list, in the decode and in
-// the search alike.
+// tier, so the search reports as many problems as the list holds.
 func BenchmarkNode_Decode_ProblemsText(b *testing.B) {
 	benchProblemLayouts[struct {
 		Servers []problemTiered `yaml:"servers"`

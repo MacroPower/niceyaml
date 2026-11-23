@@ -1,0 +1,84 @@
+--- a/decode.go
++++ b/decode.go
+@@ -53,6 +53,7 @@
+ 	aliasBytesLeft       int
+ 	bounded              bool
+ 	stopped              error
++	origins              format.Origins
+ }
+ 
+ // ErrAliasBudget is the error of a decode that read more through aliases
+@@ -823,7 +824,7 @@
+ }
+ 
+ func (d *Decoder) unmarshalableDocument(ctx context.Context, node ast.Node) ([]byte, error) {
+-	doc := format.FormatNodeWithResolvedAlias(node, d.anchorNodeMap, getAnchorMap(ctx), d.textBudget())
++	doc := format.FormatNodeWithResolvedAlias(node, d.anchorNodeMap, getAnchorMap(ctx), d.textBudget(), &d.origins)
+ 	if d.bounded && d.aliasBytesLeft < 0 {
+ 		return nil, ErrAliasBudget
+ 	}
+@@ -831,7 +832,7 @@
+ }
+ 
+ func (d *Decoder) unmarshalableText(ctx context.Context, node ast.Node) ([]byte, bool) {
+-	doc := format.FormatNodeWithResolvedAlias(node, d.anchorNodeMap, getAnchorMap(ctx), d.textBudget())
++	doc := format.FormatNodeWithResolvedAlias(node, d.anchorNodeMap, getAnchorMap(ctx), d.textBudget(), &d.origins)
+ 	var v string
+ 	if err := Unmarshal([]byte(doc), &v); err != nil {
+ 		return nil, false
+--- a/format/format.go
++++ b/format/format.go
+@@ -15,12 +15,16 @@
+ // The count budget, when it is not nil, holds the bytes that the formatter
+ // may still write for aliases. The formatter takes the text of each alias
+ // off the count, and writes no further alias once the count is below zero.
+-func FormatNodeWithResolvedAlias(n ast.Node, anchorNodeMap map[string]ast.Node, open map[string]struct{}, budget *int) string {
++//
++// The formatter reads every token of the parse of n once and keeps what it
++// read in origins, when origins is not nil. A caller that formats many nodes
++// of one parse hands in the same Origins each time.
++func FormatNodeWithResolvedAlias(n ast.Node, anchorNodeMap map[string]ast.Node, open map[string]struct{}, budget *int, origins *Origins) string {
+ 	tk := getFirstToken(n)
+ 	if tk == nil {
+ 		return ""
+ 	}
+-	formatter := newFormatter(tk, hasComment(n))
++	formatter := origins.formatter(tk, hasComment(n))
+ 	formatter.anchorNodeMap = anchorNodeMap
+ 	formatter.budget = budget
+ 	formatter.expanding = make(map[string]bool, len(open))
+@@ -204,6 +208,34 @@
+ 	budget           *int
+ }
+ 
++// Origins holds the text that a [Formatter] writes for each token of the
++// parses it has read.
++type Origins struct {
++	texts map[*token.Token]string
++}
++
++// formatter returns a Formatter for the parse that holds tk. It reads the
++// tokens of that parse only when o does not hold them yet.
++func (o *Origins) formatter(tk *token.Token, existsComment bool) *Formatter {
++	if o == nil {
++		return newFormatter(tk, existsComment)
++	}
++	if _, held := o.texts[tk]; !held {
++		read := newFormatter(tk, existsComment).tokenToOriginMap
++		if o.texts == nil {
++			o.texts = make(map[*token.Token]string, len(read))
++		}
++		for t, text := range read {
++			o.texts[t] = text
++		}
++		// A comment token has no text of its own in the map.
++		if _, held := o.texts[tk]; !held {
++			o.texts[tk] = read[tk]
++		}
++	}
++	return &Formatter{existsComment: existsComment, tokenToOriginMap: o.texts}
++}
++
+ func newFormatter(tk *token.Token, existsComment bool) *Formatter {
+ 	tokenToOriginMap := make(map[*token.Token]string)
+ 	for tk.Prev != nil {

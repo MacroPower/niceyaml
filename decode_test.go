@@ -1036,11 +1036,24 @@ func TestDocument_Decode(t *testing.T) {
 		}
 	})
 
+	t.Run("field of a pointer to a pointer", func(t *testing.T) {
+		t.Parallel()
+
+		type config struct {
+			V **int `yaml:"v"`
+		}
+
+		got, err := yamltest.FirstDocument(t, "v: 5\n").Decode[config](t.Context())
+		require.NoError(t, err)
+		require.NotNil(t, got.V)
+		assert.Equal(t, new(5), *got.V)
+	})
+
 	t.Run("int-tagged integer", func(t *testing.T) {
 		t.Parallel()
 
-		// The go-yaml decoder reads an integer under a !!int tag as a Go
-		// int, which it rejects for every integer type.
+		// An integer under a !!int tag decodes into every integer type. A
+		// decode into an interface reads it as a Go int, as go-yaml does.
 		type config struct {
 			Version int `yaml:"version"`
 		}
@@ -1053,32 +1066,32 @@ func TestDocument_Decode(t *testing.T) {
 			"integer": {
 				input:   "version: !!int 16\n",
 				want:    16,
-				wantAny: uint64(16),
+				wantAny: 16,
 			},
 			"hex integer": {
 				input:   "version: !!int 0x10\n",
 				want:    16,
-				wantAny: uint64(16),
+				wantAny: 16,
 			},
 			"negative integer": {
 				input:   "version: !!int -5\n",
 				want:    -5,
-				wantAny: int64(-5),
+				wantAny: -5,
 			},
 			"anchor on the tag": {
 				input:   "version: &v !!int 0x10\n",
 				want:    16,
-				wantAny: uint64(16),
+				wantAny: 16,
 			},
 			"tag on an anchor": {
 				input:   "version: !!int &v 0x10\n",
 				want:    16,
-				wantAny: uint64(16),
+				wantAny: 16,
 			},
 			"alias to a tagged anchor": {
 				input:   "base: &k !!int 16\nversion: *k\n",
 				want:    16,
-				wantAny: uint64(16),
+				wantAny: 16,
 			},
 			"after a reused anchor name": {
 				input: stringtest.LinesLF(
@@ -1087,7 +1100,7 @@ func TestDocument_Decode(t *testing.T) {
 					"version: !!int 16",
 				),
 				want:    16,
-				wantAny: uint64(16),
+				wantAny: 16,
 			},
 			"alias to a tagged anchor of a reused name": {
 				input: stringtest.LinesLF(
@@ -1096,7 +1109,7 @@ func TestDocument_Decode(t *testing.T) {
 					"version: *x",
 				),
 				want:    16,
-				wantAny: uint64(16),
+				wantAny: 16,
 			},
 			"after nested collections": {
 				input: stringtest.LinesLF(
@@ -1106,7 +1119,7 @@ func TestDocument_Decode(t *testing.T) {
 					"version: !!int 0x10",
 				),
 				want:    16,
-				wantAny: uint64(16),
+				wantAny: 16,
 			},
 		}
 
@@ -1129,6 +1142,68 @@ func TestDocument_Decode(t *testing.T) {
 				gotAny, err := node.Decode[any](t.Context())
 				require.NoError(t, err)
 				assert.Equal(t, tc.wantAny, gotAny)
+			})
+		}
+	})
+
+	t.Run("int-tagged integer past the range of an int", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "version: !!int 18446744073709551615\n")
+
+		got, err := dd.Decode[struct {
+			Version uint64 `yaml:"version"`
+		}](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, uint64(18446744073709551615), got.Version)
+
+		gotAny, err := yamltest.At(t, dd, paths.Current().Child("version")).Decode[any](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, uint64(18446744073709551615), gotAny)
+	})
+
+	t.Run("int-tagged value that is not an integer", func(t *testing.T) {
+		t.Parallel()
+
+		type config struct {
+			Version int64 `yaml:"version"`
+		}
+
+		tcs := map[string]struct {
+			input string
+			want  string
+		}{
+			"word": {
+				input: "version: !!int abc\n",
+				want:  "1:16: $.version: expected integer, got string",
+			},
+			"fraction": {
+				input: "version: !!int 1.5\n",
+				want:  "1:16: $.version: expected integer, got float",
+			},
+			"integer past the range of a uint64": {
+				input: "version: !!int 99999999999999999999\n",
+				want:  "1:16: $.version: expected integer, got string",
+			},
+			"block scalar": {
+				input: "version: !!int |\n  5\n",
+				want:  "1:16: $.version: expected integer, got string",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				_, err := dd.Decode[config](t.Context())
+				require.ErrorIs(t, err, niceyaml.ErrDecode)
+				require.EqualError(t, err, tc.want)
+
+				_, err = yamltest.At(t, dd, paths.Current().Child("version")).Decode[any](t.Context())
+				require.ErrorIs(t, err, niceyaml.ErrDecode)
+				require.EqualError(t, err, tc.want)
 			})
 		}
 	})
@@ -3737,6 +3812,35 @@ func TestCustomUnmarshaler(t *testing.T) {
 				}
 			})
 		}
+	})
+
+	// The function returns the TypeError of its own parse unwrapped. The
+	// decode keeps the field that the error names and binds the error at
+	// the value of the function.
+	t.Run("go-yaml error of the function binds at the value", func(t *testing.T) {
+		t.Parallel()
+
+		type inner struct{ N int }
+
+		reparse := niceyaml.OverrideTypeRules(niceyaml.CustomUnmarshaler(
+			func(_ context.Context, _ *inner, _ func(any) error) error {
+				var raw struct {
+					N int `yaml:"n"`
+				}
+
+				err := yaml.Unmarshal([]byte("n: abc\n"), &raw)
+
+				return err //nolint:wrapcheck // The test needs the go-yaml error as it is.
+			},
+		))
+
+		doc := yamltest.FirstDocument(t, "z:\n  n: abc\n")
+
+		_, err := doc.Decode[struct {
+			Z inner `yaml:"z"`
+		}](t.Context(), reparse)
+		require.EqualError(t, err, "1:1: $.z: cannot unmarshal string into Go struct field .N of type int")
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
 	})
 
 	// An unmarshaler below the value writes its paths from its own value,
@@ -7375,14 +7479,19 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 					"e": map[string]any{"q": uint64(2)},
 				},
 			},
-			"error keeps the name the alias spells": {
+			"alias of a quoted name reads its anchor": {
 				input: stringtest.LinesLF(
 					`a: &"x [1]" 1`,
 					"b: &x 2",
 					"c: &x 3",
 					`d: *"x [1]"`,
 				),
-				err: `4:4: $.d: could not find alias "\"x [1]\""`,
+				want: map[string]any{
+					"a": uint64(1),
+					"b": uint64(2),
+					"c": uint64(3),
+					"d": uint64(1),
+				},
 			},
 		}
 
@@ -8966,10 +9075,12 @@ func TestDocument_DecodeInto(t *testing.T) {
 				decode: decodedAs[**int],
 				want:   new(new(7)),
 			},
+			// The decoder rejects a pointer type that never ends.
 			"pointer type that refers to itself": {
 				input:  "a: 1\n",
 				decode: decodedAs[selfPointer],
 				want:   selfPointer(nil),
+				err:    niceyaml.ErrDecode,
 			},
 		}
 
@@ -10530,9 +10641,7 @@ func (u *bareReparsingUnmarshaler) UnmarshalYAML(data []byte) error {
 }
 
 // cancelAwareUnmarshaler decodes itself by wrapping the error of the
-// context it gets, so a canceled context fails the decode. The go-yaml
-// decoder never checks the context itself and only passes it to
-// unmarshalers like this one.
+// context it gets, so a canceled context fails the decode.
 type cancelAwareUnmarshaler struct{}
 
 func (*cancelAwareUnmarshaler) UnmarshalYAML(ctx context.Context, _ []byte) error {
@@ -10895,6 +11004,50 @@ func TestErrDecode(t *testing.T) {
 		}
 	})
 
+	t.Run("missing anchor in a reference document", func(t *testing.T) {
+		t.Parallel()
+
+		// The merge key of the reference document reads an anchor that no
+		// document defines. The decode binds the rejection at the alias of
+		// the document that reads the reference.
+		ref := yamltest.References("x: &b {<<: *nope}\n")
+
+		tcs := map[string]struct {
+			input  string
+			decode func(ctx context.Context, dd *niceyaml.Node) error
+			want   string
+		}{
+			"alias decoded into a map": {
+				input:  "a: 1\nbase: *b\n",
+				decode: decodeAs[map[string]any](),
+				want:   "2:7: decoder rejected the value: cannot find anchor by alias name nope",
+			},
+			"alias decoded into a struct": {
+				input: "a: 1\nbase: *b\n",
+				decode: decodeAs[struct {
+					Base struct{ C int } `yaml:"base"`
+					A    int             `yaml:"a"`
+				}](),
+				want: "2:7: decoder rejected the value: cannot find anchor by alias name nope",
+			},
+			"alias in a flow mapping": {
+				input:  "a: 1\nbase: {k: *b}\n",
+				decode: decodeAs[map[string]any](),
+				want:   "2:11: decoder rejected the value: cannot find anchor by alias name nope",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				err := tc.decode(t.Context(), yamltest.FirstDocument(t, tc.input, ref))
+				require.EqualError(t, err, tc.want)
+				require.ErrorIs(t, err, niceyaml.ErrDecode)
+			})
+		}
+	})
+
 	t.Run("unmarshaler error matches and keeps its chain", func(t *testing.T) {
 		t.Parallel()
 
@@ -10957,6 +11110,49 @@ func TestErrDecode(t *testing.T) {
 		}
 	})
 
+	t.Run("wrapped parse error of an unmarshaler binds at the value", func(t *testing.T) {
+		t.Parallel()
+
+		// The unmarshaler wraps the error of its own parse, which the decode
+		// keeps whole and binds at the value that decodes itself.
+		input := stringtest.LinesLF(
+			"a: 1",
+			"b: x",
+			"c: y",
+			"z:",
+			"  n: notanumber",
+		)
+
+		err := decodeAs[struct{ Z reparsingUnmarshaler }]()(t.Context(), yamltest.FirstDocument(t, input))
+		require.EqualError(
+			t,
+			err,
+			"4:1: $.z: custom context: cannot unmarshal string into Go struct field .N of type int",
+		)
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+	})
+
+	t.Run("bare parse error of an unmarshaler binds at the value", func(t *testing.T) {
+		t.Parallel()
+
+		// The item's own parse fails at "abc" on its line 1, where the
+		// source holds the same token at the same position. The decode
+		// binds the error at the item, not at that token, and keeps the
+		// field that the error names.
+		input := stringtest.LinesLF(
+			"name: [abc]",
+			"items:",
+			"  - name: [abc]",
+		)
+
+		err := decodeAs[struct {
+			Name  []string
+			Items []bareReparsingUnmarshaler
+		}]()(t.Context(), yamltest.FirstDocument(t, input))
+		require.EqualError(t, err, "3:3: $.items[0]: cannot unmarshal string into Go struct field .Name of type int")
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+	})
+
 	t.Run("error without a token of the source matches with no location", func(t *testing.T) {
 		t.Parallel()
 
@@ -10969,35 +11165,6 @@ func TestErrDecode(t *testing.T) {
 			decode func(ctx context.Context, dd *niceyaml.Node) error
 			msg    string
 		}{
-			// The error of the value's own parse carries a token of the
-			// bytes it parsed, not of the source, so it comes back as the
-			// value's own error rather than as a rejection at the wrong
-			// line.
-			"parse error of an unmarshaler": {
-				input: stringtest.LinesLF(
-					"a: 1",
-					"b: x",
-					"c: y",
-					"z:",
-					"  n: notanumber",
-				),
-				decode: decodeAs[struct{ Z reparsingUnmarshaler }](),
-				msg:    "cannot unmarshal string into Go struct field .Z of type int",
-			},
-			// The item's own parse fails at "abc" on its line 1, where the
-			// source holds the same token at the same position.
-			"parse error of an unmarshaler at a token the source holds": {
-				input: stringtest.LinesLF(
-					"name: [abc]",
-					"items:",
-					"  - name: [abc]",
-				),
-				decode: decodeAs[struct {
-					Name  []string
-					Items []bareReparsingUnmarshaler
-				}](),
-				msg: "cannot unmarshal string into Go struct field .Items of type int",
-			},
 			// The decoder reports each of the other cases with no token to
 			// bind it to, and none comes from a value that decodes itself,
 			// so the decode finds no value to bind it at. A go-yaml release
@@ -11789,6 +11956,12 @@ type strictInner struct {
 	B int `yaml:"b"`
 }
 
+// strictRefHolder holds a field with the alias option that is not
+// inline, so the field reads its own key.
+type strictRefHolder struct {
+	Ref *strictInner `yaml:"ref,alias"`
+}
+
 // StrictDeep is an inline field of [StrictNested]. The decoder sets an
 // embedded field only when its type is exported.
 type StrictDeep struct {
@@ -12071,36 +12244,6 @@ type strictAliased struct {
 	B  int         `yaml:"b"`
 }
 
-// strictEndingKey is the context key of the [strictEnding] that the
-// unmarshalers of one decode share.
-type strictEndingKey struct{}
-
-// strictEnding counts the calls of [strictEndingMirror] in one decode and
-// ends the context of that decode at the call that at names.
-type strictEnding struct {
-	cancel context.CancelFunc
-	at     int
-	calls  int
-}
-
-// strictEndingMirror decodes itself through a second type with the same
-// fields as [strictInner]. Each call counts itself in the [strictEnding]
-// of its context, which ends the context at the call it names.
-type strictEndingMirror strictInner
-
-func (m *strictEndingMirror) UnmarshalYAML(ctx context.Context, unmarshal func(any) error) error {
-	if ending, ok := ctx.Value(strictEndingKey{}).(*strictEnding); ok {
-		ending.calls++
-		if ending.calls == ending.at {
-			ending.cancel()
-		}
-	}
-
-	type plain strictEndingMirror
-
-	return unmarshal((*plain)(m))
-}
-
 // strictNestedWarn decodes itself with a decode of its text as a source of
 // its own under [niceyaml.UnknownFieldsWarn], and returns the error of that
 // decode.
@@ -12247,6 +12390,20 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 				`5:1: $.zzz~: unknown field "zzz"`,
 				`6:1: $.yyy~: unknown field "yyy"`,
 			),
+		},
+		// A field with the alias option that is not inline reads its own
+		// key, also inside a struct that another struct holds inline.
+		"alias field of an inline struct": {
+			decode: decodeAs[struct {
+				In   strictRefHolder `yaml:",inline"`
+				Name string          `yaml:"name"`
+			}](strict),
+			input: stringtest.LinesLF(
+				"ref: {a: 1}",
+				"name: x",
+				"zzz: 1",
+			),
+			want: `3:1: $.zzz~: unknown field "zzz"`,
 		},
 		// A field reads the key of its yaml tag, its json tag, or its
 		// lowercased name, and no other spelling. A field the decoder
@@ -12715,15 +12872,16 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 			want: `5:1: $.qqq~: unknown field "qqq"`,
 		},
 		// The unmarshaler of a struct that decodes itself decides for the
-		// fields below it. Its decode panics on the inline map, so it does
-		// not name a field.
+		// fields below it.
 		"below a struct with an inline map that decodes itself": {
 			decode: decodeAs[strictLooseSelf](strict),
 			input:  "port: 2\nin: {a: 1, x: 2}\n",
+			want:   `2:12: $.in.x~: unknown field "x"`,
 		},
 		"below an inline map of a struct that decodes itself": {
 			decode: decodeAs[strictLooseOuter](strict),
 			input:  "loose: {foo: 1, in: {a: 1, x: 2}}\n",
+			want:   `1:28: $.loose.in.x~: unknown field "x"`,
 		},
 		"below a struct that decodes itself into a looser local type": {
 			decode: decodeAs[strictLooseLoose](strict),
@@ -12732,6 +12890,7 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 		"beside an inline map that reads an anchor of a struct that decodes itself": {
 			decode: decodeAs[strictAliasMapSelf](strict),
 			input:  "x: 1\ny: 2\nzzz: 3\n",
+			want:   `3:1: $.zzz~: unknown field "zzz"`,
 		},
 		"inline map of a local type of an unmarshaler": {
 			decode: decodeAs[strictLooseWrap](strict),
@@ -12750,17 +12909,18 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 			sourceOpts: []niceyaml.SourceOption{yamltest.References("x: &b {a: 1, zzz: 2}\n")},
 			want:       `1:7: $.base.zzz~: unknown field "zzz"`,
 		},
-		// The document reaches the struct with an inline map, so the search
-		// reports the unknown fields. It does not read below a slice that
-		// decodes itself or behind an alias to a reference document.
+		// The decoder rejects each unknown field that it reads beside a
+		// struct with an inline map too.
 		"below a slice that decodes itself beside an inline map": {
 			decode: decodeAs[strictMaybeLoose](strict),
 			input:  "loose: {foo: 1}\nitems:\n  - a: 1\n    zzz: 2\n",
+			want:   `4:5: $.items[0].zzz~: unknown field "zzz"`,
 		},
 		"behind an alias to a reference document beside an inline map": {
 			decode:     decodeAs[strictMaybeLoose](strict),
 			input:      "loose: {foo: 1}\nbase: *b\n",
 			sourceOpts: []niceyaml.SourceOption{yamltest.References("x: &b {a: 1, zzz: 2}\n")},
+			want:       `2:7: $.base.zzz~: unknown field "zzz"`,
 		},
 		"below a value of a custom unmarshaler beside an inline map": {
 			decode: decodeAs[strictMaybeLoose](strict, niceyaml.OverrideTypeRules(
@@ -12813,8 +12973,7 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 			),
 		},
 		// A map that reads an anchor does not take the keys of the mapping,
-		// but the decoder panics on it as on an inline map when a struct
-		// holds its struct inline.
+		// even when a struct holds its struct inline.
 		"beside an inline map that reads an anchor": {
 			decode: decodeAs[strictAliasMapOuter](strict),
 			input:  "x: 1\ny: 2\nzzz: 3\nyyy: 4\n",
@@ -12954,18 +13113,21 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 		}
 	})
 
-	t.Run("inline map of the type of an unmarshaler does not warn", func(t *testing.T) {
+	t.Run("inline map of the type of an unmarshaler", func(t *testing.T) {
 		t.Parallel()
 
-		// The unmarshaler decides for the fields below its struct, and its
-		// decode panics on the inline map, so it does not name a field.
+		// The unmarshaler decides for the fields below its struct. A local
+		// type that mirrors the fields rejects the field that the decode
+		// warns of, and a looser local type does not.
 		tcs := map[string]struct {
 			decode func(context.Context, *niceyaml.Node) error
 			input  string
+			want   string
 		}{
 			"mirror": {
 				decode: decodeAs[strictLooseSelf](niceyaml.WithUnknownFields(niceyaml.UnknownFieldsWarn)),
 				input:  "port: 2\nin: {a: 1, x: 2}\n",
+				want:   `2:12: warning: $.in.x~: unknown field "x"`,
 			},
 			"looser local type": {
 				decode: decodeAs[strictLooseLoose](niceyaml.WithUnknownFields(niceyaml.UnknownFieldsWarn)),
@@ -12974,6 +13136,7 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 			"mirror with a map that reads an anchor": {
 				decode: decodeAs[strictAliasMapSelf](niceyaml.WithUnknownFields(niceyaml.UnknownFieldsWarn)),
 				input:  "x: 1\ny: 2\nzzz: 3\n",
+				want:   `3:1: warning: $.zzz~: unknown field "zzz"`,
 			},
 		}
 
@@ -12985,7 +13148,14 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 
 				err := tc.decode(warnings.Context(t.Context()), yamltest.FirstDocument(t, tc.input))
 				require.NoError(t, err)
-				require.NoError(t, warnings.Err())
+
+				if tc.want == "" {
+					require.NoError(t, warnings.Err())
+
+					return
+				}
+
+				require.EqualError(t, warnings.Err(), tc.want)
 			})
 		}
 	})
@@ -12993,9 +13163,8 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 	t.Run("inline map hands each warning of an unmarshaler once", func(t *testing.T) {
 		t.Parallel()
 
-		// The decoder panics on the inline map after the unmarshaler warns,
-		// and the decode that runs again warns too. The collector gets the
-		// warning of the decode that runs again alone.
+		// The decode runs the unmarshaler once, so the collector gets its
+		// warning once.
 		doc := yamltest.FirstDocument(t, "self: {a: 1}\nloose: {port: 2, foo: bar}\n")
 
 		warnings := niceyaml.NewWarnings()
@@ -13005,12 +13174,11 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 		require.EqualError(t, warnings.Err(), "inner.yaml: warning: a is deprecated")
 	})
 
-	t.Run("inline map calls an unmarshaler beside it three times", func(t *testing.T) {
+	t.Run("inline map calls an unmarshaler beside it once", func(t *testing.T) {
 		t.Parallel()
 
-		// The first pass calls the unmarshaler before the decoder panics on
-		// the inline map. The decode that runs again calls it a second time,
-		// and the search calls it a third time.
+		// The decoder accepts the document in one pass, so the search for
+		// unknown fields does not run.
 		doc := yamltest.FirstDocument(t, "c: {a: 1}\nloose: {foo: 1}\n")
 
 		calls := &problemCalls{}
@@ -13020,42 +13188,7 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 			Loose strictLoose   `yaml:"loose"`
 		}](context.WithValue(t.Context(), callsKey{}, calls), strict)
 		require.NoError(t, err)
-		assert.Equal(t, 3, calls.count)
-	})
-
-	t.Run("inline map with a context that ends", func(t *testing.T) {
-		t.Parallel()
-
-		// The unmarshaler ends the context in the pass that its call names.
-		// The self-validation walk is off, so that pass returns the error of
-		// the context.
-		tcs := map[string]struct {
-			at int
-		}{
-			"in the first pass":             {at: 1},
-			"in the decode that runs again": {at: 2},
-			"in the search":                 {at: 3},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				doc := yamltest.FirstDocument(t, "loose: {foo: 1}\ne: {a: 1, zzz: 2}\n")
-
-				ctx, cancel := context.WithCancel(t.Context())
-				defer cancel()
-
-				ending := &strictEnding{cancel: cancel, at: tc.at}
-
-				_, err := doc.Decode[struct {
-					Loose strictLoose        `yaml:"loose"`
-					E     strictEndingMirror `yaml:"e"`
-				}](context.WithValue(ctx, strictEndingKey{}, ending), strict, niceyaml.WithSelfValidation(false))
-				require.ErrorIs(t, err, context.Canceled)
-				assert.Equal(t, tc.at, ending.calls)
-			})
-		}
+		assert.Equal(t, 1, calls.count)
 	})
 
 	t.Run("nested decode under UnknownFieldsWarn without a collector", func(t *testing.T) {
@@ -13071,11 +13204,10 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 		require.ErrorIs(t, err, niceyaml.ErrNoWarnings)
 	})
 
-	t.Run("inline map validates after the decode runs again", func(t *testing.T) {
+	t.Run("inline map validates without an unknown field", func(t *testing.T) {
 		t.Parallel()
 
-		// The decoder panics on the inline map, and the decode runs again.
-		// The self-validation walk runs when the search finds no unknown
+		// The self-validation walk runs when the decode finds no unknown
 		// field, and does not run when it finds one.
 		tcs := map[string]struct {
 			input string
@@ -13132,8 +13264,8 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 	t.Run("inline map beside a value of the wrong kind", func(t *testing.T) {
 		t.Parallel()
 
-		// The decoder of a type with an inline map accepts unknown fields,
-		// so it reports the value. The search reports the field below.
+		// A type with an inline map takes every key of its mapping, so the
+		// decoder reports the value. The search reports the field below.
 		doc := yamltest.FirstDocument(t, stringtest.LinesLF(
 			"port: x",
 			"foo: bar",
@@ -13148,12 +13280,10 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 		))
 	})
 
-	t.Run("inline map undoes the change of a first decode", func(t *testing.T) {
+	t.Run("inline map beside an unmarshaler that changes the value", func(t *testing.T) {
 		t.Parallel()
 
-		// The unmarshaler changes the value before the decoder panics on
-		// the inline map. The decode that runs again starts from the value
-		// that the target held, so the change happens once.
+		// The decode runs the unmarshaler once, so the change happens once.
 		doc := yamltest.FirstDocument(t, "port: 2\nfoo: bar\n")
 
 		for _, mode := range []niceyaml.UnknownFieldsMode{
@@ -13171,11 +13301,10 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 		}
 	})
 
-	t.Run("inline map undoes the change of a first decode through a pointer", func(t *testing.T) {
+	t.Run("inline map beside an unmarshaler that changes the value through a pointer", func(t *testing.T) {
 		t.Parallel()
 
-		// The decode that runs again starts from the value that the pointer
-		// held, so the change happens once.
+		// The decode runs the unmarshaler once, so the change happens once.
 		doc := yamltest.FirstDocument(t, "port: 2\nfoo: bar\n")
 
 		for _, mode := range []niceyaml.UnknownFieldsMode{
@@ -15560,14 +15689,14 @@ func TestDocument_Decode_Problems(t *testing.T) {
 		// the value alone does not decode.
 		"alias to a value the decoder assigns": {
 			decode: decodeAs[struct {
-				Defs any   `yaml:"defs"`
-				L    []int `yaml:"l"`
-				X    int   `yaml:"x"`
-				N    int   `yaml:"n"`
+				Defs any      `yaml:"defs"`
+				L    [][]byte `yaml:"l"`
+				X    []byte   `yaml:"x"`
+				N    int      `yaml:"n"`
 			}](),
 			input: stringtest.LinesLF(
-				"defs: {a: &a !!int 1.5}",
-				"l: [*a, 2]",
+				"defs: {a: &a !!binary aGk=}",
+				"l: [*a, *a]",
 				"x: *a",
 				"n: z",
 			),
@@ -17180,8 +17309,9 @@ func TestDocument_Decode_Problems_Context(t *testing.T) {
 		))
 	})
 
-	// The decoder never checks the context, so the decode still returns
-	// its rejection, and the search for the others does not run.
+	// The decoder checks the context only after it reads many nodes, so
+	// the decode of a short document still returns its rejection, and the
+	// search for the others does not run.
 	t.Run("context that ends in the decode", func(t *testing.T) {
 		t.Parallel()
 
@@ -18200,6 +18330,9 @@ func TestDocument_Decode_Rejection_GoTypes(t *testing.T) {
 		A int `yaml:"a"`
 	}
 
+	// An endless pointer type never reaches a value that is not a pointer.
+	type endless *endless
+
 	merge := stringtest.LinesLF(
 		"defs: &d",
 		"  a: 1",
@@ -18262,13 +18395,31 @@ func TestDocument_Decode_Rejection_GoTypes(t *testing.T) {
 			input: "v: 5\n",
 			want:  "1:4: $.v: expected no value, got integer",
 		},
-		// The decoder fills one pointer around a value and no more.
-		"pointer to a pointer": {
+		"endless pointer type at a string": {
 			decode: decodeAs[struct {
-				V **int `yaml:"v"`
+				V endless `yaml:"v"`
+			}](),
+			input: "v: abc\n",
+			want:  "1:4: $.v: expected no value, got string",
+		},
+		"endless pointer type at an integer": {
+			decode: decodeAs[struct {
+				V endless `yaml:"v"`
 			}](),
 			input: "v: 5\n",
-			want:  "1:4: $.v: expected integer, got integer of another type",
+			want:  "1:4: $.v: expected no value, got integer",
+		},
+		"endless pointer type at a mapping": {
+			decode: decodeAs[struct {
+				V endless `yaml:"v"`
+			}](),
+			input: "v: {a: 1}\n",
+			want:  "1:1: $.v: expected no value, got mapping",
+		},
+		"endless pointer type at a sequence": {
+			decode: decodeAs[endless](),
+			input:  "[1]\n",
+			want:   "1:1: $: expected no value, got sequence",
 		},
 		"anchor read into an interface": {
 			decode: decodeAs[struct {
@@ -18520,7 +18671,6 @@ func TestDocument_Decode_Rejection_Label(t *testing.T) {
 	type target struct {
 		Addr   netip.Addr               `yaml:"addr"`
 		Bare   bareReparsingUnmarshaler `yaml:"bare"`
-		Deep   **int                    `yaml:"deep"`
 		Self   opaqueValue              `yaml:"self"`
 		Option optionDecoded            `yaml:"option"`
 		One    rejectionServer          `yaml:"one"`
@@ -18585,11 +18735,6 @@ func TestDocument_Decode_Rejection_Label(t *testing.T) {
 		"number too large for a float": {
 			input: "ratio: 1e400\n",
 			want:  "expected float, got string",
-			err:   []error{niceyaml.ErrDecode, niceyaml.ErrWrongKind},
-		},
-		"value of another type": {
-			input: "deep: 1\n",
-			want:  "expected integer, got integer of another type",
 			err:   []error{niceyaml.ErrDecode, niceyaml.ErrWrongKind},
 		},
 		"number past the range of an int8": {

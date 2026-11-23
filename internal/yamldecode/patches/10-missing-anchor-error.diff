@@ -1,0 +1,49 @@
+--- a/decode.go
++++ b/decode.go
+@@ -56,6 +56,17 @@
+ 	origins              format.Origins
+ }
+ 
++// MissingAnchorError is the error of an alias under a merge key, or at a
++// mapping or a sequence of a typed target, that the decoder holds no anchor
++// for. Its message is upstream's.
++type MissingAnchorError struct {
++	Alias *ast.AliasNode
++}
++
++func (e *MissingAnchorError) Error() string {
++	return fmt.Sprintf("cannot find anchor by alias name %s", e.Alias.Value.GetToken().Value)
++}
++
+ // ErrAliasBudget is the error of a decode that read more through aliases
+ // than [AliasBudget] allows.
+ var ErrAliasBudget = errors.New("aliases repeat more of the document than the alias budget allows")
+@@ -556,7 +567,9 @@
+ 		d.anchorValueMap[anchorName] = reflect.ValueOf(anchorValue)
+ 		return anchorValue, nil
+ 	case *ast.AliasNode:
+-		text := n.Value.String()
++		// The name is the value of its token. The text of the node also
++		// holds a comment that follows the name.
++		text := n.Value.GetToken().Value
+ 		if _, exists := getAnchorMap(ctx)[text]; exists {
+ 			// self recursion.
+ 			return nil, nil
+@@ -666,7 +679,7 @@
+ 		aliasName := n.Value.GetToken().Value
+ 		node := d.anchorNodeMap[aliasName]
+ 		if node == nil {
+-			return nil, fmt.Errorf("cannot find anchor by alias name %s", aliasName)
++			return nil, &MissingAnchorError{Alias: n}
+ 		}
+ 		if m, ok := node.(*ast.MappingNode); ok && d.bounded {
+ 			// The caller reads each entry of the anchor again.
+@@ -709,7 +722,7 @@
+ 		aliasName := alias.Value.GetToken().Value
+ 		node := d.anchorNodeMap[aliasName]
+ 		if node == nil {
+-			return nil, fmt.Errorf("cannot find anchor by alias name %s", aliasName)
++			return nil, &MissingAnchorError{Alias: alias}
+ 		}
+ 		return d.getArrayNode(node)
+ 	}

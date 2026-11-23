@@ -294,9 +294,9 @@ type keyCut struct {
 	anchors []*ast.AnchorNode
 }
 
-// cutKey names a node of the view of a decode. Each copy that
-// [decodetree.DecodeView] makes of a node keeps its type and its token, so
-// the key names every copy of the node.
+// cutKey names a node of the view of a decode. Each copy of a node that
+// the view makes keeps its type and its token, so the key names every copy
+// of the node.
 //
 //nolint:unused // The fields tell the keys of the map apart.
 type cutKey struct {

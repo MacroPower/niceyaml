@@ -2071,7 +2071,7 @@ func (n *Node) CheckAliasLimit() error {
 // converts it. So python: 3.10 gives "3.10", mode: 0755 gives "0755", and
 // hex: 0x10 gives "0x10", where a Decode[string] gives "3.1", "493", and
 // "16". A tag does not change the text, so !!int "0x10" gives "0x10" too,
-// where a Decode[string] gives "0". Scalar resolves the quotes, the
+// where a Decode[string] gives "16". Scalar resolves the quotes, the
 // escapes, and the folding of the scalar, so `image: "nginx:1.25"` gives
 // nginx:1.25 without its quotes.
 // [Node.Text] returns the scalar with its quotes, as the source writes it.
@@ -2086,9 +2086,9 @@ func (n *Node) CheckAliasLimit() error {
 // A tag can convert a mapping or a sequence to a scalar, as "!!str *k"
 // does for a sequence k. Such a tag has no text of its own, so Scalar
 // prints the value that a decode reads from it, as [fmt.Sprint] prints
-// it. So "!!str *k" gives "[x y]" for the sequence [x, y], and "!!int *k"
-// gives "0". Scalar reports false when that decode fails, as it does for
-// "!!bool *k", or reads a null, as it does for "!!null *k".
+// it. So "!!str *k" gives "[x y]" for the sequence [x, y]. Scalar reports
+// false when that decode fails, as it does for "!!int *k" and "!!bool *k",
+// or reads a null, as it does for "!!null *k".
 //
 // Scalar reports false for a nil Node and a Node whose document did not
 // parse. It also reports false for a mapping, a sequence, and an entry or

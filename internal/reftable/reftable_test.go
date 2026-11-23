@@ -304,8 +304,7 @@ func TestTable_View(t *testing.T) {
 	t.Run("view that Prime returns", func(t *testing.T) {
 		t.Parallel()
 
-		// The view holds each alias with a name free of comments, as the
-		// decoder reads it.
+		// The view is the anchor of the document, which the decoder reads.
 		table := newTable(t, []string{stringtest.LinesLF("x: &x 1", "a: &a [*x # note", "]")})
 
 		got, ok := table.View("a")
@@ -317,14 +316,14 @@ func TestTable_View(t *testing.T) {
 
 		raw, ok := table.Anchor("a")
 		require.True(t, ok)
-		assert.NotSame(t, raw, got)
+		assert.Same(t, raw, got)
 	})
 
 	t.Run("anchor inside another", func(t *testing.T) {
 		t.Parallel()
 
-		// The view of the inner anchor is the node that stands for it in the
-		// view of the outer one, whether the views copy it or not.
+		// The view of the inner anchor is the node that the view of the
+		// outer one holds.
 		tcs := map[string]struct {
 			input string
 			// Whether the first view the table gives is that of the inner
@@ -499,27 +498,6 @@ func TestTable_Prime(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
-
-	t.Run("alias with a comment on its name", func(t *testing.T) {
-		t.Parallel()
-
-		// The decoder finds an anchor by the text of the name of an alias,
-		// so the anchor comes back with names free of comments.
-		got := newTable(t, []string{stringtest.LinesLF("x: &x 1", "a: &a [*x # note", "]")}).Prime([]string{"a"})
-		require.Len(t, got, 2)
-
-		var names []string
-
-		astnode.Inspect(got[1], func(n ast.Node) bool {
-			if alias, ok := n.(*ast.AliasNode); ok {
-				names = append(names, alias.Value.String())
-			}
-
-			return true
-		})
-
-		assert.Equal(t, []string{"x"}, names)
-	})
 
 	t.Run("nil table", func(t *testing.T) {
 		t.Parallel()

@@ -9,7 +9,6 @@ import (
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
-	"go.jacobcolvin.com/niceyaml/internal/decodetree"
 	"go.jacobcolvin.com/niceyaml/internal/mapkey"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -145,7 +144,7 @@ func (s *scalar) get() any {
 		)
 
 		if s.refs != nil {
-			v, err = s.refs.ValueOf(decodetree.DecodeView(s.node))
+			v, err = s.refs.ValueOf(s.node)
 		} else {
 			v, err = s.plain.Value(s.node)
 		}

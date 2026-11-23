@@ -1,0 +1,224 @@
+--- a/decode.go
++++ b/decode.go
+@@ -47,6 +47,49 @@
+ 	parsedFile           *ast.File
+ 	streamIndex          int
+ 	decodeDepth          int
++	steps                int
++	aliasDepth           int
++	aliasNodesLeft       int
++	aliasBytesLeft       int
++	bounded              bool
++	stopped              error
++}
++
++// ErrAliasBudget is the error of a decode that read more through aliases
++// than [AliasBudget] allows.
++var ErrAliasBudget = errors.New("aliases repeat more of the document than the alias budget allows")
++
++// tick counts one node that the decoder reads. It returns the error of ctx
++// once ctx has ended, and [ErrAliasBudget] once the decoder has read more
++// nodes through aliases than its budget allows.
++//
++// The decoder goes on after the error of an element or a field, so the
++// error of tick stays: every later tick returns it, and the decode returns
++// it alone.
++func (d *Decoder) tick(ctx context.Context) error {
++	if d.stopped != nil {
++		return d.stopped
++	}
++	d.steps++
++	if d.steps&0xff == 0 {
++		d.stopped = ctx.Err()
++	}
++	if d.bounded && d.aliasDepth > 0 {
++		d.aliasNodesLeft--
++	}
++	if d.bounded && (d.aliasNodesLeft < 0 || d.aliasBytesLeft < 0) {
++		d.stopped = ErrAliasBudget
++	}
++	return d.stopped
++}
++
++// finish returns err, the error of a decode. A decode that tick stopped
++// returns the error of tick alone.
++func (d *Decoder) finish(err error) error {
++	if d.stopped != nil {
++		err, d.stopped = d.stopped, nil
++	}
++	return err
+ }
+ 
+ // NewDecoder returns a new decoder that reads from r.
+@@ -348,6 +391,9 @@
+ 	if d.isExceededMaxDepth() {
+ 		return nil, ErrExceededMaxDepth
+ 	}
++	if err := d.tick(ctx); err != nil {
++		return nil, err
++	}
+ 
+ 	d.setPathToCommentMap(node)
+ 	switch n := node.(type) {
+@@ -484,6 +530,8 @@
+ 			return v.Interface(), nil
+ 		}
+ 		if node, exists := d.anchorNodeMap[text]; exists {
++			d.aliasDepth++
++			defer func() { d.aliasDepth-- }()
+ 			return d.nodeToValue(ctx, node)
+ 		}
+ 		return nil, errors.ErrSyntax(fmt.Sprintf("could not find alias %q", text), n.Value.GetToken())
+@@ -582,6 +630,10 @@
+ 		if node == nil {
+ 			return nil, fmt.Errorf("cannot find anchor by alias name %s", aliasName)
+ 		}
++		if m, ok := node.(*ast.MappingNode); ok && d.bounded {
++			// The caller reads each entry of the anchor again.
++			d.aliasNodesLeft -= len(m.Values)
++		}
+ 		return d.getMapNode(node, isMerge)
+ 	case *ast.TagNode:
+ 		return d.getMapNode(n.Value, isMerge)
+@@ -724,13 +776,25 @@
+ 	return nil
+ }
+ 
++// textBudget returns the count of the bytes that the formatter may still
++// write for aliases, or nil for a decode without [AliasBudget].
++func (d *Decoder) textBudget() *int {
++	if !d.bounded {
++		return nil
++	}
++	return &d.aliasBytesLeft
++}
++
+ func (d *Decoder) unmarshalableDocument(ctx context.Context, node ast.Node) ([]byte, error) {
+-	doc := format.FormatNodeWithResolvedAlias(node, d.anchorNodeMap, getAnchorMap(ctx))
++	doc := format.FormatNodeWithResolvedAlias(node, d.anchorNodeMap, getAnchorMap(ctx), d.textBudget())
++	if d.bounded && d.aliasBytesLeft < 0 {
++		return nil, ErrAliasBudget
++	}
+ 	return []byte(doc), nil
+ }
+ 
+ func (d *Decoder) unmarshalableText(ctx context.Context, node ast.Node) ([]byte, bool) {
+-	doc := format.FormatNodeWithResolvedAlias(node, d.anchorNodeMap, getAnchorMap(ctx))
++	doc := format.FormatNodeWithResolvedAlias(node, d.anchorNodeMap, getAnchorMap(ctx), d.textBudget())
+ 	var v string
+ 	if err := Unmarshal([]byte(doc), &v); err != nil {
+ 		return nil, false
+@@ -885,6 +949,9 @@
+ 
+ 	if unmarshaler, isText := iface.(encoding.TextUnmarshaler); isText {
+ 		b, ok := d.unmarshalableText(ctx, src)
++		if d.bounded && d.aliasBytesLeft < 0 {
++			return ErrAliasBudget
++		}
+ 		if ok {
+ 			if err := unmarshaler.UnmarshalText(b); err != nil {
+ 				return err
+@@ -924,6 +991,9 @@
+ 	if d.isExceededMaxDepth() {
+ 		return ErrExceededMaxDepth
+ 	}
++	if err := d.tick(ctx); err != nil {
++		return err
++	}
+ 	if !dst.IsValid() {
+ 		return nil
+ 	}
+@@ -1143,6 +1213,8 @@
+ 			// The alias reads its anchor, so an alias inside reads as null.
+ 			node = anchor
+ 			ctx = withAnchor(ctx, aliasName)
++			d.aliasDepth++
++			defer func() { d.aliasDepth-- }()
+ 		}
+ 	}
+ 	var newValue reflect.Value
+@@ -2016,7 +2088,7 @@
+ 		maps.Copy(d.toCommentMap, d.commentMaps[d.streamIndex])
+ 	}
+ 	if err := d.decodeValue(ctx, v.Elem(), body); err != nil {
+-		return err
++		return d.finish(err)
+ 	}
+ 	d.streamIndex++
+ 	return nil
+@@ -2038,6 +2110,7 @@
+ 	if !rv.IsValid() || rv.Type().Kind() != reflect.Ptr {
+ 		return ErrDecodeRequiredPointerType
+ 	}
++	d.stopped = nil
+ 	if d.isInitialized() {
+ 		if err := d.decode(ctx, rv); err != nil {
+ 			return err
+@@ -2064,6 +2137,7 @@
+ 	if rv.Type().Kind() != reflect.Ptr {
+ 		return ErrDecodeRequiredPointerType
+ 	}
++	d.stopped = nil
+ 	if !d.isInitialized() {
+ 		if err := d.decodeInit(ctx); err != nil {
+ 			return err
+@@ -2071,10 +2145,10 @@
+ 	}
+ 	// resolve references to the anchor on the same file
+ 	if _, err := d.nodeToValue(ctx, node); err != nil {
+-		return err
++		return d.finish(err)
+ 	}
+ 	if err := d.decodeValue(ctx, rv.Elem(), node); err != nil {
+-		return err
++		return d.finish(err)
+ 	}
+ 	return nil
+ }
+--- a/format/format.go
++++ b/format/format.go
+@@ -11,13 +11,18 @@
+ // content of its anchor. The names in open are the anchors whose values hold
+ // n. An alias to one of them, or to an anchor that the formatter is writing
+ // out, reads as null, as the decoder reads it.
+-func FormatNodeWithResolvedAlias(n ast.Node, anchorNodeMap map[string]ast.Node, open map[string]struct{}) string {
++//
++// The count budget, when it is not nil, holds the bytes that the formatter
++// may still write for aliases. The formatter takes the text of each alias
++// off the count, and writes no further alias once the count is below zero.
++func FormatNodeWithResolvedAlias(n ast.Node, anchorNodeMap map[string]ast.Node, open map[string]struct{}, budget *int) string {
+ 	tk := getFirstToken(n)
+ 	if tk == nil {
+ 		return ""
+ 	}
+ 	formatter := newFormatter(tk, hasComment(n))
+ 	formatter.anchorNodeMap = anchorNodeMap
++	formatter.budget = budget
+ 	formatter.expanding = make(map[string]bool, len(open))
+ 	for name := range open {
+ 		formatter.expanding[name] = true
+@@ -196,6 +201,7 @@
+ 	tokenToOriginMap map[*token.Token]string
+ 	anchorNodeMap    map[string]ast.Node
+ 	expanding        map[string]bool
++	budget           *int
+ }
+ 
+ func newFormatter(tk *token.Token, existsComment bool) *Formatter {
+@@ -419,10 +425,16 @@
+ 			org := f.origin(n.Start)
+ 			return org[:len(org)-len(strings.TrimLeft(org, " \t\r\n"))] + "null"
+ 		}
++		if node != nil && f.budget != nil && *f.budget < 0 {
++			return ""
++		}
+ 		if node != nil {
+ 			f.expanding[anchorName] = true
+ 			formatted := f.formatNode(node)
+ 			delete(f.expanding, anchorName)
++			if f.budget != nil {
++				*f.budget -= len(formatted)
++			}
+ 			// If formatted text contains newline characters, indentation needs to be considered.
+ 			if strings.Contains(formatted, "\n") {
+ 				// If the first character is not a newline, the first line should be output without indentation.

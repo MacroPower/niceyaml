@@ -7,13 +7,30 @@ import (
 	"github.com/goccy/go-yaml/token"
 )
 
-func FormatNodeWithResolvedAlias(n ast.Node, anchorNodeMap map[string]ast.Node) string {
+// FormatNodeWithResolvedAlias formats n with each alias written out as the
+// content of its anchor. The names in open are the anchors whose values hold
+// n. An alias to one of them, or to an anchor that the formatter is writing
+// out, reads as null, as the decoder reads it.
+//
+// The count budget, when it is not nil, holds the bytes that the formatter
+// may still write for aliases. The formatter takes the text of each alias
+// off the count, and writes no further alias once the count is below zero.
+//
+// The formatter reads every token of the parse of n once and keeps what it
+// read in origins, when origins is not nil. A caller that formats many nodes
+// of one parse hands in the same Origins each time.
+func FormatNodeWithResolvedAlias(n ast.Node, anchorNodeMap map[string]ast.Node, open map[string]struct{}, budget *int, origins *Origins) string {
 	tk := getFirstToken(n)
 	if tk == nil {
 		return ""
 	}
-	formatter := newFormatter(tk, hasComment(n))
+	formatter := origins.formatter(tk, hasComment(n))
 	formatter.anchorNodeMap = anchorNodeMap
+	formatter.budget = budget
+	formatter.expanding = make(map[string]bool, len(open))
+	for name := range open {
+		formatter.expanding[name] = true
+	}
 	return formatter.format(n)
 }
 
@@ -187,6 +204,36 @@ type Formatter struct {
 	existsComment    bool
 	tokenToOriginMap map[*token.Token]string
 	anchorNodeMap    map[string]ast.Node
+	expanding        map[string]bool
+	budget           *int
+}
+
+// Origins holds the text that a [Formatter] writes for each token of the
+// parses it has read.
+type Origins struct {
+	texts map[*token.Token]string
+}
+
+// formatter returns a Formatter for the parse that holds tk. It reads the
+// tokens of that parse only when o does not hold them yet.
+func (o *Origins) formatter(tk *token.Token, existsComment bool) *Formatter {
+	if o == nil {
+		return newFormatter(tk, existsComment)
+	}
+	if _, held := o.texts[tk]; !held {
+		read := newFormatter(tk, existsComment).tokenToOriginMap
+		if o.texts == nil {
+			o.texts = make(map[*token.Token]string, len(read))
+		}
+		for t, text := range read {
+			o.texts[t] = text
+		}
+		// A comment token has no text of its own in the map.
+		if _, held := o.texts[tk]; !held {
+			o.texts[tk] = read[tk]
+		}
+	}
+	return &Formatter{existsComment: existsComment, tokenToOriginMap: o.texts}
 }
 
 func newFormatter(tk *token.Token, existsComment bool) *Formatter {
@@ -406,8 +453,20 @@ func (f *Formatter) formatAlias(n *ast.AliasNode) string {
 	if f.anchorNodeMap != nil {
 		anchorName := n.Value.GetToken().Value
 		node := f.anchorNodeMap[anchorName]
+		if node != nil && f.expanding[anchorName] {
+			org := f.origin(n.Start)
+			return org[:len(org)-len(strings.TrimLeft(org, " \t\r\n"))] + "null"
+		}
+		if node != nil && f.budget != nil && *f.budget < 0 {
+			return ""
+		}
 		if node != nil {
+			f.expanding[anchorName] = true
 			formatted := f.formatNode(node)
+			delete(f.expanding, anchorName)
+			if f.budget != nil {
+				*f.budget -= len(formatted)
+			}
 			// If formatted text contains newline characters, indentation needs to be considered.
 			if strings.Contains(formatted, "\n") {
 				// If the first character is not a newline, the first line should be output without indentation.

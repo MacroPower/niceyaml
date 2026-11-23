@@ -12,3 +12,8 @@ indent_size = 2
 
 [*.md]
 indent_style = space
+
+# A blank context line of a unified diff is a single space, which patch
+# needs.
+[*.diff]
+trim_trailing_whitespace = false

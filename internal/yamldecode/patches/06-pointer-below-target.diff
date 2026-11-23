@@ -1,0 +1,47 @@
+--- a/decode.go
++++ b/decode.go
+@@ -1049,15 +1049,20 @@
+ 	valueType := dst.Type()
+ 	switch valueType.Kind() {
+ 	case reflect.Ptr:
+-		if dst.IsNil() {
+-			return nil
+-		}
+ 		if src.Type() == ast.NullType {
+ 			// set nil value to pointer
+ 			dst.Set(reflect.Zero(valueType))
+ 			return nil
+ 		}
+ 		v := d.createDecodableValue(dst.Type())
++		// The decode starts from the value that the pointer reaches.
++		held := dst
++		for held.Kind() == reflect.Ptr && !held.IsNil() {
++			held = held.Elem()
++		}
++		if held.Type() == v.Type() {
++			v.Set(held)
++		}
+ 		if err := d.decodeValue(ctx, v, src); err != nil {
+ 			return err
+ 		}
+@@ -1066,6 +1071,7 @@
+ 			return err
+ 		}
+ 		dst.Set(castedValue)
++		return nil
+ 	case reflect.Interface:
+ 		if dst.Type() == astNodeType {
+ 			dst.Set(reflect.ValueOf(src))
+@@ -1214,7 +1220,11 @@
+ 			break
+ 		}
+ 		if !value.CanAddr() {
+-			break
++			// A pointer to a pointer: the inner pointer needs a place.
++			held := reflect.New(value.Type())
++			held.Elem().Set(value)
++			value = held
++			continue
+ 		}
+ 		value = value.Addr()
+ 	}

@@ -1,0 +1,184 @@
+--- a/decode.go
++++ b/decode.go
+@@ -84,11 +84,44 @@
+ }
+ 
+ // finish returns err, the error of a decode. A decode that tick stopped
+-// returns the error of tick alone.
++// returns the error of tick alone, and the error of an unmarshaler comes
++// back as the unmarshaler returned it.
+ func (d *Decoder) finish(err error) error {
+ 	if d.stopped != nil {
+ 		err, d.stopped = d.stopped, nil
+ 	}
++	return unmarshalerCause(err)
++}
++
++// unmarshalerError holds the error that an unmarshaler returned. The
++// decoder writes the name of a field only into a TypeError of its own, so
++// a TypeError that an unmarshaler returns keeps the field of the decode
++// that made it.
++type unmarshalerError struct {
++	err error
++}
++
++func (e *unmarshalerError) Error() string { return e.err.Error() }
++
++func (e *unmarshalerError) Unwrap() error { return e.err }
++
++// fromUnmarshaler returns err, the error of an unmarshaler, in an
++// unmarshalerError.
++func fromUnmarshaler(err error) error {
++	if _, ok := err.(*unmarshalerError); ok {
++		return err
++	}
++	return &unmarshalerError{err: err}
++}
++
++// unmarshalerCause returns err, or the error that an unmarshaler returned
++// when err is an unmarshalerError. The callback that the decoder hands an
++// InterfaceUnmarshaler returns that error, so the unmarshaler gets the
++// error of an inner unmarshaler as the inner unmarshaler returned it.
++func unmarshalerCause(err error) error {
++	if own, ok := err.(*unmarshalerError); ok {
++		return own.err
++	}
+ 	return err
+ }
+ 
+@@ -863,7 +896,7 @@
+ 			return err
+ 		}
+ 		if err := unmarshaler(ctx, ptrValue.Interface(), b); err != nil {
+-			return err
++			return fromUnmarshaler(err)
+ 		}
+ 		return nil
+ 	}
+@@ -875,7 +908,7 @@
+ 			return err
+ 		}
+ 		if err := unmarshaler.UnmarshalYAML(ctx, b); err != nil {
+-			return err
++			return fromUnmarshaler(err)
+ 		}
+ 		return nil
+ 	}
+@@ -886,7 +919,7 @@
+ 			return err
+ 		}
+ 		if err := unmarshaler.UnmarshalYAML(b); err != nil {
+-			return err
++			return fromUnmarshaler(err)
+ 		}
+ 		return nil
+ 	}
+@@ -898,11 +931,11 @@
+ 				return ErrDecodeRequiredPointerType
+ 			}
+ 			if err := d.decodeValue(ctx, rv.Elem(), src); err != nil {
+-				return err
++				return unmarshalerCause(err)
+ 			}
+ 			return nil
+ 		}); err != nil {
+-			return err
++			return fromUnmarshaler(err)
+ 		}
+ 		return nil
+ 	}
+@@ -914,18 +947,18 @@
+ 				return ErrDecodeRequiredPointerType
+ 			}
+ 			if err := d.decodeValue(ctx, rv.Elem(), src); err != nil {
+-				return err
++				return unmarshalerCause(err)
+ 			}
+ 			return nil
+ 		}); err != nil {
+-			return err
++			return fromUnmarshaler(err)
+ 		}
+ 		return nil
+ 	}
+ 
+ 	if unmarshaler, ok := iface.(NodeUnmarshaler); ok {
+ 		if err := unmarshaler.UnmarshalYAML(src); err != nil {
+-			return err
++			return fromUnmarshaler(err)
+ 		}
+ 
+ 		return nil
+@@ -933,7 +966,7 @@
+ 
+ 	if unmarshaler, ok := iface.(NodeUnmarshalerContext); ok {
+ 		if err := unmarshaler.UnmarshalYAML(ctx, src); err != nil {
+-			return err
++			return fromUnmarshaler(err)
+ 		}
+ 
+ 		return nil
+@@ -954,7 +987,7 @@
+ 		}
+ 		if ok {
+ 			if err := unmarshaler.UnmarshalText(b); err != nil {
+-				return err
++				return fromUnmarshaler(err)
+ 			}
+ 			return nil
+ 		}
+@@ -972,7 +1005,7 @@
+ 			}
+ 			jsonBytes = bytes.TrimRight(jsonBytes, "\n")
+ 			if err := unmarshaler.UnmarshalJSON(jsonBytes); err != nil {
+-				return err
++				return fromUnmarshaler(err)
+ 			}
+ 			return nil
+ 		}
+@@ -1510,8 +1543,10 @@
+ 				if foundErr != nil {
+ 					continue
+ 				}
+-				var te *errors.TypeError
+-				if errors.As(err, &te) {
++				// The decoder names the field only in a TypeError of its
++				// own, so an error that wraps a TypeError and the error of an
++				// unmarshaler stay as they are.
++				if te, ok := err.(*errors.TypeError); ok {
+ 					if te.StructFieldName != nil {
+ 						fieldName := fmt.Sprintf("%s.%s", structType.Name(), *te.StructFieldName)
+ 						te.StructFieldName = &fieldName
+@@ -1519,11 +1554,8 @@
+ 						fieldName := fmt.Sprintf("%s.%s", structType.Name(), field.Name)
+ 						te.StructFieldName = &fieldName
+ 					}
+-					foundErr = te
+-					continue
+-				} else {
+-					foundErr = err
+ 				}
++				foundErr = err
+ 				continue
+ 			}
+ 			_ = d.setDefaultValueIfConflicted(newFieldValue, structFieldMap)
+@@ -1546,14 +1578,14 @@
+ 			if foundErr != nil {
+ 				continue
+ 			}
+-			var te *errors.TypeError
+-			if errors.As(err, &te) {
++			// The decoder names the field only in a TypeError of its own,
++			// so an error that wraps a TypeError and the error of an
++			// unmarshaler stay as they are.
++			if te, ok := err.(*errors.TypeError); ok {
+ 				fieldName := fmt.Sprintf("%s.%s", structType.Name(), field.Name)
+ 				te.StructFieldName = &fieldName
+-				foundErr = te
+-			} else {
+-				foundErr = err
+ 			}
++			foundErr = err
+ 			continue
+ 		}
+ 		fieldValue.Set(newFieldValue)

@@ -478,8 +478,8 @@ func TestRegistry_Load(t *testing.T) {
 			matches: []error{manifest.ErrMissingTypeField},
 		},
 		"version under an int tag": {
-			// The decode reads the text under !!int as 0, which is not the
-			// text of the field.
+			// The decode rejects the text under !!int, which does not spell
+			// an integer.
 			files: map[string]string{
 				"cafe.yaml": cafeDoc,
 				"x.yaml": stringtest.LinesLF(
@@ -487,8 +487,7 @@ func TestRegistry_Load(t *testing.T) {
 				),
 			},
 			err: stringtest.JoinLF(
-				`config/x.yaml:1:19: $.apiVersion: go-yaml's decoder reads !!int cafe.jacobcolvin.com/v1 as "0"; `+
-					`write "cafe.jacobcolvin.com/v1"`,
+				"config/x.yaml:1:19: $.apiVersion: apiVersion must be text",
 				"",
 				"   1 | apiVersion: !!int cafe.jacobcolvin.com/v1",
 				"     |                   ^^^^^^^^^^^^^^^^^^^^^^^",

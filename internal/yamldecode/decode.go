@@ -47,6 +47,94 @@ type Decoder struct {
 	parsedFile           *ast.File
 	streamIndex          int
 	decodeDepth          int
+	steps                int
+	aliasDepth           int
+	aliasNodesLeft       int
+	aliasBytesLeft       int
+	bounded              bool
+	stopped              error
+	origins              format.Origins
+}
+
+// MissingAnchorError is the error of an alias under a merge key, or at a
+// mapping or a sequence of a typed target, that the decoder holds no anchor
+// for. Its message is upstream's.
+type MissingAnchorError struct {
+	Alias *ast.AliasNode
+}
+
+func (e *MissingAnchorError) Error() string {
+	return fmt.Sprintf("cannot find anchor by alias name %s", e.Alias.Value.GetToken().Value)
+}
+
+// ErrAliasBudget is the error of a decode that read more through aliases
+// than [AliasBudget] allows.
+var ErrAliasBudget = errors.New("aliases repeat more of the document than the alias budget allows")
+
+// tick counts one node that the decoder reads. It returns the error of ctx
+// once ctx has ended, and [ErrAliasBudget] once the decoder has read more
+// nodes through aliases than its budget allows.
+//
+// The decoder goes on after the error of an element or a field, so the
+// error of tick stays: every later tick returns it, and the decode returns
+// it alone.
+func (d *Decoder) tick(ctx context.Context) error {
+	if d.stopped != nil {
+		return d.stopped
+	}
+	d.steps++
+	if d.steps&0xff == 0 {
+		d.stopped = ctx.Err()
+	}
+	if d.bounded && d.aliasDepth > 0 {
+		d.aliasNodesLeft--
+	}
+	if d.bounded && (d.aliasNodesLeft < 0 || d.aliasBytesLeft < 0) {
+		d.stopped = ErrAliasBudget
+	}
+	return d.stopped
+}
+
+// finish returns err, the error of a decode. A decode that tick stopped
+// returns the error of tick alone, and the error of an unmarshaler comes
+// back as the unmarshaler returned it.
+func (d *Decoder) finish(err error) error {
+	if d.stopped != nil {
+		err, d.stopped = d.stopped, nil
+	}
+	return unmarshalerCause(err)
+}
+
+// unmarshalerError holds the error that an unmarshaler returned. The
+// decoder writes the name of a field only into a TypeError of its own, so
+// a TypeError that an unmarshaler returns keeps the field of the decode
+// that made it.
+type unmarshalerError struct {
+	err error
+}
+
+func (e *unmarshalerError) Error() string { return e.err.Error() }
+
+func (e *unmarshalerError) Unwrap() error { return e.err }
+
+// fromUnmarshaler returns err, the error of an unmarshaler, in an
+// unmarshalerError.
+func fromUnmarshaler(err error) error {
+	if _, ok := err.(*unmarshalerError); ok {
+		return err
+	}
+	return &unmarshalerError{err: err}
+}
+
+// unmarshalerCause returns err, or the error that an unmarshaler returned
+// when err is an unmarshalerError. The callback that the decoder hands an
+// InterfaceUnmarshaler returns that error, so the unmarshaler gets the
+// error of an inner unmarshaler as the inner unmarshaler returned it.
+func unmarshalerCause(err error) error {
+	if own, ok := err.(*unmarshalerError); ok {
+		return own.err
+	}
+	return err
 }
 
 // NewDecoder returns a new decoder that reads from r.
@@ -69,6 +157,10 @@ func NewDecoder(r io.Reader, opts ...DecodeOption) *Decoder {
 }
 
 const maxDecodeDepth = 10000
+
+// maxPointerDepth is the most pointers the decoder follows from a type to
+// the type of the value it decodes.
+const maxPointerDepth = 64
 
 func (d *Decoder) stepIn() {
 	d.decodeDepth++
@@ -348,6 +440,9 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 	if d.isExceededMaxDepth() {
 		return nil, ErrExceededMaxDepth
 	}
+	if err := d.tick(ctx); err != nil {
+		return nil, err
+	}
 
 	d.setPathToCommentMap(node)
 	switch n := node.(type) {
@@ -385,8 +480,26 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 			if err != nil {
 				return nil, err
 			}
-			i, _ := strconv.Atoi(fmt.Sprint(v))
-			return i, nil
+			// An integer under a !!int tag, or a string that spells one,
+			// reads as a Go int where it fits. Any other value fails.
+			if s, ok := v.(string); ok {
+				if num := token.ToNumber(s); num != nil && num.Type != token.NumberTypeFloat {
+					v = num.Value
+				}
+			}
+			switch vv := v.(type) {
+			case int64:
+				if int64(int(vv)) == vv {
+					return int(vv), nil
+				}
+				return vv, nil
+			case uint64:
+				if vv <= math.MaxInt {
+					return int(vv), nil
+				}
+				return vv, nil
+			}
+			return nil, errors.ErrTypeMismatch(reflect.TypeOf(0), reflect.TypeOf(v), n.Value.GetToken())
 		case token.FloatTag:
 			v, err := d.nodeToValue(ctx, n.Value)
 			if err != nil {
@@ -454,7 +567,9 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 		d.anchorValueMap[anchorName] = reflect.ValueOf(anchorValue)
 		return anchorValue, nil
 	case *ast.AliasNode:
-		text := n.Value.String()
+		// The name is the value of its token. The text of the node also
+		// holds a comment that follows the name.
+		text := n.Value.GetToken().Value
 		if _, exists := getAnchorMap(ctx)[text]; exists {
 			// self recursion.
 			return nil, nil
@@ -466,6 +581,8 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 			return v.Interface(), nil
 		}
 		if node, exists := d.anchorNodeMap[text]; exists {
+			d.aliasDepth++
+			defer func() { d.aliasDepth-- }()
 			return d.nodeToValue(ctx, node)
 		}
 		return nil, errors.ErrSyntax(fmt.Sprintf("could not find alias %q", text), n.Value.GetToken())
@@ -562,7 +679,11 @@ func (d *Decoder) getMapNode(node ast.Node, isMerge bool) (ast.MapNode, error) {
 		aliasName := n.Value.GetToken().Value
 		node := d.anchorNodeMap[aliasName]
 		if node == nil {
-			return nil, fmt.Errorf("cannot find anchor by alias name %s", aliasName)
+			return nil, &MissingAnchorError{Alias: n}
+		}
+		if m, ok := node.(*ast.MappingNode); ok && d.bounded {
+			// The caller reads each entry of the anchor again.
+			d.aliasNodesLeft -= len(m.Values)
 		}
 		return d.getMapNode(node, isMerge)
 	case *ast.TagNode:
@@ -601,7 +722,7 @@ func (d *Decoder) getArrayNode(node ast.Node) (ast.ArrayNode, error) {
 		aliasName := alias.Value.GetToken().Value
 		node := d.anchorNodeMap[aliasName]
 		if node == nil {
-			return nil, fmt.Errorf("cannot find anchor by alias name %s", aliasName)
+			return nil, &MissingAnchorError{Alias: alias}
 		}
 		return d.getArrayNode(node)
 	}
@@ -667,6 +788,15 @@ func (d *Decoder) deleteStructKeys(structType reflect.Type, unknownFields map[st
 	if structType.Kind() == reflect.Ptr {
 		structType = structType.Elem()
 	}
+	if structType.Kind() == reflect.Map || structType.Kind() == reflect.Interface {
+		// An inline map or interface takes every key, so no
+		// unknown field remains.
+		clear(unknownFields)
+		return nil
+	}
+	if structType.Kind() != reflect.Struct {
+		return nil
+	}
 	structFieldMap, err := structFieldMap(structType)
 	if err != nil {
 		return err
@@ -683,6 +813,11 @@ func (d *Decoder) deleteStructKeys(structType reflect.Type, unknownFields map[st
 			continue
 		}
 
+		if structField.IsInline && structField.IsAutoAlias {
+			// An inline field with the alias option reads the anchor of
+			// a merge key, not the keys of the mapping.
+			continue
+		}
 		if structField.IsInline {
 			_ = d.deleteStructKeys(field.Type, unknownFields)
 		} else {
@@ -692,13 +827,25 @@ func (d *Decoder) deleteStructKeys(structType reflect.Type, unknownFields map[st
 	return nil
 }
 
-func (d *Decoder) unmarshalableDocument(node ast.Node) ([]byte, error) {
-	doc := format.FormatNodeWithResolvedAlias(node, d.anchorNodeMap)
+// textBudget returns the count of the bytes that the formatter may still
+// write for aliases, or nil for a decode without [AliasBudget].
+func (d *Decoder) textBudget() *int {
+	if !d.bounded {
+		return nil
+	}
+	return &d.aliasBytesLeft
+}
+
+func (d *Decoder) unmarshalableDocument(ctx context.Context, node ast.Node) ([]byte, error) {
+	doc := format.FormatNodeWithResolvedAlias(node, d.anchorNodeMap, getAnchorMap(ctx), d.textBudget(), &d.origins)
+	if d.bounded && d.aliasBytesLeft < 0 {
+		return nil, ErrAliasBudget
+	}
 	return []byte(doc), nil
 }
 
-func (d *Decoder) unmarshalableText(node ast.Node) ([]byte, bool) {
-	doc := format.FormatNodeWithResolvedAlias(node, d.anchorNodeMap)
+func (d *Decoder) unmarshalableText(ctx context.Context, node ast.Node) ([]byte, bool) {
+	doc := format.FormatNodeWithResolvedAlias(node, d.anchorNodeMap, getAnchorMap(ctx), d.textBudget(), &d.origins)
 	var v string
 	if err := Unmarshal([]byte(doc), &v); err != nil {
 		return nil, false
@@ -762,35 +909,35 @@ func (d *Decoder) canDecodeByUnmarshaler(dst reflect.Value) bool {
 func (d *Decoder) decodeByUnmarshaler(ctx context.Context, dst reflect.Value, src ast.Node) error {
 	ptrValue := dst.Addr()
 	if unmarshaler, exists := d.unmarshalerFromCustomUnmarshalerMap(ptrValue.Type()); exists {
-		b, err := d.unmarshalableDocument(src)
+		b, err := d.unmarshalableDocument(ctx, src)
 		if err != nil {
 			return err
 		}
 		if err := unmarshaler(ctx, ptrValue.Interface(), b); err != nil {
-			return err
+			return fromUnmarshaler(err)
 		}
 		return nil
 	}
 	iface := ptrValue.Interface()
 
 	if unmarshaler, ok := iface.(BytesUnmarshalerContext); ok {
-		b, err := d.unmarshalableDocument(src)
+		b, err := d.unmarshalableDocument(ctx, src)
 		if err != nil {
 			return err
 		}
 		if err := unmarshaler.UnmarshalYAML(ctx, b); err != nil {
-			return err
+			return fromUnmarshaler(err)
 		}
 		return nil
 	}
 
 	if unmarshaler, ok := iface.(BytesUnmarshaler); ok {
-		b, err := d.unmarshalableDocument(src)
+		b, err := d.unmarshalableDocument(ctx, src)
 		if err != nil {
 			return err
 		}
 		if err := unmarshaler.UnmarshalYAML(b); err != nil {
-			return err
+			return fromUnmarshaler(err)
 		}
 		return nil
 	}
@@ -802,11 +949,11 @@ func (d *Decoder) decodeByUnmarshaler(ctx context.Context, dst reflect.Value, sr
 				return ErrDecodeRequiredPointerType
 			}
 			if err := d.decodeValue(ctx, rv.Elem(), src); err != nil {
-				return err
+				return unmarshalerCause(err)
 			}
 			return nil
 		}); err != nil {
-			return err
+			return fromUnmarshaler(err)
 		}
 		return nil
 	}
@@ -818,18 +965,18 @@ func (d *Decoder) decodeByUnmarshaler(ctx context.Context, dst reflect.Value, sr
 				return ErrDecodeRequiredPointerType
 			}
 			if err := d.decodeValue(ctx, rv.Elem(), src); err != nil {
-				return err
+				return unmarshalerCause(err)
 			}
 			return nil
 		}); err != nil {
-			return err
+			return fromUnmarshaler(err)
 		}
 		return nil
 	}
 
 	if unmarshaler, ok := iface.(NodeUnmarshaler); ok {
 		if err := unmarshaler.UnmarshalYAML(src); err != nil {
-			return err
+			return fromUnmarshaler(err)
 		}
 
 		return nil
@@ -837,7 +984,7 @@ func (d *Decoder) decodeByUnmarshaler(ctx context.Context, dst reflect.Value, sr
 
 	if unmarshaler, ok := iface.(NodeUnmarshalerContext); ok {
 		if err := unmarshaler.UnmarshalYAML(ctx, src); err != nil {
-			return err
+			return fromUnmarshaler(err)
 		}
 
 		return nil
@@ -852,10 +999,13 @@ func (d *Decoder) decodeByUnmarshaler(ctx context.Context, dst reflect.Value, sr
 	}
 
 	if unmarshaler, isText := iface.(encoding.TextUnmarshaler); isText {
-		b, ok := d.unmarshalableText(src)
+		b, ok := d.unmarshalableText(ctx, src)
+		if d.bounded && d.aliasBytesLeft < 0 {
+			return ErrAliasBudget
+		}
 		if ok {
 			if err := unmarshaler.UnmarshalText(b); err != nil {
-				return err
+				return fromUnmarshaler(err)
 			}
 			return nil
 		}
@@ -863,7 +1013,7 @@ func (d *Decoder) decodeByUnmarshaler(ctx context.Context, dst reflect.Value, sr
 
 	if d.useJSONUnmarshaler {
 		if unmarshaler, ok := iface.(jsonUnmarshaler); ok {
-			b, err := d.unmarshalableDocument(src)
+			b, err := d.unmarshalableDocument(ctx, src)
 			if err != nil {
 				return err
 			}
@@ -873,7 +1023,7 @@ func (d *Decoder) decodeByUnmarshaler(ctx context.Context, dst reflect.Value, sr
 			}
 			jsonBytes = bytes.TrimRight(jsonBytes, "\n")
 			if err := unmarshaler.UnmarshalJSON(jsonBytes); err != nil {
-				return err
+				return fromUnmarshaler(err)
 			}
 			return nil
 		}
@@ -891,6 +1041,9 @@ func (d *Decoder) decodeValue(ctx context.Context, dst reflect.Value, src ast.No
 	defer d.stepOut()
 	if d.isExceededMaxDepth() {
 		return ErrExceededMaxDepth
+	}
+	if err := d.tick(ctx); err != nil {
+		return err
 	}
 	if !dst.IsValid() {
 		return nil
@@ -914,15 +1067,34 @@ func (d *Decoder) decodeValue(ctx context.Context, dst reflect.Value, src ast.No
 	valueType := dst.Type()
 	switch valueType.Kind() {
 	case reflect.Ptr:
-		if dst.IsNil() {
-			return nil
+		// An alias to a null is a null too.
+		content := src
+		if alias, ok := src.(*ast.AliasNode); ok {
+			if node := d.anchorNodeMap[alias.Value.GetToken().Value]; node != nil {
+				content = node
+			}
 		}
-		if src.Type() == ast.NullType {
+		if content.Type() == ast.NullType {
 			// set nil value to pointer
 			dst.Set(reflect.Zero(valueType))
 			return nil
 		}
 		v := d.createDecodableValue(dst.Type())
+		if v.Kind() == reflect.Ptr {
+			srcValue, err := d.nodeToValue(ctx, src)
+			if err != nil {
+				return err
+			}
+			return errors.ErrTypeMismatch(valueType, reflect.TypeOf(srcValue), src.GetToken())
+		}
+		// The decode starts from the value that the pointer reaches.
+		held := dst
+		for held.Kind() == reflect.Ptr && !held.IsNil() {
+			held = held.Elem()
+		}
+		if held.Type() == v.Type() {
+			v.Set(held)
+		}
 		if err := d.decodeValue(ctx, v, src); err != nil {
 			return err
 		}
@@ -931,6 +1103,7 @@ func (d *Decoder) decodeValue(ctx context.Context, dst reflect.Value, src ast.No
 			return err
 		}
 		dst.Set(castedValue)
+		return nil
 	case reflect.Interface:
 		if dst.Type() == astNodeType {
 			dst.Set(reflect.ValueOf(src))
@@ -965,6 +1138,10 @@ func (d *Decoder) decodeValue(ctx context.Context, dst reflect.Value, src ast.No
 		if err != nil {
 			return err
 		}
+		if i, ok := v.(int); ok {
+			// nodeToValue reads an integer under a !!int tag as a Go int.
+			v = int64(i)
+		}
 		switch vv := v.(type) {
 		case int64:
 			if !dst.OverflowInt(vv) {
@@ -998,6 +1175,10 @@ func (d *Decoder) decodeValue(ctx context.Context, dst reflect.Value, src ast.No
 		v, err := d.nodeToValue(ctx, src)
 		if err != nil {
 			return err
+		}
+		if i, ok := v.(int); ok {
+			// nodeToValue reads an integer under a !!int tag as a Go int.
+			v = int64(i)
 		}
 		switch vv := v.(type) {
 		case int64:
@@ -1046,12 +1227,10 @@ func (d *Decoder) decodeValue(ctx context.Context, dst reflect.Value, src ast.No
 }
 
 func (d *Decoder) createDecodableValue(typ reflect.Type) reflect.Value {
-	for {
-		if typ.Kind() == reflect.Ptr {
-			typ = typ.Elem()
-			continue
-		}
-		break
+	// A type such as "type P *P" never ends in a type that is not a
+	// pointer, so the walk gives up, and the caller rejects the pointer.
+	for i := 0; typ.Kind() == reflect.Ptr && i < maxPointerDepth; i++ {
+		typ = typ.Elem()
 	}
 	return reflect.New(typ).Elem()
 }
@@ -1071,7 +1250,11 @@ func (d *Decoder) castToAssignableValue(value reflect.Value, target reflect.Type
 			break
 		}
 		if !value.CanAddr() {
-			break
+			// A pointer to a pointer: the inner pointer needs a place.
+			held := reflect.New(value.Type())
+			held.Elem().Set(value)
+			value = held
+			continue
 		}
 		value = value.Addr()
 	}
@@ -1086,6 +1269,11 @@ func (d *Decoder) createDecodedNewValue(
 ) (reflect.Value, error) {
 	if node.Type() == ast.AliasType {
 		aliasName := node.(*ast.AliasNode).Value.GetToken().Value
+		if _, open := getAnchorMap(ctx)[aliasName]; open {
+			// An alias inside the anchor it names reads as null, as
+			// nodeToValue reads it.
+			return d.createDecodedNewValue(ctx, typ, defaultVal, ast.Null(token.New("null", "null", node.GetToken().Position)))
+		}
 		value := d.anchorValueMap[aliasName]
 		if value.IsValid() {
 			v, err := d.castToAssignableValue(value, typ, node)
@@ -1095,7 +1283,11 @@ func (d *Decoder) createDecodedNewValue(
 		}
 		anchor, exists := d.anchorNodeMap[aliasName]
 		if exists {
+			// The alias reads its anchor, so an alias inside reads as null.
 			node = anchor
+			ctx = withAnchor(ctx, aliasName)
+			d.aliasDepth++
+			defer func() { d.aliasDepth-- }()
 		}
 	}
 	var newValue reflect.Value
@@ -1391,8 +1583,10 @@ func (d *Decoder) decodeStruct(ctx context.Context, dst reflect.Value, src ast.N
 				if foundErr != nil {
 					continue
 				}
-				var te *errors.TypeError
-				if errors.As(err, &te) {
+				// The decoder names the field only in a TypeError of its
+				// own, so an error that wraps a TypeError and the error of an
+				// unmarshaler stay as they are.
+				if te, ok := err.(*errors.TypeError); ok {
 					if te.StructFieldName != nil {
 						fieldName := fmt.Sprintf("%s.%s", structType.Name(), *te.StructFieldName)
 						te.StructFieldName = &fieldName
@@ -1400,11 +1594,8 @@ func (d *Decoder) decodeStruct(ctx context.Context, dst reflect.Value, src ast.N
 						fieldName := fmt.Sprintf("%s.%s", structType.Name(), field.Name)
 						te.StructFieldName = &fieldName
 					}
-					foundErr = te
-					continue
-				} else {
-					foundErr = err
 				}
+				foundErr = err
 				continue
 			}
 			_ = d.setDefaultValueIfConflicted(newFieldValue, structFieldMap)
@@ -1427,14 +1618,14 @@ func (d *Decoder) decodeStruct(ctx context.Context, dst reflect.Value, src ast.N
 			if foundErr != nil {
 				continue
 			}
-			var te *errors.TypeError
-			if errors.As(err, &te) {
+			// The decoder names the field only in a TypeError of its own,
+			// so an error that wraps a TypeError and the error of an
+			// unmarshaler stay as they are.
+			if te, ok := err.(*errors.TypeError); ok {
 				fieldName := fmt.Sprintf("%s.%s", structType.Name(), field.Name)
 				te.StructFieldName = &fieldName
-				foundErr = te
-			} else {
-				foundErr = err
 			}
+			foundErr = err
 			continue
 		}
 		fieldValue.Set(newFieldValue)
@@ -1969,7 +2160,7 @@ func (d *Decoder) decode(ctx context.Context, v reflect.Value) error {
 		maps.Copy(d.toCommentMap, d.commentMaps[d.streamIndex])
 	}
 	if err := d.decodeValue(ctx, v.Elem(), body); err != nil {
-		return err
+		return d.finish(err)
 	}
 	d.streamIndex++
 	return nil
@@ -1991,6 +2182,7 @@ func (d *Decoder) DecodeContext(ctx context.Context, v interface{}) error {
 	if !rv.IsValid() || rv.Type().Kind() != reflect.Ptr {
 		return ErrDecodeRequiredPointerType
 	}
+	d.stopped = nil
 	if d.isInitialized() {
 		if err := d.decode(ctx, rv); err != nil {
 			return err
@@ -2017,6 +2209,7 @@ func (d *Decoder) DecodeFromNodeContext(ctx context.Context, node ast.Node, v in
 	if rv.Type().Kind() != reflect.Ptr {
 		return ErrDecodeRequiredPointerType
 	}
+	d.stopped = nil
 	if !d.isInitialized() {
 		if err := d.decodeInit(ctx); err != nil {
 			return err
@@ -2024,10 +2217,10 @@ func (d *Decoder) DecodeFromNodeContext(ctx context.Context, node ast.Node, v in
 	}
 	// resolve references to the anchor on the same file
 	if _, err := d.nodeToValue(ctx, node); err != nil {
-		return err
+		return d.finish(err)
 	}
 	if err := d.decodeValue(ctx, rv.Elem(), node); err != nil {
-		return err
+		return d.finish(err)
 	}
 	return nil
 }

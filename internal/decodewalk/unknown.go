@@ -73,12 +73,6 @@ type UnknownField struct {
 // unmarshaler of the outermost such struct. It runs that unmarshaler on
 // the entries and elements that lead from its mapping down to the
 // candidate. So the unmarshaler decides, as it does in the decode itself.
-// A decoder that rejects unknown fields panics on a struct that holds a
-// map inline. Only the unmarshaler of the outermost such struct knows the
-// type that reads a candidate. So when its decode panics so, the search
-// keeps no candidate at or below that struct. When the decode of
-// the one entry of a struct that does not decode itself panics so, a
-// decode of that entry into a struct without fields decides.
 //
 // Before it reads the keys of the outermost such struct, the search
 // decodes the whole struct once. When the decoder accepts it, the search
@@ -271,28 +265,10 @@ type confirmKey struct {
 // confirm returns the rejection of the key of entry as an unknown field,
 // when the decode of node into a new value of type t rejects it so, or nil
 // for any other outcome. [walker.confirmation] builds node and t.
-//
-// A decoder that rejects unknown fields panics on a struct that holds a
-// map inline, as [Rules] describes for PanicsOnInlineMap. When t decodes
-// itself, the panic leaves the key without a verdict, so confirm returns
-// nil. Otherwise node holds entry alone, and the struct of type t has no
-// field for its key. The search does not take a key of a struct with an
-// inline map as a candidate, so the panic comes from another inline field
-// that the check of the decoder reads as a struct, such as a map that
-// reads an anchor. A decode of node into a struct without fields then
-// decides. It rejects the key as the decoder does, except a key under a
-// prefix that the decoder allows.
 func (w *walker) confirm(node ast.Node, t reflect.Type, entry *ast.MappingValueNode) *yaml.UnknownFieldError {
 	view := w.view(entry)
 
 	err := w.rules.Decode(node, reflect.New(t).Interface())
-	if w.rules.PanicsOnInlineMap != nil && w.rules.PanicsOnInlineMap(err) {
-		if w.rules.Unmarshalers.ReportsOwnError(t) {
-			return nil
-		}
-
-		err = w.rules.Decode(node, &struct{}{})
-	}
 
 	rejected, ok := err.(*yaml.UnknownFieldError) //nolint:errorlint // A wrapped error is the unmarshaler's own.
 	if !ok || rejected.Token == nil || rejected.Token != view.Key.GetToken() || rejected.Token.Position == nil {

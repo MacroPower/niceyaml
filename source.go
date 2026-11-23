@@ -627,15 +627,16 @@ func WithAllowDuplicateKeys(allow bool) SourceOption {
 // also bound the text that aliases write out.
 //
 // With the limit off, a few hundred bytes of nested aliases can keep a
-// decode running for minutes, because the go-yaml decoder never checks
-// the context. They can also keep a schema validation running for
-// seconds and using hundreds of MiB. The checks of
-// [go.jacobcolvin.com/niceyaml/edit.Doc.Apply] grow with the square of the
-// length of a chain of `<<` merge keys, in which each mapping merges the
-// one before it. The Transactions section of the package documentation
-// of [go.jacobcolvin.com/niceyaml/edit] gives the cost of one Set on such
-// a chain. Turn the limit off only for input the program trusts, such as
-// a file it ships:
+// decode running for minutes. A deadline does not stop the decoder while it
+// writes out the text of those aliases for a type that reads its own text,
+// such as one with an UnmarshalText method. The aliases can also keep a
+// schema validation running for seconds and using hundreds of MiB. The
+// checks of [go.jacobcolvin.com/niceyaml/edit.Doc.Apply] grow with the
+// square of the length of a chain of `<<` merge keys, in which each mapping
+// merges the one before it. The Transactions section of the package
+// documentation of [go.jacobcolvin.com/niceyaml/edit] gives the cost of one
+// Set on such a chain. Turn the limit off only for input the program
+// trusts, such as a file it ships:
 //
 //	source, err := niceyaml.NewSourceFromFile(path, niceyaml.WithAliasLimit(false))
 //

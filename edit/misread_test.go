@@ -591,9 +591,6 @@ func TestNew_GoYAMLReading(t *testing.T) {
 		"core tag before an anchor that an alias reads": {
 			text: stringtest.LinesLF("a: !!int &k 5", "b: *k"),
 		},
-		"core tag on a block scalar": {
-			text: stringtest.LinesLF("a: !!int |", "  5"),
-		},
 		"core tag on a number with a leading zero": {
 			text: "a: !!int 017\n",
 		},

@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"runtime/debug"
 
 	"github.com/goccy/go-yaml/ast"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/decodewalk"
+	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 	"go.jacobcolvin.com/niceyaml/internal/yamldecode"
 )
 
@@ -251,8 +251,7 @@ func (d defaultFuncs) start(t reflect.Type, node ast.Node) (reflect.Value, error
 				return
 			}
 
-			stack := &PanicError{Value: p, Stack: debug.Stack()}
-			err = Unchecked(panicked(fmt.Sprintf("the defaults of %s", t), stack, errPlaced),
+			err = Unchecked(panicked(fmt.Sprintf("the defaults of %s", t), recovered(p), errPlaced),
 				AtToken(astnode.StartToken(node)))
 		}()
 
@@ -262,35 +261,41 @@ func (d defaultFuncs) start(t reflect.Type, node ast.Node) (reflect.Value, error
 	return v, err
 }
 
-// startTarget allocates each nil pointer below v, a non-nil pointer, as
-// [allocate] does. It returns the last pointer and the value that the
-// decode starts from there. When v held a nil pointer, the start is the
-// defaults of its type. Otherwise the start is a copy of the value that v
-// reaches, because the decoder overwrites that value. The start is
-// invalid past [maxPointerDepth] pointers.
+// startTarget returns the pointer that a decode of node into v fills, and
+// the value that the decode starts from there. The pointer is the last of
+// the chain of pointers that v, a non-nil pointer, reaches. Along the
+// chain, startTarget sets each nil pointer to a new value, so the decode
+// fills the value at the end of the chain in place. When v held a nil
+// pointer, the start is the defaults of the type at the end. Otherwise
+// the start is a copy of the value that v reaches, because the decoder
+// overwrites that value. For a pointer type that never ends in a type
+// that is not a pointer, such as "type P *P", startTarget returns v and
+// an invalid start, and the decoder rejects the type.
 func startTarget(v any, cfg decodeConfig, node ast.Node) (any, reflect.Value, error) {
-	created := false
+	if unmarshaler.Base(reflect.TypeOf(v)).Kind() == reflect.Pointer {
+		return v, reflect.Value{}, nil
+	}
 
-	for rv := reflect.ValueOf(v).Elem(); rv.Kind() == reflect.Pointer; rv = rv.Elem() {
-		if rv.IsNil() {
+	created := false
+	target := reflect.ValueOf(v)
+
+	for elem := target.Elem(); elem.Kind() == reflect.Pointer; elem = target.Elem() {
+		if elem.IsNil() {
 			created = true
 
-			break
+			elem.Set(reflect.New(elem.Type().Elem()))
 		}
+
+		target = elem
 	}
 
-	target := allocate(v)
-
-	tv := reflect.ValueOf(target).Elem()
-	if tv.Kind() == reflect.Pointer {
-		return target, reflect.Value{}, nil
-	}
+	tv := target.Elem()
 
 	if !created {
 		start := reflect.New(tv.Type()).Elem()
 		start.Set(tv)
 
-		return target, start, nil
+		return target.Interface(), start, nil
 	}
 
 	start, err := cfg.defaults.start(tv.Type(), node)
@@ -300,7 +305,7 @@ func startTarget(v any, cfg decodeConfig, node ast.Node) (any, reflect.Value, er
 
 	tv.Set(start)
 
-	return target, start, nil
+	return target.Interface(), start, nil
 }
 
 // fillDefaults builds again each value that a decode of node into target

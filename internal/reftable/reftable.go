@@ -9,7 +9,6 @@ import (
 
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
-	"go.jacobcolvin.com/niceyaml/internal/decodetree"
 	"go.jacobcolvin.com/niceyaml/internal/decodewalk"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -35,11 +34,9 @@ import (
 // the alias by the largest of them.
 //
 // The go-yaml decoder reads the trees of a table and does not write to
-// them, so the decodes of many goroutines share them. An anchor inside
-// another reads as the node that stands for it in the view of the other,
-// as [Table.View] describes. The table also keeps the keys of the merge
-// sources in those views that walks read, as [Table.Keys] describes. A
-// nil Table does not hold any anchors.
+// them, so the decodes of many goroutines share them. The table also keeps
+// the keys of the merge sources under its anchors that walks read, as
+// [Table.Keys] describes. A nil Table does not hold any anchors.
 //
 // Create instances with [New].
 type Table struct {
@@ -54,8 +51,6 @@ type Table struct {
 	// The weights of the anchors that the table holds, as [Table.Weights]
 	// returns them.
 	weights *aliasing.ReferenceWeights
-	// The views of the anchors of own.
-	views decodetree.AnchorViews
 	// The keys of the merge sources under the anchors of own, as
 	// [Table.Keys] returns them.
 	keys decodewalk.Keys
@@ -67,8 +62,6 @@ type Table struct {
 type entry struct {
 	// The anchor, a node of a reference document.
 	anchor *ast.AnchorNode
-	// Returns the anchor as the decoder reads it, built on the first call.
-	view func() *ast.AnchorNode
 	// Returns the names the aliases under the anchor read, each once, in
 	// document order, found on the first call.
 	reads func() []string
@@ -139,7 +132,6 @@ func isNil(t *Table) bool {
 func (t *Table) newEntry(anchor *ast.AnchorNode) *entry {
 	return &entry{
 		anchor: anchor,
-		view:   sync.OnceValue(func() *ast.AnchorNode { return t.views.View(anchor) }),
 		reads:  sync.OnceValue(func() []string { return aliasNames(anchor.Value) }),
 		keys:   &t.keys,
 	}
@@ -238,34 +230,30 @@ func (t *Table) Weights() *aliasing.ReferenceWeights {
 	return t.weights
 }
 
-// View returns the anchor the table holds for name as the decoder reads
-// it, the view that [Table.Prime] returns for that anchor. The view of an
-// anchor inside another is the node that stands for it in the view of
-// the other, as [decodetree.AnchorViews] gives it. The views of a table
-// thus copy each node of its documents at most once. View reports false
-// when the table does not hold an anchor for name.
+// View returns the anchor the table holds for name, the node that the
+// decoder reads and that [Table.Prime] returns for that anchor. View
+// reports false when the table does not hold an anchor for name.
 func (t *Table) View(name string) (*ast.AnchorNode, bool) {
 	e := t.entry(name)
 	if e == nil {
 		return nil, false
 	}
 
-	return e.view(), true
+	return e.anchor, true
 }
 
 // Keys returns the [decodewalk.Keys] that keep the keys of the merge
-// sources in the view of the anchor that the table holds for name, as
+// sources under the anchor that the table holds for name, as
 // [decodewalk.Rules.AnchorKeys] describes. The anchors of the documents
 // of a table share one Keys, and every table that reads that table
 // returns it for those anchors. So the walks of every Source that reads
 // the anchors share it, and the keys stay as long as the table does.
 //
-// A walk keeps the keys of a source under the node of the view that it
-// reads. The views of the table hold at most one node for each node of
-// its documents, as [Table.View] describes. So the Keys hold the keys of
-// each mapping of the documents at most once, however many anchors hold
-// it. They grow with the text of the documents alone. Keys returns nil
-// when the table does not hold an anchor for name.
+// A walk keeps the keys of a source under the node that it reads, a node
+// of the documents of the table. So the Keys hold the keys of each mapping
+// of the documents at most once, however many anchors hold it. They grow
+// with the text of the documents alone. Keys returns nil when the table
+// does not hold an anchor for name.
 func (t *Table) Keys(name string) *decodewalk.Keys {
 	e := t.entry(name)
 	if e == nil {
@@ -689,7 +677,7 @@ func (t *Table) Prime(names []string) []ast.Node {
 				continue
 			}
 
-			order = append(order, stack[top].entry.view())
+			order = append(order, stack[top].entry.anchor)
 			stack = stack[:top]
 		}
 	}

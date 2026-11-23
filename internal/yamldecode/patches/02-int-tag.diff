@@ -1,0 +1,53 @@
+--- a/decode.go
++++ b/decode.go
+@@ -385,8 +385,26 @@
+ 			if err != nil {
+ 				return nil, err
+ 			}
+-			i, _ := strconv.Atoi(fmt.Sprint(v))
+-			return i, nil
++			// An integer under a !!int tag, or a string that spells one,
++			// reads as a Go int where it fits. Any other value fails.
++			if s, ok := v.(string); ok {
++				if num := token.ToNumber(s); num != nil && num.Type != token.NumberTypeFloat {
++					v = num.Value
++				}
++			}
++			switch vv := v.(type) {
++			case int64:
++				if int64(int(vv)) == vv {
++					return int(vv), nil
++				}
++				return vv, nil
++			case uint64:
++				if vv <= math.MaxInt {
++					return int(vv), nil
++				}
++				return vv, nil
++			}
++			return nil, errors.ErrTypeMismatch(reflect.TypeOf(0), reflect.TypeOf(v), n.Value.GetToken())
+ 		case token.FloatTag:
+ 			v, err := d.nodeToValue(ctx, n.Value)
+ 			if err != nil {
+@@ -979,6 +997,10 @@
+ 		if err != nil {
+ 			return err
+ 		}
++		if i, ok := v.(int); ok {
++			// nodeToValue reads an integer under a !!int tag as a Go int.
++			v = int64(i)
++		}
+ 		switch vv := v.(type) {
+ 		case int64:
+ 			if !dst.OverflowInt(vv) {
+@@ -1013,6 +1035,10 @@
+ 		if err != nil {
+ 			return err
+ 		}
++		if i, ok := v.(int); ok {
++			// nodeToValue reads an integer under a !!int tag as a Go int.
++			v = int64(i)
++		}
+ 		switch vv := v.(type) {
+ 		case int64:
+ 			if 0 <= vv && !dst.OverflowUint(uint64(vv)) {

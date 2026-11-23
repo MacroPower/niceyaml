@@ -142,3 +142,15 @@ func CommentToMap(cm CommentMap) DecodeOption {
 		return nil
 	}
 }
+
+// AliasBudget bounds what one decoder reads through aliases: nodes is the
+// count of nodes it may decode again below an alias, and textBytes is the
+// count of bytes it may write out for aliases in the text that it hands to
+// unmarshalers. A decode past either bound fails with [ErrAliasBudget]. An
+// alias that takes the value the decoder holds for its anchor costs nothing.
+func AliasBudget(nodes, textBytes int) DecodeOption {
+	return func(d *Decoder) error {
+		d.bounded, d.aliasNodesLeft, d.aliasBytesLeft = true, nodes, textBytes
+		return nil
+	}
+}

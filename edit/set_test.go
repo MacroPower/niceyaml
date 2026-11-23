@@ -2387,8 +2387,10 @@ func TestNode_Set(t *testing.T) {
 			engine bool
 		}{
 			"block scalar under the int tag": {
-				yaml: "!!int |\n  5\n",
-				want: "a: !!int |\n  5\n",
+				// The decoder refuses a block scalar under the tag, so the
+				// Set fails with ErrEngine and leaves the text as it was.
+				yaml:   "!!int |\n  5\n",
+				engine: true,
 			},
 			"verbatim int tag on a plain scalar": {
 				yaml: "!<tag:yaml.org,2002:int> 5",

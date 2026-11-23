@@ -1,0 +1,44 @@
+--- a/decode.go
++++ b/decode.go
+@@ -146,6 +146,10 @@
+ 
+ const maxDecodeDepth = 10000
+ 
++// maxPointerDepth is the most pointers the decoder follows from a type to
++// the type of the value it decodes.
++const maxPointerDepth = 64
++
+ func (d *Decoder) stepIn() {
+ 	d.decodeDepth++
+ }
+@@ -1055,6 +1059,13 @@
+ 			return nil
+ 		}
+ 		v := d.createDecodableValue(dst.Type())
++		if v.Kind() == reflect.Ptr {
++			srcValue, err := d.nodeToValue(ctx, src)
++			if err != nil {
++				return err
++			}
++			return errors.ErrTypeMismatch(valueType, reflect.TypeOf(srcValue), src.GetToken())
++		}
+ 		// The decode starts from the value that the pointer reaches.
+ 		held := dst
+ 		for held.Kind() == reflect.Ptr && !held.IsNil() {
+@@ -1195,12 +1206,10 @@
+ }
+ 
+ func (d *Decoder) createDecodableValue(typ reflect.Type) reflect.Value {
+-	for {
+-		if typ.Kind() == reflect.Ptr {
+-			typ = typ.Elem()
+-			continue
+-		}
+-		break
++	// A type such as "type P *P" never ends in a type that is not a
++	// pointer, so the walk gives up, and the caller rejects the pointer.
++	for i := 0; typ.Kind() == reflect.Ptr && i < maxPointerDepth; i++ {
++		typ = typ.Elem()
+ 	}
+ 	return reflect.New(typ).Elem()
+ }

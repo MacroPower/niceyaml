@@ -119,7 +119,8 @@ func main() {
 	// Before the decoder starts, the decode counts what the aliases make a
 	// reader read. A price reads its own text. Without the limit, the go-yaml
 	// decoder thus writes out a billion fika to read the one price of this
-	// upload. It never checks the context, so a deadline does not stop it.
+	// upload, and a deadline does not stop that write. The limit refuses the
+	// upload before the decoder starts.
 	// The error binds at the alias that repeats the most, the one price of
 	// the upload.
 	serve(ctx, p, shared, open, "bomb.yaml", exampleBomb)

@@ -117,7 +117,7 @@ func TestKeys_Key(t *testing.T) {
 		"alias of a sequence":      {input: "a: &k [1, 2]\n*k : 1\n", want: []string{"a", "[1 2]"}},
 		"alias of a mapping":       {input: "a: &k {p: 1}\n*k : 1\n", want: []string{"a", "p", "map[p:1]"}},
 		"integer tag over a mapping": {
-			input: "a: &k {p: 1}\nm: {!!int *k : x}\n", want: []string{"a", "p", "m", "0"},
+			input: "a: &k {p: 1}\nm: {!!int *k : x}\n", want: []string{"a", "p", "m", "!"},
 		},
 		"null tag over a mapping": {
 			input: "a: &k {p: 1}\nm: {!!null *k : x}\n", want: []string{"a", "p", "m", "null"},
@@ -486,7 +486,7 @@ func TestStringOf(t *testing.T) {
 		"number":            {node: "2", want: "2", ok: true},
 		"null":              {node: "~"},
 		"text under !!null": {node: "!!null cafe"},
-		"text under !!int":  {node: "!!int cafe", want: "0", ok: true},
+		"text under !!int":  {node: "!!int cafe", err: true},
 		"text under !!str":  {node: "!!str 2", want: "2", ok: true},
 		"timestamp":         {node: "!!timestamp cafe", err: true},
 		"mapping":           {node: "{a: 1}", err: true},

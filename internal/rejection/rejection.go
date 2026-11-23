@@ -82,12 +82,11 @@ var bytesType = reflect.TypeFor[[]byte]()
 //
 // The decoder also rejects a value by its Go type alone. It does so when
 // it hands the value of an anchor to an inline field with an alias
-// option, or when it fills a pointer to a pointer. The two types can then
-// hold the same kind of value, as two struct types do. An anchor that the
-// decoder read into an interface has a type that does not name a kind. A
-// message from kinds alone reads "expected mapping, got mapping", so the
-// message reads "expected mapping, got mapping of another type" and does
-// not name either type.
+// option. The two types can then hold the same kind of value, as two
+// struct types do. An anchor that the decoder read into an interface has
+// a type that does not name a kind. A message from kinds alone reads
+// "expected mapping, got mapping", so the message reads "expected
+// mapping, got mapping of another type" and does not name either type.
 //
 // Any other error keeps the message the decoder gave it and gets [None].
 func Classify(err yaml.Error) (string, Label) {

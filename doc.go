@@ -921,11 +921,10 @@
 // method, or a node inside a type that decodes itself. A node inside an
 // anchor of a reference document from [WithReferences] stays the decoder's
 // node too. Such a node spells an alias to a renamed anchor with a count in
-// brackets, such as `*x [2]`, which is not valid YAML. It spells a !!int tag
-// on an integer in the verbatim form `!<tag:yaml.org,2002:int>`. The
-// resolver of the document does not know the node. A caller can decode a
-// value from such a node and read the positions of its tokens, but should
-// not write its text out as YAML.
+// brackets, such as `*x [2]`, which is not valid YAML. The resolver of the
+// document does not know the node. A caller can decode a value from such a
+// node and read the positions of its tokens, but should not write its text
+// out as YAML.
 //
 // A [DecodeOption] sets how one decode runs, and it applies only to the call
 // that gets it. A setting that describes the documents, such as
@@ -1180,11 +1179,7 @@
 // [Node.DecodeInto] allocates for a nil pointer that its target points to.
 // Under [UnknownFieldsWarn], a decode whose context carries a collector also
 // calls again the unmarshalers of the structs that decode themselves from a
-// mapping, as [WithUnknownFields] describes. Under [UnknownFieldsReject], a
-// decode whose decoder panics on a struct that holds a map inline runs
-// again. It calls a second time each unmarshaler that the first pass
-// reached. The search for unknown fields then calls again the unmarshalers
-// of the structs that decode themselves, as [WithUnknownFields] describes.
+// mapping, as [WithUnknownFields] describes.
 //
 // The go-yaml decoder can give the place of an alias the value that its
 // anchor decoded to. The two places then share each map, slice, and pointer
@@ -1654,12 +1649,13 @@
 // not get the context, so a type whose check does I/O implements
 // SelfValidatorContext instead.
 //
-// The go-yaml decoder never checks the context. A decode checks it before the
-// decoder starts and between the anchors that the decode registers, but a
-// deadline does not stop the decoder after it starts. To decode a type that
-// reads its own text, such as one with an UnmarshalText method, the decoder
-// reads every token of the file for each value. A long list of such values
-// can thus take a second or more.
+// The decoder checks the context after each few hundred nodes that it reads,
+// so a deadline stops a decode in progress between nodes. The decode then
+// returns the error of the context. A type that reads its own text, such as
+// one with an UnmarshalText method, gets that text with each alias written
+// out. The decoder does not check the context during that write, so a
+// deadline does not stop it. A decode also checks the context before the
+// decoder starts and between the anchors that the decode registers.
 //
 // An ended context stops each step that loops:
 //
@@ -2183,19 +2179,17 @@
 // # Alias Limit
 //
 // A document of a few hundred bytes can nest aliases so that a reader that
-// follows them reads far more than the document holds. The go-yaml decoder
-// can take minutes on such a document and never checks the context, and a
-// schema reads every use of every alias. A decode, a
-// [go.jacobcolvin.com/niceyaml/schema.Schema], and a
+// follows them reads far more than the document holds. The go-yaml decoder can
+// take minutes on such a document, and a schema reads every use of every
+// alias. A decode, a [go.jacobcolvin.com/niceyaml/schema.Schema], and a
 // [go.jacobcolvin.com/niceyaml/matcher.Content] or
-// [go.jacobcolvin.com/niceyaml/matcher.Text] matcher therefore refuse
-// to read a value that holds an alias when the aliases of its document
-// exceed the limit. The error matches [ErrExcessiveAliasing], and
-// [IsInvalid] reports it, because the aliases of the document are the
-// cause wherever the count runs. The error binds at the alias of the
-// document that repeats the most nodes, as in "app.yaml:14:30: aliases
-// expand the document past the alias limit". That alias can lie outside
-// the node that the call reads.
+// [go.jacobcolvin.com/niceyaml/matcher.Text] matcher therefore refuse to read
+// a value that holds an alias when the aliases of its document exceed the
+// limit. The error matches [ErrExcessiveAliasing], and [IsInvalid] reports it,
+// because the aliases of the document are the cause wherever the count runs.
+// The error binds at the alias of the document that repeats the most nodes, as
+// in "app.yaml:14:30: aliases expand the document past the alias limit". That
+// alias can lie outside the node that the call reads.
 //
 // The value of a Node at a local alias without a tag that lies outside
 // the content of its anchor is the content of the anchor. So the check
