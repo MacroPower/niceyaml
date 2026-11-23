@@ -1326,6 +1326,17 @@ func TestTokenize_Patches(t *testing.T) {
 				{token.SequenceEndType, "]\n"},
 			},
 		},
+		// A ":" before text stays in an explicit key on two lines of a
+		// flow sequence, as the scan of one line keeps it in the key.
+		"colon before text after an explicit key on two lines of a flow sequence": {
+			input: "[? a\n c:d]\n",
+			want: []tok{
+				{token.SequenceStartType, "["},
+				{token.MappingKeyType, "?"},
+				{token.StringType, " a\n c:d"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
 		// Upstream keeps a ":" before a flow indicator on one line in the
 		// scalar of the key.
 		"colon before the end of a flow sequence after an explicit key": {

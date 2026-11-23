@@ -944,6 +944,16 @@ func TestParse_ExplicitKey(t *testing.T) {
 			input: stringtest.LinesLF("[? !t", " a: ]"),
 			msg:   "could not find '[' character corresponding to ']'",
 		},
+		// A ":" before text stays in a key on two lines, as it stays in
+		// the same key on one line.
+		"with a colon before text on two lines in a flow sequence": {
+			input: stringtest.LinesLF("[? a", " c:d]"),
+			want:  []any{map[string]any{"a c:d": nil}},
+		},
+		"with a colon before text on two lines before an item of a flow sequence": {
+			input: stringtest.LinesLF("[? a", " c:d, e]"),
+			want:  []any{map[string]any{"a c:d": nil}, "e"},
+		},
 		// The parser refuses a key without a node.
 		"without a node in a flow sequence": {
 			input: "[? ]\n",

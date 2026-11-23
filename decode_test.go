@@ -8133,6 +8133,10 @@ func TestDocument_Decode_YAMLReadings(t *testing.T) {
 			input: stringtest.LinesLF("key: [? a", " c:, d]"),
 			want:  map[string]any{"key": []any{map[string]any{"a c": nil}, "d"}},
 		},
+		"colon before text in an explicit key on two lines of a flow sequence in a flow mapping": {
+			input: stringtest.LinesLF("{x: [? a", " c:d]}"),
+			want:  map[string]any{"x": []any{map[string]any{"a c:d": nil}}},
+		},
 		"dash that continues an explicit key of a flow mapping": {
 			// Go-yaml reads the "-" as a sequence entry, so it reads
 			// {a: [b]}.
