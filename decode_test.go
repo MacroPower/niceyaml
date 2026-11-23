@@ -7806,6 +7806,46 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 	})
 }
 
+func TestDocument_Decode_YAMLReadings(t *testing.T) {
+	t.Parallel()
+
+	// Go-yaml reads these texts otherwise, but a decode reads them as YAML
+	// does.
+	tcs := map[string]struct {
+		input string
+		want  any
+	}{
+		"tag that ends the text": {
+			// Go-yaml drops the tag and reads null.
+			input: "b: !!str",
+			want:  map[string]any{"b": ""},
+		},
+		"tag that ends the text after a line break": {
+			input: "b: !!str\n",
+			want:  map[string]any{"b": ""},
+		},
+		"tag alone": {
+			input: "!!str",
+			want:  "",
+		},
+		"tag over the first key of a mapping": {
+			// Go-yaml reads the key as the string "0x10".
+			input: stringtest.LinesLF("!t", "0x10: 1"),
+			want:  map[string]any{"16": uint64(1)},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := yamltest.FirstDocument(t, tc.input).Decode[any](t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestDocument_Decode_SyntaxNodes(t *testing.T) {
 	t.Parallel()
 

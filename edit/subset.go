@@ -815,25 +815,12 @@ func (k oddKey) label() string {
 
 // reading returns the words that tell how a decode reads k in the message
 // of a call, such as "a key that reads as 16 rather than as its text".
-// Then tells that a decode reads k so only in the text that the call
-// leaves.
-func (k oddKey) reading(then bool) string {
-	reads := "reads"
-	if then {
-		reads = "then reads"
-	}
-
+func (k oddKey) reading() string {
 	if k.null() {
-		return fmt.Sprintf("a key that %s as the null value", reads)
+		return "a key that reads as the null value"
 	}
 
-	return fmt.Sprintf("a key that %s as %s rather than as its text", reads, k.shown())
-}
-
-// reread returns the words of the message of a call that changes how a
-// decode reads k, with the reading of k as [oddKey.reading] tells it.
-func (k oddKey) reread(then bool) string {
-	return fmt.Sprintf("changes how a decode reads %s, %s", k.label(), k.reading(then))
+	return fmt.Sprintf("a key that reads as %s rather than as its text", k.shown())
 }
 
 // fix returns the fix of k, which asks for the key in quotes.
@@ -1520,9 +1507,6 @@ type zone struct {
 	parts []zonePart
 	// The key sets that the zone holds.
 	keys []zoneKeys
-	// The reading of the key of a zone of [ConstructKeyText], for the words
-	// of a call that changes how a decode reads the key.
-	odd oddKey
 	// The instance of the construct.
 	in instance
 	// The offset of the site in the text that the Apply found, which orders
@@ -2752,8 +2736,8 @@ func (d *Doc) zoneProblem(z *zone, named string) error {
 
 // offsetPath returns the path of the innermost value of the current text
 // whose bytes hold the byte at off, or that lies at off without bytes, as
-// [Doc.valueSpan] places such a value, as the null of "b: !!str" lies at
-// its tag when go-yaml's lexer drops the tag.
+// [Doc.valueSpan] places such a value, as the null of "b:" lies after its
+// colon.
 func (d *Doc) offsetPath(off int) paths.Path {
 	var (
 		at   ast.Node
@@ -3232,10 +3216,9 @@ type keyTextGroup struct {
 // such a key, and each other entry is a related site.
 func (d *Doc) keyTextZone(m ast.Node, g *keyTextGroup) *zone {
 	odd := g.odd
-	shown, reading := odd.label(), odd.reading(false)
+	shown, reading := odd.label(), odd.reading()
 
 	z := &zone{
-		odd: odd,
 		in: instance{
 			construct: ConstructKeyText,
 			at:        d.nodeSite(plainKey(g.first), false),
@@ -5463,14 +5446,6 @@ func (d *Doc) readCommentOrigins() []int {
 // [ErrEngine]. Any other construct lies in
 // the bytes of the user, which the call kept or moved, so its problem
 // matches [ErrUnsupported].
-//
-// A call can also change how a decode reads a key that it does not reach.
-// A decode can read such a key as its text after the call, as
-// [Doc.rereadKey] finds. A decode can also read a key as another value than
-// its text only after the call. The text then holds a zone of the key that
-// the Apply does not hold. The problem of each such call matches
-// ErrUnsupported, and [ConstructKeyText] names it. Its words tell that the
-// call changes how a decode reads the key.
 func (d *Doc) madeProblem(h *Node, named string) error {
 	if found := d.find(true); len(found) > 0 {
 		in := firstInText(found)
@@ -5482,15 +5457,6 @@ func (d *Doc) madeProblem(h *Node, named string) error {
 	zones := d.constructZones(true)
 	slices.SortStableFunc(zones, func(a, b *zone) int { return cmp.Compare(a.at, b.at) })
 
-	const reread = "change how a decode reads a key"
-
-	if z, ok := d.rereadKey(zones); ok {
-		in := z.in
-		in.reach, in.object = z.odd.reread(false), reread
-
-		return d.refusal(&in, named)
-	}
-
 	for _, z := range zones {
 		if d.heldZone(z) || d.heldComment(z) {
 			continue
@@ -5499,60 +5465,10 @@ func (d *Doc) madeProblem(h *Node, named string) error {
 		in := z.in
 		in.reach = "makes " + strings.TrimPrefix(strings.TrimPrefix(in.reach, "goes through "), "reaches ")
 
-		// The text that the Apply found holds the key of such a zone, which
-		// a decode read as its text there. The call does not reach the
-		// entry of the key, so the words of z.in do not tell what it does.
-		if in.construct == ConstructKeyText {
-			in.reach, in.object = z.odd.reread(true), reread
-		}
-
 		return d.madeRefusal(h, &in, named)
 	}
 
 	return nil
-}
-
-// rereadKey returns the first zone of the Apply whose key a decode reads
-// another way in the current text, and reports whether it found one. It
-// reads only the zones of the keys that read as another value than their
-// text. Zones holds the zones of the current text. The text holds an entry
-// of the zone that rereadKey returns as the Apply found it, and no zone of
-// zones holds that entry. Each call that reaches the entry fails, so the
-// text of the entry is the same. Only the place of the entry changes its
-// reading.
-//
-// Go-yaml's scanner reads the plain scalar right after a tag as a string.
-// It does not do so after a tag that YAML defines, such as !!map. The first
-// key of a block mapping under a tag such as !t is such a scalar. A call
-// can take away each entry before the key 0x10 of such a mapping. A decode
-// then reads that key as its text, though the call reaches no entry of the
-// key.
-func (d *Doc) rereadKey(zones []*zone) (*zone, bool) {
-	held := make(map[int]bool)
-
-	for _, z := range zones {
-		if z.in.construct != ConstructKeyText {
-			continue
-		}
-
-		for _, s := range d.zoneSpans(z) {
-			held[s.start] = true
-		}
-	}
-
-	for _, z := range d.zones {
-		if z.in.construct != ConstructKeyText {
-			continue
-		}
-
-		for _, s := range d.zoneSpans(z) {
-			if !held[s.start] {
-				return z, true
-			}
-		}
-	}
-
-	return nil, false
 }
 
 // heldZone reports whether z, a zone of the current text, is a zone of the

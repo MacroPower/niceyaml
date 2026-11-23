@@ -3689,8 +3689,7 @@ func TestNode_Append(t *testing.T) {
 			want:   stringtest.LinesLF("args:", "  - --quiet # first", "  - --color", "  - --verbose"),
 		},
 		"item with a tag that ends the text": {
-			// Go-yaml drops the tag, and the "-" holds its text. The new
-			// sequence writes over the tag.
+			// The new sequence replaces the tag, which ends the text.
 			before: "- !t",
 			path:   paths.MustParse("$[0]"),
 			value:  "z",

@@ -130,13 +130,6 @@ func (n *Node) SetHeadComment(lines ...string) error {
 // item. It fails with [ErrUnsupported] where the path of that entry or
 // item reaches a construct of the Supported YAML section.
 //
-// Go-yaml's lexer drops a tag that ends the text without a line break, as
-// in "a: !!str", but it reads the tag before a comment. A comment after
-// such a tag thus changes the value that go-yaml reads. So a call with
-// another text than "" fails there, and the document is at fault for the
-// problem. A call with "" that removes the comment after such a tag ends
-// the line with a line break, which keeps the tag.
-//
 // A value whose text goes on past the line of its key or its "-" leaves no
 // end of that line for a comment. A plain scalar of two lines is such a
 // value. LineComment reads "" there, so a call with "" leaves the text as
@@ -270,17 +263,6 @@ func (n *Node) setLineComment(text, named string) error {
 	}
 
 	switch {
-	case spot.dropped:
-		// Go-yaml's lexer reads a tag before a comment, so a comment there
-		// changes the value that go-yaml reads.
-		return d.fail(n, "%s %s, whose tag ends the text without a line break, "+
-			"and go-yaml drops such a tag, so a comment after it changes the value that go-yaml reads",
-			d.subject(), named)
-
-	case text == "" && spot.bare:
-		// Go-yaml's lexer reads the tag before a line break, as it reads it
-		// before the comment, so the line break keeps the value.
-		err = n.writeComment(owner, named, spot.at, spot.end, d.breakBefore(d.lineOf(spot.at)))
 	case text == "":
 		err = n.writeComment(owner, named, spot.at, spot.end, "")
 	case spot.comment >= 0:
@@ -539,14 +521,6 @@ type commentSpot struct {
 	comment int
 	// The offset of the end of the line, before its line break.
 	end int
-	// Whether the text ends at the end of the line, and the line ends with
-	// the tag of a value without content before the comment. Go-yaml's
-	// lexer drops such a tag when no comment follows it, as
-	// [Doc.pastDropped] tells.
-	bare bool
-	// Whether go-yaml's lexer dropped the text before at, a tag that ends
-	// the text.
-	dropped bool
 }
 
 // lineSpot returns the end of the line of the key or the "-" of p, an
@@ -567,18 +541,11 @@ func (d *Doc) lineSpot(p *place) (commentSpot, bool) {
 	keyLine := d.lineOf(start)
 	vs, ve := d.valueStart(p), d.valueEnd(p)
 
-	var (
-		at      int
-		dropped bool
-	)
+	var at int
 
 	switch content := astnode.Content(p.value); {
 	case p.value == nil || isImplicitNull(p.value):
-		// Go-yaml's lexer drops a tag that ends the text without a final
-		// line break, as in "a: !!str". The value holds that text, as
-		// [Doc.valueEnd] gives it, so the comment goes past it.
 		at = max(d.afterProps(p), d.valueEnd(p))
-		dropped = at > d.tokensEnd(p)
 
 	case d.lineOf(d.contentStart(p)) > keyLine:
 		at = d.afterProps(p)
@@ -608,8 +575,7 @@ func (d *Doc) lineSpot(p *place) (commentSpot, bool) {
 	}
 
 	end := d.lineEnd(keyLine)
-	spot := commentSpot{at: at, comment: d.trailingComment(at), end: end, dropped: dropped}
-	spot.bare = end == len(d.cur) && at > d.indicatorEnd(p) && at == d.afterProps(p)
+	spot := commentSpot{at: at, comment: d.trailingComment(at), end: end}
 
 	if spot.comment < 0 && strings.TrimSpace(d.cur[at:end]) != "" {
 		return commentSpot{}, false

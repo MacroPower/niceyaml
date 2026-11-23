@@ -882,12 +882,6 @@ func (d *Doc) setFirst(ctx context.Context, h *Node, p *place, v any, cfg setCon
 			d.subject(), named, cfg.at.side(), cfg.at.key, paths.Doc().Child(cfg.at.key))
 	}
 
-	// Go-yaml's parser reads no value from a tag that ends the text, as in
-	// "--- !t". The first value would take the tag, so the Set writes none.
-	if props, ok := d.bareProperties(); ok {
-		return nil, d.fail(h, "%s %s, but the document holds %s without a value", d.subject(), named, props)
-	}
-
 	wrapped := wrapValue(v, sels)
 
 	// The collections above v take block style, so v goes in flow style
@@ -968,32 +962,6 @@ func wrapValue(v any, sels []paths.Selector) any {
 	}
 
 	return v
-}
-
-// bareProperties returns the text of a tag in the current text of an
-// empty document, which go-yaml's parser reads no value from, as in "!t"
-// or "--- !t". It reports false when the text holds comments, directives,
-// and the "---" and "..." markers alone.
-func (d *Doc) bareProperties() (string, bool) {
-	for line := range d.curLines {
-		text := strings.TrimSpace(d.lineText(line))
-
-		if strings.HasPrefix(text, "%") {
-			continue
-		}
-
-		for _, marker := range []string{headerMarker, "..."} {
-			if rest, ok := strings.CutPrefix(text, marker); ok && (rest == "" || rest[0] == ' ' || rest[0] == '\t') {
-				text = strings.TrimSpace(rest)
-			}
-		}
-
-		if text != "" && !strings.HasPrefix(text, "#") {
-			return strings.Fields(text)[0], true
-		}
-	}
-
-	return "", false
 }
 
 // rootLines returns the lines of pl as the root of a document, joined with

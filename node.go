@@ -339,9 +339,8 @@ func (n *Node) Document() *Node {
 //
 // The body is what the parser built: nil for an empty document, and a
 // comment group for one holding only comments. A file might hold only
-// whitespace, or text that the lexer does not emit a token for, such as a
-// lone "!". The body of its one document is then a scalar that holds the
-// placeholder token [tokens.Tokenize] makes. [tokens.IsPlaceholder] tells
+// whitespace. The body of its one document is then a scalar that holds
+// the placeholder token [tokens.Tokenize] makes. [tokens.IsPlaceholder] tells
 // that scalar apart from a scalar the file holds. A document of whitespace
 // below a "---" header has a nil body.
 //

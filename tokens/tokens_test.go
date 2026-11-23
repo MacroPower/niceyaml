@@ -586,8 +586,8 @@ var (
 		},
 		"text after a folded scalar header at the end": {input: "a: >x y"},
 		"lone tag marker at the end": {
-			// The lexer does not emit a tag that ends the source, and
-			// the token in front of it ends with its text.
+			// The lexer does not emit a tag that ends the source, but
+			// Tokenize does.
 			input: "a: !",
 		},
 		"lone tag marker on the last line":           {input: "a: b\n!"},
@@ -1400,11 +1400,11 @@ func TestTokenize_TabInDoubleQuotedScalar(t *testing.T) {
 	t.Parallel()
 
 	// Each tab between the text of a double-quoted scalar makes the go-yaml
-	// lexer step one rune past the text that it reads, and the copy of the
-	// scanner does the same. Around the invalid token of such a scalar, the
-	// next scan starts after those runes, and the invalid token holds
-	// them. The joined Origins equal the input, and each position names
-	// the rune of the source where its token starts.
+	// lexer step one rune past the text that it reads, but the copy of the
+	// scanner does not step past it. The next scan after the invalid token
+	// of such a scalar starts where that token ends. The joined Origins
+	// equal the input, and each position names the rune of the source
+	// where its token starts.
 	tcs := map[string]struct {
 		input string
 		pos   []string
@@ -1415,18 +1415,18 @@ func TestTokenize_TabInDoubleQuotedScalar(t *testing.T) {
 				"---",
 				"# c",
 			),
-			pos: []string{"1:1:1", "2:2:6", "3:1:9"},
+			pos: []string{"1:1:1", "2:1:5", "3:1:9"},
 		},
 		"long escape cut short after a hex escape and a tab": {
 			input: `k: "\x41` + "\t" + `\U12"` + "\n",
-			pos:   []string{"1:1:1", "1:2:2", "1:4:4", "1:11:11"},
+			pos:   []string{"1:1:1", "1:2:2", "1:4:4", "1:10:10"},
 		},
 		"high surrogate without a low one after a tab": {
 			input: stringtest.LinesLF(
 				`- ":`+"\t\t"+`\N\uD83D\u`+"\t"+`"`,
 				"b: 1",
 			),
-			pos: []string{"1:1:1", "1:3:3", "1:11:11", "2:1:20", "2:2:21", "2:4:23"},
+			pos: []string{"1:1:1", "1:3:3", "1:9:9", "2:1:20", "2:2:21", "2:4:23"},
 		},
 	}
 
@@ -2031,6 +2031,7 @@ func TestIsPlaceholder(t *testing.T) {
 		want  bool
 	}{
 		"whitespace only":             {input: "\n  \n", want: true},
+		"tag alone":                   {input: "!", want: false},
 		"plain scalar":                {input: "abc", want: false},
 		"plain scalar line":           {input: "abc\n", want: false},
 		"mapping":                     {input: "a: 1\n", want: false},
@@ -2114,14 +2115,45 @@ func TestTokenize_EmptyContentPastEnd(t *testing.T) {
 func TestTokenize_PlaceholderPosition(t *testing.T) {
 	t.Parallel()
 
-	// The placeholder sits where its text starts, like any other token,
-	// and at 1:1:1 when the source holds whitespace alone. A fresh stream
-	// already counts from 1, so ResetPositions keeps its position.
+	// The placeholder of a source of whitespace alone sits at 1:1:1. A
+	// fresh stream already counts from 1, so ResetPositions keeps its
+	// position.
+	tcs := map[string]struct {
+		input string
+	}{
+		"whitespace alone":  {input: "  \n"},
+		"line breaks alone": {input: "\n\n"},
+		"tab alone":         {input: "\t"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tks := tokens.Tokenize(tc.input)
+			require.Len(t, tks, 1)
+			require.True(t, tokens.IsPlaceholder(tks[0]))
+
+			assert.Equal(t, []string{"1:1:1"}, positionsOf(tks))
+
+			reset := tokens.ResetPositions(tks)
+			require.Len(t, reset, 1)
+			assert.Equal(t, *tks[0].Position, *reset[0].Position)
+		})
+	}
+}
+
+func TestTokenize_TagAlone(t *testing.T) {
+	t.Parallel()
+
+	// The go-yaml lexer drops a tag that ends the source, but Tokenize
+	// gives it a token that sits where its text starts.
 	tcs := map[string]struct {
 		input string
 		want  string // Position of the token, as positionsOf gives it.
 	}{
 		"lone tag marker":   {input: "!", want: "1:1:1"},
+		"named tag":         {input: "!t", want: "1:1:1"},
 		"spaces before":     {input: "  !", want: "1:3:3"},
 		"tab before":        {input: "\t!", want: "1:2:2"},
 		"line break before": {input: "\n!", want: "2:1:2"},
@@ -2148,8 +2180,6 @@ func TestTokenize_PlaceholderPosition(t *testing.T) {
 			),
 			want: "3:2:4",
 		},
-		"whitespace alone":           {input: "  \n", want: "1:1:1"},
-		"line breaks alone":          {input: "\n\n", want: "1:1:1"},
 		"byte order mark is dropped": {input: "\ufeff  !", want: "1:3:3"},
 	}
 
@@ -2159,7 +2189,8 @@ func TestTokenize_PlaceholderPosition(t *testing.T) {
 
 			tks := tokens.Tokenize(tc.input)
 			require.Len(t, tks, 1)
-			require.True(t, tokens.IsPlaceholder(tks[0]))
+			assert.Equal(t, token.TagType, tks[0].Type)
+			assert.False(t, tokens.IsPlaceholder(tks[0]))
 
 			assert.Equal(t, []string{tc.want}, positionsOf(tks))
 
@@ -3132,13 +3163,30 @@ func TestTokenize_ParsesAsTheLexerDoes(t *testing.T) {
 
 	// The go-yaml parser reads Column and Line to decide which map or
 	// sequence a token belongs to and where a comment attaches, so moving
-	// tokens must not change the tree it builds from the stream ForParser
-	// shapes.
+	// tokens must not change the tree it builds from the stream that
+	// ForParser returns. The lexer drops a tag that ends the source, but
+	// Tokenize reads the tag as the lexer reads it before a final line
+	// break.
+	tagEnds := map[string]bool{
+		"lone tag marker at the end":                 true,
+		"lone tag marker on the last line":           true,
+		"named tag at the end":                       true,
+		"secondary tag at the end":                   true,
+		"named tag on the last line":                 true,
+		"named tag on the line after a plain scalar": true,
+		"tag holding a comma at the end":             true,
+	}
+
 	for name, input := range positionSources(t) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			want, wantErr := parser.Parse(lexer.Tokenize(input), parser.ParseComments)
+			lexed := input
+			if tagEnds[name] {
+				lexed += "\n"
+			}
+
+			want, wantErr := parser.Parse(lexer.Tokenize(lexed), parser.ParseComments)
 			got, gotErr := parser.Parse(tokens.ForParser(tokens.Tokenize(input)), parser.ParseComments)
 
 			if wantErr != nil {

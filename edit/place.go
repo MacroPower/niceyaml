@@ -861,19 +861,6 @@ func (d *Doc) tokenSpan(tk *token.Token) (span, bool) {
 	return span{start: d.offset(ranges[0].Start), end: d.offset(ranges[len(ranges)-1].End)}, true
 }
 
-// indicatorSpan returns the bytes of tk, the ":" of an entry or the "-" of
-// an item, without the text after the indicator. The token in front of a
-// tag that go-yaml's lexer drops ends with the text of the tag, as
-// [Doc.pastDropped] tells, and [Doc.tokenSpan] includes that text.
-func (d *Doc) indicatorSpan(tk *token.Token) (span, bool) {
-	s, ok := d.tokenSpan(tk)
-	if ok {
-		s.end = min(s.end, s.start+len(tk.Value))
-	}
-
-	return s, ok
-}
-
 // nodeSpan returns the bytes of node, from its first token through its
 // last, without comments. It reports false for a node without a token,
 // such as the null of an entry without a value. A node whose text ends
@@ -905,9 +892,8 @@ func (d *Doc) nodeSpan(node ast.Node) (span, bool) {
 // valueSpan returns the bytes of n as [Doc.nodeSpan] gives them. A value
 // of the current text without a token there, such as the null that
 // go-yaml's parser reads for an entry without a value, holds no bytes. It
-// lies where the parser places its token. So the null of "b: !!str", whose
-// tag go-yaml's lexer drops at the end of a text without a line break,
-// lies at the tag. A value that the syntax tree of the text does not hold,
+// lies where the parser places its token. So the null of "b:" lies after
+// its colon. A value that the syntax tree of the text does not hold,
 // such as a value of a reference document, lies nowhere in the text, as
 // [Doc.inText] tells.
 func (d *Doc) valueSpan(n ast.Node) (span, bool) {
@@ -1280,44 +1266,8 @@ func (d *Doc) explicitKeyStart(off int) int {
 
 // valueEnd returns the offset where the value of p ends, past its last
 // token, or past the ":" of an entry without a value, as [Doc.colonEnd]
-// gives it. The text after it that go-yaml's lexer dropped belongs to the
-// value, as [Doc.pastDropped] tells.
+// gives it.
 func (d *Doc) valueEnd(p *place) int {
-	return d.pastDropped(d.tokensEnd(p))
-}
-
-// pastDropped returns the end of the last text of the current text when no
-// token starts in the text from end on, or else end. Go-yaml's lexer
-// drops a tag that ends a text without a final line break, as in
-// "a: !!str", and the token in front of the tag ends with its text. The
-// value whose tokens end at end holds that text, so an edit of the value
-// writes over it.
-func (d *Doc) pastDropped(end int) int {
-	last := len(strings.TrimRight(d.cur, " \t\r\n"))
-
-	lines := d.src.Lines()
-
-	for i := end; i < last; i++ {
-		if strings.IndexByte(" \t\r\n", d.cur[i]) >= 0 {
-			continue
-		}
-
-		tk := lines.TokenAt(d.curPos(i))
-		if tk == nil {
-			continue
-		}
-
-		if s, ok := d.tokenSpan(tk); !ok || s.start >= end {
-			return end
-		}
-	}
-
-	return max(end, last)
-}
-
-// tokensEnd returns the offset where the tokens of the value of p end, as
-// [Doc.valueEnd] reads them.
-func (d *Doc) tokensEnd(p *place) int {
 	if p.end > 0 {
 		return p.end
 	}
@@ -1335,7 +1285,7 @@ func (d *Doc) tokensEnd(p *place) int {
 	}
 
 	if p.seq != nil && p.index < len(p.seq.Entries) && p.seq.Entries[p.index].Start != nil {
-		if s, ok := d.indicatorSpan(p.seq.Entries[p.index].Start); ok {
+		if s, ok := d.tokenSpan(p.seq.Entries[p.index].Start); ok {
 			return s.end
 		}
 	}
@@ -1350,7 +1300,7 @@ func (d *Doc) tokensEnd(p *place) int {
 // key, where a value of the entry goes.
 func (d *Doc) colonEnd(e *ast.MappingValueNode) (int, bool, bool) {
 	if e.Start != nil && e.Start.Type == token.MappingValueType {
-		s, ok := d.indicatorSpan(e.Start)
+		s, ok := d.tokenSpan(e.Start)
 
 		return s.end, true, ok
 	}
@@ -1369,7 +1319,7 @@ func (d *Doc) valueStart(p *place) int {
 		}
 	}
 
-	return d.tokensEnd(p)
+	return d.valueEnd(p)
 }
 
 // contentStart returns the offset where the content of the value of p

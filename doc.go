@@ -964,6 +964,14 @@
 //     "m: {<<: *b}", go-yaml reads m as {"map[null:1]": 1}, and niceyaml
 //     reads m as {null: 1}.
 //
+// The tokenizer of niceyaml reads some constructs as YAML does, where
+// go-yaml's lexer reads them otherwise, as
+// [go.jacobcolvin.com/niceyaml/tokens.Tokenize] lists them.
+// So yaml.Unmarshal reads such a document apart from a decode of niceyaml
+// too. In "b: !!str" without a final line break, go-yaml reads b as null,
+// and niceyaml reads b as "". In "a: !t" and "  0x10: 1", go-yaml reads
+// the key 0x10 under a as "0x10", and niceyaml reads it as 16.
+//
 // Go-yaml's parser nests the lines after a tag on an empty value in that
 // value, but YAML reads them outside it. So the parser reads "a: !t" and
 // "b: 1" as {a: {b: 1}}, where YAML reads {a: null, b: 1}. It also nests

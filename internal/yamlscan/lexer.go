@@ -2,18 +2,13 @@ package yamlscan
 
 import (
 	"io"
-	"strings"
 
 	"github.com/goccy/go-yaml/token"
 )
 
 // Tokenize split to token instances from string
-func Tokenize(src string, opts ...Option) token.Tokens {
+func Tokenize(src string) token.Tokens {
 	var s Scanner
-	// niceyaml: apply the options of the scanner.
-	for _, opt := range opts {
-		opt(&s)
-	}
 	s.Init(src)
 	var tokens token.Tokens
 	for {
@@ -33,8 +28,8 @@ func Tokenize(src string, opts ...Option) token.Tokens {
 		settleWhitespace(tokens, s.drops)
 		setPositions(tokens)
 	case src != "":
-		// niceyaml: a source without a token, such as one of whitespace
-		// alone, gets one token that holds its text.
+		// niceyaml: a source of whitespace alone, which the scan does not
+		// emit a token for, gets one token that holds its text.
 		tokens = token.Tokens{{
 			Type:          token.StringType,
 			CharacterType: token.CharacterTypeMiscellaneous,
@@ -43,9 +38,6 @@ func Tokenize(src string, opts ...Option) token.Tokens {
 			Origin:        src,
 			Position:      &token.Position{Line: 1, Column: 1, Offset: 1},
 		}}
-		if strings.Trim(src, " \t\r\n") != "" {
-			setPositions(tokens)
-		}
 	}
 	return tokens
 }

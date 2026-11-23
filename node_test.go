@@ -5043,7 +5043,7 @@ func TestDocument_Node(t *testing.T) {
 		// The lexer emits nothing for the text, so the document holds no
 		// value, and the decode leaves its target as it is rather than
 		// reading the placeholder token as a string.
-		for _, input := range []string{"\n", "  \n", "\t\n", "\n\n", "!"} {
+		for _, input := range []string{"\n", "  \n", "\t\n", "\n\n"} {
 			blank := yamltest.FirstDocument(t, input)
 
 			scalar, ok := blank.AST().(*ast.StringNode)

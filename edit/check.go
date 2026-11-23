@@ -22,6 +22,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/bom"
 	"go.jacobcolvin.com/niceyaml/internal/docparse"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/internal/mapkey"
@@ -148,7 +149,8 @@ type finalParse struct {
 	// The problems of the parse without the comments of the text, as
 	// yaml.Unmarshal parses it, and of the parse with them.
 	plain, comments error
-	// The tokens of the one pass of go-yaml's lexer that both parses read.
+	// The tokens that both parses read, as [parserTokens] gives them, each
+	// at the index of the token of the current parse that it stands for.
 	tokens token.Tokens
 }
 
@@ -156,24 +158,27 @@ type finalParse struct {
 // from start, the text before the calls. Each parse reads the text with its
 // tail, as the parser reads the document in its file. One parse leaves out
 // the comments of the text, as yaml.Unmarshal does, and one keeps them, as
-// [parser.ParseComments] does. Both read the tokens of one pass of
-// go-yaml's lexer, one parse after the other. The parser changes only the
-// links between the tokens, which it does not read, so the second parse
-// reads the tokens as the lexer made them. The two parses differ only in
-// the comment tokens that they read, so a text without comments takes the
-// result of the first parse for the second. The parses run beside the
-// checks of [Doc.check]. The function that parseFinal returns waits for
-// them. A panic of the lexer or the parser comes back as the problem of the
-// parse, as [parseTokens] gives it. The parses take a key that the text
-// repeats. The parse of the edits already reads the keys as the Source
-// does, and a refusal of a repeated key does not depend on the comments.
+// [parser.ParseComments] does. Both read the tokens that [parserTokens]
+// gives, one parse after the other. Those are the tokens of one pass of
+// go-yaml's lexer, as yaml.Unmarshal reads them, except in a text where
+// the lexer moves or drops tokens other than a tag that ends the text.
+// The parser changes only the links between the tokens, which it
+// does not read, so the second parse reads the tokens as the first read
+// them. The two parses differ only in the comment tokens that they read,
+// so a text without comments takes the result of the first parse for the
+// second. The parses run beside the checks of [Doc.check]. The function
+// that parseFinal returns waits for them. A panic of the lexer or the
+// parser comes back as the problem of the parse, as [parseTokens] gives
+// it. The parses take a key that the text repeats. The parse of the edits
+// already reads the keys as the Source does, and a refusal of a repeated
+// key does not depend on the comments.
 func (d *Doc) parseFinal(start string) func() finalParse {
 	if d.cur == start {
 		return func() finalParse { return finalParse{} }
 	}
 
 	done := make(chan finalParse, 1)
-	text := d.cur + d.tail
+	text, tks := d.cur+d.tail, d.tokens()
 
 	go func() {
 		var r finalParse
@@ -186,7 +191,7 @@ func (d *Doc) parseFinal(start string) func() finalParse {
 			done <- r
 		}()
 
-		r.tokens = lexer.Tokenize(text)
+		r.tokens = parserTokens(text, tks)
 		r.plain = parseTokens(r.tokens, 0)
 
 		// The mode of the parser decides only whether it reads the comment
@@ -198,6 +203,195 @@ func (d *Doc) parseFinal(start string) func() finalParse {
 	}()
 
 	return func() finalParse { return <-done }
+}
+
+// parserTokens returns the tokens of text, a text that the tokenizer reads
+// as tks, that go-yaml's parser reads in the check of the text. Those are
+// the tokens of a pass of go-yaml's lexer over text, as yaml.Unmarshal
+// reads it, when [linesUp] tells that each of them stands at the index of
+// the token of tks that holds its text. The parser then refuses text where
+// yaml.Unmarshal refuses it, as for a token that the lexer misplaces. The
+// lexer's tokens line up with tks below a tag without a value and before a
+// tag that ends the text, where the lexer reads the constructs otherwise
+// than the tokenizer but places each token as the tokenizer does.
+// Otherwise the lexer moves or drops other tokens, as after a
+// double-quoted scalar after which it skips a line break. ParserTokens
+// then returns the copies of tks that [tokens.ForParser] makes. Either
+// way, each token stands at the index of the token of tks that holds its
+// text. A panic of the lexer reaches the caller.
+func parserTokens(text string, tks token.Tokens) token.Tokens {
+	if lexedTks := lexerTokens(text); linesUp(lexedTks, tks) {
+		return lexedTks
+	}
+
+	return tokens.ForParser(tks)
+}
+
+// lexerTokens returns the tokens of a pass of go-yaml's lexer over text, as
+// the tokenizer reads it, with each invalid byte read as [utf8.RuneError]
+// and without a byte order mark at the start.
+func lexerTokens(text string) token.Tokens {
+	text, _ = bom.Drop(lexed(text))
+
+	return lexer.Tokenize(text)
+}
+
+// sameTokens reports whether go-yaml's lexer reads a text as the tokenizer
+// does. LexedTks holds the tokens of a pass of the lexer over the text, and
+// tks holds the tokens of the tokenizer. The two read the text alike when
+// their tokens hold the same types and values in the same order. The
+// tokenizer reads some constructs as YAML does, where the lexer reads them
+// otherwise, as [tokens.Tokenize] lists them. A double-quoted scalar after
+// which the lexer skips a line break counts as such a construct even when
+// the types and the values match, as [skipsLineBreak] tells. The lexer then
+// moves each token after the scalar, so go-yaml's parser can refuse a text
+// that YAML reads.
+func sameTokens(lexedTks, tks token.Tokens) bool {
+	if skipsLineBreak(tks) {
+		return false
+	}
+
+	return slices.EqualFunc(lexedTks, tks, func(a, b *token.Token) bool {
+		return a.Type == b.Type && a.Value == b.Value
+	})
+}
+
+// linesUp reports whether each token of lexedTks, the tokens of a pass of
+// go-yaml's lexer over a text, stands at the index of the token of tks,
+// the tokens of the tokenizer over the text, that holds its text. The
+// tokens at each index must hold the same value and the same type. The
+// lexer types a key below a tag without a value as a string, so a string
+// of the lexer also lines up with a scalar of another type, such as an
+// integer. The lexer drops a tag that ends the text, so tks can hold one
+// more token than lexedTks, a final tag. A double-quoted scalar after
+// which the lexer skips a line break does not line up, as
+// [skipsLineBreak] tells, because the lexer moves each later token.
+func linesUp(lexedTks, tks token.Tokens) bool {
+	if skipsLineBreak(tks) {
+		return false
+	}
+
+	if n := len(lexedTks); len(tks) == n+1 && tks[n].Type == token.TagType {
+		tks = tks[:n]
+	}
+
+	return slices.EqualFunc(lexedTks, tks, func(a, b *token.Token) bool {
+		return a.Value == b.Value &&
+			(a.Type == b.Type || a.Type == token.StringType && typedScalar(b.Type))
+	})
+}
+
+// typedScalar reports whether t is the type of a plain scalar that a
+// resolver reads as a value other than a string, such as an integer.
+func typedScalar(t token.Type) bool {
+	switch t {
+	case token.NullType, token.BoolType, token.IntegerType, token.BinaryIntegerType,
+		token.OctetIntegerType, token.HexIntegerType, token.FloatType,
+		token.InfinityType, token.NanType:
+		return true
+	default:
+		return false
+	}
+}
+
+// skipsLineBreak reports whether go-yaml's lexer skips a line break after a
+// double-quoted scalar of tks, the tokens of the tokenizer over a text. The
+// lexer skips one rune after the closing quote for each tab of the scalar
+// that [lexerSkips] counts. The text after the closing quote is the rest of
+// the Origin of the scalar, which holds the blanks after that quote, and the
+// Origins of the tokens after it. A skipped "\r" whose "\n" the lexer reads
+// next does not count, because the line break stays.
+func skipsLineBreak(tks token.Tokens) bool {
+	for i, tk := range tks {
+		if tk.Type != token.DoubleQuoteType {
+			continue
+		}
+
+		_, text, ok := strings.Cut(tk.Origin, `"`)
+		end := strings.LastIndexByte(text, '"')
+
+		if !ok || end < 0 {
+			continue
+		}
+
+		n := lexerSkips([]rune(text[:end]))
+		if n == 0 {
+			continue
+		}
+
+		after := []rune(text[end+1:])
+		for _, next := range tks[i+1:] {
+			if len(after) > n {
+				break
+			}
+
+			after = append(after, []rune(next.Origin)...)
+		}
+
+		for j, r := range after[:min(n, len(after))] {
+			if r == '\n' || r == '\r' && (j+1 == len(after) || after[j+1] != '\n') {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// lexerSkips returns the number of runes that go-yaml's lexer skips after
+// the closing quote of a double-quoted scalar whose text between its quotes
+// is raw. The lexer skips one rune for each tab that the closing quote does
+// not follow right away. It skips that rune only when a rune other than a
+// space or a tab follows the tab on its line, and the closing quote counts
+// as such a rune. A tab in the indentation of a line, or one that a
+// backslash escapes, does not count.
+func lexerSkips(raw []rune) int {
+	n := 0
+	lineStart := false
+
+	for k := 0; k < len(raw); k++ {
+		switch c := raw[k]; {
+		case c == '\n' || c == '\r':
+			lineStart = true
+
+		case lineStart && (c == ' ' || c == '\t'):
+
+		case c == '\\':
+			lineStart = false
+
+			if k+1 < len(raw) {
+				k++
+				lineStart = raw[k] == '\n' || raw[k] == '\r'
+			}
+
+		case c == '\t':
+			if k+1 < len(raw) && !blanksToBreak(raw[k+1:]) {
+				n++
+			}
+
+		default:
+			lineStart = false
+		}
+	}
+
+	return n
+}
+
+// blanksToBreak reports whether rest, the text of a double-quoted scalar
+// after a rune, holds only spaces and tabs up to a line break. Rest without
+// a line break ends at the closing quote, which is not a blank.
+func blanksToBreak(rest []rune) bool {
+	for _, r := range rest {
+		switch r {
+		case ' ', '\t':
+		case '\n', '\r':
+			return true
+		default:
+			return false
+		}
+	}
+
+	return false
 }
 
 // parseTokens returns the problem of go-yaml's parse of tks in mode, or nil
@@ -298,18 +492,19 @@ func (d *Doc) decodeProblem(ctx context.Context) (any, error) {
 // otherwise. The two read a text alike unless go-yaml's own binding by
 // name can read it otherwise, as [hook.DecodeChanges] tells, so only such a
 // text takes the decode alone. A text that the decoder alone refuses does
-// not count. Other values count only when the decoder alone reads start as
-// the decode reads it, as [Doc.readsAlike] tells. Where the two read start
-// apart, the edits follow the decode. The problem matches [ErrEngine] and
-// names go-yaml's decoder. It binds at the first place that the two read
-// apart, as [Doc.apartAt] finds it.
+// not count. Nor does a text that go-yaml's lexer reads otherwise than the
+// tokenizer, as [Doc.lexedAlike] tells. Other values count only when the
+// decoder alone reads start as the decode reads it, as [Doc.readsAlike]
+// tells. Where the two read start apart, the edits follow the decode. The
+// problem matches [ErrEngine] and names go-yaml's decoder. It binds at the
+// first place that the two read apart, as [Doc.apartAt] finds it.
 func (d *Doc) ownDecodeProblem(ctx context.Context, read any, start state) error {
 	if d.cur == start.cur || !hook.DecodeChanges(d.node) {
 		return nil
 	}
 
 	own, err := hook.OwnDecode(ctx, d.node, d.cur+d.tail)
-	if err != nil || sameReading(own, read) {
+	if err != nil || sameReading(own, read) || !d.lexedAlike() {
 		return nil //nolint:nilerr // A refusal of go-yaml's decoder alone does not count.
 	}
 
@@ -344,7 +539,8 @@ func (d *Doc) readsAlike(ctx context.Context, start state) (bool, bool) {
 // decodes the text, refuses the current text or reads other values than
 // the decode of the text. A refusal counts when the decoder alone takes the
 // text that the Apply found, and other values count when it reads that text
-// alike, as [Doc.readsAlike] tells.
+// alike, as [Doc.readsAlike] tells. Neither counts in a text that go-yaml's
+// lexer reads otherwise than the tokenizer, as [Doc.lexedAlike] tells.
 func (d *Doc) ownApart(ctx context.Context) bool {
 	if !hook.DecodeChanges(d.node) {
 		return false
@@ -356,7 +552,7 @@ func (d *Doc) ownApart(ctx context.Context) bool {
 	}
 
 	own, err := hook.OwnDecode(ctx, d.node, d.cur+d.tail)
-	if err == nil && sameReading(own, read) {
+	if err == nil && sameReading(own, read) || !d.lexedAlike() {
 		return false
 	}
 
@@ -368,6 +564,14 @@ func (d *Doc) ownApart(ctx context.Context) bool {
 	takes, alike := d.readsAlike(ctx, start)
 
 	return takes && (err != nil || alike)
+}
+
+// lexedAlike reports whether go-yaml's lexer reads the current text as the
+// tokenizer reads it in the current parse, as [sameTokens] tells. Go-yaml's
+// decoder alone reads the text through the lexer. It then reads a text
+// where the two differ otherwise than the decode of the text does.
+func (d *Doc) lexedAlike() bool {
+	return sameTokens(lexerTokens(d.cur+d.tail), d.tokens())
 }
 
 // sameReading reports whether a and b, two decodes into any, hold equal
@@ -601,7 +805,7 @@ func (d *Doc) engineAtToken(tk *token.Token, err error) error {
 // parser also refuses start, the text that the Apply found, with its
 // comments, as [refusedWithComments] tells. The problem of each refusal
 // that counts matches [ErrEngine], and it names go-yaml's parser. It binds
-// at the token where the parser refused the text, as [Doc.lexedAt] places
+// at the token where the parser refused the text, as [Doc.parsedAt] places
 // it, or at the root for a panic.
 func (d *Doc) parseProblem(final finalParse, start state) error {
 	refusals := []struct{ err, why error }{
@@ -628,12 +832,12 @@ func (d *Doc) parseProblem(final finalParse, start state) error {
 				return problem
 			}
 
-			if refusedWithComments(start.cur + d.tail) {
+			if refusedWithComments(start.cur+d.tail, start.src.Tokens()) {
 				continue
 			}
 		}
 
-		if at, ok := d.lexedAt(final.tokens, tk); ok {
+		if at, ok := d.parsedAt(final.tokens, tk); ok {
 			return d.engineAtToken(at, cause)
 		}
 
@@ -645,8 +849,10 @@ func (d *Doc) parseProblem(final finalParse, start state) error {
 
 // refusedWithComments reports whether go-yaml's parser refuses text with
 // its comments, as [parser.ParseComments] parses it, or whether go-yaml's
-// lexer or parser panics on it.
-func refusedWithComments(text string) bool {
+// lexer or parser panics on it. The parser reads the tokens that
+// [parserTokens] gives for text and tks, the tokens of the tokenizer over
+// text.
+func refusedWithComments(text string, tks token.Tokens) bool {
 	var refused bool
 
 	func() {
@@ -656,7 +862,7 @@ func refusedWithComments(text string) bool {
 			}
 		}()
 
-		refused = parseTokens(lexer.Tokenize(text), parser.ParseComments) != nil
+		refused = parseTokens(parserTokens(text, tks), parser.ParseComments) != nil
 	}()
 
 	return refused
@@ -709,55 +915,31 @@ func (d *Doc) emptiedRootProblem(tk *token.Token) error {
 		d.subject(), d.notes[-1-o].emptiedBy, d.cur[s.start:s.end])
 }
 
-// lexedAt returns the token of the parse of the edits that holds the text
-// of tk. Go-yaml's parser names tk in a refusal of tks, the tokens of a
-// pass of go-yaml's lexer over the current text. The lexer misplaces some
-// tokens, as after a comment in a text with CRLF line breaks, and the
-// tokens of the parse of the edits sit where the text holds them. That
-// parse reads the tokens of another pass of the lexer over the same text,
-// so its tokens come in the same order. The token there with the type and
-// the value of tk, after as many such tokens as tks holds before tk, thus
-// holds its text. A token that the parser made, such as the null of an
-// empty value, has the place of the last token of tks that starts at or
-// before it. It reports false when it does not find such a token.
-func (d *Doc) lexedAt(tks token.Tokens, tk *token.Token) (*token.Token, bool) {
+// parsedAt returns the token of the current parse that tk stands for.
+// Go-yaml's parser names tk in a refusal of copies, the tokens that
+// [parserTokens] gives for the current text, each at the index of the
+// token of the current parse that holds its text. A token that the parser
+// made, such as the null of an empty value, stands for the last token of
+// copies that starts at or before it. It reports false when it does not
+// find such a token.
+func (d *Doc) parsedAt(copies token.Tokens, tk *token.Token) (*token.Token, bool) {
 	if tk == nil || tk.Position == nil {
 		return nil, false
 	}
 
-	i := slices.Index(tks, tk)
-	for j := len(tks) - 1; i < 0 && j >= 0; j-- {
-		if tks[j].Position != nil && tks[j].Position.Offset <= tk.Position.Offset {
+	i := slices.Index(copies, tk)
+	for j := len(copies) - 1; i < 0 && j >= 0; j-- {
+		if copies[j].Position != nil && copies[j].Position.Offset <= tk.Position.Offset {
 			i = j
 		}
 	}
 
-	if i < 0 {
+	tks := d.tokens()
+	if i < 0 || i >= len(tks) || tks[i].Position == nil {
 		return nil, false
 	}
 
-	same := func(t *token.Token) bool { return t.Type == tks[i].Type && t.Value == tks[i].Value }
-	n := 0
-
-	for _, t := range tks[:i] {
-		if same(t) {
-			n++
-		}
-	}
-
-	for _, t := range d.tokens() {
-		if !same(t) {
-			continue
-		}
-
-		if n == 0 {
-			return t, t.Position != nil
-		}
-
-		n--
-	}
-
-	return nil, false
+	return tks[i], true
 }
 
 // limitProblem returns the problem of the current text when it differs

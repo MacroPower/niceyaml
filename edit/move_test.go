@@ -1239,6 +1239,16 @@ func TestNode_Move(t *testing.T) {
 				to:     paths.Doc().Child("api"),
 				want:   stringtest.LinesLF("other: 1", "api: {backend: *base} # shared"),
 			},
+			"entry before the first key of a mapping under a tag": {
+				// With a reference document, the decode renames each anchor
+				// of the document. Go-yaml's decoder alone reads the key 0x10
+				// as "0x10" after the Move, and the decode of the text reads
+				// it as 16. The check does not count that difference.
+				before: stringtest.LinesLF("a: &x 1", "b: *x", "m: !t", "  z: 0", "  0x10: 1"),
+				from:   paths.MustParse("$.m.z"),
+				to:     paths.Doc().Child("w"),
+				want:   stringtest.LinesLF("a: &x 1", "b: *x", "m: !t", "  0x10: 1", "w: 0"),
+			},
 		}
 
 		for name, tc := range tcs {

@@ -431,6 +431,13 @@ func TestNew_Unsupported(t *testing.T) {
 				"`-- write a value after &x, such as null",
 			),
 		},
+		"anchor and tag on an empty value at the end of the text": {
+			// Go-yaml's lexer drops the tag, but the tokenizer keeps it.
+			before:    "b: 1\na: &x !t",
+			construct: edit.ConstructAnchoredEmpty,
+			err: "test.yaml:2:4: $.a: this program does not edit a document with an anchor on an empty value, " +
+				"such as &x",
+		},
 		"anchor on an empty value of a mapping item": {
 			before:    stringtest.LinesLF("- a: &x", "  b: 1"),
 			construct: edit.ConstructAnchoredEmpty,
@@ -1504,12 +1511,9 @@ func TestDoc_Apply_Unsupported(t *testing.T) {
 		// The entry of the key 3.10 is all that the mapping at $.python
 		// holds.
 		onlyVersion = stringtest.LinesLF("python:", "  3.10: cp310")
-		// Go-yaml reads the first key of a block mapping under a tag such as
-		// !t as a string, so only the place of the key 0x10 makes it read as
-		// 16.
+		// The key 0x10 comes after the first key of a block mapping under a
+		// tag.
 		taggedHex = stringtest.LinesLF("a: !t", "  z: 0", "  0x10: 1", "  k: 2")
-		// As taggedHex, with the key 0x10 first, which reads as its text.
-		taggedFirstHex = stringtest.LinesLF("a: !t", "  0x10: 1", "  0o20: 2", "  k: 1")
 		// A decode into a map names the key null by its text, though it
 		// reads the key as the null value.
 		nullKey = stringtest.LinesLF("m:", "  null: a", "  b: 1")
@@ -3263,114 +3267,54 @@ func TestDoc_Apply_Unsupported(t *testing.T) {
 				"key that reads as 16 rather than as its text",
 		},
 		"removal of the entry before a hex key of a block mapping under a tag": {
-			// The key 0x10 then comes first under the tag, where it reads as
-			// its text.
-			before:    taggedHex,
-			fn:        remove("$.a.z"),
-			construct: edit.ConstructKeyText,
-			err: stringtest.JoinLF(
-				"test.yaml:3:3: $.a.0x10: the edit removes $.a.z, which changes how a decode reads 0x10, a key "+
-					"that reads as 16 rather than as its text, and this program does not change how a decode "+
-					"reads a key",
-				`|-- quote the key, as in "0x10"`,
-				"`-- the edit removes $.a.z",
-			),
+			// The tag does not type the first key of the mapping, so the key
+			// 0x10 reads as 16 at each place.
+			before: taggedHex,
+			fn:     remove("$.a.z"),
+			want:   stringtest.LinesLF("a: !t", "  0x10: 1", "  k: 2"),
 		},
 		"move of the entry before a hex key of a block mapping under a tag": {
-			before:    taggedHex,
-			fn:        move("$.a.z", "$.z"),
-			construct: edit.ConstructKeyText,
-			err: "test.yaml:3:3: $.a.0x10: the edit moves $.a.z to $.z, which changes how a decode reads 0x10, a " +
-				"key that reads as 16 rather than as its text, and this program does not change how a decode " +
-				"reads a key",
+			before: taggedHex,
+			fn:     move("$.a.z", "$.z"),
+			want:   stringtest.LinesLF("a: !t", "  0x10: 1", "  k: 2", "z: 0"),
 		},
 		"removal of the entry before a hex key of a root under a tag": {
-			before:    stringtest.LinesLF("!t", "z: 0", "0x10: 1", "k: 2"),
-			fn:        remove("$.z"),
-			construct: edit.ConstructKeyText,
-			err: "test.yaml:3:1: $.0x10: the edit removes $.z, which changes how a decode reads 0x10, a key that " +
-				"reads as 16 rather than as its text",
+			before: stringtest.LinesLF("!t", "z: 0", "0x10: 1", "k: 2"),
+			fn:     remove("$.z"),
+			want:   stringtest.LinesLF("!t", "0x10: 1", "k: 2"),
 		},
 		"removal through a merge key of the entry before a hex key of a block mapping under a tag": {
-			before:    stringtest.LinesLF("a: &x !t", "  z: 1", "  0x10: 2", "b:", "  <<: *x"),
-			fn:        remove("$.b.z"),
-			construct: edit.ConstructKeyText,
-			err: "test.yaml:3:3: $.a.0x10: the edit removes $.b.z, which changes how a decode reads 0x10, a key " +
-				"that reads as 16 rather than as its text",
-		},
-		"removal of a first hex key under a tag before a key that reads as another value": {
-			// The key 0x10 comes first under the tag, so it reads as its text.
-			// The key 0o20 takes its place after the Remove.
-			before:    taggedFirstHex,
-			fn:        remove("$.a.0x10"),
-			construct: edit.ConstructKeyText,
-			err: "test.yaml:3:3: $.a.0o20: the edit removes $.a.0x10, which changes how a decode reads 0o20, a " +
-				"key that reads as 16 rather than as its text",
-		},
-		"removal of the entry before two keys that a decode reads under one name, under a tag": {
-			// The key 0x10 leaves the part, and the key 16 stays.
-			before:    stringtest.LinesLF("a: !t", "  z: 0", "  0x10: 1", "  16: 2"),
-			fn:        remove("$.a.z"),
-			construct: edit.ConstructKeyText,
-			related:   []string{"$.a.16"},
-			err: stringtest.JoinLF(
-				"test.yaml:3:3: $.a.0x10: the edit removes $.a.z, which changes how a decode reads 0x10, a key "+
-					"that reads as 16 rather than as its text, and this program does not change how a decode "+
-					"reads a key",
-				"|-- 4:3: $.a.16: a decode reads the key 16 under the same name here",
-			),
+			before: stringtest.LinesLF("a: &x !t", "  z: 1", "  0x10: 2", "b:", "  <<: *x"),
+			fn:     remove("$.b.z"),
+			want:   stringtest.LinesLF("a: &x !t", "  0x10: 2", "b:", "  <<: *x"),
 		},
 		"new first key before a first hex key of a block mapping under a tag": {
-			// The key 0x10 then comes second, where it reads as 16.
-			before: taggedFirstHex,
+			before: taggedHex,
 			fn: func(ctx context.Context, root *edit.Node) error {
 				return root.At(paths.MustParse("$.a.j")).Set(ctx, 3, edit.First())
 			},
-			construct: edit.ConstructKeyText,
-			related:   []string{"$.a.0o20"},
-			err: stringtest.JoinLF(
-				"test.yaml:2:3: $.a.0x10: the edit sets $.a.j, which changes how a decode reads 0x10, a key that "+
-					"then reads as 16 rather than as its text, and this program does not change how a decode "+
-					"reads a key",
-				"|-- 3:3: $.a.0o20: a decode reads the key 0o20 under the same name here",
-				`|-- quote the key, as in "0x10"`,
-				"`-- the edit sets $.a.j",
-			),
+			want: stringtest.LinesLF("a: !t", "  j: 3", "  z: 0", "  0x10: 1", "  k: 2"),
 		},
 		"move with First to before a first hex key of a block mapping under a tag": {
 			before: stringtest.LinesLF("a: !t", "  0x10: 1", "  k: 2", "b: 1"),
 			fn: func(_ context.Context, root *edit.Node) error {
 				return root.At(paths.MustParse("$.b")).Move(paths.MustParse("$.a.b"), edit.First())
 			},
-			construct: edit.ConstructKeyText,
-			err: stringtest.JoinLF(
-				"test.yaml:2:3: $.a.0x10: the edit moves $.b to $.a.b, which changes how a decode reads 0x10, a "+
-					"key that then reads as 16 rather than as its text, and this program does not change how a "+
-					"decode reads a key",
-				`|-- quote the key, as in "0x10"`,
-				"`-- the edit moves $.b to $.a.b",
-			),
+			want: stringtest.LinesLF("a: !t", "  b: 1", "  0x10: 1", "  k: 2"),
 		},
 		"new first key before a first null key of a block mapping under a tag": {
-			// The key null then comes second, where it reads as the null
-			// value.
 			before: stringtest.LinesLF("a: !t", "  null: 1", "  k: 2"),
 			fn: func(ctx context.Context, root *edit.Node) error {
 				return root.At(paths.MustParse("$.a.j")).Set(ctx, 3, edit.First())
 			},
-			construct: edit.ConstructKeyText,
-			err: stringtest.JoinLF(
-				"test.yaml:2:3: $.a.null: the edit sets $.a.j, which changes how a decode reads null, a key that "+
-					"then reads as the null value, and this program does not change how a decode reads a key",
-				`|-- quote the key, as in "null"`,
-				"`-- the edit sets $.a.j",
-			),
+			want: stringtest.LinesLF("a: !t", "  j: 3", "  null: 1", "  k: 2"),
 		},
 		"set of a first hex key of a block mapping under a tag": {
-			// Control: the key reads as its text.
-			before: taggedFirstHex,
-			fn:     set("$.a.0x10", 3),
-			want:   stringtest.LinesLF("a: !t", "  0x10: 3", "  0o20: 2", "  k: 1"),
+			before:    stringtest.LinesLF("a: !t", "  0x10: 1", "  k: 1"),
+			fn:        set("$.a.0x10", 3),
+			construct: edit.ConstructKeyText,
+			err: "test.yaml:2:3: $.a.0x10: the edit sets $.a.0x10, which reaches 0x10, a key that reads as 16 " +
+				"rather than as its text",
 		},
 		"set of another key of a block mapping under a tag with a hex key": {
 			// Control.
@@ -3378,22 +3322,14 @@ func TestDoc_Apply_Unsupported(t *testing.T) {
 			fn:     set("$.a.k", 3),
 			want:   stringtest.LinesLF("a: !t", "  z: 0", "  0x10: 1", "  k: 3"),
 		},
-		"removal of a hex key and then of the entry before it, in a block mapping under a tag": {
-			// Control: the text holds no entry of the key when the second
-			// Remove runs.
-			before: taggedHex,
-			fn:     both(remove("$.a.0x10"), remove("$.a.z")),
-			want:   stringtest.LinesLF("a: !t", "  k: 2"),
-		},
 		"removal of the entry before a hex key of a block mapping under the tag of a mapping": {
-			// Control: the key reads as 16 at each place under a tag that
-			// YAML defines.
+			// Control.
 			before: stringtest.LinesLF("a: !!map", "  z: 0", "  0x10: 1", "  k: 2"),
 			fn:     remove("$.a.z"),
 			want:   stringtest.LinesLF("a: !!map", "  0x10: 1", "  k: 2"),
 		},
 		"removal of the entry before a hex key of a flow mapping under a tag": {
-			// Control: the "{" comes right after the tag.
+			// Control.
 			before: "a: !t {z: 0, 0x10: 1}\n",
 			fn:     remove("$.a.z"),
 			want:   "a: !t {0x10: 1}\n",

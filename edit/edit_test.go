@@ -551,13 +551,27 @@ func TestNew_RootPath(t *testing.T) {
 func TestNew_TagAlone(t *testing.T) {
 	t.Parallel()
 
-	// Go-yaml's parser reads an empty value under a tag that a line break or
-	// a space follows, so New takes each document. Every row is a control:
-	// the doc of New states the behavior that FIX24 has (fix25 GT2-3).
+	// Go-yaml's parser reads an empty value under a tag, so New takes each
+	// document. Go-yaml's lexer drops a tag that ends the text, but the
+	// tokenizer of the Source keeps it.
 	tcs := map[string]struct {
 		text string
 		want any
 	}{
+		"tag that ends the text": {
+			text: "!t",
+		},
+		"core string tag that ends the text": {
+			text: "!!str",
+			want: "",
+		},
+		"tag that ends the text after a header": {
+			text: "--- !t",
+		},
+		"tag that a tab ends": {
+			// Go-yaml's lexer reads the tab into the tag.
+			text: "!t\t",
+		},
 		"control: tag and a line break": {
 			text: "!t\n",
 		},
@@ -607,9 +621,6 @@ func TestNew_Empty(t *testing.T) {
 		"header alone":             {text: "---\n"},
 		"directive and end marker": {text: "%YAML 1.2\n---\n...\n"},
 		"comments with CRLF":       {text: "# a\r\n# b\r\n"},
-		"tag alone":                {text: "!!str"},
-		"tag after a header":       {text: "--- !t"},
-		"tag that a tab ends":      {text: "!t\t"},
 	}
 
 	for name, tc := range tcs {
@@ -856,11 +867,6 @@ func TestNew_Unparsed(t *testing.T) {
 		"core tag alone on an empty value before a line at its column": {
 			// Go-yaml's parser reads b as the value of !!str and refuses it.
 			text: "a: !!str\nb: 1\n",
-		},
-		"tag after an anchor at the end of a text without a final line break": {
-			// Go-yaml's lexer drops the tag, and its parser refuses the anchor
-			// on no value.
-			text: "x: 1\ns: &s !t",
 		},
 		"byte order mark before a comment line and the header of a later document": {
 			// The tokenizer keeps the mark for go-yaml's parser, which refuses

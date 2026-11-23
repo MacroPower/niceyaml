@@ -53,12 +53,6 @@ type KeyValue interface {
 // that the encoder writes as -0.0, 1.0e+30, .inf, and .nan. The problem
 // has InValue set, because the key comes from the program.
 //
-// The place of a key can decide how a decode reads it. Go-yaml reads the
-// first key of a block mapping under a tag such as !t as a string. So
-// SetKey(16) on that entry fails with ErrUnsupported in the same way, with
-// InValue set. SetKey writes a key there only as a Go string, as in
-// SetKey("16").
-//
 // A place that does not hold a value stays as it is. SetKey still fails at
 // the root of an empty document and at a path that ends in an index, as at
 // any root or item.
@@ -101,8 +95,6 @@ type keyArg struct {
 	// The problem of the encode of a typed key, which matches errEncoder,
 	// or nil.
 	err error
-	// The value of a typed key, of its basic type, or nil for a string.
-	val any
 	// The reading of a typed key whose text a decode reads as another
 	// value, or nil.
 	odd *oddKey
@@ -144,7 +136,7 @@ func newKeyArg(v reflect.Value) keyArg {
 	}
 
 	val := v.Convert(basicKinds[v.Kind()]).Interface()
-	k := keyArg{name: fmt.Sprint(val), val: val, typed: true}
+	k := keyArg{name: fmt.Sprint(val), typed: true}
 
 	data, meant, _, err := encode(context.Background(), map[any]any{val: nil})
 	if err != nil {
@@ -266,7 +258,6 @@ func (n *Node) setKey(c *modelCall, k keyArg) (renaming, error) {
 	}
 
 	r := renaming{key: key, name: key}
-	before := d.save()
 
 	d.recordEdit(p, fmt.Sprintf("renames %q to %s", n.Key(), k.shown()),
 		fmt.Sprintf("renames %s to %s", n.path, k.shown()))
@@ -337,15 +328,6 @@ func (n *Node) setKey(c *modelCall, k keyArg) (renaming, error) {
 		return kept, d.bug(n, err)
 	}
 
-	// The place of a key can decide how a decode reads it, as go-yaml reads
-	// the first key of a block mapping under a tag such as !t as a string.
-	// A typed key must read as a value of its own kind where it stands.
-	if read, ok := d.misplacedKey(k, ks.start); ok {
-		d.restore(before)
-
-		return kept, d.placedKeyRefusal(p.entry, k, read, named)
-	}
-
 	at.rebase(func(head paths.Path) paths.Path {
 		holder, _ := head.Parent()
 
@@ -363,92 +345,13 @@ func (d *Doc) typedKeyRefusal(e *ast.MappingValueNode, odd *oddKey, named string
 	in := instance{
 		construct: ConstructKeyText,
 		at:        d.entrySite(e),
-		reach:     fmt.Sprintf("writes the key %s, %s", odd.label(), odd.reading(false)),
+		reach:     fmt.Sprintf("writes the key %s, %s", odd.label(), odd.reading()),
 		object:    "write such a key",
 		fix:       "make the key a Go string, as in " + cut(strconv.Quote(odd.text)),
 		inValue:   true,
 	}
 
 	return d.refusal(&in, named)
-}
-
-// placedKeyRefusal returns the problem of a rename of the entry e that
-// named names to the typed key k, which a decode reads as read at the place
-// of e, a value of another kind than k. The problem binds at the key of e,
-// and InValue is true.
-func (d *Doc) placedKeyRefusal(e *ast.MappingValueNode, k keyArg, read any, named string) error {
-	in := instance{
-		construct: ConstructKeyText,
-		at:        d.entrySite(e),
-		reach: fmt.Sprintf(
-			"writes the key %s, a key that reads as %s%s at its place",
-			cut(k.name),
-			typeWord(read),
-			shownCut(read),
-		),
-		object:  "write such a key",
-		fix:     "make the key a Go string, as in " + cut(strconv.Quote(k.name)),
-		inValue: true,
-	}
-
-	return d.refusal(&in, named)
-}
-
-// misplacedKey returns what go-yaml's decoder reads from the key of the
-// current text that starts at the byte start, when k is a typed key and
-// the decode reads a value of another kind than k there.
-func (d *Doc) misplacedKey(k keyArg, start int) (any, bool) {
-	if !k.typed {
-		return nil, false
-	}
-
-	var e *ast.MappingValueNode
-
-	d.inspect(func(n ast.Node) bool {
-		if m, ok := n.(*ast.MappingValueNode); ok && e == nil {
-			if tk := astnode.KeyToken(m); tk != nil {
-				if s, ok := d.tokenSpan(tk); ok && s.start == start {
-					e = m
-				}
-			}
-		}
-
-		return e == nil
-	})
-
-	if e == nil {
-		return nil, false
-	}
-
-	read, ok := placedKey(e)
-	if !ok || typeWord(read) == typeWord(k.val) {
-		return nil, false
-	}
-
-	return read, true
-}
-
-// placedKey returns what go-yaml's decoder reads from the key of e, with
-// the tags of the key, as the token of the key reads at the place of e.
-// It reports false when the decoder does not read the key.
-func placedKey(e *ast.MappingValueNode) (any, bool) {
-	if e.Key == nil {
-		return nil, false
-	}
-
-	var m map[any]any
-
-	err := astnode.StockNodeToValue(ast.MappingValue(token.New(":", ":", &token.Position{}), e.Key,
-		ast.Null(token.New("null", "null", &token.Position{}))), &m)
-	if err != nil || len(m) != 1 {
-		return nil, false
-	}
-
-	for read := range m {
-		return read, true
-	}
-
-	return nil, false
 }
 
 // keeps reports whether a rename of p, an entry, to k leaves the text as
@@ -475,11 +378,6 @@ func (d *Doc) keeps(p *place, k keyArg) bool {
 
 		tk := astnode.Token(old)
 		if tk == nil || tk.Type == token.DoubleQuoteType || tk.Type == token.SingleQuoteType || tk.Value != key {
-			return false
-		}
-
-		// The place of the key can make a decode read it as a string.
-		if read, ok := placedKey(p.entry); !ok || typeWord(read) != typeWord(k.val) {
 			return false
 		}
 	}
@@ -1742,7 +1640,7 @@ func (d *Doc) indicatorEnd(p *place) int {
 		}
 
 	case p.seq != nil && p.index >= 0 && p.index < len(p.seq.Entries) && p.seq.Entries[p.index].Start != nil:
-		if s, ok := d.indicatorSpan(p.seq.Entries[p.index].Start); ok {
+		if s, ok := d.tokenSpan(p.seq.Entries[p.index].Start); ok {
 			return s.end
 		}
 	}

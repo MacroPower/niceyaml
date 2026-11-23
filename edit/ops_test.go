@@ -499,40 +499,29 @@ func TestNode_SetKey_Typed(t *testing.T) {
 			err:       "renames $.a to .nan, which writes the key .nan",
 		},
 		"int as the first key under a tag": {
-			// Go-yaml reads the first key of a block mapping under !t as a
-			// string.
-			before:    "a: !t\n  b: 1\n  c: 2\n",
-			fn:        at("$.a.b", func(_ context.Context, n *edit.Node) error { return n.SetKey(16) }),
-			construct: edit.ConstructKeyText,
-			fix:       `make the key a Go string, as in "16"`,
-			err: "test.yaml:2:3: $.a.b: cafe.jacobcolvin.com/v1 renames $.a.b to 16, which writes the key 16, " +
-				`a key that reads as the string "16" at its place, and cafe does not write such a key`,
+			// The tag on the mapping does not type its first key, so the key
+			// reads as an int.
+			before: "a: !t\n  b: 1\n  c: 2\n",
+			fn:     at("$.a.b", func(_ context.Context, n *edit.Node) error { return n.SetKey(16) }),
+			want:   "a: !t\n  16: 1\n  c: 2\n",
 		},
 		"bool as the first key under a tag": {
-			before:    "!t\nb: 1\n",
-			fn:        at("$.b", func(_ context.Context, n *edit.Node) error { return n.SetKey(true) }),
-			construct: edit.ConstructKeyText,
-			fix:       `make the key a Go string, as in "true"`,
-			err:       `renames $.b to true, which writes the key true, a key that reads as the string "true" at its place`,
+			before: "!t\nb: 1\n",
+			fn:     at("$.b", func(_ context.Context, n *edit.Node) error { return n.SetKey(true) }),
+			want:   "!t\ntrue: 1\n",
 		},
 		"float as the first key under a tag": {
-			before:    "a: !t\n  b: 1\n",
-			fn:        at("$.a.b", func(_ context.Context, n *edit.Node) error { return n.SetKey(0.5) }),
-			construct: edit.ConstructKeyText,
-			fix:       `make the key a Go string, as in "0.5"`,
-			err:       `renames $.a.b to 0.5, which writes the key 0.5, a key that reads as the string "0.5" at its place`,
+			before: "a: !t\n  b: 1\n",
+			fn:     at("$.a.b", func(_ context.Context, n *edit.Node) error { return n.SetKey(0.5) }),
+			want:   "a: !t\n  0.5: 1\n",
 		},
 		"int over its text as the first key under a tag": {
-			// The key 16 reads as a string there, so the rename does not
-			// keep it.
-			before:    "a: !t\n  16: 1\n",
-			fn:        at("$.a.16", func(_ context.Context, n *edit.Node) error { return n.SetKey(16) }),
-			construct: edit.ConstructKeyText,
-			fix:       `make the key a Go string, as in "16"`,
-			err:       `renames $.a.16 to 16, which writes the key 16, a key that reads as the string "16" at its place`,
+			// The key 16 reads as an int, so the rename keeps it.
+			before: "a: !t\n  16: 1\n",
+			fn:     at("$.a.16", func(_ context.Context, n *edit.Node) error { return n.SetKey(16) }),
+			want:   "a: !t\n  16: 1\n",
 		},
 		"int as the second key under a tag": {
-			// Control: a later key of the mapping reads as an int.
 			before: "a: !t\n  b: 1\n  c: 2\n",
 			fn:     at("$.a.c", func(_ context.Context, n *edit.Node) error { return n.SetKey(16) }),
 			want:   "a: !t\n  b: 1\n  16: 2\n",
@@ -547,9 +536,7 @@ func TestNode_SetKey_Typed(t *testing.T) {
 
 				return n.SetKey(9)
 			}),
-			construct: edit.ConstructKeyText,
-			fix:       `make the key a Go string, as in "9"`,
-			err:       `renames $.a.9 to 9, which writes the key 9, a key that reads as the string "9" at its place`,
+			want: "a: !t\n  9: 1\n  b: 1\n",
 		},
 		"float with an exponent": {
 			// The encoder writes the key as 1.0e+30, which reads back as the
@@ -729,6 +716,62 @@ func TestNode_Remove(t *testing.T) {
 			path:   paths.Doc().Child("b"),
 			err: "test.yaml:2:5: $.a: cafe.jacobcolvin.com/v1 removes $.b, and go-yaml's parser refuses the " +
 				"edited text: invalid number of indent is specified in the multi-line header",
+			engine: true,
+		},
+		"item between a scalar and its deeper line, before another document": {
+			// Go-yaml's lexer and the tokenizer give the text the same tokens.
+			// The lexer places them so that go-yaml's parser refuses the text
+			// with the document after it.
+			before: stringtest.LinesLF("- y", "  - x", "- z", "---", "b: 1"),
+			path:   paths.MustParse("$[1]"),
+			err: "test.yaml:1:3: $[0]: go-yaml's parser refuses the edited text without its comments: " +
+				"value is not allowed in this context",
+			engine: true,
+		},
+		"item between a scalar and its deeper line, after a double-quoted scalar and a tab": {
+			// The tab after the closing quote does not move the tokens of
+			// go-yaml's lexer, so the check parses them as it parses the text
+			// without the tab.
+			before: stringtest.LinesLF("- \"q\"\t", "- y", "  - x", "- z", "---", "b: 1"),
+			path:   paths.MustParse("$[2]"),
+			err: "test.yaml:2:3: $[1]: go-yaml's parser refuses the edited text without its comments: " +
+				"value is not allowed in this context",
+			engine: true,
+		},
+		"item between a scalar and its deeper line, after a double-quoted scalar with a tab before its closing quote": {
+			// The lexer skips no rune after the scalar, so the check parses its
+			// tokens.
+			before: stringtest.LinesLF("- \"x\t\"", "- y", "  - x", "- z", "---", "b: 1"),
+			path:   paths.MustParse("$[2]"),
+			err: "test.yaml:2:3: $[1]: go-yaml's parser refuses the edited text without its comments: " +
+				"value is not allowed in this context",
+			engine: true,
+		},
+		"item between a scalar and its deeper line, after a double-quoted scalar with a tab and a space": {
+			// The lexer skips the space after the scalar, which keeps the line
+			// break, so the check parses its tokens.
+			before: stringtest.LinesLF("- \"q\ty\" ", "- y", "  - x", "- z", "---", "b: 1"),
+			path:   paths.MustParse("$[2]"),
+			err: "test.yaml:2:3: $[1]: go-yaml's parser refuses the edited text without its comments: " +
+				"value is not allowed in this context",
+			engine: true,
+		},
+		"item between a scalar and its deeper line, after a key below a tag": {
+			// Go-yaml's lexer reads the key 0x10 as a string, but it places
+			// each token as the tokenizer does, so the check parses its tokens.
+			before: stringtest.LinesLF("- !t", "  0x10: 1", "- y", "  - x", "- z", "---", "b: 1"),
+			path:   paths.MustParse("$[2]"),
+			err: "test.yaml:3:3: $[1]: go-yaml's parser refuses the edited text without its comments: " +
+				"value is not allowed in this context",
+			engine: true,
+		},
+		"item between a scalar and its deeper line, after a double-quoted scalar with a tab and a CRLF": {
+			// The lexer skips the "\r" of the CRLF after the scalar and reads
+			// its "\n", so the check parses its tokens.
+			before: stringtest.LinesCRLF("- \"q\ty\"", "- y", "  - x", "- z", "---", "b: 1"),
+			path:   paths.MustParse("$[2]"),
+			err: "test.yaml:2:3: $[1]: go-yaml's parser refuses the edited text without its comments: " +
+				"value is not allowed in this context",
 			engine: true,
 		},
 		"one of the blank lines around it": {

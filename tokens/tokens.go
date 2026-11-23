@@ -4,7 +4,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/goccy/go-yaml/lexer"
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/internal/bom"
@@ -16,8 +15,9 @@ import (
 // Tokenize returns the token stream for the given YAML source. It reads
 // the tokens with niceyaml's copy of the go-yaml scanner. The tokens that
 // the go-yaml parser reads have the types and values that the go-yaml
-// lexer gives them, except in the documents after an unclosed flow
-// collection. Their Origins join to the source without its byte order
+// lexer gives them, except where the copy reads a construct as YAML
+// does, and in the documents after an unclosed flow collection. Their
+// Origins join to the source without its byte order
 // marks. Every token's Line, Column, and Offset count from 1 and name the
 // rune of the joined Origins where its text starts. [ForParser] returns
 // the stream to hand the go-yaml parser.
@@ -42,29 +42,36 @@ import (
 // breaks in front of the later token. The later token keeps the
 // indentation of its own line. A CRLF stays whole in one Origin.
 //
-// Each tab between the text of a double-quoted scalar makes the lexer
-// step one rune past the text that it reads, and the copy does the same.
-// The Origin of a valid scalar ends with the runes after the scalar that
-// the scan steps past. The invalid token of such a scalar, as when an
-// escape in it ends too soon or a tab indents a later line, ends with the
-// runes after the place where the scan stopped. The next token starts
-// after those runes. When the last of those runes is the "\r" of a CRLF,
-// the "\r" opens the Origin of the next token instead, so the CRLF stays
-// whole.
+// # YAML Readings
 //
-// # Kept Readings
+// The copy reads some constructs as YAML reads them, where the go-yaml
+// lexer reads them otherwise. So a decode of the stream of Tokenize reads
+// these constructs as YAML does, and not as yaml.Unmarshal reads them:
 //
-// The copy keeps the readings of the go-yaml lexer where a patch would
-// change what the go-yaml parser reads. A tag that ends the source after
-// other text is not a token, and its text ends the Origin of the last
-// token. Only a space, a line break, or a "," in a flow collection closes
-// a tag, so the "[" of a file of "[!t]" holds the whole file. A tag that
-// go-yaml does not reserve, such as "!t", types the next token as a
-// string. It does so even when the tag has no value on its line, where it
-// types the first key of the next line.
+//   - A tag that ends the source is a token, where the lexer drops it.
+//     A decode reads "b: !!str" as an empty string, as it reads the same
+//     text with a final line break. Only a space, a line break, or a ","
+//     in a flow collection closes a tag, so in a file of "[!t]" the tag
+//     "!t]" ends the source.
+//   - The copy reads the rune after a double-quoted scalar that holds a
+//     tab between its quotes. The lexer skips one rune after the closing
+//     quote for each tab of the text that a rune other than a space or a
+//     tab follows on its line, unless the closing quote comes right after
+//     the tab. When the lexer skips a line break, it places each later
+//     token on the line of the scalar.
+//   - A tag without a value on its line does not type the first key of
+//     the next line, nor the first key of the mapping below it. A tag
+//     that go-yaml does not reserve, such as "!t", types the next token as
+//     a string on its own line, as in "a: !t 0x10". The lexer types the
+//     key below the tag as a string too, so it reads the key 0x10 below
+//     "a: !t" as "0x10" and not as 16.
 //
 // A tab used as indentation makes the lexer read an invalid token. When a
-// "-" or ":" indicator follows the tab, the invalid token holds it.
+// "-" or ":" indicator follows the tab, the invalid token holds it. The
+// lexer does not make the invalid token on the line after a tag or after
+// a comment that ends with a CRLF. Nor does it make one after a block
+// scalar header that an invalid token ends. The copy keeps that reading
+// of the lexer.
 //
 // # Byte Order Marks
 //
@@ -98,12 +105,10 @@ import (
 // position of the token after it. When text does not follow it, the token
 // sits at the end of the last line.
 //
-// The lexer does not emit a token for a source of whitespace alone, nor
-// for some text it rejects outright, such as a tag alone. Tokenize gives
-// such a source one token that holds the whole text, so the file stays
-// visible. The token sits where its text starts, and at line 1, column 1
-// when the source holds whitespace alone. [IsPlaceholder] tells that
-// token apart from one the lexer makes.
+// The lexer does not emit a token for a source of whitespace alone.
+// Tokenize gives such a source one token that holds the whole text, so
+// the file stays visible. The token sits at line 1, column 1.
+// [IsPlaceholder] tells that token apart from one the lexer makes.
 //
 // # Parser Input
 //
@@ -114,12 +119,12 @@ import (
 func Tokenize(src string) token.Tokens {
 	src, _ = bom.Drop(src)
 
-	return yamlscan.Tokenize(src, yamlscan.WithCompat(true))
+	return yamlscan.Tokenize(src)
 }
 
-// IsPlaceholder reports whether tk is the token [Tokenize] made for text
-// that the lexer does not emit a token for, such as a source of whitespace
-// alone. The parser reads that token as a plain scalar that holds the
+// IsPlaceholder reports whether tk is the token [Tokenize] made for a
+// source of whitespace alone, which the lexer does not emit a token for.
+// The parser reads that token as a plain scalar that holds the
 // text. The go-yaml Unmarshal does not read a value from the text, so a
 // decoder that wants to agree with Unmarshal treats the token as empty.
 // Tokenize makes the placeholder as the only token of its stream, so a
@@ -130,7 +135,7 @@ func IsPlaceholder(tk *token.Token) bool {
 		return false
 	}
 
-	return len(lexer.Tokenize(tk.Origin)) == 0
+	return strings.Trim(tk.Origin, " \t\r\n") == ""
 }
 
 // ForParser returns clones of tks for the go-yaml parser to read.

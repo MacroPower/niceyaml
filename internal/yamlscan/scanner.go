@@ -6,7 +6,6 @@ import (
 	"io"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/goccy/go-yaml/token"
 )
@@ -62,23 +61,10 @@ type Scanner struct {
 	// niceyaml: heldLineEnd reports that the last token holds the line
 	// ending that the scan reads next.
 	heldLineEnd bool
-	// niceyaml: heldCR reports that the scan of a double-quoted scalar
-	// skipped the "\r" of a CRLF, and the next origin opens with it.
-	heldCR bool
-	// niceyaml: skippedCR reports that the last scan stepped past the
-	// "\r" of a CRLF after an invalid token, and the first Origin of the
-	// next scan opens with it.
-	skippedCR bool
 	// niceyaml: headerLineEnd reports that the invalid token of a block
 	// scalar header holds the line ending that upstream leaves for the
 	// next scan.
 	headerLineEnd bool
-	// niceyaml: compat keeps the token types and values of upstream, as
-	// [WithCompat] describes.
-	compat bool
-	// niceyaml: emitted counts the runes of the Origins that Scan has
-	// returned.
-	emitted int
 }
 
 func (s *Scanner) pos() *token.Position {
@@ -347,9 +333,6 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 	value := []rune{}
 	isFirstLineChar := false
 	isNewLine := false
-	// niceyaml: stepped reports that the scan stepped one rune past the
-	// text after a tab, as upstream does with compat.
-	stepped := false
 
 	for idx := startIndex; idx < size; idx++ {
 		if !isNewLine {
@@ -394,12 +377,8 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 					string(ctx.obuf), s.pos(),
 				)
 				// niceyaml: the origin holds the tab, so the next scan
-				// starts after it. After a step past the text that
-				// follows a tab, the scan already stands one rune
-				// further, as upstream does, and does not step again.
-				if !stepped {
-					s.progressColumn(ctx, 1)
-				}
+				// starts after it.
+				s.progressColumn(ctx, 1)
 				return nil, ErrInvalidToken(invalidTk)
 			}
 			continue
@@ -613,13 +592,7 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 			if foundNotSpaceChar {
 				// niceyaml: upstream steps one more rune here, and that
 				// step makes the scan skip the rune after the scalar.
-				// The token of the scalar, or Scan for an invalid
-				// token, keeps the skipped rune in the origin.
 				value = append(value, c)
-				if s.compat && src[idx+1] != '"' {
-					s.progressColumn(ctx, 1)
-					stepped = true
-				}
 			} else {
 				// niceyaml: only spaces and tabs follow on the line, so
 				// the loop counted all of them, and the origin keeps them.
@@ -634,17 +607,6 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 			continue
 		}
 		s.progressColumn(ctx, 1)
-		if s.compat && idx+1 < ctx.idx {
-			// niceyaml: the origin keeps the runes that the scan skips. A
-			// skipped "\r" whose "\n" the scan reads next opens the next
-			// origin instead, so the CRLF stays whole.
-			skipped := src[idx+1 : min(ctx.idx, size)]
-			if len(skipped) > 0 && skipped[len(skipped)-1] == '\r' && ctx.idx < size && src[ctx.idx] == '\n' {
-				skipped = skipped[:len(skipped)-1]
-				s.heldCR = true
-			}
-			ctx.addOriginRunes(skipped)
-		}
 		return token.DoubleQuote(string(value), string(ctx.obuf), srcpos), nil
 	}
 	s.progressColumn(ctx, 1)
@@ -698,11 +660,6 @@ func (s *Scanner) scanQuote(ctx *Context, ch rune) (bool, error) {
 		ctx.addToken(tk)
 	}
 	ctx.clear()
-	if s.heldCR {
-		// niceyaml: the "\r" that the scan of the scalar skipped.
-		s.heldCR = false
-		ctx.addOriginBuf('\r')
-	}
 	return true, nil
 }
 
@@ -807,13 +764,8 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 			ctx.addOriginBuf(c)
 		}
 	}
-	if s.compat {
-		// niceyaml: upstream drops a tag that ends the input. The origin
-		// buffer keeps its text for the last token.
-		s.progressColumn(ctx, progress)
-		return true, nil
-	}
-	// niceyaml: a tag that ends the input is a token too.
+	// niceyaml: a tag that ends the input is a token too, where upstream
+	// drops it.
 	value := ctx.source(ctx.idx-1, ctx.size)
 	ctx.addToken(token.Tag(value, string(ctx.obuf), s.pos()))
 	s.progressColumn(ctx, progress)
@@ -1655,8 +1607,6 @@ func (s *Scanner) Init(text string) {
 	s.column = 1
 	s.offset = 1
 	s.isFirstCharAtLine = true
-	s.emitted = 0           // niceyaml: no Origin of the new source is out yet.
-	s.skippedCR = false     // niceyaml: no "\r" of the new source is held yet.
 	s.headerLineEnd = false // niceyaml: no header of the new source is out yet.
 	s.clearState()
 }
@@ -1682,7 +1632,6 @@ func (s *Scanner) Scan() (token.Tokens, error) {
 		return nil, io.EOF
 	}
 	ctx := newContext(s.source[s.sourcePos:])
-	ctx.compat = s.compat // niceyaml: pass the option to the context.
 	// niceyaml: upstream opens this scan with the line ending of the
 	// header before.
 	ctx.lineBefore = s.headerLineEnd
@@ -1698,60 +1647,13 @@ func (s *Scanner) Scan() (token.Tokens, error) {
 		if errors.As(err, &invalidTokenErr) {
 			tokens = append(tokens, invalidTokenErr.Token)
 		}
-		s.takeCR(tokens)      // niceyaml: open the scan with the "\r" that the last scan skipped.
-		s.takeSkipped(tokens) // niceyaml: keep the runes that the scan skipped.
 		return tokens, err
 	}
-	s.takeCR(tokens) // niceyaml: open the scan with the "\r" that the last scan skipped.
 	// niceyaml: the last token of the scan takes the text that ends the
 	// input.
 	if s.rest != "" && len(tokens) > 0 {
 		tokens[len(tokens)-1].Origin += s.rest
 		s.rest = ""
 	}
-	s.takeSkipped(tokens) // niceyaml: keep the runes that the scan skipped.
 	return tokens, nil
-}
-
-// takeSkipped gives the last token of tks the runes that the scan stepped
-// past without an Origin to hold them, so the Origins join to the source.
-// With compat, the scan of a double-quoted scalar steps one rune past the
-// text that it reads for each tab between its text, as upstream does. A
-// scalar that ends keeps those runes, but the invalid token of a scalar
-// that the scan abandons does not, and the next scan starts after the
-// runes. A "\r" that ends the runes and whose "\n" the next scan reads
-// stays out of tks, and [Scanner.takeCR] gives it to the next scan.
-// niceyaml: upstream does not have this method.
-func (s *Scanner) takeSkipped(tks token.Tokens) {
-	for _, tk := range tks {
-		s.emitted += utf8.RuneCountInString(tk.Origin)
-	}
-	end := min(s.sourcePos, s.sourceSize)
-	if !s.compat || s.emitted >= end || len(tks) == 0 {
-		return
-	}
-	if s.source[end-1] == '\r' && end < s.sourceSize && s.source[end] == '\n' {
-		// The next scan reads the "\n" of the CRLF, so its first
-		// Origin takes the "\r" too, and the CRLF stays whole.
-		end--
-		s.skippedCR = true
-	}
-	tks[len(tks)-1].Origin += string(s.source[s.emitted:end])
-	s.emitted = end
-}
-
-// takeCR opens the first Origin of tks with the "\r" of a CRLF that the
-// last scan stepped past, as [Scanner.takeSkipped] describes. When tks is
-// empty, the text that ends the input opens with it.
-// niceyaml: upstream does not have this method.
-func (s *Scanner) takeCR(tks token.Tokens) {
-	if !s.skippedCR {
-		return
-	}
-	s.skippedCR = false
-	if len(tks) == 0 {
-		s.rest = "\r" + s.rest
-		return
-	}
-	tks[0].Origin = "\r" + tks[0].Origin
 }

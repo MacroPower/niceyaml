@@ -80,8 +80,8 @@ func IsNil(node ast.Node) bool {
 // directive. Those are the bodies of an empty document, a document of
 // comments alone, and a document of a %YAML directive alone. It also
 // returns false for a scalar that holds the placeholder token of
-// [tokens.Tokenize]. Tokenize makes that token for text that the lexer
-// does not emit a token for, such as a file of whitespace alone.
+// [tokens.Tokenize]. Tokenize makes that token for a source of whitespace
+// alone, which the lexer does not emit a token for.
 func HasContent(node ast.Node) bool {
 	if IsNil(node) {
 		return false

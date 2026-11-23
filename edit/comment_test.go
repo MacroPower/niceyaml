@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
 
+	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/edit"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -582,6 +583,8 @@ func TestNode_SetLineComment(t *testing.T) {
 		err    string
 		is     error
 		opts   []edit.Option
+		// The text of a reference document of the document, or "".
+		ref string
 	}{
 		"add after a scalar": {
 			before: "port: 80   \nb: 1\n",
@@ -701,20 +704,16 @@ func TestNode_SetLineComment(t *testing.T) {
 			want:   "a: 1 # one",
 		},
 		"tag that ends the text": {
-			// Go-yaml drops the tag, but it reads the tag before a comment.
 			before: "z: 1\na: !!str",
 			path:   paths.MustParse("$.a"),
 			text:   "d",
-			err: "test.yaml:2:4: $.a: cafe.jacobcolvin.com/v1 sets the line comment of $.a, " +
-				"whose tag ends the text without a line break",
+			want:   "z: 1\na: !!str # d",
 		},
 		"tag of an item that ends the text": {
-			// Go-yaml drops the tag, and the "-" holds its text.
 			before: "z: 1\nl:\n  - !!str",
 			path:   paths.MustParse("$.l[0]"),
 			text:   "d",
-			err: "test.yaml:3:5: $.l[0]: cafe.jacobcolvin.com/v1 sets the line comment of $.l[0], " +
-				"whose tag ends the text without a line break",
+			want:   "z: 1\nl:\n  - !!str # d",
 		},
 		"empty text on a tag that ends the text": {
 			before: "z: 1\na: !!str",
@@ -722,15 +721,23 @@ func TestNode_SetLineComment(t *testing.T) {
 			want:   "z: 1\na: !!str",
 		},
 		"remove after a tag at the end of the text": {
-			// The line break keeps the tag that the comment kept.
 			before: "z: 1\na: !!str # c",
 			path:   paths.MustParse("$.a"),
-			want:   "z: 1\na: !!str\n",
+			want:   "z: 1\na: !!str",
+		},
+		"remove after a tag at the end of a text with a reference document": {
+			// Go-yaml's decoder alone drops the tag, and it reads null where
+			// the decode of the text reads "". The check does not count that
+			// difference.
+			before: "a: &x 1\nb: *x\ne: !!str # c",
+			ref:    "r: &r 1\n",
+			path:   paths.MustParse("$.e"),
+			want:   "a: &x 1\nb: *x\ne: !!str",
 		},
 		"remove after the tag of an item at the end of the text": {
 			before: "z: 1\r\nl:\r\n  - !!str # c",
 			path:   paths.MustParse("$.l[0]"),
-			want:   "z: 1\r\nl:\r\n  - !!str\r\n",
+			want:   "z: 1\r\nl:\r\n  - !!str",
 		},
 		"plain scalar of two lines": {
 			before: stringtest.LinesLF("a: one", "  two"),
@@ -876,7 +883,13 @@ func TestNode_SetLineComment(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			_, d := newSourceDocWith(t, tc.before, tc.opts)
+			var src []niceyaml.SourceOption
+
+			if tc.ref != "" {
+				src = append(src, niceyaml.WithReferences(niceyaml.NewSourceFromString(tc.ref)))
+			}
+
+			_, d := newSourceDocWith(t, tc.before, tc.opts, src...)
 
 			err := applyAt(t, d, tc.path, func(_ context.Context, n *edit.Node) error {
 				return n.SetLineComment(tc.text)

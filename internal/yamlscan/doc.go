@@ -25,8 +25,19 @@
 // from an Origin to the token where niceyaml's tokens package expects it.
 // The files position.go and settle.go hold those passes.
 //
-// The [WithCompat] option keeps the token types and values of go-yaml
-// where a patch would change what the go-yaml parser reads.
+// Some patches change what the go-yaml parser reads, so that it reads
+// the text as YAML does:
+//
+//   - The copy emits a tag that ends the input, where go-yaml drops it.
+//     The parser then reads "b: !!str" as an empty string, as it reads
+//     the same text with a final line break.
+//   - The copy keeps the rune after a double-quoted scalar that holds a
+//     tab between its quotes, where go-yaml skips one rune for each tab
+//     that more text follows on its line.
+//   - A tag without a value does not type the first key of the next
+//     line, nor the first key of the mapping below the tag. Go-yaml reads
+//     that key as a string, so it reads the key 0x10 below "a: !t" as
+//     "0x10" and not as 16.
 //
 // # Sync
 //
@@ -47,11 +58,11 @@
 //     package, and the other side is the unchanged copy of the new commit.
 //     Resolve each conflict that sync.sh reports.
 //  4. Run the tests of this package. The corpus test reads each input under
-//     testdata/corpus with and without [WithCompat]. It checks that the
-//     Origins join to the input and that each position names the rune
-//     where the text of its token starts. With [WithCompat], it also
-//     checks that the tokens have the types and values that go-yaml's
-//     lexer gives them. That check skips each input where either stream
-//     holds an invalid token and each input where the lexer does not give
-//     any token.
+//     testdata/corpus. It checks that the Origins join to the input and
+//     that each position names the rune where the text of its token
+//     starts. It also checks that the tokens have the types and values
+//     that go-yaml's lexer gives them, except on the inputs where a patch
+//     changes them. That check skips each input where either stream holds
+//     an invalid token and each input where the lexer does not give any
+//     token.
 package yamlscan

@@ -88,8 +88,7 @@ var (
 	// an [*UnsupportedError] whose InValue field is true, which a value of
 	// the request with an anchor or a tag fails with. A typed key of the
 	// request that a [Node.SetKey] writes fails that way too when a decode
-	// reads it as another value, as 1.0 reads as 1, or as a string at its
-	// place.
+	// reads it as another value, as 1.0 reads as 1.
 	//
 	// A call that writes such a text fails with an error that matches
 	// [ErrEngine] and not ErrMisread, because the engine wrote that text. So
@@ -751,12 +750,9 @@ type Removal struct {
 // New takes an empty document, which [niceyaml.Node.IsEmpty] reports, such
 // as an empty text or a text of comments alone. Its root holds no value, so
 // a [Func] writes the first value with [Node.Set], as the Empty Documents
-// section of the package documentation describes. Go-yaml's parser reads no
-// value from a tag at the end of the text, as in "!t" or "!t\t" without a
-// line break. Go-yaml's lexer reads a tab after a tag as a part of the tag.
-// So such a document is empty too. The parser reads an
-// empty value under a tag that a line break or a space follows. So New
-// takes "!t\n" with that value as its root.
+// section of the package documentation describes. Go-yaml's parser reads
+// an empty value under a tag, so New takes "!t" with that value as its
+// root.
 //
 // New takes a document of [niceyaml.NewSourceFromLayers], whose
 // [niceyaml.Source.Layers] are not empty. Its Doc edits the merged text,

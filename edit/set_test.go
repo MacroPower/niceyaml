@@ -46,12 +46,28 @@ func TestNode_Set(t *testing.T) {
 		panicked bool
 	}{
 		"item with a tag that ends the text": {
-			// Go-yaml drops the tag, and the "-" holds its text. The value
-			// writes over the tag.
+			// The value replaces the tag, which ends the text.
 			before: "- !t",
 			path:   paths.MustParse("$[0]"),
 			value:  "y",
 			want:   `- "y"`,
+		},
+		"value after a double-quoted scalar with a tab": {
+			// Go-yaml's lexer skips the line break after the scalar, which
+			// moves the tokens after it, and its parser refuses the text.
+			// The check reads the text as YAML does.
+			before: "a: \"x\ty\"\nb: 1\n",
+			path:   paths.Doc().Child("b"),
+			value:  2,
+			want:   "a: \"x\ty\"\nb: 2\n",
+		},
+		"value after a double-quoted scalar of two lines with a tab on its first line": {
+			// The text after the tab on its line makes go-yaml's lexer skip
+			// the line break after the closing quote on the next line.
+			before: "a: \"x\tz\n  y\"\nb: 1\n",
+			path:   paths.Doc().Child("b"),
+			value:  2,
+			want:   "a: \"x\tz\n  y\"\nb: 2\n",
 		},
 		"string of several lines at the end of a document before a comment line deeper than its text": {
 			// The comment line above the next "---" belongs to the next
@@ -1332,6 +1348,27 @@ func TestNode_Set(t *testing.T) {
 			path:   paths.Doc(),
 			value:  1,
 			err:    "test.yaml:1:1: $: cafe.jacobcolvin.com/v1 replaces the root of the document",
+		},
+		// A tag alone is not an empty document. Its root is a tagged empty
+		// value, as YAML reads it.
+		"name below a tag alone": {
+			// A Set below a null root replaces the root, tag and all.
+			before: "!t",
+			path:   paths.Doc().Child("x"),
+			value:  1,
+			want:   "x: 1",
+		},
+		"path of names below a tag alone": {
+			before: "!!str",
+			path:   paths.Doc().Child("server", "port"),
+			value:  1,
+			err:    "cafe.jacobcolvin.com/v1 sets $.server.port, but the document holds a scalar",
+		},
+		"root of a tag after a header": {
+			before: "--- !t",
+			path:   paths.Doc(),
+			value:  1,
+			err:    "test.yaml:1:5: $: cafe.jacobcolvin.com/v1 replaces the root of the document",
 		},
 		"value that holds two keys that a decode reads as one": {
 			// The key has no text in the user's text, so the problem binds where an error at the value that the
@@ -3239,18 +3276,6 @@ func TestNode_Set_Empty(t *testing.T) {
 			value:  1,
 			opts:   []edit.SetOption{edit.First()},
 			err:    "test.yaml: $: cafe.jacobcolvin.com/v1 sets $[0] first, but $[0] is an item",
-		},
-		"tag alone": {
-			before: "!!str",
-			path:   port,
-			value:  1,
-			err:    "test.yaml: $: cafe.jacobcolvin.com/v1 sets $.server.port, but the document holds !!str without a value",
-		},
-		"tag after a header": {
-			before: "--- !t",
-			path:   paths.Doc(),
-			value:  1,
-			err:    "test.yaml:1:1: $: cafe.jacobcolvin.com/v1 sets $, but the document holds !t without a value",
 		},
 	}
 

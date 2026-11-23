@@ -16,29 +16,54 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/yamlscan"
 )
 
-// CompatFlowReset holds the inputs of the corpus whose token types or
-// values differ from those of go-yaml's lexer with [yamlscan.WithCompat].
-// Each holds a document after an unclosed flow collection. The copy closes
-// the collection at the document marker, but go-yaml's lexer reads the
-// later documents as the inside of the collection.
-var compatFlowReset = map[string]bool{
-	"testdata/corpus/ny/0a63f443bad091c2.yaml":                          true,
-	"testdata/corpus/ny/170ab8343bfa65b2.yaml":                          true,
-	"testdata/corpus/ny/1c1e6fbd6da10194.yaml":                          true,
-	"testdata/corpus/ny/1c811ebbe7b2f54a.yaml":                          true,
-	"testdata/corpus/ny/37767ad8a8c8bb88.yaml":                          true,
-	"testdata/corpus/ny/6fe609943a0f0183.yaml":                          true,
-	"testdata/corpus/ny/7639c9a81a881762.yaml":                          true,
-	"testdata/corpus/ny/873ef8d7ce64ae87.yaml":                          true,
-	"testdata/corpus/ny/8c8891b0297506d0.yaml":                          true,
-	"testdata/corpus/ny/8cf93a89ea05cbf0.yaml":                          true,
-	"testdata/corpus/ny/9e82b5ac83955dec.yaml":                          true,
-	"testdata/corpus/ny/bce30c8a70314e21.yaml":                          true,
-	"testdata/corpus/ny/c5cd9ce6e5f815f1.yaml":                          true,
-	"testdata/corpus/ny/c72f638b107edba4.yaml":                          true,
-	"testdata/corpus/ny/cd9937f542fa35fe.yaml":                          true,
-	"testdata/corpus/ny/d3b1448f35c9e6d8.yaml":                          true,
-	"testdata/corpus/suite/invalid-document-markers-in-flow-style.yaml": true,
+// Reading names a patch of the copy that changes the token types or
+// values that go-yaml's lexer gives an input.
+type reading string
+
+const (
+	// The copy closes an unclosed flow collection at the document marker,
+	// but go-yaml's lexer reads the later documents as the inside of the
+	// collection.
+	readFlow reading = "flow collection closed at a document marker"
+	// The copy emits a tag that ends the input, but go-yaml's lexer drops
+	// it.
+	readTag reading = "tag that ends the input"
+	// The copy keeps the rune after a double-quoted scalar that holds a
+	// tab between its text, but go-yaml's lexer skips that rune.
+	readTab reading = "rune after a double-quoted scalar with a tab"
+)
+
+// Readings holds each input of the corpus whose token types or values
+// differ from those of go-yaml's lexer, with the patch that makes them
+// differ.
+var readings = map[string]reading{
+	"testdata/corpus/ny/020e1d155680ba18.yaml":                          readTab,
+	"testdata/corpus/ny/0a63f443bad091c2.yaml":                          readFlow,
+	"testdata/corpus/ny/170ab8343bfa65b2.yaml":                          readFlow,
+	"testdata/corpus/ny/1c1e6fbd6da10194.yaml":                          readFlow,
+	"testdata/corpus/ny/1c811ebbe7b2f54a.yaml":                          readFlow,
+	"testdata/corpus/ny/372d2e9802b34509.yaml":                          readTag,
+	"testdata/corpus/ny/37767ad8a8c8bb88.yaml":                          readFlow,
+	"testdata/corpus/ny/49633592044d7a83.yaml":                          readTag,
+	"testdata/corpus/ny/58ff94c6d6941ae1.yaml":                          readTag,
+	"testdata/corpus/ny/6fe609943a0f0183.yaml":                          readFlow,
+	"testdata/corpus/ny/7639c9a81a881762.yaml":                          readFlow,
+	"testdata/corpus/ny/8389eaccdfc90948.yaml":                          readTag,
+	"testdata/corpus/ny/873ef8d7ce64ae87.yaml":                          readFlow,
+	"testdata/corpus/ny/8c8891b0297506d0.yaml":                          readFlow,
+	"testdata/corpus/ny/8cf93a89ea05cbf0.yaml":                          readFlow,
+	"testdata/corpus/ny/8d700bfa14c0a453.yaml":                          readTag,
+	"testdata/corpus/ny/9e82b5ac83955dec.yaml":                          readFlow,
+	"testdata/corpus/ny/bce30c8a70314e21.yaml":                          readFlow,
+	"testdata/corpus/ny/c48f78e6fb5fa6fd.yaml":                          readTag,
+	"testdata/corpus/ny/c5cd9ce6e5f815f1.yaml":                          readFlow,
+	"testdata/corpus/ny/c72f638b107edba4.yaml":                          readFlow,
+	"testdata/corpus/ny/cd9937f542fa35fe.yaml":                          readFlow,
+	"testdata/corpus/ny/d1891338a74debe0.yaml":                          readTag,
+	"testdata/corpus/ny/d3b1448f35c9e6d8.yaml":                          readFlow,
+	"testdata/corpus/ny/da44b184c7cf3b21.yaml":                          readTag,
+	"testdata/corpus/ny/f309731e7ef738c9.yaml":                          readTag,
+	"testdata/corpus/suite/invalid-document-markers-in-flow-style.yaml": readFlow,
 }
 
 // place is the line, the column, and the rune offset of a rune, each
@@ -154,11 +179,10 @@ func gotPlaces(tks token.Tokens) []place {
 	return out
 }
 
-// TestTokenize reads every input of the corpus with and without
-// [yamlscan.WithCompat]. The Origins join to the source, no two tokens
-// cut a CRLF, and each position names the place where its token belongs.
-// With the option, the tokens have the types and values that go-yaml's
-// lexer gives them, except for the inputs of compatFlowReset. The test
+// TestTokenize reads every input of the corpus. The Origins join to the
+// source, no two tokens cut a CRLF, and each position names the place
+// where its token belongs. The tokens have the types and values that
+// go-yaml's lexer gives them, except for the inputs of readings. The test
 // skips that check where either stream holds an invalid token, and where
 // the lexer gives no token, as for a source of whitespace alone.
 func TestTokenize(t *testing.T) {
@@ -177,39 +201,34 @@ func TestTokenize(t *testing.T) {
 			src, err := os.ReadFile(file)
 			require.NoError(t, err)
 
-			for _, compat := range []bool{false, true} {
-				tks := yamlscan.Tokenize(string(src), yamlscan.WithCompat(compat))
+			tks := yamlscan.Tokenize(string(src))
 
-				if compat {
-					want, wantInvalid := typedValues(lexer.Tokenize(string(src)))
-					got, gotInvalid := typedValues(tks)
+			want, wantInvalid := typedValues(lexer.Tokenize(string(src)))
+			got, gotInvalid := typedValues(tks)
 
-					switch {
-					case len(want) == 0 || wantInvalid || gotInvalid:
-					case compatFlowReset[name]:
-						assert.NotEqual(t, want, got, "types and values")
-					default:
-						assert.Equal(t, want, got, "types and values")
-					}
+			switch {
+			case len(want) == 0 || wantInvalid || gotInvalid:
+			case readings[name] != "":
+				assert.NotEqual(t, want, got, "types and values of a %s", readings[name])
+			default:
+				assert.Equal(t, want, got, "types and values")
+			}
+
+			assert.Equal(t, string(src), joined(tks))
+
+			// A CRLF stays whole in one Origin.
+			for i := 1; i < len(tks); i++ {
+				if strings.HasSuffix(tks[i-1].Origin, "\r") && strings.HasPrefix(tks[i].Origin, "\n") {
+					assert.Fail(t, "CRLF cut", "token %d %q", i, tks[i].Origin)
 				}
+			}
 
-				assert.Equal(t, string(src), joined(tks), "compat=%t", compat)
-
-				// A CRLF stays whole in one Origin.
-				for i := 1; i < len(tks); i++ {
-					if strings.HasSuffix(tks[i-1].Origin, "\r") && strings.HasPrefix(tks[i].Origin, "\n") {
-						assert.Fail(t, "CRLF cut", "compat=%t token %d %q", compat, i, tks[i].Origin)
-					}
-				}
-
-				// A diff of the whole stream of a large input takes
-				// minutes, so the test reports the first token that
-				// differs.
-				want, got := wantPlaces(tks), gotPlaces(tks)
-				for i := range want {
-					if !assert.Equal(t, want[i], got[i], "compat=%t token %d %q", compat, i, tks[i].Origin) {
-						break
-					}
+			// A diff of the whole stream of a large input takes minutes,
+			// so the test reports the first token that differs.
+			wantAt, gotAt := wantPlaces(tks), gotPlaces(tks)
+			for i := range wantAt {
+				if !assert.Equal(t, wantAt[i], gotAt[i], "token %d %q", i, tks[i].Origin) {
+					break
 				}
 			}
 		})
@@ -232,16 +251,13 @@ func toks(tks token.Tokens) []tok {
 	return out
 }
 
-// TestTokenize_Patches reads one input for each patch of the copy, with and
-// without [yamlscan.WithCompat].
+// TestTokenize_Patches reads one input for each patch of the copy.
 func TestTokenize_Patches(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
 		input string
 		want  []tok
-		// The tokens with the option, where they differ from want.
-		compat []tok
 	}{
 		"trailing spaces before a key": {
 			input: "a: b  \n? c\n",
@@ -360,8 +376,6 @@ func TestTokenize_Patches(t *testing.T) {
 			},
 		},
 		"tab that indents a line after a tab in a double-quoted scalar": {
-			// With the option, the scan steps past the text after the first
-			// tab, as go-yaml does, and does not step past the second.
 			input: "a: \"x\ty\n\t\n---\nb: 1\n",
 			want: []tok{
 				{token.StringType, "a"},
@@ -389,11 +403,6 @@ func TestTokenize_Patches(t *testing.T) {
 			input: "!t\n\t- a\n",
 			want: []tok{
 				{token.TagType, "!t\n"},
-				{token.InvalidType, "\t-"},
-				{token.StringType, " a\n"},
-			},
-			compat: []tok{
-				{token.TagType, "!t\n"},
 				{token.SequenceEntryType, "\t-"},
 				{token.StringType, " a\n"},
 			},
@@ -401,11 +410,6 @@ func TestTokenize_Patches(t *testing.T) {
 		"tab before a key on the line after a comment that ends with a crlf": {
 			input: "# c\r\n\ta: 1\r\n",
 			want: []tok{
-				{token.CommentType, "# c\r\n"},
-				{token.InvalidType, "\ta:"},
-				{token.IntegerType, " 1\r\n"},
-			},
-			compat: []tok{
 				{token.CommentType, "# c\r\n"},
 				{token.StringType, "\ta"},
 				{token.MappingValueType, ":"},
@@ -417,12 +421,6 @@ func TestTokenize_Patches(t *testing.T) {
 			// scan, so it reads the key, and the "---" ends the document.
 			input: "|x\n\ta: |\n---\nc: 1\n",
 			want: []tok{
-				{token.InvalidType, "|x\n"},
-				{token.InvalidType, "\ta:"},
-				{token.LiteralType, " |\n"},
-				{token.StringType, "---\nc: 1\n"},
-			},
-			compat: []tok{
 				{token.InvalidType, "|x\n"},
 				{token.StringType, "\ta"},
 				{token.MappingValueType, ":"},
@@ -483,10 +481,6 @@ func TestTokenize_Patches(t *testing.T) {
 				{token.MappingValueType, ":"},
 				{token.TagType, " !t"},
 			},
-			compat: []tok{
-				{token.StringType, "a"},
-				{token.MappingValueType, ": !t"},
-			},
 		},
 		"tag before the key of the next line": {
 			input: "a: !t\n1: x\n",
@@ -498,26 +492,12 @@ func TestTokenize_Patches(t *testing.T) {
 				{token.MappingValueType, ":"},
 				{token.StringType, " x\n"},
 			},
-			compat: []tok{
-				{token.StringType, "a"},
-				{token.MappingValueType, ":"},
-				{token.TagType, " !t\n"},
-				{token.StringType, "1"},
-				{token.MappingValueType, ":"},
-				{token.StringType, " x\n"},
-			},
 		},
 		"tag on a mapping": {
 			input: "!t\n1: x\n",
 			want: []tok{
 				{token.TagType, "!t\n"},
 				{token.IntegerType, "1"},
-				{token.MappingValueType, ":"},
-				{token.StringType, " x\n"},
-			},
-			compat: []tok{
-				{token.TagType, "!t\n"},
-				{token.StringType, "1"},
 				{token.MappingValueType, ":"},
 				{token.StringType, " x\n"},
 			},
@@ -532,18 +512,10 @@ func TestTokenize_Patches(t *testing.T) {
 				{token.MappingValueType, ":"},
 				{token.IntegerType, " 1\n"},
 			},
-			compat: []tok{
-				{token.StringType, "a"},
-				{token.MappingValueType, ":"},
-				{token.DoubleQuoteType, " \"t\tb\" "},
-				{token.StringType, "\nb"},
-				{token.MappingValueType, ":"},
-				{token.IntegerType, " 1\n"},
-			},
 		},
 		"invalid escape after a tab in a double-quoted scalar": {
-			// With the option, the scan steps one rune past the escape, as
-			// go-yaml does, and the invalid token holds that rune.
+			// Go-yaml steps one rune past the text after the tab, so its
+			// invalid token holds the "q".
 			input: "a: \"x\t\\q\"\nb: 1\n",
 			want: []tok{
 				{token.StringType, "a"},
@@ -554,16 +526,10 @@ func TestTokenize_Patches(t *testing.T) {
 				{token.MappingValueType, ":"},
 				{token.IntegerType, " 1\n"},
 			},
-			compat: []tok{
-				{token.StringType, "a"},
-				{token.MappingValueType, ":"},
-				{token.InvalidType, " \"x\t\\q"},
-				{token.InvalidType, "\"\nb: 1\n"},
-			},
 		},
 		"crlf after an invalid double-quoted scalar with two tabs": {
-			// With the option, the scan steps past the "\r" of the CRLF,
-			// and the next token opens with it.
+			// Go-yaml steps one rune past the text after each tab, so it
+			// skips the "q" and the "\r" of the CRLF.
 			input: "a: \"\tx\ty\\q\r\nb: 1\r\n",
 			want: []tok{
 				{token.StringType, "a"},
@@ -574,18 +540,10 @@ func TestTokenize_Patches(t *testing.T) {
 				{token.MappingValueType, ":"},
 				{token.IntegerType, " 1\r\n"},
 			},
-			compat: []tok{
-				{token.StringType, "a"},
-				{token.MappingValueType, ":"},
-				{token.InvalidType, " \"\tx\ty\\q"},
-				{token.StringType, "\r\nb"},
-				{token.MappingValueType, ":"},
-				{token.IntegerType, " 1\r\n"},
-			},
 		},
 		"crlf after a double-quoted scalar with two tabs": {
-			// With the option, the scan steps past the "y" and the "\r",
-			// and the next token opens with the "\r".
+			// Go-yaml steps one rune past the text after each tab, so it
+			// skips the "y" and the "\r" of the CRLF.
 			input: "a: \"\t\tx\"y\r\nb: 1\r\n",
 			want: []tok{
 				{token.StringType, "a"},
@@ -593,14 +551,6 @@ func TestTokenize_Patches(t *testing.T) {
 				{token.DoubleQuoteType, " \"\t\tx\""},
 				{token.StringType, "y\r\n"},
 				{token.StringType, "b"},
-				{token.MappingValueType, ":"},
-				{token.IntegerType, " 1\r\n"},
-			},
-			compat: []tok{
-				{token.StringType, "a"},
-				{token.MappingValueType, ":"},
-				{token.DoubleQuoteType, " \"\t\tx\"y"},
-				{token.StringType, "\r\nb"},
 				{token.MappingValueType, ":"},
 				{token.IntegerType, " 1\r\n"},
 			},
@@ -622,14 +572,7 @@ func TestTokenize_Patches(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, toks(yamlscan.Tokenize(tc.input)), "without the option")
-
-			compat := tc.compat
-			if compat == nil {
-				compat = tc.want
-			}
-
-			assert.Equal(t, compat, toks(yamlscan.Tokenize(tc.input, yamlscan.WithCompat(true))), "with the option")
+			assert.Equal(t, tc.want, toks(yamlscan.Tokenize(tc.input)))
 		})
 	}
 }

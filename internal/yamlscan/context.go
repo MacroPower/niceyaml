@@ -28,9 +28,6 @@ type Context struct {
 	// that is the last token. A key on a later line is then the first key
 	// of the mapping that the tag is on, and the tag does not type it.
 	tagEndedLine bool
-	// niceyaml: compat holds the option of the scanner that
-	// [WithCompat] sets.
-	compat bool
 	// niceyaml: lineBefore reports that the token before holds the line
 	// ending in front of the origin buffer, where upstream opens the
 	// buffer with that line ending.
@@ -323,9 +320,7 @@ func (c *Context) addOriginBuf(r rune) {
 // abandoned returns tk, the invalid token of an escape that the scanner
 // abandons, with an Origin that lacks the backslash that ends it. The
 // scanner reads the escape again from that backslash, so the next token
-// holds it. With compat, a tab earlier in the scalar moves the next scan
-// past the backslash, and [Scanner.Scan] gives it back to tk. The Value
-// keeps the backslash, as upstream writes it.
+// holds it. The Value keeps the backslash, as upstream writes it.
 // niceyaml: upstream does not have this function.
 func abandoned(tk *token.Token) *token.Token {
 	tk.Origin = strings.TrimSuffix(tk.Origin, `\`)
@@ -356,12 +351,11 @@ func (c *Context) removeRightSpaceFromBuf() bool {
 // tabIndented reports whether the origin buffer opens with a tab, after
 // one space at most, as upstream reads it from a buffer without the
 // spaces and tabs that end a line. A first line of spaces and tabs alone
-// thus does not count. With compat, a buffer after a line ending that the
-// token before holds does not count either, because upstream opens that
-// buffer with the line ending. niceyaml: upstream does not have this
-// function.
+// thus does not count. Nor does a buffer after a line ending that the
+// token before holds, because upstream opens that buffer with the line
+// ending. niceyaml: upstream does not have this function.
 func (c *Context) tabIndented() bool {
-	if c.compat && c.lineBefore {
+	if c.lineBefore {
 		return false
 	}
 	i := 0
@@ -508,9 +502,8 @@ func (c *Context) setTokenTypeByPrevTag(tk *token.Token) {
 	if lastTk == nil {
 		return
 	}
-	// niceyaml: without compat, a tag that a later line closes does not
-	// type this token.
-	if lastTk.Type != token.TagType || c.tagClosed && !c.compat {
+	// niceyaml: a tag that a later line closes does not type this token.
+	if lastTk.Type != token.TagType || c.tagClosed {
 		return
 	}
 	tag := token.ReservedTagKeyword(lastTk.Value)

@@ -2819,13 +2819,12 @@ func TestResolver_NoContentDocument(t *testing.T) {
 		// A parse that keeps comments makes the comment group the body of
 		// a document that holds nothing else.
 		"comment": {input: "# just a comment\n"},
-		// The tokenizer gives a source the lexer emits nothing for one
+		// The tokenizer gives a source of whitespace alone one
 		// placeholder token, which the parser reads as a plain scalar.
 		// That scalar is not content.
 		"newline":     {input: "\n"},
 		"blank lines": {input: "\n\n"},
 		"spaces":      {input: "   "},
-		"lone bang":   {input: "!"},
 		// The directive parses as a document of its own, ahead of the
 		// content. It stands above the header, so its document holds no
 		// header for the root path to select.

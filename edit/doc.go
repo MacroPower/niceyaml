@@ -266,11 +266,8 @@
 // "# server:\r\n#   port: 80\r\n" becomes
 // "# server:\r\n#   port: 80\r\nserver:\r\n  port: 8080\r\n".
 //
-// Go-yaml's parser reads no value from a tag at the end of the
-// text, as in "!t", so such a document is empty too. A value after it takes
-// the tag, so a Set there fails, and its message names the tag. After
-// the first value, the Doc edits the document as any other, and a Set of
-// `$` fails because it replaces the root.
+// After the first value, the Doc edits the document as any other, and a
+// Set of `$` fails because it replaces the root.
 //
 // # Supported YAML
 //
@@ -375,16 +372,6 @@
 // entry by the text of its key, as in $.python.'3.10'. The detail of the
 // error says to quote the key, which makes the key a string that a call
 // edits.
-//
-// The place of a key can decide how a decode reads it. Go-yaml reads the
-// first key of a block mapping under a tag as a string, unless YAML defines
-// the tag, as it defines !!map. So the key 0x10 reads as its text right
-// after "a: !t", and a call edits its entry there. It reads as 16 after
-// another key of that mapping. A call that changes which of the two a
-// decode reads fails with ErrUnsupported, as [ConstructKeyText] names it.
-// Such a call does not reach the entry of the key. A Remove or a Move of
-// the one entry before the key is such a call. So is a Set with [First]
-// that writes an entry before the key.
 //
 // A `<<` merge key whose value is one alias of a reference document is not a
 // refused form, so a call that reaches it does not fail with ErrUnsupported.
@@ -596,7 +583,7 @@
 // status keeps that answer. A construct in the YAML of a value that a Set
 // writes comes from the program. So does a key that a SetKey repeats in its
 // mapping. So does a typed key of a SetKey that a decode reads as another
-// value, such as the float 1.0, or as a string at its place. The error then
+// value, such as the float 1.0. The error then
 // binds at the place of the call, its InValue field is true, and IsInvalid
 // reports false.
 //
@@ -623,7 +610,10 @@
 //
 // The engine reads a document as go-yaml reads it. Its reading is the tree
 // of go-yaml's parser, as the Source parses it, with the values that a
-// decode of niceyaml reads from that tree. Every read returns that reading,
+// decode of niceyaml reads from that tree. The tokenizer of the Source
+// reads some constructs as YAML does, as
+// [go.jacobcolvin.com/niceyaml/tokens.Tokenize] lists them, so the reading
+// of such a construct is the reading of YAML. Every read returns that reading,
 // and every call edits it. Where go-yaml reads valid YAML otherwise than
 // YAML does, the reads return go-yaml's reading, and a program that needs
 // the reading of YAML fixes the text itself. A call on such a text can fail
@@ -817,8 +807,7 @@
 //     path names it. When the old key has the name of the new key and a
 //     path by that name selects the entry already, the SetKey leaves the
 //     text and the model as they are. A typed key also needs the old
-//     key to be a plain scalar of that text, which a decode reads as a
-//     value of the kind of the new key at its place.
+//     key to be a plain scalar of that text.
 //   - [Node.Remove] removes the value.
 //   - [Node.Move] takes the value from its place to the target. A target
 //     that holds an item takes the value before that item. A target at the
@@ -1023,6 +1012,21 @@
 // Otherwise, when the parser refuses or panics on the edited text in
 // either parse, the Apply fails with ErrEngine. The error names go-yaml's
 // parser and gives its message.
+//
+// Go-yaml's lexer reads some texts otherwise than the tokenizer of
+// niceyaml, as [go.jacobcolvin.com/niceyaml/tokens.Tokenize] lists. Such
+// texts include one with a tag that ends it and one with a key that the
+// lexer reads as a string below a tag without a value. They also include
+// one with a double-quoted scalar after which the lexer skips a line
+// break. The decode of yaml.Unmarshal reads such a text apart from
+// niceyaml, so the check against go-yaml's decoder alone skips it.
+//
+// Below a tag without a value and before a tag that ends the text, go-yaml's
+// lexer places each other token as the tokenizer does. Both parses by
+// go-yaml's parser then still read the tokens of the lexer. They read the
+// tokenizer's tokens only in a text where the lexer moves or drops other
+// tokens. The lexer moves each later token when it skips a line break after
+// a double-quoted scalar.
 //
 // The edited text must hold only the characters that YAML allows in a text,
 // the printable characters of YAML 1.2, which include U+0085. A Go string
