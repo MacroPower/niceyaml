@@ -15,6 +15,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/edit"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -37,6 +38,22 @@ func services(n int) string {
 	return b.String()
 }
 
+// timedDoc returns a Doc of the first document of text, with the name and
+// the options of a Doc from [newDoc]. Unlike newDoc, it does not keep a
+// reference to the Doc, so the Doc of each timed turn becomes garbage when
+// the turn ends. A test that times many Applies of a large text then holds
+// the Doc of one turn at a time.
+func timedDoc(t *testing.T, text string) *edit.Doc {
+	t.Helper()
+
+	doc := yamltest.FirstDocument(t, text, niceyaml.WithName("test.yaml"))
+
+	d, err := edit.New(doc, edit.WithAppName("cafe"), edit.WithProtected(typeFields...))
+	require.NoError(t, err)
+
+	return d
+}
+
 // setTime returns how long an Apply that sets the one value at path to 3
 // takes on a new Doc of text. The Apply must fail when fails is true and
 // pass otherwise. Tests bound the time of a larger Apply by a multiple of
@@ -44,7 +61,7 @@ func services(n int) string {
 func setTime(t *testing.T, text string, path paths.Path, fails bool) time.Duration {
 	t.Helper()
 
-	d := newDoc(t, text)
+	d := timedDoc(t, text)
 	start := time.Now()
 
 	err := d.Apply(t.Context(), path, func(ctx context.Context, n *edit.Node) error {
@@ -59,6 +76,27 @@ func setTime(t *testing.T, text string, path paths.Path, fails bool) time.Durati
 	}
 
 	return elapsed
+}
+
+// turnTimes runs one and then all in each turn, for the given number of
+// turns. It returns the median of the durations that one returns, then
+// the median of the durations that all returns. Tests time a smaller
+// Apply in one and a larger Apply in all. They bound the median time of
+// the larger Apply by a multiple of the median time of the smaller one.
+// A load on the machine that lasts for several turns slows both Applies,
+// so it scales the bound too. A shorter burst of load slows only the
+// Applies that run during it. The burst moves a median only when it lasts
+// for more than half of the turns of one of them.
+func turnTimes(turns int, one, all func() time.Duration) (time.Duration, time.Duration) {
+	ones := make([]time.Duration, 0, turns)
+	alls := make([]time.Duration, 0, turns)
+
+	for range turns {
+		ones = append(ones, one())
+		alls = append(alls, all())
+	}
+
+	return median(ones), median(alls)
 }
 
 func TestDoc_Apply_Queue(t *testing.T) {
@@ -569,24 +607,49 @@ func TestDoc_Apply_Queue_Deadline(t *testing.T) {
 
 	// A Set of each of 1,500 counts in 140 KiB of text parses and checks
 	// the text once. So the Apply takes a few times as long as a Set of one
-	// count and ends well before the deadline. A parse and a check of the
-	// whole text after each Set takes about 1,500 times as long. The slower
-	// of two single Sets sets the deadline, so that a load on the machine
-	// in one of them does not shrink it.
+	// count and ends well before a deadline of 100 times the time of that
+	// Set. A parse and a check of the whole text after each Set takes about
+	// 1,500 times as long.
+	//
+	// Each turn times a Set of one count and then runs the Apply with the
+	// deadline that the Set gives it. The test requires the Apply to end
+	// before its deadline in more than half of the turns. A load on the
+	// machine that lasts for several turns slows both the Set and the
+	// Apply of each turn. A shorter burst of load makes the Apply of a turn
+	// miss its deadline only when the burst slows that Apply and not its
+	// Set. So the burst fails the test only when it lasts for more than
+	// half of the turns.
+	const turns = 5
+
 	before := services(1500)
+	want := strings.ReplaceAll(before, "replicas: 1", "replicas: 3")
 	one := paths.MustParse("$.services.svc0.replicas")
-	unit := max(setTime(t, before, one, false), setTime(t, before, one, false))
-	d := newDoc(t, before)
+	met := 0
 
-	ctx, cancel := context.WithTimeout(t.Context(), 100*unit)
-	defer cancel()
+	for range turns {
+		unit := setTime(t, before, one, false)
+		d := timedDoc(t, before)
 
-	err := d.Apply(ctx, paths.MustParse("$.services.*.replicas"), func(ctx context.Context, n *edit.Node) error {
-		return n.Set(ctx, 3)
-	})
-	require.NoError(t, err)
+		ctx, cancel := context.WithTimeout(t.Context(), 100*unit)
+		err := d.Apply(ctx, paths.MustParse("$.services.*.replicas"), func(ctx context.Context, n *edit.Node) error {
+			return n.Set(ctx, 3)
+		})
 
-	assert.Equal(t, strings.ReplaceAll(before, "replicas: 1", "replicas: 3"), d.Text())
+		cancel()
+
+		if err != nil {
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+			assert.Equal(t, before, d.Text())
+
+			continue
+		}
+
+		met++
+
+		assert.Equal(t, want, d.Text())
+	}
+
+	assert.Greater(t, met, turns/2)
 }
 
 func TestDoc_Apply_Queue_Scalars(t *testing.T) {
@@ -597,9 +660,12 @@ func TestDoc_Apply_Queue_Scalars(t *testing.T) {
 	// it. So the Apply takes a few times as long as an Apply of the Set of
 	// one scalar, which parses and checks the text as well. A Set whose
 	// cost grows with the number of the Sets that wait makes the Apply
-	// take dozens of times as long. The slower of two single Sets sets
-	// the bound, so that a load on the machine in one of them does not
-	// shrink it.
+	// take dozens of times as long. The test compares the median time of
+	// each Apply in three turns. Under the race detector, a turn on the
+	// mapping takes more than 10 seconds. So the test takes fewer turns
+	// than the cheaper tests of the queue.
+	const turns = 3
+
 	tcs := map[string]struct {
 		before string
 		path   string
@@ -631,18 +697,25 @@ func TestDoc_Apply_Queue_Scalars(t *testing.T) {
 			t.Parallel()
 
 			one := paths.MustParse(tc.one)
-			unit := max(setTime(t, tc.before, one, false), setTime(t, tc.before, one, false))
-			d := newDoc(t, tc.before)
+			path := paths.MustParse(tc.path)
 
-			start := time.Now()
-			err := d.Apply(t.Context(), paths.MustParse(tc.path), func(ctx context.Context, n *edit.Node) error {
-				return n.Set(ctx, 3)
+			unit, elapsed := turnTimes(turns, func() time.Duration {
+				return setTime(t, tc.before, one, false)
+			}, func() time.Duration {
+				d := timedDoc(t, tc.before)
+				start := time.Now()
+				err := d.Apply(t.Context(), path, func(ctx context.Context, n *edit.Node) error {
+					return n.Set(ctx, 3)
+				})
+				elapsed := time.Since(start)
+
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, d.Text())
+
+				return elapsed
 			})
-			elapsed := time.Since(start)
 
-			require.NoError(t, err)
 			assert.Less(t, elapsed, time.Duration(tc.bound)*unit)
-			assert.Equal(t, tc.want, d.Text())
 		})
 	}
 }
@@ -990,8 +1063,11 @@ func TestDoc_Apply_Queue_FirstProblem(t *testing.T) {
 	// Apply of the Set of $.k0 alone does the same parses and checks, so
 	// the Apply takes a few times as long. A run of each of the 800 Sets
 	// with a parse and a check of the text takes hundreds of times as
-	// long. The Apply of $.k0 runs before and after. The slower of the two
-	// sets the bound, so that the load on the machine scales it.
+	// long. The test compares the median time of each Apply in several
+	// turns. The Apply fails, so the Doc keeps its text, and each turn runs
+	// the Apply on the same Doc.
+	const turns = 5
+
 	before := "x: !!bool y\n" + keys(800)
 	path := paths.MustParse("$.*")
 	one := paths.MustParse("$.k0")
@@ -1000,20 +1076,28 @@ func TestDoc_Apply_Queue_FirstProblem(t *testing.T) {
 		return d.Apply(t.Context(), path, setKeys)
 	}
 
-	unit := setTime(t, before, one, true)
 	d := newDoc(t, before)
-	start := time.Now()
-	err := run(d)
-	elapsed := time.Since(start)
-	unit = max(unit, setTime(t, before, one, true))
 
-	require.Error(t, err)
-	assert.Contains(t, niceyaml.FormatError(err), stringtest.JoinLF(
-		`test.yaml:1:11: $.x: cannot convert "y" to boolean`,
-		"`-- the edit sets $.k0",
-	))
+	var err error
+
+	unit, elapsed := turnTimes(turns, func() time.Duration {
+		return setTime(t, before, one, true)
+	}, func() time.Duration {
+		start := time.Now()
+		err = run(d)
+		elapsed := time.Since(start)
+
+		require.Error(t, err)
+		assert.Contains(t, niceyaml.FormatError(err), stringtest.JoinLF(
+			`test.yaml:1:11: $.x: cannot convert "y" to boolean`,
+			"`-- the edit sets $.k0",
+		))
+		assert.Equal(t, before, d.Text())
+
+		return elapsed
+	})
+
 	assert.Less(t, elapsed, 50*unit)
-	assert.Equal(t, before, d.Text())
 
 	requireEachCall(t, d, err, before, nil, run)
 }
@@ -1026,29 +1110,38 @@ func TestDoc_Apply_Queue_ReplayDeadline(t *testing.T) {
 	// one at a time, each with a parse and a check of the text, which takes
 	// hundreds of times as long as an Apply of the Set of $.k0 alone. The
 	// Func cancels the context of the Apply at $.x, the last place, so the
-	// run of the Sets one at a time stops a Set after it starts. The Apply
-	// of $.k0 runs before and after, and the slower of the two bounds the
-	// time of the Apply.
+	// run of the Sets one at a time stops a Set after it starts. The test
+	// compares the median time of each Apply in several turns. The Apply
+	// fails, so the Doc keeps its text, and each turn runs the Apply on the
+	// same Doc.
+	const turns = 5
+
 	before := keys(800) + "x: !!bool y\n"
+	path := paths.MustParse("$.*")
 	one := paths.MustParse("$.k0")
-	unit := setTime(t, before, one, true)
 	d := newDoc(t, before)
 
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
+	unit, elapsed := turnTimes(turns, func() time.Duration {
+		return setTime(t, before, one, true)
+	}, func() time.Duration {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
 
-	start := time.Now()
-	err := d.Apply(ctx, paths.MustParse("$.*"), func(ctx context.Context, n *edit.Node) error {
-		if n.Key() == "x" {
-			cancel()
-		}
+		start := time.Now()
+		err := d.Apply(ctx, path, func(ctx context.Context, n *edit.Node) error {
+			if n.Key() == "x" {
+				cancel()
+			}
 
-		return setKeys(ctx, n)
+			return setKeys(ctx, n)
+		})
+		elapsed := time.Since(start)
+
+		require.ErrorIs(t, err, context.Canceled)
+		assert.Equal(t, before, d.Text())
+
+		return elapsed
 	})
-	elapsed := time.Since(start)
-	unit = max(unit, setTime(t, before, one, true))
 
-	require.ErrorIs(t, err, context.Canceled)
 	assert.Less(t, elapsed, 40*unit)
-	assert.Equal(t, before, d.Text())
 }
