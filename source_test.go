@@ -2315,6 +2315,30 @@ func TestSource_File_ErrSyntax(t *testing.T) {
 			input: stringtest.LinesLF("a: !t", "  - 1", "b: 1"),
 			want:  []bool{false},
 		},
+		// A flow collection holds no block sequence. The go-yaml parser
+		// reads the "-" as the start of one, and the Source refuses it.
+		"sequence entry in a flow sequence": {
+			input: "[- 1]\n",
+			want:  []bool{true},
+		},
+		"sequence entry in a flow mapping": {
+			input: "{a: - 1}\n",
+			want:  []bool{true},
+		},
+		"sequence entry in a flow sequence in the second document": {
+			input: stringtest.LinesLF("a: 1", "---", "b: [c, - d]", "---", "e: 3"),
+			want:  []bool{false, true, false},
+		},
+		// YAML folds the line into the explicit key, but the go-yaml parser
+		// reads the "-" as a sequence entry, and the Source refuses it.
+		"plain scalar on two lines of an explicit key in a flow mapping": {
+			input: stringtest.LinesLF("{? a", " - b}"),
+			want:  []bool{true},
+		},
+		"negative number in a flow sequence": {
+			input: "[-1]\n",
+			want:  []bool{false},
+		},
 		// The parser takes an alias with no anchor, and a decode rejects
 		// it.
 		"alias with no anchor": {

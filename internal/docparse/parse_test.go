@@ -251,8 +251,7 @@ func TestParse_TagSequence(t *testing.T) {
 			at:    new(position.New(0, 4)),
 			msg:   tagMsg,
 		},
-		// The run fails with its first error in file order, whether the
-		// parser or the check of the tag finds it.
+		// The run fails with its first error in file order.
 		"after an anchor above a tag": {
 			input: stringtest.LinesLF("a: &x - 1", "b: !t - 1"),
 			at:    new(position.New(0, 6)),
@@ -289,6 +288,211 @@ func TestParse_TagSequence(t *testing.T) {
 		},
 		"a negative number after a tag": {
 			input: "a: !t -1\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			r := docparse.Parse(tokens.Tokenize(tc.input))
+
+			if tc.at == nil {
+				require.Empty(t, r.Failures)
+
+				return
+			}
+
+			require.Len(t, r.Failures, 1)
+
+			var syntaxErr *yaml.SyntaxError
+
+			require.ErrorAs(t, r.Failures[0].Err, &syntaxErr)
+			assert.Equal(t, tc.msg, syntaxErr.Message)
+			require.NotNil(t, syntaxErr.Token)
+			assert.Equal(t, *tc.at, position.NewFromToken(syntaxErr.Token))
+		})
+	}
+}
+
+func TestParse_FlowSequence(t *testing.T) {
+	t.Parallel()
+
+	const (
+		flowMsg   = "sequence entries are not allowed in a flow collection"
+		anchorMsg = "sequence entries are not allowed after anchor on the same line"
+		tagMsg    = "sequence entries are not allowed after tag on the same line"
+		contMsg   = "a \"-\" that continues a plain scalar in a flow collection is not supported"
+	)
+
+	tcs := map[string]struct {
+		input string
+		// The line and column of the token that the failure binds at, or
+		// nil when the text parses.
+		at *position.Position
+		// The message of the failure, when the text does not parse.
+		msg string
+	}{
+		"in a flow sequence": {
+			input: "[- 1]\n",
+			at:    new(position.New(0, 1)),
+			msg:   flowMsg,
+		},
+		"in a flow mapping": {
+			input: "{a: - 1}\n",
+			at:    new(position.New(0, 4)),
+			msg:   flowMsg,
+		},
+		"after an entry of a flow sequence": {
+			input: "[a, - b]\n",
+			at:    new(position.New(0, 4)),
+			msg:   flowMsg,
+		},
+		"after a tab": {
+			input: "[-\t1]\n",
+			at:    new(position.New(0, 1)),
+			msg:   flowMsg,
+		},
+		"on a line below the start of a flow sequence": {
+			input: stringtest.LinesLF("[", "- 1]"),
+			at:    new(position.New(1, 0)),
+			msg:   flowMsg,
+		},
+		"before a nested flow sequence": {
+			input: "[- [1]]\n",
+			at:    new(position.New(0, 1)),
+			msg:   flowMsg,
+		},
+		"after a nested flow sequence": {
+			input: "{a: [1], b: - 2}\n",
+			at:    new(position.New(0, 12)),
+			msg:   flowMsg,
+		},
+		"in a flow sequence in a block sequence": {
+			input: "- [- 1]\n",
+			at:    new(position.New(0, 3)),
+			msg:   flowMsg,
+		},
+		"in a flow sequence on a value": {
+			input: stringtest.LinesLF("a: 1", "b: [- 1]"),
+			at:    new(position.New(1, 4)),
+			msg:   flowMsg,
+		},
+		// The parser refuses this "-" too, at the same token.
+		"after a key of a flow sequence": {
+			input: "[a: - 1]\n",
+			at:    new(position.New(0, 4)),
+			msg:   flowMsg,
+		},
+		// A "-" right after an anchor or a tag on its line keeps the
+		// message of the anchor or the tag.
+		"after an anchor in a flow sequence": {
+			input: "[&x - 1]\n",
+			at:    new(position.New(0, 4)),
+			msg:   anchorMsg,
+		},
+		"after an anchor in a flow mapping": {
+			input: "{a: &x - 1}\n",
+			at:    new(position.New(0, 7)),
+			msg:   anchorMsg,
+		},
+		"after an anchor after a tag in a flow sequence": {
+			input: "[!t &x - 1]\n",
+			at:    new(position.New(0, 7)),
+			msg:   anchorMsg,
+		},
+		"after a tag after an anchor in a flow sequence": {
+			input: "[&x !t - 1]\n",
+			at:    new(position.New(0, 7)),
+			msg:   tagMsg,
+		},
+		"on the line below an anchor in a flow sequence": {
+			input: stringtest.LinesLF("[&x", "- 1]"),
+			at:    new(position.New(1, 0)),
+			msg:   flowMsg,
+		},
+		// The run fails with its first error in file order.
+		"after an anchor above a flow sequence": {
+			input: stringtest.LinesLF("a: &x - 1", "b: [- 1]"),
+			at:    new(position.New(0, 6)),
+			msg:   anchorMsg,
+		},
+		"in a flow sequence above an anchor": {
+			input: stringtest.LinesLF("a: [- 1]", "b: &x - 1"),
+			at:    new(position.New(0, 4)),
+			msg:   flowMsg,
+		},
+		// The parser refuses the block mapping after the flow sequence ends.
+		"in a block mapping after a flow sequence": {
+			input: stringtest.LinesLF("a: [1, [2]]", "b: - 3"),
+			at:    new(position.New(1, 3)),
+			msg:   "block sequence entries are not allowed in this context",
+		},
+		// YAML folds a line that starts with a "-" into the plain scalar on
+		// the line above, but the parser refuses the "-". The run keeps the
+		// error of the parser.
+		"on the line below a value of a flow mapping": {
+			input: stringtest.LinesLF("{a: b", " - c}"),
+			at:    new(position.New(1, 1)),
+			msg:   "',' or '}' must be specified",
+		},
+		"on the line below a value of a flow sequence": {
+			input: stringtest.LinesLF("[a: b", " - c]"),
+			at:    new(position.New(1, 1)),
+			msg:   "non-map value is specified",
+		},
+		// The parser takes the "-" after an explicit key as a sequence
+		// entry, so the run fails at the "-".
+		"on the line below an explicit key of a flow sequence": {
+			input: stringtest.LinesLF("[? a", " - b]"),
+			at:    new(position.New(1, 1)),
+			msg:   contMsg,
+		},
+		"on the line below an explicit key of a flow mapping": {
+			input: stringtest.LinesLF("{? a", " - b}"),
+			at:    new(position.New(1, 1)),
+			msg:   contMsg,
+		},
+		"on the line below an explicit key after an entry of a flow mapping": {
+			input: stringtest.LinesLF("{a: b, ? c", " - d}"),
+			at:    new(position.New(1, 1)),
+			msg:   contMsg,
+		},
+		"on the line below an integer key of a flow sequence": {
+			input: stringtest.LinesLF("[? 1", " - 2]"),
+			at:    new(position.New(1, 1)),
+			msg:   contMsg,
+		},
+		"on the line below an explicit key in a block sequence": {
+			input: stringtest.LinesLF("- [? a", "   - b]"),
+			at:    new(position.New(1, 3)),
+			msg:   contMsg,
+		},
+		// A comment ends the plain scalar.
+		"on the line below a comment in a flow mapping": {
+			input: stringtest.LinesLF("{a: b # c", " - d}"),
+			at:    new(position.New(1, 1)),
+			msg:   flowMsg,
+		},
+		"on the line below an alias in a flow sequence": {
+			input: stringtest.LinesLF("[*x", " - 1]"),
+			at:    new(position.New(1, 1)),
+			msg:   flowMsg,
+		},
+		"a negative number": {
+			input: "[-1]\n",
+		},
+		"a plain scalar with a dash inside": {
+			input: "[a -b]\n",
+		},
+		"a key of a dash": {
+			input: "{-: 1}\n",
+		},
+		"a quoted dash": {
+			input: "[\"- 1\"]\n",
+		},
+		"a block sequence below a flow sequence": {
+			input: stringtest.LinesLF("a: [b]", "c:", "  - 1"),
 		},
 	}
 
@@ -394,6 +598,81 @@ func TestParse_PanicTagSequence(t *testing.T) {
 	assert.Equal(t, docparse.TagSequenceMessage, syntaxErr.Message)
 	require.NotNil(t, syntaxErr.Token)
 	assert.Equal(t, position.New(1, 6), position.NewFromToken(syntaxErr.Token))
+}
+
+func TestParse_PanicAnchorSequence(t *testing.T) {
+	t.Parallel()
+
+	// The go-yaml parser dereferences the position of this token, above
+	// the "-" after the anchor.
+	tks := tokens.Tokenize(stringtest.LinesLF("a: 1", "b: &x - 1"))
+	tks[2].Position = nil
+
+	r := docparse.Parse(tks)
+	require.Len(t, r.Failures, 1)
+
+	// The error of the anchor takes the place of the panic.
+	f := r.Failures[0]
+	assert.Nil(t, f.Panic)
+
+	// The Error method of the error panics on the token without a position,
+	// so the test reads the fields of the error alone.
+	var syntaxErr *yaml.SyntaxError
+
+	require.ErrorAs(t, f.Err, &syntaxErr)
+	assert.Equal(t, docparse.AnchorSequenceMessage, syntaxErr.Message)
+	require.NotNil(t, syntaxErr.Token)
+	assert.Equal(t, position.New(1, 6), position.NewFromToken(syntaxErr.Token))
+}
+
+func TestParse_PanicFlowSequence(t *testing.T) {
+	t.Parallel()
+
+	// The go-yaml parser dereferences the position of this token, above
+	// the "-" in the flow sequence.
+	tks := tokens.Tokenize(stringtest.LinesLF("a: 1", "b: [- 1]"))
+	tks[2].Position = nil
+
+	r := docparse.Parse(tks)
+	require.Len(t, r.Failures, 1)
+
+	// The error of the flow sequence takes the place of the panic.
+	f := r.Failures[0]
+	assert.Nil(t, f.Panic)
+
+	// The Error method of the error panics on the token without a position,
+	// so the test reads the fields of the error alone.
+	var syntaxErr *yaml.SyntaxError
+
+	require.ErrorAs(t, f.Err, &syntaxErr)
+	assert.Equal(t, docparse.FlowSequenceMessage, syntaxErr.Message)
+	require.NotNil(t, syntaxErr.Token)
+	assert.Equal(t, position.New(1, 4), position.NewFromToken(syntaxErr.Token))
+}
+
+func TestParse_PanicContinuation(t *testing.T) {
+	t.Parallel()
+
+	// The go-yaml parser dereferences the position of this token, above
+	// the "-" that continues the plain scalar of the explicit key.
+	tks := tokens.Tokenize(stringtest.LinesLF("a: 1", "b: {? a", " - b}"))
+	tks[2].Position = nil
+
+	r := docparse.Parse(tks)
+	require.Len(t, r.Failures, 1)
+
+	// The error of the continuation takes the place of the panic.
+	f := r.Failures[0]
+	assert.Nil(t, f.Panic)
+
+	// The Error method of the error panics on the token without a position,
+	// so the test reads the fields of the error alone.
+	var syntaxErr *yaml.SyntaxError
+
+	require.ErrorAs(t, f.Err, &syntaxErr)
+	assert.Equal(t, docparse.ContinuationMessage, syntaxErr.Message)
+	require.NotNil(t, syntaxErr.Token)
+	assert.Equal(t, position.New(2, 1), position.NewFromToken(syntaxErr.Token))
 }
 
 func TestFail(t *testing.T) {

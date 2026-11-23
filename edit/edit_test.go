@@ -877,6 +877,20 @@ func TestNew_Unparsed(t *testing.T) {
 			// Go-yaml's parser reads a as [1], and the Source refuses the text.
 			text: stringtest.LinesLF("a: !t - 1", "b: 1"),
 		},
+		"sequence entry in a flow sequence": {
+			// Go-yaml's parser reads the text as [[1]], and the Source refuses
+			// it.
+			text: "[- 1]\n",
+		},
+		"sequence entry in a flow mapping": {
+			// Go-yaml's parser reads a as [1], and the Source refuses the text.
+			text: "{a: - 1}\n",
+		},
+		"plain scalar on two lines of an explicit key": {
+			// YAML reads the key as "a - b", but go-yaml's parser reads it as
+			// a key a with the value [b]. The Source refuses the text.
+			text: stringtest.LinesLF("{? a", " - b}"),
+		},
 	}
 
 	for name, tc := range tcs {
@@ -5684,6 +5698,14 @@ func TestDoc_Apply_Fault(t *testing.T) {
 			},
 			sentinel: edit.ErrValue,
 			err:      `writes a "-" on the line of a tag at 1:7 of that YAML, which YAML does not allow`,
+		},
+		"marshaler YAML with a sequence entry in a flow collection": {
+			before: "a: 1\n",
+			call: func(ctx context.Context, root *edit.Node) error {
+				return root.At(a).Set(ctx, yamlMarshaler("x: [1, - 2]\n"))
+			},
+			sentinel: edit.ErrValue,
+			err:      `writes a "-" in a flow collection at 1:8 of that YAML, which YAML does not allow`,
 		},
 		"chain of 1,001 marshalers": {
 			before: "a: 1\n",

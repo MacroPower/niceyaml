@@ -223,9 +223,13 @@ var (
 	// of a Source that reads it returns the error of that document.
 	//
 	// ErrSyntax also indicates a "-" right after a tag on its line, as in
-	// "a: !t - 1". The parser takes that "-", but YAML refuses it, so the
-	// parse of a Source fails the document with a syntax error at the "-".
-	// That error matches ErrSyntax, as the errors of the parser do.
+	// "a: !t - 1", and a "-" that starts an entry inside a flow collection,
+	// as in "[- 1]". The parser takes either "-", but YAML refuses it, so
+	// the parse of a Source fails the document with a syntax error at the
+	// "-". That error matches ErrSyntax, as the errors of the parser do.
+	// So does the error of a "-" that continues a plain scalar after an
+	// explicit key in a flow collection, as in "{? A\n - B}". YAML allows
+	// that "-", but the parser reads it as a sequence entry.
 	//
 	// A document past the depth limit of [WithDepthLimit] or the byte limit
 	// of [WithDocumentByteLimit] does not parse either. Neither does the one
@@ -245,9 +249,12 @@ var (
 	//
 	// A panic in the parser does not match. The same calls return the panic
 	// as a [PanicError], bound at the first token with a position among the
-	// tokens the parser was reading. A document that holds a "-" right after
-	// a tag on its line is the exception. The calls return the syntax error
-	// of that "-" in place of the panic, and that error matches ErrSyntax.
+	// tokens the parser was reading. When a document holds a "-" right
+	// after an anchor or a tag on its line, the calls return the syntax
+	// error of that "-" in place of the panic. They do the same for a "-"
+	// that starts an entry inside a flow collection and for a "-" that
+	// continues a plain scalar after an explicit key there. That error
+	// matches ErrSyntax.
 	//
 	// [errors.Is] reports whether any problem of an error matches ErrSyntax,
 	// so an error that matches can hold a problem of another kind beside it. A

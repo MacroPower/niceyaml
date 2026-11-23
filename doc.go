@@ -188,6 +188,24 @@
 // refuses the one after an anchor. The document fails with a syntax error at
 // the "-", and a line break after the tag fixes it.
 //
+// A flow collection holds no block sequence, and YAML does not start a plain
+// scalar there with a "-" and a space. Go-yaml's parser takes such a "-" as
+// the start of a block sequence, so yaml.Unmarshal reads "[- 1]" as [[1]] and
+// "{a: - 1}" as {a: [1]}. The parse of a Source refuses that "-" too. The
+// document fails with a syntax error at the "-". The text "[[1]]" holds the
+// nested sequence that the parser reads from "[- 1]". A "-" right after an
+// anchor or a tag on its line inside a flow collection fails with the error
+// of the anchor or the tag, as in "[&x - 1]".
+//
+// Inside a flow collection, YAML folds a line that starts with a "-" into the
+// plain scalar on the line above. Go-yaml's parser refuses such a "-" after a
+// mapping value, as in "{a: b\n - c}", and the document fails with the error
+// of the parser. After an explicit key, the parser reads the "-" as a
+// sequence entry, so yaml.Unmarshal reads "{? A\n - B}" as {A: [B]} where
+// YAML holds {"A - B": null}. The parse of a Source refuses that "-" with a
+// syntax error at the "-". A quoted key, as in "{? 'A - B'}", holds the
+// same text on one line.
+//
 // A "---" header that directly follows an anchor without a value parses
 // together with the document above it. A syntax error in either document thus
 // fails both, and both return that one error. The two documents also share
@@ -2470,8 +2488,10 @@
 // path type when a caller needs it.
 //
 // The error for text that the go-yaml parser rejects matches [ErrSyntax]. So
-// does the error for a "-" right after a tag on its line, although the parser
-// takes that "-". The error for YAML that parsed but does not decode matches
+// do the errors for a "-" right after a tag on its line and for a "-" that
+// starts an entry inside a flow collection. So does the error for a "-" that
+// continues a plain scalar after an explicit key there. The parser takes each
+// such "-". The error for YAML that parsed but does not decode matches
 // [ErrDecode]. The errors for a value of the wrong kind, a number out of
 // range, and an unknown field each match a sentinel of their own beside
 // ErrDecode, as [ErrUnknownField] describes. A caller thus distinguishes

@@ -42,14 +42,19 @@ type Result struct {
 // Failure is a run of tokens that did not parse. The parser rejected the
 // run or panicked on it, or the run failed before the parser read it. A
 // run past a limit of [ParseLimits] fails that way, and so does the
-// stream of [Fail]. A run also fails when it holds a "-" right after a
-// tag on its line, which the parser takes.
+// stream of [Fail]. A run also fails when it holds a "-" right after an
+// anchor or a tag on its line, or a "-" that starts an entry inside a
+// flow collection. The parser refuses the "-" after an anchor, but it
+// takes the other two. A run with a "-" that continues a plain scalar in
+// a flow collection fails too, when the parser reads that "-" as a
+// sequence entry.
 type Failure struct {
 	// Err is the error of the run, or nil after a panic. It is the error
 	// that the parser returned, the [*SizeError] of a run past the byte
 	// limit, the [*DepthError] of a run past the depth limit, the
-	// [*yaml.SyntaxError] of a "-" right after a tag on its line, or the
-	// error that the caller handed [Fail].
+	// [*yaml.SyntaxError] of a "-" that [sequenceEntryError] returns, or
+	// the error that the caller handed [Fail]. The error of that "-" also
+	// takes the place of a panic.
 	Err error
 	// Panic is the value the parser panicked with, or nil.
 	Panic any
@@ -163,10 +168,16 @@ func parse(tks token.Tokens, limits Limits, mode parser.Mode, opts []parser.Opti
 		f, failure := parseRun(dropStrandedComments(run), mode, opts)
 
 		// The run fails with its first error in file order. The error of
-		// the parser thus wins only when it binds before the "-".
-		tagErr := tagSequenceError(run)
-		if tagErr != nil && !r.bindsBefore(failure, tagErr.Token) {
-			failure = &Failure{Err: tagErr}
+		// the parser thus wins when it binds before the "-". A "-" that
+		// continues a plain scalar is valid YAML, so any error of the
+		// parser wins over the error of that "-".
+		entryErr, continuation := sequenceEntryError(run)
+
+		switch {
+		case entryErr == nil, r.bindsBefore(failure, entryErr.Token):
+		case continuation && failure != nil && failure.Err != nil:
+		default:
+			failure = &Failure{Err: entryErr}
 		}
 
 		if failure == nil {
@@ -318,25 +329,123 @@ func parseRun(run token.Tokens, mode parser.Mode, opts []parser.Option) (*ast.Fi
 // right after a tag on its line, which fails the run of the "-".
 const TagSequenceMessage = "sequence entries are not allowed after tag on the same line"
 
-// tagSequenceError returns the syntax error of the first "-" of run that
-// directly follows a tag on its line, or nil. YAML puts a line break
-// between the properties of a block sequence and its first "-", and a "-"
-// does not start a node in a flow collection. The go-yaml parser refuses a
-// "-" right after an anchor on its line, as in "a: &x - 1". It takes one
-// right after a tag, and it reads "a: !t - 1" as {a: [1]}. So the run fails
-// with this error unless the parser refuses a token before the "-". The
-// error binds at the "-", and its message matches the message of the
-// anchor.
-func tagSequenceError(run token.Tokens) *yaml.SyntaxError {
-	for i := 1; i < len(run); i++ {
-		tk := run[i]
+// AnchorSequenceMessage is the message of the [*yaml.SyntaxError] of a
+// "-" right after an anchor on its line, which fails the run of the "-".
+// It matches the message of the go-yaml parser for that "-".
+const AnchorSequenceMessage = "sequence entries are not allowed after anchor on the same line"
 
-		if tk.Type == token.SequenceEntryType && run[i-1].Type == token.TagType && sameLine(run[i-1], tk) {
-			return &yaml.SyntaxError{Message: TagSequenceMessage, Token: tk}
+// FlowSequenceMessage is the message of the [*yaml.SyntaxError] of a "-"
+// that starts a sequence entry inside a flow collection, which fails the
+// run of the "-".
+const FlowSequenceMessage = "sequence entries are not allowed in a flow collection"
+
+// ContinuationMessage is the message of the [*yaml.SyntaxError] of a "-"
+// that continues a plain scalar on a new line inside a flow collection.
+// The run fails with it when the go-yaml parser reads that "-" as a
+// sequence entry. YAML allows the "-", so the error names a limit of the
+// parser.
+const ContinuationMessage = "a \"-\" that continues a plain scalar in a flow collection is not supported"
+
+// sequenceEntryError returns the syntax error of the first "-" of run that
+// the go-yaml parser can read as the start of a block sequence where YAML
+// does not hold one, or nil. It reports whether that "-" continues a plain
+// scalar.
+//
+// YAML puts a line break between the properties of a block sequence and
+// its first "-". The parser refuses a "-" right after an anchor on its
+// line, as in "a: &x - 1". It takes one right after a tag, and it reads
+// "a: !t - 1" as {a: [1]}. The error of the "-" after the tag has
+// [TagSequenceMessage]. The error of the "-" after the anchor has
+// [AnchorSequenceMessage], the message of the parser.
+//
+// A flow collection does not hold a block sequence, and a plain scalar
+// does not start with a "-" that a space follows. The parser reads
+// "[- 1]" as [[1]] and "{a: - 1}" as {a: [1]}. The error of that "-" has
+// [FlowSequenceMessage]. A "-" right after an anchor or a tag on its line
+// inside a flow collection keeps the message of the anchor or the tag. So
+// "[&x - 1]" fails as the parser fails it.
+//
+// YAML allows a "-" that starts a line right below a plain scalar in a
+// flow collection, because the "-" continues that scalar. The go-yaml
+// lexer splits the "-" out of the scalar after a mapping value or an
+// explicit key, as [continuesPlain] tells. The parser refuses the "-"
+// after a mapping value, as in "{a: b\n - c}". It takes the "-" after an
+// explicit key, and it reads "{? A\n - B}" as {A: [B]}, where YAML holds
+// {"A - B": null}. The error of such a "-" has [ContinuationMessage], and
+// the run takes the error of the parser in its place when the parser
+// refuses the run.
+//
+// The run fails with this error unless the parser refuses a token before
+// the "-". The error binds at the "-".
+func sequenceEntryError(run token.Tokens) (*yaml.SyntaxError, bool) {
+	// The number of flow collections open at the token.
+	depth := 0
+
+	for i, tk := range run {
+		switch tk.Type {
+		case token.SequenceStartType, token.MappingStartType:
+			depth++
+
+		case token.SequenceEndType, token.MappingEndType:
+			depth--
+
+		case token.SequenceEntryType:
+			if i > 0 && run[i-1].Type == token.TagType && sameLine(run[i-1], tk) {
+				return &yaml.SyntaxError{Message: TagSequenceMessage, Token: tk}, false
+			}
+
+			// The name of the anchor sits between the "&" and the "-".
+			if i > 1 && run[i-2].Type == token.AnchorType && sameLine(run[i-2], tk) {
+				return &yaml.SyntaxError{Message: AnchorSequenceMessage, Token: tk}, false
+			}
+
+			if depth > 0 && continuesPlain(run, i) {
+				return &yaml.SyntaxError{Message: ContinuationMessage, Token: tk}, true
+			}
+
+			if depth > 0 {
+				return &yaml.SyntaxError{Message: FlowSequenceMessage, Token: tk}, false
+			}
+
+		default:
 		}
 	}
 
-	return nil
+	return nil, false
+}
+
+// continuesPlain reports whether the "-" at run[i] starts a line that
+// continues a plain scalar on an earlier line. In a flow collection, YAML
+// folds such a line into the scalar, and a space joins the "-" to the
+// text of the line above. The go-yaml lexer folds the line into the
+// scalar after a flow sequence entry, as in "[a\n - 1]", so the run does
+// not hold a "-" token there. It splits the "-" out of the scalar after a mapping
+// value or an explicit key.
+func continuesPlain(run token.Tokens, i int) bool {
+	if i == 0 {
+		return false
+	}
+
+	prev := run[i-1]
+	if !plainScalar(prev.Type) || prev.Position == nil || run[i].Position == nil ||
+		prev.Position.Line >= run[i].Position.Line {
+		return false
+	}
+
+	// The name of an anchor or an alias is not a plain scalar.
+	return i == 1 || run[i-2].Type != token.AnchorType && run[i-2].Type != token.AliasType
+}
+
+// plainScalar reports whether t is the type of a token of a plain scalar.
+func plainScalar(t token.Type) bool {
+	switch t {
+	case token.StringType, token.NullType, token.BoolType, token.IntegerType,
+		token.BinaryIntegerType, token.OctetIntegerType, token.HexIntegerType,
+		token.FloatType, token.InfinityType, token.NanType:
+		return true
+	default:
+		return false
+	}
 }
 
 // isDocumentGroup reports whether group, a token group of [SplitGroups],

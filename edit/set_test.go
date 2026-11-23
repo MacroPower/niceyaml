@@ -770,6 +770,65 @@ func TestNode_Set(t *testing.T) {
 			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 cannot write the value of $.b: the MarshalYAML method of " +
 				`edit_test.yamlMarshaler writes a "-" on the line of a tag at 3:7 of that YAML, which YAML does not allow`,
 		},
+		"YAML marshaler that writes a sequence entry in a flow collection": {
+			// Go-yaml's parser takes the text, but YAML does not allow it, so
+			// the problem is the marshaler's.
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("b"),
+			value:  yamlMarshaler("{x: - 1}\n"),
+			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 cannot write the value of $.b: the MarshalYAML method of " +
+				`edit_test.yamlMarshaler writes a "-" in a flow collection at 1:5 of that YAML, which YAML does not allow`,
+		},
+		"YAML marshaler that writes a sequence entry after a key in a flow sequence": {
+			// Go-yaml's parser refuses the "-", and so does the finder. YAML
+			// does not allow it, so the problem is the marshaler's.
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("b"),
+			value:  yamlMarshaler("[x: - 1]\n"),
+			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 cannot write the value of $.b: the MarshalYAML method of " +
+				`edit_test.yamlMarshaler writes a "-" in a flow collection at 1:5 of that YAML, which YAML does not allow`,
+		},
+		"YAML marshaler that writes a sequence entry after an anchor in a flow sequence": {
+			// Go-yaml's parser refuses the "-", and so does the finder. YAML
+			// does not allow it, so the problem is the marshaler's.
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("b"),
+			value:  yamlMarshaler("[&x - 1]\n"),
+			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 cannot write the value of $.b: the MarshalYAML method of " +
+				`edit_test.yamlMarshaler writes a "-" on the line of an anchor at 1:5 of that YAML, which YAML does not allow`,
+		},
+		"YAML marshaler that writes a sequence entry on the line of an anchor": {
+			// Go-yaml's parser refuses the "-", and so does the finder. YAML
+			// does not allow it, so the problem is the marshaler's.
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("b"),
+			value:  yamlMarshaler("a: &x - 1\n"),
+			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 cannot write the value of $.b: the MarshalYAML method of " +
+				`edit_test.yamlMarshaler writes a "-" on the line of an anchor at 1:7 of that YAML, which YAML does not allow`,
+		},
+		"YAML marshaler that writes a plain scalar on two lines of a flow mapping": {
+			// Control: YAML folds the line that starts with the "-" into the
+			// scalar above it, but go-yaml's parser refuses the "-". So the
+			// refusal is go-yaml's.
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("b"),
+			value:  yamlMarshaler(stringtest.LinesLF("{x: y", " - z}")),
+			err: "2:4: $.b: go-yaml's parser refuses the YAML that the MarshalYAML method of " +
+				"edit_test.yamlMarshaler writes: ',' or '}' must be specified at 2:2 of that YAML",
+			engine: true,
+		},
+		"YAML marshaler that writes a plain scalar on two lines of an explicit key": {
+			// Control: YAML folds the line that starts with the "-" into the
+			// key above it, but go-yaml's parser reads the "-" as a sequence
+			// entry. So the misread is go-yaml's.
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("b"),
+			value:  yamlMarshaler(stringtest.LinesLF("{? x", " - y}")),
+			err: "2:4: $.b: go-yaml's parser misreads the YAML that the MarshalYAML method of " +
+				`edit_test.yamlMarshaler writes: a "-" that continues a plain scalar in a flow collection ` +
+				"is not supported at 2:2 of that YAML",
+			engine: true,
+		},
 		"YAML marshaler that writes a float key and a string key of one text": {
 			// Control: go-yaml's decoder reads the keys apart, but its parser
 			// compares them by their text.
