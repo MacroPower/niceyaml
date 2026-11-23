@@ -779,6 +779,27 @@ func TestNode_Set(t *testing.T) {
 			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 cannot write the value of $.b: the MarshalYAML method of " +
 				`edit_test.yamlMarshaler writes a "-" in a flow collection at 1:5 of that YAML, which YAML does not allow`,
 		},
+		"YAML marshaler that writes a dash before a flow indicator": {
+			// Go-yaml's parser reads the string "-", but YAML does not allow
+			// the text, so the problem is the marshaler's.
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("b"),
+			value:  yamlMarshaler("{x: [1, -]}\n"),
+			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 cannot write the value of $.b: the MarshalYAML method of " +
+				`edit_test.yamlMarshaler writes a "-" before a flow indicator at 1:9 of that YAML, which YAML does not allow`,
+		},
+		"YAML marshaler that writes a dash before a flow indicator below an explicit key": {
+			// Control: YAML folds the line that starts with the "-" into the
+			// key above it, but go-yaml's parser reads the "-" as the value of
+			// the key. So the misread is go-yaml's.
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("b"),
+			value:  yamlMarshaler(stringtest.LinesLF("{? x", " -}")),
+			err: "2:4: $.b: go-yaml's parser misreads the YAML that the MarshalYAML method of " +
+				`edit_test.yamlMarshaler writes: a "-" that continues a plain scalar in a flow collection ` +
+				"is not supported at 2:2 of that YAML",
+			engine: true,
+		},
 		"YAML marshaler that writes a sequence entry after a key in a flow sequence": {
 			// Go-yaml's parser refuses the "-", and so does the finder. YAML
 			// does not allow it, so the problem is the marshaler's.

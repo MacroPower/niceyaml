@@ -599,15 +599,15 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 			),
 		},
 		"a plain scalar that a block line reads another way takes quotes": {
-			layers: []string{stringtest.LinesLF("a: [-, ?, a b, -x]", "b: {k: -}")},
+			// The plain key "-" takes quotes on a block line.
+			layers: []string{stringtest.LinesLF("a: [?, a b, -x]", "b: {-: k}")},
 			want: stringtest.LinesLF(
 				"a:",
-				`  - "-"`,
 				`  - "?"`,
 				"  - a b",
 				"  - -x",
 				"b:",
-				`  k: "-"`,
+				`  "-": k`,
 			),
 		},
 		"a tag stays on its value": {
@@ -7564,7 +7564,7 @@ var (
 				"  b,",
 				"  c]",
 				"set: {a, b}",
-				`odd: [-, ?, a b, "x, y"]`,
+				`odd: ["-", ?, a b, "x, y"]`,
 				"pair: [a: 1]",
 			),
 		},

@@ -2339,6 +2339,29 @@ func TestSource_File_ErrSyntax(t *testing.T) {
 			input: "[-1]\n",
 			want:  []bool{false},
 		},
+		// YAML does not start a plain scalar with a "-" right before a flow
+		// indicator. The go-yaml parser reads the string "-", and the Source
+		// refuses it.
+		"dash before the end of a flow sequence": {
+			input: "[-]\n",
+			want:  []bool{true},
+		},
+		"dash before an entry of a flow sequence": {
+			input: "[-, 1]\n",
+			want:  []bool{true},
+		},
+		"dash before the end of a flow mapping": {
+			input: "{a: -}\n",
+			want:  []bool{true},
+		},
+		"dash before a flow indicator in the second document": {
+			input: stringtest.LinesLF("a: 1", "---", "b: [c, -]", "---", "e: 3"),
+			want:  []bool{false, true, false},
+		},
+		"key of a dash in a flow mapping": {
+			input: "{-: 1}\n",
+			want:  []bool{false},
+		},
 		// The parser takes an alias with no anchor, and a decode rejects
 		// it.
 		"alias with no anchor": {

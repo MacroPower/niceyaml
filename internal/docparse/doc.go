@@ -5,9 +5,10 @@
 // It rejects a comment on a line of its own in several places. One bad
 // document also costs it the whole stream. It also takes a "-" on the
 // line of a tag, as in "a: !t - 1", and a "-" that starts an entry inside
-// a flow collection, as in "[- 1]". YAML refuses both. It reads a "-"
-// that continues a plain scalar on a new line after an explicit key in a
-// flow collection, as in "{? A\n - B}", as a sequence entry as well.
+// a flow collection, as in "[- 1]". It reads a "-" right before a flow
+// indicator as a plain scalar, as in "[-]". YAML refuses each of them. It
+// also misreads a "-" that continues a plain scalar on a new line after
+// an explicit key in a flow collection, as in "{? A\n - B}".
 //
 // [Parse] avoids each of these faults. It cuts the stream into runs that
 // each parse on their own, and drops the comments that make the parser

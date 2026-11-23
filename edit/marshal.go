@@ -82,11 +82,12 @@ func refusal(err error, text string) string {
 // comments. Text of more than one document is the problem of the
 // marshaler, because a value is one node, and the problem names it. So
 // are a mapping that repeats a key, a "-" right after an anchor or a tag
-// on its line, and a "-" that starts an entry inside a flow collection,
-// because YAML does not allow any of them. Each other problem is
-// go-yaml's, and it matches errEncoder. One of them is a "-" that
-// continues a plain scalar in a flow collection, which the parser reads
-// as a sequence entry. Go-yaml's encoder
+// on its line, a "-" that starts an entry inside a flow collection, and a
+// plain scalar there that starts with a "-" right before a flow
+// indicator, because YAML does not allow any of them. Each other problem
+// is go-yaml's, and it matches errEncoder. One of them is a "-" that
+// continues a plain scalar in a flow collection, which the parser
+// misreads. Go-yaml's encoder
 // writes a directive alone for text with one before its value, as
 // [directiveProblem] tells. Go-yaml's parser can refuse the text, with its
 // comments or without them, or panic on it. The text can hold no value, as
@@ -111,10 +112,10 @@ func marshaledYAML(v reflect.Value, method string, doc []byte, err error) ([]ins
 		// YAML does not allow a mapping that repeats a key, so a refusal of
 		// such a text is the problem of the marshaler. The finder takes a
 		// repeated key but refuses a "-" right after an anchor or a tag on
-		// its line and a "-" that starts an entry inside a flow collection.
+		// its line and a "-" inside a flow collection that YAML refuses.
 		// Those refusals are also the problem of the marshaler.
 		enc, derr := encodedDoc(string(doc))
-		problem := sequenceEntryProblem(derr, who)
+		problem := dashProblem(derr, who)
 		if problem != nil {
 			return nil, problem
 		}
@@ -160,7 +161,7 @@ func marshaledYAML(v reflect.Value, method string, doc []byte, err error) ([]ins
 	// name the places of the text of the marshaler.
 	enc, err := encodedDoc(string(doc))
 	if err != nil {
-		problem := sequenceEntryProblem(err, who)
+		problem := dashProblem(err, who)
 		if problem != nil {
 			return nil, problem
 		}
@@ -184,13 +185,15 @@ func marshaledYAML(v reflect.Value, method string, doc []byte, err error) ([]ins
 	return enc.valueInstances(fmt.Sprintf("%T", v.Interface())), nil
 }
 
-// sequenceEntryProblem returns the problem of the marshaler that who
-// names when err is the refusal of the finder of a "-" in the YAML of the
-// marshaler, or nil otherwise. The finder refuses a "-" right after an
-// anchor or a tag on its line and a "-" that starts an entry inside a flow
-// collection. YAML does not allow any of them, so the refusal is the
-// problem of the marshaler, also where go-yaml's parser refuses the "-".
-func sequenceEntryProblem(err error, who string) error {
+// dashProblem returns the problem of the marshaler that who names when
+// err is the refusal of the finder of a "-" in the YAML of the marshaler,
+// or nil otherwise. The finder refuses a "-" right after an anchor or a
+// tag on its line and a "-" that starts an entry inside a flow
+// collection. It also refuses a plain scalar there that starts with a "-"
+// right before a flow indicator. YAML does not allow any of them, so the
+// refusal is the problem of the marshaler, also where go-yaml's parser
+// refuses the "-".
+func dashProblem(err error, who string) error {
 	syntax, ok := errors.AsType[*yaml.SyntaxError](err)
 	if !ok || syntax.Token == nil || syntax.Token.Position == nil {
 		return nil
@@ -205,6 +208,8 @@ func sequenceEntryProblem(err error, who string) error {
 		where = "on the line of a tag"
 	case docparse.FlowSequenceMessage:
 		where = "in a flow collection"
+	case docparse.FlowIndicatorMessage:
+		where = "before a flow indicator"
 	default:
 		return nil
 	}

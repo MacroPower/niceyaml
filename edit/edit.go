@@ -140,9 +140,10 @@ var (
 	// with a value that holds itself or that holds two keys that a decode
 	// reads as one. So does YAML of a marshaler that holds more than one
 	// document, that repeats a key, or that holds a "-" right after an
-	// anchor or a tag on its line or one that starts an entry inside a flow
-	// collection, and a chain of more than 1,000 marshalers. It fails so
-	// with a value that holds a string that is not UTF-8, as a value or as
+	// anchor or a tag on its line, a "-" that starts an entry inside a flow
+	// collection, or a "-" there right before a flow indicator, as in "[-]".
+	// So does a chain of more than 1,000 marshalers. It fails so with a
+	// value that holds a string that is not UTF-8, as a value or as
 	// a key, and that error also matches
 	// [go.jacobcolvin.com/niceyaml/encoder.ErrEncode]. The error binds at
 	// the place of the call. The program wrote the value, so

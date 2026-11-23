@@ -323,6 +323,7 @@ func TestParse_FlowSequence(t *testing.T) {
 		anchorMsg = "sequence entries are not allowed after anchor on the same line"
 		tagMsg    = "sequence entries are not allowed after tag on the same line"
 		contMsg   = "a \"-\" that continues a plain scalar in a flow collection is not supported"
+		indMsg    = "a plain scalar cannot start with a \"-\" before a flow indicator"
 	)
 
 	tcs := map[string]struct {
@@ -479,8 +480,104 @@ func TestParse_FlowSequence(t *testing.T) {
 			at:    new(position.New(1, 1)),
 			msg:   flowMsg,
 		},
+		// The lexer reads a "-" right before a flow indicator as a plain
+		// scalar, which YAML refuses.
+		"before the end of a flow sequence": {
+			input: "[-]\n",
+			at:    new(position.New(0, 1)),
+			msg:   indMsg,
+		},
+		"before an entry of a flow sequence": {
+			input: "[-, 1]\n",
+			at:    new(position.New(0, 1)),
+			msg:   indMsg,
+		},
+		"after an entry of a flow sequence before its end": {
+			input: "[a, -]\n",
+			at:    new(position.New(0, 4)),
+			msg:   indMsg,
+		},
+		"before the end of a flow mapping": {
+			input: "{a: -}\n",
+			at:    new(position.New(0, 4)),
+			msg:   indMsg,
+		},
+		"before an entry of a flow mapping": {
+			input: "{a: -, b: 1}\n",
+			at:    new(position.New(0, 4)),
+			msg:   indMsg,
+		},
+		"as a key before the end of a flow mapping": {
+			input: "{-}\n",
+			at:    new(position.New(0, 1)),
+			msg:   indMsg,
+		},
+		"before the end of a nested flow sequence": {
+			input: "[[-]]\n",
+			at:    new(position.New(0, 2)),
+			msg:   indMsg,
+		},
+		"on a line below the start of a flow sequence before its end": {
+			input: stringtest.LinesLF("[a,", "-]"),
+			at:    new(position.New(1, 0)),
+			msg:   indMsg,
+		},
+		"before a flow indicator after a tag": {
+			input: "[!t -]\n",
+			at:    new(position.New(0, 4)),
+			msg:   indMsg,
+		},
+		"before a flow indicator after an anchor": {
+			input: "[&x -]\n",
+			at:    new(position.New(0, 4)),
+			msg:   indMsg,
+		},
+		// The parser refuses the "[" after the "-", but the "-" comes first.
+		"before the start of a nested flow sequence": {
+			input: "[-[]]\n",
+			at:    new(position.New(0, 1)),
+			msg:   indMsg,
+		},
+		"before a flow indicator above a sequence entry": {
+			input: stringtest.LinesLF("a: [-]", "b: [- 1]"),
+			at:    new(position.New(0, 4)),
+			msg:   indMsg,
+		},
+		// YAML folds the "-" into the plain scalar on the line above. The
+		// parser refuses it after a mapping value, and the run keeps the
+		// error of the parser. After an explicit key, the parser reads the
+		// "-" as the value of the key, so the run fails at the "-".
+		"before a flow indicator on the line below a value of a flow mapping": {
+			input: stringtest.LinesLF("{a: b", " -}"),
+			at:    new(position.New(1, 1)),
+			msg:   "',' or '}' must be specified",
+		},
+		"before a flow indicator on the line below an explicit key": {
+			input: stringtest.LinesLF("{? a", " -}"),
+			at:    new(position.New(1, 1)),
+			msg:   contMsg,
+		},
 		"a negative number": {
 			input: "[-1]\n",
+		},
+		"a plain scalar of two dashes": {
+			input: "[--]\n",
+		},
+		"a key of a dash in a flow sequence": {
+			input: "[-: 1]\n",
+		},
+		"an alias of the anchor named dash": {
+			input: "[*-]\n",
+		},
+		// The "-" names the anchor, so the run keeps the error of the
+		// parser.
+		"an anchor named dash before a flow indicator": {
+			input: "[&-, 1]\n",
+			at:    new(position.New(0, 3)),
+			msg:   "unexpected scalar value type",
+		},
+		"a quoted dash before a flow indicator": {
+			input: "[\"-\", '-']\n",
 		},
 		"a plain scalar with a dash inside": {
 			input: "[a -b]\n",

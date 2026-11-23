@@ -230,8 +230,9 @@ func (n *Node) DocumentAST() *ast.DocumentNode {
 // document that parsed and for a nil Node. The error matches [ErrSyntax] for
 // text that the parser rejects. It matches ErrSyntax as well for a "-" right
 // after a tag on its line, for a "-" that starts an entry inside a flow
-// collection, and for a "-" that continues a plain scalar after an explicit
-// key there, as ErrSyntax describes. It matches [ErrLimit] for
+// collection, for a "-" there right before a flow indicator, and for a "-"
+// that continues a plain scalar after an explicit key there, as ErrSyntax
+// describes. It matches [ErrLimit] for
 // a document past the depth limit or the document byte limit, and for a text
 // past the byte limit of the Source. It matches [ErrEncoding] for the one
 // document of a text that is not UTF-8. A syntax error fails the one

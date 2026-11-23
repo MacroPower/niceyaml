@@ -615,13 +615,14 @@
 // with [ErrEngine] where the engine cannot write go-yaml's reading back. A
 // text that the Source does not parse fails New with the error of the
 // parse. Such texts include one that go-yaml's parser refuses. They also
-// include one with a "-" on the line of a tag, as in "a: !t - 1", and one
-// with a "-" that starts an entry inside a flow collection, as in "[- 1]".
-// YAML refuses either "-", but the parser takes it. They also include one
-// with a "-" that continues a plain scalar after an explicit key in a flow
-// collection, as in "{? A\n - B}", which the parser reads as a sequence
-// entry. A reference document of
-// [go.jacobcolvin.com/niceyaml.WithReferences] that does not parse fails
+// include one with a "-" on the line of a tag, as in "a: !t - 1", one
+// with a "-" that starts an entry inside a flow collection, as in "[- 1]",
+// and one with a "-" there right before a flow indicator, as in "[-]".
+// YAML refuses each such "-", but the parser takes it. They also include
+// one with a "-" that continues a plain scalar after an explicit key in a
+// flow collection, as in "{? A\n - B}", which the parser misreads. A
+// reference document of [go.jacobcolvin.com/niceyaml.WithReferences] that
+// does not parse fails
 // New the same way, because each decode of the document fails with that
 // error. A reference document
 // in which go-yaml's parser nests a line deeper than YAML reads it, as in

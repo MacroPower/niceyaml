@@ -44,15 +44,16 @@ type Result struct {
 // run past a limit of [ParseLimits] fails that way, and so does the
 // stream of [Fail]. A run also fails when it holds a "-" right after an
 // anchor or a tag on its line, or a "-" that starts an entry inside a
-// flow collection. The parser refuses the "-" after an anchor, but it
-// takes the other two. A run with a "-" that continues a plain scalar in
-// a flow collection fails too, when the parser reads that "-" as a
-// sequence entry.
+// flow collection. It fails as well when a plain scalar inside a flow
+// collection starts with a "-" right before a flow indicator, as in
+// "[-]". The parser refuses the "-" after an anchor, but it takes the
+// others. A run with a "-" that continues a plain scalar in a flow
+// collection fails too, when the parser misreads that "-".
 type Failure struct {
 	// Err is the error of the run, or nil after a panic. It is the error
 	// that the parser returned, the [*SizeError] of a run past the byte
 	// limit, the [*DepthError] of a run past the depth limit, the
-	// [*yaml.SyntaxError] of a "-" that [sequenceEntryError] returns, or
+	// [*yaml.SyntaxError] of a "-" that [dashError] returns, or
 	// the error that the caller handed [Fail]. The error of that "-" also
 	// takes the place of a panic.
 	Err error
@@ -171,7 +172,7 @@ func parse(tks token.Tokens, limits Limits, mode parser.Mode, opts []parser.Opti
 		// the parser thus wins when it binds before the "-". A "-" that
 		// continues a plain scalar is valid YAML, so any error of the
 		// parser wins over the error of that "-".
-		entryErr, continuation := sequenceEntryError(run)
+		entryErr, continuation := dashError(run)
 
 		switch {
 		case entryErr == nil, r.bindsBefore(failure, entryErr.Token):
@@ -339,17 +340,22 @@ const AnchorSequenceMessage = "sequence entries are not allowed after anchor on 
 // run of the "-".
 const FlowSequenceMessage = "sequence entries are not allowed in a flow collection"
 
+// FlowIndicatorMessage is the message of the [*yaml.SyntaxError] of a
+// plain scalar that starts with a "-" right before a flow indicator, as
+// in "[-]", which fails the run of the "-".
+const FlowIndicatorMessage = "a plain scalar cannot start with a \"-\" before a flow indicator"
+
 // ContinuationMessage is the message of the [*yaml.SyntaxError] of a "-"
 // that continues a plain scalar on a new line inside a flow collection.
-// The run fails with it when the go-yaml parser reads that "-" as a
-// sequence entry. YAML allows the "-", so the error names a limit of the
-// parser.
+// The run fails with it when the go-yaml parser takes the run and misreads
+// that "-". YAML allows the "-", so the error names a limit of the parser.
 const ContinuationMessage = "a \"-\" that continues a plain scalar in a flow collection is not supported"
 
-// sequenceEntryError returns the syntax error of the first "-" of run that
-// the go-yaml parser can read as the start of a block sequence where YAML
-// does not hold one, or nil. It reports whether that "-" continues a plain
-// scalar.
+// dashError returns the syntax error of the first "-" of run that the
+// go-yaml parser can misread, or nil. Such a "-" starts a block sequence
+// where YAML does not hold one, starts a plain scalar that YAML refuses,
+// or continues a plain scalar. It reports whether that "-" continues a
+// plain scalar.
 //
 // YAML puts a line break between the properties of a block sequence and
 // its first "-". The parser refuses a "-" right after an anchor on its
@@ -365,19 +371,29 @@ const ContinuationMessage = "a \"-\" that continues a plain scalar in a flow col
 // inside a flow collection keeps the message of the anchor or the tag. So
 // "[&x - 1]" fails as the parser fails it.
 //
+// Inside a flow collection, a plain scalar starts with a "-" only when a
+// character other than a space, a line break, or a flow indicator follows
+// the "-". The go-yaml lexer reads a "-" right before a ",", a "]", or a
+// "}" as a plain scalar, so the parser reads "[-]" as ["-"] and "{a: -}"
+// as {a: "-"}. The error of that "-" has [FlowIndicatorMessage], also
+// after a tag. A "-" right before a ":" starts a plain scalar, so "{-: 1}"
+// holds the key "-". The name "-" of an anchor or an alias is not a plain
+// scalar.
+//
 // YAML allows a "-" that starts a line right below a plain scalar in a
 // flow collection, because the "-" continues that scalar. The go-yaml
 // lexer splits the "-" out of the scalar after a mapping value or an
 // explicit key, as [continuesPlain] tells. The parser refuses the "-"
 // after a mapping value, as in "{a: b\n - c}". It takes the "-" after an
 // explicit key, and it reads "{? A\n - B}" as {A: [B]}, where YAML holds
-// {"A - B": null}. The error of such a "-" has [ContinuationMessage], and
+// {"A - B": null}. It reads "{? A\n -}" as {A: "-"}, where YAML holds
+// {"A -": null}. The error of such a "-" has [ContinuationMessage], and
 // the run takes the error of the parser in its place when the parser
 // refuses the run.
 //
 // The run fails with this error unless the parser refuses a token before
 // the "-". The error binds at the "-".
-func sequenceEntryError(run token.Tokens) (*yaml.SyntaxError, bool) {
+func dashError(run token.Tokens) (*yaml.SyntaxError, bool) {
 	// The number of flow collections open at the token.
 	depth := 0
 
@@ -407,11 +423,36 @@ func sequenceEntryError(run token.Tokens) (*yaml.SyntaxError, bool) {
 				return &yaml.SyntaxError{Message: FlowSequenceMessage, Token: tk}, false
 			}
 
+		case token.StringType:
+			if depth == 0 || tk.Value != "-" || !beforeFlowIndicator(run, i) {
+				continue
+			}
+
+			// The "-" is the name of the anchor or the alias.
+			if i > 0 && (run[i-1].Type == token.AnchorType || run[i-1].Type == token.AliasType) {
+				continue
+			}
+
+			if continuesPlain(run, i) {
+				return &yaml.SyntaxError{Message: ContinuationMessage, Token: tk}, true
+			}
+
+			return &yaml.SyntaxError{Message: FlowIndicatorMessage, Token: tk}, false
+
 		default:
 		}
 	}
 
 	return nil, false
+}
+
+// beforeFlowIndicator reports whether a flow indicator follows the plain
+// scalar "-" at run[i] inside a flow collection. The go-yaml lexer ends
+// that scalar only at a flow indicator or at a ":" right after the "-".
+// It gives a "-" that a space, a line break, or the end of the text
+// follows a token of the sequence entry type.
+func beforeFlowIndicator(run token.Tokens, i int) bool {
+	return i+1 >= len(run) || run[i+1].Type != token.MappingValueType
 }
 
 // continuesPlain reports whether the "-" at run[i] starts a line that

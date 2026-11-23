@@ -333,15 +333,16 @@ type payload struct {
 // node, so text of more than one document fails the Set. So does a mapping
 // that repeats a key, as go-yaml's decoder reads each key. So do a "-"
 // right after an anchor or a tag on its line and a "-" that starts an
-// entry inside a flow collection, because YAML does not allow any of them.
+// entry inside a flow collection. So does a "-" there right before a flow
+// indicator, as in "[-]", because YAML does not allow any of them.
 // The problem names the path of the Set and the marshaler, and it matches
 // ErrValue.
 // Every other problem of the text is go-yaml's, and it fails the Set with
 // ErrEngine at its place. Go-yaml's parser can refuse the text, with its
 // comments or without them. It refuses some text that YAML allows, such as
-// an anchor without a value at the end of the text. It also reads a "-"
-// that continues a plain scalar after an explicit key in a flow collection
-// as a sequence entry, as in "{? X\n - Y}". The encoder reads no
+// an anchor without a value at the end of the text. It also misreads a
+// "-" that continues a plain scalar after an explicit key in a flow
+// collection, as in "{? X\n - Y}". The encoder reads no
 // value from text that holds a tag or a comment alone. Go-yaml also reads
 // a byte order mark at the start of the text, or after its comment lines,
 // as text of the value, which YAML drops. Go-yaml's encoder writes only the
