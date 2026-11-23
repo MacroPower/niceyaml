@@ -588,6 +588,16 @@ func TestNew_GoYAMLReading(t *testing.T) {
 			// does not find the anchor x.
 			text: stringtest.LinesLF("a: &x\t1", "b: *x"),
 		},
+		"dash that continues a plain value of a flow mapping": {
+			// Go-yaml's lexer cuts the line out of the value, and its parser
+			// refuses the "-".
+			text: stringtest.LinesLF("a: {b: c", "  - d}", "e: 1"),
+		},
+		"dash that continues a plain value right of its key": {
+			// Go-yaml's lexer reads the "-" and the rest of the text into the
+			// value, so it does not find the end of the flow mapping.
+			text: stringtest.LinesLF("a: {b: c", "     - d}", "e: 1"),
+		},
 		"block scalar header after a tab after a tag": {
 			// Go-yaml's lexer reads the tag "!!str\t|" on the plain scalar
 			// x.

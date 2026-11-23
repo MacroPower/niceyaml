@@ -32,6 +32,21 @@ type Context struct {
 	// ending in front of the origin buffer, where upstream opens the
 	// buffer with that line ending.
 	lineBefore bool
+	// niceyaml: foldBuf and foldObuf hold the lengths of the buffer and
+	// the origin buffer at the start of a folded line. That line is the
+	// last line of a flow collection that the plain scalar of the buffer
+	// folds in. Both are 0 when the buffer does not hold such a line.
+	foldBuf, foldObuf int
+	// niceyaml: headBuf and headObuf hold the lengths of the buffer and
+	// the origin buffer at the start of the first folded line, and
+	// headPos holds the position of that start.
+	headBuf, headObuf int
+	headPos           *token.Position
+	// niceyaml: lineHead holds the rune index of the start of the last
+	// line that [Context.lineSpaces] found, and lineSeen the rune index up
+	// to which it looked for that start. lineLead holds the number of
+	// spaces that open that line, or -1 before lineSpaces counts them.
+	lineHead, lineSeen, lineLead int
 }
 
 type MultiLineState struct {
@@ -89,6 +104,8 @@ func (c *Context) reset(src []rune) {
 	c.tagClosed = false
 	c.tagEndedLine = false
 	c.lineBefore = false // niceyaml: and without a line ending before it.
+	// niceyaml: and without a line that lineSpaces found.
+	c.lineHead, c.lineSeen, c.lineLead = 0, 0, -1
 }
 
 func (c *Context) resetBuffer() {
@@ -96,6 +113,72 @@ func (c *Context) resetBuffer() {
 	c.obuf = c.obuf[:0]
 	c.notSpaceCharPos = 0
 	c.notSpaceOrgCharPos = 0
+	// niceyaml: the new buffer holds no folded line.
+	c.foldBuf, c.foldObuf = 0, 0
+	c.headBuf, c.headObuf, c.headPos = 0, 0, nil
+}
+
+// markFold marks the start of a line that the plain scalar of the buffer
+// folds in. The start of the line is at pos. niceyaml: upstream does not
+// have this method.
+func (c *Context) markFold(pos *token.Position) {
+	if !c.folded() {
+		c.headBuf, c.headObuf, c.headPos = len(c.buf), len(c.obuf), pos
+	}
+	c.foldBuf, c.foldObuf = len(c.buf), len(c.obuf)
+}
+
+// folded reports whether the buffer holds a line that [Context.markFold]
+// marked. niceyaml: upstream does not have this method.
+func (c *Context) folded() bool {
+	return c.foldObuf > 0
+}
+
+// cutFold drops the text in front of the line that [Context.markFold]
+// marked last from the buffer and the origin buffer. niceyaml: upstream
+// does not have this method.
+func (c *Context) cutFold() {
+	c.buf = append(c.buf[:0], c.buf[c.foldBuf:]...)
+	c.obuf = append(c.obuf[:0], c.obuf[c.foldObuf:]...)
+	c.notSpaceCharPos = max(c.notSpaceCharPos-c.foldBuf, 0)
+	c.notSpaceOrgCharPos = max(c.notSpaceOrgCharPos-c.foldObuf, 0)
+	c.foldBuf, c.foldObuf = 0, 0
+	c.headBuf, c.headObuf, c.headPos = 0, 0, nil
+}
+
+// lineSpaces returns the number of spaces that open the line of the scan,
+// up to the scan. A tab ends them, because YAML does not indent with a
+// tab. It looks at each rune of the text once, so a scan that calls it at
+// each rune of a line stays linear. niceyaml: upstream does not have this
+// method.
+func (c *Context) lineSpaces() int {
+	for ; c.lineSeen < c.idx; c.lineSeen++ {
+		if r := c.src[c.lineSeen]; r == '\n' || r == '\r' {
+			c.lineHead, c.lineLead = c.lineSeen+1, -1
+		}
+	}
+	if c.lineLead < 0 {
+		c.lineLead = 0
+		for c.lineHead+c.lineLead < c.size && c.src[c.lineHead+c.lineLead] == ' ' {
+			c.lineLead++
+		}
+	}
+	return min(c.lineLead, c.idx-c.lineHead)
+}
+
+// cutIndicator drops the indicator that opens the buffer and the origin
+// buffer. It also drops the blanks after the indicator from the buffer,
+// and the origin buffer keeps them. niceyaml: upstream does not have this
+// method.
+func (c *Context) cutIndicator() {
+	n := 1
+	for n < len(c.buf) && (c.buf[n] == ' ' || c.buf[n] == '\t') {
+		n++
+	}
+	c.buf = append(c.buf[:0], c.buf[n:]...)
+	c.obuf = append(c.obuf[:0], c.obuf[1:]...)
+	c.notSpaceCharPos = max(c.notSpaceCharPos-n, 0)
+	c.notSpaceOrgCharPos = max(c.notSpaceOrgCharPos-1, 0)
 }
 
 func (c *Context) breakMultiLine() {

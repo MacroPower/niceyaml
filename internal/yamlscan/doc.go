@@ -52,6 +52,33 @@
 //     next token with the tab after a space, and it refuses a key or a ":"
 //     after that tab as a tab used as indentation. So go-yaml refuses
 //     "&x \ta: 1", and the copy reads the anchor x on the key a.
+//   - Inside a flow collection, a line folds into the plain scalar on the
+//     line above. YAML folds it only when the spaces that open the line pass
+//     the indent of the block node that holds the collection. Go-yaml cuts
+//     the scalar at a line that starts at or left of the last ":", "?", or
+//     "-" indicator. It reads a "-" there as a sequence entry. It reads a "-"
+//     that starts a line right of that indicator as a folded block scalar,
+//     which takes the rest of the text. So go-yaml refuses "{a: b\n - c}" and
+//     "{a: b\n    - c}", and the copy reads both as {a: "b - c"}. At a line
+//     that does not pass the indent, as in "key: [a\n- c]", the copy cuts the
+//     scalar as go-yaml does. YAML drops the indent of each folded line, tabs
+//     included, and so does the copy. Go-yaml reads a tab that opens the line
+//     into the scalar. Where YAML refuses the scalar as the key of a ":" on a
+//     folded line, the copy cuts the scalar at the start of that line. It
+//     reads a "-" or "?" that opens the line as an indicator. So the parser
+//     refuses "{a: b\n c: d}" and "{a: b\n    c: d}" as YAML does. Go-yaml
+//     reads the second of those as {a: "b c: d"}. A ":" that a character
+//     other than a blank or a flow indicator follows stays in a value or in
+//     an item of a flow sequence that spans lines, as YAML keeps it. So the
+//     copy reads "{a: !t b\n c :d}" as {a: "b c :d"}, where go-yaml refuses
+//     the ":" after its cut. On one line, go-yaml reads such a ":" as an
+//     indicator after a tag or an anchor on a value and in a flow sequence
+//     inside a flow mapping. So go-yaml reads "{a: [b c:d]}" as
+//     {a: [{"b c": d}]}, and the copy reads "{a: [b\n c:d]}" as
+//     {a: ["b c:d"]}. A ":" before such a character ends a key of a flow
+//     mapping that spans lines, as go-yaml reads it in a key on one line.
+//     So the copy reads "{a\n b:c}" as {"a b": c}, as go-yaml reads
+//     "{a b:c}".
 //
 // # Sync
 //

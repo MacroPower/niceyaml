@@ -799,16 +799,23 @@ func TestNode_Set(t *testing.T) {
 				"at 1:5 of that YAML, which YAML does not allow",
 		},
 		"YAML marshaler that writes a dash before a flow indicator below an explicit key": {
-			// Control: YAML folds the line that starts with the "-" into the
-			// key above it, but go-yaml's parser reads the "-" as the value of
-			// the key. So the misread is go-yaml's.
+			// YAML folds the line that starts with the "-" into the key
+			// above it, and so does the Source. So the value holds an
+			// explicit key, which cafe does not write.
 			before: stringtest.LinesLF("a: 1", "b: 2"),
 			path:   paths.Doc().Child("b"),
 			value:  yamlMarshaler(stringtest.LinesLF("{? x", " -}")),
-			err: "2:4: $.b: go-yaml's parser misreads the YAML that the MarshalYAML method of " +
-				`edit_test.yamlMarshaler writes: a "-" that continues a plain scalar in a flow collection ` +
-				"is not supported at 2:2 of that YAML",
-			engine: true,
+			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 sets $.b to a value whose YAML holds an " +
+				"explicit key, and cafe does not write explicit keys",
+		},
+		"YAML marshaler that writes a plain scalar on two lines of an explicit key": {
+			// YAML folds the line that starts with the "-" into the key
+			// above it, and so does the Source.
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("b"),
+			value:  yamlMarshaler(stringtest.LinesLF("{? x", " - y}")),
+			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 sets $.b to a value whose YAML holds an " +
+				"explicit key, and cafe does not write explicit keys",
 		},
 		"YAML marshaler that writes a sequence entry after a key in a flow sequence": {
 			// Go-yaml's parser refuses the "-", and so does the finder. YAML
@@ -848,17 +855,66 @@ func TestNode_Set(t *testing.T) {
 				"edit_test.yamlMarshaler writes: ',' or '}' must be specified at 2:2 of that YAML",
 			engine: true,
 		},
-		"YAML marshaler that writes a plain scalar on two lines of an explicit key": {
-			// Control: YAML folds the line that starts with the "-" into the
-			// key above it, but go-yaml's parser reads the "-" as a sequence
-			// entry. So the misread is go-yaml's.
+		"YAML marshaler that writes a key on a line that continues a value of a flow mapping": {
+			// Go-yaml's parser reads {x: "y z: w"}, but YAML ends the value at
+			// the ":" of z, so the problem is the marshaler's.
 			before: stringtest.LinesLF("a: 1", "b: 2"),
 			path:   paths.Doc().Child("b"),
-			value:  yamlMarshaler(stringtest.LinesLF("{? x", " - y}")),
-			err: "2:4: $.b: go-yaml's parser misreads the YAML that the MarshalYAML method of " +
-				`edit_test.yamlMarshaler writes: a "-" that continues a plain scalar in a flow collection ` +
-				"is not supported at 2:2 of that YAML",
+			value:  yamlMarshaler(stringtest.LinesLF("{x: y", "    z: w}")),
+			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 cannot write the value of $.b: the MarshalYAML method of " +
+				"edit_test.yamlMarshaler writes YAML that YAML does not allow: ',' or '}' must be specified " +
+				"at 2:5 of that YAML",
+		},
+		"YAML marshaler that writes a key on two lines of a flow sequence": {
+			// Go-yaml's parser reads a pair of the key "x y", but YAML does
+			// not take a key on two lines in a flow sequence, so the problem
+			// is the marshaler's.
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("b"),
+			value:  yamlMarshaler(stringtest.LinesLF("[x", " y: z]")),
+			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 cannot write the value of $.b: the MarshalYAML method of " +
+				"edit_test.yamlMarshaler writes YAML that YAML does not allow: ',' or ']' must be specified " +
+				"at 2:2 of that YAML",
+		},
+		"YAML marshaler that writes a key on a line that continues a value of a flow mapping with a comment": {
+			// The comment does not cause the refusal, so the problem is still
+			// the marshaler's.
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("b"),
+			value:  yamlMarshaler(stringtest.LinesLF("{x: y", "    z: w} # c")),
+			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 cannot write the value of $.b: the MarshalYAML method of " +
+				"edit_test.yamlMarshaler writes YAML that YAML does not allow: ',' or '}' must be specified " +
+				"at 2:5 of that YAML",
+		},
+		"YAML marshaler that writes an explicit key on two lines of a flow sequence": {
+			// Control: YAML reads [{"x y": null}], but go-yaml's parser
+			// refuses the explicit key without a value in a flow sequence, so
+			// the refusal is go-yaml's.
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("b"),
+			value:  yamlMarshaler(stringtest.LinesLF("[? x", " y]")),
+			err: "2:4: $.b: go-yaml's parser refuses the YAML that the MarshalYAML method of " +
+				"edit_test.yamlMarshaler writes: could not find '[' character corresponding to ']' at 2:3 of that YAML",
 			engine: true,
+		},
+		"YAML marshaler that writes a dash line at the indent of the key of a flow mapping": {
+			// Go-yaml's parser reads {y: [z]} after the explicit key, but YAML
+			// does not fold a line at the indent of x into the key, so the
+			// problem is the marshaler's.
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("b"),
+			value:  yamlMarshaler(stringtest.LinesLF("x: {? y", "- z}")),
+			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 cannot write the value of $.b: the MarshalYAML method of " +
+				`edit_test.yamlMarshaler writes a "-" at a line of a flow collection that does not pass the indent ` +
+				"of the block node of the collection at 2:1 of that YAML, which YAML does not allow",
+		},
+		"YAML marshaler that writes a tab that opens a line of a flow mapping": {
+			// Control: YAML drops the tab from the plain scalar, but go-yaml
+			// reads it into the scalar, and the Set writes go-yaml's reading.
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("b"),
+			value:  yamlMarshaler(stringtest.LinesLF("{x: y", " \tz}")),
+			want:   stringtest.LinesLF("a: 1", `b: {x: "y \tz"}`),
 		},
 		"YAML marshaler that writes a float key and a string key of one text": {
 			// Control: go-yaml's decoder reads the keys apart, but its parser

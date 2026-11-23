@@ -2329,10 +2329,105 @@ func TestSource_File_ErrSyntax(t *testing.T) {
 			input: stringtest.LinesLF("a: 1", "---", "b: [c, - d]", "---", "e: 3"),
 			want:  []bool{false, true, false},
 		},
-		// YAML folds the line into the explicit key, but the go-yaml parser
-		// reads the "-" as a sequence entry, and the Source refuses it.
+		// YAML folds a line that starts with a "-" into the plain scalar
+		// above it in a flow collection. The go-yaml lexer cuts the "-" out
+		// of the scalar, but the Source reads the line as YAML does.
 		"plain scalar on two lines of an explicit key in a flow mapping": {
 			input: stringtest.LinesLF("{? a", " - b}"),
+			want:  []bool{false},
+		},
+		"plain scalar on two lines of a value in a flow mapping": {
+			input: stringtest.LinesLF("{a: b", " - c}"),
+			want:  []bool{false},
+		},
+		// YAML ends the value at the ":" of the key below it, so a comma
+		// must come between the two entries.
+		"key on the line below a value in a flow mapping": {
+			input: stringtest.LinesLF("{a: b", " c: d}"),
+			want:  []bool{true},
+		},
+		"key on the line below an anchored value in a flow mapping": {
+			input: stringtest.LinesLF("{a: &x b", " c: d}"),
+			want:  []bool{true},
+		},
+		"key on the line below a value with a number anchor name in a flow mapping": {
+			input: stringtest.LinesLF("{a: &1 b", " c: d}"),
+			want:  []bool{true},
+		},
+		// YAML does not take an implicit key on two lines in a flow
+		// sequence.
+		"key on two lines of a flow sequence after a flow mapping": {
+			input: stringtest.LinesLF("{x: [{y: z}, a", " b: c]}"),
+			want:  []bool{true},
+		},
+		"key on two lines of a flow sequence": {
+			input: stringtest.LinesLF("[a", " b: c]"),
+			want:  []bool{true},
+		},
+		// YAML ends a value at the ":" of a key on a line that continues
+		// it, at any indent.
+		"key below a value on two lines of a single pair in a flow sequence": {
+			input: stringtest.LinesLF("[a: b", " c", " d: e]"),
+			want:  []bool{true},
+		},
+		"key below a value on two lines with a tab of a single pair in a flow sequence": {
+			input: stringtest.LinesLF("[a: b", "\tc", " d: e]"),
+			want:  []bool{true},
+		},
+		"key right of the key of a value in a flow mapping": {
+			input: stringtest.LinesLF("{a: b", "    c: d}"),
+			want:  []bool{true},
+		},
+		"key on a dash line right of the key of a value in a flow mapping": {
+			input: stringtest.LinesLF("{a: b", "    - c: d}"),
+			want:  []bool{true},
+		},
+		"key on a dash line below an item of a nested flow sequence": {
+			input: stringtest.LinesLF("{a: [b", "    - c: d]}"),
+			want:  []bool{true},
+		},
+		"key without a value below a value of a single pair": {
+			input: stringtest.LinesLF("[a: b", " c:]"),
+			want:  []bool{true},
+		},
+		"key without a value on a dash line below a value of a single pair": {
+			input: stringtest.LinesLF("[a: b", " - c:]"),
+			want:  []bool{true},
+		},
+		"key on a dash line below a value of a single pair": {
+			input: stringtest.LinesLF("[a: b", " - c: d]"),
+			want:  []bool{true},
+		},
+		"tagged key on a dash line below a value of a single pair": {
+			input: stringtest.LinesLF("[a: b", " - !t c: d]"),
+			want:  []bool{true},
+		},
+		"key on a dash line with a tab below a value of a single pair": {
+			input: stringtest.LinesLF("[a: b", " -\tc: d]"),
+			want:  []bool{true},
+		},
+		"key on a question mark line with a tab below a value of a single pair": {
+			input: stringtest.LinesLF("[a: b", " ?\tc: d]"),
+			want:  []bool{true},
+		},
+		// YAML folds a line of a flow collection only when the line is
+		// indented past the block node that holds the collection.
+		"dash line at the indent of the key of a flow sequence": {
+			input: stringtest.LinesLF("key: [a", "- c]"),
+			want:  []bool{true},
+		},
+		"dash line at the indent of the key of a nested flow mapping": {
+			input: stringtest.LinesLF("x:", "  key: {a: b", "  - c}"),
+			want:  []bool{true},
+		},
+		// The go-yaml parser reads the "-" as the value of the explicit key,
+		// but YAML refuses the line.
+		"dash line at the indent of the key of a flow mapping after an explicit key": {
+			input: stringtest.LinesLF("key: {? a", "- b}"),
+			want:  []bool{true},
+		},
+		"line at the indent of the sequence entry of a flow mapping": {
+			input: stringtest.LinesLF("- {a: b", "c}"),
 			want:  []bool{true},
 		},
 		"negative number in a flow sequence": {

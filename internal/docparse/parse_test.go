@@ -322,8 +322,8 @@ func TestParse_FlowSequence(t *testing.T) {
 		flowMsg   = "sequence entries are not allowed in a flow collection"
 		anchorMsg = "sequence entries are not allowed after anchor on the same line"
 		tagMsg    = "sequence entries are not allowed after tag on the same line"
-		contMsg   = "a \"-\" that continues a plain scalar in a flow collection is not supported"
 		indMsg    = "a plain scalar cannot start with a \"-\" before a flow indicator"
+		indentMsg = "a line of a flow collection must be indented past the block node that holds it"
 		scalarMsg = "a plain scalar in a flow collection cannot hold a flow indicator"
 	)
 
@@ -431,44 +431,55 @@ func TestParse_FlowSequence(t *testing.T) {
 			msg:   "block sequence entries are not allowed in this context",
 		},
 		// YAML folds a line that starts with a "-" into the plain scalar on
-		// the line above, but the parser refuses the "-". The run keeps the
-		// error of the parser.
+		// the line above, and so does the tokenizer.
 		"on the line below a value of a flow mapping": {
 			input: stringtest.LinesLF("{a: b", " - c}"),
-			at:    new(position.New(1, 1)),
-			msg:   "',' or '}' must be specified",
 		},
 		"on the line below a value of a flow sequence": {
 			input: stringtest.LinesLF("[a: b", " - c]"),
-			at:    new(position.New(1, 1)),
-			msg:   "non-map value is specified",
-		},
-		// The parser takes the "-" after an explicit key as a sequence
-		// entry, so the run fails at the "-".
-		"on the line below an explicit key of a flow sequence": {
-			input: stringtest.LinesLF("[? a", " - b]"),
-			at:    new(position.New(1, 1)),
-			msg:   contMsg,
 		},
 		"on the line below an explicit key of a flow mapping": {
 			input: stringtest.LinesLF("{? a", " - b}"),
-			at:    new(position.New(1, 1)),
-			msg:   contMsg,
 		},
 		"on the line below an explicit key after an entry of a flow mapping": {
 			input: stringtest.LinesLF("{a: b, ? c", " - d}"),
-			at:    new(position.New(1, 1)),
-			msg:   contMsg,
 		},
-		"on the line below an integer key of a flow sequence": {
-			input: stringtest.LinesLF("[? 1", " - 2]"),
-			at:    new(position.New(1, 1)),
-			msg:   contMsg,
+		// The parser refuses an explicit key in a flow sequence, as it
+		// refuses "[? A - b]".
+		"on the line below an explicit key of a flow sequence": {
+			input: stringtest.LinesLF("[? a", " - b]"),
+			at:    new(position.New(1, 4)),
+			msg:   "could not find '[' character corresponding to ']'",
 		},
-		"on the line below an explicit key in a block sequence": {
-			input: stringtest.LinesLF("- [? a", "   - b]"),
-			at:    new(position.New(1, 3)),
-			msg:   contMsg,
+		// The tokenizer cuts the "-" out of the scalar at a line that does
+		// not pass the indent of the block node of the collection, and at a
+		// line that holds a key. The run keeps the error of the parser.
+		"at the indent of the key of a flow sequence": {
+			input: stringtest.LinesLF("key: [a", "- c]"),
+			at:    new(position.New(1, 0)),
+			msg:   "',' or ']' must be specified",
+		},
+		"on a key line below a value of a flow mapping": {
+			input: stringtest.LinesLF("{a: b", " - c: d}"),
+			at:    new(position.New(1, 1)),
+			msg:   "',' or '}' must be specified",
+		},
+		// The parser reads the "-" after an explicit key as the value of
+		// the key, so the run fails at the "-".
+		"at the indent of the key of a flow mapping after an explicit key": {
+			input: stringtest.LinesLF("key: {? a", "- b}"),
+			at:    new(position.New(1, 0)),
+			msg:   indentMsg,
+		},
+		"before a flow indicator at the indent of the key of a flow mapping": {
+			input: stringtest.LinesLF("key: {? a", "-}"),
+			at:    new(position.New(1, 0)),
+			msg:   indentMsg,
+		},
+		"at the indent of the entry of a flow sequence after an explicit key": {
+			input: stringtest.LinesLF("- [", "? 1", "-]"),
+			at:    new(position.New(2, 0)),
+			msg:   indentMsg,
 		},
 		// A comment ends the plain scalar.
 		"on the line below a comment in a flow mapping": {
@@ -544,19 +555,13 @@ func TestParse_FlowSequence(t *testing.T) {
 			at:    new(position.New(0, 4)),
 			msg:   indMsg,
 		},
-		// YAML folds the "-" into the plain scalar on the line above. The
-		// parser refuses it after a mapping value, and the run keeps the
-		// error of the parser. After an explicit key, the parser reads the
-		// "-" as the value of the key, so the run fails at the "-".
+		// YAML folds the "-" into the plain scalar on the line above, and
+		// so does the tokenizer.
 		"before a flow indicator on the line below a value of a flow mapping": {
 			input: stringtest.LinesLF("{a: b", " -}"),
-			at:    new(position.New(1, 1)),
-			msg:   "',' or '}' must be specified",
 		},
 		"before a flow indicator on the line below an explicit key": {
 			input: stringtest.LinesLF("{? a", " -}"),
-			at:    new(position.New(1, 1)),
-			msg:   contMsg,
 		},
 		// The lexer ends a plain scalar at a "}" only inside a flow mapping,
 		// and at a "]" only inside a flow sequence. YAML ends it at each
@@ -831,18 +836,18 @@ func TestParse_PanicFlowSequence(t *testing.T) {
 	assert.Equal(t, position.New(1, 4), position.NewFromToken(syntaxErr.Token))
 }
 
-func TestParse_PanicContinuation(t *testing.T) {
+func TestParse_PanicFlowIndent(t *testing.T) {
 	t.Parallel()
 
 	// The go-yaml parser dereferences the position of this token, above
-	// the "-" that continues the plain scalar of the explicit key.
-	tks := tokens.Tokenize(stringtest.LinesLF("a: 1", "b: {? a", " - b}"))
+	// the "-" at the indent of the key of the flow mapping.
+	tks := tokens.Tokenize(stringtest.LinesLF("a: 1", "b: {? a", "- c}"))
 	tks[2].Position = nil
 
 	r := docparse.Parse(tks)
 	require.Len(t, r.Failures, 1)
 
-	// The error of the continuation takes the place of the panic.
+	// The error of the "-" takes the place of the panic.
 	f := r.Failures[0]
 	assert.Nil(t, f.Panic)
 
@@ -851,9 +856,9 @@ func TestParse_PanicContinuation(t *testing.T) {
 	var syntaxErr *yaml.SyntaxError
 
 	require.ErrorAs(t, f.Err, &syntaxErr)
-	assert.Equal(t, docparse.ContinuationMessage, syntaxErr.Message)
+	assert.Equal(t, docparse.FlowIndentMessage, syntaxErr.Message)
 	require.NotNil(t, syntaxErr.Token)
-	assert.Equal(t, position.New(2, 1), position.NewFromToken(syntaxErr.Token))
+	assert.Equal(t, position.New(2, 0), position.NewFromToken(syntaxErr.Token))
 }
 
 func TestFail(t *testing.T) {

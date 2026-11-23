@@ -7,18 +7,20 @@
 // line of a tag, as in "a: !t - 1", and a "-" that starts an entry inside
 // a flow collection, as in "[- 1]". It reads a "-" right before a flow
 // indicator as a plain scalar, as in "[-]", and it reads a plain scalar
-// in a flow collection that holds a flow indicator, as in "[a}]". YAML
-// refuses each of them. It also misreads a "-" that continues a plain
-// scalar on a new line after an explicit key in a flow collection, as in
-// "{? A\n - B}".
+// in a flow collection that holds a flow indicator, as in "[a}]". It
+// takes a "-" that starts a line of a flow collection after an explicit
+// key, where the line does not pass the indent of the block node that
+// holds the collection, as in "key: {? A\n- b}". YAML refuses each of
+// them.
 //
 // [Parse] avoids each of these faults. It cuts the stream into runs that
 // each parse on their own, and drops the comments that make the parser
 // reject or misread valid YAML. It fails a run with any such "-" or
 // plain scalar, unless the parser refuses an earlier token of the run.
-// The error of the parser also wins for a "-" that continues a plain
-// scalar whenever the parser refuses the run. For each
-// document of a run that does not parse, it puts a stand-in into the file.
+// The error of the parser also wins for a "-" that starts a line right
+// below a plain scalar whenever the parser refuses the run.
+// For each document of a run that does not parse, it puts a stand-in
+// into the file.
 // The [Result] holds the file, the copies of the tokens the parser read,
 // and a [Failure] for each run that did not parse. [ParseLimits] also fails
 // a run past a byte limit or a depth limit before the parser reads it.

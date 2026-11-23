@@ -11,10 +11,13 @@ import (
 )
 
 func BenchmarkTokenize(b *testing.B) {
-	// Each source repeats unit 100, 1000, or 10000 times.
+	// Each source repeats unit 100, 1000, or 10000 times between head
+	// and tail.
 	benchmarks := []struct {
 		name string
+		head string
 		unit string
+		tail string
 	}{
 		// Each unit is a double-quoted scalar with a second line a tab
 		// indents. The go-yaml lexer cuts every scalar at its tab and
@@ -36,11 +39,38 @@ func BenchmarkTokenize(b *testing.B) {
 				"---",
 			),
 		},
+		// Each unit ends a key on the line of a value and goes on to the
+		// next line, inside a flow mapping in a flow sequence. YAML folds
+		// the two lines into one key, so the lexer checks at each ":"
+		// which kind of flow collection holds it.
+		{
+			name: "FoldedKeys",
+			head: "[{k",
+			unit: stringtest.JoinLF("", " x: v, k"),
+			tail: stringtest.LinesLF("", " x: v}]"),
+		},
+		// Each unit is a tab that opens the line of a value of a flow
+		// mapping. The lexer checks at each tab whether the line folds
+		// into the value.
+		{
+			name: "LeadingTabs",
+			head: stringtest.LinesLF("{k: v"),
+			unit: "\t",
+			tail: stringtest.LinesLF("x}"),
+		},
+		// Each unit is a key with an empty flow sequence on one line. The
+		// lexer finds the indent of the key at each "[".
+		{
+			name: "FlowValuesOnALine",
+			head: "k: ",
+			unit: "x: [] ",
+			tail: "\n",
+		},
 	}
 
 	for _, bm := range benchmarks {
 		for _, count := range []int{100, 1000, 10000} {
-			src := strings.Repeat(bm.unit, count)
+			src := bm.head + strings.Repeat(bm.unit, count) + bm.tail
 
 			b.Run(fmt.Sprintf("%s/%d", bm.name, count), func(b *testing.B) {
 				b.ReportAllocs()

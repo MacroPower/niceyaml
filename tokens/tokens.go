@@ -88,6 +88,33 @@ import (
 //     a string on its own line, as in "a: !t 0x10". The lexer types the
 //     key below the tag as a string too, so it reads the key 0x10 below
 //     "a: !t" as "0x10" and not as 16.
+//   - Inside a flow collection, a line folds into the plain scalar on the
+//     line above. YAML folds it only when the spaces that open the line pass
+//     the indent of the block node that holds the collection. The lexer cuts
+//     the scalar at a line that starts at or left of the last ":", "?", or
+//     "-" indicator. It reads a "-" there as a sequence entry. It reads a
+//     "-" that starts a line right of that indicator as the start of a
+//     folded block scalar, which takes the rest of the text. So the lexer
+//     reads "{a: b\n - c}" as the scalar b, a "-", and the scalar c, and the
+//     copy reads the one scalar "b - c". At a line that does not pass the
+//     indent, as in "key: [a\n- c]", the copy cuts the scalar as the lexer
+//     does. A tab that opens a folded line belongs to the indent of the
+//     line, and the copy drops it from the scalar. The lexer reads the tab
+//     into the scalar, so it reads "{a: b\n \tc}" as "b \tc", where the copy
+//     reads "b c". YAML refuses the scalar as the key of a ":" on a folded
+//     line where the scalar is the value of another key or an implicit key
+//     in a flow sequence. There the copy cuts the scalar at the start of
+//     that line, and it reads a "-" or "?" that opens the line as an
+//     indicator. So the go-yaml parser refuses "{a: b\n c: d}" and
+//     "{a: b\n    c: d}". The lexer reads the second of those as the one
+//     scalar "b c: d". A ":" that a character other than a blank or a flow
+//     indicator follows stays in a value or in an item of a flow sequence
+//     that spans lines, as YAML keeps it. So the copy reads
+//     "{a: !t b\n c :d}" as the one scalar "b c :d", and the lexer cuts the
+//     scalar at the line and reads the ":" as an indicator. Such a ":" ends
+//     a key of a flow mapping that spans lines, as the lexer reads it in a
+//     key on one line. So the copy and the lexer read "{a\n b:c}" as the
+//     key "a b" and the value c.
 //
 // A tab used as indentation makes the lexer read an invalid token. When a
 // "-" or ":" indicator follows the tab, the invalid token holds it. The

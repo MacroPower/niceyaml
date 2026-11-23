@@ -58,6 +58,14 @@ type Scanner struct {
 	// niceyaml: drops holds the rune index of each line break whose line
 	// ends with spaces or tabs that upstream cuts from the origin.
 	drops []int
+	// niceyaml: flows holds the type of the "[" or "{" of each flow
+	// collection that the scan stands in, innermost last.
+	flows []token.Type
+	// niceyaml: flowIndent holds the indent of the block node that holds
+	// the outermost open flow collection, as a 0-based column, or -1 when
+	// that collection is the root node of its document. YAML continues a
+	// plain scalar of the collection only on a line indented past it.
+	flowIndent int
 	// niceyaml: heldLineEnd reports that the last token holds the line
 	// ending that the scan reads next.
 	heldLineEnd bool
@@ -997,6 +1005,7 @@ func (s *Scanner) scanFlowMapStart(ctx *Context) bool {
 	ctx.addOriginBuf('{')
 	ctx.addToken(token.MappingStart(string(ctx.obuf), s.pos()))
 	s.startedFlowMapNum++
+	s.pushFlow(ctx, token.MappingStartType) // niceyaml: track the innermost flow collection.
 	s.progressColumn(ctx, 1)
 	ctx.clear()
 	return true
@@ -1011,6 +1020,7 @@ func (s *Scanner) scanFlowMapEnd(ctx *Context) bool {
 	ctx.addOriginBuf('}')
 	ctx.addToken(token.MappingEnd(string(ctx.obuf), s.pos()))
 	s.startedFlowMapNum--
+	s.popFlow() // niceyaml: track the innermost flow collection.
 	s.progressColumn(ctx, 1)
 	ctx.clear()
 	return true
@@ -1025,6 +1035,7 @@ func (s *Scanner) scanFlowArrayStart(ctx *Context) bool {
 	ctx.addOriginBuf('[')
 	ctx.addToken(token.SequenceStart(string(ctx.obuf), s.pos()))
 	s.startedFlowSequenceNum++
+	s.pushFlow(ctx, token.SequenceStartType) // niceyaml: track the innermost flow collection.
 	s.progressColumn(ctx, 1)
 	ctx.clear()
 	return true
@@ -1039,6 +1050,7 @@ func (s *Scanner) scanFlowArrayEnd(ctx *Context) bool {
 	ctx.addOriginBuf(']')
 	ctx.addToken(token.SequenceEnd(string(ctx.obuf), s.pos()))
 	s.startedFlowSequenceNum--
+	s.popFlow() // niceyaml: track the innermost flow collection.
 	s.progressColumn(ctx, 1)
 	ctx.clear()
 	return true
@@ -1062,14 +1074,34 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 	if s.isDirective || s.isAnchor || s.isAlias {
 		return false, nil
 	}
-	if s.startedFlowMapNum <= 0 && nc != ' ' && nc != '\t' && !s.isNewLineChar(nc) && !ctx.isNextEOS() {
+	// niceyaml: a plain scalar that spans lines of a flow collection can
+	// hold a ":" that a character other than a blank or a flow indicator
+	// follows. The scalar keeps that ":" when the scalar is the value of a
+	// key or stands in a flow sequence, as YAML keeps it. The scan of one
+	// line reads such a ":" as an indicator after a tag or an anchor on a
+	// value and in a flow sequence inside a flow mapping. So the readings
+	// of one line and of two lines differ there. In a key of a flow
+	// mapping, that ":" ends the key, as the scan of one line reads
+	// "{a b:c}".
+	cut := ctx.folded() && s.refusesFoldedKey(ctx)
+	if ctx.folded() && !endsPlain(nc) && (cut || s.innerFlow() == token.SequenceStartType) {
+		return false, nil
+	}
+	// niceyaml: YAML refuses such a scalar as a key when it is the value
+	// of a key or an implicit key in a flow sequence. There a ":" cuts the
+	// scalar at the start of its last line. Any other ":" after a scalar
+	// that spans lines ends the scalar, also before a flow indicator in a
+	// flow sequence.
+	if !ctx.folded() && s.startedFlowMapNum <= 0 && nc != ' ' && nc != '\t' && !s.isNewLineChar(nc) && !ctx.isNextEOS() {
 		return false, nil
 	}
 	if s.startedFlowMapNum > 0 && nc == '/' {
 		// like http://
 		return false, nil
 	}
-	if s.startedFlowMapNum > 0 {
+	if cut {
+		s.cutFold(ctx)
+	} else if s.startedFlowMapNum > 0 {
 		tk := ctx.lastToken()
 		if tk != nil && tk.Type == token.MappingValueType {
 			return false, nil
@@ -1175,6 +1207,13 @@ func (s *Scanner) scanRawFoldedChar(ctx *Context) bool {
 		return false
 	}
 	if !s.isChangedToIndentStateUp() {
+		return false
+	}
+	// niceyaml: inside a flow collection, a "-" that starts a line
+	// continues the plain scalar of the buffer as any other text does.
+	// Upstream reads the rest of the text into the scalar, with the flow
+	// indicators.
+	if s.continuesFlowPlain(ctx) {
 		return false
 	}
 
@@ -1393,6 +1432,230 @@ func (s *Scanner) scanAlias(ctx *Context) bool {
 	return true
 }
 
+// continuesFlowPlain reports whether the line that the scan opens
+// continues the plain scalar of the buffer inside a flow collection. YAML
+// folds such a line into the plain scalar on the line above. The spaces
+// that open the line must pass the indent of the block node that holds
+// the collection. Upstream cuts the scalar at a line that
+// starts at or left of the column of the last ":", "?", or "-" indicator.
+// So it reads "{a: b\n c}" as two scalars, and "{a: b\n - c}" as a
+// scalar, a "-" entry, and a scalar. Upstream reads a "-" that starts a
+// line right of that column as a folded block scalar, which takes the
+// rest of the text. So it reads "{a: b\n    - c}" as {a: "b - c}"}
+// without the end of the mapping. niceyaml: upstream does not have this
+// function.
+func (s *Scanner) continuesFlowPlain(ctx *Context) bool {
+	return s.isFlowMode() && ctx.existsBuffer() && !ctx.isMultiLine() &&
+		ctx.lineSpaces() > s.flowIndent
+}
+
+// pushFlow adds a flow collection of the type typ to the flows of the
+// scan. For the outermost flow collection, it also sets the indent that
+// the lines of the collection must pass. niceyaml: upstream does not have
+// this method.
+func (s *Scanner) pushFlow(ctx *Context, typ token.Type) {
+	if len(s.flows) == 0 {
+		// The last token is the "[" or "{" of the collection.
+		s.flowIndent = blockIndent(ctx.tokens[:max(len(ctx.tokens)-1, 0)])
+	}
+	s.flows = append(s.flows, typ)
+}
+
+// blockIndent returns the indent of the block node that holds a flow
+// collection after the tokens tks, as a 0-based column. That indent is
+// the column of the "-" or "?" in front of the collection, or of the
+// first token of the key in front of its ":". It is -1 when the flow
+// collection is the root node of its document. niceyaml: upstream does
+// not have this function.
+func blockIndent(tks token.Tokens) int {
+	i := len(tks) - 1
+	for ; i >= 0; i-- {
+		switch tks[i].Type {
+		case token.TagType, token.AnchorType, token.CommentType:
+			continue
+		}
+		// The name of an anchor follows its "&".
+		if i > 0 && tks[i-1].Type == token.AnchorType {
+			i--
+			continue
+		}
+		break
+	}
+	if i < 0 {
+		return -1
+	}
+	tk := tks[i]
+	switch tk.Type {
+	case token.SequenceEntryType, token.MappingKeyType:
+		return tk.Position.Column - 1
+	case token.MappingValueType:
+		return keyColumn(tks[:i], tk.Position) - 1
+	}
+	return -1
+}
+
+// keyColumn returns the column of the first token of the implicit key
+// that the tokens tks end with, in front of a ":" at pos. That key sits on
+// the line of its ":". It is one scalar or one flow collection, after any
+// tag, anchor, or alias. It returns the column of the ":" when tks do not
+// end with a key on that line. The walk steps back over the tokens of the
+// key alone, so a line of many keys stays linear. niceyaml: upstream does
+// not have this function.
+func keyColumn(tks token.Tokens, pos *token.Position) int {
+	col := pos.Column
+	i := len(tks) - 1
+	on := func(i int) bool { return i >= 0 && tks[i].Position.Line == pos.Line }
+	if !on(i) {
+		return col
+	}
+	switch tks[i].Type {
+	case token.SequenceEndType, token.MappingEndType:
+		// Step back to the "[" or "{" that opens the collection.
+		depth := 0
+		for ; on(i); i-- {
+			switch tks[i].Type {
+			case token.SequenceEndType, token.MappingEndType:
+				depth++
+			case token.SequenceStartType, token.MappingStartType:
+				depth--
+			}
+			if depth == 0 {
+				break
+			}
+		}
+		if !on(i) {
+			return col
+		}
+	case token.SequenceEntryType, token.MappingKeyType, token.MappingValueType,
+		token.CollectEntryType, token.SequenceStartType, token.MappingStartType,
+		token.TagType, token.AnchorType, token.AliasType:
+		return col
+	}
+	col = tks[i].Position.Column
+	// Step back over the tag, the anchor, and the alias of the key.
+	for i--; on(i); i-- {
+		switch {
+		case tks[i].Type == token.TagType, tks[i].Type == token.AnchorType, tks[i].Type == token.AliasType:
+		case i > 0 && (tks[i-1].Type == token.AnchorType || tks[i-1].Type == token.AliasType):
+			// The name of an anchor or an alias follows its "&" or "*".
+			i--
+		default:
+			return col
+		}
+		col = tks[i].Position.Column
+	}
+	return col
+}
+
+// endsPlain reports whether a ":" that nc follows ends a plain scalar
+// inside a flow collection. A space, a tab, a line break, a flow
+// indicator, or the end of the text does. niceyaml: upstream does not have
+// this function.
+func endsPlain(nc rune) bool {
+	switch nc {
+	case 0, ' ', '\t', '\n', '\r', ',', '[', ']', '{', '}':
+		return true
+	}
+	return false
+}
+
+// refusesFoldedKey reports whether YAML refuses the plain scalar of the
+// buffer, which spans lines, as the key of a ":". YAML takes a key on
+// more than one line only after a "?" or inside a flow mapping. So it
+// refuses the value of a key, past any tag or anchor, as in
+// "{a: b\n c: d}". It also refuses an implicit key inside a flow
+// sequence, as in "{x: [a\n b: c]}". YAML ends the value at the ":" of
+// the key, so a "," must come between the two entries. niceyaml: upstream
+// does not have this function.
+func (s *Scanner) refusesFoldedKey(ctx *Context) bool {
+	tks := ctx.tokens
+	for i := len(tks) - 1; i >= 0; i-- {
+		switch tks[i].Type {
+		case token.MappingValueType:
+			return true
+		case token.MappingKeyType:
+			return false
+		case token.TagType:
+			continue
+		default:
+			// The name of an anchor follows its "&". The lexer types a
+			// name such as 1 or true as a number or a boolean.
+			if i > 0 && tks[i-1].Type == token.AnchorType {
+				i--
+				continue
+			}
+		}
+		break
+	}
+	return s.innerFlow() == token.SequenceStartType
+}
+
+// innerFlow returns the type of the "[" or "{" of the innermost flow
+// collection that holds the scan, or [token.UnknownType] when the scan
+// stands in none. niceyaml: upstream does not have this function.
+func (s *Scanner) innerFlow() token.Type {
+	switch {
+	case s.startedFlowMapNum <= 0 && s.startedFlowSequenceNum > 0:
+		return token.SequenceStartType
+	case s.startedFlowSequenceNum <= 0 && s.startedFlowMapNum > 0:
+		return token.MappingStartType
+	case len(s.flows) == 0:
+		return token.UnknownType
+	}
+	return s.flows[len(s.flows)-1]
+}
+
+// cutFold cuts the plain scalar of the buffer at the start of the last
+// line that [Context.markFold] marked in it. The buffer keeps the text
+// from the start of that line. The line of the scalar above the folded
+// lines becomes a token, and the folded lines above the cut line become
+// one more token. A "-" or "?" and a blank that open the cut line become
+// an indicator token, as upstream reads them at a line that it cuts. The
+// go-yaml parser then refuses the key on the cut line in a flow mapping
+// and after a "-", as YAML does. After a single pair in a flow sequence,
+// the parser reads a key right below the value as one more pair of the
+// mapping of the single pair, so it reads "[a: b\n ? c: d]" and
+// "[a: b\n c: d]" as [{a: b, c: d}]. It refuses a key below a value of
+// more than one line, as in "[a: b\n c\n d: e]", because the value then
+// becomes two tokens. niceyaml: upstream does not have this function.
+func (s *Scanner) cutFold(ctx *Context) {
+	pos := s.savedPos
+	if pos == nil {
+		pos = s.pos()
+	}
+	s.savedPos = nil
+	addCut(ctx, ctx.buf[:ctx.headBuf], ctx.obuf[:ctx.headObuf], pos)
+	if ctx.headObuf < ctx.foldObuf {
+		addCut(ctx, ctx.buf[ctx.headBuf:ctx.foldBuf], ctx.obuf[ctx.headObuf:ctx.foldObuf], ctx.headPos)
+	}
+	ctx.cutFold()
+	// A "-" or "?" and a blank that open the line are an indicator, as
+	// upstream reads them at that line.
+	if len(ctx.obuf) < 2 || (ctx.obuf[1] != ' ' && ctx.obuf[1] != '\t') {
+		return
+	}
+	switch ctx.obuf[0] {
+	case '-':
+		ctx.addToken(token.SequenceEntry("-", s.pos()))
+	case '?':
+		ctx.addToken(token.MappingKey(s.pos()))
+	default:
+		return
+	}
+	ctx.cutIndicator()
+}
+
+// addCut adds a token of the text that [Scanner.cutFold] cuts from the
+// plain scalar of the buffer. The buffer text buf of the token holds its
+// value, the origin buffer text obuf holds its origin, and pos is its
+// position. niceyaml: upstream does not have this function.
+func addCut(ctx *Context, buf, obuf []rune, pos *token.Position) {
+	value := strings.Trim(string(buf), " \t\r\n")
+	tk := token.New(value, string(obuf), pos)
+	ctx.setTokenTypeByPrevTag(tk)
+	ctx.addToken(tk)
+}
+
 // inName reports whether the scan stands in the name of an anchor or an
 // alias, right after its indicator token. The anchor and alias flags stay
 // set after an error and after a tag that follows the indicator. So the
@@ -1503,10 +1766,17 @@ func (s *Scanner) scan(ctx *Context) error {
 		// First, change the IndentState.
 		// If the target character is the first character in a line, IndentState is Up/Down/Equal state.
 		// The second and subsequent letters are Keep.
+		lineStart := s.isFirstCharAtLine // niceyaml: c may open the text of a line.
 		s.updateIndent(ctx, c)
 
 		// If IndentState is down, tokens are split, so the buffer accumulated until that point needs to be cutted as a token.
-		if s.isChangedToIndentStateDown() {
+		// niceyaml: inside a flow collection, a line indented past the
+		// block node continues the plain scalar of the buffer, so the
+		// buffer stays whole. The mark keeps the start of the line, where
+		// a key on the line cuts the scalar.
+		if lineStart && !s.isFirstCharAtLine && s.continuesFlowPlain(ctx) {
+			ctx.markFold(s.pos())
+		} else if s.isChangedToIndentStateDown() {
 			s.addBufferedTokenIfExists(ctx)
 			// niceyaml: a line left of the tag closes the tag, so the tag
 			// has no value.
@@ -1676,6 +1946,15 @@ func (s *Scanner) scan(ctx *Context) error {
 				s.progressOnly(ctx, 1)
 				continue
 			}
+			// niceyaml: a tab that opens a line of a flow collection
+			// belongs to the indent of the line. YAML drops that indent
+			// from the plain scalar that folds the line in. Upstream reads
+			// the tab into the scalar at or left of the last indicator.
+			if s.isFirstCharAtLine && s.continuesFlowPlain(ctx) {
+				ctx.addOriginBuf(c)
+				s.progressOnly(ctx, 1)
+				continue
+			}
 			if err := s.scanTab(ctx, c); err != nil {
 				return err
 			}
@@ -1709,6 +1988,16 @@ func (s *Scanner) Init(text string) {
 func (s *Scanner) closeFlows() {
 	s.startedFlowSequenceNum = 0
 	s.startedFlowMapNum = 0
+	s.flows = s.flows[:0]
+}
+
+// popFlow drops the innermost flow collection from the flows of the scan.
+// A "]" or "}" closes the innermost collection, whichever its kind, as the
+// go-yaml parser reads it. niceyaml: upstream does not have this method.
+func (s *Scanner) popFlow() {
+	if len(s.flows) > 0 {
+		s.flows = s.flows[:len(s.flows)-1]
+	}
 }
 
 func (s *Scanner) clearState() {

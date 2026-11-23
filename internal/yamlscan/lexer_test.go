@@ -880,6 +880,429 @@ func TestTokenize_Patches(t *testing.T) {
 				{token.IntegerType, " 1\r\n"},
 			},
 		},
+		"dash that continues a value of a flow mapping": {
+			input: "{a: b\n - c}\n",
+			want: []tok{
+				{token.MappingStartType, "{"},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " b\n - c"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		"dash that continues a value right of its key": {
+			input: "{a: b\n    - c}\n",
+			want: []tok{
+				{token.MappingStartType, "{"},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " b\n    - c"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		"dash that continues an explicit key of a flow mapping": {
+			input: "{? a\n - b}\n",
+			want: []tok{
+				{token.MappingStartType, "{"},
+				{token.MappingKeyType, "?"},
+				{token.StringType, " a\n - b"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		"key on two lines of a flow mapping": {
+			input: "{x: y, a\n b: c}\n",
+			want: []tok{
+				{token.MappingStartType, "{"},
+				{token.StringType, "x"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " y"},
+				{token.CollectEntryType, ","},
+				{token.StringType, " a\n b"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " c"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		// YAML ends the value at the ":" of the key below it. The copy
+		// cuts the value at the line of the key, as go-yaml's lexer does,
+		// so the parser refuses the key.
+		"key on the line below a value of a flow mapping": {
+			input: "{a: b\n c: d}\n",
+			want: []tok{
+				{token.MappingStartType, "{"},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " b\n "},
+				{token.StringType, "c"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " d"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		"key on the line below a tagged value of a flow mapping": {
+			input: "{a: !t b\n c: d}\n",
+			want: []tok{
+				{token.MappingStartType, "{"},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.TagType, " !t "},
+				{token.StringType, "b\n "},
+				{token.StringType, "c"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " d"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		// YAML takes a key on two lines in a flow mapping but not in a
+		// flow sequence.
+		"key on two lines of a flow sequence in a flow mapping": {
+			input: "{x: [a\n b: c]}\n",
+			want: []tok{
+				{token.MappingStartType, "{"},
+				{token.StringType, "x"},
+				{token.MappingValueType, ":"},
+				{token.SequenceStartType, " ["},
+				{token.StringType, "a\n "},
+				{token.StringType, "b"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " c"},
+				{token.SequenceEndType, "]"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		"tab that opens a line of a value of a flow mapping": {
+			input: "{a: b\n\tc}\n",
+			want: []tok{
+				{token.MappingStartType, "{"},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " b\n\tc"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		"explicit key on two lines before its value": {
+			input: "{? a\n b: c}\n",
+			want: []tok{
+				{token.MappingStartType, "{"},
+				{token.MappingKeyType, "?"},
+				{token.StringType, " a\n b"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " c"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		"key on the line below an anchored value of a flow mapping": {
+			input: "{a: &x b\n c: d}\n",
+			want: []tok{
+				{token.MappingStartType, "{"},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.AnchorType, " &"},
+				{token.StringType, "x"},
+				{token.StringType, " b\n "},
+				{token.StringType, "c"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " d"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		// The lexer types the anchor name 1 as an integer.
+		"key on the line below a value with a number anchor name": {
+			input: "{a: &1 b\n c: d}\n",
+			want: []tok{
+				{token.MappingStartType, "{"},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.AnchorType, " &"},
+				{token.IntegerType, "1"},
+				{token.StringType, " b\n "},
+				{token.StringType, "c"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " d"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		"key on two lines of a flow mapping in a flow sequence": {
+			input: "[{x: [y], a\n b: c}]\n",
+			want: []tok{
+				{token.SequenceStartType, "["},
+				{token.MappingStartType, "{"},
+				{token.StringType, "x"},
+				{token.MappingValueType, ":"},
+				{token.SequenceStartType, " ["},
+				{token.StringType, "y"},
+				{token.SequenceEndType, "]"},
+				{token.CollectEntryType, ","},
+				{token.StringType, " a\n b"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " c"},
+				{token.MappingEndType, "}"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
+		"key on two lines of a flow sequence after a flow mapping": {
+			input: "{x: [{y: z}, a\n b: c]}\n",
+			want: []tok{
+				{token.MappingStartType, "{"},
+				{token.StringType, "x"},
+				{token.MappingValueType, ":"},
+				{token.SequenceStartType, " ["},
+				{token.MappingStartType, "{"},
+				{token.StringType, "y"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " z"},
+				{token.MappingEndType, "}"},
+				{token.CollectEntryType, ","},
+				{token.StringType, " a\n "},
+				{token.StringType, "b"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " c"},
+				{token.SequenceEndType, "]"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		"key below an item of an open flow sequence": {
+			input: "a: [1\nb: 2\n",
+			want: []tok{
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.SequenceStartType, " ["},
+				{token.IntegerType, "1\n"},
+				{token.StringType, "b"},
+				{token.MappingValueType, ":"},
+				{token.IntegerType, " 2\n"},
+			},
+		},
+		// YAML refuses a key on a line that continues a value, also right
+		// of the key of the value. The copy cuts the value at the line, and
+		// it reads a "-" that opens the line as a sequence entry.
+		"key on a dash line right of the key of a value": {
+			input: "{a: b\n    - c: d}\n",
+			want: []tok{
+				{token.MappingStartType, "{"},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " b\n    "},
+				{token.SequenceEntryType, "-"},
+				{token.StringType, " c"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " d"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		"key on a dash line below an item of a nested flow sequence": {
+			input: "{a: [b\n    - c: d]}\n",
+			want: []tok{
+				{token.MappingStartType, "{"},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.SequenceStartType, " ["},
+				{token.StringType, "b\n    "},
+				{token.SequenceEntryType, "-"},
+				{token.StringType, " c"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " d"},
+				{token.SequenceEndType, "]"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		"key on a dash line below a value of a single pair": {
+			input: "[a: b\n - c: d]\n",
+			want: []tok{
+				{token.SequenceStartType, "["},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " b\n "},
+				{token.SequenceEntryType, "-"},
+				{token.StringType, " c"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " d"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
+		// A tab after the "-" or "?" that opens the cut line is the blank
+		// of the indicator, and the next token keeps it in its origin. The
+		// parser refuses that token as a key after a tab, as go-yaml's
+		// lexer reads the line.
+		"key on a dash line with a tab below a value of a single pair": {
+			input: "[a: b\n -\tc: d]\n",
+			want: []tok{
+				{token.SequenceStartType, "["},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " b\n "},
+				{token.SequenceEntryType, "-"},
+				{token.InvalidType, "\tc:"},
+				{token.StringType, " d"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
+		"key on a question mark line below a value of a single pair": {
+			input: "[a: b\n ? c: d]\n",
+			want: []tok{
+				{token.SequenceStartType, "["},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " b\n "},
+				{token.MappingKeyType, "?"},
+				{token.StringType, " c"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " d"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
+		"key on a question mark line with a tab below a value of a single pair": {
+			input: "[a: b\n ?\tc: d]\n",
+			want: []tok{
+				{token.SequenceStartType, "["},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " b\n "},
+				{token.MappingKeyType, "?"},
+				{token.InvalidType, "\tc:"},
+				{token.StringType, " d"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
+		"key without a value below a value of a single pair": {
+			input: "[a: b\n c:]\n",
+			want: []tok{
+				{token.SequenceStartType, "["},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " b\n "},
+				{token.StringType, "c"},
+				{token.MappingValueType, ":"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
+		"key on two lines of a flow sequence right of its start": {
+			input: "[a\n b: c]\n",
+			want: []tok{
+				{token.SequenceStartType, "["},
+				{token.StringType, "a\n "},
+				{token.StringType, "b"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " c"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
+		// YAML folds a line of a flow collection only when the line is
+		// indented past the block node that holds the collection.
+		"dash line at the indent of the key of a flow sequence": {
+			input: "key: [a\n- c]\n",
+			want: []tok{
+				{token.StringType, "key"},
+				{token.MappingValueType, ":"},
+				{token.SequenceStartType, " ["},
+				{token.StringType, "a\n"},
+				{token.SequenceEntryType, "-"},
+				{token.StringType, " c"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
+		"dash line right of the key of a nested flow mapping": {
+			input: "x:\n  key: {a: b\n   - c}\n",
+			want: []tok{
+				{token.StringType, "x"},
+				{token.MappingValueType, ":"},
+				{token.StringType, "\n  key"},
+				{token.MappingValueType, ":"},
+				{token.MappingStartType, " {"},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " b\n   - c"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		// The indent of the block node is the column of the anchor of the
+		// key, so a line at that column ends the value.
+		"dash line at the indent of an anchored key of a nested flow mapping": {
+			input: "x:\n  &k key: {a: b\n  - c}\n",
+			want: []tok{
+				{token.StringType, "x"},
+				{token.MappingValueType, ":"},
+				{token.AnchorType, "\n  &"},
+				{token.StringType, "k"},
+				{token.StringType, " key"},
+				{token.MappingValueType, ":"},
+				{token.MappingStartType, " {"},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " b\n  "},
+				{token.SequenceEntryType, "-"},
+				{token.StringType, " c"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		// YAML keeps a ":" in a plain scalar when a character other than a
+		// blank or a flow indicator follows it, so the value spans the
+		// lines.
+		"colon before text on the line below a tagged value of a flow mapping": {
+			input: "{a: !t b\n c :d}\n",
+			want: []tok{
+				{token.MappingStartType, "{"},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.TagType, " !t "},
+				{token.StringType, "b\n c :d"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		"colon before text on the line below an anchored value of a flow mapping": {
+			input: "{a: &x b\n c :d}\n",
+			want: []tok{
+				{token.MappingStartType, "{"},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.AnchorType, " &"},
+				{token.StringType, "x"},
+				{token.StringType, " b\n c :d"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		// Such a ":" ends a key of a flow mapping, as go-yaml reads it in
+		// "{a b:c}" on one line.
+		"colon before text on the line below a key of a flow mapping": {
+			input: "{a\n b:c}\n",
+			want: []tok{
+				{token.MappingStartType, "{"},
+				{token.StringType, "a\n b"},
+				{token.MappingValueType, ":"},
+				{token.StringType, "c"},
+				{token.MappingEndType, "}\n"},
+			},
+		},
+		// A ":" before a flow indicator ends an explicit key on two lines
+		// of a flow sequence.
+		"colon before the end of a flow sequence after an explicit key on two lines": {
+			input: "key: [? a\n c:]\n",
+			want: []tok{
+				{token.StringType, "key"},
+				{token.MappingValueType, ":"},
+				{token.SequenceStartType, " ["},
+				{token.MappingKeyType, "?"},
+				{token.StringType, " a\n c"},
+				{token.MappingValueType, ":"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
+		// The value above the key becomes two tokens, so the go-yaml
+		// parser refuses the key after the single pair.
+		"key below a value on two lines of a single pair in a flow sequence": {
+			input: "[a: b\n c\n d: e]\n",
+			want: []tok{
+				{token.SequenceStartType, "["},
+				{token.StringType, "a"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " b\n "},
+				{token.StringType, "c\n "},
+				{token.StringType, "d"},
+				{token.MappingValueType, ":"},
+				{token.StringType, " e"},
+				{token.SequenceEndType, "]\n"},
+			},
+		},
 	}
 
 	for name, tc := range tcs {

@@ -183,7 +183,9 @@ type emptiedRoot struct {
 // text where the lexer moves or drops tokens other than a tag that ends the
 // text. They are the tokenizer's tokens as well in a text where the lexer
 // reads a tab after a tag into the tag. The same holds where the lexer
-// reads a tab after the name of an anchor or an alias into the name. The
+// reads a tab after the name of an anchor or an alias into the name. It
+// holds as well where the lexer cuts a plain scalar of a flow collection
+// at a line, or reads a key on such a line into the scalar. The
 // parser changes only the links between the tokens, which it does not
 // read, so the second parse reads the tokens as the first read them. The
 // parses run beside the checks of [Doc.check]. The function that
@@ -237,7 +239,10 @@ func (d *Doc) parseFinal(start string) func() finalParse {
 // Otherwise the lexer moves or drops other tokens, as after a
 // double-quoted scalar after which it skips a line break. It also drops
 // tokens where it reads a tab after a tag into the tag, or a tab after the
-// name of an anchor or an alias into the name. ParserTokens then returns
+// name of an anchor or an alias into the name. It cuts a plain scalar
+// that continues on a later line of a flow collection into more tokens,
+// as in "{a: b\n - c}". It reads a key on such a line into the scalar, as
+// in "{a: b\n    c: d}". ParserTokens then returns
 // the copies of tks that [tokens.ForParser] makes. Either way, each token
 // stands at the index of the token of tks that holds its text. A panic of
 // the lexer reaches the caller.

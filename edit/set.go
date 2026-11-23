@@ -335,29 +335,36 @@ type payload struct {
 // right after an anchor or a tag on its line and a "-" that starts an
 // entry inside a flow collection. So do a "-" there right before a flow
 // indicator, as in "[-]", and a plain scalar there that holds a flow
-// indicator, as in "[a}]", because YAML does not allow any of them.
-// The problem names the path of the Set and the marshaler, and it matches
-// ErrValue.
-// Every other problem of the text is go-yaml's, and it fails the Set with
-// ErrEngine at its place. Go-yaml's parser can refuse the text, with its
-// comments or without them. It refuses some text that YAML allows, such as
-// an anchor without a value at the end of the text. It also misreads a
-// "-" that continues a plain scalar after an explicit key in a flow
-// collection, as in "{? X\n - Y}". The encoder reads no
-// value from text that holds a tag or a comment alone. Go-yaml also reads
-// a byte order mark at the start of the text, or after its comment lines,
-// as text of the value, which YAML drops. Go-yaml's encoder writes only the
-// directive for text with a %YAML or a %TAG directive before its value,
-// though go-yaml reads that text as the value after the directive. The
-// message names go-yaml and the problem, with its place in that text. For
-// a directive, the detail tells the author of the program to return the
-// YAML without directives. Go-yaml converts the JSON of a MarshalJSON
-// method to YAML, and that YAML must read as the value of the JSON. Some
-// JSON converts to YAML that reads as another value, and such JSON fails
-// the Set with ErrEngine. A string of one line break reads as "". A number
-// in exponent form without a decimal point, such as 1e-07, reads as a
-// string, and so does an integer outside the range of 64 bits. An object
-// key "<<" reads as a merge key.
+// indicator, as in "[a}]", because YAML does not allow any of them. So
+// does a "-" that starts a line of a flow collection, where the line does
+// not pass the indent of the block node that holds the collection, as in
+// "x: {? Y\n- z}". So does a key on a line that continues a plain scalar
+// in a flow collection, as in "{x: y\n    z: w}" and "[x\n y: z]", where
+// the parse refuses that key. YAML ends the scalar at the ":" of such a
+// key, so the entries lack a ",". The problem names the path of the Set
+// and the marshaler, and it matches ErrValue. Every other problem of the
+// text is go-yaml's, and it fails the Set with ErrEngine at its place.
+// Go-yaml's parser can refuse the text without its comments, or refuse a
+// text with comments that it takes without them. It refuses some text
+// that YAML allows, such as an anchor without a value at the end of the
+// text and an explicit key on two lines of a flow sequence, as in
+// "[? X\n Y]". It
+// also refuses a "-" that continues a plain scalar in a flow collection,
+// as in "{x: y\n - z}". The encoder reads no value from text that holds a
+// tag or a comment alone. Go-yaml also reads a byte order mark at the
+// start of the text, or after its comment lines, as text of the value,
+// which YAML drops. Go-yaml's encoder writes only the directive for text
+// with a %YAML or a %TAG directive before its value, though go-yaml reads
+// that text as the value after the directive. The message names go-yaml
+// and the problem, with its place in that text. For a directive, the
+// detail tells the author of the program to return the YAML without
+// directives. Go-yaml converts the JSON of a MarshalJSON method to YAML,
+// and that YAML must read as the value of the JSON. Some JSON converts to
+// YAML that reads as another value, and such JSON fails the Set with
+// ErrEngine. A string of one line break reads as "". A number in exponent
+// form without a decimal point, such as 1e-07, reads as a string, and so
+// does an integer outside the range of 64 bits. An object key "<<" reads
+// as a merge key.
 //
 // The text is text of the program, and the Set writes it as go-yaml reads
 // it, indented for its place. Go-yaml's encoder writes each scalar of the
@@ -368,7 +375,9 @@ type payload struct {
 // escapes resolved, so "\x41" becomes "A". A block scalar at a place in a
 // flow collection becomes a double-quoted string. The place then reads
 // what go-yaml reads from the text, also where YAML reads the text
-// otherwise.
+// otherwise. YAML drops a tab that opens a line of a plain scalar in a
+// flow collection, but go-yaml reads the tab into the scalar. So the Set
+// writes "{x: y\n \tz}" as {x: "y \tz"}.
 // The encoder quotes a plain string that YAML reads as another value, as
 // [go.jacobcolvin.com/niceyaml/encoder.Encoder.Encode] describes. An indent
 // that makes go-yaml read the text otherwise fails the Set with ErrEngine.

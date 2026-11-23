@@ -214,15 +214,14 @@
 // indicator, as in "['a}']". Outside a flow collection, a plain scalar holds
 // a flow indicator after its first character, as in "a: b}".
 //
-// Inside a flow collection, YAML folds a line that starts with a "-" into the
-// plain scalar on the line above. Go-yaml's parser refuses such a "-" after a
-// mapping value, as in "{a: b\n - c}", and the document fails with the error
-// of the parser. After an explicit key, the parser reads the "-" as a
-// sequence entry, so yaml.Unmarshal reads "{? A\n - B}" as {A: [B]} where
-// YAML holds {"A - B": null}. It reads "{? A\n -}" as {A: "-"} where YAML
-// holds {"A -": null}. The parse of a Source refuses each such "-" with a
-// syntax error at the "-". A quoted key, as in "{? 'A - B'}", holds the
-// same text on one line.
+// Inside a flow collection, YAML folds a line into the plain scalar on the
+// line above only when the spaces that open the line pass the indent of the
+// block node that holds the collection. Go-yaml's parser reads a "-" at a
+// line that does not pass that indent after an explicit key as a sequence
+// entry, so yaml.Unmarshal reads "key: {? A\n- B}" as {key: {A: [B]}}. The
+// parse of a Source refuses that "-" with a syntax error at the "-". Where
+// the parser refuses such a "-", the document fails with the error of the
+// parser.
 //
 // A "---" header that directly follows an anchor without a value parses
 // together with the document above it. A syntax error in either document thus
@@ -1019,7 +1018,11 @@
 // and niceyaml reads the tag !t and the anchor x on 1. In "a: &x\t1",
 // go-yaml reads the anchor x1 on an empty value, and niceyaml reads the
 // anchor x on 1. Go-yaml refuses "&x \ta: 1" for the tab in front of the
-// key, and niceyaml reads {a: 1}.
+// key, and niceyaml reads {a: 1}. Inside a flow collection, go-yaml cuts
+// a "-" that starts a line out of the plain scalar on the line above. So
+// it refuses "{a: b\n - c}" and reads "{? A\n - B}" as {A: [B]}. YAML
+// folds the line into the scalar, so niceyaml reads {a: "b - c"} and
+// {"A - B": null}.
 //
 // Go-yaml's parser nests the lines after a tag on an empty value in that
 // value, but YAML reads them outside it. So the parser reads "a: !t" and
@@ -2479,18 +2482,18 @@
 // path type when a caller needs it.
 //
 // The error for text that the go-yaml parser rejects matches [ErrSyntax]. So
-// do the errors for a "-" right after a tag on its line, for a "-" that
-// starts an entry inside a flow collection, and for a "-" there right before
-// a flow indicator. So do the error for a plain scalar there that holds a
-// flow indicator and the error for a "-" that continues a plain scalar after
-// an explicit key there. The parser takes each such token. The error for
-// YAML that parsed but does not decode matches [ErrDecode]. The errors for a
-// value of the wrong kind, a number out of range, and an unknown field each
-// match a sentinel of their own beside ErrDecode, as [ErrUnknownField]
-// describes. A caller thus distinguishes these cases without naming go-yaml's
-// error types. The package returns a panic in go-yaml, or in an unmarshaler
-// that go-yaml calls, as a [PanicError] that does not match any of those
-// sentinels.
+// do the errors for a "-" right after a tag on its line, for a "-" that starts
+// an entry inside a flow collection, and for a "-" there right before a flow
+// indicator. So do the error for a plain scalar there that holds a flow
+// indicator and the error for a "-" at a line of a flow collection that does
+// not pass the indent of the block node that holds the collection. The parser
+// takes each such token. The error for YAML that parsed but does not decode
+// matches [ErrDecode]. The errors for a value of the wrong kind, a number out
+// of range, and an unknown field each match a sentinel of their own beside
+// ErrDecode, as [ErrUnknownField] describes. A caller thus distinguishes these
+// cases without naming go-yaml's error types. The package returns a panic in
+// go-yaml, or in an unmarshaler that go-yaml calls, as a [PanicError] that
+// does not match any of those sentinels.
 //
 // The go-yaml settings that niceyaml supports have named options, such as
 // [WithAllowDuplicateKeys], [CustomUnmarshaler], or

@@ -231,16 +231,16 @@ func (n *Node) DocumentAST() *ast.DocumentNode {
 // text that the parser rejects. It matches ErrSyntax as well for a "-" right
 // after a tag on its line, for a "-" that starts an entry inside a flow
 // collection, and for a "-" there right before a flow indicator. It matches
-// ErrSyntax for a plain scalar there that holds a flow indicator and for a
-// "-" that continues a plain scalar after an explicit key there, as ErrSyntax
-// describes. It matches [ErrLimit] for a document past the depth limit or
-// the document byte limit, and for a text past the byte limit of the
-// Source. It matches [ErrEncoding] for the one document of a text that is
-// not UTF-8. A syntax error fails the one document that holds it, and
-// [Source.AllDocuments] returns a Node for that document too. The error is a
-// [*SourceError] bound to the Source and to that document, so
-// [SourceError.Document] returns its root. It is among the errors
-// [Source.File] returns:
+// ErrSyntax for a plain scalar there that holds a flow indicator, and for a
+// "-" at a line of a flow collection that does not pass the indent of the
+// block node that holds the collection, as ErrSyntax describes. It matches
+// [ErrLimit] for a document past the depth limit or the document byte limit,
+// and for a text past the byte limit of the Source. It matches [ErrEncoding]
+// for the one document of a text that is not UTF-8. A syntax error fails the
+// one document that holds it, and [Source.AllDocuments] returns a Node for
+// that document too. The error is a [*SourceError] bound to the Source and to
+// that document, so [SourceError.Document] returns its root. It is among the
+// errors [Source.File] returns:
 //
 //	for _, doc := range source.AllDocuments() {
 //		if err := doc.Err(); err != nil {

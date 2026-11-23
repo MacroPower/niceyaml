@@ -48,8 +48,8 @@ type Result struct {
 // collection starts with a "-" right before a flow indicator, as in
 // "[-]". So does a plain scalar there that holds a flow indicator, as in
 // "[a}]". The parser refuses the "-" after an anchor, but it takes the
-// others. A run with a "-" that continues a plain scalar in a flow
-// collection fails too, when the parser misreads that "-".
+// others. A run with a "-" that starts a line right below a plain scalar
+// in a flow collection fails too, when the parser takes the run.
 type Failure struct {
 	// Err is the error of the run, or nil after a panic. It is the error
 	// that the parser returned, the [*SizeError] of a run past the byte
@@ -171,13 +171,14 @@ func parse(tks token.Tokens, limits Limits, mode parser.Mode, opts []parser.Opti
 
 		// The run fails with its first error in file order. The error of
 		// the parser thus wins when it binds before the token of the misread.
-		// A "-" that continues a plain scalar is valid YAML, so any error of
-		// the parser wins over the error of that "-".
-		entryErr, continuation := misreadError(run)
+		// Any error of the parser wins over the error of a "-" right below
+		// a plain scalar, because that error names the indent of the line,
+		// and the parser names the token that it refuses there.
+		entryErr, yields := misreadError(run)
 
 		switch {
 		case entryErr == nil, r.bindsBefore(failure, entryErr.Token):
-		case continuation && failure != nil && failure.Err != nil:
+		case yields && failure != nil && failure.Err != nil:
 		default:
 			failure = &Failure{Err: entryErr}
 		}
@@ -351,18 +352,20 @@ const FlowIndicatorMessage = "a plain scalar cannot start with a \"-\" before a 
 // "[a}]", which fails the run of the scalar.
 const FlowScalarMessage = "a plain scalar in a flow collection cannot hold a flow indicator"
 
-// ContinuationMessage is the message of the [*yaml.SyntaxError] of a "-"
-// that continues a plain scalar on a new line inside a flow collection.
-// The run fails with it when the go-yaml parser takes the run and misreads
-// that "-". YAML allows the "-", so the error names a limit of the parser.
-const ContinuationMessage = "a \"-\" that continues a plain scalar in a flow collection is not supported"
+// FlowIndentMessage is the message of the [*yaml.SyntaxError] of a "-"
+// that starts a line right below a plain scalar in a flow collection,
+// where the go-yaml parser takes the run. The line of such a "-" does not
+// pass the indent of the block node that holds the collection, which
+// YAML requires of each line of the collection.
+const FlowIndentMessage = "a line of a flow collection must be indented past the block node that holds it"
 
 // misreadError returns the syntax error of the first token of run that
 // the go-yaml parser can misread, or nil. Such a token is a "-" or a plain
 // scalar. The "-" starts a block sequence where YAML does not hold one,
-// starts a plain scalar that YAML refuses, or continues a plain scalar.
-// The plain scalar holds a flow indicator inside a flow collection. It
-// reports whether the token is a "-" that continues a plain scalar.
+// starts a plain scalar that YAML refuses, or starts a line right below a
+// plain scalar in a flow collection. The plain scalar holds a flow
+// indicator inside a flow collection. It reports whether the token is a
+// "-" that starts a line right below a plain scalar.
 //
 // YAML puts a line break between the properties of a block sequence and
 // its first "-". The parser refuses a "-" right after an anchor on its
@@ -398,16 +401,18 @@ const ContinuationMessage = "a \"-\" that continues a plain scalar in a flow col
 // plain scalar, and neither is the content of a block scalar, as
 // [blockContent] tells.
 //
-// YAML allows a "-" that starts a line right below a plain scalar in a
-// flow collection, because the "-" continues that scalar. The go-yaml
-// lexer splits the "-" out of the scalar after a mapping value or an
-// explicit key, as [continuesPlain] tells. The parser refuses the "-"
-// after a mapping value, as in "{a: b\n - c}". It takes the "-" after an
-// explicit key, and it reads "{? A\n - B}" as {A: [B]}, where YAML holds
-// {"A - B": null}. It reads "{? A\n -}" as {A: "-"}, where YAML holds
-// {"A -": null}. The error of such a "-" has [ContinuationMessage], and
-// the run takes the error of the parser in its place when the parser
-// refuses the run.
+// A "-" that starts a line right below a plain scalar in a flow
+// collection continues that scalar when the line passes the indent of the
+// block node that holds the collection. [tokens.Tokenize] then reads the
+// "-" into the scalar. The tokenizer gives the "-" a token of its own at a
+// line that does not pass that indent, as in "key: [a\n- c]". It also
+// gives the "-" a token at a line that holds the key of a ":" where YAML
+// refuses a scalar on more than one line as a key, as in "{a: b\n - c: d}".
+// YAML refuses both texts, and so does the parser. The parser takes a "-"
+// at a line that does not pass the indent after an explicit key, so it
+// reads "key: {? A\n- b}" as {key: {A: [b]}}. The error of such a "-" has
+// [FlowIndentMessage], and the run takes the error of the parser in its
+// place when the parser refuses the run.
 //
 // The run fails with this error unless the parser refuses a token before
 // the token of the error. The error of a "-" binds at the "-".
@@ -433,8 +438,8 @@ func misreadError(run token.Tokens) (*yaml.SyntaxError, bool) {
 				return &yaml.SyntaxError{Message: AnchorSequenceMessage, Token: tk}, false
 			}
 
-			if depth > 0 && continuesPlain(run, i) {
-				return &yaml.SyntaxError{Message: ContinuationMessage, Token: tk}, true
+			if depth > 0 && belowPlain(run, i) {
+				return &yaml.SyntaxError{Message: FlowIndentMessage, Token: tk}, true
 			}
 
 			if depth > 0 {
@@ -459,8 +464,8 @@ func misreadError(run token.Tokens) (*yaml.SyntaxError, bool) {
 				continue
 			}
 
-			if continuesPlain(run, i) {
-				return &yaml.SyntaxError{Message: ContinuationMessage, Token: tk}, true
+			if belowPlain(run, i) {
+				return &yaml.SyntaxError{Message: FlowIndentMessage, Token: tk}, true
 			}
 
 			return &yaml.SyntaxError{Message: FlowIndicatorMessage, Token: tk}, false
@@ -505,14 +510,9 @@ func beforeFlowIndicator(run token.Tokens, i int) bool {
 	return i+1 >= len(run) || run[i+1].Type != token.MappingValueType
 }
 
-// continuesPlain reports whether the "-" at run[i] starts a line that
-// continues a plain scalar on an earlier line. In a flow collection, YAML
-// folds such a line into the scalar, and a space joins the "-" to the
-// text of the line above. The go-yaml lexer folds the line into the
-// scalar after a flow sequence entry, as in "[a\n - 1]", so the run does
-// not hold a "-" token there. It splits the "-" out of the scalar after a mapping
-// value or an explicit key.
-func continuesPlain(run token.Tokens, i int) bool {
+// belowPlain reports whether the "-" at run[i] starts a line right below
+// a plain scalar.
+func belowPlain(run token.Tokens, i int) bool {
 	if i == 0 {
 		return false
 	}

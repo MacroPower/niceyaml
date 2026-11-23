@@ -611,34 +611,32 @@
 // of such a construct is the reading of YAML. Every read returns that reading,
 // and every call edits it. Where go-yaml reads valid YAML otherwise than
 // YAML does, the reads return go-yaml's reading, and a program that needs
-// the reading of YAML fixes the text itself. A call on such a text can fail
-// with [ErrEngine] where the engine cannot write go-yaml's reading back. A
-// text that the Source does not parse fails New with the error of the
-// parse. Such texts include one that go-yaml's parser refuses. They also
-// include one with a "-" on the line of a tag, as in "a: !t - 1", one
+// the reading of YAML fixes the text itself. A call on such a text can
+// fail with [ErrEngine] where the engine cannot write go-yaml's reading
+// back. A text that the Source does not parse fails New with the error of
+// the parse. Such texts include one that go-yaml's parser refuses. They
+// also include one with a "-" on the line of a tag, as in "a: !t - 1", one
 // with a "-" that starts an entry inside a flow collection, as in "[- 1]",
 // and one with a "-" there right before a flow indicator, as in "[-]".
 // YAML refuses each such "-", but the parser takes it. They also include
 // one with a plain scalar in a flow collection that holds a flow
 // indicator, as in "[a}]", which YAML refuses and the parser takes. They
-// also include one with a "-" that continues a plain scalar after an
-// explicit key in a flow collection, as in "{? A\n - B}", which the
-// parser misreads. A reference document of
-// [go.jacobcolvin.com/niceyaml.WithReferences] that does not parse fails
-// New the same way, because each decode of the document fails with that
-// error. A reference document
-// in which go-yaml's parser nests a line deeper than YAML reads it, as in
-// "x: !t\ny: 1", fails New with an error that matches
-// [go.jacobcolvin.com/niceyaml.ErrDecode] for the same reason. So does one
-// in which the parser leaves a line out, as in "x: !!str &k [1]\ny: 1".
-// The text itself can hold a line that the parser leaves out, as in
-// "x: !!int &k\n  1\ny: 1".
-// Each decode of the document then fails with the error of that line, so
-// New fails with it too. That error matches
-// [go.jacobcolvin.com/niceyaml.ErrDecode]. New returns the error of such a
-// line only for a document that it does not refuse. It refuses
-// "a: !!str &x {a: 1}\nb: 1" for the tag that converts a collection, even
-// though the parser leaves out "b: 1".
+// also include one with a "-" at a line of a flow collection after an
+// explicit key, where the line does not pass the indent of the block node
+// that holds the collection, as in "key: {? A\n- b}". A reference document
+// of [go.jacobcolvin.com/niceyaml.WithReferences] that does not parse
+// fails New the same way, because each decode of the document fails with
+// that error. A reference document in which go-yaml's parser nests a line
+// deeper than YAML reads it, as in "x: !t\ny: 1", fails New with an error
+// that matches [go.jacobcolvin.com/niceyaml.ErrDecode] for the same
+// reason. So does one in which the parser leaves a line out, as in
+// "x: !!str &k [1]\ny: 1". The text itself can hold a line that the parser
+// leaves out, as in "x: !!int &k\n  1\ny: 1". Each decode of the document
+// then fails with the error of that line, so New fails with it too. That
+// error matches [go.jacobcolvin.com/niceyaml.ErrDecode]. New returns the
+// error of such a line only for a document that it does not refuse. It
+// refuses "a: !!str &x {a: 1}\nb: 1" for the tag that converts a
+// collection, even though the parser leaves out "b: 1".
 //
 // [New] refuses a document that holds one of these, with an error that
 // matches [ErrMisread] and that [go.jacobcolvin.com/niceyaml.IsInvalid]
@@ -1029,21 +1027,30 @@
 // lexer reads as a string below a tag without a value. They also include
 // one with a double-quoted scalar after which the lexer skips a line
 // break, and one with a tab after a tag or after the name of an anchor.
-// The decode of yaml.Unmarshal reads such a text apart from niceyaml, so
-// the check against go-yaml's decoder alone skips it.
+// They also include one with a plain scalar that continues on a later
+// line in a flow collection, as in "{a: b\n - c}". The decode of
+// yaml.Unmarshal reads such a text apart from niceyaml, so the check
+// against go-yaml's decoder alone skips it.
 //
 // Below a tag without a value and before a tag that ends the text, go-yaml's
 // lexer places each other token as the tokenizer does. The parse of
 // go-yaml's parser then still reads the tokens of the lexer. It reads the
-// tokenizer's tokens only in a text where the lexer moves or drops other
-// tokens, or reads a tab after a tag or a name into it. The lexer moves each
+// tokenizer's tokens only in a text where the lexer moves, drops, or cuts
+// other tokens, or reads a tab after a tag or a name into it. They are the
+// tokenizer's tokens as well where the lexer reads a tab that opens a line
+// of a flow collection into a plain scalar, or a key on such a line, as
+// in "{a: b\n    c: d}". The lexer moves each
 // later token when it skips a line break after a double-quoted scalar. It
 // reads a tab after a tag into the tag, with the text after the tab up to
 // the next space, line break, or "," in a flow collection. So it drops the
 // tokens of that text. It reads a tab after the name of an anchor or an
 // alias, and the text after the tab, into the name in the same way. That
 // text ends at the next space, line break, or comment, or at a flow
-// indicator such as "," in a flow collection.
+// indicator such as "," in a flow collection. In a flow collection, the
+// lexer cuts a plain scalar at a line that starts at or left of the last
+// ":", "?", or "-" indicator. It reads a "-" there as a token of its own.
+// It reads a "-" that starts a line right of that indicator, and the rest
+// of the text, into the scalar.
 //
 // The edited text must hold only the characters that YAML allows in a text,
 // the printable characters of YAML 1.2, which include U+0085. A Go string

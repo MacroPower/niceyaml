@@ -900,11 +900,6 @@ func TestNew_Unparsed(t *testing.T) {
 			// it.
 			text: "[a}]\n",
 		},
-		"plain scalar on two lines of an explicit key": {
-			// YAML reads the key as "a - b", but go-yaml's parser reads it as
-			// a key a with the value [b]. The Source refuses the text.
-			text: stringtest.LinesLF("{? a", " - b}"),
-		},
 	}
 
 	for name, tc := range tcs {

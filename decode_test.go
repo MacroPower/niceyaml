@@ -7975,6 +7975,142 @@ func TestDocument_Decode_YAMLReadings(t *testing.T) {
 			input: "!!str\t\ta: 1\n",
 			want:  map[string]any{"a": uint64(1)},
 		},
+		"dash that continues a value of a flow mapping": {
+			// Go-yaml cuts the "-" out of the value and refuses it.
+			input: stringtest.LinesLF("{a: b", " - c}"),
+			want:  map[string]any{"a": "b - c"},
+		},
+		"dash that continues a value of a flow mapping on a value": {
+			input: stringtest.LinesLF("a: {b: c", "  - d}"),
+			want:  map[string]any{"a": map[string]any{"b": "c - d"}},
+		},
+		"dash that continues a value of a single pair in a flow sequence": {
+			input: stringtest.LinesLF("[a: b", " - c]"),
+			want:  []any{map[string]any{"a": "b - c"}},
+		},
+		"dash that continues an integer value": {
+			input: stringtest.LinesLF("{a: 1", " - 2}"),
+			want:  map[string]any{"a": "1 - 2"},
+		},
+		"dash that continues an item of a nested flow sequence": {
+			input: stringtest.LinesLF("{a: [b", " - c]}"),
+			want:  map[string]any{"a": []any{"b - c"}},
+		},
+		"dashes that continue a value on two lines": {
+			input: stringtest.LinesLF("{a: b", " - c", " - d}"),
+			want:  map[string]any{"a": "b - c - d"},
+		},
+		"dash before a flow indicator that continues a value": {
+			input: stringtest.LinesLF("{a: b", " -, c: d}"),
+			want:  map[string]any{"a": "b -", "c": "d"},
+		},
+		"dash that continues a value after an anchor": {
+			input: stringtest.LinesLF("{a: &x b", " - c, d: *x}"),
+			want:  map[string]any{"a": "b - c", "d": "b - c"},
+		},
+		"dash that continues a value right of its key": {
+			// Go-yaml reads the rest of the text into the value, with the
+			// "}".
+			input: stringtest.LinesLF("{a: b", "    - c}"),
+			want:  map[string]any{"a": "b - c"},
+		},
+		"dash that continues an item right of the key of its flow sequence": {
+			input: stringtest.LinesLF("x: [a, b", " - c]"),
+			want:  map[string]any{"x": []any{"a", "b - c"}},
+		},
+		"colon before text that continues a tagged value of a flow mapping": {
+			// Go-yaml cuts the value at the line and reads the ":" as the
+			// indicator of a key.
+			input: stringtest.LinesLF("{a: !t b", " c :d}"),
+			want:  map[string]any{"a": "b c :d"},
+		},
+		"colon before text that continues an anchored value of a flow mapping": {
+			input: stringtest.LinesLF("{a: &x b", " c :d}"),
+			want:  map[string]any{"a": "b c :d"},
+		},
+		"colon before text that ends an explicit key on two lines of a flow mapping": {
+			// Go-yaml reads the text on one line the same way.
+			input: stringtest.LinesLF("{? a", " c:d}"),
+			want:  map[string]any{"a c": "d"},
+		},
+		"colon before text that ends a key on two lines of a flow mapping": {
+			// Go-yaml reads "{a b:c}" on one line the same way.
+			input: stringtest.LinesLF("{a", " b:c}"),
+			want:  map[string]any{"a b": "c"},
+		},
+		"colon before text that ends a key on two lines after an entry of a flow mapping": {
+			input: stringtest.LinesLF("{x: y, a", " b:c}"),
+			want:  map[string]any{"x": "y", "a b": "c"},
+		},
+		"colon before the end of a flow sequence after an explicit key on two lines": {
+			input: stringtest.LinesLF("key: [? a", " c:]"),
+			want:  map[string]any{"key": []any{map[string]any{"a c": nil}}},
+		},
+		"colon before a comma after an explicit key on two lines of a flow sequence": {
+			input: stringtest.LinesLF("key: [? a", " c:, d]"),
+			want:  map[string]any{"key": []any{map[string]any{"a c": nil}, "d"}},
+		},
+		"dash that continues an explicit key of a flow mapping": {
+			// Go-yaml reads the "-" as a sequence entry, so it reads
+			// {a: [b]}.
+			input: stringtest.LinesLF("{? a", " - b}"),
+			want:  map[string]any{"a - b": nil},
+		},
+		"line that continues a value of a flow mapping": {
+			input: stringtest.LinesLF("{a: b", " c}"),
+			want:  map[string]any{"a": "b c"},
+		},
+		"colon inside a line that continues a value of a flow mapping": {
+			input: stringtest.LinesLF("{a: b", " c:d}"),
+			want:  map[string]any{"a": "b c:d"},
+		},
+		"key on two lines of a flow mapping": {
+			input: stringtest.LinesLF("{x: y, a", " b: c}"),
+			want:  map[string]any{"x": "y", "a b": "c"},
+		},
+		"tab that opens a line of a value of a flow mapping": {
+			// Go-yaml reads the tab into the value and cuts the value at
+			// the line.
+			input: stringtest.LinesLF("{a: b", "\tc}"),
+			want:  map[string]any{"a": "b c"},
+		},
+		"tab before a dash that continues a value of a flow mapping": {
+			input: stringtest.LinesLF("{a: b", "\t- c}"),
+			want:  map[string]any{"a": "b - c"},
+		},
+		"tab that opens a line of an item of a flow sequence": {
+			input: stringtest.LinesLF("{x: [a", "\tb]}"),
+			want:  map[string]any{"x": []any{"a b"}},
+		},
+		"explicit key on two lines before its value": {
+			input: stringtest.LinesLF("{? a", " b: c}"),
+			want:  map[string]any{"a b": "c"},
+		},
+		"key on two lines of a flow mapping in a flow sequence": {
+			input: stringtest.LinesLF("[{x: [y], a", " b: c}]"),
+			want:  []any{map[string]any{"x": []any{"y"}, "a b": "c"}},
+		},
+		"dash at the indent of a root flow mapping": {
+			input: stringtest.LinesLF("{a: b", "- c}"),
+			want:  map[string]any{"a": "b - c"},
+		},
+		"dash right of the key of a nested flow mapping": {
+			// The line must start right of the key, at column 3 or later.
+			input: stringtest.LinesLF("x:", "  key: {a: b", "   - c}"),
+			want:  map[string]any{"x": map[string]any{"key": map[string]any{"a": "b - c"}}},
+		},
+		"dash right of the sequence entry of a flow mapping": {
+			input: stringtest.LinesLF("- {a: b", " - c}"),
+			want:  []any{map[string]any{"a": "b - c"}},
+		},
+		"dash right of the key of a flow mapping in a sequence entry": {
+			input: stringtest.LinesLF("- key: {a: b", "   - c}"),
+			want:  []any{map[string]any{"key": map[string]any{"a": "b - c"}}},
+		},
+		"dash right of the explicit value of a flow mapping": {
+			input: stringtest.LinesLF("? a", ": {b: c", " - d}"),
+			want:  map[string]any{"a": map[string]any{"b": "c - d"}},
+		},
 	}
 
 	for name, tc := range tcs {
