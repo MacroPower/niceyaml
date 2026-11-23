@@ -96,11 +96,11 @@ func (d *Doc) endCall(n *Node, err error) error {
 
 // check checks the text after the calls of an Apply return. The text must
 // keep the limits of the Source of the user's text, as [Doc.limitProblem]
-// describes. The text must decode, as [Doc.decodeProblem]
-// describes, and go-yaml's parser must take it with and without its
-// comments, as [Doc.parseProblem] describes. It must hold the values of the
-// model of the calls, as [Doc.checkModel] describes. Go-yaml's decoder
-// alone must read those values too, as [Doc.ownDecodeProblem] describes.
+// describes. The text must decode, as [Doc.decodeProblem] describes, and
+// go-yaml's parser must take it, as [Doc.parseProblem] describes. It must
+// hold the values of the model of the calls, as [Doc.checkModel]
+// describes. Go-yaml's decoder alone must read those values too, as
+// [Doc.ownDecodeProblem] describes.
 // The text of start is the text that the Apply found. The parses of
 // [Doc.parseFinal] run beside the checks that do not read them, the check
 // of the model among them. The problem that check returns is the first in
@@ -131,7 +131,7 @@ func (d *Doc) check(ctx context.Context, start state) error {
 		return err
 	}
 
-	err = d.parseProblem(final, start)
+	err = d.parseProblem(final)
 	if err != nil {
 		return err
 	}
@@ -146,32 +146,48 @@ func (d *Doc) check(ctx context.Context, start state) error {
 // finalParse holds the problems of go-yaml's parses of the current text
 // that [Doc.parseFinal] makes.
 type finalParse struct {
-	// The problems of the parse without the comments of the text, as
-	// yaml.Unmarshal parses it, and of the parse with them.
-	plain, comments error
-	// The tokens that both parses read, as [parserTokens] gives them, each
+	// The problem of the parse without the comments of the text, as
+	// yaml.Unmarshal parses it.
+	plain error
+	// The problem of the parse with the comments of the text, as
+	// [parser.ParseComments] parses it. Only a text below an emptied root
+	// takes that parse.
+	comments error
+	// The tokens that the parses read, as [parserTokens] gives them, each
 	// at the index of the token of the current parse that it stands for.
 	tokens token.Tokens
+	// The root of the current text, when a removal emptied it.
+	root emptiedRoot
+}
+
+// emptiedRoot holds the "{}" or "[]" that a removal wrote for the root that
+// it emptied, as [Doc.emptiedRoot] finds it.
+type emptiedRoot struct {
+	// The call that wrote the "{}" or "[]", such as a Remove. It is empty
+	// for any other root.
+	by string
+	// The bytes of the "{}" or "[]" in the current text.
+	s span
 }
 
 // parseFinal starts go-yaml's parses of the current text when it differs
 // from start, the text before the calls. Each parse reads the text with its
 // tail, as the parser reads the document in its file. One parse leaves out
-// the comments of the text, as yaml.Unmarshal does, and one keeps them, as
-// [parser.ParseComments] does. Both read the tokens that [parserTokens]
-// gives, one parse after the other. Those are the tokens of one pass of
-// go-yaml's lexer, as yaml.Unmarshal reads them, except in a text where
-// the lexer moves or drops tokens other than a tag that ends the text.
-// The parser changes only the links between the tokens, which it
-// does not read, so the second parse reads the tokens as the first read
-// them. The two parses differ only in the comment tokens that they read,
-// so a text without comments takes the result of the first parse for the
-// second. The parses run beside the checks of [Doc.check]. The function
-// that parseFinal returns waits for them. A panic of the lexer or the
-// parser comes back as the problem of the parse, as [parseTokens] gives
-// it. The parses take a key that the text repeats. The parse of the edits
-// already reads the keys as the Source does, and a refusal of a repeated
-// key does not depend on the comments.
+// the comments of the text, as yaml.Unmarshal does. A second parse keeps
+// them, as [parser.ParseComments] does, for the problem that
+// [Doc.emptiedRootProblem] gives. That parse runs only when the first takes
+// the text, the text holds a comment, and a removal emptied the root, as
+// [Doc.emptiedRoot] tells. Both read the tokens that [parserTokens] gives,
+// one parse after the other. Those are the tokens of one pass of go-yaml's
+// lexer, as yaml.Unmarshal reads them, except in a text where the lexer
+// moves or drops tokens other than a tag that ends the text. The parser
+// changes only the links between the tokens, which it does not read, so
+// the second parse reads the tokens as the first read them. The parses run
+// beside the checks of [Doc.check]. The function that parseFinal returns
+// waits for them. A panic of the lexer or the parser comes back as the
+// problem of the parse, as [parseTokens] gives it. The parses take a key
+// that the text repeats. The parse of the edits already reads the keys as
+// the Source does.
 func (d *Doc) parseFinal(start string) func() finalParse {
 	if d.cur == start {
 		return func() finalParse { return finalParse{} }
@@ -179,9 +195,10 @@ func (d *Doc) parseFinal(start string) func() finalParse {
 
 	done := make(chan finalParse, 1)
 	text, tks := d.cur+d.tail, d.tokens()
+	root := d.emptiedRoot()
 
 	go func() {
-		var r finalParse
+		r := finalParse{root: root}
 
 		defer func() {
 			if p := recover(); p != nil {
@@ -196,8 +213,8 @@ func (d *Doc) parseFinal(start string) func() finalParse {
 
 		// The mode of the parser decides only whether it reads the comment
 		// tokens, so it reads tokens without a comment the same in both.
-		r.comments = r.plain
-		if slices.ContainsFunc(r.tokens, func(tk *token.Token) bool { return tk.Type == token.CommentType }) {
+		if r.plain == nil && root.by != "" &&
+			slices.ContainsFunc(r.tokens, func(tk *token.Token) bool { return tk.Type == token.CommentType }) {
 			r.comments = parseTokens(r.tokens, parser.ParseComments)
 		}
 	}()
@@ -765,23 +782,9 @@ func (d *Doc) entryRead(node ast.Node, name string) (*ast.MappingValueNode, bool
 // engineAtToken returns err as the problem of a bug in the engine, bound at
 // the bytes of tk, a token of the current text, as [Doc.engineAtOffset]
 // binds them. A token without bytes, such as the null of an entry without
-// a value, binds at the byte where the text places it. A token of the tail
-// binds where the user's text holds it. The Apply records the problem.
+// a value, binds at the byte where the text places it. The Apply records
+// the problem.
 func (d *Doc) engineAtToken(tk *token.Token, err error) error {
-	// A token of the tail lies outside the document, so it binds where the
-	// user's text holds it, at the path $, as [Doc.tailRange] places it.
-	if ranges := d.src.Lines().ContentRanges(tk); len(ranges) > 0 {
-		rng := position.NewRange(ranges[0].Start, ranges[len(ranges)-1].End)
-		if at, ok := d.tailRange(rng); ok {
-			problem := d.bindSite(site{path: paths.Doc(), at: at}, func(opts ...niceyaml.ErrorOption) error {
-				return d.engineProblem(err, opts...)
-			})
-			d.record(problem)
-
-			return problem
-		}
-	}
-
 	s, ok := d.tokenSpan(tk)
 	if !ok {
 		off := d.offset(position.NewFromToken(tk))
@@ -792,127 +795,93 @@ func (d *Doc) engineAtToken(tk *token.Token, err error) error {
 }
 
 // parseProblem returns the problem of the current text when go-yaml's
-// parser refuses it, or panics on it, in one of the parses of final. The
-// parse without comments comes first. The edits read a parse that keeps
-// the comments, and that parse leaves out each comment that makes the
-// parser refuse or misread valid YAML. The parser refuses some texts
-// without their comments, such as one with an anchor without a value
-// before a comment at its end. It refuses some texts with their comments,
-// such as a flow collection at the root before a comment line. A refusal
-// of a comment line below the "{}" or "[]" that a removal wrote for the
-// root gives the problem of the document that [Doc.emptiedRootProblem]
-// gives. Any other refusal with the comments does not count when the
-// parser also refuses start, the text that the Apply found, with its
-// comments, as [refusedWithComments] tells. The problem of each refusal
-// that counts matches [ErrEngine], and it names go-yaml's parser. It binds
-// at the token where the parser refused the text, as [Doc.parsedAt] places
-// it, or at the root for a panic.
-func (d *Doc) parseProblem(final finalParse, start state) error {
-	refusals := []struct{ err, why error }{
-		{final.plain, errRefusedWithoutComments},
-		{final.comments, errRefusedWithComments},
+// parser refuses it, or panics on it, in the parse of final that leaves out
+// the comments. The problem matches [ErrEngine], and it names go-yaml's
+// parser. It binds at the token where the parser refused the text, as
+// [Doc.parsedAt] places it, or at the root for a panic. The edits read a
+// parse that keeps the comments, and that parse leaves out each comment
+// that makes the parser refuse or misread valid YAML. So a refusal of the
+// text with its comments fails the Apply only below an emptied root, as
+// [Doc.emptiedRootProblem] tells.
+func (d *Doc) parseProblem(final finalParse) error {
+	if final.plain == nil {
+		return d.emptiedRootProblem(final)
 	}
 
-	for _, r := range refusals {
-		if r.err == nil {
-			continue
-		}
+	cause := fmt.Errorf("%w: %w", errRefusedWithoutComments, final.plain)
 
-		cause := fmt.Errorf("%w: %w", r.why, r.err)
+	var tk *token.Token
 
-		var tk *token.Token
-
-		if refusal, ok := errors.AsType[yaml.Error](r.err); ok {
-			cause, tk = fmt.Errorf("%w: %s", r.why, refusal.GetMessage()), refusal.GetToken()
-		}
-
-		if errors.Is(r.why, errRefusedWithComments) {
-			problem := d.emptiedRootProblem(tk)
-			if problem != nil {
-				return problem
-			}
-
-			if refusedWithComments(start.cur+d.tail, start.src.Tokens()) {
-				continue
-			}
-		}
-
-		if at, ok := d.parsedAt(final.tokens, tk); ok {
-			return d.engineAtToken(at, cause)
-		}
-
-		return d.bug(d.rootNode(), cause)
+	if refusal, ok := errors.AsType[yaml.Error](final.plain); ok {
+		cause, tk = fmt.Errorf("%w: %s", errRefusedWithoutComments, refusal.GetMessage()), refusal.GetToken()
 	}
 
-	return nil
+	if at, ok := d.parsedAt(final.tokens, tk); ok {
+		return d.engineAtToken(at, cause)
+	}
+
+	return d.bug(d.rootNode(), cause)
 }
 
-// refusedWithComments reports whether go-yaml's parser refuses text with
-// its comments, as [parser.ParseComments] parses it, or whether go-yaml's
-// lexer or parser panics on it. The parser reads the tokens that
-// [parserTokens] gives for text and tks, the tokens of the tokenizer over
-// text.
-func refusedWithComments(text string, tks token.Tokens) bool {
-	var refused bool
-
-	func() {
-		defer func() {
-			if p := recover(); p != nil {
-				refused = true
-			}
-		}()
-
-		refused = parseTokens(parserTokens(text, tks), parser.ParseComments) != nil
-	}()
-
-	return refused
-}
-
-// emptiedRootProblem returns the problem of the current text when tk, the
-// token where go-yaml's parser refuses the text with its comments, is a
-// comment below the "{}" or "[]" that a removal wrote for the root that it
-// emptied. Go-yaml's parser refuses a comment line below a flow collection
-// at the root, as in "{}" and "# c". The removal leaves the comment lines
-// after the lines of the root where they are, so the layout of the
-// document decides the problem, and the document is at fault for it. The
-// problem names the call that wrote the "{}" or "[]", such as a Remove or
-// an Update, and it binds at the root. EmptiedRootProblem returns nil for
-// any other refusal, and for a root that a later call wrote again.
-func (d *Doc) emptiedRootProblem(tk *token.Token) error {
-	if tk == nil || tk.Type != token.CommentType {
+// emptiedRootProblem returns the problem of the current text when go-yaml's
+// parser refuses it with its comments at a comment below the "{}" or "[]"
+// of an emptied root. The parse of final that keeps the comments gives the
+// refusal, and [Doc.emptiedRoot] finds the root. Go-yaml's parser refuses
+// a comment line below a flow collection at the root, as in "{}" and
+// "# c". The removal leaves the comment lines after the lines of the root
+// where they are, so the layout of the document decides the problem, and
+// the document is at fault for it.
+// The problem names the call that wrote the "{}" or "[]", such as a Remove
+// or an Update, and it binds at the root. EmptiedRootProblem returns nil for
+// any other refusal and for a text that the parser takes.
+func (d *Doc) emptiedRootProblem(final finalParse) error {
+	refusal, ok := errors.AsType[yaml.Error](final.comments)
+	if !ok || final.root.by == "" {
 		return nil
 	}
 
-	root := astnode.Content(d.node.AST())
-
-	switch x := root.(type) {
-	case *ast.MappingNode:
-		if !x.IsFlowStyle || len(x.Values) > 0 {
-			return nil
-		}
-
-	case *ast.SequenceNode:
-		if !x.IsFlowStyle || len(x.Values) > 0 {
-			return nil
-		}
-
-	default:
-		return nil
-	}
-
-	s, ok := d.nodeSpan(root)
-	if !ok {
-		return nil
-	}
-
-	o := d.originAt(s.start)
-	if o >= 0 || o == math.MinInt || d.notes[-1-o].emptiedBy == "" {
+	if tk := refusal.GetToken(); tk == nil || tk.Type != token.CommentType {
 		return nil
 	}
 
 	return d.fail(d.rootNode(), "%s %s, after which a comment line goes below the %q at the root, and "+
 		"go-yaml's parser refuses a comment line below a flow collection at the root",
-		d.subject(), d.notes[-1-o].emptiedBy, d.cur[s.start:s.end])
+		d.subject(), final.root.by, d.cur[final.root.s.start:final.root.s.end])
+}
+
+// emptiedRoot returns the "{}" or "[]" of the root of the current text when
+// a removal wrote it for the root that it emptied. It returns an
+// emptiedRoot without a call for any other root, and for a root that a
+// later call wrote again.
+func (d *Doc) emptiedRoot() emptiedRoot {
+	root := astnode.Content(d.node.AST())
+
+	switch x := root.(type) {
+	case *ast.MappingNode:
+		if !x.IsFlowStyle || len(x.Values) > 0 {
+			return emptiedRoot{}
+		}
+
+	case *ast.SequenceNode:
+		if !x.IsFlowStyle || len(x.Values) > 0 {
+			return emptiedRoot{}
+		}
+
+	default:
+		return emptiedRoot{}
+	}
+
+	s, ok := d.nodeSpan(root)
+	if !ok {
+		return emptiedRoot{}
+	}
+
+	o := d.originAt(s.start)
+	if o >= 0 || o == math.MinInt || d.notes[-1-o].emptiedBy == "" {
+		return emptiedRoot{}
+	}
+
+	return emptiedRoot{by: d.notes[-1-o].emptiedBy, s: s}
 }
 
 // parsedAt returns the token of the current parse that tk stands for.
@@ -1223,7 +1192,6 @@ func (d *Doc) bindSite(s site, problem func(opts ...niceyaml.ErrorOption) error)
 // of [Doc.decodeProblem].
 var (
 	errRefusedWithoutComments = errors.New("go-yaml's parser refuses the edited text without its comments")
-	errRefusedWithComments    = errors.New("go-yaml's parser refuses the edited text with its comments")
 	errParserRefuses          = errors.New("go-yaml's parser refuses the edited text")
 	errParserPanicked         = errors.New("go-yaml's parser panicked on the edited text")
 	errDecoderRefuses         = errors.New("go-yaml's decoder refuses the edited text")

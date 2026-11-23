@@ -25,8 +25,8 @@ var (
 	// ErrEngine indicates an edit that the engine cannot write so that the
 	// text reads as the calls ask. It marks a bug in the engine, and it
 	// also marks go-yaml behavior that the engine cannot write around.
-	// Go-yaml's parser can refuse the edited text, with or without its
-	// comments, misread it, or panic on it. Go-yaml's decoder can refuse
+	// Go-yaml's parser can refuse the edited text without its comments,
+	// misread it, or panic on it. Go-yaml's decoder can refuse
 	// it. Go-yaml's encoder can write text that go-yaml's decoder reads as
 	// another value. It can also write a character that YAML does not allow
 	// in a text, or both "\n" and "\r\n" line breaks for YAML of one kind.

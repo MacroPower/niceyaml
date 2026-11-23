@@ -1440,7 +1440,7 @@ func (d *Doc) blankCut(r region) (int, int) {
 // flow sequence has neither, so the note binds at the item. For a nil
 // holder, the collection is the root, which binds at its first key or
 // item in the user's text. That note also names the call that runs, as
-// [Doc.emptiedRootProblem] reads it. A key that an edit created gives its
+// [Doc.emptiedRoot] reads it. A key that an edit created gives its
 // note, so an error there names that edit.
 func (d *Doc) emptiedNote(holder *place) note {
 	if holder == nil {

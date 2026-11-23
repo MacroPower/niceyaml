@@ -1006,21 +1006,17 @@
 // decoder.
 //
 // An Apply that changes the text also parses the edited text with go-yaml's
-// parser twice. One parse leaves out the comments, as yaml.Unmarshal does,
-// and one keeps them. The edits read a parse that leaves out each comment
-// that makes the parser refuse or misread valid YAML. The parser refuses
-// some texts without their comments that it takes with them, such as one
-// that holds an anchor without a value before a comment at its end. It
-// refuses others with their comments, such as a flow collection at the root
-// before a comment line. A removal that empties a block collection at the
-// root and leaves its "{}" or "[]" above a comment line fails the Apply
-// with a problem of the document, as [Node.Remove] describes. Any other
-// refusal with the comments does not count when the parser also refuses
-// the text that the Apply found with its comments. So an Apply edits a
-// document that holds a comment line below a flow collection at the root.
-// Otherwise, when the parser refuses or panics on the edited text in
-// either parse, the Apply fails with ErrEngine. The error names go-yaml's
-// parser and gives its message.
+// parser, without its comments, as yaml.Unmarshal does. When the parser
+// refuses or panics on the edited text, the Apply fails with ErrEngine. The
+// error names go-yaml's parser and gives its message. The edits read a
+// parse that keeps the comments, and that parse leaves out each comment
+// that makes the parser refuse or misread valid YAML. A removal that
+// empties a block collection at the root and leaves its "{}" or "[]" above
+// a comment line fails the Apply with a problem of the document, as
+// [Node.Remove] describes. Any other refusal of the edited text with its
+// comments does not fail the Apply. So an Apply edits a document that
+// holds a comment line below a flow collection at the root, a text that
+// the parser refuses with its comments.
 //
 // Go-yaml's lexer reads some texts otherwise than the tokenizer of
 // niceyaml, as [go.jacobcolvin.com/niceyaml/tokens.Tokenize] lists. Such
@@ -1031,8 +1027,8 @@
 // niceyaml, so the check against go-yaml's decoder alone skips it.
 //
 // Below a tag without a value and before a tag that ends the text, go-yaml's
-// lexer places each other token as the tokenizer does. Both parses by
-// go-yaml's parser then still read the tokens of the lexer. They read the
+// lexer places each other token as the tokenizer does. The parse of
+// go-yaml's parser then still reads the tokens of the lexer. It reads the
 // tokenizer's tokens only in a text where the lexer moves or drops other
 // tokens. The lexer moves each later token when it skips a line break after
 // a double-quoted scalar.
@@ -1241,14 +1237,14 @@
 //
 // The checks after the last call test the edited text as a whole, as the
 // Transactions section describes. They test its limits, its decodes, its
-// model, and its parses with and without its comments, and their problems
-// name no call. So when go-yaml's parser refuses the edited text in one of
-// those parses, the problem names no call. The problem of a call that
-// empties a block collection at the root and leaves its "{}" or "[]" above
-// a comment line names that call in its message, as in "the edit removes
-// $.a". A difference from the model that these checks find names the call
-// after which the text first differed, in its message. [Doc.Removals]
-// names each value that it lists as the user's text holds it.
+// model, and its parse, and their problems name no call. So when go-yaml's
+// parser refuses the edited text, the problem names no call. The problem
+// of a call that empties a block collection at the root and leaves its
+// "{}" or "[]" above a comment line names that call in its message, as in
+// "the edit removes $.a". A difference from the model that these checks
+// find names the call after which the text first differed, in its message.
+// [Doc.Removals] names each value that it lists as the user's text holds
+// it.
 //
 // [WithLabel] gives the edits of one Apply a name for its messages, such
 // as the version of a migration step. Without a label, a message names

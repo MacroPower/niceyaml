@@ -1056,8 +1056,9 @@ func TestDoc_Apply_Documents(t *testing.T) {
 		},
 		"set in a root flow mapping above a comment line of a later document": {
 			// Go-yaml's parser refuses the comment line below the flow mapping
-			// with the comments, in the text that the Apply found too, so the
-			// refusal does not count.
+			// with the comments. No removal emptied the root, so the check
+			// does not parse the text with its comments, and the Apply edits
+			// the document.
 			text: stringtest.LinesLF("{a: 1}", "# tail", "---", "b: 2"),
 			fn: func(ctx context.Context, n *edit.Node) error {
 				return n.At(paths.Doc().Child("a")).Set(ctx, 2)
@@ -1065,8 +1066,9 @@ func TestDoc_Apply_Documents(t *testing.T) {
 			want: stringtest.LinesLF("{a: 2}", "# tail", "---", "b: 2"),
 		},
 		"removal of the last entry of a root flow mapping above a comment line of a later document": {
-			// The "{}" keeps the bytes of the user's flow mapping, which the
-			// parser refuses above the comment line before the removal too.
+			// The "{}" keeps the bytes of the user's flow mapping, so no
+			// removal emptied the root. The check then does not parse the
+			// text with its comments.
 			text: stringtest.LinesLF("{a: 1}", "# tail", "---", "b: 2"),
 			fn:   func(ctx context.Context, n *edit.Node) error { return remove(ctx, n.At(paths.Doc().Child("a"))) },
 			want: stringtest.LinesLF("{}", "# tail", "---", "b: 2"),
