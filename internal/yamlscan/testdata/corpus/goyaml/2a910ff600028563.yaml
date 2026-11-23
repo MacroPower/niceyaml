@@ -1,0 +1,5 @@
+
+a:
+ b: &anchor
+ c: &anchor2
+d: e

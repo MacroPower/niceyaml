@@ -1,0 +1,1 @@
+price: !money {amount: 10, currency: USD}

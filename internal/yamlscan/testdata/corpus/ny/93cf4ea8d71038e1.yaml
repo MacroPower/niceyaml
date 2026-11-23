@@ -1,0 +1,3 @@
+merged:
+  <<: *base
+  extra: data

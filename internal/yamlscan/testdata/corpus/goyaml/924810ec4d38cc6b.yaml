@@ -1,0 +1,8 @@
+
+- key1: val
+  key2:
+    (
+      foo
+      +
+      bar
+    )

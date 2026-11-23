@@ -1,0 +1,3 @@
+%TAG !custom! tag:example.com,2024:
+---
+value: !custom!price 10

@@ -1,0 +1,6 @@
+base1: &b1
+  a: 1
+base2: &b2
+  b: 2
+merged:
+  <<: [*b1, *b2]

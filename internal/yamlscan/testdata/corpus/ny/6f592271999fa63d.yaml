@@ -1,0 +1,6 @@
+t: !!str s
+u: !t
+  v: 1
+w: !!seq
+
+  - x

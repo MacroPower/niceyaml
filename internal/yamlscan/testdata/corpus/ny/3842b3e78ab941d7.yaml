@@ -1,0 +1,2 @@
+anchor: &name value
+ref: *name

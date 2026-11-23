@@ -1,0 +1,2 @@
+items:
+  - Pizza: { size: large, toppings: [a, b, c] }

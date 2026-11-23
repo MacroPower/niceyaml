@@ -1,0 +1,5 @@
+!!map {
+  ? !!str "explicit":!!str "entry",
+  ? !!str "implicit" : !!str "entry",
+  ? !!null "" : !!null "",
+}

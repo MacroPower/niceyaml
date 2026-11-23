@@ -1,0 +1,7 @@
+
+foo:
+  bar:
+    foo: 2
+  baz:
+    foo: 3
+    foo: 4

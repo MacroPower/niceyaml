@@ -1,0 +1,10 @@
+
+single:
+  # foo comment
+  foo: bar
+
+multiple:
+    # a comment
+    a: b
+    # c comment
+    c: d

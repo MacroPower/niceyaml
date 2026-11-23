@@ -1,0 +1,5 @@
+---
+name: worker
+command: sleep 1, 2
+spec:
+  replicas: 2

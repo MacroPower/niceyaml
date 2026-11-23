@@ -41,6 +41,8 @@ formatters:
       # style of go-yaml, which these rules refuse.
       - internal/yamldecode/(context|decode|decode_test|option|struct|upstream|yaml|yaml_fuzz_test)\.go$
       - internal/yamldecode/(errors|format)/
+      # The copy of go-yaml's scanner keeps the style of go-yaml too.
+      - internal/yamlscan/(context|error|lexer|scanner)\.go$
 
 linters:
   default: none
@@ -253,6 +255,8 @@ linters:
       # style of go-yaml, which these rules refuse.
       - internal/yamldecode/(context|decode|decode_test|option|struct|upstream|yaml|yaml_fuzz_test)\.go$
       - internal/yamldecode/(errors|format)/
+      # The copy of go-yaml's scanner keeps the style of go-yaml too.
+      - internal/yamlscan/(context|error|lexer|scanner)\.go$
     rules:
       - path: _test\.go
         linters:

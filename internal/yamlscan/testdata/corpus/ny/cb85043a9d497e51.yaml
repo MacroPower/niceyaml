@@ -1,0 +1,1 @@
+price: !custom!price { amount: 12.50, currency: EUR }

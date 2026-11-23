@@ -1,0 +1,2 @@
+a: !!str x
+name: "Caf\u00e9"

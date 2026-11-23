@@ -1,0 +1,26 @@
+
+# foo comment
+# foo comment2
+foo: # map key comment
+  # bar above comment
+  # bar above comment2
+  bar: 10 # comment for bar
+  # baz above comment
+  # baz above comment2
+  baz: bbbb # comment for baz
+  piyo: # sequence key comment
+  # sequence1 above comment 1
+  # sequence1 above comment 2
+  - sequence1 # sequence1
+  # sequence2 above comment 1
+  # sequence2 above comment 2
+  - sequence2 # sequence2
+  # sequence3 above comment 1
+  # sequence3 above comment 2
+  - false # sequence3
+# foo2 comment
+# foo2 comment2
+foo2: &anchor text # anchor comment
+# foo3 comment
+# foo3 comment2
+foo3: *anchor # alias comment

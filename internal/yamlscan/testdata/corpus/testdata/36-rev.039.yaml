@@ -1,0 +1,15 @@
+---
+restaurant:
+  name: ☕ Café Yamüll
+  established: &year 2026
+
+menu:
+  breakfast:
+    # Swedish cookies with coffee
+    - item: "Småkakor & Kaffe"
+      price: "200 kr"
+      dietary: [🥛, 🌾]
+    - item: "Kanelbullar"
+      price: "45 kr"
+  lunch:
+    -

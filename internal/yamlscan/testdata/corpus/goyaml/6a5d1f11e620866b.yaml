@@ -1,0 +1,17 @@
+
+a: # commentA
+  b: # commentB
+    c: foo # commentC
+    d: bar # commentD
+    e: baz # commentE
+  f: # commentF
+    g: hoge # commentG
+  h: # commentH
+   - list1 # comment list1
+   - list2 # comment list2
+   - list3 # comment list3
+  i: fuga # commentI
+j: piyo # commentJ
+k.l.m.n: moge # commentKLMN
+o#p: hogera # commentOP
+q#.r: hogehoge # commentQR

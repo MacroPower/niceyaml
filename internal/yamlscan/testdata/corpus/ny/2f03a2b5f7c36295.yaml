@@ -1,0 +1,5 @@
+# Header comment
+key1: value1  # inline comment
+# Middle comment
+key2: value2
+# Footer comment

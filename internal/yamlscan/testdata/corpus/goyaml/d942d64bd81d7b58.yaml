@@ -1,0 +1,13 @@
+
+a:
+  # comment 1
+  - b: c
+    # comment 2
+    d: e
+
+  # comment 3
+  # comment 4
+  - f: |
+      g
+      g
+    h: i # comment 5
