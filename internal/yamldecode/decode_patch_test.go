@@ -2589,7 +2589,7 @@ func TestStartValueInlineFieldWritesIntoStart(t *testing.T) {
 
 // startKinds holds fields of several kinds that the decoder compares when
 // it compares the start of the place of an alias with the start of the
-// place of its anchor. It does not hold a bool field.
+// place of its anchor.
 type startKinds struct {
 	M     map[string]int `yaml:"-"`
 	Any   any            `yaml:"-"`
@@ -2598,6 +2598,7 @@ type startKinds struct {
 	C     complex128     `yaml:"-"`
 	Arr   [2]int         `yaml:"-"`
 	U     uint           `yaml:"-"`
+	B     bool           `yaml:"-"`
 }
 
 // startKindsValue returns a [startKinds] whose fields hold values that
@@ -2610,6 +2611,7 @@ func startKindsValue() startKinds {
 		C:   complex(1, 2),
 		Arr: [2]int{1, 2},
 		U:   1,
+		B:   true,
 	}
 }
 
@@ -2653,6 +2655,9 @@ func TestStartValueAliasStarts(t *testing.T) {
 		},
 		"complex": {
 			edit: func(k *startKinds) { k.C = complex(1, 3) },
+		},
+		"bool": {
+			edit: func(k *startKinds) { k.B = false },
 		},
 	}
 
