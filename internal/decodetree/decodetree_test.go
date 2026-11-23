@@ -148,6 +148,7 @@ func TestTree_Resolve(t *testing.T) {
 		"merge alias inside its anchor": {
 			input: "a: &x {<<: *x}\n",
 			steps: []any{"a", "<<"},
+			want:  "{<<: *x}",
 			bound: true,
 		},
 		"alias without an anchor": {

@@ -22,7 +22,9 @@
 //   - An integer under a !!int tag decodes into each integer type, and a
 //     value under the tag that does not spell an integer fails.
 //   - An alias inside the anchor that it names reads as null, in a typed
-//     target and in the text that the decoder hands an unmarshaler.
+//     target and in the text that the decoder hands an unmarshaler. A `<<`
+//     merge of such an alias, alone or in a sequence, fails with a
+//     [MergeLoopError], where go-yaml does not find the anchor.
 //   - The decoder checks its context as it reads, and [AliasBudget] bounds
 //     what it reads through aliases.
 //   - The error of a value that decodes itself comes back in an
@@ -45,12 +47,12 @@
 //     read that anchor before. The decoder reads the entries that a merge
 //     brings in inside the anchor of their alias, also in a sequence or in
 //     a sequence that an alias reads, so the rule holds in those entries
-//     too. A merge of such an alias, alone or in a sequence, fails with a
-//     [MissingAnchorError]. The decoder keeps the value of an anchor that an
-//     alias reads into an any value, so each later alias takes it. It does
-//     not keep the value of a read in which such an alias read as null,
-//     because a read from another place can give another value. An inline
-//     alias field reads an anchor that the decoder has not read.
+//     too. A merge of such an alias fails with a [MergeLoopError]. The
+//     decoder keeps the value of an anchor that an alias reads into an any
+//     value, so each later alias takes it. It does not keep the value of a
+//     read in which such an alias read as null, because a read from
+//     another place can give another value. An inline alias field reads an
+//     anchor that the decoder has not read.
 //   - A pointer to a node type of the go-yaml ast package points to the node
 //     of the document, and not to a copy, also where the node sits under an
 //     anchor or a tag.

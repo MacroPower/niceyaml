@@ -316,6 +316,42 @@ func TestUnmarshalAliasInsideItsAnchor(t *testing.T) {
 	assert.Equal(t, "{k: null, j: 1}", raw.A.s)
 }
 
+func TestUnmarshalMergeInsideItsAnchor(t *testing.T) {
+	t.Parallel()
+
+	// Without a resolver too, a merge of an alias inside the anchor that it
+	// names fails with a MergeLoopError at the alias. Go-yaml does not find
+	// the anchor there.
+	docs := map[string]struct {
+		src string
+		col int
+	}{
+		"alias":    {src: "a: &a {<<: *a, x: 1}\n", col: 12},
+		"sequence": {src: "a: &a {<<: [*a], x: 1}\n", col: 13},
+	}
+
+	targets := map[string]func() any{
+		"any": func() any { return new(any) },
+		"map": func() any { return new(map[string]map[string]int) },
+	}
+
+	for docName, doc := range docs {
+		for targetName, target := range targets {
+			t.Run(docName+"/"+targetName, func(t *testing.T) {
+				t.Parallel()
+
+				err := yaml.NewDecoder(strings.NewReader(doc.src)).Decode(target())
+
+				var loop *yaml.MergeLoopError
+
+				require.ErrorAs(t, err, &loop)
+				assert.Equal(t, doc.col, loop.Alias.GetToken().Position.Column)
+				assert.EqualError(t, loop, "merge key loops back to anchor a")
+			})
+		}
+	}
+}
+
 func TestUnmarshalContextEnds(t *testing.T) {
 	t.Parallel()
 
@@ -1226,10 +1262,11 @@ func TestResolveAliasMergeLoop(t *testing.T) {
 
 						err := yaml.NewDecoder(bytes.NewReader(nil), opts...).DecodeFromNode(body, target())
 
-						var missing *yaml.MissingAnchorError
+						var loop *yaml.MergeLoopError
 
-						require.ErrorAs(t, err, &missing)
-						assert.Same(t, inner, missing.Alias)
+						require.ErrorAs(t, err, &loop)
+						assert.Same(t, inner, loop.Alias)
+						assert.EqualError(t, loop, "merge key loops back to anchor b")
 					})
 				}
 			}

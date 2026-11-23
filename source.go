@@ -791,20 +791,20 @@ func WithTypeRules(rules ...TypeRule) SourceOption {
 // [Source.Lines], [Source.Tokens], and the methods of each [Node] hand
 // the text to the caller as they do for any Source. A message quotes the
 // value it rejects, as in `time: invalid duration "sk-live-abcdef"`. The
-// path of an error spells each key above it, and the message for a
-// missing anchor names the alias. The go-yaml error that [errors.As]
-// finds behind a syntax error or a decode error holds an excerpt that
-// go-yaml builds. That excerpt prints when a program prints the go-yaml
-// error itself. A bind writes each go-yaml error that it reaches through
-// wrappers without that excerpt. Each wrapper above the error takes the
-// shorter text when its message copies the full text of the go-yaml error
-// unchanged. Wrappers that rewrite that text, such as one that indents
-// each line or one that quotes the text with %q, keep the excerpt of
-// go-yaml in their messages. The message of a join keeps the excerpt. But
-// the bind prints each branch of the join on its own, as the Errors
-// section of the package documentation describes. The result of [Detach]
-// keeps the lines of that excerpt, so its go-yaml error prints the same
-// excerpt.
+// path of an error spells each key above it. The message for a missing
+// anchor or for a merge key that loops back to its own anchor names the
+// alias. The go-yaml error that [errors.As] finds behind a syntax error or
+// a decode error holds an excerpt that go-yaml builds. That excerpt prints
+// when a program prints the go-yaml error itself. A bind writes each
+// go-yaml error that it reaches through wrappers without that excerpt. Each
+// wrapper above the error takes the shorter text when its message copies
+// the full text of the go-yaml error unchanged. Wrappers that rewrite that
+// text, such as one that indents each line or one that quotes the text with
+// %q, keep the excerpt of go-yaml in their messages. The message of a join
+// keeps the excerpt. But the bind prints each branch of the join on its
+// own, as the Errors section of the package documentation describes. The
+// result of [Detach] keeps the lines of that excerpt, so its go-yaml error
+// prints the same excerpt.
 //
 // The Source that [NewSourceFromLayers] builds has excerpts off when the
 // Source of any layer, or of a reference document a layer reads through

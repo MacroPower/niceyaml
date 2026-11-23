@@ -683,13 +683,14 @@ type mergedRead struct {
 //
 // A merge that reaches a mapping that the walk or mergedAnchors is inside
 // closes a cycle of merges, and the decoder rejects the document. The
-// decoder fails to find the anchor of an alias whose content it is
-// reading, or it reads the merges of the cycle until it passes its maximum
-// depth. For an open mapping, mergedAnchors thus returns an empty result
-// that is final, so the merge brings in nothing there. It does not keep
-// that result, because a merge after the walk leaves the mapping brings
-// in all of it. No result depends on which mappings are open, so
-// mergedAnchors reads each mapping at most once at each version.
+// decoder rejects the merge of an alias whose content it is reading as a
+// merge key that loops back to its anchor, or it reads the merges of the
+// cycle until it passes its maximum depth. For an open mapping,
+// mergedAnchors thus returns an empty result that is final, so the merge
+// brings in nothing there. It does not keep that result, because a merge
+// after the walk leaves the mapping brings in all of it. No result depends
+// on which mappings are open, so mergedAnchors reads each mapping at most
+// once at each version.
 //
 // An alias that Visit has not bound yet can bring in a mapping after it
 // binds. The result is not final when one of those merge keys names such

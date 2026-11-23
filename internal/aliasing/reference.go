@@ -49,7 +49,8 @@ import (
 // `<<` merge of the anchor does the same, and a decode into a type that
 // reads text writes the alias out as null. Where the alias is the value
 // of a `<<` merge key inside the anchor of its own name, as in
-// `&m {<<: *m}`, the decode fails to find the anchor, in one file too.
+// `&m {<<: *m}`, the decode fails with an error that says the merge key
+// loops back to its own anchor, in one file too.
 //
 // Where the anchor holds the alias itself, as `&e *e` does, a decode into
 // any or into a type that reads text takes the alias as null. A decode of

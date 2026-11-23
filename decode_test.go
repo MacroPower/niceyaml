@@ -7825,7 +7825,7 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 
 		_, err := dd.Decode[any](t.Context())
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "alias name x")
+		assert.Contains(t, err.Error(), "loops back to anchor x")
 		assert.NotContains(t, err.Error(), "[")
 	})
 
@@ -11170,7 +11170,7 @@ func TestErrDecode(t *testing.T) {
 					"  b: 1",
 				),
 				line: 1,
-				msg:  "cannot find anchor by alias name x",
+				msg:  "merge key loops back to anchor x",
 			},
 			"merge alias with no anchor": {
 				input: noAnchor,
@@ -11213,7 +11213,7 @@ func TestErrDecode(t *testing.T) {
 				),
 				path: paths.Current().Child("a", "m"),
 				line: 2,
-				msg:  "cannot find anchor by alias name x",
+				msg:  "merge key loops back to anchor x",
 			},
 			"merge of an anchor that holds the node after one of the same name": {
 				input: stringtest.LinesLF(
@@ -11224,7 +11224,7 @@ func TestErrDecode(t *testing.T) {
 				),
 				path: paths.Current().Child("b"),
 				line: 3,
-				msg:  "cannot find anchor by alias name x",
+				msg:  "merge key loops back to anchor x",
 			},
 			"depth limit": {
 				input:  "a: " + strings.Repeat("[", 10005) + strings.Repeat("]", 10005) + "\n",
@@ -11449,9 +11449,67 @@ func TestErrDecode(t *testing.T) {
 				)
 
 				_, err := doc.Decode[map[string]any](t.Context())
-				require.EqualError(t, err, "1:9: decoder rejected the value: cannot find anchor by alias name b")
+				require.EqualError(t, err, "1:9: decoder rejected the value: merge key loops back to anchor b")
 				require.ErrorIs(t, err, niceyaml.ErrDecode)
 			})
+		}
+	})
+
+	t.Run("merge loop read through an alias", func(t *testing.T) {
+		t.Parallel()
+
+		// The anchor m merges itself, and an alias of the document reads m.
+		// The rejection names the loop for each target, also with the anchor
+		// in a reference document and with the alias limit off. The alias
+		// limit refuses the loop of the reference document first, so that
+		// case turns the limit off.
+		docs := map[string]struct {
+			doc  func(t *testing.T) *niceyaml.Node
+			want string
+		}{
+			"reference document": {
+				doc: func(t *testing.T) *niceyaml.Node {
+					t.Helper()
+
+					return yamltest.FirstDocument(t, "v: *m\n",
+						yamltest.References("m: &m {<<: *m, a: 1}\n"), niceyaml.WithAliasLimit(false))
+				},
+				want: "1:4: decoder rejected the value: merge key loops back to anchor m",
+			},
+			"one document": {
+				doc: func(t *testing.T) *niceyaml.Node {
+					t.Helper()
+
+					return yamltest.FirstDocument(t, "m: &m {<<: *m, a: 1}\nv: *m\n")
+				},
+				want: "1:12: decoder rejected the value: merge key loops back to anchor m",
+			},
+			"one document without the alias limit": {
+				doc: func(t *testing.T) *niceyaml.Node {
+					t.Helper()
+
+					return yamltest.FirstDocument(t, "m: &m {<<: *m, a: 1}\nv: *m\n", niceyaml.WithAliasLimit(false))
+				},
+				want: "1:12: decoder rejected the value: merge key loops back to anchor m",
+			},
+		}
+
+		targets := map[string]func(context.Context, *niceyaml.Node) error{
+			"any":         decodeAs[any](),
+			"map":         decodeAs[map[string]any](),
+			"unmarshaler": decodeAs[map[string]rawText](),
+		}
+
+		for docName, tc := range docs {
+			for targetName, decode := range targets {
+				t.Run(docName+"/"+targetName, func(t *testing.T) {
+					t.Parallel()
+
+					err := decode(t.Context(), tc.doc(t))
+					require.EqualError(t, err, tc.want)
+					require.ErrorIs(t, err, niceyaml.ErrDecode)
+				})
+			}
 		}
 	})
 

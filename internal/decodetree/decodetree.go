@@ -88,22 +88,21 @@ func (t *Tree) newNodeTokens() map[*token.Token]struct{} {
 // resolver binds the alias to. The document reads an alias inside the
 // anchor it refers to as null wherever a read reaches it. For such an
 // alias, the node is a null that holds the token of the alias, so an
-// error at the null names the alias. A `<<` merge key that merges such an
-// alias does not find a mapping, and for that alias the node is nil.
+// error at the null names the alias. An alias that a `<<` merge key merges
+// inside its own anchor is the exception, and its node is the value of the
+// anchor. The decoder reads that alias inside the anchor and rejects the
+// loop.
 func (t *Tree) Resolve(alias *ast.AliasNode) (ast.Node, bool) {
 	a, ok := t.facted()[alias]
 	if !ok || a.Anchor == nil {
 		return nil, false
 	}
 
-	switch {
-	case a.Inside && a.Merge:
-		return nil, true
-	case t.facts.Enclosed[alias]:
+	if t.facts.Enclosed[alias] {
 		return ast.Null(alias.Start), true
-	default:
-		return a.Anchor.Value, true
 	}
+
+	return a.Anchor.Value, true
 }
 
 // Anchor returns the anchor that the decoder reads for alias, an alias of

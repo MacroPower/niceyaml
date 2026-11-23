@@ -1834,15 +1834,13 @@ func (n *Node) rejection(err error, scope ast.Node, path paths.Path, pathed bool
 
 	if errors.Is(err, yaml.ErrExceededMaxDepth) {
 		at = astnode.StartToken(scope)
-	} else if missing, isMissing := errors.AsType[*yamldecode.MissingAnchorError](err); isMissing {
-		// The decoder does not find an anchor for an alias under a merge key
-		// that the document does not bind, or that lies inside the anchor it
-		// names. The rejection binds at that alias. An alias of a reference
-		// document binds at the alias of the document that led the decoder
-		// to it.
-		if n.holdsToken(missing.Alias.Start) {
-			at = missing.Alias.Start
-		} else if alias, found := n.referenceRead(tree.ReferenceAliases(scope), missing.Alias.Start, path); found {
+	} else if rejected := rejectedAlias(err); rejected != nil {
+		// The rejection binds at the alias that the decoder could not read.
+		// An alias of a reference document binds at the alias of the
+		// document that led the decoder to it.
+		if n.holdsToken(rejected.Start) {
+			at = rejected.Start
+		} else if alias, found := n.referenceRead(tree.ReferenceAliases(scope), rejected.Start, path); found {
 			at = alias.Token
 		}
 	}
@@ -1868,6 +1866,21 @@ func (n *Node) rejection(err error, scope ast.Node, path paths.Path, pathed bool
 	rejected := markDecode(fmt.Errorf("decoder rejected the value: %w", err), errPlaced)
 
 	return Invalid(rejected, AtToken(at))
+}
+
+// rejectedAlias returns the alias that err names: an alias that the decoder
+// holds no anchor for, or an alias under a merge key that the decoder reads
+// inside the anchor that it names. It returns nil for any other err.
+func rejectedAlias(err error) *ast.AliasNode {
+	if missing, ok := errors.AsType[*yamldecode.MissingAnchorError](err); ok {
+		return missing.Alias
+	}
+
+	if loop, ok := errors.AsType[*yamldecode.MergeLoopError](err); ok {
+		return loop.Alias
+	}
+
+	return nil
 }
 
 // referenceRejection returns err, a rejection at a token of a reference

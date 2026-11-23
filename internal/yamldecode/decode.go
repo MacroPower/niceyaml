@@ -116,9 +116,8 @@ func (d *Decoder) aliasKey(alias *ast.AliasNode) string {
 // enterMerge returns ctx for the reads of the entries that node, the value
 // of a merge key or an element of a sequence under a merge key, brings in.
 // For an alias, the decoder reads those entries inside the anchor of the
-// alias. A merge of an alias inside the anchor that it reads closes a loop.
-// Such a merge fails with a MissingAnchorError, as it does where the decoder
-// reads the anchor itself.
+// alias. A merge of an alias inside the anchor that it reads closes a loop,
+// so it fails with a MergeLoopError.
 func (d *Decoder) enterMerge(ctx context.Context, node ast.Node) (context.Context, error) {
 	for {
 		switch n := node.(type) {
@@ -135,7 +134,7 @@ func (d *Decoder) enterMerge(ctx context.Context, node ast.Node) (context.Contex
 	if alias, ok := node.(*ast.AliasNode); ok {
 		key := d.aliasKey(alias)
 		if _, ok := open[key]; ok {
-			return ctx, &MissingAnchorError{Alias: alias}
+			return ctx, &MergeLoopError{Alias: alias}
 		}
 		return withAnchor(ctx, key), nil
 	}
@@ -267,6 +266,18 @@ type MissingAnchorError struct {
 
 func (e *MissingAnchorError) Error() string {
 	return fmt.Sprintf("cannot find anchor by alias name %s", e.Alias.Value.GetToken().Value)
+}
+
+// MergeLoopError is the error of an alias under a merge key that the
+// decoder reads inside the anchor that the alias names, alone or in a
+// sequence. Such a merge brings in the entries of a mapping that the
+// decoder has not finished reading.
+type MergeLoopError struct {
+	Alias *ast.AliasNode
+}
+
+func (e *MergeLoopError) Error() string {
+	return fmt.Sprintf("merge key loops back to anchor %s", e.Alias.Value.GetToken().Value)
 }
 
 // ErrAliasBudget is the error of a decode that read more through aliases

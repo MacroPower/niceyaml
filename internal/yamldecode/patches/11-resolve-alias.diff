@@ -1,6 +1,6 @@
 --- a/decode.go
 +++ b/decode.go
-@@ -54,6 +54,196 @@
+@@ -54,18 +54,219 @@
  	bounded              bool
  	stopped              error
  	origins              format.Origins
@@ -54,9 +54,8 @@
 +// enterMerge returns ctx for the reads of the entries that node, the value
 +// of a merge key or an element of a sequence under a merge key, brings in.
 +// For an alias, the decoder reads those entries inside the anchor of the
-+// alias. A merge of an alias inside the anchor that it reads closes a loop.
-+// Such a merge fails with a MissingAnchorError, as it does where the decoder
-+// reads the anchor itself.
++// alias. A merge of an alias inside the anchor that it reads closes a loop,
++// so it fails with a MergeLoopError.
 +func (d *Decoder) enterMerge(ctx context.Context, node ast.Node) (context.Context, error) {
 +	for {
 +		switch n := node.(type) {
@@ -73,7 +72,7 @@
 +	if alias, ok := node.(*ast.AliasNode); ok {
 +		key := d.aliasKey(alias)
 +		if _, ok := open[key]; ok {
-+			return ctx, &MissingAnchorError{Alias: alias}
++			return ctx, &MergeLoopError{Alias: alias}
 +		}
 +		return withAnchor(ctx, key), nil
 +	}
@@ -197,7 +196,31 @@
  }
  
  // MissingAnchorError is the error of an alias under a merge key, or at a
-@@ -233,13 +423,16 @@
+ // mapping or a sequence of a typed target, that the decoder holds no anchor
+ // for. Its message is upstream's.
+ type MissingAnchorError struct {
+ 	Alias *ast.AliasNode
+ }
+ 
+ func (e *MissingAnchorError) Error() string {
+ 	return fmt.Sprintf("cannot find anchor by alias name %s", e.Alias.Value.GetToken().Value)
+ }
++
++// MergeLoopError is the error of an alias under a merge key that the
++// decoder reads inside the anchor that the alias names, alone or in a
++// sequence. Such a merge brings in the entries of a mapping that the
++// decoder has not finished reading.
++type MergeLoopError struct {
++	Alias *ast.AliasNode
++}
++
++func (e *MergeLoopError) Error() string {
++	return fmt.Sprintf("merge key loops back to anchor %s", e.Alias.Value.GetToken().Value)
++}
+ 
+ // ErrAliasBudget is the error of a decode that read more through aliases
+ // than [AliasBudget] allows.
+@@ -233,13 +434,16 @@
  	switch n := node.(type) {
  	case *ast.MappingValueNode:
  		if n.Key.IsMergeKey() {
@@ -217,7 +240,7 @@
  					return err
  				}
  			}
-@@ -261,7 +454,7 @@
+@@ -261,7 +465,7 @@
  			}
  		}
  	case *ast.AnchorNode:
@@ -226,7 +249,7 @@
  		d.anchorNodeMap[anchorName] = n.Value
  	}
  	return nil
-@@ -278,13 +471,16 @@
+@@ -278,13 +482,16 @@
  	switch n := node.(type) {
  	case *ast.MappingValueNode:
  		if n.Key.IsMergeKey() {
@@ -246,7 +269,7 @@
  					return err
  				}
  			}
-@@ -554,24 +750,26 @@
+@@ -554,24 +761,26 @@
  			return d.nodeToValue(ctx, n.Value)
  		}
  	case *ast.AnchorNode:
@@ -278,7 +301,7 @@
  			return nil, nil
  		}
  		if v, exists := d.anchorValueMap[text]; exists {
-@@ -581,26 +779,29 @@
+@@ -581,26 +790,29 @@
  			return v.Interface(), nil
  		}
  		if node, exists := d.anchorNodeMap[text]; exists {
@@ -315,7 +338,7 @@
  						return nil, err
  					}
  				}
-@@ -608,7 +809,7 @@
+@@ -608,7 +820,7 @@
  			}
  			m := make(map[string]any)
  			for iter.Next() {
@@ -324,7 +347,7 @@
  					return nil, err
  				}
  			}
-@@ -672,12 +873,11 @@
+@@ -672,12 +884,11 @@
  	case ast.MapNode:
  		return n, nil
  	case *ast.AnchorNode:
@@ -339,7 +362,7 @@
  		if node == nil {
  			return nil, &MissingAnchorError{Alias: n}
  		}
-@@ -719,8 +919,7 @@
+@@ -719,8 +930,7 @@
  		return d.getArrayNode(anchor.Value)
  	}
  	if alias, ok := node.(*ast.AliasNode); ok {
@@ -349,7 +372,7 @@
  		if node == nil {
  			return nil, &MissingAnchorError{Alias: alias}
  		}
-@@ -837,7 +1036,7 @@
+@@ -837,7 +1047,7 @@
  }
  
  func (d *Decoder) unmarshalableDocument(ctx context.Context, node ast.Node) ([]byte, error) {
@@ -358,7 +381,7 @@
  	if d.bounded && d.aliasBytesLeft < 0 {
  		return nil, ErrAliasBudget
  	}
-@@ -845,7 +1044,7 @@
+@@ -845,7 +1055,7 @@
  }
  
  func (d *Decoder) unmarshalableText(ctx context.Context, node ast.Node) ([]byte, bool) {
@@ -367,7 +390,7 @@
  	var v string
  	if err := Unmarshal([]byte(doc), &v); err != nil {
  		return nil, false
-@@ -1051,11 +1250,14 @@
+@@ -1051,11 +1261,14 @@
  
  	if src.Type() == ast.AnchorType {
  		anchor, _ := src.(*ast.AnchorNode)
@@ -384,7 +407,7 @@
  		return nil
  	}
  	if d.canDecodeByUnmarshaler(dst) {
-@@ -1070,7 +1272,7 @@
+@@ -1070,7 +1283,7 @@
  		// An alias to a null is a null too.
  		content := src
  		if alias, ok := src.(*ast.AliasNode); ok {
@@ -393,7 +416,7 @@
  				content = node
  			}
  		}
-@@ -1268,10 +1470,11 @@
+@@ -1268,10 +1481,11 @@
  	ctx context.Context, typ reflect.Type, defaultVal reflect.Value, node ast.Node,
  ) (reflect.Value, error) {
  	if node.Type() == ast.AliasType {
@@ -406,7 +429,7 @@
  			return d.createDecodedNewValue(ctx, typ, defaultVal, ast.Null(token.New("null", "null", node.GetToken().Position)))
  		}
  		value := d.anchorValueMap[aliasName]
-@@ -1310,7 +1513,37 @@
+@@ -1310,7 +1524,37 @@
  	return d.castToAssignableValue(newValue, typ, node)
  }
  
@@ -445,7 +468,7 @@
  	d.stepIn()
  	defer d.stepOut()
  	if d.isExceededMaxDepth() {
-@@ -1330,7 +1563,11 @@
+@@ -1330,7 +1574,11 @@
  			if ignoreMergeKey {
  				continue
  			}
@@ -458,7 +481,7 @@
  			if err != nil {
  				return nil, err
  			}
-@@ -1353,25 +1590,31 @@
+@@ -1353,25 +1601,31 @@
  				return nil, err
  			}
  			keyToNodeMap[key] = getKeyOrValueNode(mapIter)
@@ -495,7 +518,7 @@
  }
  
  func (d *Decoder) setDefaultValueIfConflicted(v reflect.Value, fieldMap StructFieldMap) error {
-@@ -1490,7 +1733,7 @@
+@@ -1490,7 +1744,7 @@
  		key := mapIter.Key()
  		value := mapIter.Value()
  		if key.IsMergeKey() && value.Type() == ast.AliasType {
@@ -504,7 +527,7 @@
  		}
  	}
  	return ""
-@@ -1523,7 +1766,7 @@
+@@ -1523,7 +1777,7 @@
  		return err
  	}
  	ignoreMergeKey := structFieldMap.hasMergeProperty()
@@ -513,7 +536,7 @@
  	if err != nil {
  		return err
  	}
-@@ -1549,6 +1792,18 @@
+@@ -1549,6 +1803,18 @@
  			if structField.IsAutoAlias {
  				if aliasName != "" {
  					newFieldValue := d.anchorValueMap[aliasName]
@@ -532,7 +555,7 @@
  					if newFieldValue.IsValid() {
  						value, err := d.castToAssignableValue(newFieldValue, fieldValue.Type(), d.anchorNodeMap[aliasName])
  						if err != nil {
-@@ -1572,7 +1827,7 @@
+@@ -1572,7 +1838,7 @@
  				key := &ast.StringNode{BaseNode: &ast.BaseNode{}, Value: k}
  				mapNode.Values = append(mapNode.Values, ast.MappingValue(nil, key, v))
  			}
@@ -541,7 +564,7 @@
  			if d.disallowUnknownField {
  				if err := d.deleteStructKeys(fieldValue.Type(), unknownFields); err != nil {
  					return err
-@@ -1613,7 +1868,11 @@
+@@ -1613,7 +1879,11 @@
  			fieldValue.Set(reflect.Zero(fieldValue.Type()))
  			continue
  		}
@@ -554,7 +577,7 @@
  		if err != nil {
  			if foundErr != nil {
  				continue
-@@ -1811,18 +2070,22 @@
+@@ -1811,18 +2081,22 @@
  		return ErrExceededMaxDepth
  	}
  
@@ -580,7 +603,7 @@
  			return err
  		}
  		return nil
-@@ -1860,19 +2123,23 @@
+@@ -1860,19 +2134,23 @@
  		return ErrExceededMaxDepth
  	}
  
@@ -607,7 +630,7 @@
  				return err
  			}
  			for _, v := range m {
-@@ -1907,7 +2174,7 @@
+@@ -1907,7 +2185,7 @@
  		return ErrExceededMaxDepth
  	}
  
@@ -616,7 +639,7 @@
  	if err != nil {
  		return err
  	}
-@@ -1915,14 +2182,18 @@
+@@ -1915,14 +2193,18 @@
  	mapValue := reflect.MakeMap(mapType)
  	keyType := mapValue.Type().Key()
  	valueType := mapValue.Type().Elem()

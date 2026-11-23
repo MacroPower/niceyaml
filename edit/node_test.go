@@ -3394,7 +3394,7 @@ func TestNode_At(t *testing.T) {
 					return n.Set(ctx, 5)
 				})
 				require.EqualError(t, err,
-					"test.yaml:3:7: decoder rejected the value: cannot find anchor by alias name b")
+					"test.yaml:3:7: decoder rejected the value: merge key loops back to anchor b")
 			})
 		}
 	})
