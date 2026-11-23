@@ -982,7 +982,8 @@
 // "a: !t\t&x 1", go-yaml reads the tag "!t\t&x" on 1 without an anchor,
 // and niceyaml reads the tag !t and the anchor x on 1. In "a: &x\t1",
 // go-yaml reads the anchor x1 on an empty value, and niceyaml reads the
-// anchor x on 1.
+// anchor x on 1. Go-yaml refuses "&x \ta: 1" for the tab in front of the
+// key, and niceyaml reads {a: 1}.
 //
 // Go-yaml's parser nests the lines after a tag on an empty value in that
 // value, but YAML reads them outside it. So the parser reads "a: !t" and

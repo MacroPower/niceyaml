@@ -7898,6 +7898,43 @@ func TestDocument_Decode_YAMLReadings(t *testing.T) {
 			input: stringtest.LinesLF("a: &a 1", "*a\t : 2"),
 			want:  map[string]any{"a": uint64(1), "1": uint64(2)},
 		},
+		"key after a space and a tab after an anchor": {
+			input: "&x \ta: 1\n",
+			want:  map[string]any{"a": uint64(1)},
+		},
+		"key after a space and tabs after an anchor": {
+			input: "&x \t \ta: 1\n",
+			want:  map[string]any{"a": uint64(1)},
+		},
+		"key after a space, a tab, and a space after an anchor": {
+			input: "&x \t a: 1\n",
+			want:  map[string]any{"a": uint64(1)},
+		},
+		"key after a space and a tab after an anchor in a sequence": {
+			input: "- &x \ta: 1\n",
+			want:  []any{map[string]any{"a": uint64(1)}},
+		},
+		"key after a space and a tab after an anchor in a flow mapping": {
+			input: "{&x \ta: 1}\n",
+			want:  map[string]any{"a": uint64(1)},
+		},
+		"value after a space and a tab after an anchor": {
+			// Control: go-yaml reads the anchor x on 1 too.
+			input: stringtest.LinesLF("a: &x \t1", "b: *x"),
+			want:  map[string]any{"a": uint64(1), "b": uint64(1)},
+		},
+		"colon after a space and a tab after an alias": {
+			input: stringtest.LinesLF("a: &a 1", "*a \t: 2"),
+			want:  map[string]any{"a": uint64(1), "1": uint64(2)},
+		},
+		"key after a space and a tab after a tag": {
+			input: "!!str \ta: 1\n",
+			want:  map[string]any{"a": uint64(1)},
+		},
+		"key after two tabs after a tag": {
+			input: "!!str\t\ta: 1\n",
+			want:  map[string]any{"a": uint64(1)},
+		},
 	}
 
 	for name, tc := range tcs {

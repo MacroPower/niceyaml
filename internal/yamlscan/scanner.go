@@ -683,6 +683,14 @@ func (s *Scanner) scanWhiteSpace(ctx *Context) bool {
 		return true
 	}
 
+	// niceyaml: the name token takes the spaces and tabs after the name
+	// through the last tab, as after a tab. When the blanks run to a line
+	// break, upstream gives the name token the blanks and the line break.
+	if s.inName(ctx) && !blankRunEndsLine(ctx, ctx.idx) {
+		s.closeName(ctx)
+		return true
+	}
+
 	s.addBufferedTokenIfExists(ctx)
 	s.isAnchor = false
 	s.isAlias = false
@@ -726,12 +734,21 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 		progress = idx + 1
 		switch c {
 		// niceyaml: a tab closes the tag too, where upstream reads the tab
-		// and the text after it into the tag.
+		// and the text after it into the tag. The tag takes the spaces and
+		// tabs after it through the last tab, unless they run to a line
+		// break. So the origin of the next token does not open with a tab.
 		case ' ', '\t':
-			ctx.addOriginBuf(c)
-			value := ctx.source(ctx.idx-1, ctx.idx+idx)
+			blank := ctx.idx + idx
+			end := blank + 1
+			if !blankRunEndsLine(ctx, blank) {
+				end = max(end, blankRunTabEnd(ctx, blank))
+			}
+			for _, b := range ctx.src[blank:end] {
+				ctx.addOriginBuf(b)
+			}
+			value := ctx.source(ctx.idx-1, blank)
 			ctx.addToken(token.Tag(value, string(ctx.obuf), s.pos()))
-			s.progressColumn(ctx, len([]rune(value)))
+			s.progressColumn(ctx, len([]rune(value))+end-blank-1)
 			ctx.clear()
 			return true, nil
 		case ',':
@@ -1390,10 +1407,10 @@ func (s *Scanner) inName(ctx *Context) bool {
 }
 
 // blankRunEndsLine reports whether the run of spaces and tabs that starts
-// where the scan stands ends at a line break. niceyaml: upstream does not
+// at the rune index from ends at a line break. niceyaml: upstream does not
 // have this function.
-func blankRunEndsLine(ctx *Context) bool {
-	for i := ctx.idx; i < ctx.size; i++ {
+func blankRunEndsLine(ctx *Context, from int) bool {
+	for i := from; i < ctx.size; i++ {
 		switch ctx.src[i] {
 		case ' ', '\t':
 			continue
@@ -1405,20 +1422,12 @@ func blankRunEndsLine(ctx *Context) bool {
 	return false
 }
 
-// closeNameAtTab ends the name of an anchor or an alias at the tab where
-// the scan stands. The name token takes the run of spaces and tabs from
-// that tab through the last tab of the run, as a tag takes the tab that
-// ends it. So the origin of the next token does not open with a tab. The
-// spaces after the last tab open that origin as after any token. A key
-// after the tab then reads as a key after a space. niceyaml: upstream does
-// not have this function.
-func (s *Scanner) closeNameAtTab(ctx *Context) {
-	s.addBufferedTokenIfExists(ctx)
-	s.isAnchor = false
-	s.isAlias = false
-
-	end := ctx.idx
-	for i := ctx.idx; i < ctx.size; i++ {
+// blankRunTabEnd returns the rune index past the last tab of the run of
+// spaces and tabs that starts at the rune index from. It returns from when
+// the run holds no tab. niceyaml: upstream does not have this function.
+func blankRunTabEnd(ctx *Context, from int) int {
+	end := from
+	for i := from; i < ctx.size; i++ {
 		c := ctx.src[i]
 		if c != ' ' && c != '\t' {
 			break
@@ -1427,7 +1436,22 @@ func (s *Scanner) closeNameAtTab(ctx *Context) {
 			end = i + 1
 		}
 	}
+	return end
+}
 
+// closeName ends the name of an anchor or an alias at the space or the tab
+// where the scan stands. The name token takes the run of spaces and tabs
+// from there through the last tab of the run, as a tag does. So the origin
+// of the next token does not open with a tab. The spaces after the last
+// tab open that origin as after any token. A key after the blanks then
+// reads as a key after a space. niceyaml: upstream does not have this
+// function.
+func (s *Scanner) closeName(ctx *Context) {
+	s.addBufferedTokenIfExists(ctx)
+	s.isAnchor = false
+	s.isAlias = false
+
+	end := blankRunTabEnd(ctx, ctx.idx)
 	tk := ctx.lastToken()
 	tk.Origin += ctx.source(ctx.idx, end)
 	s.progressColumn(ctx, end-ctx.idx)
@@ -1635,8 +1659,8 @@ func (s *Scanner) scan(ctx *Context) error {
 			// name. When the blanks run to a line break, upstream already
 			// ends the name there and gives the name token the blanks and
 			// the line break, as after a space.
-			if s.inName(ctx) && !blankRunEndsLine(ctx) {
-				s.closeNameAtTab(ctx)
+			if s.inName(ctx) && !blankRunEndsLine(ctx, ctx.idx) {
+				s.closeName(ctx)
 				continue
 			}
 			if ctx.existsBuffer() && s.lastDelimColumn == 0 {

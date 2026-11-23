@@ -332,6 +332,30 @@ func TestNew_Unsupported(t *testing.T) {
 				"`-- remove !t and &k from the key",
 			),
 		},
+		"alias key after a space and a tab": {
+			before:    stringtest.LinesLF("k: &k a", "*k \t: v"),
+			construct: edit.ConstructKeyProperties,
+			err: stringtest.JoinLF(
+				"test.yaml:2:1: $: this program does not edit a document with an alias as a mapping key, such as *k",
+				"`-- write the key out in place of *k",
+			),
+		},
+		"anchor on a key after a space and a tab": {
+			before:    "&k \ta: v\n",
+			construct: edit.ConstructKeyProperties,
+			err: stringtest.JoinLF(
+				"test.yaml:1:1: $: this program does not edit a document with a tag or an anchor on a mapping key, such as &k",
+				"`-- remove &k from the key",
+			),
+		},
+		"tag on a key after a space and a tab": {
+			before:    "!t \ta: v\n",
+			construct: edit.ConstructKeyProperties,
+			err: stringtest.JoinLF(
+				"test.yaml:1:1: $: this program does not edit a document with a tag or an anchor on a mapping key, such as !t",
+				"`-- remove !t from the key",
+			),
+		},
 		"anchor on a key of a flow mapping": {
 			before:    stringtest.LinesLF("m: {&k a: 1}"),
 			construct: edit.ConstructKeyProperties,

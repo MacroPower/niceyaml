@@ -37,10 +37,16 @@ import (
 // a block scalar header, and another is the tab that cuts a quoted scalar.
 //
 // The whitespace between the text of two tokens opens the Origin of the
-// later token, as the go-yaml lexer places it. Where the lexer drops the
-// spaces and tabs that end a line, the earlier token ends with the line
-// breaks in front of the later token. The later token keeps the
-// indentation of its own line. A CRLF stays whole in one Origin.
+// later token, as the go-yaml lexer places it. Tags and the names of
+// anchors and aliases are the exception. Each of them takes the spaces and
+// tabs after it through the last tab, unless those blanks run to a line
+// break. So in "a: &x \t1" the Origin of the name holds "x \t", and the
+// Origin of the value holds "1".
+//
+// Where the lexer drops the spaces and tabs that end a line, the earlier
+// token ends with the line breaks in front of the later token. The later
+// token keeps the indentation of its own line. A CRLF stays whole in one
+// Origin.
 //
 // # YAML Readings
 //
@@ -65,6 +71,11 @@ import (
 //     collection a flow indicator such as "," ends the name too. So the
 //     lexer reads "a: &x\t1" as the anchor x1 on an empty value, and an
 //     alias *x does not find the anchor x.
+//   - Spaces and tabs after a tag, or after the name of an anchor or an
+//     alias, separate it from a key after them. The lexer refuses a key or
+//     a ":" after a space and a tab there as a tab used as indentation. So
+//     the lexer refuses "&x \ta: 1" and "*x \t: 1", and the copy reads
+//     them as "&x a: 1" and "*x : 1".
 //   - The copy reads the rune after a double-quoted scalar that holds a
 //     tab between its quotes. The lexer skips one rune after the closing
 //     quote for each tab of the text that a rune other than a space or a

@@ -47,6 +47,11 @@
 //     name, up to the next space, line break, or comment. In a flow
 //     collection a flow indicator such as "," ends the name too. So
 //     go-yaml reads "&x\t1" as the anchor x1 on an empty value.
+//   - The token of a tag, or of the name of an anchor or an alias, takes
+//     the spaces and tabs after it through the last tab. Go-yaml opens the
+//     next token with the tab after a space, and it refuses a key or a ":"
+//     after that tab as a tab used as indentation. So go-yaml refuses
+//     "&x \ta: 1", and the copy reads the anchor x on the key a.
 //
 // # Sync
 //
