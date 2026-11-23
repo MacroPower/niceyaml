@@ -932,13 +932,13 @@ func TestContent_UnmarshalerError(t *testing.T) {
 		require.ErrorAs(t, err, &p)
 	})
 
-	t.Run("panic beside a rejection comes back", func(t *testing.T) {
+	t.Run("panic after a rejection comes back", func(t *testing.T) {
 		t.Parallel()
 
-		// The error matches niceyaml.ErrDecode through the rejection it
-		// holds beside the panic, and the panic still decides.
+		// The panic ends the decode, so the error holds the panic alone
+		// and does not match niceyaml.ErrDecode.
 		ok, err := matcher.Content(kindPath, nesting("")).Match(t.Context(), doc)
-		require.ErrorIs(t, err, niceyaml.ErrDecode)
+		require.NotErrorIs(t, err, niceyaml.ErrDecode)
 		assert.False(t, ok)
 
 		var p *niceyaml.PanicError

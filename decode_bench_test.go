@@ -57,9 +57,9 @@ func BenchmarkNode_Decode_FirstDecode(b *testing.B) {
 }
 
 // BenchmarkNode_Decode_ProblemsNested decodes a document nested many
-// levels deep whose innermost value the decoder rejects. The search for
-// the other problems reads each level once, so the time per level stays
-// flat as the document deepens.
+// levels deep whose innermost value the decoder rejects. The decoder
+// reads each level once, so the time per level stays flat as the document
+// deepens.
 func BenchmarkNode_Decode_ProblemsNested(b *testing.B) {
 	for _, depth := range []int{500, 1000, 2000, 4000} {
 		doc := yamltest.FirstDocument(b, deepDocument(depth), yamltest.NoSizeLimits()...)
@@ -132,10 +132,9 @@ func benchProblemLayouts[T any](b *testing.B, counts []int, server, last, each s
 }
 
 // BenchmarkNode_Decode_ProblemsWide decodes a list of servers. In the
-// first layout the decoder rejects the last server alone, so the search
-// reads every server and finds nothing more. In the second it rejects
-// each server, so the search reports as many problems as the list holds.
-// The time per server stays flat as the list grows.
+// first layout the decoder rejects the last server alone. In the second it
+// rejects each server, and it reports every problem in one pass. The time
+// per server stays flat as the list grows.
 func BenchmarkNode_Decode_ProblemsWide(b *testing.B) {
 	bad := "  - {name: n%d, port: http}"
 
@@ -143,10 +142,9 @@ func BenchmarkNode_Decode_ProblemsWide(b *testing.B) {
 }
 
 // BenchmarkNode_Decode_ProblemsMap decodes a map of servers. In the first
-// layout the decoder rejects the last server alone, so the search reads
-// every server and finds nothing more. In the second it rejects each
-// server, so the search reports as many problems as the map holds. The
-// time per server stays flat as the map grows.
+// layout the decoder rejects the last server alone. In the second it
+// rejects each server, and it reports every problem in one pass. The time
+// per server stays flat as the map grows.
 func BenchmarkNode_Decode_ProblemsMap(b *testing.B) {
 	bad := "  s%[1]d: {name: n%[1]d, port: http}"
 
@@ -157,9 +155,8 @@ func BenchmarkNode_Decode_ProblemsMap(b *testing.B) {
 
 // BenchmarkNode_Decode_ProblemsText decodes a list of servers whose tier
 // decodes itself from text. In the first layout the decoder rejects the
-// port of the last server alone, so the search decodes every tier again
-// and finds nothing more. In the second the tier of each server names no
-// tier, so the search reports as many problems as the list holds.
+// port of the last server alone. In the second the tier of each server
+// names no tier, and the decoder reports every problem in one pass.
 func BenchmarkNode_Decode_ProblemsText(b *testing.B) {
 	benchProblemLayouts[struct {
 		Servers []problemTiered `yaml:"servers"`
@@ -490,8 +487,8 @@ func BenchmarkNode_Decode_RejectionInRepeatedReferenceAnchor(b *testing.B) {
 // BenchmarkNode_Decode_UnknownFieldsFromReferenceMerge decodes, under
 // [niceyaml.UnknownFieldsReject], mappings whose `<<` merge key brings in
 // keys of a reference document that the struct does not declare. The
-// decoder rejects one such key at the alias of its merge key, and the
-// search for other problems does not report the others. The keys layout
+// decoder reports each such key at the alias of its merge key, in one
+// pass. The keys layout
 // reads one mapping that merges an anchor of more and more keys. The
 // mappings layout reads more and more mappings that each merge one anchor
 // of 200 keys. The merge keys of its larger documents repeat more than the

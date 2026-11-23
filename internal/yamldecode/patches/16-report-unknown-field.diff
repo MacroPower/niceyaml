@@ -1,0 +1,266 @@
+--- a/decode.go
++++ b/decode.go
+@@ -12,6 +12,7 @@
+ 	"os"
+ 	"path/filepath"
+ 	"reflect"
++	"slices"
+ 	"sort"
+ 	"strconv"
+ 	"strings"
+@@ -56,6 +57,13 @@
+ 	origins              format.Origins
+ 	resolveAlias         func(*ast.AliasNode) (ast.Node, bool)
+ 	collectErrors        bool
++	// unknownField, from ReportUnknownField, takes the error of each
++	// unknown field, and the decode does not return that error.
++	unknownField func(error)
++	// anchorUnknown holds the unknown fields that the decoder reported
++	// while it read the value that anchorValueMap keeps under the same
++	// key, with their paths below the anchor.
++	anchorUnknown map[string][]unknownReport
+ 	// path holds the steps from the node of a decode under CollectErrors
+ 	// to the value that the decoder reads.
+ 	path []Step
+@@ -376,6 +384,76 @@
+ 	return v, d.located(err)
+ }
+ 
++// captureUnknown runs read and returns the errors of the unknown fields
++// that read reports through unknownField. When forward is set, it also
++// hands each one on as it comes. Otherwise it holds them, and the caller
++// decides whether to hand them on.
++func (d *Decoder) captureUnknown(forward bool, read func() error) ([]error, error) {
++	if d.unknownField == nil {
++		return nil, read()
++	}
++	outer := d.unknownField
++	defer func() { d.unknownField = outer }()
++	var reports []error
++	d.unknownField = func(err error) {
++		reports = append(reports, err)
++		if forward {
++			outer(err)
++		}
++	}
++	err := read()
++	return reports, err
++}
++
++// reportUnknown hands each error of reports to unknownField.
++func (d *Decoder) reportUnknown(reports []error) {
++	for _, err := range reports {
++		d.unknownField(err)
++	}
++}
++
++// unknownReport is an unknown field that the decoder reported while it
++// read the value of an anchor, with its path below the anchor.
++type unknownReport struct {
++	err  error
++	path []Step
++}
++
++// keepUnknown records reports, the unknown fields that the decoder
++// reported while it read the anchor with the key key at depth steps on
++// the path. An alias that takes the value of the anchor in place of a read
++// of its own reports them again, below its own path.
++func (d *Decoder) keepUnknown(key string, depth int, reports []error) {
++	if len(reports) == 0 {
++		delete(d.anchorUnknown, key)
++		return
++	}
++	if d.anchorUnknown == nil {
++		d.anchorUnknown = map[string][]unknownReport{}
++	}
++	kept := make([]unknownReport, 0, len(reports))
++	for _, err := range reports {
++		r := unknownReport{err: err}
++		if located, ok := err.(*PathError); ok && len(located.Path) >= depth {
++			r.err, r.path = located.Err, slices.Clone(located.Path[depth:])
++		}
++		kept = append(kept, r)
++	}
++	d.anchorUnknown[key] = kept
++}
++
++// replayUnknown reports the unknown fields that keepUnknown recorded for
++// the anchor with the key key, below the path of the alias that takes its
++// value.
++func (d *Decoder) replayUnknown(key string) {
++	if d.unknownField == nil {
++		return
++	}
++	for _, r := range d.anchorUnknown[key] {
++		d.unknownField(d.located(r.err, r.path...))
++	}
++}
++
+ // Errors holds every error that a decode under [CollectErrors] found, in
+ // the order of the document. An error without a place in the document goes
+ // first.
+@@ -996,6 +1074,7 @@
+ 		d.anchorNodeMap[anchorName] = n.Value
+ 		if d.keeps(mark) {
+ 			d.anchorValueMap[anchorName] = reflect.ValueOf(anchorValue)
++			delete(d.anchorUnknown, anchorName)
+ 		}
+ 		return anchorValue, nil
+ 	case *ast.AliasNode:
+@@ -1340,8 +1419,6 @@
+ 
+ func (d *Decoder) decodeByUnmarshaler(ctx context.Context, dst reflect.Value, src ast.Node) error {
+ 	ptrValue := dst.Addr()
+-	// The errors that the callback of an InterfaceUnmarshaler returned.
+-	var passed []error
+ 	if unmarshaler, exists := d.unmarshalerFromCustomUnmarshalerMap(ptrValue.Type()); exists {
+ 		b, err := d.unmarshalableDocument(ctx, src)
+ 		if err != nil {
+@@ -1377,35 +1454,17 @@
+ 	}
+ 
+ 	if unmarshaler, ok := iface.(InterfaceUnmarshalerContext); ok {
+-		if err := unmarshaler.UnmarshalYAML(ctx, func(v interface{}) error {
+-			rv := reflect.ValueOf(v)
+-			if rv.Type().Kind() != reflect.Ptr {
+-				return ErrDecodeRequiredPointerType
+-			}
+-			if err := d.decodeValue(ctx, rv.Elem(), src); err != nil {
+-				passed = append(passed, err)
+-				return err
+-			}
+-			return nil
+-		}); err != nil {
+-			return d.unmarshalerError(err, src, passed...)
++		calls := &callbackCalls{d: d, ctx: ctx, src: src}
++		if err := unmarshaler.UnmarshalYAML(ctx, calls.decode); err != nil {
++			return calls.failed(err)
+ 		}
+ 		return nil
+ 	}
+ 
+ 	if unmarshaler, ok := iface.(InterfaceUnmarshaler); ok {
+-		if err := unmarshaler.UnmarshalYAML(func(v interface{}) error {
+-			rv := reflect.ValueOf(v)
+-			if rv.Type().Kind() != reflect.Ptr {
+-				return ErrDecodeRequiredPointerType
+-			}
+-			if err := d.decodeValue(ctx, rv.Elem(), src); err != nil {
+-				passed = append(passed, err)
+-				return err
+-			}
+-			return nil
+-		}); err != nil {
+-			return d.unmarshalerError(err, src, passed...)
++		calls := &callbackCalls{d: d, ctx: ctx, src: src}
++		if err := unmarshaler.UnmarshalYAML(calls.decode); err != nil {
++			return calls.failed(err)
+ 		}
+ 		return nil
+ 	}
+@@ -1468,6 +1527,51 @@
+ 	return ErrTextOnly
+ }
+ 
++// callbackCalls holds the calls of the callback that the decoder hands an
++// InterfaceUnmarshaler for a value that decodes from src.
++type callbackCalls struct {
++	d   *Decoder
++	ctx context.Context
++	src ast.Node
++	// The errors that the calls returned, and the unknown fields that
++	// each of those calls reported. A call that fails holds its unknown
++	// fields, because the unmarshaler can drop its result and read the
++	// value another way.
++	passed []error
++	held   [][]error
++}
++
++// decode is the callback. It decodes src into v, which must be a pointer.
++func (c *callbackCalls) decode(v interface{}) error {
++	rv := reflect.ValueOf(v)
++	if rv.Type().Kind() != reflect.Ptr {
++		return ErrDecodeRequiredPointerType
++	}
++	reports, err := c.d.captureUnknown(false, func() error {
++		return c.d.decodeValue(c.ctx, rv.Elem(), c.src)
++	})
++	if err != nil {
++		c.passed = append(c.passed, err)
++		c.held = append(c.held, reports)
++		return err
++	}
++	c.d.reportUnknown(reports)
++	return nil
++}
++
++// failed returns err, the error of the unmarshaler, as unmarshalerError
++// does. When err is the error of a call, unchanged, it reports the unknown
++// fields of that call.
++func (c *callbackCalls) failed(err error) error {
++	for i, p := range c.passed {
++		if sameError(err, p) {
++			c.d.reportUnknown(c.held[i])
++			break
++		}
++	}
++	return c.d.unmarshalerError(err, c.src, c.passed...)
++}
++
+ // ErrTextOnly is the error of a mapping or a sequence for a type that
+ // decodes itself from text alone, through an UnmarshalText method. The
+ // decoder does not call the method for such a node. Its message is
+@@ -1495,11 +1599,15 @@
+ 		anchor, _ := src.(*ast.AnchorNode)
+ 		anchorName := d.anchorKey(anchor)
+ 		mark := d.openNulls
+-		if err := d.decodeValue(withAnchor(ctx, anchorName), dst, anchor.Value); err != nil {
++		reports, err := d.captureUnknown(true, func() error {
++			return d.decodeValue(withAnchor(ctx, anchorName), dst, anchor.Value)
++		})
++		if err != nil {
+ 			return err
+ 		}
+ 		if d.keeps(mark) {
+ 			d.anchorValueMap[anchorName] = dst
++			d.keepUnknown(anchorName, len(d.path), reports)
+ 		}
+ 		return nil
+ 	}
+@@ -1735,6 +1843,9 @@
+ 		if value.IsValid() {
+ 			v, err := d.castToAssignableValue(value, typ, node)
+ 			if err == nil {
++				// The alias takes the value and does not read the
++				// anchor, so it reports the unknown fields of that read.
++				d.replayUnknown(aliasName)
+ 				return v, nil
+ 			}
+ 		}
+@@ -1810,6 +1921,7 @@
+ 	}
+ 	if d.resolveAlias != nil && d.keeps(mark) {
+ 		d.anchorValueMap[key] = reflect.ValueOf(v)
++		delete(d.anchorUnknown, key)
+ 	}
+ 	return v, nil
+ }
+@@ -2170,6 +2282,10 @@
+ 			}
+ 			if !ok {
+ 				err := errors.ErrUnknownField(fmt.Sprintf(`unknown field "%s"`, key), unknownFields[key].GetToken())
++				if d.unknownField != nil {
++					d.unknownField(d.located(err, Step{Key: key, IsKey: true}))
++					continue
++				}
+ 				if !d.collectErrors {
+ 					return err
+ 				}
+@@ -2671,6 +2787,7 @@
+ func (d *Decoder) decode(ctx context.Context, v reflect.Value) error {
+ 	d.decodeDepth = 0
+ 	d.anchorValueMap = make(map[string]reflect.Value)
++	d.anchorUnknown = nil
+ 	if len(d.parsedFile.Docs) == 0 {
+ 		// empty document.
+ 		dst := v.Elem()

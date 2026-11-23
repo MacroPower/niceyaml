@@ -27,14 +27,6 @@ type jsonValue struct{}
 
 func (*jsonValue) UnmarshalJSON([]byte) error { return nil }
 
-// textNodeValue decodes itself from text and from its node. Go-yaml
-// calls its UnmarshalYAML first.
-type textNodeValue struct{}
-
-func (*textNodeValue) UnmarshalText([]byte) error { return nil }
-
-func (*textNodeValue) UnmarshalYAML(ast.Node) error { return nil }
-
 // plainValue has no method.
 type plainValue struct {
 	Name string `yaml:"name"`
@@ -65,35 +57,6 @@ type checks interface{ Check() error }
 // embedsChecker gets its Check from the field it embeds.
 type embedsChecker struct {
 	checker
-}
-
-// inlineNode holds a field that decodes itself inline.
-type inlineNode struct {
-	Value nodeValue `yaml:",inline"`
-	Name  string    `yaml:"name"`
-}
-
-// inlineDeep holds a struct inline that holds an inline field that
-// decodes itself.
-type inlineDeep struct {
-	Inner inlineNode `yaml:",inline"`
-}
-
-// inlinePlain holds a struct inline that decodes by its fields.
-type inlinePlain struct {
-	Inner plainValue `yaml:",inline"`
-}
-
-// inlineSelf holds a pointer to itself inline.
-type inlineSelf struct {
-	Self *inlineSelf `yaml:",inline"`
-}
-
-// inlineCustom holds a plain struct inline, which a function of a decode
-// can decode.
-type inlineCustom struct {
-	Inner plainValue `yaml:",inline"`
-	Name  string     `yaml:"name"`
 }
 
 // noOption is the go-yaml option of a function no test calls.
@@ -298,78 +261,6 @@ func TestOptions_ReportsOwnError(t *testing.T) {
 			t.Parallel()
 
 			assert.Equal(t, tc.want, tc.opts.ReportsOwnError(tc.typ))
-		})
-	}
-}
-
-func TestOptions_FromText(t *testing.T) {
-	t.Parallel()
-
-	assert.True(t, unmarshaler.Options{}.FromText(reflect.TypeFor[textValue]()))
-	assert.False(t, unmarshaler.Options{}.FromText(reflect.TypeFor[textNodeValue]()), "UnmarshalYAML comes first")
-	assert.False(t, unmarshaler.Options{}.FromText(reflect.TypeFor[plainValue]()))
-
-	custom := unmarshaler.Options{}.With(reflect.TypeFor[textValue](), noOption)
-	assert.False(t, custom.FromText(reflect.TypeFor[textValue]()), "a function comes first")
-}
-
-func TestOptions_RefusesForText(t *testing.T) {
-	t.Parallel()
-
-	mapping := &ast.MappingNode{}
-
-	tcs := map[string]struct {
-		typ     reflect.Type
-		content ast.Node
-		opts    unmarshaler.Options
-		want    bool
-	}{
-		"text type from a mapping": {
-			typ:     reflect.TypeFor[textValue](),
-			content: mapping,
-			want:    true,
-		},
-		"text type from a scalar":  {typ: reflect.TypeFor[textValue](), content: &ast.StringNode{}},
-		"text type from nothing":   {typ: reflect.TypeFor[textValue]()},
-		"time from a mapping":      {typ: reflect.TypeFor[time.Time](), content: mapping},
-		"node type from a mapping": {typ: reflect.TypeFor[nodeValue](), content: mapping},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, tc.opts.RefusesForText(tc.typ, tc.content))
-		})
-	}
-}
-
-func TestOptions_InlinesUnmarshaler(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		typ  reflect.Type
-		opts unmarshaler.Options
-		want bool
-	}{
-		"inline field that decodes itself": {typ: reflect.TypeFor[inlineNode](), want: true},
-		"inside an inline struct":          {typ: reflect.TypeFor[inlineDeep](), want: true},
-		"inline struct of fields":          {typ: reflect.TypeFor[inlinePlain]()},
-		"inline pointer to itself":         {typ: reflect.TypeFor[inlineSelf]()},
-		"inline struct a function decodes": {
-			typ:  reflect.TypeFor[inlineCustom](),
-			opts: unmarshaler.Options{}.With(reflect.TypeFor[plainValue](), noOption),
-			want: true,
-		},
-		"inline struct without its function": {typ: reflect.TypeFor[inlineCustom]()},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, tc.opts.InlinesUnmarshaler(tc.typ))
-			assert.Equal(t, tc.want, tc.opts.InlinesUnmarshaler(tc.typ), "a second call gives the same answer")
 		})
 	}
 }

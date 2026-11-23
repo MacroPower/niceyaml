@@ -179,3 +179,41 @@ func ResolveAlias(resolve func(alias *ast.AliasNode) (ast.Node, bool)) DecodeOpt
 		return nil
 	}
 }
+
+// CollectErrors has a decode go on past the error of a field, an element,
+// or an entry and return every error it finds, each unknown field under
+// [DisallowUnknownField] among them, as an [Errors] in the order of the
+// document. A decode that finds one error returns that error alone. Each
+// error comes in a [PathError] with the path on which the decoder read its
+// value. A map still stops at the error of a key or of a `<<` merge key,
+// as go-yaml does. Without CollectErrors, a decode returns the first error
+// it finds.
+func CollectErrors() DecodeOption {
+	return func(d *Decoder) error {
+		d.collectErrors = true
+		return nil
+	}
+}
+
+// ReportUnknownField has a decode find the unknown fields of each struct, as
+// [DisallowUnknownField] does, and hand the error of each one to fn. The
+// decode does not return those errors, so an unknown field does not fail
+// it, and an unmarshaler whose callback reads a mapping with such a field
+// does not see the error. Each struct hands its fields in the order of the
+// document. Under [CollectErrors], each error comes in a [PathError] with
+// the path on which the decoder read the key.
+//
+// The decode hands fn the same fields that [DisallowUnknownField] fails
+// for. An alias that takes the value that the decoder read for its anchor
+// hands on the fields of that read again, at its own path. A call of the
+// callback of an unmarshaler that fails holds its fields. The decode hands
+// them on only when the unmarshaler returns the error of that call as it
+// is, because an unmarshaler that drops the error can read the value
+// another way.
+func ReportUnknownField(fn func(err error)) DecodeOption {
+	return func(d *Decoder) error {
+		d.disallowUnknownField = true
+		d.unknownField = fn
+		return nil
+	}
+}

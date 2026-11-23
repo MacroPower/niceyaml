@@ -1124,3 +1124,34 @@ func isAlias(node ast.Node) bool {
 
 	return ok
 }
+
+// fieldNames returns the names of the keys that t, a struct type, has a
+// field for, as [yamlfield.Name] names them, at any depth of inline
+// structs. The seen set holds the inline structs the walk is inside of,
+// so the walk stops at a struct that holds itself inline. An inline field
+// that [yamlfield.ReadsAnchor] reports does not add a name.
+func fieldNames(t reflect.Type, seen map[reflect.Type]bool) map[string]bool {
+	names := yamlfield.OwnNames(t)
+
+	seen[t] = true
+
+	for field := range t.Fields() {
+		_, inline, skip := yamlfield.Name(field)
+		if skip || !inline || yamlfield.ReadsAnchor(field) {
+			continue
+		}
+
+		inner := unmarshaler.Base(field.Type)
+		if inner.Kind() != reflect.Struct || seen[inner] {
+			continue
+		}
+
+		for name := range fieldNames(inner, seen) {
+			names[name] = true
+		}
+	}
+
+	delete(seen, t)
+
+	return names
+}

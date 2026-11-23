@@ -21,23 +21,23 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
 
-// rules returns the rules of a walk of doc, for a decoder with opts that
-// has read the anchors of doc, as the decode of doc did. A panic of the
-// decoder comes back as an error.
-func rules(tb testing.TB, doc *niceyaml.Node, opts ...yamldecode.DecodeOption) decodewalk.Rules {
+// rules returns the rules of a walk of doc, for a decoder that has read
+// the anchors of doc, as the decode of doc did. A panic of the decoder
+// comes back as an error.
+func rules(tb testing.TB, doc *niceyaml.Node) decodewalk.Rules {
 	tb.Helper()
 
-	return referenceRules(tb, doc, nil, opts...)
+	return referenceRules(tb, doc, nil)
 }
 
 // referenceRules returns the rules of a walk of doc, as [rules] does. The
 // aliases of doc read the anchors of ref, a reference document, or of no
 // document for a nil ref. The decoder reads ref before doc, as a decode
 // reads the anchors of its reference documents first.
-func referenceRules(tb testing.TB, doc, ref *niceyaml.Node, opts ...yamldecode.DecodeOption) decodewalk.Rules {
+func referenceRules(tb testing.TB, doc, ref *niceyaml.Node) decodewalk.Rules {
 	tb.Helper()
 
-	dec := yamldecode.NewDecoder(bytes.NewReader(nil), opts...)
+	dec := yamldecode.NewDecoder(bytes.NewReader(nil))
 
 	var sink any
 
@@ -479,103 +479,6 @@ func TestWalk(t *testing.T) {
 	}
 }
 
-// node is a tree of nodes, so a walk can read one node below several uses
-// of an anchor.
-type node struct {
-	Kids []node `yaml:"kids"`
-	A    int    `yaml:"a"`
-}
-
-func TestWalkUses(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		typ   reflect.Type
-		input string
-		want  []string
-	}{
-		"a node that two aliases reach, below each": {
-			input: "list: [&p {a: 1}, *p]\n",
-			typ:   reflect.TypeFor[withList](),
-			want: []string{
-				"root @ decodewalk_test.withList fields",
-				"field @.list []decodewalk_test.pair elements",
-				"element @.list[0] decodewalk_test.pair fields",
-				"field @.list[0].a int whole",
-				"element @.list[1] decodewalk_test.pair fields",
-				"field @.list[1].a int whole",
-			},
-		},
-		"a node that a merge key and an alias reach, below each": {
-			input: stringtest.LinesLF("base: &b {a: 1}", "list: [*b, {<<: *b}]"),
-			typ:   reflect.TypeFor[withList](),
-			want: []string{
-				"root @ decodewalk_test.withList fields",
-				"field @.list []decodewalk_test.pair elements",
-				"element @.list[0] decodewalk_test.pair fields",
-				"field @.list[0].a int whole",
-				"element @.list[1] decodewalk_test.pair fields",
-				"field @.list[1].a int whole",
-			},
-		},
-		// The alias inside the anchor of its name reads null, so the walk
-		// ends below each use.
-		"an alias inside its own anchor": {
-			input: "kids: [&k {kids: [*k], a: 1}, *k]\n",
-			typ:   reflect.TypeFor[node](),
-			want: []string{
-				"root @ decodewalk_test.node fields",
-				"field @.kids []decodewalk_test.node elements",
-				"element @.kids[0] decodewalk_test.node fields",
-				"field @.kids[0].kids []decodewalk_test.node elements",
-				"field @.kids[0].a int whole",
-				"element @.kids[1] decodewalk_test.node fields",
-				"field @.kids[1].kids []decodewalk_test.node elements",
-				"field @.kids[1].a int whole",
-			},
-		},
-		// The anchor k holds an alias of b, so the walk reads b below each
-		// use of k.
-		"a node that two uses of an anchor reach below it": {
-			input: stringtest.LinesLF("base: &b {a: 1}", "kids: [&k {kids: [*b], a: 2}, *k]"),
-			typ:   reflect.TypeFor[node](),
-			want: []string{
-				"root @ decodewalk_test.node fields",
-				"field @.kids []decodewalk_test.node elements",
-				"element @.kids[0] decodewalk_test.node fields",
-				"field @.kids[0].kids []decodewalk_test.node elements",
-				"element @.kids[0].kids[0] decodewalk_test.node fields",
-				"field @.kids[0].kids[0].a int whole",
-				"field @.kids[0].a int whole",
-				"element @.kids[1] decodewalk_test.node fields",
-				"field @.kids[1].kids []decodewalk_test.node elements",
-				"element @.kids[1].kids[0] decodewalk_test.node fields",
-				"field @.kids[1].kids[0].a int whole",
-				"field @.kids[1].a int whole",
-			},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			doc := yamltest.FirstDocument(t, tc.input)
-
-			var lines []string
-
-			decodewalk.WalkUses(t.Context(), rules(t, doc), tc.typ, doc.AST(), astnode.Parent{},
-				func(v *decodewalk.Value) decodewalk.Action {
-					lines = append(lines, fmt.Sprintf("%s %s %s %s", kinds[v.Kind], v.Path(), v.Type, reads[v.Reads]))
-
-					return decodewalk.Descend
-				})
-
-			assert.Equal(t, tc.want, lines)
-		})
-	}
-}
-
 func TestWalk_ReferenceMerges(t *testing.T) {
 	t.Parallel()
 
@@ -673,20 +576,20 @@ func TestWalk_Value(t *testing.T) {
 	decodewalk.Walk(t.Context(), rules(t, doc), reflect.TypeFor[holder](), doc.AST(), astnode.Parent{},
 		func(v *decodewalk.Value) decodewalk.Action {
 			if v.Kind == decodewalk.Key || v.Kind == decodewalk.Member {
-				got = append(got, fmt.Sprintf("%s %q depth=%d named=%t selected=%t held=%s",
-					kinds[v.Kind], v.Name, v.Depth, v.Named, v.Selected(), strings.TrimSpace(v.Held.String())))
+				got = append(got, fmt.Sprintf("%s %q depth=%d named=%t held=%s",
+					kinds[v.Kind], v.Name, v.Depth, v.Named, strings.TrimSpace(v.Held.String())))
 			}
 
 			return decodewalk.Descend
 		})
 
 	assert.Equal(t, []string{
-		`key "x" depth=2 named=true selected=false held=x`,
-		`member "x" depth=2 named=true selected=false held={a: 1}`,
-		`key "x" depth=2 named=true selected=true held=x`,
-		`member "x" depth=2 named=true selected=true held=2`,
-		`key "" depth=2 named=false selected=false held=? *k`,
-		`member "" depth=2 named=false selected=false held=3`,
+		`key "x" depth=2 named=true held=x`,
+		`member "x" depth=2 named=true held={a: 1}`,
+		`key "x" depth=2 named=true held=x`,
+		`member "x" depth=2 named=true held=2`,
+		`key "" depth=2 named=false held=? *k`,
+		`member "" depth=2 named=false held=3`,
 	}, got)
 }
 

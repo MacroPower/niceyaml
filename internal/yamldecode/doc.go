@@ -10,8 +10,9 @@
 // packages. So the commit of the copy must match the version that go.mod
 // requires. LICENSE holds the license of go-yaml.
 //
-// Each diff under patches fixes a defect of go-yaml's decoder, and sync.sh
-// applies the diffs in the order of their names after it copies the files.
+// Each diff under patches fixes a defect of go-yaml's decoder or adds a
+// feature that niceyaml reads its errors with. The sync.sh script applies
+// the diffs in the order of their names after it copies the files.
 // A change to a copied file goes into a diff of its own, or into the diff
 // of the fix that it belongs to, so the next sync keeps it. With the
 // diffs, the copy differs from go-yaml as follows:
@@ -24,8 +25,11 @@
 //     target and in the text that the decoder hands an unmarshaler.
 //   - The decoder checks its context as it reads, and [AliasBudget] bounds
 //     what it reads through aliases.
-//   - The error of an unmarshaler stays as the unmarshaler returned it,
-//     with the field that a TypeError in it names.
+//   - The error of a value that decodes itself comes back in an
+//     [UnmarshalerError] with the node of that value. The error of the
+//     unmarshaler stays as the unmarshaler returned it, with the field that
+//     a TypeError in it names. An unmarshaler can return an error of its
+//     callback unchanged, and that error stays where the decoder found it.
 //   - A nil pointer below the target gets a value, and a pointer that
 //     holds a value decodes from that value.
 //   - A pointer type that never ends in a type that is not a pointer
@@ -50,6 +54,22 @@
 //   - A pointer to a node type of the go-yaml ast package points to the node
 //     of the document, and not to a copy, also where the node sits under an
 //     anchor or a tag.
+//   - The decoder names the unknown fields of a mapping in the order of the
+//     document, so a decode that returns one names the first. It builds the
+//     mapping of an inline field in that order too, so it reads the entries,
+//     and finds their errors, in the same order at every decode.
+//   - With [CollectErrors], a decode goes on past each error and returns
+//     every error it finds, as an [Errors] in the order of the document. A
+//     map still stops at the error of a key or of a `<<` merge key. Each
+//     error comes in a [PathError] with the path on which the decoder read
+//     its value, so a value that several aliases read gives one error for
+//     each alias.
+//   - With [ReportUnknownField], a decode hands each unknown field to a
+//     function in place of returning its error. It hands on the fields that
+//     the decoder finds in the anchor of each alias that takes the value
+//     of that anchor. It drops the fields of a failed call of the callback
+//     of an unmarshaler, unless the unmarshaler returns the error of that
+//     call as it is.
 //
 // The files that sync.sh does not write stand in for the parts of go-yaml
 // that the copy needs outside those files. The decode options are copies of

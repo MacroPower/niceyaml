@@ -1,0 +1,215 @@
+--- a/decode.go
++++ b/decode.go
+@@ -56,6 +56,9 @@
+ 	origins              format.Origins
+ 	resolveAlias         func(*ast.AliasNode) (ast.Node, bool)
+ 	collectErrors        bool
++	// path holds the steps from the node of a decode under CollectErrors
++	// to the value that the decoder reads.
++	path []Step
+ 	// openNulls counts the aliases that read as null because the decoder
+ 	// was reading their anchor.
+ 	openNulls int
+@@ -294,12 +297,85 @@
+ 		err, d.stopped = d.stopped, nil
+ 		return err
+ 	}
++	err = d.located(err)
+ 	if list, ok := err.(Errors); ok {
+ 		sort.SliceStable(list, func(i, j int) bool { return offsetOf(list[i]) < offsetOf(list[j]) })
+ 	}
+ 	return err
+ }
+ 
++// Step is one step on the way from the node of a decode to a value below
++// it: the entry of a key, the element at an index, or the key of an entry.
++type Step struct {
++	// The name of the key, for an entry or a key.
++	Key string
++	// The index of the element, when IsIndex is set.
++	Index   int
++	IsIndex bool
++	// Whether the step names the key of the entry and not its value.
++	IsKey bool
++}
++
++// PathError is an error of a decode under [CollectErrors] with the path of
++// the value that it is about. The path names the way the decode read the
++// value, through each alias and each `<<` merge key, so a value that
++// several aliases read gives one error for each of them, each with its own
++// path. An inline field does not add a step.
++type PathError struct {
++	Err  error
++	Path []Step
++}
++
++func (e *PathError) Error() string { return e.Err.Error() }
++
++func (e *PathError) Unwrap() error { return e.Err }
++
++// located returns err with the path of the value that the decoder is in,
++// and then steps. An error that holds a path already keeps it. Without
++// [CollectErrors], err comes back as it is.
++func (d *Decoder) located(err error, steps ...Step) error {
++	if !d.collectErrors || err == nil {
++		return err
++	}
++	switch err := err.(type) {
++	case *PathError:
++		return err
++	case Errors:
++		for i := range err {
++			err[i] = d.located(err[i], steps...)
++		}
++		return err
++	}
++	path := make([]Step, 0, len(d.path)+len(steps))
++	return &PathError{Err: err, Path: append(append(path, d.path...), steps...)}
++}
++
++// keyName returns the name of key for a [Step]. The key of an entry that
++// the decoder made for an inline field has no token.
++func keyName(key ast.Node) string {
++	if tk := key.GetToken(); tk != nil {
++		return tk.Value
++	}
++	if made, ok := key.(*ast.StringNode); ok {
++		return made.Value
++	}
++	return ""
++}
++
++// below is createDecodedNewValue for a value at step below the value that
++// the decoder is in.
++func (d *Decoder) below(
++	ctx context.Context, step Step, typ reflect.Type, defaultVal reflect.Value, node ast.Node,
++) (reflect.Value, error) {
++	// The defer takes the step off the path when a value below panics too,
++	// because an unmarshaler can recover a panic of its callback.
++	depth := len(d.path)
++	defer func() { d.path = d.path[:depth] }()
++	d.path = append(d.path, step)
++	v, err := d.createDecodedNewValue(ctx, typ, defaultVal, node)
++	return v, d.located(err)
++}
++
+ // Errors holds every error that a decode under [CollectErrors] found, in
+ // the order of the document. An error without a place in the document goes
+ // first.
+@@ -365,8 +441,12 @@
+ 	for _, err := range list {
+ 		// The decoder names the field only in a TypeError of its own, so
+ 		// an error that wraps a TypeError and the error of an unmarshaler
+-		// stay as they are.
+-		if te, ok := err.(*errors.TypeError); ok {
++		// stay as they are. A TypeError of its own can carry a path.
++		own := err
++		if located, ok := own.(*PathError); ok {
++			own = located.Err
++		}
++		if te, ok := own.(*errors.TypeError); ok {
+ 			fieldName := fmt.Sprintf("%s.%s", typ, field)
+ 			if inline && te.StructFieldName != nil {
+ 				fieldName = fmt.Sprintf("%s.%s", typ, *te.StructFieldName)
+@@ -455,6 +535,8 @@
+ 		}
+ 	case Errors:
+ 		return err
++	case *PathError:
++		return err
+ 	}
+ 	return &UnmarshalerError{Err: err, Node: src, dec: d}
+ }
+@@ -2051,7 +2133,7 @@
+ 		if c, ok := valueCtxs[v]; ok {
+ 			fieldCtx = c
+ 		}
+-		newFieldValue, err := d.createDecodedNewValue(fieldCtx, fieldValue.Type(), fieldValue, v)
++		newFieldValue, err := d.below(fieldCtx, Step{Key: structField.RenderName}, fieldValue.Type(), fieldValue, v)
+ 		if err != nil {
+ 			d.noteField(&found, err, structType.Name(), field.Name, false)
+ 			continue
+@@ -2091,7 +2173,7 @@
+ 				if !d.collectErrors {
+ 					return err
+ 				}
+-				found = append(found, err)
++				found = append(found, d.located(err, Step{Key: key, IsKey: true}))
+ 			}
+ 		}
+ 	}
+@@ -2185,13 +2267,15 @@
+ 	idx := 0
+ 
+ 	var found []error
+-	for iter.Next() {
++	// pos counts the elements of the sequence. idx counts the slots of the
++	// array, and it skips an element that does not decode.
++	for pos := 0; iter.Next(); pos++ {
+ 		v := iter.Value()
+ 		if elemType.Kind() == reflect.Ptr && v.Type() == ast.NullType {
+ 			// set nil value to pointer
+ 			arrayValue.Index(idx).Set(reflect.Zero(elemType))
+ 		} else {
+-			dstValue, err := d.createDecodedNewValue(ctx, elemType, reflect.Value{}, v)
++			dstValue, err := d.below(ctx, Step{Index: pos, IsIndex: true}, elemType, reflect.Value{}, v)
+ 			if err != nil {
+ 				d.note(&found, err)
+ 				continue
+@@ -2224,14 +2308,14 @@
+ 	elemType := sliceType.Elem()
+ 
+ 	var found []error
+-	for iter.Next() {
++	for idx := 0; iter.Next(); idx++ {
+ 		v := iter.Value()
+ 		if elemType.Kind() == reflect.Ptr && v.Type() == ast.NullType {
+ 			// set nil value to pointer
+ 			sliceValue = reflect.Append(sliceValue, reflect.Zero(elemType))
+ 			continue
+ 		}
+-		dstValue, err := d.createDecodedNewValue(ctx, elemType, reflect.Value{}, v)
++		dstValue, err := d.below(ctx, Step{Index: idx, IsIndex: true}, elemType, reflect.Value{}, v)
+ 		if err != nil {
+ 			d.note(&found, err)
+ 			continue
+@@ -2388,10 +2472,10 @@
+ 		k := d.createDecodableValue(keyType)
+ 		if d.canDecodeByUnmarshaler(k) {
+ 			if err := d.decodeByUnmarshaler(ctx, k, key); err != nil {
+-				return d.noted(found, d.ownError(err, key))
++				return d.noted(found, d.located(d.ownError(err, key), Step{Key: keyName(key), IsKey: true}))
+ 			}
+ 		} else {
+-			keyVal, err := d.createDecodedNewValue(ctx, keyType, reflect.Value{}, key)
++			keyVal, err := d.below(ctx, Step{Key: keyName(key), IsKey: true}, keyType, reflect.Value{}, key)
+ 			if err != nil {
+ 				return d.noted(found, err)
+ 			}
+@@ -2408,7 +2492,7 @@
+ 			mapValue.SetMapIndex(k, reflect.Zero(valueType))
+ 			continue
+ 		}
+-		dstValue, err := d.createDecodedNewValue(ctx, valueType, reflect.Value{}, value)
++		dstValue, err := d.below(ctx, Step{Key: keyName(key)}, valueType, reflect.Value{}, value)
+ 		if err != nil {
+ 			d.note(&found, err)
+ 		}
+@@ -2627,7 +2711,7 @@
+ 	if !rv.IsValid() || rv.Type().Kind() != reflect.Ptr {
+ 		return ErrDecodeRequiredPointerType
+ 	}
+-	d.stopped = nil
++	d.stopped, d.path = nil, d.path[:0]
+ 	if d.isInitialized() {
+ 		if err := d.decode(ctx, rv); err != nil {
+ 			return err
+@@ -2654,7 +2738,7 @@
+ 	if rv.Type().Kind() != reflect.Ptr {
+ 		return ErrDecodeRequiredPointerType
+ 	}
+-	d.stopped = nil
++	d.stopped, d.path = nil, d.path[:0]
+ 	if !d.isInitialized() {
+ 		if err := d.decodeInit(ctx); err != nil {
+ 			return err

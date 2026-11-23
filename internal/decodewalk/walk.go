@@ -154,8 +154,6 @@ type Value struct {
 	Entry *ast.MappingValueNode
 	// Name is the field or the key, for a field, a key, or a member.
 	Name string
-	// The resolver of the walk, for a key or a member.
-	resolver *paths.Resolver
 	// From is what holds Held in the document.
 	From astnode.Parent
 	// Depth is the number of values that hold this one. It is zero for
@@ -198,21 +196,6 @@ func (v *Value) Path() paths.Path {
 	slices.Reverse(selectors)
 
 	return paths.Current().Join(selectors...)
-}
-
-// Selected reports whether a path through the name of v, a key or a
-// member, selects the entry v comes from, in the mapping of the map that
-// holds v. A path names an entry by the text of its key and selects the
-// last entry with that text. Paths therefore do not point at an entry
-// that a later one hides. Selected reports false for any other value.
-func (v *Value) Selected() bool {
-	if v.Kind != Key && v.Kind != Member || !v.Named {
-		return false
-	}
-
-	selected, err := v.resolver.Entry(v.Parent.Node, v.Name)
-
-	return err == nil && selected == v.Entry
 }
 
 // Walk reads node as a value of type t and calls visit for each value the
@@ -259,25 +242,6 @@ func Walk(
 	newWalker(ctx, r, visit).root(t, node, from)
 }
 
-// WalkUses walks node as [Walk] does, except that it goes below a struct,
-// a map, or a sequence once for each value that reads it. It thus reads a
-// node that several aliases reach once for each alias, and each [Value]
-// below it has the path of the use that reached it. It does not go below a
-// value that a value holding it already reads as the same type, so it
-// stops at a node that holds itself. The [paths.Resolver] of the rules
-// reads an alias inside its own anchor as null, so a document does not
-// make such a node.
-//
-// The walk costs what the aliases of the document expand to, as the
-// decoder does when it decodes them.
-func WalkUses(
-	ctx context.Context, r Rules, t reflect.Type, node ast.Node, from astnode.Parent, visit func(*Value) Action,
-) {
-	w := newWalker(ctx, r, visit)
-	w.uses = true
-	w.root(t, node, from)
-}
-
 // walker holds the state of one walk.
 type walker struct {
 	ctx context.Context
@@ -300,9 +264,6 @@ type walker struct {
 	// [walker.pastAliasLimit] finds it, or nil before it asks.
 	pastLimit *bool
 	rules     Rules
-	// Whether the walk goes below a node once for each value that reads
-	// it, as [WalkUses] describes, rather than once for each type.
-	uses bool
 }
 
 // seenKey names a node the walk has gone below, by the type it read the
@@ -463,29 +424,14 @@ func (w *walker) below(v *Value) bool {
 
 // enter reports whether the walk goes below v, a struct, a map, or a
 // sequence whose node has the content content. A walk goes below a node
-// once for each type it reads the node as. A walk of [WalkUses] goes below
-// it for each use instead, unless a value that holds v reads the node as
-// the same type, so that v lies inside a node that holds itself. The
-// resolver refuses an alias that leads back into its own anchor, so no
-// document reaches that check. It keeps the walk finite without relying
-// on the resolver.
+// once for each type it reads the node as.
 func (w *walker) enter(v *Value, content ast.Node) bool {
-	if !w.uses {
-		key := seenKey{typ: v.Type, node: content}
-		if w.seen[key] {
-			return false
-		}
-
-		w.seen[key] = true
-
-		return true
+	key := seenKey{typ: v.Type, node: content}
+	if w.seen[key] {
+		return false
 	}
 
-	for at := v.Parent; at != nil; at = at.Parent {
-		if at.Kind != Inline && at.Type == v.Type && datapath.Deref(w.rules.Resolver, at.Node) == content {
-			return false
-		}
-	}
+	w.seen[key] = true
 
 	return true
 }
@@ -649,16 +595,15 @@ func (w *walker) entry(
 	named bool,
 ) bool {
 	key := &Value{
-		Parent:   parent,
-		Kind:     Key,
-		Type:     unmarshaler.Base(t.Key()),
-		Held:     entry.Key,
-		Node:     entry.Key,
-		Entry:    entry,
-		Struct:   owner,
-		Name:     name,
-		Named:    named,
-		resolver: w.rules.Resolver,
+		Parent: parent,
+		Kind:   Key,
+		Type:   unmarshaler.Base(t.Key()),
+		Held:   entry.Key,
+		Node:   entry.Key,
+		Entry:  entry,
+		Struct: owner,
+		Name:   name,
+		Named:  named,
 	}
 
 	if !w.yield(key) {
@@ -666,30 +611,16 @@ func (w *walker) entry(
 	}
 
 	return w.value(&Value{
-		Parent:   parent,
-		Kind:     Member,
-		Type:     t.Elem(),
-		Held:     entry.Value,
-		From:     astnode.Parent{Entry: entry},
-		Entry:    entry,
-		Struct:   owner,
-		Name:     name,
-		Named:    named,
-		resolver: w.rules.Resolver,
+		Parent: parent,
+		Kind:   Member,
+		Type:   t.Elem(),
+		Held:   entry.Value,
+		From:   astnode.Parent{Entry: entry},
+		Entry:  entry,
+		Struct: owner,
+		Name:   name,
+		Named:  named,
 	})
-}
-
-// entryOf returns the entry of mapping that the decoder reads for the
-// key name when it decodes a struct, as [walker.lookup] finds it. It
-// returns nil when the decoder reads an entry of a reference document for
-// name, or when it does not read any entry.
-func (w *walker) entryOf(mapping *ast.MappingNode, name string, merges bool) *ast.MappingValueNode {
-	read := w.lookup(mapping, name, merges)
-	if read.alias != nil {
-		return nil
-	}
-
-	return read.entry
 }
 
 // entryRead is the entry that the decoder reads for a key of a mapping
@@ -1125,171 +1056,6 @@ func (k *Keys) held(key keysOfKey, index func() *sourceKeys) *sourceKeys {
 	k.sources.Store(key, keys)
 
 	return keys
-}
-
-// ReferenceKey returns the alias of the document through which a `<<`
-// merge key brings in the entry of mapping, a mapping of the document,
-// whose key has the token tk. The entry lies in a reference document, and
-// the decoder reads it for a struct, as [walker.mergedEntry] finds such an
-// entry. It reports false when no such entry has the key tk.
-func ReferenceKey(r Rules, mapping *ast.MappingNode, tk *token.Token) (*ast.AliasNode, bool) {
-	for _, read := range lookupWalker(r).mergedEntries(mapping) {
-		if read.entry.Key != nil && read.entry.Key.GetToken() == tk {
-			return read.alias, true
-		}
-	}
-
-	return nil, false
-}
-
-// lookupWalker returns a walker that looks up the entries of mappings with
-// r, as [walker.mergedEntry] does, and does not walk anything.
-func lookupWalker(r Rules) *walker {
-	return &walker{
-		dropped: map[*ast.MappingNode]map[*ast.MappingValueNode]bool{},
-		keys:    map[keysOfKey]*sourceKeys{},
-		rules:   r,
-	}
-}
-
-// mergedEntries returns each entry of a reference document that the
-// decoder reads for a struct from mapping, one for each key, as
-// [walker.mergedEntry] finds them. The entries come in the order the walk
-// reaches them, which reads the entries of each mapping from the last
-// back. It returns nil when the walk cannot read every source. It reads
-// every merge source of mapping each time, and does not keep what it read.
-func (w *walker) mergedEntries(mapping *ast.MappingNode) []entryRead {
-	l := &mergeLookup{w: w, seen: map[ast.Node]bool{}, found: map[string]entryRead{}}
-	l.entries(mapping, nil, astnode.Parent{}, true)
-
-	if l.unknown {
-		return nil
-	}
-
-	var reads []entryRead
-
-	for _, name := range l.names {
-		if read := l.found[name]; read.alias != nil {
-			reads = append(reads, read)
-		}
-	}
-
-	return reads
-}
-
-// mergeLookup holds the state of one lookup of [walker.mergedEntries],
-// which reads every key of a mapping as [walker.mergedEntry] reads one.
-type mergeLookup struct {
-	w *walker
-	// The mappings and the sequences of merge sources that the lookup has
-	// read. An alias inside its own anchor reads that anchor, so a source
-	// can hold itself.
-	seen map[ast.Node]bool
-	// The entry the decoder reads for each key that the lookup has found.
-	found map[string]entryRead
-	// The keys of found, in the order the lookup found them.
-	names []string
-	// Whether the lookup reached a merge source it cannot read.
-	unknown bool
-}
-
-// entries reads the entries of node, a mapping, from the last back, as
-// [walker.mergedEntry] describes. The arguments via, from, and top are
-// those of [nameLookup.entries]. It reports true when the lookup cannot
-// read a source, which ends it.
-func (l *mergeLookup) entries(node ast.Node, via *ast.AliasNode, from astnode.Parent, top bool) bool {
-	entries, ok := astnode.Entries(node)
-	if !ok || l.seen[node] {
-		return false
-	}
-
-	l.seen[node] = true
-
-	if !top && !l.w.readsAsStrings(entries, via != nil) {
-		return false
-	}
-
-	for _, entry := range slices.Backward(entries) {
-		if entry == nil || entry.Key == nil {
-			continue
-		}
-
-		if astnode.IsMergeKey(entry.Key) {
-			at := from
-			if via == nil {
-				at = astnode.Parent{Entry: entry}
-			}
-
-			if l.merge(entry.Value, via, at) {
-				return true
-			}
-
-			continue
-		}
-
-		name, ok := l.w.keyName(entry.Key, via != nil)
-		if !ok {
-			continue
-		}
-
-		if _, held := l.found[name]; held {
-			continue
-		}
-
-		l.found[name] = entryRead{entry: entry, alias: via, from: from, known: true}
-		l.names = append(l.names, name)
-	}
-
-	return false
-}
-
-// merge reads the mappings that value, the value of a `<<` merge key,
-// brings in, the last first, as [mergeLookup.entries] reads them.
-func (l *mergeLookup) merge(value ast.Node, via *ast.AliasNode, from astnode.Parent) bool {
-	switch v := value.(type) {
-	case *ast.AnchorNode:
-		return l.merge(v.Value, via, from)
-
-	case *ast.TagNode:
-		return l.merge(v.Value, via, from)
-
-	case *ast.AliasNode:
-		target, ref, ok := l.w.follow(v, via)
-		if !ok {
-			l.unknown = true
-
-			return true
-		}
-
-		if via == nil && ref {
-			via = v
-		}
-
-		return l.merge(target, via, from)
-
-	case *ast.SequenceNode:
-		if l.seen[v] {
-			return false
-		}
-
-		l.seen[v] = true
-
-		for i, elem := range slices.Backward(v.Values) {
-			at := from
-			if via == nil {
-				at = astnode.Parent{Sequence: v, Index: i}
-			}
-
-			if l.merge(elem, via, at) {
-				return true
-			}
-		}
-
-		return false
-
-	default:
-		return l.entries(value, via, from, false)
-	}
 }
 
 // follow returns the value of the anchor that the decoder reads for alias,

@@ -1,0 +1,42 @@
+--- a/decode.go
++++ b/decode.go
+@@ -2210,10 +2210,21 @@
+ 				fieldValue.Set(reflect.Zero(fieldValue.Type()))
+ 				continue
+ 			}
++			// The mapping holds the entries in the order of the document,
++			// so each decode reads them, and finds their errors, in the
++			// same order.
++			names := slices.Collect(maps.Keys(keyToNodeMap))
++			sort.Slice(names, func(i, j int) bool {
++				a, b := nodeOffset(keyToNodeMap[names[i]]), nodeOffset(keyToNodeMap[names[j]])
++				if a == b {
++					return names[i] < names[j]
++				}
++				return a < b
++			})
+ 			mapNode := ast.Mapping(nil, false)
+-			for k, v := range keyToNodeMap {
++			for _, k := range names {
+ 				key := &ast.StringNode{BaseNode: &ast.BaseNode{}, Value: k}
+-				mapNode.Values = append(mapNode.Values, ast.MappingValue(nil, key, v))
++				mapNode.Values = append(mapNode.Values, ast.MappingValue(nil, key, keyToNodeMap[k]))
+ 			}
+ 			newFieldValue, err := d.createDecodedNewValue(withEntryContexts(ctx, valueCtxs), fieldValue.Type(), fieldValue, mapNode)
+ 			if d.disallowUnknownField {
+@@ -2331,6 +2342,15 @@
+ 	return nil
+ }
+ 
++// nodeOffset returns the offset of the token of node in the document, or
++// -1 for a node without a place.
++func nodeOffset(node ast.Node) int {
++	if tk := node.GetToken(); tk != nil && tk.Position != nil {
++		return tk.Position.Offset
++	}
++	return -1
++}
++
+ // getParentMapTokenIfExists if the NodeType is a container type such as MappingType or SequenceType,
+ // it is necessary to return the parent MapNode's colon token to represent the entire container.
+ func (d *Decoder) getParentMapTokenIfExistsForValidationError(typ ast.NodeType, tk *token.Token) *token.Token {

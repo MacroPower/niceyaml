@@ -14273,12 +14273,12 @@ func TestIsInvalid(t *testing.T) {
 				Pair [2]string `yaml:"pair"`
 			}](t.Context())),
 		},
-		"panic beside a rejection": {
+		// The panic ends the decode, which returns the panic alone.
+		"panic after a rejection": {
 			err: errOf(yamltest.FirstDocument(t, "port: abc\nv: x\n").Decode[struct {
 				Port int                  `yaml:"port"`
 				V    panickingUnmarshaler `yaml:"v"`
 			}](t.Context())),
-			is: niceyaml.ErrDecode,
 		},
 		"PanicError around an Error from NewError": {
 			// The chain ends at the PanicError, so the Error the code
@@ -15345,40 +15345,20 @@ func TestPanicError_Recovered(t *testing.T) {
 		assert.Equal(t, int32(1), calls.Load())
 	})
 
-	t.Run("panic beside another problem", func(t *testing.T) {
+	t.Run("panic after another problem", func(t *testing.T) {
 		t.Parallel()
 
 		// The decoder rejects the port and goes on to the value that
-		// panics. The search then finds the port again.
+		// panics. The panic ends the decode, so the decode returns the
+		// panic alone.
 		_, err := yamltest.FirstDocument(t, "port: abc\nv: x\n").Decode[struct {
 			Port int                  `yaml:"port"`
 			V    panickingUnmarshaler `yaml:"v"`
 		}](t.Context())
-		require.EqualError(t, err, stringtest.JoinLF(
-			"2 problems",
-			"1:1: decoder panicked: unmarshaler rejected the value",
-			"1:7: $.port: expected integer, got string",
-		))
-
-		// The rejection of the port matches, and the panic keeps the error
-		// from being invalid.
-		require.ErrorIs(t, err, niceyaml.ErrDecode)
+		require.EqualError(t, err, "1:1: decoder panicked: unmarshaler rejected the value")
+		require.NotErrorIs(t, err, niceyaml.ErrDecode)
 		requirePanic(t, err)
-
-		invalid := map[string]bool{}
-
-		for problem := range niceyaml.NewErrorTree(err).Problems() {
-			invalid[problem.Message()] = problem.IsInvalid()
-
-			var p *niceyaml.PanicError
-
-			assert.Equal(t, !problem.IsInvalid(), errors.As(problem.Err, &p), problem.Label())
-		}
-
-		assert.Equal(t, map[string]bool{
-			"decoder panicked: unmarshaler rejected the value": false,
-			"expected integer, got string":                     true,
-		}, invalid)
+		assert.False(t, niceyaml.IsInvalid(err))
 	})
 }
 

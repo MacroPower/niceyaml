@@ -13,9 +13,10 @@ import (
 )
 
 var (
-	As  = errors.As
-	Is  = errors.Is
-	New = errors.New
+	As     = errors.As
+	Is     = errors.Is
+	New    = errors.New
+	Unwrap = errors.Unwrap
 )
 
 type (

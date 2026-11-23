@@ -466,8 +466,9 @@ func TestUnmarshalWrappedTypeError(t *testing.T) {
 func TestUnmarshalInterfaceUnmarshalerCallback(t *testing.T) {
 	t.Parallel()
 
-	// The callback returns the error of an inner unmarshaler as the inner
-	// unmarshaler returned it.
+	// The callback returns the error of an inner unmarshaler at the node of
+	// the inner value, and an outer unmarshaler that returns that error
+	// unchanged leaves it at that node.
 	tcs := map[string]struct {
 		decode func() (callbackErr, err error)
 		check  func(t *testing.T, err error)
@@ -483,7 +484,7 @@ func TestUnmarshalInterfaceUnmarshalerCallback(t *testing.T) {
 			check: func(t *testing.T, err error) {
 				t.Helper()
 
-				assert.Same(t, errSentinel, err)
+				assert.ErrorIs(t, err, errSentinel)
 			},
 		},
 		"sentinel with a context": {
@@ -497,23 +498,23 @@ func TestUnmarshalInterfaceUnmarshalerCallback(t *testing.T) {
 			check: func(t *testing.T, err error) {
 				t.Helper()
 
-				assert.Same(t, errSentinel, err)
+				assert.ErrorIs(t, err, errSentinel)
 			},
 		},
 		"bare TypeError": {
 			decode: func() (error, error) {
 				var c callbackHolder[bareReparsed]
 
-				err := yaml.Unmarshal([]byte("x:\n  v: x\n"), &c)
+				err := yaml.Unmarshal([]byte("x: {v: x}\n"), &c)
 
 				return c.err, err
 			},
 			check: func(t *testing.T, err error) {
 				t.Helper()
 
-				//nolint:errorlint // The test checks the type of the error itself.
-				te, ok := err.(*up.TypeError)
-				require.True(t, ok, "%T", err)
+				var te *up.TypeError
+
+				require.ErrorAs(t, err, &te)
 				require.NotNil(t, te.StructFieldName)
 				assert.Equal(t, ".V", *te.StructFieldName)
 			},
@@ -528,9 +529,177 @@ func TestUnmarshalInterfaceUnmarshalerCallback(t *testing.T) {
 			require.Error(t, callbackErr)
 			tc.check(t, callbackErr)
 
+			var own *yaml.UnmarshalerError
+
+			require.ErrorAs(t, callbackErr, &own)
+			assert.Equal(t, 4, own.Node.GetToken().Position.Column)
+
 			// The decode returns the error that the outer unmarshaler
 			// returned.
-			tc.check(t, err)
+			assert.Same(t, callbackErr, err)
+		})
+	}
+}
+
+// failingText is a text type whose UnmarshalText returns errSentinel.
+type failingText struct{}
+
+func (*failingText) UnmarshalText([]byte) error { return errSentinel }
+
+// failingKey is a text type that returns errSentinel for the key "bad".
+type failingKey string
+
+func (k *failingKey) UnmarshalText(b []byte) error {
+	if string(b) == "bad" {
+		return errSentinel
+	}
+
+	*k = failingKey(b)
+
+	return nil
+}
+
+// failingHolder decodes a struct whose field fails through the callback
+// of an InterfaceUnmarshaler.
+type failingHolder struct{ In failing }
+
+func (h *failingHolder) UnmarshalYAML(unmarshal func(any) error) error {
+	type plain failingHolder
+
+	return unmarshal((*plain)(h))
+}
+
+// wrappingHolder decodes a struct whose field fails through the callback
+// of an InterfaceUnmarshaler, and wraps the error of the callback.
+type wrappingHolder struct{ In failing }
+
+func (h *wrappingHolder) UnmarshalYAML(unmarshal func(any) error) error {
+	type plain wrappingHolder
+
+	err := unmarshal((*plain)(h))
+	if err != nil {
+		return fmt.Errorf("holder: %w", err)
+	}
+
+	return nil
+}
+
+func TestUnmarshalUnmarshalerErrorNode(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		decode func() error
+		cause  error
+		msg    string
+		line   int
+		col    int
+	}{
+		"bytes unmarshaler": {
+			decode: func() error {
+				var v struct {
+					X int
+					B failing
+				}
+
+				return yaml.Unmarshal([]byte("x: 1\nb: 2\n"), &v)
+			},
+			cause: errSentinel,
+			line:  2,
+			col:   4,
+		},
+		"element": {
+			decode: func() error {
+				var v struct{ L []failing }
+
+				return yaml.Unmarshal([]byte("l:\n  - 1\n"), &v)
+			},
+			cause: errSentinel,
+			line:  2,
+			col:   5,
+		},
+		"text unmarshaler in a map": {
+			decode: func() error {
+				var v struct{ M map[string]failingText }
+
+				return yaml.Unmarshal([]byte("m:\n  k: v\n"), &v)
+			},
+			cause: errSentinel,
+			line:  2,
+			col:   6,
+		},
+		"duration": {
+			decode: func() error {
+				var v struct{ T time.Duration }
+
+				return yaml.Unmarshal([]byte("t: soon\n"), &v)
+			},
+			msg:  `time: invalid duration "soon"`,
+			line: 1,
+			col:  4,
+		},
+		"map key": {
+			decode: func() error {
+				var v map[failingKey]int
+
+				return yaml.Unmarshal([]byte("a: 1\nbad: 2\n"), &v)
+			},
+			cause: errSentinel,
+			line:  2,
+			col:   1,
+		},
+		"deepest value": {
+			decode: func() error {
+				var v struct{ O failingHolder }
+
+				return yaml.Unmarshal([]byte("o:\n  in: 5\n"), &v)
+			},
+			cause: errSentinel,
+			line:  2,
+			col:   7,
+		},
+		"wrapped by the outer unmarshaler": {
+			decode: func() error {
+				var v struct{ O wrappingHolder }
+
+				return yaml.Unmarshal([]byte("o:\n  in: 5\n"), &v)
+			},
+			cause: errSentinel,
+			msg:   "holder: sentinel",
+			line:  2,
+			col:   5,
+		},
+		"mapping for a text type": {
+			decode: func() error {
+				var v struct{ T failingText }
+
+				return yaml.Unmarshal([]byte("t: {a: 1}\n"), &v)
+			},
+			cause: yaml.ErrTextOnly,
+			line:  1,
+			col:   4,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tc.decode()
+
+			var own *yaml.UnmarshalerError
+
+			require.ErrorAs(t, err, &own)
+
+			if tc.cause != nil {
+				require.ErrorIs(t, err, tc.cause)
+			}
+
+			if tc.msg != "" {
+				require.EqualError(t, err, tc.msg)
+			}
+
+			pos := own.Node.GetToken().Position
+			assert.Equal(t, []int{tc.line, tc.col}, []int{pos.Line, pos.Column})
 		})
 	}
 }
@@ -1410,4 +1579,587 @@ func TestResolveAliasInlineAliasBelowDocument(t *testing.T) {
 	require.NoError(t, yaml.NewDecoder(bytes.NewReader(nil), documentOrder(body)).DecodeFromNode(body, &whole))
 	assert.Equal(t, aliased{Base: map[string]any{"a": uint64(1)}, B: 2}, scoped)
 	assert.Equal(t, whole.V, scoped)
+}
+
+// errorAt returns the line and column where err lies: at the node of an
+// UnmarshalerError, or at the token of an error of the decoder.
+func errorAt(t *testing.T, err error) string {
+	t.Helper()
+
+	own, ok := errors.AsType[*yaml.UnmarshalerError](err)
+	if ok {
+		pos := own.Node.GetToken().Position
+
+		return fmt.Sprintf("%d:%d", pos.Line, pos.Column)
+	}
+
+	located, ok := errors.AsType[up.Error](err)
+	require.True(t, ok, "no place in %v", err)
+
+	pos := located.GetToken().Position
+
+	return fmt.Sprintf("%d:%d", pos.Line, pos.Column)
+}
+
+// errorMessage returns the message of err without the excerpt that an
+// error of the decoder prints.
+func errorMessage(err error) string {
+	located, ok := errors.AsType[up.Error](err)
+	if ok {
+		return located.GetMessage()
+	}
+
+	return err.Error()
+}
+
+// collectServer and collectApp declare their fields in another order than
+// the document of TestCollectErrors writes them.
+type (
+	collectServer struct {
+		Port    int           `yaml:"port"`
+		Timeout time.Duration `yaml:"timeout"`
+	}
+
+	collectApp struct {
+		Servers  []collectServer `yaml:"servers"`
+		Limits   map[string]int  `yaml:"limits"`
+		Pair     [2]int          `yaml:"pair"`
+		Timeout  int             `yaml:"timeout"`
+		Replicas int             `yaml:"replicas"`
+	}
+)
+
+func TestCollectErrors(t *testing.T) {
+	t.Parallel()
+
+	const src = `replcas: 3
+timeout: soon
+servers:
+  - port: x
+    timeout: later
+    prot: 1
+  - port: 70000000000000000000
+limits: {cpu: lots, mem: 2}
+pair: [a, 1]
+zzz: 1
+`
+
+	var v collectApp
+
+	err := yaml.UnmarshalWithOptions([]byte(src), &v, yaml.DisallowUnknownField(), yaml.CollectErrors())
+
+	var all yaml.Errors
+
+	require.ErrorAs(t, err, &all)
+
+	got := make([]string, 0, len(all))
+	for _, e := range all {
+		got = append(got, errorAt(t, e)+" "+errorMessage(e))
+	}
+
+	assert.Equal(t, []string{
+		`1:1 unknown field "replcas"`,
+		`2:10 cannot unmarshal string into Go struct field collectApp.Timeout of type int`,
+		`4:11 cannot unmarshal string into Go struct field collectApp.Servers of type int`,
+		`5:14 time: invalid duration "later"`,
+		`6:5 unknown field "prot"`,
+		`7:11 cannot unmarshal 70000000000000000000 into Go value of type int ( overflow )`,
+		`8:15 cannot unmarshal string into Go struct field collectApp.Limits of type int`,
+		`9:8 cannot unmarshal string into Go struct field collectApp.Pair of type int`,
+		`10:1 unknown field "zzz"`,
+	}, got)
+
+	// The message holds the message of each error, one per line.
+	msgs := make([]string, 0, len(all))
+	for _, e := range all {
+		msgs = append(msgs, e.Error())
+	}
+
+	assert.Equal(t, strings.Join(msgs, "\n"), all.Error())
+
+	// Without the option, the decode returns the first error it finds.
+	err = yaml.UnmarshalWithOptions([]byte(src), &v, yaml.DisallowUnknownField())
+	require.Error(t, err)
+	require.NotErrorAs(t, err, &all)
+}
+
+func TestCollectErrorsOne(t *testing.T) {
+	t.Parallel()
+
+	var v struct{ A, B int }
+
+	err := yaml.UnmarshalWithOptions([]byte("a: x\nb: 2\n"), &v, yaml.CollectErrors())
+
+	//nolint:errorlint // The test checks the type of the error itself.
+	located, ok := err.(*yaml.PathError)
+	require.True(t, ok, "%T", err)
+	assert.Equal(t, "$.a", pathOf(located))
+
+	//nolint:errorlint // The test checks the type of the error itself.
+	_, typed := located.Err.(*up.TypeError)
+	assert.True(t, typed, "%T", located.Err)
+	assert.Equal(t, 2, v.B)
+	assert.Equal(t, "1:4", errorAt(t, err))
+}
+
+func TestCollectErrorsMapStops(t *testing.T) {
+	t.Parallel()
+
+	// A map stops at the error of a key, after the errors of the entries
+	// before it.
+	var v map[int]int
+
+	err := yaml.UnmarshalWithOptions([]byte("1: x\nk: 2\n3: y\n"), &v, yaml.CollectErrors())
+
+	var all yaml.Errors
+
+	require.ErrorAs(t, err, &all)
+	require.Len(t, all, 2)
+	assert.Equal(t, "1:4", errorAt(t, all[0]))
+	assert.Equal(t, "2:1", errorAt(t, all[1]))
+}
+
+func TestDisallowUnknownFieldOrder(t *testing.T) {
+	t.Parallel()
+
+	// The decode names the first unknown field of the document at every
+	// decode. Go-yaml names any of them, as the order of a map gives it.
+	for range 300 {
+		var v struct{ A int }
+
+		err := yaml.UnmarshalWithOptions([]byte("a: 1\nb: 2\nc: 3\nd: 4\n"), &v, yaml.DisallowUnknownField())
+
+		var unknown *up.UnknownFieldError
+
+		require.ErrorAs(t, err, &unknown)
+		require.Equal(t, `unknown field "b"`, unknown.Message)
+	}
+}
+
+func TestReportUnknownField(t *testing.T) {
+	t.Parallel()
+
+	var v struct {
+		H    callbackHolder[struct{ A int }] `yaml:"h"`
+		Port int                             `yaml:"port"`
+	}
+
+	var fields []error
+
+	report := yaml.ReportUnknownField(func(err error) { fields = append(fields, err) })
+
+	// The callback of the holder reads a mapping with an unknown field and
+	// does not fail. The decode returns the error of the port alone.
+	err := yaml.UnmarshalWithOptions([]byte("h: {x: {a: 1, b: 2}}\nzzz: 1\nport: x\nyyy: 2\n"), &v,
+		report, yaml.CollectErrors())
+	require.Error(t, err)
+	assert.Equal(t, "$.port", pathOf(err))
+	require.NoError(t, v.H.err)
+
+	got := make([]string, 0, len(fields))
+	for _, e := range fields {
+		require.ErrorAs(t, e, new(*up.UnknownFieldError))
+
+		got = append(got, errorAt(t, e)+" "+pathOf(e))
+	}
+
+	// Each struct hands its fields in the order of the document, after the
+	// fields of the values inside it.
+	assert.Equal(t, []string{"1:15 $.h.x.b~", "2:1 $.zzz~", "4:1 $.yyy~"}, got)
+
+	// Without CollectErrors, the errors carry no path.
+	fields = nil
+
+	require.NoError(t, yaml.UnmarshalWithOptions([]byte("port: 1\nzzz: 1\n"), &v, report))
+	require.Len(t, fields, 1)
+	assert.Equal(t, "(no path)", pathOf(fields[0]))
+}
+
+func TestReportUnknownFieldAliases(t *testing.T) {
+	t.Parallel()
+
+	type named struct{ Name string }
+
+	type holder struct{ In named }
+
+	tcs := map[string]struct {
+		src  string
+		v    any
+		want []string
+	}{
+		"plain alias and merge key": {
+			src: "a: &x {name: n, extra: 1}\nb: *x\nc:\n  <<: *x\n",
+			v:   &struct{ A, B, C named }{},
+			want: []string{
+				"1:17 $.a.extra~",
+				"1:17 $.b.extra~",
+				"1:17 $.c.extra~",
+			},
+		},
+		"anchor that reads another anchor": {
+			src: "b: &b {name: n, extra: 1}\no: &o {in: *b, more: 2}\nu: *o\n",
+			v: &struct {
+				B    named
+				O, U holder
+			}{},
+			want: []string{
+				"1:17 $.b.extra~",
+				"1:17 $.o.in.extra~",
+				"2:16 $.o.more~",
+				"1:17 $.u.in.extra~",
+				"2:16 $.u.more~",
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var reported []string
+
+			report := yaml.ReportUnknownField(func(err error) {
+				reported = append(reported, errorAt(t, err)+" "+pathOf(err))
+			})
+
+			// Each alias that takes the value of a read anchor reports the
+			// unknown fields of that anchor at its own path. A decode that
+			// fails for them returns them for each alias too.
+			require.NoError(t, yaml.UnmarshalWithOptions([]byte(tc.src), tc.v, report, yaml.CollectErrors()))
+			assert.Equal(t, tc.want, reported)
+
+			err := yaml.UnmarshalWithOptions([]byte(tc.src), tc.v, yaml.DisallowUnknownField(), yaml.CollectErrors())
+
+			var all yaml.Errors
+
+			require.ErrorAs(t, err, &all)
+
+			rejected := make([]string, 0, len(all))
+			for _, e := range all {
+				rejected = append(rejected, errorAt(t, e)+" "+pathOf(e))
+			}
+
+			assert.ElementsMatch(t, tc.want, rejected)
+		})
+	}
+}
+
+// fallbackHolder decodes a mapping into a struct with an int field a
+// through the callback. When that call fails, it decodes the mapping into
+// a map instead, and keeps its error as passing tells it to.
+type fallbackHolder struct {
+	M       map[string]string
+	passing string
+}
+
+func (h *fallbackHolder) UnmarshalYAML(unmarshal func(any) error) error {
+	var strict struct {
+		A int `yaml:"a"`
+	}
+
+	err := unmarshal(&strict)
+	if err == nil {
+		return nil
+	}
+
+	switch h.passing {
+	case "unchanged":
+		return err
+	case "wrapped":
+		return fmt.Errorf("strict: %w", err)
+	}
+
+	return unmarshal(&h.M)
+}
+
+func TestReportUnknownFieldCallbackFails(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		passing string
+		err     bool
+		want    []string
+	}{
+		"unmarshaler that reads the value another way": {
+			want: []string{},
+		},
+		"unmarshaler that returns the error of the call": {
+			passing: "unchanged",
+			err:     true,
+			want:    []string{"1:11 $.v.b~"},
+		},
+		"unmarshaler that wraps the error of the call": {
+			passing: "wrapped",
+			err:     true,
+			want:    []string{},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			reported := []string{}
+
+			report := yaml.ReportUnknownField(func(err error) {
+				reported = append(reported, errorAt(t, err)+" "+pathOf(err))
+			})
+
+			v := struct{ V fallbackHolder }{V: fallbackHolder{passing: tc.passing}}
+
+			// The call of the callback fails for its value of a. The decode
+			// reports the unknown field b of that call only when the
+			// unmarshaler returns the error of the call as it is.
+			err := yaml.UnmarshalWithOptions([]byte("v: {a: q, b: r}\n"), &v, report, yaml.CollectErrors())
+			if tc.err {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, map[string]string{"a": "q", "b": "r"}, v.V.M)
+			}
+
+			assert.Equal(t, tc.want, reported)
+		})
+	}
+}
+
+func TestCollectErrorsInlineMapOrder(t *testing.T) {
+	t.Parallel()
+
+	// The mapping of an inline map holds its entries in the order of the
+	// document, so the errors at one position come in that order at every
+	// decode.
+	const src = "x: &x abc\nb: *x\nc: *x\na: *x\n"
+
+	for range 50 {
+		var v struct {
+			Rest map[string]int `yaml:",inline"`
+			X    string         `yaml:"x"`
+		}
+
+		err := yaml.UnmarshalWithOptions([]byte(src), &v, yaml.CollectErrors())
+
+		var all yaml.Errors
+
+		require.ErrorAs(t, err, &all)
+
+		got := make([]string, 0, len(all))
+		for _, e := range all {
+			got = append(got, errorAt(t, e)+" "+pathOf(e))
+		}
+
+		require.Equal(t, []string{"1:7 $.x", "1:7 $.b", "1:7 $.c", "1:7 $.a"}, got)
+	}
+}
+
+// pathOf returns the path of a PathError in err, with "~" after the name
+// of a key, or "(no path)".
+func pathOf(err error) string {
+	located, ok := errors.AsType[*yaml.PathError](err)
+	if !ok {
+		return "(no path)"
+	}
+
+	var b strings.Builder
+
+	b.WriteString("$")
+
+	for _, step := range located.Path {
+		switch {
+		case step.IsIndex:
+			fmt.Fprintf(&b, "[%d]", step.Index)
+		case step.IsKey:
+			fmt.Fprintf(&b, ".%s~", step.Key)
+		default:
+			fmt.Fprintf(&b, ".%s", step.Key)
+		}
+	}
+
+	return b.String()
+}
+
+func TestCollectErrorsPathOfEachUse(t *testing.T) {
+	t.Parallel()
+
+	type srv struct {
+		Env  map[string]int `yaml:"env"`
+		Tags []string       `yaml:"tags"`
+		Port int            `yaml:"port"`
+	}
+
+	var v struct {
+		ByKey map[string]srv `yaml:"byKey"`
+		Base  srv            `yaml:"base"`
+		A     srv            `yaml:"a"`
+		C     srv            `yaml:"c"`
+		List  []srv          `yaml:"list"`
+	}
+
+	const src = `base: &b {port: x, env: {LOG: info}}
+a: *b
+c: {<<: *b, tags: {}}
+list: [*b, {port: 1}, {port: y}]
+byKey: {k: *b}
+`
+
+	err := yaml.UnmarshalWithOptions([]byte(src), &v, yaml.CollectErrors())
+
+	var all yaml.Errors
+
+	require.ErrorAs(t, err, &all)
+
+	got := make([]string, 0, len(all))
+	for _, e := range all {
+		got = append(got, errorAt(t, e)+" "+pathOf(e))
+	}
+
+	// Each use of the anchor gives an error at the position of the anchor,
+	// in the order of the fields at one position.
+	assert.Equal(t, []string{
+		"1:17 $.byKey.k.port",
+		"1:17 $.base.port",
+		"1:17 $.a.port",
+		"1:17 $.c.port",
+		"1:17 $.list[0].port",
+		"1:31 $.byKey.k.env.LOG",
+		"1:31 $.base.env.LOG",
+		"1:31 $.a.env.LOG",
+		"1:31 $.c.env.LOG",
+		"1:31 $.list[0].env.LOG",
+		"3:19 $.c.tags",
+		"4:30 $.list[2].port",
+	}, got)
+}
+
+func TestCollectErrorsPathOfKeys(t *testing.T) {
+	t.Parallel()
+
+	var v struct {
+		Items []struct {
+			Name string  `yaml:"name"`
+			When failing `yaml:"when"`
+		} `yaml:"items"`
+		Keys map[int]int `yaml:"keys"`
+	}
+
+	err := yaml.UnmarshalWithOptions([]byte("items:\n  - {name: a, nme: b, when: 1}\nkeys: {x: 1}\n"), &v,
+		yaml.DisallowUnknownField(), yaml.CollectErrors())
+
+	var all yaml.Errors
+
+	require.ErrorAs(t, err, &all)
+
+	got := make([]string, 0, len(all))
+	for _, e := range all {
+		got = append(got, pathOf(e))
+	}
+
+	assert.Equal(t, []string{"$.items[0].nme~", "$.items[0].when", "$.keys.x~"}, got)
+
+	// Without CollectErrors, the error carries no path.
+	err = yaml.Unmarshal([]byte("items:\n  - {name: [1]}\n"), &v)
+
+	//nolint:errorlint // The test checks the type of the error itself.
+	_, bare := err.(*up.TypeError)
+	assert.True(t, bare, "%T", err)
+}
+
+func TestCollectErrorsPathInsideCallback(t *testing.T) {
+	t.Parallel()
+
+	// A value that decodes itself through the callback reports the errors
+	// below it, each with its own path from the node of the decode.
+	var v struct {
+		L []callbackHolder[struct{ A, B int }] `yaml:"l"`
+	}
+
+	err := yaml.UnmarshalWithOptions([]byte("l:\n  - x: {a: p, b: q}\n"), &v, yaml.CollectErrors())
+
+	var all yaml.Errors
+
+	require.ErrorAs(t, err, &all)
+
+	got := make([]string, 0, len(all))
+	for _, e := range all {
+		got = append(got, errorAt(t, e)+" "+pathOf(e))
+	}
+
+	assert.Equal(t, []string{"2:12 $.l[0].x.a", "2:18 $.l[0].x.b"}, got)
+}
+
+func TestCollectErrorsPathOfArray(t *testing.T) {
+	t.Parallel()
+
+	// Each element of an array has the index of its place in the sequence,
+	// after an element that does not decode too.
+	var v struct {
+		X [3]time.Duration `yaml:"x"`
+	}
+
+	err := yaml.UnmarshalWithOptions([]byte("x: [a, soon, later]\n"), &v, yaml.CollectErrors())
+
+	var all yaml.Errors
+
+	require.ErrorAs(t, err, &all)
+
+	got := make([]string, 0, len(all))
+	for _, e := range all {
+		got = append(got, errorAt(t, e)+" "+pathOf(e))
+	}
+
+	assert.Equal(t, []string{"1:5 $.x[0]", "1:8 $.x[1]", "1:14 $.x[2]"}, got)
+}
+
+// panicText panics when it decodes.
+type panicText struct{}
+
+func (*panicText) UnmarshalText([]byte) error { panic("panicText") }
+
+// guard decodes a panicText through the callback, and it returns an error
+// in place of the panic.
+type guard struct{}
+
+func (*guard) UnmarshalYAML(unmarshal func(any) error) (err error) {
+	defer func() {
+		if recover() != nil {
+			err = errors.New("guarded")
+		}
+	}()
+
+	var v struct {
+		Deep struct {
+			P panicText `yaml:"p"`
+		} `yaml:"deep"`
+	}
+
+	return unmarshal(&v)
+}
+
+func TestCollectErrorsPathAfterRecoveredPanic(t *testing.T) {
+	t.Parallel()
+
+	// A panic below the callback leaves no step of its values on the path
+	// when the unmarshaler recovers it.
+	var v struct {
+		G guard         `yaml:"g"`
+		N int           `yaml:"n"`
+		T time.Duration `yaml:"t"`
+	}
+
+	err := yaml.UnmarshalWithOptions([]byte("g: {deep: {p: x}}\nn: y\nt: soon\n"), &v, yaml.CollectErrors())
+
+	var all yaml.Errors
+
+	require.ErrorAs(t, err, &all)
+
+	got := make([]string, 0, len(all))
+	for _, e := range all {
+		got = append(got, errorAt(t, e)+" "+pathOf(e)+" "+errorMessage(e))
+	}
+
+	assert.Equal(t, []string{
+		"1:4 $.g guarded",
+		"2:4 $.n cannot unmarshal string into Go struct field .N of type int",
+		`3:4 $.t time: invalid duration "soon"`,
+	}, got)
 }

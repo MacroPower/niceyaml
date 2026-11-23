@@ -23,9 +23,7 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 
-	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/yamldecode"
-	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
 )
 
 var (
@@ -266,76 +264,6 @@ func (o Options) Whole(t reflect.Type) (int, bool) {
 // does not change what ReportsOwnError reports.
 func (o Options) ReportsOwnError(t reflect.Type) bool {
 	return t == DurationType || DecodesItself(t) || o.Custom(t) || o.decodesJSON(t)
-}
-
-// RefusesForText reports whether the decoder refuses content for a value
-// of type t and does not call an unmarshaler. The content is the mapping,
-// sequence, or scalar the value reads.
-//
-// The decoder hands an UnmarshalText method the string it reads from a
-// scalar. It does not read a string from a mapping or a sequence. So it
-// does not call the method for one, and it returns an error of its own
-// without a token of the source. A type that [Options.FromText] reports
-// thus takes a scalar alone, unless the decoder reads it another way. The
-// decoder parses a [time.Time] itself, and under JSON it hands the node to
-// the UnmarshalJSON method of a type that has one.
-func (o Options) RefusesForText(t reflect.Type, content ast.Node) bool {
-	if astnode.IsNil(content) || astnode.IsScalar(content) || t == TimeType || !o.FromText(t) {
-		return false
-	}
-
-	return !o.JSON || !reflect.PointerTo(t).Implements(JSONType)
-}
-
-// FromText reports whether the decoder decodes a scalar into a value of
-// type t through the UnmarshalText method of the type. The decoder calls
-// the first unmarshaler it finds on the pointer to the type, in the
-// order of [Interfaces], so a type with an UnmarshalYAML method reports
-// false. So does a type that a function of o decodes, because the
-// decoder calls that function ahead of any method. The decoder parses a
-// [time.Time] itself, ahead of its UnmarshalText method, so a caller must
-// check for a time before it asks FromText.
-func (o Options) FromText(t reflect.Type) bool {
-	if o.Custom(t) {
-		return false
-	}
-
-	k := slices.IndexFunc(Interfaces, reflect.PointerTo(t).Implements)
-
-	return k >= 0 && Interfaces[k] == reflect.TypeFor[encoding.TextUnmarshaler]()
-}
-
-// InlinesUnmarshaler reports whether t, a struct type, holds an inline
-// field that decodes itself, as [Options.ReportsOwnError] reports. It
-// checks the fields of t and of each struct that t holds inline. A decode
-// of t calls the unmarshaler of that field whatever the mapping holds.
-func (o Options) InlinesUnmarshaler(t reflect.Type) bool {
-	return o.holdsInlineUnmarshaler(t, map[reflect.Type]bool{})
-}
-
-// holdsInlineUnmarshaler is [Options.InlinesUnmarshaler]. The seen set
-// holds the structs the walk is inside of, so a struct that holds itself
-// inline ends the walk.
-func (o Options) holdsInlineUnmarshaler(t reflect.Type, seen map[reflect.Type]bool) bool {
-	if seen[t] {
-		return false
-	}
-
-	seen[t] = true
-
-	for field := range t.Fields() {
-		_, inline, skip := yamlfield.Name(field)
-		if skip || !inline || yamlfield.ReadsAnchor(field) {
-			continue
-		}
-
-		inner := Base(field.Type)
-		if o.ReportsOwnError(inner) || inner.Kind() == reflect.Struct && o.holdsInlineUnmarshaler(inner, seen) {
-			return true
-		}
-	}
-
-	return false
 }
 
 // decoderField returns the index of the embedded field of t whose

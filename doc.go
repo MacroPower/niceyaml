@@ -1073,9 +1073,8 @@
 // `$.server.<<.port`, and `server: {<<: [{port: x}, {port: 1}]}` gives
 // `$.server.<<[0].port`.
 //
-// The decoder stops at the first value it rejects. The decode then searches
-// for the other problems of the document and reports them together, in the
-// order of the source:
+// The decoder goes on past each value that it rejects, and the decode
+// reports every problem together, in the order of the source:
 //
 //	app.yaml: 3 problems
 //	app.yaml:1:1: $.replcas~: unknown field "replcas"
@@ -1086,54 +1085,58 @@
 // and [ErrorTree.Problems] yields those errors. For a document with one
 // problem, the decode returns that problem alone. A value that several
 // aliases or `<<` merge keys read gives one problem for each use that the
-// decoder rejects, each with the path of that use. The search adds values of
-// the wrong kind, numbers out of range, durations that do not parse, scalars
-// that an UnmarshalText method rejects, and unknown fields under
-// [UnknownFieldsReject]. The decoder confirms each one.
+// decoder rejects, each with the path of that use. Unknown fields under
+// [UnknownFieldsReject] join the other problems.
 //
-// The search does not read a value of a reference document, such as the
-// value at an alias of one. Such a value reports a problem only when the
-// decoder rejects it first, so each decode reports at most one problem of
-// the reference documents.
+// The decoder of a map stops at a key that it rejects, and at a `<<` merge
+// key whose sources it rejects. It reports the problems of the entries
+// before that key alone. The decoder also stops at a tag that does not
+// convert its value, before it reads any value. A value validates itself
+// only after the decoder accepts the document.
 //
-// Apart from those scalars and a [time.Time], the search does not read
-// anything at or below a value that decodes itself. A type with an
-// UnmarshalYAML method thus reports one bad value per decode. A value
-// validates itself only after the decoder accepts the document. The search
-// calls an UnmarshalText method again on a new value, so the method must
-// answer from its text alone.
+// A decode that fails calls each unmarshaler once. The decoder reports
+// the problems below a value that decodes itself through the callback of
+// the decoder, such as an UnmarshalYAML method that decodes into a second
+// type with the same fields.
 //
 // The decoder returns the error of a value that decodes itself without a
 // token of the source. Such a value has an unmarshaler method that the
 // decoder calls, a function from [CustomUnmarshaler], or the type
-// [time.Duration]. The decode then decodes each such value again, in the
-// order the decoder reads them. It binds the error at the first value that
-// fails the same way, or at the deepest value inside that one that also fails
-// that way:
+// [time.Duration]. The decoder hands back the node of that value with its
+// error, and the error binds at the path on which the decoder read the
+// value:
 //
 //	config.yaml:7:14: $.servers[1].timeout: time: invalid duration "soon"
 //
-// For a value inside an anchor of a reference document, the error binds at
-// the alias that reads the anchor, as the References section describes.
+// An unmarshaler can return the error of its callback for a value inside
+// its own, unchanged or wrapped in text of its own. When the error of the
+// inner value carries a location, such as an `@` path, the error binds at
+// the inner value. A wrapped problem that the decoder found below the
+// inner value binds at the path on which the decoder read it, with the
+// text of each wrapper. When the callback returned several problems, the
+// text of the unmarshaler heads them at the value of the unmarshaler. Any
+// other error of the unmarshaler binds at its own value. For a value
+// inside an anchor of a reference document, the error
+// binds at the alias that reads the anchor, as the References section
+// describes.
 //
 // An `@` path in an [*Error] from an unmarshaler reads from the value of that
 // unmarshaler. The error stays in the chain beside ErrDecode, unless it holds
-// an Error from [Unchecked], as the Errors section describes. An unmarshaler
-// that answers differently the second time can move the error to another
-// value. When an error does not recur at any value, the decode returns it
-// without a location.
+// an Error from [Unchecked], as the Errors section describes. An error of
+// an unmarshaler that holds the error of an ended context comes back as it
+// is, without a location.
 //
-// The search, the decodes that locate an error, and the fill of the
-// defaults decode values again. So does the self-validation walk, which
-// decodes map keys to spell them. Each unmarshaler that such a decode runs
-// gets a context without the [Warnings] collector of the call. The
-// collector thus gets only the warnings that the unmarshalers hand to the
-// context of the decoder step.
+// The fill of the defaults decodes values again. So does the
+// self-validation walk, which decodes map keys to spell them. Each
+// unmarshaler that such a decode runs gets a context without the
+// [Warnings] collector of the call. The collector thus gets only the
+// warnings that the unmarshalers hand to the context of the decoder step.
 //
 // The decode recovers a panic in the go-yaml decoder and in the unmarshalers
-// it calls. It returns the panic as an error that holds a [PanicError] and
-// binds that error at the first token of the node. That error does not match
-// ErrDecode, and [IsInvalid] does not report it. The decode also recovers a
+// it calls. A panic ends the decode, which returns the panic alone as an
+// error that holds a [PanicError]. That error binds at the first token of
+// the node. It does not match ErrDecode, and [IsInvalid] does not report
+// it. The decode also recovers a
 // panic in a Validator, in a Validate or ValidateContext method, and in a
 // function from [WithValueCheck] or [WithNodeCheck]. It returns such a panic
 // as the error of the check that panicked, so the error binds where an
@@ -1204,9 +1207,6 @@
 // that a reference document writes. The target of [Node.Decode] thus decodes
 // itself once from its defaults, and so does the value that
 // [Node.DecodeInto] allocates for a nil pointer that its target points to.
-// Under [UnknownFieldsWarn], a decode whose context carries a collector also
-// calls again the unmarshalers of the structs that decode themselves from a
-// mapping, as [WithUnknownFields] describes.
 //
 // The go-yaml decoder can give the place of an alias the value that its
 // anchor decoded to. The two places then share each map, slice, and pointer
@@ -1686,8 +1686,6 @@
 //
 // An ended context stops each step that loops:
 //
-//   - The search for the other problems of a rejected decode stops, and the
-//     decode returns the rejection alone.
 //   - The self-validation walk stops. It returns the error of the context in
 //     place of the errors it found, and it gives the warnings it found to the
 //     collector of the context.
@@ -1909,40 +1907,26 @@
 // the error binds at the alias whose anchor reaches the token. When no alias
 // reaches the token, the error binds without a position.
 //
-// Two or more aliases can reach the token, such as two aliases of one anchor.
-// The decode then decodes each value that reaches them again, in the order
-// that the decoder reads the values. It binds the error at the first value
-// that fails the same way. That order takes the fields of a struct in the
-// order its type declares them, and the elements of a sequence and the
-// entries of a map in document order. When no value fails the same way, the
-// error binds without a position.
-//
-// The decoder of a map returns the error of a `<<` merge key before the error
-// of any other entry. So the decode tries the merge keys of a map first. It
-// reads the source of the first merge key whose merge fails the same way as
-// it reads the map. The decoder reads the mappings of a sequence there as one
-// mapping, and the decode reads them the same way. The document does not hold
-// the values of a source in a reference document, so the error binds at the
-// alias that reads such a source.
-//
-// The decode departs from the order of the decoder inside a value that
-// decodes itself. It follows the fields of the type of that value, which
-// might differ from the order its unmarshaler reads them in.
+// Two or more aliases can reach the token, such as two aliases of one
+// anchor. The decoder reports the token once for each read, with the path
+// of that read, and each error binds at the alias that its path passes. A
+// later entry of the same key can take that path. The error then binds at
+// the alias whose own path and the path of the token below its anchor
+// spell the path of the read. When no alias does, the error binds without
+// a position.
 //
 // The decoder returns the error of a value that decodes itself, such as a
-// [time.Duration], without a token. The decode decodes the value at each
-// alias of a reference document again, and binds the error at the first
-// alias whose value fails the same way:
+// [time.Duration], without a token. The error binds at the path on which
+// the decoder read the value, which passes the alias of the reference
+// document:
 //
 //	app.yaml:2:4: $.w: time: invalid duration "soon"
 //
-// When a value inside the anchor reported the error, the decode walks the
-// anchor as it walks the document, and the path goes on to that value, as in
-// `$.w.timeout`. An `@` path in the error reads from that value. A `<<` merge
-// key that reads a reference document stands for each field whose entry it
-// brings in. The decode tries such a field where the decoder reads it among
-// the fields of its struct, and the error binds as an error at the path of
-// the field binds.
+// For a value inside the anchor, the path goes on to that value, as in
+// `$.w.timeout`. An `@` path in the error reads from that value. A `<<`
+// merge key that reads a reference document stands for each field whose
+// entry it brings in, and the error binds as an error at the path of the
+// field binds.
 //
 // A reference document brings its anchors and its own reference documents.
 // Its Source parses it once, with its [WithAllowDuplicateKeys],

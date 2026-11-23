@@ -1,0 +1,390 @@
+--- a/decode.go
++++ b/decode.go
+@@ -55,6 +55,7 @@
+ 	stopped              error
+ 	origins              format.Origins
+ 	resolveAlias         func(*ast.AliasNode) (ast.Node, bool)
++	collectErrors        bool
+ 	// openNulls counts the aliases that read as null because the decoder
+ 	// was reading their anchor.
+ 	openNulls int
+@@ -285,15 +286,124 @@
+ 	return d.stopped
+ }
+ 
+-// finish returns err, the error of a decode. A decode that tick stopped
++// finish returns err, the error of a decode, with the errors of an
++// [Errors] in the order of the document. A decode that tick stopped
+ // returns the error of tick alone.
+ func (d *Decoder) finish(err error) error {
+ 	if d.stopped != nil {
+ 		err, d.stopped = d.stopped, nil
++		return err
++	}
++	if list, ok := err.(Errors); ok {
++		sort.SliceStable(list, func(i, j int) bool { return offsetOf(list[i]) < offsetOf(list[j]) })
+ 	}
+ 	return err
+ }
+ 
++// Errors holds every error that a decode under [CollectErrors] found, in
++// the order of the document. An error without a place in the document goes
++// first.
++type Errors []error
++
++// Error returns the message of each error, one per line, as the join of
++// the errors package of the standard library writes them.
++func (e Errors) Error() string {
++	msgs := make([]string, len(e))
++	for i, err := range e {
++		msgs[i] = err.Error()
++	}
++	return strings.Join(msgs, "\n")
++}
++
++func (e Errors) Unwrap() []error { return e }
++
++// note adds err to found, with each error of an [Errors] on its own.
++// Without [CollectErrors], found keeps the first error alone, as go-yaml
++// does.
++func (d *Decoder) note(found *[]error, err error) {
++	if !d.collectErrors && len(*found) != 0 {
++		return
++	}
++	if list, ok := err.(Errors); ok {
++		*found = append(*found, list...)
++		return
++	}
++	*found = append(*found, err)
++}
++
++// noted returns the error for found, with last after it when last is not
++// nil. Without [CollectErrors], last comes back alone.
++func (d *Decoder) noted(found []error, last error) error {
++	if last != nil {
++		if !d.collectErrors {
++			return last
++		}
++		d.note(&found, last)
++	}
++	switch len(found) {
++	case 0:
++		return nil
++	case 1:
++		return found[0]
++	}
++	return Errors(found)
++}
++
++// noteField adds err, the error of the field called field of the struct
++// type called typ, to found, as note does. It names the field in each
++// TypeError of the decoder's own, as go-yaml does for the one error it
++// keeps. For an inline field, a TypeError that names a field of the inline
++// struct keeps that name under typ.
++func (d *Decoder) noteField(found *[]error, err error, typ, field string, inline bool) {
++	if !d.collectErrors && len(*found) != 0 {
++		return
++	}
++	list, ok := err.(Errors)
++	if !ok {
++		list = Errors{err}
++	}
++	for _, err := range list {
++		// The decoder names the field only in a TypeError of its own, so
++		// an error that wraps a TypeError and the error of an unmarshaler
++		// stay as they are.
++		if te, ok := err.(*errors.TypeError); ok {
++			fieldName := fmt.Sprintf("%s.%s", typ, field)
++			if inline && te.StructFieldName != nil {
++				fieldName = fmt.Sprintf("%s.%s", typ, *te.StructFieldName)
++			}
++			te.StructFieldName = &fieldName
++		}
++		*found = append(*found, err)
++	}
++}
++
++// offsetOf returns where err lies in the document: at the node of an
++// [UnmarshalerError], or at the token of an error of the decoder. It
++// returns -1 for an error without a place.
++func offsetOf(err error) int {
++	var tk *token.Token
++	for at := err; at != nil && tk == nil; at = errors.Unwrap(at) {
++		switch e := at.(type) {
++		case *UnmarshalerError:
++			if e.Node != nil {
++				tk = e.Node.GetToken()
++			}
++			if tk == nil {
++				return -1
++			}
++		case errors.Error:
++			tk = e.GetToken()
++			if tk == nil {
++				return -1
++			}
++		}
++	}
++	if tk == nil || tk.Position == nil {
++		return -1
++	}
++	return tk.Position.Offset
++}
++
+ // UnmarshalerError is the error of a value that decodes itself: one with an
+ // unmarshaler method, one that a function from [CustomUnmarshaler] decodes,
+ // a [time.Time], or a [time.Duration]. It holds the node that the decoder
+@@ -343,6 +453,8 @@
+ 		if e.dec == d {
+ 			return err
+ 		}
++	case Errors:
++		return err
+ 	}
+ 	return &UnmarshalerError{Err: err, Node: src, dec: d}
+ }
+@@ -1861,7 +1973,7 @@
+ 	}
+ 
+ 	aliasName := d.getMergeAliasName(src)
+-	var foundErr error
++	var found []error
+ 
+ 	for i := 0; i < structType.NumField(); i++ {
+ 		field := structType.Field(i)
+@@ -1917,22 +2029,7 @@
+ 			}
+ 
+ 			if err != nil {
+-				if foundErr != nil {
+-					continue
+-				}
+-				// The decoder names the field only in a TypeError of its
+-				// own, so an error that wraps a TypeError and the error of an
+-				// unmarshaler stay as they are.
+-				if te, ok := err.(*errors.TypeError); ok {
+-					if te.StructFieldName != nil {
+-						fieldName := fmt.Sprintf("%s.%s", structType.Name(), *te.StructFieldName)
+-						te.StructFieldName = &fieldName
+-					} else {
+-						fieldName := fmt.Sprintf("%s.%s", structType.Name(), field.Name)
+-						te.StructFieldName = &fieldName
+-					}
+-				}
+-				foundErr = err
++				d.noteField(&found, err, structType.Name(), field.Name, true)
+ 				continue
+ 			}
+ 			_ = d.setDefaultValueIfConflicted(newFieldValue, structFieldMap)
+@@ -1956,29 +2053,32 @@
+ 		}
+ 		newFieldValue, err := d.createDecodedNewValue(fieldCtx, fieldValue.Type(), fieldValue, v)
+ 		if err != nil {
+-			if foundErr != nil {
+-				continue
+-			}
+-			// The decoder names the field only in a TypeError of its own,
+-			// so an error that wraps a TypeError and the error of an
+-			// unmarshaler stay as they are.
+-			if te, ok := err.(*errors.TypeError); ok {
+-				fieldName := fmt.Sprintf("%s.%s", structType.Name(), field.Name)
+-				te.StructFieldName = &fieldName
+-			}
+-			foundErr = err
++			d.noteField(&found, err, structType.Name(), field.Name, false)
+ 			continue
+ 		}
+ 		fieldValue.Set(newFieldValue)
+ 	}
+-	if foundErr != nil {
+-		return foundErr
++	if len(found) != 0 && !d.collectErrors {
++		return found[0]
+ 	}
+ 
+ 	// Ignore unknown fields when parsing an inline struct (recognized by a nil token).
+ 	// Unknown fields are expected (they could be fields from the parent struct).
+ 	if len(unknownFields) != 0 && d.disallowUnknownField && src.GetToken() != nil {
+-		for key, node := range unknownFields {
++		// The keys go in the order of the document, so the decoder names
++		// the same field at every decode.
++		keys := make([]string, 0, len(unknownFields))
++		for key := range unknownFields {
++			keys = append(keys, key)
++		}
++		sort.Slice(keys, func(i, j int) bool {
++			a, b := unknownFields[keys[i]].GetToken(), unknownFields[keys[j]].GetToken()
++			if a == nil || b == nil || a.Position.Offset == b.Position.Offset {
++				return keys[i] < keys[j]
++			}
++			return a.Position.Offset < b.Position.Offset
++		})
++		for _, key := range keys {
+ 			var ok bool
+ 			for _, prefix := range d.allowedFieldPrefixes {
+ 				if strings.HasPrefix(key, prefix) {
+@@ -1987,10 +2087,17 @@
+ 				}
+ 			}
+ 			if !ok {
+-				return errors.ErrUnknownField(fmt.Sprintf(`unknown field "%s"`, key), node.GetToken())
++				err := errors.ErrUnknownField(fmt.Sprintf(`unknown field "%s"`, key), unknownFields[key].GetToken())
++				if !d.collectErrors {
++					return err
++				}
++				found = append(found, err)
+ 			}
+ 		}
+ 	}
++	if len(found) != 0 {
++		return d.noted(found, nil)
++	}
+ 
+ 	if d.validator != nil {
+ 		if err := d.validator.Struct(dst.Interface()); err != nil {
+@@ -2077,7 +2184,7 @@
+ 	elemType := arrayType.Elem()
+ 	idx := 0
+ 
+-	var foundErr error
++	var found []error
+ 	for iter.Next() {
+ 		v := iter.Value()
+ 		if elemType.Kind() == reflect.Ptr && v.Type() == ast.NullType {
+@@ -2086,9 +2193,7 @@
+ 		} else {
+ 			dstValue, err := d.createDecodedNewValue(ctx, elemType, reflect.Value{}, v)
+ 			if err != nil {
+-				if foundErr == nil {
+-					foundErr = err
+-				}
++				d.note(&found, err)
+ 				continue
+ 			}
+ 			arrayValue.Index(idx).Set(dstValue)
+@@ -2096,10 +2201,7 @@
+ 		idx++
+ 	}
+ 	dst.Set(arrayValue)
+-	if foundErr != nil {
+-		return foundErr
+-	}
+-	return nil
++	return d.noted(found, nil)
+ }
+ 
+ func (d *Decoder) decodeSlice(ctx context.Context, dst reflect.Value, src ast.Node) error {
+@@ -2121,7 +2223,7 @@
+ 	sliceValue := reflect.MakeSlice(sliceType, 0, iter.Len())
+ 	elemType := sliceType.Elem()
+ 
+-	var foundErr error
++	var found []error
+ 	for iter.Next() {
+ 		v := iter.Value()
+ 		if elemType.Kind() == reflect.Ptr && v.Type() == ast.NullType {
+@@ -2131,18 +2233,13 @@
+ 		}
+ 		dstValue, err := d.createDecodedNewValue(ctx, elemType, reflect.Value{}, v)
+ 		if err != nil {
+-			if foundErr == nil {
+-				foundErr = err
+-			}
++			d.note(&found, err)
+ 			continue
+ 		}
+ 		sliceValue = reflect.Append(sliceValue, dstValue)
+ 	}
+ 	dst.Set(sliceValue)
+-	if foundErr != nil {
+-		return foundErr
+-	}
+-	return nil
++	return d.noted(found, nil)
+ }
+ 
+ func (d *Decoder) decodeMapItem(ctx context.Context, dst *MapItem, src ast.Node) error {
+@@ -2265,7 +2362,7 @@
+ 	keyType := mapValue.Type().Key()
+ 	valueType := mapValue.Type().Elem()
+ 	keyMap := map[string]struct{}{}
+-	var foundErr error
++	var found []error
+ 	for mapIter.Next() {
+ 		key := mapIter.Key()
+ 		value := mapIter.Value()
+@@ -2273,15 +2370,15 @@
+ 		if key.IsMergeKey() {
+ 			mergeCtx, err := d.enterMerge(withMerge(ctx), value)
+ 			if err != nil {
+-				return err
++				return d.noted(found, err)
+ 			}
+ 			if err := d.decodeMap(mergeCtx, dst, value); err != nil {
+-				return err
++				return d.noted(found, err)
+ 			}
+ 			iter := dst.MapRange()
+ 			for iter.Next() {
+ 				if err := d.validateDuplicateKey(keyMap, iter.Key(), value); err != nil {
+-					return err
++					return d.noted(found, err)
+ 				}
+ 				mapValue.SetMapIndex(iter.Key(), iter.Value())
+ 			}
+@@ -2291,19 +2388,19 @@
+ 		k := d.createDecodableValue(keyType)
+ 		if d.canDecodeByUnmarshaler(k) {
+ 			if err := d.decodeByUnmarshaler(ctx, k, key); err != nil {
+-				return d.ownError(err, key)
++				return d.noted(found, d.ownError(err, key))
+ 			}
+ 		} else {
+ 			keyVal, err := d.createDecodedNewValue(ctx, keyType, reflect.Value{}, key)
+ 			if err != nil {
+-				return err
++				return d.noted(found, err)
+ 			}
+ 			k = keyVal
+ 		}
+ 
+ 		if k.IsValid() {
+ 			if err := d.validateDuplicateKey(keyMap, k.Interface(), key); err != nil {
+-				return err
++				return d.noted(found, err)
+ 			}
+ 		}
+ 		if valueType.Kind() == reflect.Ptr && value.Type() == ast.NullType {
+@@ -2313,9 +2410,7 @@
+ 		}
+ 		dstValue, err := d.createDecodedNewValue(ctx, valueType, reflect.Value{}, value)
+ 		if err != nil {
+-			if foundErr == nil {
+-				foundErr = err
+-			}
++			d.note(&found, err)
+ 		}
+ 		if !k.IsValid() {
+ 			// expect nil key
+@@ -2323,18 +2418,15 @@
+ 			continue
+ 		}
+ 		if keyType.Kind() != k.Kind() {
+-			return errors.ErrSyntax(
++			return d.noted(found, errors.ErrSyntax(
+ 				fmt.Sprintf("cannot convert %q type to %q type", k.Kind(), keyType.Kind()),
+ 				key.GetToken(),
+-			)
++			))
+ 		}
+ 		mapValue.SetMapIndex(k, dstValue)
+ 	}
+ 	dst.Set(mapValue)
+-	if foundErr != nil {
+-		return foundErr
+-	}
+-	return nil
++	return d.noted(found, nil)
+ }
+ 
+ func (d *Decoder) fileToReader(file string) (io.Reader, error) {

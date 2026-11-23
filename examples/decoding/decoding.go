@@ -138,8 +138,7 @@ func main() {
 
 	fmt.Println("\nReport every problem of a document:")
 
-	// The go-yaml decoder stops at the first value it rejects. The decode
-	// then searches the whole document for the other problems and reports
+	// The decoder goes on past each value it rejects. The decode reports
 	// every problem under one heading, in the order of the source.
 	_, err = docs[1].Decode[config](ctx, decoding)
 	lipgloss.Println(p.PrintError(err))
