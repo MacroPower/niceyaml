@@ -8370,6 +8370,71 @@ func TestDocument_Decode_YAMLReadings(t *testing.T) {
 			input: stringtest.LinesLF("[", "? a # c", "]"),
 			want:  []any{map[string]any{"a": nil}},
 		},
+		"map tag before an anchor on a flow mapping": {
+			// Go-yaml refuses the anchor after the tag.
+			input: stringtest.LinesLF("key: !!map &x {a: b}", "z: *x"),
+			want:  map[string]any{"key": map[string]any{"a": "b"}, "z": map[string]any{"a": "b"}},
+		},
+		"map tag before an anchor above a flow mapping": {
+			input: stringtest.LinesLF("key: !!map &x", "  {a: b}", "z: *x"),
+			want:  map[string]any{"key": map[string]any{"a": "b"}, "z": map[string]any{"a": "b"}},
+		},
+		"map tag above an anchor on a flow mapping": {
+			input: stringtest.LinesLF("key: !!map # c", "  &x {a: b}", "z: *x"),
+			want:  map[string]any{"key": map[string]any{"a": "b"}, "z": map[string]any{"a": "b"}},
+		},
+		"map tag before an anchor above a block mapping": {
+			input: stringtest.LinesLF("key: !!map &x", "  a: b", "z: *x"),
+			want:  map[string]any{"key": map[string]any{"a": "b"}, "z": map[string]any{"a": "b"}},
+		},
+		"map tag before an anchor above an anchor on a key": {
+			input: stringtest.LinesLF("key: !!map &x", "  &y a: b", "z: *x", "w: *y"),
+			want: map[string]any{
+				"key": map[string]any{"a": "b"},
+				"z":   map[string]any{"a": "b"},
+				"w":   "a",
+			},
+		},
+		"seq tag before an anchor on a flow sequence": {
+			input: stringtest.LinesLF("key: !!seq &x [a]", "z: *x"),
+			want:  map[string]any{"key": []any{"a"}, "z": []any{"a"}},
+		},
+		"seq tag before an anchor above a block sequence": {
+			input: stringtest.LinesLF("key: !!seq &x", "- a", "z: *x"),
+			want:  map[string]any{"key": []any{"a"}, "z": []any{"a"}},
+		},
+		"set tag before an anchor on a flow mapping": {
+			input: stringtest.LinesLF("key: !!set &x {a}", "z: *x"),
+			want:  map[string]any{"key": map[string]any{"a": nil}, "z": map[string]any{"a": nil}},
+		},
+		"omap tag before an anchor on a flow sequence": {
+			input: stringtest.LinesLF("key: !!omap &x [a: 1]", "z: *x"),
+			want: map[string]any{
+				"key": []any{map[string]any{"a": uint64(1)}},
+				"z":   []any{map[string]any{"a": uint64(1)}},
+			},
+		},
+		"map tag before an anchor at the root": {
+			input: "!!map &x {a: b}\n",
+			want:  map[string]any{"a": "b"},
+		},
+		"map tag before an anchor in a flow sequence": {
+			input: "[!!map &x {a: b}, *x]\n",
+			want:  []any{map[string]any{"a": "b"}, map[string]any{"a": "b"}},
+		},
+		"map tag before an anchor in a flow mapping": {
+			input: "{k: !!map &x {a: b}, z: *x}\n",
+			want:  map[string]any{"k": map[string]any{"a": "b"}, "z": map[string]any{"a": "b"}},
+		},
+		"map tag before an anchor in a block sequence": {
+			input: stringtest.LinesLF("- !!map &x {a: b}", "- *x"),
+			want:  []any{map[string]any{"a": "b"}, map[string]any{"a": "b"}},
+		},
+		"map tag above an anchor on a key": {
+			// Control: go-yaml reads the anchor x on the key a too.
+			input: stringtest.LinesLF("key: !!map", "  &x a: b", "z: *x"),
+			want:  map[string]any{"key": map[string]any{"a": "b"}, "z": "a"},
+		},
 	}
 
 	for name, tc := range tcs {

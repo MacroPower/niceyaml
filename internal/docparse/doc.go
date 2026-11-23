@@ -17,7 +17,9 @@
 // "[a: b\n c: d]". YAML holds one key in
 // such a pair, and it refuses the text without a "," before the second
 // key. The parser also refuses an explicit key without a value in a flow
-// sequence, as in "[? A]", which YAML reads as [{A: null}].
+// sequence, as in "[? A]", which YAML reads as [{A: null}]. It refuses an
+// anchor after a collection tag, as in "!!map &x {a: b}". YAML takes the
+// tag and the anchor of a node in either order.
 //
 // [Parse] avoids each of these faults. It cuts the stream into runs that
 // each parse on their own, and drops the comments that make the parser
@@ -27,7 +29,9 @@
 // below a plain scalar whenever the parser refuses the run. It fails a
 // run where the parser reads more than one key into a single pair of a
 // flow sequence. It hands the parser a null after each explicit key of a
-// flow sequence that lacks its value, as [NullFlowPairs] adds it.
+// flow sequence that lacks its value, as [NullFlowPairs] adds it. It hands
+// the parser each anchor after a collection tag before the tag, as
+// [AnchorsFirst] moves it.
 // For each document of a run that does not parse, it puts a stand-in
 // into the file.
 // The [Result] holds the file, the copies of the tokens the parser read,

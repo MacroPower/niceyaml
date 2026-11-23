@@ -1649,7 +1649,8 @@ func (d *Doc) indicatorEnd(p *place) int {
 }
 
 // afterProps returns the offset past the ":" or the "-" of p and past the
-// anchor and the tag on its line, where an empty collection goes.
+// last anchor or tag of its value on its line in the order of the text,
+// where an empty collection goes.
 func (d *Doc) afterProps(p *place) int {
 	at := d.indicatorEnd(p)
 	line := d.lineOf(at)
@@ -1666,12 +1667,13 @@ func (d *Doc) afterProps(p *place) int {
 			return at
 		}
 
+		// The parse reads an anchor after a collection tag before the tag,
+		// so an anchor node can hold a tag that comes before it in the text.
 		props, ok := d.propsSpan(n)
-		if !ok || d.lineOf(props.start) != line {
-			return at
+		if ok && d.lineOf(props.start) == line {
+			at = max(at, props.end)
 		}
 
-		at = props.end
 		n = next
 	}
 

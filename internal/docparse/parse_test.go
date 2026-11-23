@@ -1218,6 +1218,124 @@ func TestNullFlowPairs(t *testing.T) {
 	}
 }
 
+func TestAnchorsFirst(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		// The index in the input of each token of the result, or nil when
+		// the result holds the input in its order.
+		want []int
+	}{
+		"map tag before an anchor on a flow mapping": {
+			// "key" ":" "!!map" "&" "x" "{" "a" ":" "b" "}".
+			input: "key: !!map &x {a: b}\n",
+			want:  []int{0, 1, 3, 4, 2, 5, 6, 7, 8, 9},
+		},
+		"map tag and a comment before an anchor": {
+			// "key" ":" "!!map" "# c" "&" "x" "{" "a" ":" "b" "}".
+			input: stringtest.LinesLF("key: !!map # c", "  &x {a: b}"),
+			want:  []int{0, 1, 4, 5, 2, 3, 6, 7, 8, 9, 10},
+		},
+		"seq tag before an anchor above a block sequence": {
+			// "key" ":" "!!seq" "&" "x" "-" "a".
+			input: stringtest.LinesLF("key: !!seq &x", "  - a"),
+			want:  []int{0, 1, 3, 4, 2, 5, 6},
+		},
+		"set and omap tags before anchors": {
+			// "[" "!!set" "&" "x" "{" "a" "}" "," "!!omap" "&" "y" "[" "]" "]".
+			input: "[!!set &x {a}, !!omap &y []]\n",
+			want:  []int{0, 2, 3, 1, 4, 5, 6, 7, 9, 10, 8, 11, 12, 13},
+		},
+		"map tag before an anchor above a key": {
+			// "key" ":" "!!map" "&" "x" "a" ":" "b".
+			input: stringtest.LinesLF("key: !!map &x", "  a: b"),
+			want:  []int{0, 1, 3, 4, 2, 5, 6, 7},
+		},
+		"not an anchor after a map tag that holds a key": {
+			input: "key: !!map &x a: b\n",
+		},
+		"not an anchor below a map tag that holds a key": {
+			input: stringtest.LinesLF("key: !!map", "  &x a: b"),
+		},
+		"not an anchor that holds a key after another tag": {
+			input: stringtest.LinesLF("key: !!map", "  &x !!str a: b"),
+		},
+		"not an anchor that holds an alias as a key": {
+			input: stringtest.LinesLF("key: !!map", "  &x *y : b"),
+		},
+		"not an anchor that holds a flow mapping as a key": {
+			input: stringtest.LinesLF("key: !!map", "  &x {a: b}: c"),
+		},
+		"not an anchor without a name before a comment": {
+			input: stringtest.LinesLF("key: !!map & # c", "  a: b"),
+		},
+		"not an anchor without a name at the end of a line": {
+			input: stringtest.LinesLF("key: !!map &", "  {a: b}"),
+		},
+		"not an anchor without a name before a flow mapping": {
+			input: "key: !!map & {a: b}\n",
+		},
+		"not an anchor after a scalar tag": {
+			input: "key: !!str &x a\n",
+		},
+		"not an anchor after a local tag": {
+			input: "key: !t &x {a: b}\n",
+		},
+		"not an anchor before a map tag": {
+			input: "key: &x !!map {a: b}\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tks := tokens.Tokenize(tc.input)
+			got := docparse.AnchorsFirst(tks)
+
+			want := tc.want
+			if want == nil {
+				want = make([]int, len(tks))
+				for i := range want {
+					want[i] = i
+				}
+			}
+
+			require.Len(t, got, len(want))
+
+			for i, j := range want {
+				assert.Same(t, tks[j], got[i], "token %d", i)
+			}
+		})
+	}
+}
+
+func TestParse_TagBeforeAnchor(t *testing.T) {
+	t.Parallel()
+
+	// The anchor holds the tag, as it does in "&x !!map {a: b}".
+	r := docparse.Parse(tokens.Tokenize("key: !!map &x {a: b}\n"))
+	require.Empty(t, r.Failures)
+
+	mapping, ok := r.File.Docs[0].Body.(*ast.MappingNode)
+	require.True(t, ok, "got %T", r.File.Docs[0].Body)
+	require.Len(t, mapping.Values, 1)
+
+	anchor, ok := mapping.Values[0].Value.(*ast.AnchorNode)
+	require.True(t, ok, "got %T", mapping.Values[0].Value)
+	assert.Equal(t, "x", anchor.Name.String())
+
+	tag, ok := anchor.Value.(*ast.TagNode)
+	require.True(t, ok, "got %T", anchor.Value)
+	assert.Equal(t, "!!map", tag.Start.Value)
+	assert.IsType(t, &ast.MappingNode{}, tag.Value)
+
+	// The tokens of the Result keep the order of the input.
+	assert.Equal(t, token.TagType, r.Tokens[2].Type)
+	assert.Equal(t, token.AnchorType, r.Tokens[3].Type)
+}
+
 func TestParse_EmptyAnchor(t *testing.T) {
 	t.Parallel()
 

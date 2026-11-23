@@ -93,7 +93,9 @@ type standIn struct {
 // The parser also reads the null that [NullFlowPairs] adds after each
 // explicit key of a flow sequence that lacks its value. Neither
 // [Result.Tokens] nor [Result.Index] holds such a null, as neither holds a
-// null that the parser makes itself.
+// null that the parser makes itself. The parser reads each anchor after a
+// collection tag before the tag, as [AnchorsFirst] moves it. Result.Tokens
+// keeps the order of tks.
 //
 // Each run of documents parses on its own, so a run the parser rejects
 // costs the file only its own documents. [Result.File] holds stand-ins in
@@ -174,7 +176,7 @@ func parse(tks token.Tokens, limits Limits, mode parser.Mode, opts []parser.Opti
 			continue
 		}
 
-		f, failure := parseRun(NullFlowPairs(dropStrandedComments(run)), mode, opts)
+		f, failure := parseRun(NullFlowPairs(dropStrandedComments(AnchorsFirst(run))), mode, opts)
 		parsed := failure == nil
 
 		// The run fails with its first error in file order. The error of
@@ -913,6 +915,115 @@ func (s *scan) drops(i, next int) (bool, bool) {
 	default:
 		return stranded, false
 	}
+}
+
+// AnchorsFirst returns tks with each anchor that follows a collection tag
+// moved before that tag, together with its name. YAML takes the tag and
+// the anchor of a node in either order. So "!!map &x {a: b}" holds the
+// mapping {a: b} under the anchor x. The go-yaml parser wants the
+// collection right after a !!map, !!set, !!seq, or !!omap tag, and it
+// refuses the text. It reads "&x !!map {a: b}" as YAML does. [Parse] hands
+// the parser each run with the anchors first. The parser thus reads both
+// orders the same way. The comments between the tag and the anchor stay
+// after the tag.
+//
+// An anchor stays after the tag when it holds a key on its own line, as in
+// "!!map\n&x a: b". There the tag belongs to the mapping and the anchor
+// belongs to the key a, and the parser reads them that way. A "&" without
+// a name stays after the tag too. The parser takes the token after a "&"
+// as its name, even past a comment, so a moved "&" takes the tag as its
+// name. Each token keeps its position. AnchorsFirst returns tks itself
+// when it does not move an anchor.
+func AnchorsFirst(tks token.Tokens) token.Tokens {
+	var moved token.Tokens
+
+	for i := 0; i < len(tks); i++ {
+		if tks[i].Type != token.TagType || !collectionTag(tks[i]) {
+			continue
+		}
+
+		at := nextBody(tks, i)
+
+		if at+1 >= len(tks) || tks[at].Type != token.AnchorType ||
+			!anchorName(tks[at], tks[at+1]) || holdsKey(tks, at) {
+			continue
+		}
+
+		if moved == nil {
+			moved = slices.Clone(tks)
+		}
+
+		// The tag and the comments after it go right after the name.
+		copy(moved[i+2:at+2], tks[i:at])
+
+		moved[i], moved[i+1] = tks[at], tks[at+1]
+
+		i = at + 1
+	}
+
+	if moved == nil {
+		return tks
+	}
+
+	return moved
+}
+
+// anchorName reports whether name is the name of the anchor at amp. The
+// name is not a comment, and it starts on the line of the "&", right after
+// it. The parser takes the token after a "&" as its name, even when a
+// comment or a line break comes between them.
+func anchorName(amp, name *token.Token) bool {
+	return name.Type != token.CommentType && sameLine(name, amp) &&
+		name.Position.Column == amp.Position.Column+1
+}
+
+// collectionTag reports whether tag is a tag that the go-yaml parser
+// reserves for a collection: !!map, !!set, !!seq, or !!omap.
+func collectionTag(tag *token.Token) bool {
+	switch token.ReservedTagKeyword(tag.Value) {
+	case token.MappingTag, token.SetTag, token.SequenceTag, token.OrderedMapTag:
+		return true
+
+	default:
+		return false
+	}
+}
+
+// holdsKey reports whether the anchor at tks[at] holds a key that starts
+// on its line, as in "&x a: 1". The node of the anchor follows its name
+// and any other tag or anchor on the line. The key is a scalar, an alias,
+// or a flow collection, and a ":" follows it.
+func holdsKey(tks token.Tokens, at int) bool {
+	// The name of the anchor follows its "&".
+	j := nextBody(tks, at+1)
+
+	for j < len(tks) && sameLine(tks[j], tks[at]) &&
+		(tks[j].Type == token.TagType || tks[j].Type == token.AnchorType) {
+		if tks[j].Type == token.AnchorType {
+			j = nextBody(tks, j)
+		}
+
+		j = nextBody(tks, j)
+	}
+
+	if j >= len(tks) || !sameLine(tks[j], tks[at]) {
+		return false
+	}
+
+	switch t := tks[j].Type; t {
+	case token.SequenceStartType, token.MappingStartType:
+		j = flowEnd(tks, j)
+
+	case token.AliasType:
+		// The name of the alias follows its "*".
+		j = nextBody(tks, j)
+
+	default:
+	}
+
+	j = nextBody(tks, j)
+
+	return j < len(tks) && tks[j].Type == token.MappingValueType
 }
 
 // NullFlowPairs returns tks with a null after each explicit key of a flow

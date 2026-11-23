@@ -630,6 +630,18 @@ func TestNode_Remove(t *testing.T) {
 			path:   paths.MustParse("$.a[0]"),
 			want:   stringtest.LinesLF("a: &x []\t", "b: *x"),
 		},
+		"last entry of a mapping with a map tag before its anchor": {
+			// The parse reads the anchor before the tag, but the "{}" goes
+			// after the anchor, which ends the props in the text.
+			before: stringtest.LinesLF("a: !!map &x", "  k: v", "b: 1"),
+			path:   paths.MustParse("$.a.k"),
+			want:   stringtest.LinesLF("a: !!map &x {}", "b: 1"),
+		},
+		"last item of a sequence with a seq tag before its anchor": {
+			before: stringtest.LinesLF("a: !!seq &x", "  - 1", "b: 1"),
+			path:   paths.MustParse("$.a[0]"),
+			want:   stringtest.LinesLF("a: !!seq &x []", "b: 1"),
+		},
 		"entry below a scalar under a local tag": {
 			// A scalar holds no value below it, whatever its tag.
 			before: "a: !t x\n",

@@ -1017,10 +1017,13 @@
 // parser, without its comments, as yaml.Unmarshal does. The parse reads each
 // explicit key of a flow sequence that lacks its value with a null, as the
 // parse of the Source reads it. So an Apply edits a document that holds
-// "[? A]", a text that yaml.Unmarshal refuses. When the parser refuses or
-// panics on the edited text, the Apply fails with ErrEngine. The error names
-// go-yaml's parser and gives its message. The edits read a
-// parse that keeps the comments, and that parse leaves out each comment
+// "[? A]", a text that yaml.Unmarshal refuses. The parse also reads each
+// anchor after a !!map, !!set, !!seq, or !!omap tag before the tag, as the
+// parse of the Source reads it. So an Apply edits a document that holds
+// "a: !!map &x {b: c}", another text that yaml.Unmarshal refuses. When the
+// parser refuses or panics on the edited text, the Apply fails with
+// ErrEngine. The error names go-yaml's parser and gives its message. The
+// edits read a parse that keeps the comments, and that parse leaves out each comment
 // that makes the parser refuse or misread valid YAML. A removal that
 // empties a block collection at the root and leaves its "{}" or "[]" above
 // a comment line fails the Apply with a problem of the document, as

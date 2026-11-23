@@ -159,6 +159,16 @@ func TestNode_LineComment(t *testing.T) {
 			path:   spec,
 			want:   "the spec",
 		},
+		"collection below its key with a map tag before its anchor": {
+			before: stringtest.LinesLF("a: !!map &x # old", "  k: v"),
+			path:   paths.MustParse("$.a"),
+			want:   "old",
+		},
+		"collection with a map tag on the line of its key and its anchor below": {
+			before: stringtest.LinesLF("a: !!map # c", "  &x {k: v}"),
+			path:   paths.MustParse("$.a"),
+			want:   "c",
+		},
 		"block scalar": {
 			before: stringtest.LinesLF("a: |- # text", "  x"),
 			path:   paths.MustParse("$.a"),
@@ -591,6 +601,18 @@ func TestNode_SetLineComment(t *testing.T) {
 			path:   paths.MustParse("$.port"),
 			text:   "plain http",
 			want:   "port: 80 # plain http\nb: 1\n",
+		},
+		"add after a map tag before an anchor": {
+			before: stringtest.LinesLF("a: !!map &x", "  k: v"),
+			path:   paths.MustParse("$.a"),
+			text:   "lc",
+			want:   stringtest.LinesLF("a: !!map &x # lc", "  k: v"),
+		},
+		"add after a seq tag before an anchor on an item": {
+			before: stringtest.LinesLF("- !!seq &x", "  - 1", "- *x"),
+			path:   paths.MustParse("$[0]"),
+			text:   "lc",
+			want:   stringtest.LinesLF("- !!seq &x # lc", "  - 1", "- *x"),
 		},
 		"replace keeps the spaces before the comment": {
 			before: "port: 443    # plain http\n",

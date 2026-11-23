@@ -428,9 +428,10 @@ func blanksToBreak(rest []rune) bool {
 // parseTokens returns the problem of go-yaml's parse of tks in mode, or nil
 // when the parser takes tks. The parser reads tks with the null of each
 // explicit key of a flow sequence that lacks its value, as
-// [docparse.NullFlowPairs] adds it, because the parse of a Source reads
-// that null too. A panic of the parser comes back as a
-// [*parserPanicError].
+// [docparse.NullFlowPairs] adds it. It reads each anchor after a
+// collection tag before the tag, as [docparse.AnchorsFirst] moves it. The
+// parse of a Source reads the tokens the same way. A panic of the parser
+// comes back as a [*parserPanicError].
 func parseTokens(tks token.Tokens, mode parser.Mode) error {
 	var err error
 
@@ -441,7 +442,7 @@ func parseTokens(tks token.Tokens, mode parser.Mode) error {
 			}
 		}()
 
-		_, err = parser.Parse(docparse.NullFlowPairs(tks), mode, parser.AllowDuplicateMapKey())
+		_, err = parser.Parse(docparse.NullFlowPairs(docparse.AnchorsFirst(tks)), mode, parser.AllowDuplicateMapKey())
 	}()
 
 	return err //nolint:wrapcheck // The problem of the check names the parser.

@@ -1316,6 +1316,30 @@ func TestSource_File_CommentBelowAnchor(t *testing.T) {
 			),
 			err: "2:1: unexpected scalar value type",
 		},
+		// The parser reads an anchor after a collection tag before the tag.
+		// A "&" with no name stays after the tag, so the parser rejects it
+		// and does not take the tag as the name of the anchor.
+		"no name, comment after a map tag above a key": {
+			input: stringtest.LinesLF(
+				"key: !!map & # c",
+				"  a: b",
+			),
+			err: "2:4: found an invalid key for this map",
+		},
+		"no name, comment after a map tag above a flow mapping": {
+			input: stringtest.LinesLF(
+				"key: !!map & # c",
+				"  {a: b}",
+			),
+			err: "1:12: could not find map",
+		},
+		"no name, comment after a seq tag above an entry": {
+			input: stringtest.LinesLF(
+				"- !!seq & # c",
+				"  - a",
+			),
+			err: "1:9: value is not allowed in this context",
+		},
 	}
 
 	for name, tc := range tcs {

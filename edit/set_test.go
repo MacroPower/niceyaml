@@ -86,6 +86,28 @@ func TestNode_Set(t *testing.T) {
 			value:  2,
 			want:   "a: [? x]\nb: 2\n",
 		},
+		"value after a map tag before an anchor": {
+			// Go-yaml's parser refuses the anchor after the tag. The check
+			// reads the text as YAML does.
+			before: "a: !!map &x {k: v}\nb: 1\n",
+			path:   paths.Doc().Child("b"),
+			value:  2,
+			want:   "a: !!map &x {k: v}\nb: 2\n",
+		},
+		"value inside a mapping with a map tag before its anchor": {
+			before: "a: !!map &x\n  k: v\nb: *x\n",
+			path:   paths.Doc().Child("a").Child("k"),
+			value:  "w",
+			want:   "a: !!map &x\n  k: w\nb: *x\n",
+		},
+		"mapping with a map tag before its anchor and a comment after them": {
+			// The Set keeps the anchor and the line comment, as it keeps them
+			// after "&x !!map", and drops the tag, as it drops any tag.
+			before: "a: !!map &x # old\n  k: v\nb: *x\n",
+			path:   paths.Doc().Child("a"),
+			value:  map[string]int{"z": 1},
+			want:   "a: &x # old\n  z: 1\nb: *x\n",
+		},
 		"anchored value after a tab after its anchor": {
 			// The Set replaces the tab and 1, as it replaces a space and 1.
 			before: "a: &x\t1\nb: *x\n",

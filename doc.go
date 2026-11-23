@@ -237,6 +237,13 @@
 // "[? A: ]". The parse of a Source reads each as [{A: null}], as the parser
 // reads "{? A}" as {A: null}.
 //
+// YAML takes the tag and the anchor of a node in either order. Go-yaml's
+// parser wants the collection right after a !!map, !!set, !!seq, or !!omap
+// tag, so yaml.Unmarshal refuses "a: !!map &x {b: c}". The parse of a Source
+// reads it as it reads "a: &x !!map {b: c}", which holds the anchor x on the
+// mapping {b: c}. An anchor below the tag that sits on a key, as in
+// "a: !!map\n  &x b: c", stays on the key.
+//
 // A mapping of one pair in a flow sequence holds one key, so a "," comes before
 // the key of the next pair. YAML requires each line of a flow collection to
 // pass the indent of the block node that holds the collection, and it ignores
