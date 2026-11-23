@@ -335,11 +335,13 @@ type payload struct {
 // right after an anchor or a tag on its line and a "-" that starts an
 // entry inside a flow collection. So do a "-" there right before a flow
 // indicator, as in "[-]", and a plain scalar there that holds a flow
-// indicator, as in "[a}]", because YAML does not allow any of them. So
-// does a "-" that starts a line of a flow collection, where the line does
-// not pass the indent of the block node that holds the collection, as in
-// "x: {? Y\n- z}". So does a key on a line that continues a plain scalar
-// in a flow collection, as in "{x: y\n    z: w}" and "[x\n y: z]", where
+// indicator, as in "[a}]", and the name of an anchor or an alias that
+// holds a flow indicator, as in "[&x} 1]", because YAML does not allow
+// any of them. So does a "-" that starts a line of a flow collection,
+// where the line does not pass the indent of the block node that holds
+// the collection, as in "x: {? Y\n- z}". So does a key on a line that
+// continues a plain scalar in a flow collection, as in "{x: y\n    z: w}"
+// and "[x\n y: z]", where
 // the parse refuses that key. YAML ends the scalar at the ":" of such a
 // key, so the entries lack a ",". So does a key on the line below a single
 // pair of a flow sequence, as in "[a: 'b'\n c: d]", which go-yaml's parser

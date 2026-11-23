@@ -226,9 +226,11 @@ var (
 	// "a: !t - 1", and a "-" that starts an entry inside a flow collection,
 	// as in "[- 1]". It also indicates a "-" in a flow collection right
 	// before a flow indicator, as in "[-]", and a plain scalar there that
-	// holds a flow indicator, as in "[a}]". So does a "-" at a line of a
-	// flow collection that does not pass the indent of the block node that
-	// holds the collection, as in "key: {? A\n- B}". So does a key on the
+	// holds a flow indicator, as in "[a}]". So does the name of an anchor
+	// or an alias that holds a flow indicator, as in "[&x} 1]" and
+	// "a: &x, 1". So does a "-" at a line of a flow collection that does
+	// not pass the indent of the block node that holds the collection, as
+	// in "key: {? A\n- B}". So does a key on the
 	// line below a single pair of a flow sequence without a "," before it,
 	// as in "[a: b\n c: d]", which the parser reads into the pair. The
 	// parser takes each such token, but YAML refuses it, so the parse of a

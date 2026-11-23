@@ -214,6 +214,14 @@
 // indicator, as in "['a}']". Outside a flow collection, a plain scalar holds
 // a flow indicator after its first character, as in "a: b}".
 //
+// The name of an anchor or an alias does not hold a flow indicator in YAML,
+// inside a flow collection or outside one. The go-yaml lexer reads a "}"
+// inside a flow sequence and a "]" inside a flow mapping into the name, and
+// outside a flow collection it reads each flow indicator into the name. So
+// yaml.Unmarshal reads "[&x} 1, *x}]" as [1, 1] and "a: &x, 1" as {a: 1}.
+// The parse of a Source refuses such a name with a syntax error at the "&"
+// of the anchor or the "*" of the alias.
+//
 // Inside a flow collection, YAML folds a line into the plain scalar on the
 // line above only when the spaces that open the line pass the indent of the
 // block node that holds the collection. Go-yaml's parser reads a "-" at a
@@ -2504,14 +2512,15 @@
 // an entry inside a flow collection, and for a "-" there right before a flow
 // indicator. So do the error for a plain scalar there that holds a flow
 // indicator and the error for a "-" at a line of a flow collection that does
-// not pass the indent of the block node that holds the collection. The parser
-// takes each such token. The error for YAML that parsed but does not decode
-// matches [ErrDecode]. The errors for a value of the wrong kind, a number out
-// of range, and an unknown field each match a sentinel of their own beside
-// ErrDecode, as [ErrUnknownField] describes. A caller thus distinguishes these
-// cases without naming go-yaml's error types. The package returns a panic in
-// go-yaml, or in an unmarshaler that go-yaml calls, as a [PanicError] that
-// does not match any of those sentinels.
+// not pass the indent of the block node that holds the collection. So does
+// the error for the name of an anchor or an alias that holds a flow
+// indicator. The parser takes each such token. The error for YAML that
+// parsed but does not decode matches [ErrDecode]. The errors for a value of
+// the wrong kind, a number out of range, and an unknown field each match a
+// sentinel of their own beside ErrDecode, as [ErrUnknownField] describes. A
+// caller thus distinguishes these cases without naming go-yaml's error types.
+// The package returns a panic in go-yaml, or in an unmarshaler that go-yaml
+// calls, as a [PanicError] that does not match any of those sentinels.
 //
 // The go-yaml settings that niceyaml supports have named options, such as
 // [WithAllowDuplicateKeys], [CustomUnmarshaler], or

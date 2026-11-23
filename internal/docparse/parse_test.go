@@ -703,6 +703,127 @@ func TestParse_FlowSequence(t *testing.T) {
 	}
 }
 
+func TestParse_AnchorName(t *testing.T) {
+	t.Parallel()
+
+	const nameMsg = "the name of an anchor or an alias cannot hold a flow indicator"
+
+	tcs := map[string]struct {
+		input string
+		// The line and column of the token that the failure binds at, or
+		// nil when the text parses.
+		at *position.Position
+		// The message of the failure, when the text does not parse.
+		msg string
+	}{
+		// The lexer ends the name of an anchor or an alias at a "}" only
+		// inside a flow mapping, and at a "]" only inside a flow sequence.
+		"brace in an anchor of a flow sequence": {
+			input: "[&x} 1, *x}]\n",
+			at:    new(position.New(0, 1)),
+			msg:   nameMsg,
+		},
+		"brace in an alias of a flow sequence": {
+			input: "[&x 1, *x}]\n",
+			at:    new(position.New(0, 7)),
+			msg:   nameMsg,
+		},
+		"bracket in an anchor of a flow mapping": {
+			input: "{a: &x] 1, b: *x]}\n",
+			at:    new(position.New(0, 4)),
+			msg:   nameMsg,
+		},
+		"brace in an anchor of a nested flow sequence": {
+			input: "a: [[&x} 1]]\n",
+			at:    new(position.New(0, 5)),
+			msg:   nameMsg,
+		},
+		// The parser refuses the "]" after the name, but the error of the
+		// name binds before it.
+		"brace in an anchor before the end of a flow sequence": {
+			input: "[&x}]\n",
+			at:    new(position.New(0, 1)),
+			msg:   nameMsg,
+		},
+		// Outside a flow collection, the lexer reads each flow indicator
+		// into the name.
+		"comma in an anchor of a block mapping": {
+			input: "a: &x, 1\n",
+			at:    new(position.New(0, 3)),
+			msg:   nameMsg,
+		},
+		"bracket in an anchor of a block sequence": {
+			input: "- &x[ 1\n",
+			at:    new(position.New(0, 2)),
+			msg:   nameMsg,
+		},
+		"brace in an alias of a block mapping": {
+			input: stringtest.LinesLF("a: &x 1", "b: *x{"),
+			at:    new(position.New(1, 3)),
+			msg:   nameMsg,
+		},
+		"brace in an anchor of a key": {
+			input: "&x} a: 1\n",
+			at:    new(position.New(0, 0)),
+			msg:   nameMsg,
+		},
+		// The parser refuses the "-" after the anchor, but the error of the
+		// name binds before it.
+		"brace in an anchor before a dash": {
+			input: "a: &x} - 1\n",
+			at:    new(position.New(0, 3)),
+			msg:   nameMsg,
+		},
+		// The parser refuses the "[" after the first scalar, before the
+		// name.
+		"brace in an anchor after a refused token": {
+			input: "[a[b, &x} 1]]\n",
+			at:    new(position.New(0, 2)),
+			msg:   "',' or ']' must be specified",
+		},
+		"brace in an anchor of the second document": {
+			input: stringtest.LinesLF("a: 1", "---", "b: [&x} 1]"),
+			at:    new(position.New(2, 4)),
+			msg:   nameMsg,
+		},
+		"anchor and alias in a flow sequence": {
+			input: "[&x 1, *x]\n",
+		},
+		"anchor and alias with a dash in a block mapping": {
+			input: stringtest.LinesLF("a: &x-y 1", "b: *x-y"),
+		},
+		"brace in a quoted scalar after an anchor": {
+			input: "[&x '}']\n",
+		},
+		"brace after an anchor in a literal scalar": {
+			input: stringtest.LinesLF("a: |", "  &x} 1"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			r := docparse.Parse(tokens.Tokenize(tc.input))
+
+			if tc.at == nil {
+				require.Empty(t, r.Failures)
+
+				return
+			}
+
+			require.Len(t, r.Failures, 1)
+
+			var syntaxErr *yaml.SyntaxError
+
+			require.ErrorAs(t, r.Failures[0].Err, &syntaxErr)
+			assert.Equal(t, tc.msg, syntaxErr.Message)
+			require.NotNil(t, syntaxErr.Token)
+			assert.Equal(t, *tc.at, position.NewFromToken(syntaxErr.Token))
+		})
+	}
+}
+
 func TestParse_FlowPair(t *testing.T) {
 	t.Parallel()
 

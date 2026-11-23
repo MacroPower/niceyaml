@@ -47,11 +47,12 @@ type Result struct {
 // flow collection. It fails as well when a plain scalar inside a flow
 // collection starts with a "-" right before a flow indicator, as in
 // "[-]". So does a plain scalar there that holds a flow indicator, as in
-// "[a}]". The parser refuses the "-" after an anchor, but it takes the
-// others. A run with a "-" that starts a line right below a plain scalar
-// in a flow collection fails too, when the parser takes the run. So does
-// a run where the parser reads more than one key into a single pair of a
-// flow sequence, as in "[a: b\n c: d]".
+// "[a}]". So does the name of an anchor or an alias that holds a flow
+// indicator, as in "[&x} 1]". The parser refuses the "-" after an
+// anchor, but it takes the others. A run with a "-" that starts a line
+// right below a plain scalar in a flow collection fails too, when the
+// parser takes the run. So does a run where the parser reads more than
+// one key into a single pair of a flow sequence, as in "[a: b\n c: d]".
 type Failure struct {
 	// Err is the error of the run, or nil after a panic. It is the error
 	// that the parser returned, or the error that the caller handed
@@ -370,6 +371,11 @@ const FlowIndicatorMessage = "a plain scalar cannot start with a \"-\" before a 
 // "[a}]", which fails the run of the scalar.
 const FlowScalarMessage = "a plain scalar in a flow collection cannot hold a flow indicator"
 
+// NameIndicatorMessage is the message of the [*yaml.SyntaxError] of the
+// name of an anchor or an alias that holds a flow indicator, as in
+// "[&x} 1]", which fails the run of the name.
+const NameIndicatorMessage = "the name of an anchor or an alias cannot hold a flow indicator"
+
 // FlowIndentMessage is the message of the [*yaml.SyntaxError] of a "-"
 // that starts a line right below a plain scalar in a flow collection,
 // where the go-yaml parser takes the run. The line of such a "-" does not
@@ -469,12 +475,13 @@ func flowPairKey(pair *ast.MappingNode) *token.Token {
 }
 
 // misreadError returns the syntax error of the first token of run that
-// the go-yaml parser can misread, or nil. Such a token is a "-" or a plain
-// scalar. The "-" starts a block sequence where YAML does not hold one,
-// starts a plain scalar that YAML refuses, or starts a line right below a
-// plain scalar in a flow collection. The plain scalar holds a flow
-// indicator inside a flow collection. It reports whether the token is a
-// "-" that starts a line right below a plain scalar.
+// the go-yaml parser can misread, or nil. Such a token is a "-", a plain
+// scalar, or an anchor or an alias. The "-" starts a block sequence where
+// YAML does not hold one, starts a plain scalar that YAML refuses, or
+// starts a line right below a plain scalar in a flow collection. The
+// plain scalar holds a flow indicator inside a flow collection. The name
+// of the anchor or the alias holds a flow indicator. It reports whether
+// the token is a "-" that starts a line right below a plain scalar.
 //
 // YAML puts a line break between the properties of a block sequence and
 // its first "-". The parser refuses a "-" right after an anchor on its
@@ -509,6 +516,15 @@ func flowPairKey(pair *ast.MappingNode) *token.Token {
 // scalar too, as in "[-}]". The name of an anchor or an alias is not a
 // plain scalar, and neither is the content of a block scalar, as
 // [blockContent] tells.
+//
+// YAML does not allow a flow indicator in the name of an anchor or an
+// alias, inside a flow collection or outside one. The go-yaml lexer ends
+// such a name at a ",", a "[", or a "{" only inside a flow collection, and
+// at a "]" or a "}" as it ends a plain scalar there. Outside a flow
+// collection it reads each flow indicator into the name. So the parser
+// reads "[&x} 1, *x}]" as [1, 1] and "a: &x, 1" as {a: 1}. The error of
+// such a name has [NameIndicatorMessage], and it binds at the "&" of the
+// anchor or the "*" of the alias.
 //
 // A "-" that starts a line right below a plain scalar in a flow
 // collection continues that scalar when the line passes the indent of the
@@ -553,6 +569,12 @@ func misreadError(run token.Tokens) (*yaml.SyntaxError, bool) {
 
 			if depth > 0 {
 				return &yaml.SyntaxError{Message: FlowSequenceMessage, Token: tk}, false
+			}
+
+		case token.AnchorType, token.AliasType:
+			if i+1 < len(run) && run[i+1].Type == token.StringType &&
+				strings.ContainsAny(run[i+1].Value, flowIndicators) {
+				return &yaml.SyntaxError{Message: NameIndicatorMessage, Token: tk}, false
 			}
 
 		case token.StringType:

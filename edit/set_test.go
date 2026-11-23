@@ -814,6 +814,27 @@ func TestNode_Set(t *testing.T) {
 				"edit_test.yamlMarshaler writes a plain scalar that holds a flow indicator in a flow collection " +
 				"at 1:5 of that YAML, which YAML does not allow",
 		},
+		"YAML marshaler that writes a flow indicator in the name of an anchor": {
+			// Go-yaml's parser reads [1, 1], but YAML does not allow the text,
+			// so the problem is the marshaler's.
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("b"),
+			value:  yamlMarshaler("[&x} 1, *x}]\n"),
+			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 cannot write the value of $.b: the MarshalYAML method of " +
+				"edit_test.yamlMarshaler writes the name of an anchor or an alias that holds a flow indicator " +
+				"at 1:2 of that YAML, which YAML does not allow",
+		},
+		"YAML marshaler that writes a flow indicator in the name of an anchor that go-yaml refuses": {
+			// Go-yaml's parser refuses the "]" after the name "x}", but the
+			// name already breaks YAML, so the problem is the marshaler's
+			// and not the engine's.
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("b"),
+			value:  yamlMarshaler("[&x}]\n"),
+			err: "test.yaml:2:4: $.b: cafe.jacobcolvin.com/v1 cannot write the value of $.b: the MarshalYAML method of " +
+				"edit_test.yamlMarshaler writes the name of an anchor or an alias that holds a flow indicator " +
+				"at 1:2 of that YAML, which YAML does not allow",
+		},
 		"YAML marshaler that writes a dash before a flow indicator below an explicit key": {
 			// YAML folds the line that starts with the "-" into the key
 			// above it, and so does the Source. So the value holds an

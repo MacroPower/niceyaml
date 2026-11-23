@@ -2587,6 +2587,26 @@ func TestSource_File_ErrSyntax(t *testing.T) {
 			input: "a: b}\n",
 			want:  []bool{false},
 		},
+		// YAML does not allow a flow indicator in the name of an anchor or
+		// an alias. The go-yaml parser reads a "}" in a flow sequence into
+		// the name, and a "," outside a flow collection, and the Source
+		// refuses the name.
+		"brace in an anchor and an alias of a flow sequence": {
+			input: "[&x} 1, *x}]\n",
+			want:  []bool{true},
+		},
+		"bracket in an anchor of a flow mapping": {
+			input: "{a: &x] 1}\n",
+			want:  []bool{true},
+		},
+		"comma in an anchor and an alias of a block mapping": {
+			input: stringtest.LinesLF("a: &x, 1", "b: *x,"),
+			want:  []bool{true},
+		},
+		"brace in an anchor of a flow sequence in the second document": {
+			input: stringtest.LinesLF("a: 1", "---", "b: [&c} 1]", "---", "e: 3"),
+			want:  []bool{false, true, false},
+		},
 		// The parser takes an alias with no anchor, and a decode rejects
 		// it.
 		"alias with no anchor": {

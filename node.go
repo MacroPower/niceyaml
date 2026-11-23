@@ -224,12 +224,13 @@ func (n *Node) DocumentAST() *ast.DocumentNode {
 // collection, and for a "-" there right before a flow indicator. It matches
 // ErrSyntax for a plain scalar there that holds a flow indicator, and for a
 // "-" at a line of a flow collection that does not pass the indent of the
-// block node that holds the collection. It matches ErrSyntax for a key on
-// the line below a single pair of a flow sequence without a "," before it,
-// as ErrSyntax describes. It matches [ErrLimit] for a document past the
-// depth limit or the document byte limit, and for a text past the byte
-// limit of the Source. It matches [ErrEncoding]
-// for the one document of a text that is not UTF-8. A syntax error fails the
+// block node that holds the collection. It matches ErrSyntax for the name
+// of an anchor or an alias that holds a flow indicator. It matches
+// ErrSyntax for a key on the line below a single pair of a flow sequence
+// without a "," before it, as ErrSyntax describes. It matches [ErrLimit]
+// for a document past the depth limit or the document byte limit, and for
+// a text past the byte limit of the Source. It matches [ErrEncoding] for
+// the one document of a text that is not UTF-8. A syntax error fails the
 // one document that holds it, and [Source.AllDocuments] returns a Node for
 // that document too. The error is a [*SourceError] bound to the Source and to
 // that document, so [SourceError.Document] returns its root. It is among the
