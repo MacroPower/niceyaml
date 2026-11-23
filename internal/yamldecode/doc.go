@@ -78,6 +78,10 @@
 //     starts from the value that the place of the anchor started from. A
 //     field of an inline struct that the struct that holds it names too keeps
 //     the value that it started from, where go-yaml sets it to zero.
+//   - A resolver from [ResolveAlias] can bind an alias to an anchor of
+//     another parse. The text that the decoder hands an unmarshaler holds
+//     such an alias written out as the value of that anchor. The space and
+//     the line breaks that end the other parse stay out of the text.
 //
 // The files that sync.sh does not write stand in for the parts of go-yaml
 // that the copy needs outside those files. The decode options are copies of

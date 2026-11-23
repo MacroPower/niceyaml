@@ -212,6 +212,8 @@ type Formatter struct {
 	expanding        map[string]bool
 	aliasKey         func(*ast.AliasNode) string
 	budget           *int
+	// aliases counts the aliases that the formatter is writing out.
+	aliases int
 }
 
 // Origins holds the text that a [Formatter] writes for each token of the
@@ -226,20 +228,30 @@ func (o *Origins) formatter(tk *token.Token, existsComment bool) *Formatter {
 	if o == nil {
 		return newFormatter(tk, existsComment)
 	}
-	if _, held := o.texts[tk]; !held {
-		read := newFormatter(tk, existsComment).tokenToOriginMap
-		if o.texts == nil {
-			o.texts = make(map[*token.Token]string, len(read))
-		}
-		for t, text := range read {
-			o.texts[t] = text
-		}
-		// A comment token has no text of its own in the map.
-		if _, held := o.texts[tk]; !held {
-			o.texts[tk] = read[tk]
-		}
+	if o.texts == nil {
+		o.texts = make(map[*token.Token]string)
 	}
+	readParse(o.texts, tk)
 	return &Formatter{existsComment: existsComment, tokenToOriginMap: o.texts}
+}
+
+// readParse adds to texts the text of each token of the parse that holds
+// tk, when texts does not hold tk yet.
+func readParse(texts map[*token.Token]string, tk *token.Token) {
+	if tk == nil {
+		return
+	}
+	if _, held := texts[tk]; held {
+		return
+	}
+	read := newFormatter(tk, false).tokenToOriginMap
+	for t, text := range read {
+		texts[t] = text
+	}
+	// A comment token has no text of its own in the map.
+	if _, held := texts[tk]; !held {
+		texts[tk] = read[tk]
+	}
 }
 
 func newFormatter(tk *token.Token, existsComment bool) *Formatter {
@@ -340,10 +352,32 @@ func (f *Formatter) origin(tk *token.Token) string {
 	if tk == nil {
 		return ""
 	}
+	text := f.tokenToOriginMap[tk]
 	if f.existsComment {
-		return tk.Origin
+		text = tk.Origin
 	}
-	return f.tokenToOriginMap[tk]
+	if f.aliases > 0 && endsParse(tk) {
+		// The last token of a parse holds the space and the line breaks
+		// that end the text of the parse. They belong to no node, so the
+		// text of an alias leaves them out.
+		text = strings.TrimRight(text, " \t\r\n")
+	}
+	return text
+}
+
+// endsParse reports whether tk is the last token of its parse. It reports
+// false for the content of a block scalar, because the line breaks of that
+// content belong to its value. A comment can sit between the header of a
+// block scalar and its content.
+func endsParse(tk *token.Token) bool {
+	if tk.Next != nil {
+		return false
+	}
+	prev := tk.Prev
+	for prev != nil && prev.Type == token.CommentType {
+		prev = prev.Prev
+	}
+	return prev == nil || (prev.Type != token.LiteralType && prev.Type != token.FoldedType)
 }
 
 func (f *Formatter) formatDocument(n *ast.DocumentNode) string {
@@ -471,8 +505,15 @@ func (f *Formatter) formatAlias(n *ast.AliasNode) string {
 			return ""
 		}
 		if node != nil {
+			// The anchor can sit in another parse than n, such as a
+			// document that a resolver from ResolveAlias reads.
+			if !f.existsComment {
+				readParse(f.tokenToOriginMap, getFirstToken(node))
+			}
 			f.expanding[anchorName] = true
+			f.aliases++
 			formatted := f.formatNode(node)
+			f.aliases--
 			delete(f.expanding, anchorName)
 			if f.budget != nil {
 				*f.budget -= len(formatted)

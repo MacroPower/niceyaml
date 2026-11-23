@@ -1138,6 +1138,48 @@ func TestResolveAliasUnreadAnchor(t *testing.T) {
 	assert.Equal(t, want, untyped)
 }
 
+func TestResolveAliasUnmarshalerBytesOtherParse(t *testing.T) {
+	t.Parallel()
+
+	// The resolver binds the alias to an anchor of another parse. The text
+	// that an unmarshaler gets holds the value of that anchor, without the
+	// space and the line breaks that end the other parse.
+	tcs := map[string]struct {
+		ref  string
+		want string
+	}{
+		"flow mapping": {
+			ref:  "r: &r {k: 1, j: 2}\n",
+			want: "{a: {k: 1, j: 2}}",
+		},
+		"plain scalar": {
+			ref:  "r: &r x  \n\n",
+			want: "{a: x}",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			ref := parseBody(t, tc.ref)
+			refMapping, ok := ref.(*ast.MappingNode)
+			require.True(t, ok)
+
+			anchor, ok := refMapping.Values[0].Value.(*ast.AnchorNode)
+			require.True(t, ok)
+
+			resolve := yaml.ResolveAlias(func(*ast.AliasNode) (ast.Node, bool) { return anchor.Value, true })
+			body := parseBody(t, "m: {a: *r}\n")
+
+			var v struct{ M bytesValue }
+
+			require.NoError(t, yaml.NewDecoder(bytes.NewReader(nil), resolve).DecodeFromNode(body, &v))
+			assert.Equal(t, tc.want, strings.TrimSpace(v.M.s))
+		})
+	}
+}
+
 func TestDecodeFromNodePointerToNodeType(t *testing.T) {
 	t.Parallel()
 

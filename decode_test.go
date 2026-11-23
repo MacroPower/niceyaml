@@ -20493,6 +20493,83 @@ func TestNode_Decode_TextAtReferenceAlias(t *testing.T) {
 	assert.Equal(t, tier(1), tiers)
 }
 
+func TestDocument_Decode_TextOfReferenceAlias(t *testing.T) {
+	t.Parallel()
+
+	// A type that reads text gets each alias to a reference document
+	// written out as the value of its anchor, as it gets an alias to an
+	// anchor of its own document. The space and the line breaks that end
+	// the reference document stay out of the text.
+	const flow = "m: &m {k: 1, j: 2}\n"
+
+	tcs := map[string]struct {
+		ref   string
+		input string
+		want  rawString
+	}{
+		"alias in a flow mapping": {
+			ref:   flow,
+			input: "v: {a: *m}\n",
+			want:  "{a: {k: 1, j: 2}}\n",
+		},
+		"merge in a flow mapping": {
+			ref:   flow,
+			input: "v: {<<: *m}\n",
+			want:  "{<<: {k: 1, j: 2}}\n",
+		},
+		"merge in a block mapping": {
+			ref:   flow,
+			input: "v:\n  <<: *m\n",
+			want:  "<<: {k: 1, j: 2}",
+		},
+		"alias in a flow sequence": {
+			ref:   flow,
+			input: "v: [*m, 1]\n",
+			want:  "[ {k: 1, j: 2}, 1]\n",
+		},
+		"block mapping before a key": {
+			ref:   "m: &m\n  k: 1\n  j: 2\n",
+			input: "v:\n  a: *m\n  b: 1\n",
+			want:  "a:\n  k: 1\n  j: 2\nb: 1\n",
+		},
+		"scalar before trailing space": {
+			ref:   "m: &m x  \n\n",
+			input: "v: {a: *m}\n",
+			want:  "{a: x}\n",
+		},
+		"literal keeps its line break": {
+			ref:   "m: &m |\n  text\n",
+			input: "v:\n  a: *m\n",
+			want:  "a: |\n  text\n",
+		},
+		"literal with a header comment keeps its line break": {
+			ref:   "m: &m | # c\n  text\n",
+			input: "v:\n  a: *m\n",
+			want:  "a: | # c\n\n  text\n",
+		},
+		"folded with a header comment keeps its line break": {
+			ref:   "m: &m > # c\n  text\n",
+			input: "v:\n  a: *m\n",
+			want:  "a: > # c\n\n  text\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			for _, limit := range []bool{true, false} {
+				doc := yamltest.FirstDocument(t, tc.input,
+					yamltest.References(tc.ref), niceyaml.WithAliasLimit(limit))
+
+				got, err := doc.Decode[map[string]rawString](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got["v"], "alias limit %t", limit)
+			}
+		})
+	}
+}
+
 func TestNode_Decode_AnchorBeforeNodeReadsReference(t *testing.T) {
 	t.Parallel()
 
